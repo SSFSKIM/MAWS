@@ -198,6 +198,12 @@ const columnBoxes = (page: Page): Promise<{ list: Box; cards: Box[] }> =>
     return { list: box(list), cards: Array.from(list.querySelectorAll(':scope > section')).map(box) };
   });
 const overlaps = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+// What each card of the column holds, with its height: printed beside the boxes' comparison, so a card whose box moved
+// can be told from a card whose content changed (the first Mac run of scene 5: the first card 68 px shorter).
+const columnCardsText = (page: Page): Promise<string[]> =>
+  sessionCards(page).evaluate((aside) =>
+    Array.from(aside.querySelectorAll<HTMLElement>('div[aria-label="Session cards"] > section')).map((section) => `${Math.round(section.getBoundingClientRect().height)} px: ${section.innerText.replace(/\s+/g, ' ').trim().slice(0, 200)}`),
+  );
 // The open side chat card at the column's foot: inside the column, its bottom edge within 8 px of the column's, over
 // neither the composer's frame nor the jump control, and the cards above it in the boxes `before` recorded. The jump
 // control ("Jump to latest") is drawn only while the transcript is not following its end, which this scene's one short
@@ -217,6 +223,7 @@ async function expectAtFoot(page: Page, before: { cards: Box[] }): Promise<void>
     expect(box, `${name} has a box`).not.toBeNull();
     expect(overlaps(card, box!), `the card ${JSON.stringify(card)} clear of ${name} ${JSON.stringify(box)}`).toBe(false);
   }
+  console.log(`[side foot] the cards at the check: ${JSON.stringify(await columnCardsText(page))}`);
   expect((await columnBoxes(page)).cards, 'every card where it was before /btw').toEqual(before.cards);
 }
 // The title bar's "Session cards" icon (in "More surfaces" where the row has no room for it): the column off when it is
@@ -630,6 +637,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(column, 'the card column is drawn for the session at this window’s width').toBeVisible();
     const before = await columnBoxes(page);
     expect(before.cards.length, 'the session’s cards').toBeGreaterThan(0);
+    const firstCardText = () => column.locator('div[aria-label="Session cards"] > section').first().innerText();
+    const firstCardBefore = await firstCardText();
+    console.log(`[side foot] the cards before /btw: ${JSON.stringify(await columnCardsText(page))}`);
 
     // the palette lists it
     await composer.click();
@@ -686,6 +696,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(foot).toBeVisible();
     await expect(corner).toHaveCount(0);
     await expect(foot.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
+    // Turned on again, the column is mounted anew, and the git store keeps nothing of a checkout its last holder let go
+    // (`stores/git.ts`), so the first card draws without its branch and change rows until git answers. The boxes are
+    // compared once the card holds what it held; the comparison itself stays one reading.
+    await expect.poll(firstCardText, { message: 'the first card holds what it held before the column was turned off' }).toBe(firstCardBefore);
     await expectAtFoot(page, before);
 
     // folded, the chip is the column's; opened again, the card
@@ -977,11 +991,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
     await expect(card.getByText(FIRST_REPLY), 'none of the parent’s copied history').toHaveCount(0);
     await expect(card.getByText(FIRST_PROMPT)).toHaveCount(0);
-    // the comment row's time, Copy and Edit, shown on hover, sit inside the card (the card's narrow width; whole-branch
-    // review, fix wave)
+    // the comment row's time, Copy and Edit, shown on hover on their line under the bubble (UX wave U3b, decision 10),
+    // sit inside the card (the card's narrow width; whole-branch review, fix wave)
     const comment = card.getByRole('region', { name: 'Your message' }).first();
     await comment.hover();
-    const toolbar = comment.locator('.transcript-user-actions');
+    const toolbar = comment.locator('.transcript-user-line-actions');
     await expect(toolbar).toHaveCSS('opacity', '1');
     const [cardBox, toolbarBox] = [(await card.boundingBox())!, (await toolbar.boundingBox())!];
     expect(toolbarBox.x, 'the toolbar’s left inside the card').toBeGreaterThanOrEqual(cardBox.x);

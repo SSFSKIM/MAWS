@@ -1,7 +1,8 @@
 // The permission card's first line by the tool's class (UX wave U1a, §D): what is asked, in the card's words.
 import { describe, expect, it } from 'vitest';
 import { permission, syntheticRequest, type PermissionEvent } from './test-requests';
-import { askedLine, pathIn, toolVerb } from './tools';
+import { webFetchCases } from '../../../../test/support/web-fetch-recorded';
+import { askedLine, mcpParts, pathIn, toolClass, toolVerb } from './tools';
 
 const ask = (toolName: string, input: unknown, over: Partial<PermissionEvent> = {}) => askedLine(permission({ toolName, displayName: toolName, input, ...over }));
 
@@ -62,6 +63,17 @@ describe('the first line of a permission prompt', () => {
     expect(pathIn('/elsewhere/a.ts', '/w/proj')).toBe('/elsewhere/a.ts');
     expect(pathIn('/w/proj/a.ts', null)).toBe('/w/proj/a.ts');
     expect(pathIn('/w/proj/a.ts', '')).toBe('/w/proj/a.ts'); // a record that names no folder
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is asked about as WebFetch is, over its recorded calls
+  it('asks for the web plugin’s fetch as for WebFetch: a fetch, "Fetch a page", no MCP server named', () => {
+    for (const [label, call] of webFetchCases()) {
+      const ev = permission({ toolName: call.toolName, displayName: call.toolName, input: call.input });
+      expect(toolClass(call.toolName), label).toBe('fetch');
+      expect(askedLine(ev), label).toBe('Fetch a page');
+      expect(toolVerb(ev), label).toBe('fetch a page');
+      expect(mcpParts(ev), label).toBeNull();
+    }
   });
 
   it('keeps the verb desk web reads', () => {

@@ -311,6 +311,14 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);
       },
+      // UX wave U3b (M6): an answer's "Fork from here", always available here, named with the message it forks from
+      forkFrom: {
+        useUnavailable: () => null,
+        run: (_appSessionId, rewindTo) => {
+          say(`forkFrom ${rewindTo ?? 'the whole conversation'}`);
+          return Promise.resolve();
+        },
+      },
     },
     rewind: {
       canUndo: () => Promise.resolve({ ok: true, reason: null }),

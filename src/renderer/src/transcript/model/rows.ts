@@ -103,7 +103,7 @@ export type Row = RowBase &
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
-    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; overflow: number } // overflow: agents beyond the four glyphs
+    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
@@ -134,7 +134,13 @@ export type Row = RowBase &
         kind: 'notice'; class: 'task' | 'schedule' | 'answer' | 'wake'; outcome: 'completed' | 'failed' | 'stopped' | null;
         text: string; durationMs: number | null; detail: string | null; taskId: TaskId | null; toolUseId: ToolUseId | null; outputFile: string | null;
       }
-    | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string } // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; a replayed row, never a bubble
+    // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; never
+    // a bubble. UX wave U3b (Interfaces B): drawn as a light line, with four marks, each present only where it says something
+    | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string;
+        error?: true;                               // all of it came in <local-command-stderr>
+        run?: { command: string; args: string };    // commandOf(event.arrival).run: the command the engine ran
+        plain?: true;                               // commandOf(event.arrival).plain: a terminal's text, not markdown
+        lone?: true }                               // its turn holds no bubble of a command, or it has no turn
     // E1 start: the `maws` server's rows (E1 execution document, Interfaces "The renderer"): an `ask` call's capsule and
     // a `send_file` call's delivery row, derived from the calls themselves and refined by the `maws.*` events
     | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */; waiting?: true /* UX wave U1b */ }
@@ -194,6 +200,10 @@ export type Row = RowBase &
     // in view when its turn's work folds whatever the owner lane says: a message is always addressed to the human, as
     // a `<message>` span is, which the presenter draws with the lane off and so keeps (derive.ts, `isPersistentRow`).
     | { kind: 'to_human'; toolUseId: ToolUseId; text: string; pending: boolean }
+    // UX wave U3b (decision 17, Interfaces §E): what the session is doing now that no turn line says, at the drawn list's
+    // end: placed by the view (`view/compacting.ts`), never derived and never in the store's rows; `since` when this
+    // window first saw the session compacting
+    | { kind: 'activity'; activity: 'compacting'; since: string }
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

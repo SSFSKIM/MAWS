@@ -7,6 +7,7 @@ import type { TaskId, ToolUseId } from '@shared/graph/ids';
 import { MAWS_SERVER_NAME, ShowPaneResultSchema } from '@shared/maws/tools'; // E1
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
 import * as z from 'zod'; // P3-A
+import { isWebFetch, webFetchUrl } from '@shared/engine/web-fetch'; // UX wave U3b
 import { classifyTool, continuedAfter, HISTORICAL_ARTIFACT_UPDATE_TOOL_USE, isAbortedReason, MAWS_TOOL_USE, MCP_TOOL, stoppedMember, tableRowOf, type ClassifyContext } from './classify';
 import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, SHELL_CELL, stoppedLabel, thinkingLabel } from './copy';
 import { ARTIFACT_CELL } from './copy'; // E2
@@ -219,6 +220,9 @@ function detailOf(rec: ToolRecord, status: Cell['status']): CellDetail {
     });
     return { kind: 'image', images, caption: filePathOf(input) || null };
   }
+  // UX wave U3b (M5, decision 18): a web fetch, the web plugin's among them, is a web call before it is an MCP one; its
+  // output is the result's text, a string or text blocks alike
+  if (isWebFetch(use.toolName)) return { kind: 'web', url: webFetchUrl(use.input), query: null, output: text, truncated: truncationOf(text) };
   const mcp = MCP_TOOL.exec(use.toolName);
   if (mcp) return { kind: 'mcp', server: mcp[1], tool: mcp[2], input: use.input, result: result?.content ?? '', structured, spill: spillOf(result) };
   switch (use.toolName) {
@@ -241,7 +245,7 @@ function detailOf(rec: ToolRecord, status: Cell['status']): CellDetail {
       return { kind: 'read', files: [{ path: filePathOf(input), range: readRange(input) }], preview: text || null, truncated: truncationOf(text) };
     case 'Grep': case 'Glob':
       return { kind: 'search', query: str(input.pattern), scope: typeof input.path === 'string' ? input.path : null, matches: null, output: text, truncated: truncationOf(text) };
-    case 'WebFetch': case 'WebSearch':
+    case 'WebSearch':
       return { kind: 'web', url: typeof input.url === 'string' ? input.url : null, query: typeof input.query === 'string' ? input.query : null, output: text, truncated: truncationOf(text) };
     default:
       return { kind: 'generic', input: use.input, result: result?.content ?? '', structured, isError: result?.isError ?? false, spill: spillOf(result), truncated: truncationOf(text) };
@@ -410,7 +414,7 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
     case 'search':
       return cellLabel({ kind: 'generic', toolName: rec.use.toolName, category, detail: detail.query, scope: detail.scope });
     case 'web':
-      return cellLabel({ kind: 'generic', toolName: rec.use.toolName, category, detail: rec.use.toolName === 'WebFetch' ? hostOf(detail.url ?? '') : detail.query });
+      return cellLabel({ kind: 'generic', toolName: rec.use.toolName, category, detail: isWebFetch(rec.use.toolName) ? hostOf(detail.url ?? '') : detail.query });
     default: {
       const s = record(rec.result?.structured);
       const detailText =

@@ -127,6 +127,8 @@
 // UX wave U6e: (an outside file, both ways) and (outside file, on the peer's daemon), a chosen file outside the session's
 // folders across build F and master at U6e's parent pin; their block is at the end of this file, and their row is in
 // U13a's UC-14 coverage table.
+// UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
+// other build's window as the row the build that reads the frames makes; its block is at the end of this file.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -4092,4 +4094,101 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       record(said);
     });
   });
+});
+
+// ---- UX wave U3b (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, M6): a command's output -----
+// The engine writes a slash command's output as an assistant frame with `local_command_source` and, from 2.1.322, the
+// run it made (`local_command_run`); a build from U3 on maps it to the person's line of class `command` (its
+// normalizer's `commandOutput`), and U3b's event carries the run in a `command` entry. A build before U3 (build F) draws
+// it as the model's answer. Whichever build's engine host reads the frames makes the window's events: at a handover (both
+// builds list `host.holder`) the attacher's host adopts the session and folds the whole journal itself, so the entry is
+// never sent across the builds on one profile; without one the keeper's host serves the other build's app. The scene
+// keeps a session whose journal holds a `/rename` and its output (u3-commands-r1, seq 198 to 208, inside C3's permission
+// round trip), crosses each way and reads the row the attacher's window draws: one row of the output, of the kind that
+// host's build makes, drawn by the attacher's build (U3b's light line, or the earlier "Command output" card), nothing
+// refused and no gap. Where both builds hand over (this tree, build G and build F all list `host.holder`), the window's
+// build is the reading build, so this build's entry never reaches an older window here: what an older reader does with it
+// is held by acceptance 14's unit cases (src/shared/graph/arrival-builds.test.ts). The recorded rows are the probe's own,
+// with the scene's name for the session in place of the recorded one.
+const COMMAND_ROWS = { fixture: 'spikes/protocol-probe/fixtures/uxwave/u3-commands-r1.jsonl', from: 198, to: 208, named: 'uxw renamed' };
+const COMMAND = '/rename crossing check';
+const COMMAND_OUTPUT = 'Session renamed to: crossing check';
+const sourceHas = (build: Build, file: string, text: string) => {
+  const path = join(build.root ?? REPO_ROOT, file);
+  return existsSync(path) && readFileSync(path, 'utf8').includes(text);
+};
+// What the peer knows, read from its source; this build's side is pinned, not read: its host reads the frame as a
+// command's output and its window draws U3b's light line, so losing either fails the scene rather than changing it
+const readsCommandOutput = (build: Build) => build.root === undefined || sourceHas(build, 'src/engine-host/normalizer.ts', 'commandOutput('); // UX wave U3's class `command`
+const drawsLightLine = (build: Build) => build.root === undefined || sourceHas(build, 'src/renderer/src/transcript/view/rows/LocalCommand.tsx', 'transcript-command-output'); // U3b's line
+const takesStubEngine = (build: Build) => sourceHas(build, 'src/engine-host/binary-info.ts', 'MAWS_E2E_ENGINE_BIN');
+
+// C3's permission round trip with the recorded `/rename` turn ahead of its prompt, written into the scratch: the rows
+// carry the round trip's session id and its init (the recorded turn's own init names the probe's folder), the name is
+// the scene's, and the seqs run on. The stub holds at the command's `out` row until the app sends a user frame, plays the
+// command's rows, then holds at the prompt.
+function commandJournal(dir: string): string {
+  const read = (fixture: string) => readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow);
+  const rows = read(PERMISSION);
+  const init = rows.find((r) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init')!;
+  const sessionId = init.frame.session_id as string;
+  const recorded = read(COMMAND_ROWS.fixture).filter((r) => r.seq >= COMMAND_ROWS.from && r.seq <= COMMAND_ROWS.to && r.direction !== 'meta');
+  const recordedId = recorded.find((r) => typeof r.frame.session_id === 'string')!.frame.session_id as string;
+  const prompt = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'user');
+  const command = recorded.map((r) =>
+    r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init'
+      ? { ...init, at: rows[prompt]!.at }
+      : ({ ...JSON.parse(JSON.stringify(r).replaceAll(recordedId, sessionId).replaceAll(COMMAND_ROWS.named, COMMAND.slice('/rename '.length))), at: rows[prompt]!.at } as JournalRow),
+  );
+  const path = join(dir, 'command-output.jsonl');
+  writeFileSync(path, [...rows.slice(0, prompt), ...command, ...rows.slice(prompt)].map((r, i) => JSON.stringify({ ...r, seq: i + 1 })).join('\n') + '\n');
+  return path;
+}
+
+test('(a command’s output, both ways) a session kept with a slash command’s output in its journal shows the output once in the other build’s window, as the row the reading build makes', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  for (const [keeper, attacher] of [[here, peer], [peer, here]] as const) {
+    await withScratch(`xb-command-${keeper === here ? 'here' : 'peer'}`, async (s) => {
+      const handover = holds(keeper) && holds(attacher);
+      const reader = handover ? attacher : keeper; // the build whose engine host reads the frames
+      const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)}) keeps a session whose turn ran ${COMMAND}; ${attacher.label} (wire ${wireOf(attacher)}) shows it; ${reader.label}'s engine host reads the frames${handover ? ' (the handover)' : ''}`];
+      const stub = s.useStub({ rowMs: Number(ROW_MS) });
+
+      // the keeper: the command's turn played to its end, then the app quits and the session is kept
+      const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, keeper.root);
+      await s.ready(first.page);
+      const id = await s.record(first.page);
+      const input = fitTo(commandOf(keeper, 'session.launch')!.input, { spec: stubSpec(stub, id, commandJournal(s.root), { cwd: s.repo }) });
+      expect(value(await invoke(first.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+      await expect.poll(async () => (await statusOf(first.page, id)).process, { timeout: 30_000 }).toBe('ready');
+      value(await invoke(first.page, 'session.send', { appSessionId: id, content: COMMAND }));
+      await expect.poll(async () => JSON.stringify(await eventsOf(first.page, id)).includes(COMMAND_OUTPUT), { timeout: 60_000, message: 'the output reached the keeper’s events' }).toBe(true);
+      await turnEnded(first.page, id);
+      expect(first.maws.consoleErrors()).toEqual([]);
+      await s.quit(first);
+
+      // the attacher: served the kept session, its window shows the output once
+      const second = await launchServed(s, id, attacher.root);
+      await showSession(second.page, id, `session:${await addressed(second.page, id)}`);
+      const transcript = second.page.locator('[data-region="main"] [data-transcript-scroller]');
+      const row = transcript.locator('.transcript-row[data-kind]').filter({ hasText: COMMAND_OUTPUT });
+      await expect(row, 'one row of the output').toHaveCount(1, { timeout: 20_000 });
+      const kind = await row.getAttribute('data-kind');
+      if (readsCommandOutput(reader)) {
+        expect(kind, `${reader.label} reads the frame as a command’s output`).toBe('local_command');
+        if (drawsLightLine(attacher)) await expect(row.locator('.transcript-command-output'), `${attacher.label} draws the light line`).toHaveText(COMMAND_OUTPUT);
+        else await expect(row, `${attacher.label} draws its card`).toContainText('Command output');
+      } else expect(kind, `${reader.label} reads the frame as the model’s answer`).toBe('assistant_text');
+      await expect(transcript.locator('.transcript-row[data-kind="gap"]'), 'no gap').toHaveCount(0);
+      expect(second.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing`).toEqual([]);
+      expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'no engine host refuses what the other build sent').toEqual([]);
+      const dropped = [...first.output().split('\n'), ...second.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
+      said.push(`  ${attacher.label}'s window: one ${kind} row${kind === 'local_command' ? (drawsLightLine(attacher) ? ', the light line' : ', the "Command output" card') : ''}`, dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+      expect(second.maws.consoleErrors()).toEqual([]);
+      await s.quit(second);
+      record(said);
+    });
+  }
 });

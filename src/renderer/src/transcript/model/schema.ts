@@ -91,7 +91,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
     added: z.number(), removed: z.number(), state: z.enum(['applied', 'undoing', 'undone', 'reapplying']), canUndo: z.boolean(), canReapply: z.boolean(),
   }),
-  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), overflow: z.number() }),
+  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), exited: z.literal(true).optional() /* UX wave U3b */, overflow: z.number() }),
   z.strictObject({
     ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(),
     peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
@@ -115,7 +115,10 @@ export const RowSchema = z.discriminatedUnion('kind', [
     text: z.string(), durationMs: nullable(z.number()), detail: nullable(z.string()), taskId: nullable(z.string()), toolUseId: nullable(z.string()), outputFile: nullable(z.string()),
   }),
   // U3 end
-  z.strictObject({ ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string() }),
+  z.strictObject({
+    ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string(),
+    error: z.literal(true).optional(), run: z.strictObject({ command: z.string(), args: z.string() }).optional(), plain: z.literal(true).optional(), lone: z.literal(true).optional(), // UX wave U3b
+  }),
   // E1 start
   z.strictObject({
     ...base, kind: z.literal('ask'), toolUseId: z.string(), askId: z.string(), title: nullable(z.string()), context: nullable(z.string()), blocking: z.boolean(), questions: z.array(AskQuestionSchema),
@@ -157,4 +160,5 @@ export const RowSchema = z.discriminatedUnion('kind', [
   // E4c end
   z.strictObject({ ...base, kind: z.literal('browser_activity'), toolUseId: nullable(z.string()), appSessionId: z.string(), tabId: z.string(), activity: BrowserActivitySchema }), // E13
   z.strictObject({ ...base, kind: z.literal('to_human'), toolUseId: z.string(), text: z.string().min(1), pending: z.boolean() }), // P4-R7
+  z.strictObject({ ...base, kind: z.literal('activity'), activity: z.literal('compacting'), since: z.string() }), // UX wave U3b (decision 17)
 ]);

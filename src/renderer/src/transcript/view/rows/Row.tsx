@@ -21,6 +21,8 @@ import { RecordFold } from '../../../owner/view/RecordFold'; // UX wave U2b
 import { ReportOnly } from '../../../owner/view/Message'; // UX wave U2b
 import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
+import { AnswerActions } from './AnswerActions'; // UX wave U3b
+import { ActivityRow } from './Activity'; // UX wave U3b (M4)
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
 import { GapRow } from './GapRow'; // P5 O7 M2
@@ -68,6 +70,7 @@ function body(row: Row) {
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
     case 'record_fold': return <RecordFold row={row} />; // UX wave U2b: placed by the mirror
     case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
+    case 'activity': return <ActivityRow row={row} />; // UX wave U3b (M4): placed by the view at the drawn list's end
   }
 }
 
@@ -75,7 +78,8 @@ function body(row: Row) {
 // nothing under it has no divider, so the mark goes on the turn's first drawn row, whatever its kind.
 const opensTurn = (row: Row, rows: readonly Row[] | undefined) => rows?.find((candidate) => candidate.turnId === row.turnId && candidate.kind !== 'time')?.id === row.id;
 
-// Keep one frame/body lineage when a surface answer moves a row into or out of the work area.
+// Keep one frame/body lineage when a surface answer moves a row into or out of the work area. UX wave U3b (Interfaces
+// §C): an answer's action row follows its body, drawn when the mount placed one on it.
 export function RowView({ row }: { row: Row }) {
   const motion = useWorkMotion();
   const work = inWorkArea(row);
@@ -85,6 +89,7 @@ export function RowView({ row }: { row: Row }) {
   return (
     <RowFrame row={row} frameRef={ref}>
       {mounted && body(row)}
+      {mounted && row.kind === 'assistant_text' && <AnswerActions row={row} />}
     </RowFrame>
   );
 }

@@ -14,7 +14,7 @@ import { PROMOTION_HEAD } from '@shared/anchor/message';
 import { LINKED_READ_OPENING } from '@shared/maws/linked-read';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, GRANT_OPENING, MAX_ENVELOPE_CHECKS, nothingOpen, personsGrants, personsLines, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, GRANT_OPENING, MAX_ENVELOPE_CHECKS, nothingOpen, ownWordsOf, personsGrants, personsLines, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -31,7 +31,7 @@ function said(arrival: Arrival): string {
     case 'answer':
       return `answer by ${arrival.tool} to ${arrival.call}${arrival.dismissed ? ', dismissed' : ''}: ${first(arrival.summary)}`;
     case 'command':
-      return `command ${arrival.run === null ? '(no run)' : `/${arrival.run.command}${arrival.run.args ? ` ${arrival.run.args}` : ''}`}: ${arrival.stderr !== '' ? `stderr ${first(arrival.stderr)}` : first(arrival.stdout)}`;
+      return `command ${arrival.run === null ? '(no run)' : `/${arrival.run.command}${arrival.run.args ? ` ${arrival.run.args}` : ''}`}${arrival.plain ? ', plain' : ''}: ${arrival.stderr !== '' ? `stderr ${first(arrival.stderr)}` : first(arrival.stdout)}`;
     case 'own':
       return `own ${arrival.via}: ${first(arrival.words)}`;
     case 'wake':
@@ -343,28 +343,50 @@ describe('the reader, on a slash command’s output (u3-commands)', () => {
     });
   });
 
+  // UX wave U3b (M1; Interfaces A): a `system` row of subtype `local_command` names the command the engine ran
+  // (`commandRun`, as the frame's `local_command_run`); a `user` row that holds an output names none (Engine facts, 6, 7)
   it('in the file: the system rows and the user rows that hold an output; the command’s own rows, a caveat and an unknown command yield nothing', () => {
     expect(transcriptArrivals('u3-commands-r1')).toEqual({
-      5: ['command (no run): stderr Error: No messages to compact'],
+      5: ['command /compact: stderr Error: No messages to compact'],
       45: ['command (no run): Compacted '],
-      55: ['command (no run): Total cost:            $0.0020'],
-      60: ['command (no run): ## Context Usage'],
-      68: ['command (no run): Reloaded: 0 plugins · 0 skills · 5 agents · 0 hooks · 0 plugin LSP servers'],
-      75: ['command (no run): Session renamed to: uxw renamed'],
-      80: ['command (no run): Set effort level to low (this session only): Quick, straightforward implementation with minimal overhead'],
-      85: ['command (no run): API error: 400 ClaudeUsage routes Claude models only; got uxw-no-such-model · model not changed'],
+      55: ['command /usage: Total cost:            $0.0020'],
+      60: ['command /context: ## Context Usage'],
+      68: ['command /reload-plugins: Reloaded: 0 plugins · 0 skills · 5 agents · 0 hooks · 0 plugin LSP servers'],
+      75: ['command /rename uxw renamed: Session renamed to: uxw renamed'],
+      80: ['command /effort low: Set effort level to low (this session only): Quick, straightforward implementation with minimal overhead'],
+      85: ['command /model uxw-no-such-model: API error: 400 ClaudeUsage routes Claude models only; got uxw-no-such-model · model not changed'],
       133: ['command (no run): Compaction canceled.'],
       145: ['command (no run): Compacted '],
     });
     const terminal = transcriptArrivals('u3-terminal-commands-r1');
     expect(Object.keys(terminal).map(Number)).toEqual([6, 50, 57, 67, 71, 76, 78, 119]); // 56, 70 and 77 hold the command; 79 the unknown one
-    expect(terminal[50]).toEqual(['command (no run): Compacted (ctrl+o to see full summary)']);
+    expect(terminal[50]).toEqual(['command (no run), plain: Compacted (ctrl+o to see full summary)']); // dimmed by the terminal: escapes removed
+    expect(terminal[57]).toEqual(['command /context, plain:  Context Usage']); // the terminal's grid, its escapes removed
+    expect(terminal[71]).toEqual(['command /rename uxw renamed: Session renamed to: uxw renamed']);
     expect(JSON.stringify(Object.values(terminal))).not.toContain('\\u001b');
   });
 
   it('reads the run the frame names and keeps the output as the tag held it', () => {
-    expect(readArrivals(frameOf('u3-commands-r1', 204))).toEqual([{ class: 'command', run: { command: 'rename', args: 'uxw renamed' }, stdout: 'Session renamed to: uxw renamed', stderr: '' }]);
-    expect(readArrivals(frameOf('u3-commands-r1', 28))).toEqual([{ class: 'command', run: { command: 'compact', args: '' }, stdout: '', stderr: 'Error: No messages to compact' }]);
+    expect(readArrivals(frameOf('u3-commands-r1', 204))).toEqual([{ class: 'command', run: { command: 'rename', args: 'uxw renamed' }, stdout: 'Session renamed to: uxw renamed', stderr: '', plain: false }]);
+    expect(readArrivals(frameOf('u3-commands-r1', 28))).toEqual([{ class: 'command', run: { command: 'compact', args: '' }, stdout: '', stderr: 'Error: No messages to compact', plain: false }]);
+    expect(readArrivals(rowOf('u3-commands-r1', 55))).toEqual([{ class: 'command', run: { command: 'usage', args: '' }, stdout: expect.stringMatching(/^Total cost: /), stderr: '', plain: false }]);
+  });
+
+  // UX wave U3b (M1; Interfaces A): `plain` says the carrier's text held a terminal's escape sequences, which the
+  // reader removed; no output on the live wire holds one (Engine facts, 8)
+  it('marks an output plain only where its text held escape sequences: the terminal’s grid, never the live wire', () => {
+    const live = Object.values(journalArrivals('u3-commands-r1')).flat();
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.filter((line) => line.includes(', plain'))).toEqual([]);
+    expect(Object.values(transcriptArrivals('u3-commands-r1')).flat().filter((line) => line.includes(', plain'))).toEqual([]);
+    const terminal = Object.values(transcriptArrivals('u3-terminal-commands-r1')).flat();
+    expect(terminal.filter((line) => line.includes(', plain'))).toEqual([ // the grid, and the two dimmed "Compacted" rows (lines 50 and 119)
+      'command (no run), plain: Compacted (ctrl+o to see full summary)',
+      'command /context, plain:  Context Usage',
+      'command (no run), plain: Compacted (ctrl+o to see full summary)',
+    ]);
+    const coloured = { type: 'system', subtype: 'local_command', uuid: 'c-1', content: '<local-command-stderr>\u001b[31mfailed\u001b[39m</local-command-stderr>', commandRun: { command: 'demo' } };
+    expect(readArrivals(coloured)).toEqual([{ class: 'command', run: { command: 'demo', args: '' }, stdout: '', stderr: 'failed', plain: true }]);
   });
 });
 
@@ -664,7 +686,7 @@ describe('readNext and turnOriginOf', () => {
           { class: 'task', taskId: null, toolUseId: null, runId: null, outcome: null, summary: '', durationMs: null, outputFile: null, detail: null },
           { class: 'schedule', prompt: null },
           { class: 'answer', tool: 'sminos', call: 'c', summary: '', answers: null, dismissed: false },
-          { class: 'command', run: null, stdout: '', stderr: '' },
+          { class: 'command', run: null, stdout: '', stderr: '', plain: false },
           { class: 'wake' },
         ] satisfies Arrival[]
       ).map((arrival) => [arrival.class, turnOriginOf(arrival)]),
@@ -806,6 +828,33 @@ describe('the answer envelopes inside a joined text: the member boundary is the 
   it('a line that begins with the tag but is not the writer\'s first line opens nothing: it stays text', () => {
     const text = `[MAWS ask ask-1] is how the answers start\n${envelope}`;
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '[MAWS ask ask-1] is how the answers start' });
+  });
+});
+
+// UX wave U3b (M3; Interfaces §D, Probes 5): a prompt's text as the person's own words, the reader's `own` reading for a
+// text alone: the rewind's text of a prompt sminos delivered opens with the frame line, which the fork's window never
+// shows as the person's words.
+describe('ownWordsOf', () => {
+  it('takes the words after a whole frame line that names the person', () => {
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\nDraft the volunteers’ note.')).toBe('Draft the volunteers’ note.');
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\nLine one.\nLine two.')).toBe('Line one.\nLine two.');
+  });
+
+  it('keeps the frame line before words that alone would read as the engine’s interrupt marker, as the reader does', () => {
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]')).toBe('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]');
+  });
+
+  it('leaves every other text as it is: a typed prompt, another sender’s frame, a frame line with nothing after it', () => {
+    expect(ownWordsOf('Check the gauges.')).toBe('Check the gauges.');
+    expect(ownWordsOf('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.')).toBe('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.');
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]')).toBe('[sminos message from human id=0a1b2c3d]');
+  });
+
+  it('reads the recorded rewind of a delivered prompt (u3b-fork-delivered, seq 25) as its words', () => {
+    const row = loadUxwaveJournal('u3b-fork-delivered').find((entry) => entry.seq === 25)!;
+    const prefill = (row.frame as { response: { response: { prefillText: string } } }).response.response.prefillText;
+    expect(prefill.startsWith('[sminos message from human id=')).toBe(true);
+    expect(ownWordsOf(prefill)).toBe('UXW delivered: reply with only the word DELIVERED.');
   });
 });
 

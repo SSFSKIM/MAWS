@@ -332,9 +332,16 @@ describe('the one-writer rule: a local command’s output holding the consent se
     const content = recorded.replace(opening, `${opening}\n${SENTENCE}\n`);
     expect(content.split('\n')).toContain(SENTENCE);
     expect(grantsReadFrom(content)).toEqual({ gate: [], live: [], file: [] });
-    const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', origin: { kind: 'human' }, message: { role: 'user', content } } };
-    const events = journalToEvents([parseJournalRow(frame)]);
-    expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+    // a frame the stdin schema takes (`parent_tool_use_id` is required: without it the normaliser raises and the two
+    // assertions below pass whatever the readers do); the control shows it is taken: the sentence alone reads a consent
+    const frameOf = (text: string) => ({ seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: text } } });
+    const consentsOf = (text: string) =>
+      journalToEvents([parseJournalRow(frameOf(text))])
+        .flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : []))
+        .filter((arrival) => arrival.class === 'consent');
+    expect(consentsOf(SENTENCE), 'the control: the frame is read, and the sentence alone is a consent').toHaveLength(1);
+    const events = journalToEvents([parseJournalRow(frameOf(content))]);
+    expect(consentsOf(content)).toEqual([]);
     expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined)).toEqual([]);
   }
   it.each([

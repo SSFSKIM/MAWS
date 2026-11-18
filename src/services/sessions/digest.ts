@@ -13,6 +13,7 @@ import type { SessionDigest } from '@shared/ipc/schema';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { messageLine, previewLine } from '@shared/owner/preview';
 import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { isWebFetch, webFetchUrl } from '@shared/engine/web-fetch'; // UX wave U3b
 
 export const SEEN_WINDOW = 2_000;
 const LAST_LINE_MAX = 160;
@@ -33,6 +34,14 @@ const text = (value: unknown): string => (typeof value === 'string' ? value : ''
 
 export function activityForTool(toolName: string, toolInput: unknown): string {
   const args = input(toolInput);
+  // UX wave U3b (M5): every web fetch, the web plugin's among them
+  if (isWebFetch(toolName)) {
+    try {
+      return `Fetching ${new URL(webFetchUrl(toolInput) ?? '').host}`;
+    } catch {
+      return 'Fetching';
+    }
+  }
   switch (toolName) {
     case 'Bash':
       return `Running ${text(args.command).slice(0, 60)}`;
@@ -45,12 +54,6 @@ export function activityForTool(toolName: string, toolInput: unknown): string {
     case 'Glob':
     case 'Grep':
       return 'Searching';
-    case 'WebFetch':
-      try {
-        return `Fetching ${new URL(text(args.url)).host}`;
-      } catch {
-        return 'Fetching';
-      }
     default:
       return `Running ${toolName}`;
   }

@@ -11,6 +11,7 @@ import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { FIXTURE_DIR, framesOf, loadJournal, loadUxwaveJournal } from '../../../test/support/fixtures';
 import { Normalizer } from '../../engine-host/normalizer'; // C12
+import { webFetchCases } from '../../../test/support/web-fetch-recorded'; // UX wave U3b
 
 const APP = 'app-1' as AppSessionId;
 const CHILD = { agentId: 'agent-a', parentToolUseId: 'toolu_parent' };
@@ -49,6 +50,14 @@ describe('digest fold', () => {
     expect(at(ev('tool.result', {}))).toBe('Working');
     expect(at(ev('boundary.compaction', {}))).toBe('Compacting');
     expect(at(ev('session.reconnect', { phase: 'attempting' }))).toBe('Reconnecting');
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch reads as WebFetch does, over its recorded calls
+  it('says what page a web fetch fetches, the web plugin’s as WebFetch', () => {
+    for (const [label, call] of webFetchCases()) {
+      expect(run([ev('turn.started', {}), ev('tool.use', { toolName: call.toolName, input: call.input })]).activity, label).toBe('Fetching example.com');
+      expect(run([ev('turn.started', {}), ev('tool.use', { toolName: call.toolName, input: {} })]).activity, label).toBe('Fetching');
+    }
   });
 
   it('follows session.state and pending requests', () => {

@@ -32,10 +32,12 @@ import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { firstLineOf, previewHidesBody, previewOf } from './rows'; // E7; UX wave U3
 import { needsSeparator, separatorLabel } from './time';
-import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
+import { commandLineOf, confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
-import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
-import { consentMessage, personsLines } from '@shared/engine/arrival'; // UX wave U1c; rule R
+import { carriedOf, commandOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { consentMessage, ownWordsOf, personsLines } from '@shared/engine/arrival'; // UX wave U1c, rule R; U3b, ownWordsOf
+import { localCommandParts } from '@shared/engine/engine-markers'; // UX wave U3b
+import { isWebFetch, webFetchUrl } from '@shared/engine/web-fetch'; // UX wave U3b
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
@@ -108,7 +110,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
     previousAt = rows.at(-1)!.at;
   };
   const emitLoose = (after: TurnId | null) => {
-    for (const row of looseRows(state, looseAfter.get(after) ?? [])) {
+    for (const row of looseRows(state, looseAfter.get(after) ?? [], after)) {
       emit([row], 'loose', rowId.timeOfRow(row.id));
       if (row.kind === 'boundary' && row.boundaryKind === 'rewind' && row.revealed) {
         for (const id of state.hidden?.branches.get(row.id)?.turns ?? []) {
@@ -580,7 +582,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
-          const row = localCommandRow(event, turn.id);
+          const row = localCommandRow(event, turn.id); // UX wave U3b: whether it stands alone is read on the drawn rows, below
           if (row) items.push({ kind: 'row', row });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
@@ -963,8 +965,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
-        if (item.group.ended) endedByExit(item.group);
-        resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id) });
+        const exited = item.group.ended && endedByExit(item.group);
+        resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id, exited) });
         break;
       }
       case 'row':
@@ -1081,6 +1083,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     });
   }
   rows.push(...(expanded ? allRows : allRows.filter((row) => staysInView(row) || answerAlone))); // with no divider there is no work: every row is persistent
+  markLoneOutputs(rows, user !== null && turnCommandLine(turn) !== null ? user : null);
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
@@ -1139,8 +1142,10 @@ function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[
   for (const { use, result } of tools.values()) {
     const input = record(use.input);
     const { category } = tableRowOf(use.toolName);
-    const mcp = MCP_TOOL.exec(use.toolName);
-    used.push({ name: use.toolName, category, at: use.at, url: use.toolName === 'WebFetch' && typeof input.url === 'string' ? input.url : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
+    // UX wave U3b (M5): a web fetch is a page fetched, the web plugin's as WebFetch, and no MCP tool of its own
+    const webFetch = isWebFetch(use.toolName);
+    const mcp = webFetch ? null : MCP_TOOL.exec(use.toolName);
+    used.push({ name: use.toolName, category, at: use.at, url: webFetch ? webFetchUrl(input) : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
     const completed = result !== null && !result.isError && result.denial === null;
     const grepFile = use.toolName === 'Grep' && completed ? grepFileScope(input, result.structured, cwd) : null;
     const path = grepFile ?? filePathOf(input);
@@ -1277,15 +1282,21 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
 // come (a crash, a kill, E10's idle stop, C4's exit synthesised for a transcript nobody holds): an agents row made
 // before the exit (`ended`, by arrival order) reads its agents still running stopped, so it folds with its turn rather
 // than staying in view (`staysInView`). An ordinary end of the turn that made the call is no exit: background agents
-// outlive it.
-function endedByExit(group: SubagentGroup): void {
+// outlive it. UX wave U3b (M5, decision 19): whether every agent the row names ended so, none having finished or been
+// stopped before the exit.
+function endedByExit(group: SubagentGroup): boolean {
+  let every = true;
   for (const ref of group.refs) {
     const status = group.statuses.get(ref.taskId) ?? 'started';
-    if (!AGENTS_ENDED.has(status)) group.statuses.set(ref.taskId, 'stopped');
+    if (AGENTS_ENDED.has(status)) every = false;
+    else group.statuses.set(ref.taskId, 'stopped');
   }
+  return every;
 }
 
-function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
+// `exited`: every agent the row names ended with the session's process (endedByExit); the row is stopped, and its
+// sentence says how
+function subagentRow(group: SubagentGroup, turnId: TurnId, exited: boolean): RowOf<'subagent'> {
   // Each child's own state; the row is terminal only when every child is (with errors when any failed, stopped when
   // any was stopped), and working while any child has progressed or ended and another still runs.
   const statuses = group.refs.map((ref) => group.statuses.get(ref.taskId) ?? 'started');
@@ -1294,8 +1305,8 @@ function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
   const status: SubagentStatus = done
     ? statuses.includes('finished_with_errors') ? 'finished_with_errors' : statuses.includes('stopped') ? 'stopped' : 'finished'
     : statuses.every((s) => s === 'started') ? 'started' : 'working';
-  const sentence = subagentSentence(group.refs.map((ref) => ref.name), status) + (group.phase && !done ? ` · ${group.phase}` : '');
-  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, overflow: Math.max(0, group.refs.length - 4) };
+  const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status) + (group.phase && !done ? ` · ${group.phase}` : '');
+  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
 }
 
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {
@@ -1801,12 +1812,49 @@ function cutRowOf(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'a
   return { id: rowId.cut(event.id), turnId, at: event.at, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: cut.text, live: false, phase: 'commentary', model: null, cut: true, ...(cut.partway && { partway: true as const }) };
 }
 
+/**
+ * UX wave U3b (Interfaces B, §N): the command line a turn opens with: its opening message read through `commandLineOf`,
+ * the one reader of "this drawn text is a slash command line"; null for a turn a prompt, an arrival or nothing opened.
+ * What says a command's output has its command's bubble directly above it (`lone`), and names the command for the mod's
+ * site where the output's event names no run (`commandInput`).
+ */
+export function turnCommandLine(turn: TurnState): { command: string; args: string } | null {
+  const opener = turn.events.find((event): event is Event<'user.message'> => event.kind === 'user.message' && !event.isSynthetic && event.origin !== 'local-command' && event.bash === null);
+  return opener === undefined ? null : commandLineOf(userTextOf(opener.content).text);
+}
+
+// UX wave U3b (Interfaces B; the branch panel's finding 2): a command's output stands alone unless the row drawn directly
+// before it is its command's bubble (`bubble`, null where the turn's opening message is no command), read on the turn's
+// drawn rows: a typed /compact draws its bubble, the compaction's boundary, then its output, which stands alone. The
+// turn's own line counts as the bubble's: it stands under the bubble while the command runs or after it was stopped, and
+// the output under it is still the command's (no name drawn, then taken away when the turn ends).
+function markLoneOutputs(rows: Row[], bubble: RowOf<'user'> | null): void {
+  rows.forEach((row, i) => {
+    if (row.kind !== 'local_command') return;
+    const before = rows[i - 1]?.kind === 'divider' ? rows[i - 2] : rows[i - 1];
+    if (bubble === null || before !== bubble) rows[i] = { ...row, lone: true };
+  });
+}
+
+// The last row a turn draws (time separators aside) is its bubble: nothing of the turn stands between it and what follows.
+function lastDrawnIsBubble(state: TranscriptState, turn: TurnState): boolean {
+  return rowsOfTurn(state, turn).findLast((row) => row.kind !== 'time')?.kind === 'user';
+}
+
+// UX wave U3b (decision 3, Interfaces B): the row says all of the output was an error where only the error tag held
+// text (an output that mixes the two is drawn muted), and carries the run and the plain mark of its event's entry.
 function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
   const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
   if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
   const text = stripAnsi(localCommandOutput(content) ?? content).trim();
   if (!text || confirmsSettingChange(text)) return null;
-  return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
+  const parts = localCommandParts(content);
+  const error = parts !== null && parts.stdout.trim() === '' && parts.stderr.trim() !== '';
+  const { run, plain } = commandOf(event.arrival);
+  return {
+    id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text,
+    ...(error && { error: true as const }), ...(run !== null && { run }), ...(plain && { plain: true as const }),
+  };
 }
 
 // The engine's own words for a hook that got in the way, written for the terminal, which the hook's notice row says
@@ -1853,8 +1901,16 @@ function withBashOutput(row: RowOf<'bash'>, output: Event<'user.message'>): RowO
 }
 
 // Rows for the events outside any turn, placed after the turn they followed.
-function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
+// `after` is the turn the events are placed after (state.placement): what is drawn directly above the first of them.
+function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId | null): Row[] {
   const rows: Row[] = [];
+  // UX wave U3b (Interfaces B): the file's routes place a command's output as a loose event after its command's turn; it
+  // stands under the bubble when it is the first row drawn there and that turn's last drawn row is a command's bubble.
+  // Asked only for such an output, so a re-flatten reads no turn's events for the turns with no loose output after them.
+  const underCommand = (): boolean => {
+    const placedAfter = after === null ? undefined : state.turns.get(after);
+    return placedAfter !== undefined && turnCommandLine(placedAfter) !== null && lastDrawnIsBubble(state, placedAfter);
+  };
   let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   for (const event of events) {
@@ -1874,7 +1930,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) {
           const row = localCommandRow(event, null);
-          if (row) rows.push(row);
+          if (row) rows.push(rows.length === 0 && underCommand() ? row : { ...row, lone: true }); // UX wave U3b: on the drawn order
         }
         break;
       }
@@ -1887,7 +1943,9 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         const id = rowId.boundary(event.id);
         const revealed = state.ui.revealedBoundaries.has(id);
         const hiddenRows = state.hidden?.branches.get(id)?.rows ?? 0;
-        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: event.prefillText, hiddenRows, revealed });
+        // UX wave U3b (Probes, 5): the one place the rewind's text reaches a fork's window, as the person's own words (a
+        // prompt sminos delivered opens with its frame line)
+        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: event.prefillText === null ? null : ownWordsOf(event.prefillText), hiddenRows, revealed });
         break;
       }
       case 'api.retry':

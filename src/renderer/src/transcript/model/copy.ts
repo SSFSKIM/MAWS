@@ -4,6 +4,7 @@ import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import type { Cell, SubagentStatus, ToolCategory } from './rows';
 import { isCuaJsTool, MCP_TOOL } from './classify';
+import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U2
@@ -147,14 +148,14 @@ export function cellLabel(input: CellLabelInput): string {
       return `Moved \`${input.name}\` to the background after ${duration(input.durationMs)}`;
     case 'generic': {
       if (isCuaJsTool(input.toolName)) return 'Used computer use'; // UX wave U12a: the computer-use plugin's call, under either name
+      const detail = input.detail ?? null;
+      if (isWebFetch(input.toolName)) return `Fetched ${detail ?? ''}`; // UX wave U3b (M5): the web plugin's fetch too, before the MCP form
       const mcp = MCP_TOOL.exec(input.toolName);
       if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
-      const detail = input.detail ?? null;
       switch (input.toolName) {
         case 'Skill': return detail === null ? 'Ran a skill' : `Ran /${detail.replace(/^\//, '')}`; // UX wave U2 (decision 5): the row's words, once the view's
         case 'ToolSearch': return `Loaded ${plural(Number(detail ?? 0), 'tool')}`;
         case 'Grep': case 'Glob': return `Searched for \`${detail ?? ''}\`${input.scope ? ` in ${input.scope}` : ''}`;
-        case 'WebFetch': return `Fetched ${detail ?? ''}`;
         case 'WebSearch': return `Searched the web for ${detail ?? ''}`;
         case 'EnterPlanMode': return 'Entered plan mode';
         case 'EnterWorktree': return `Entered worktree ${detail ?? ''}`;
@@ -230,13 +231,16 @@ export const SAFEGUARD_LINE = { skipped: 'Auto mode · review skipped', not_flag
 // ---------------------------------------------------------------------------------------------------------------------
 // Subagents, agent messages, plans, questions, slots, boundaries, errors
 
-export function subagentSentence(names: string[], status: SubagentStatus): string {
+// `exited` (UX wave U3b, M5, decision 19): a row whose agents all ended with the session's process, a stopped row
+// whose sentence is U8's words for the same fact
+export function subagentSentence(names: string[], status: SubagentStatus | 'exited'): string {
   const subject = names.length <= 3 ? list(names) : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
   switch (status) {
     case 'started': case 'working': return `${subject} started working`;
     case 'finished': return `${subject} finished`;
     case 'finished_with_errors': return `${subject} finished with errors`;
     case 'stopped': return `${subject} was stopped`;
+    case 'exited': return `${subject} ended with the session`;
   }
 }
 
@@ -330,7 +334,17 @@ const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {
 export const processExitCopy = (reason: string, lostAttentionCount: number, lostAskCount = 0) =>
   reason === 'budget' ? RELEASED_COPY /* C12 */ : reason === 'idle' ? IDLE_RELEASED_COPY /* E10 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${lostCopy(lostAttentionCount, lostAskCount)} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
-export const LOCAL_COMMAND_HEADER = 'Command output';
+// UX wave U3b (O-18; Interfaces B and L): a slash command's output is a light line, `⎿` then the output, clipped at two
+// lines until opened; one that stands with no bubble of its command names the command the engine ran first
+export const COMMAND_LINE = { mark: '⎿', showMore: 'Show more', showLess: 'Show less' } as const;
+export const commandLead = (run: { command: string }) => `/${run.command} · `;
+// UX wave U3b (Interfaces §L): an answer's action row; a disabled Fork says U9's sentence (useForkUnavailable), never one of these
+export const ANSWER_ACTIONS = { copy: 'Copy', fork: 'Fork from here', forkTitle: 'Starts a new session from this point. This one stays as it is.' } as const;
+
+// UX wave U3b (decision 16, Interfaces §L): while a session compacts, the row at the transcript's end, with the time so
+// far in the turn line's format once it reaches a second ('' before), and the sidebar's hover card
+export const COMPACTING_SESSION = 'Compacting session…';
+export const compactingLine = (elapsed: string) => (elapsed === '' ? COMPACTING_SESSION : `${COMPACTING_SESSION} ${elapsed}`);
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 // W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
 // and a steer the engine took, inside the turn at the step where it arrived.

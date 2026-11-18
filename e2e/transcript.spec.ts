@@ -17,6 +17,7 @@ import { expect, test as base, type Locator, type Page } from '@playwright/test'
 import type { HarnessApi, HarnessMetrics, HarnessQuestion } from '../src/renderer/src/harness/api';
 import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // decision 17: the tiers' words live in the copy only
 import { addressed } from './support/address';
+import { withNativeClipboard } from './support/clipboard';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { rowOf } from './support/request-keys';
@@ -1302,38 +1303,767 @@ test('a long token in prose wraps in a narrow transcript', async ({ harness }) =
   expect(harness.consoleErrors()).toEqual([]);
 });
 
-// W2: in a completed answer a table or code block wider than the text breaks out to --measure-wide less its two pads
-// (896 − 32 = 864 px), centred on the column; a narrow table keeps the text's width and left edge. A completed answer
-// renders in Streamdown's static mode, whose blocks sit directly under the prose with no per-block [dir] wrapper.
-test('a completed answer\u2019s wide table and code break out to the wide measure, centred, and a narrow table keeps the text', async ({ harness }) => {
+// ---- UX wave U3b, landing 1 (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, M6) -------------
+// The rows' pixels, which happy-dom cannot hold: the unit tests pin each row's structure, these scenes its widths,
+// heights and overlaps, what hovering moves and what the clipboard gets, on three fixtures written for them
+// (test/fixtures/transcript/events/command-lines, column-blocks and message-actions; invented content, X1 events in the
+// shapes the model's tests write). Each claim names its ruling in the document's Decision Log (R1 to R23, M2-2, M2-5).
+
+type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+const boxOf = (locator: Locator): Promise<Box> =>
+  locator.evaluate((element) => {
+    const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+    return { left, top, right, bottom, width, height };
+  });
+const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+// A pixel claim held to a pixel (a rounding of layout, never a different rule)
+const expectNear = (actual: number, expected: number, message: string) => expect(Math.abs(actual - expected), `${message}: ${actual} against ${expected}`).toBeLessThanOrEqual(1);
+
+// The transcript's pane `width` px wide (the harness lays it out as flex-1), settled.
+async function paneWidth(page: Page, width: number) {
+  await page.evaluate((w) => {
+    document.querySelector<HTMLElement>('[data-transcript-scroller]')!.closest<HTMLElement>('.transcript')!.style.flex = `0 0 ${w}px`;
+  }, width);
+  await settle(page, 300);
+}
+// The three values of `appearance.transcriptWidth` (settings-tab/transcript-width.ts): the column `--measure` the
+// transcript's rows share, set at the document's root.
+const TRANSCRIPT_WIDTHS = [768, 960, 1280] as const;
+// A window with room for the widest column (1280 px, the pane's scrollbar beside it), the pane on the harness's flex-1.
+async function roomForWidths({ app, page }: MawsLaunch) {
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 820)); // 820: the e2e launch's own default height
+  await page.waitForFunction(() => window.innerWidth === 1440);
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-transcript-scroller]')!.closest<HTMLElement>('.transcript')!.style.flex = '';
+  });
+  await settle(page, 300);
+}
+// The transcript width set as the app sets it (applyTranscriptWidth: the default removes the root's `--measure`, the
+// others set it), settled, and the text column it gives held: the width less the column's two 16 px pads.
+async function transcriptWidth(page: Page, width: (typeof TRANSCRIPT_WIDTHS)[number]) {
+  await page.evaluate((w) => {
+    if (w === 768) document.documentElement.style.removeProperty('--measure');
+    else document.documentElement.style.setProperty('--measure', `${w}px`);
+  }, width);
+  await settle(page, 300);
+  const column = await page.evaluate(() => {
+    const row = document.querySelector('[data-transcript-scroller] .transcript-row')!;
+    const style = getComputedStyle(row);
+    return row.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  });
+  expectNear(column, width - 32, `the transcript width ${width}: its text column`);
+}
+// Whether an element scrolls on `axis`: its computed overflow lets it, and an offset set on it reads back.
+const scrollsOn = (locator: Locator, axis: 'x' | 'y') =>
+  locator.evaluate((element, a) => {
+    const overflow = a === 'x' ? getComputedStyle(element).overflowX : getComputedStyle(element).overflowY;
+    if (a === 'x') element.scrollLeft = 40;
+    else element.scrollTop = 40;
+    const offset = a === 'x' ? element.scrollLeft : element.scrollTop;
+    if (a === 'x') element.scrollLeft = 0;
+    else element.scrollTop = 0;
+    return { overflow, offset };
+  }, axis);
+const expectScrolls = async (locator: Locator, axis: 'x' | 'y', message: string) => {
+  const { overflow, offset } = await scrollsOn(locator, axis);
+  expect(['auto', 'scroll'], `${message}: its overflow lets it (${overflow})`).toContain(overflow);
+  expect(offset, `${message}: an offset set on it holds`).toBeGreaterThan(0);
+};
+// A row brought into the list's mounted range and settled, so a measurement in the page finds it.
+async function mounted(page: Page, row: Locator) {
+  await row.scrollIntoViewIfNeeded();
+  await settle(page, 200);
+}
+// What a token computes to on this page (a colour or a font), read through a probe element.
+const tokenValue = (page: Page, property: 'color' | 'fontFamily', value: string) =>
+  page.evaluate(
+    ([name, token]) => {
+      const probe = document.createElement('span');
+      probe.style[name as 'color'] = token;
+      document.querySelector('.transcript')!.append(probe);
+      const read = getComputedStyle(probe)[name as 'color'];
+      probe.remove();
+      return read;
+    },
+    [property, value] as const,
+  );
+const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+
+// Acceptance 1 (O-18; decision 4, R1 to R5, R19, R23): a slash command's output is a dim line led by `⎿` under its
+// command, in the line's own type (12 px at 1.5), with 16 px under it. A one-line output sits on the bubble's side as wide
+// as its words; one with a line end is a block from the column's left edge after the mark, and opening it moves nothing
+// sideways. Closed, the one drawing is cut at the bottom of its second drawn line (36 px for a paragraph, 40 px for a
+// heading over a line), under a fade of at most a third of a line that ends at the bound; "Show more" opens the same
+// text, each source line on a line of its own. Inside it markdown is drawn at the line's scale; a terminal's grid is
+// preformatted, scrolls sideways and never wraps; an error is in `--danger`; a line standing alone names its command in
+// the line's own font.
+test('a command’s output is a dim line under its command, cut at the bottom of its second drawn line until opened, in the line’s own type', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
-  await loadAll(page, 'events/wide-blocks');
-  const prose = page.locator('[data-kind="assistant_text"] .transcript-prose');
-  await expect(prose).toHaveCount(1);
-  await expect(prose.locator('[data-streamdown="code-block"]')).toHaveCount(1);
-  const measured = await prose.evaluate((element) => {
-    const row = element.closest<HTMLElement>('.transcript-row')!;
-    const style = getComputedStyle(row);
-    const box = row.getBoundingClientRect();
-    const round = (value: number) => Math.round(value * 10) / 10;
-    const text = { left: round(box.left + parseFloat(style.paddingLeft)), width: round(box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)) };
-    const blocks = [...Array.from(element.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"]')), element.querySelector<HTMLElement>('[data-streamdown="code-block"]')!];
-    const [narrow, wide, code] = blocks.map((block) => {
-      const rect = block.getBoundingClientRect();
-      return { left: round(rect.left), width: round(rect.width), inProse: block.parentElement === element };
+  await blockHumanInput(page);
+  await loadAll(page, 'events/command-lines');
+  const transcript = page.locator('[data-transcript-scroller]');
+  await expect(transcript).not.toContainText('Command output');
+  await expect(page.locator('[data-kind="local_command"] .transcript-replayed')).toHaveCount(0);
+  const row = (text: string) => page.locator('[data-kind="local_command"]').filter({ hasText: text });
+  const measure = async (frame: Locator) => {
+    await mounted(page, frame);
+    return frame.evaluate((element) => {
+      const box = (el: Element) => {
+        const { left, top, right, bottom, width, height } = el.getBoundingClientRect();
+        return { left, top, right, bottom, width, height };
+      };
+      const frameStyle = getComputedStyle(element);
+      const line = element.querySelector<HTMLElement>('.transcript-command')!;
+      const output = line.querySelector<HTMLElement>('.transcript-command-output')!;
+      const style = getComputedStyle(output);
+      return {
+        column: { left: box(element).left + parseFloat(frameStyle.paddingLeft), right: box(element).right - parseFloat(frameStyle.paddingRight) },
+        mark: { box: box(line.querySelector('.transcript-command-mark')!), color: getComputedStyle(line.querySelector('.transcript-command-mark')!).color },
+        output: box(output),
+        fragments: (() => {
+          // the first drawn text fragments, from the output's top (what the row's own measure reads)
+          const origin = output.getBoundingClientRect().top;
+          const range = document.createRange();
+          const walker = document.createTreeWalker(output, NodeFilter.SHOW_TEXT);
+          const out: { top: number; bottom: number }[] = [];
+          for (let node = walker.nextNode(); node !== null && out.length < 4; node = walker.nextNode()) {
+            if (!node.textContent?.trim()) continue;
+            range.selectNodeContents(node);
+            for (const rect of Array.from(range.getClientRects())) if (out.length < 4) out.push({ top: rect.top - origin, bottom: rect.bottom - origin });
+          }
+          return out;
+        })(),
+        text: output.textContent,
+        type: { size: style.fontSize, lineHeight: parseFloat(style.lineHeight), color: style.color, font: style.fontFamily },
+        mask: style.maskImage || style.webkitMaskImage || 'none',
+        under: parseFloat(getComputedStyle(line).paddingBottom),
+        block: line.hasAttribute('data-block'),
+        error: line.hasAttribute('data-error'),
+        button: line.querySelector('.transcript-quiet-button')?.textContent ?? null,
+      };
     });
-    return { pads: [style.paddingLeft, style.paddingRight], text, narrow, wide, code };
+  };
+  const muted = await tokenValue(page, 'color', 'var(--fg-muted)');
+  const faint = await tokenValue(page, 'color', 'var(--fg-faint)');
+
+  // a one-line output (/rename): on the bubble's side, as wide as its words, one line and no bound
+  const renamed = await measure(row('Session renamed to: north gauges'));
+  const renameBubble = await boxOf(page.locator('[data-kind="user"]').filter({ hasText: '/rename north gauges' }).locator('[data-bubble]'));
+  expect(renamed.text).toBe('Session renamed to: north gauges');
+  expect(renamed.type, 'R1: the line’s type, muted').toMatchObject({ size: '12px', lineHeight: 18, color: muted });
+  expect(renamed.mark.color, 'the lead mark is faint').toBe(faint);
+  expect(renamed.under, '16 px under the line').toBe(16);
+  expect(renamed.block, 'R2: one line of text is no block').toBe(false);
+  expectNear(renamed.output.right, renameBubble.right, 'R2: on the bubble’s side, its right edge at the bubble’s');
+  expect(renamed.output.width, 'R2: as wide as its words').toBeLessThan((renamed.column.right - renamed.column.left) / 2);
+  expectNear(renamed.output.height, renamed.type.lineHeight, 'R19: one line, no bound');
+  expect(renamed.button, 'no Show more for a line that is not cut').toBeNull();
+
+  // a paragraph of seven lines (/cost): a block from the column's left edge, cut at two lines under the fade
+  const cost = row('Total duration (API)');
+  const closed = await measure(cost);
+  expect(closed.block, 'R2: a text with a line end is a block').toBe(true);
+  expectNear(closed.mark.box.left, closed.column.left, 'R2: the mark at the column’s left edge');
+  expect(closed.output.left, 'R2: the output starts after the mark').toBeGreaterThan(closed.mark.box.right);
+  expectNear(closed.output.height, 2 * closed.type.lineHeight, `R19 and acceptance 1: closed at the bottom of its second drawn line, two lines of its type (its first text fragments: ${JSON.stringify(closed.fragments)})`);
+  const fade = /calc\((?:100% - ([\d.]+)px|-([\d.]+)px \+ 100%)\)/.exec(closed.mask); // either order a computed calc() may take
+  expect(fade, `R3: the closed line fades out (${closed.mask})`).not.toBeNull();
+  expect(Number(fade![1] ?? fade![2]), 'R3: the fade is at most a third of one line, ending at the bound').toBeLessThanOrEqual(closed.type.lineHeight / 3);
+  expect(closed.button).toBe('Show more');
+  await cost.getByRole('button', { name: 'Show more' }).click();
+  const open = await measure(cost);
+  expect(open.text, 'one drawing: the open state holds the closed state’s text, in its order').toBe(closed.text);
+  expectNear(open.output.height, 7 * open.type.lineHeight, 'R4: each of the seven source lines on a line of its own');
+  expect(open.mask, 'open: no fade').toBe('none');
+  expect([open.output.left, open.output.width], 'R2: opening moves nothing sideways').toEqual([closed.output.left, closed.output.width]);
+  expect(open.button).toBe('Show less');
+  await cost.getByRole('button', { name: 'Show less' }).click();
+  expectNear((await measure(cost)).output.height, 2 * closed.type.lineHeight, 'closed again');
+
+  // markdown at the line's scale (/context): a heading over a line is cut at 40 px; open, the heading is the line's size
+  // in bold, the blocks stand 4 px apart and the table's text is the line's size; no heading marker is drawn
+  const context = row('Context Usage').filter({ has: page.locator('table') });
+  const shut = await measure(context);
+  expectNear(shut.output.height, 2 * shut.type.lineHeight + 4, 'R19 and R1: a heading over a line, 4 px apart, comes to 40 px');
+  await context.getByRole('button', { name: 'Show more' }).click();
+  await mounted(page, context);
+  const drawn = await context.locator('.transcript-command-output').evaluate((output) => {
+    const prose = output.querySelector('.transcript-prose')!;
+    // a per-block wrapper (`display: contents`, live mode's) is flattened; static mode draws none, and the `dir` it puts on
+    // each p, heading, li and cell marks a block, not a wrapper
+    const blocks = Array.from(prose.children).flatMap((child) => (getComputedStyle(child).display === 'contents' ? Array.from(child.children) : [child]));
+    const heading = prose.querySelector('h2')!;
+    const style = getComputedStyle(heading);
+    return {
+      heading: { size: style.fontSize, lineHeight: style.lineHeight, weight: style.fontWeight },
+      gaps: blocks.slice(1).map((block, i) => Math.round((block.getBoundingClientRect().top - blocks[i]!.getBoundingClientRect().bottom) * 10) / 10),
+      cells: Array.from(output.querySelectorAll('th, td')).map((cell) => getComputedStyle(cell).fontSize),
+      text: output.textContent ?? '',
+    };
   });
-  console.log(`wide blocks: ${JSON.stringify(measured)}`);
-  expect(measured.pads, 'the row pads its text by --measure-pad').toEqual(['16px', '16px']);
-  expect(measured.text.width, 'the default column holds 736 px of text in a 1280 px or wider window').toBe(736);
-  for (const block of [measured.narrow, measured.wide, measured.code]) expect(block.inProse, 'static mode: the block is a direct child of the prose').toBe(true);
-  expect(measured.narrow, 'the narrow table is the text\u2019s width at its left edge').toEqual({ left: measured.text.left, width: measured.text.width, inProse: true });
-  for (const block of [measured.wide, measured.code]) {
-    expect(block.width, 'a wide block is --measure-wide less the pads').toBe(864);
-    expect(block.left, 'centred on the column: 64 px left of the text').toBe(measured.text.left - 64);
+  expect(drawn.heading, 'R1: the heading is the line’s size in bold').toEqual({ size: '12px', lineHeight: '18px', weight: '600' });
+  expect(drawn.gaps, 'R1: blocks stand 4 px apart').toEqual(drawn.gaps.map(() => 4));
+  expect(new Set(drawn.cells), 'R1: the table’s text is the line’s size').toEqual(new Set(['12px']));
+  expect(drawn.text, 'drawn, not its source').not.toContain('##');
+  expect(drawn.text, 'one drawing: opening shows the closed state’s text').toBe(shut.text);
+
+  // an error: all of it in the error tag, in --danger
+  const failed = await measure(row('Error: No messages to compact'));
+  expect(failed.error).toBe(true);
+  expect(failed.type.color, 'in --danger').toBe(await tokenValue(page, 'color', 'var(--danger)'));
+
+  // a terminal's grid: preformatted in the monospace font, scrolling sideways, never wrapping, cut at two lines
+  const grid = row('Context Usage · demo-model').filter({ has: page.locator('pre') });
+  const gridShut = await measure(grid);
+  expectNear(gridShut.output.height, 2 * gridShut.type.lineHeight, 'R19: a grid is cut at two of its lines');
+  await grid.getByRole('button', { name: 'Show more' }).click();
+  await mounted(page, grid);
+  const pre = await grid.locator('.transcript-command-output > pre').evaluate((element) => ({
+    whiteSpace: getComputedStyle(element).whiteSpace,
+    font: getComputedStyle(element).fontFamily,
+    lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+    sideways: element.scrollWidth > element.clientWidth,
+    clientHeight: element.clientHeight,
+    text: element.textContent,
+  }));
+  expect(pre.whiteSpace, 'R5: it does not wrap').toBe('pre');
+  expect(pre.sideways, 'R5: wider than the column').toBe(true);
+  await expectScrolls(grid.locator('.transcript-command-output > pre'), 'x', 'R5: the grid scrolls sideways inside the row');
+  expectNear(pre.clientHeight, 4 * pre.lineHeight, 'R5: each of the grid’s four lines on one drawn line');
+  expect(pre.font, 'a terminal’s grid is monospace').toBe(await tokenValue(page, 'fontFamily', 'var(--font-mono)'));
+  expect(pre.text, 'one drawing').toBe(gridShut.text);
+
+  // a line standing alone (an output before any turn): its command named first, in the line's own font (R23)
+  const alone = row('Total cost: $0.0000');
+  await mounted(page, alone);
+  await expect(alone.locator('.transcript-command-name')).toHaveText(/^\/usage ·\s*$/);
+  const fonts = await alone.evaluate((frame) => [frame.querySelector('.transcript-command-name')!, frame.querySelector('.transcript-command-output')!].map((el) => getComputedStyle(el).fontFamily));
+  expect(fonts[0], 'R23: the command’s name in the line’s own font').toBe(fonts[1]);
+  expect(fonts[0]).not.toBe(pre.font);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// The words of the column-blocks fixture's fences (test/fixtures/transcript/events/column-blocks.events.jsonl)
+const CHECKSUM_LINE = 'gauge_offset_reading_'.repeat(15).slice(0, 300);
+const BENCH_LINES = ['north_bench_reading_', 'south_bench_reading_', 'west_bench_readings_'].map((word) => word.repeat(10));
+
+// Acceptance 4 (O-07; decision 7, R6 to R9): a fenced block is Streamdown's, restyled. At each transcript width (the
+// setting's 768, 960 and 1280 px): one frame (its outer box carries the one border and ground, at the table's radius)
+// exactly the text column's width; no header band, the code starting where the frame's padding ends; long lines wrap inside it and nothing scrolls sideways; the
+// first two source lines keep 32 px at their end on every line they wrap to, the third does not; the copy control is a
+// 24 px target on its own ground and covers none of those lines' text; the body keeps its 480 px bound and scrolls down,
+// which leaves the control in its place, and the control's row is sticky in the transcript's viewport (R8).
+// The control copies the fence's one line as it is, and a selection of a whole block copied by hand has a line end
+// between source lines only.
+test('a code block wraps its long lines in one frame the column’s width, with no band over it and its copy control clear of the first lines’ text; the control and a selection copy the source’s line ends', async ({ harness }) => {
+  const { page, app } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'events/column-blocks');
+  const answer = page.locator('[data-kind="assistant_text"] .transcript-answer');
+  const fence = (text: string) => answer.locator('[data-streamdown="code-block"]').filter({ hasText: text });
+  const [checksum, bench, loader] = [fence(CHECKSUM_LINE.slice(0, 40)), fence(BENCH_LINES[0]!.slice(0, 40)), fence('const step_40')];
+  const tableRadius = await answer.locator('[data-streamdown="table-wrapper"]').first().evaluate((element) => getComputedStyle(element).borderTopLeftRadius);
+  const measure = (block: Locator) =>
+    block.evaluate((frame) => {
+      const box = (el: Element) => {
+        const { left, top, right, bottom, width, height } = el.getBoundingClientRect();
+        return { left, top, right, bottom, width, height };
+      };
+      const textRects = (el: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return Array.from(range.getClientRects()).filter((rect) => rect.width > 0).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
+      };
+      const row = frame.closest('.transcript-row')!;
+      const rowStyle = getComputedStyle(row);
+      const style = getComputedStyle(frame);
+      const body = frame.querySelector('[data-streamdown="code-block-body"]')!;
+      const pre = body.querySelector('pre')!;
+      const actions = frame.querySelector('[data-streamdown="code-block-actions"]')!;
+      return {
+        column: { left: box(row).left + parseFloat(rowStyle.paddingLeft), width: box(row).width - parseFloat(rowStyle.paddingLeft) - parseFloat(rowStyle.paddingRight) },
+        frame: box(frame),
+        look: { border: style.borderTopWidth, ground: style.backgroundColor, radius: style.borderTopLeftRadius, bodyBorder: getComputedStyle(body).borderTopWidth, bodyGround: getComputedStyle(body).backgroundColor, preGround: getComputedStyle(pre).backgroundColor },
+        header: getComputedStyle(frame.querySelector('[data-streamdown="code-block-header"]')!).display,
+        band: box(body).top - (box(frame).top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)),
+        sideways: [frame, body, pre].map((el) => el.scrollWidth - el.clientWidth),
+        lines: Array.from(pre.querySelector('code')!.children).map((line) => ({ box: box(line), pad: getComputedStyle(line).paddingRight, text: textRects(line) })),
+        button: box(frame.querySelector('[data-streamdown="code-block-copy-button"]')!),
+        controlGround: getComputedStyle(actions).backgroundColor,
+        // the 480 px bound (STREAMDOWN_OPTIONS.codeBlockMaxHeight), on whichever of the body's boxes Streamdown puts it
+        bound: [body, ...Array.from(body.querySelectorAll('*'))].filter((el) => getComputedStyle(el).maxHeight === '480px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight })),
+      };
+    });
+
+  await roomForWidths(harness);
+  for (const width of TRANSCRIPT_WIDTHS) {
+    await transcriptWidth(page, width);
+    await mounted(page, checksum);
+    const one = await measure(checksum);
+    const three = await measure(bench);
+    for (const [name, m] of [['the checksum fence', one], ['the bench fence', three]] as const) {
+      expectNear(m.frame.width, m.column.width, `${width} px, ${name}: one frame exactly the column’s width`);
+      expectNear(m.frame.left, m.column.left, `${width} px, ${name}: at the column’s left edge`);
+      expect(m.header, `${width} px, ${name}: no header`).toBe('none');
+      expect(Math.abs(m.band), `${width} px, ${name}, R6: no band over the code (${m.band} px)`).toBeLessThanOrEqual(1);
+      expect(m.sideways.every((overflow) => overflow <= 0), `${width} px, ${name}: nothing scrolls sideways (${m.sideways.join(', ')})`).toBe(true);
+      expect(m.look.border, `${name}, R7: the outer box carries the border`).not.toBe('0px');
+      expect(m.look.ground, `${name}, R7: and the ground`).not.toBe(TRANSPARENT);
+      expect([m.look.bodyBorder, m.look.bodyGround, m.look.preGround], `${name}, R7: the body and its pre carry neither`).toEqual(['0px', TRANSPARENT, TRANSPARENT]);
+      expect(m.look.radius, `${name}, R7: the table’s radius`).toBe(tableRadius);
+      expect(m.button.width >= 24 && m.button.height >= 24, `${name}, R9: the copy control is a 24 px target (${m.button.width} × ${m.button.height})`).toBe(true);
+      expect(m.controlGround, `${name}, R8: the sticky control has its ground`).not.toBe(TRANSPARENT);
+      for (const line of m.lines.slice(0, 2)) expect(line.text.some((rect) => overlaps(rect, m.button)), `${width} px, ${name}: the control covers none of the first lines’ text`).toBe(false);
+    }
+    expect(new Set(one.lines[0]!.text.map((rect) => Math.round(rect.top))).size, `${width} px: the 300-character line wraps`).toBeGreaterThan(1);
+    // R7's room: 32 px at the end of every line source lines 1 and 2 wrap to; line 3 runs to the frame's edge
+    const [first, second, third] = three.lines;
+    for (const [n, line] of [[1, first!], [2, second!]] as const) {
+      expect(line.pad, `${width} px: source line ${n} keeps 32 px at its end`).toBe('32px');
+      expect(Math.max(...line.text.map((rect) => rect.right)), `${width} px: no drawn line of source line ${n} reaches into its 32 px`).toBeLessThanOrEqual(line.box.right - 32 + 0.5);
+    }
+    expect(third!.pad, `${width} px: source line 3 keeps none`).toBe('0px');
+    expect(Math.max(...third!.text.map((rect) => rect.right)), `${width} px: source line 3’s drawn lines run past where the room starts`).toBeGreaterThan(third!.box.right - 32);
   }
+  // the body's 480 px bound, and the code scrolls down inside it; scrolling the code leaves the control where it is, at the
+  // frame's top right (R8)
+  await mounted(page, loader);
+  const tall = await measure(loader);
+  expect(tall.bound, 'the body keeps its 480 px bound').toHaveLength(1);
+  const [boxed] = tall.bound;
+  expect(boxed!.client <= 480 && boxed!.scroll > boxed!.client, `the forty lines are taller than it (${boxed!.client} of ${boxed!.scroll} px)`).toBe(true);
+  const codeScroll = await loader.evaluate((frame) => {
+    const body = frame.querySelector<HTMLElement>('[data-streamdown="code-block-body"]')!;
+    const viewport = [body, ...Array.from(body.querySelectorAll<HTMLElement>('*'))].find((el) => getComputedStyle(el).maxHeight === '480px')!;
+    const control = frame.querySelector('[data-streamdown="code-block-copy-button"]')!;
+    const place = () => {
+      const [outer, own] = [frame.getBoundingClientRect(), control.getBoundingClientRect()];
+      return { top: Math.round(own.top - outer.top), right: Math.round(outer.right - own.right) };
+    };
+    const before = place();
+    const scroller = frame.closest<HTMLElement>('[data-transcript-scroller]');
+    const [outer, port] = [frame.getBoundingClientRect(), scroller?.getBoundingClientRect()];
+    const stands = { frameTop: Math.round(outer.top - (port?.top ?? 0)), frameHeight: Math.round(outer.height), viewport: scroller?.clientHeight ?? null, scrolled: Math.round(scroller?.scrollTop ?? -1), window: window.innerHeight };
+    viewport.scrollTop = 200;
+    return { overflow: getComputedStyle(viewport).overflowY, offset: viewport.scrollTop, before, after: place(), stands };
+  });
+  expect(['auto', 'scroll'], `the code’s viewport scrolls down (${codeScroll.overflow})`).toContain(codeScroll.overflow);
+  expect(codeScroll.offset, 'an offset set on the code’s viewport holds').toBeGreaterThan(0);
+  expect(codeScroll.after, 'R8: scrolling the code leaves the control in its place').toEqual(codeScroll.before);
+  expect(codeScroll.before.top <= 16 && codeScroll.before.right <= 16, `R8: that place is the frame’s top right (${JSON.stringify(codeScroll.before)}; the frame in the list’s viewport: ${JSON.stringify(codeScroll.stands)})`).toBe(true);
+  // sticky: with the frame's top scrolled 160 px above the transcript's viewport, the control stays in view inside it.
+  // The fence ends the fixture and the list has no trailing space, so in a 900 px window the scroll would stop short:
+  // for this step the viewport is capped at 300 px, shorter than the frame, so the list can carry its top that far up (the
+  // window cannot be made that short: main gives it a 600 px minimum height, src/main/window.ts).
+  await page.evaluate(() => void (document.querySelector<HTMLElement>('[data-transcript-scroller]')!.style.maxHeight = '300px'));
+  await settle(page, 300);
+  await mounted(page, loader);
+  const stuck = await loader.evaluate(async (frame) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const control = frame.querySelector('[data-streamdown="code-block-copy-button"]')!;
+    let sticky = false;
+    for (let el = control.parentElement; el !== null && el !== frame; el = el.parentElement) sticky = sticky || getComputedStyle(el).position === 'sticky';
+    scroller.scrollTop += frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 160;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const [view, outer, own] = [scroller.getBoundingClientRect(), frame.getBoundingClientRect(), control.getBoundingClientRect()];
+    return { sticky, above: Math.round(view.top - outer.top), fromViewTop: Math.round(own.top - view.top), inside: own.bottom <= outer.bottom, viewport: scroller.clientHeight, frameHeight: Math.round(outer.height) };
+  });
+  expect(stuck.sticky, 'R8: the control’s row is sticky').toBe(true);
+  expect(stuck.above, `the frame’s top is above the viewport (a ${stuck.viewport} px viewport, a ${stuck.frameHeight} px frame)`).toBeGreaterThan(100);
+  expect(stuck.fromViewTop, 'R8: the control stays at the viewport’s top, not scrolled away with the frame’s').toBeGreaterThanOrEqual(-1);
+  expect(stuck.inside, 'and inside its frame').toBe(true);
+  await page.evaluate(() => void (document.querySelector<HTMLElement>('[data-transcript-scroller]')!.style.maxHeight = ''));
+  await settle(page, 300);
+
+  // the clipboard: the control takes the fence's one line as it is; a selection copied by hand, a line end between the
+  // source lines only (a soft wrap is no character), with at most the one a selection that ends a block carries
+  const pasteboard = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  const benchText = BENCH_LINES.join('\n');
+  await withNativeClipboard(app, [CHECKSUM_LINE, `${CHECKSUM_LINE}\n`, benchText, `${benchText}\n`], async () => {
+    await mounted(page, checksum);
+    await checksum.hover();
+    await checksum.locator('[data-streamdown="code-block-copy-button"]').click();
+    await expect.poll(async () => (await pasteboard()).replace(/\n$/, ''), { message: 'the control copies the one source line' }).toBe(CHECKSUM_LINE);
+    await mounted(page, bench);
+    await bench.evaluate((frame) => {
+      const range = document.createRange();
+      range.selectNodeContents(frame.querySelector('pre code')!);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    });
+    await app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find((contents) => contents.getURL() === url)!.copy(), page.url());
+    await expect.poll(async () => (await pasteboard()).replace(/\n$/, ''), { message: 'a selection copied by hand holds exactly the source’s line ends' }).toBe(benchText);
+  });
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 5 (O-08, reversing W2's breakout; decisions 8 and 9, R10, R11, M2-5): at each transcript width (768, 960 and
+// 1280 px) a wide table and a code block are exactly the text column's width in an answer, in a commentary block and in
+// a message to the person; a wide table's inner scroller scrolls sideways and its frame does not; a narrow table keeps
+// the text's left edge. A table is one frame with one ground; its inner scroller keeps the 320 px bound and its cells wrap as before; its
+// copy control adds no height, sits 9 px from the frame's outer top and right edges on its own ground, a 24 px target,
+// and shows on hover or focus within.
+test('a wide table and a code block are the text column’s width in an answer, a commentary and a message to the person; a wide table scrolls inside its one frame', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'events/column-blocks');
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandAll()); // the commentary is the turn's work
+  await settle(page, 300);
+  const hosts = {
+    answer: page.locator('[data-kind="assistant_text"] .transcript-answer'),
+    commentary: page.locator('[data-kind="assistant_text"] .transcript-commentary'),
+    message: page.locator('[data-kind="to_human"] .transcript-prose'),
+  };
+  for (const host of Object.values(hosts)) await expect(host).toHaveCount(1);
+  const measure = (host: Locator) =>
+    host.evaluate((element) => {
+      // the text column: the host's content box, and for the answer the row's (the shared column, less its pads)
+      const contentOf = (el: Element) => {
+        const style = getComputedStyle(el);
+        const { left, width } = el.getBoundingClientRect();
+        return { left: left + parseFloat(style.paddingLeft), width: width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+      };
+      const text = contentOf(element);
+      const column = contentOf(element.closest('.transcript-row')!);
+      const blocks = Array.from(element.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"], [data-streamdown="code-block"]')).map((block) => {
+        const { left, width } = block.getBoundingClientRect();
+        const table = block.querySelector('table');
+        const scroller = table === null ? null : (block.lastElementChild as HTMLElement);
+        return { kind: block.dataset.streamdown!, left, width, frameScrolls: block.scrollWidth > block.clientWidth, wide: table !== null && table.getBoundingClientRect().width > width, scrollerScrolls: scroller !== null && scroller.scrollWidth > scroller.clientWidth };
+      });
+      return { text, column, blocks };
+    });
+
+  await roomForWidths(harness);
+  for (const width of TRANSCRIPT_WIDTHS) {
+    await transcriptWidth(page, width);
+    for (const [name, host] of Object.entries(hosts)) {
+      await mounted(page, host);
+      const { text, column, blocks } = await measure(host);
+      if (name === 'answer') expect([text.left, text.width], `${width} px: the answer’s text is the column`).toEqual([column.left, column.width]);
+      expect(blocks.filter((block) => block.kind === 'code-block').length, `${name}: a code block`).toBeGreaterThan(0);
+      expect(blocks.filter((block) => block.wide).length, `${name}: a table wider than the column`).toBeGreaterThan(0);
+      for (const block of blocks) {
+        expectNear(block.width, text.width, `${width} px, ${name}, its ${block.kind}: exactly the text column’s width`);
+        expectNear(block.left, text.left, `${width} px, ${name}, its ${block.kind}: at the text’s left edge`);
+        expect(block.frameScrolls, `${width} px, ${name}, its ${block.kind}: the frame does not scroll sideways`).toBe(false);
+        if (block.wide) expect(block.scrollerScrolls, `${width} px, ${name}: the wide table’s inner scroller scrolls sideways`).toBe(true);
+      }
+      if (name === 'answer') expect(blocks[0], `${width} px: the narrow table keeps the text’s left edge`).toMatchObject({ kind: 'table-wrapper', wide: false });
+    }
+  }
+
+  // the answer's wide table: its inner scroller takes a sideways scroll and its frame does not
+  const wide = hosts.answer.locator('[data-streamdown="table-wrapper"]').filter({ hasText: 'Readings' });
+  await mounted(page, wide);
+  const scrolled = await wide.evaluate((frame) => {
+    const scroller = frame.lastElementChild as HTMLElement;
+    scroller.scrollLeft = 120;
+    return { scroller: scroller.scrollLeft, frame: frame.scrollLeft };
+  });
+  expect(scrolled.scroller, 'the inner scroller moved').toBeGreaterThan(0);
+  expect(scrolled.frame, 'the frame did not').toBe(0);
+  // one frame, one ground; the cells wrap as before; the copy control adds no height
+  const look = await wide.evaluate((frame) => {
+    const [controls, scroller] = [frame.firstElementChild as HTMLElement, frame.lastElementChild as HTMLElement];
+    const style = getComputedStyle(frame);
+    const inner = getComputedStyle(scroller);
+    const chrome = ['borderTopWidth', 'borderBottomWidth', 'paddingTop', 'paddingBottom'].reduce((sum, key) => sum + parseFloat(style[key as 'paddingTop']), 0);
+    return {
+      frame: [style.borderTopWidth !== '0px', style.backgroundColor !== 'rgba(0, 0, 0, 0)'],
+      scroller: [inner.borderTopWidth, inner.backgroundColor],
+      cells: [...new Set(Array.from(frame.querySelectorAll('td')).map((cell) => getComputedStyle(cell).whiteSpace))],
+      controlsPlaced: getComputedStyle(controls).position,
+      addedHeight: frame.getBoundingClientRect().height - chrome - scroller.getBoundingClientRect().height,
+    };
+  });
+  expect(look.frame, 'R10: the frame carries a border and the ground').toEqual([true, true]);
+  expect(look.scroller, 'R10: the inner scroller neither').toEqual(['0px', TRANSPARENT]);
+  expect(look.cells, 'R11: cells wrap as before').not.toContain('nowrap');
+  expect(look.controlsPlaced, 'the control’s row is out of the flow').toBe('absolute');
+  expect(Math.abs(look.addedHeight), `the copy control adds no height (${look.addedHeight} px)`).toBeLessThanOrEqual(1);
+  // the control: hidden at rest, shown on hover and on focus within, 9 px from the outer top and right, a 24 px target
+  const controls = wide.locator(':scope > div').first();
+  const copy = controls.locator(':scope > div > button').first();
+  await page.mouse.move(0, 0);
+  await expect(controls).toHaveCSS('opacity', '0');
+  await wide.hover();
+  await expect(controls).toHaveCSS('opacity', '1');
+  const [frameBox, controlsBox, copyBox] = [await boxOf(wide), await boxOf(controls), await boxOf(copy)];
+  expectNear(controlsBox.top - frameBox.top, 9, 'M2-5: 9 px from the frame’s outer top');
+  expectNear(frameBox.right - controlsBox.right, 9, 'M2-5: 9 px from its outer right');
+  expect(copyBox.width >= 24 && copyBox.height >= 24, `R9: a 24 px target (${copyBox.width} × ${copyBox.height})`).toBe(true);
+  expect(await controls.evaluate((element) => getComputedStyle(element).backgroundColor), 'R10: on its own ground').not.toBe(TRANSPARENT);
+  await page.mouse.move(0, 0);
+  await expect(controls).toHaveCSS('opacity', '0');
+  await copy.focus();
+  await expect(controls, 'shown on focus within').toHaveCSS('opacity', '1');
+  // the 320 px bound: a tall table scrolls down inside it
+  const tall = hosts.answer.locator('[data-streamdown="table-wrapper"]').filter({ hasText: 'day 24' });
+  await mounted(page, tall);
+  const bound = await tall.evaluate((frame) => {
+    const scroller = frame.lastElementChild as HTMLElement;
+    // the 320 px bound (STREAMDOWN_OPTIONS.tableMaxHeight), on the scroller or a box inside it
+    return [scroller, ...Array.from(scroller.querySelectorAll('*'))].filter((el) => getComputedStyle(el).maxHeight === '320px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+  });
+  expect(bound, 'the inner scroller keeps its 320 px bound').toHaveLength(1);
+  expect(bound[0]!.scroll > bound[0]!.client && bound[0]!.client <= 320, `the tall table is taller than it (${bound[0]!.client} of ${bound[0]!.scroll} px)`).toBe(true);
+  const tallScroll = await tall.evaluate((frame) => {
+    const scroller = frame.lastElementChild as HTMLElement;
+    const viewport = [scroller, ...Array.from(scroller.querySelectorAll<HTMLElement>('*'))].find((el) => getComputedStyle(el).maxHeight === '320px')!;
+    viewport.scrollTop = 120;
+    return { overflow: getComputedStyle(viewport).overflowY, offset: viewport.scrollTop };
+  });
+  expect(['auto', 'scroll'], `the tall table scrolls down inside it (${tallScroll.overflow})`).toContain(tallScroll.overflow);
+  expect(tallScroll.offset, 'an offset set on it holds').toBeGreaterThan(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 6 (O-02, amending W2's B2; decision 10, R12 to R14, R20 to R22, M2-2): the owner's time, Copy and Edit sit
+// on one line under the bubble, at its side, shown on hover or focus within, in the 16 px the row already has under the
+// bubble: the row is the bubble's height plus 16 px at rest, hovered and focused, a short message and one of twenty lines
+// alike, at each transcript width (768, 960 and 1280 px). At rest the controls take no width, so a caption has the whole line; shown, they stand left of it in the order
+// time, Copy, Edit, and the caption (or "Not sent") stays flush with the bubble's edge without moving. Tab reaches Copy.
+// In a pane too narrow for the line the caption alone shrinks. Copy's and Edit's targets overhang the line 7 px up and
+// 1 px down and overlap neither each other nor the turn line's button at 360 and 280 px; their focus rings, at offset 0,
+// cover no neighbour's words. The nineteen-line fold still works.
+test('the owner’s time, Copy and Edit sit on one line under the bubble, shown on hover or focus within, and the row keeps its height', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page); // no blockHumanInput: Tab is pressed
+  await loadAll(page, 'events/message-actions');
+  const userRow = (text: string) => page.locator('.transcript-row[data-kind="user"]').filter({ hasText: text });
+  const short = userRow('Check the north gauge against the bench rig.');
+  const steer = userRow("Also note the rig's serial number.");
+  const long = userRow("Here are this week's gauge notes:");
+  const measure = async (row: Locator) => {
+    await mounted(page, row);
+    return row.evaluate((frame) => {
+      const box = (el: Element) => {
+        const { left, top, right, bottom, width, height } = el.getBoundingClientRect();
+        return { left, top, right, bottom, width, height };
+      };
+      const frameStyle = getComputedStyle(frame);
+      const line = frame.querySelector('.transcript-user-line')!;
+      const actions = line.querySelector('.transcript-user-line-actions')!;
+      const tail = line.querySelector<HTMLElement>('.transcript-user-caption, .transcript-not-sent');
+      return {
+        row: box(frame),
+        column: { left: box(frame).left + parseFloat(frameStyle.paddingLeft), right: box(frame).right - parseFloat(frameStyle.paddingRight) },
+        bubble: box(frame.querySelector('[data-bubble]')!),
+        line: box(line),
+        lineScrolls: line.scrollWidth > line.clientWidth + 1,
+        actions: box(actions),
+        shown: getComputedStyle(actions).opacity,
+        parts: [...Array.from(actions.children), ...(tail ? [tail] : [])].map((part) => ({ text: part.textContent ?? '', box: box(part) })),
+        tail: tail && { box: box(tail), whole: tail.scrollWidth <= tail.clientWidth, title: tail.title, last: line.lastElementChild === tail },
+      };
+    });
+  };
+  const atRest = async () => {
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  };
+  const checkRow = async (row: Locator, name: string, words: string[], caption: string | null) => {
+    await atRest();
+    const rest = await measure(row);
+    expect(rest.shown, `${name}: at rest the controls are hidden`).toBe('0');
+    expect(rest.actions.width, `${name}, R20: at rest they take no width`).toBe(0);
+    // hidden, the three keep their widths: none of their boxes may lie past the end of the box that clips them, where a
+    // narrow pane or a phone's screen ends (the desk's phone scenes count a control whose box is past the screen). A
+    // button overhangs its place by its 2 px of side padding, as it does when shown.
+    for (const part of rest.parts.slice(0, 3)) expect(part.box.right, `${name}: at rest “${part.text}” ends at the line’s end`).toBeLessThanOrEqual(rest.actions.right + 2.5);
+    expect(rest.row.height - rest.bubble.height, `${name}: the row is the bubble’s height plus 16 px`).toBe(16);
+    await row.hover();
+    await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on hover`).toHaveCSS('opacity', '1');
+    const hovered = await measure(row);
+    expect(hovered.row.height, `${name}: hovering adds no height`).toBe(rest.row.height);
+    expect(hovered.parts.map((part) => part.text), `${name}, R12: time, Copy, Edit, then the caption`).toEqual([expect.stringMatching(/\d/), ...words, ...(caption === null ? [] : [caption])]);
+    const lefts = hovered.parts.map((part) => part.box.left);
+    expect(lefts, `${name}, R12: in that order on the line`).toEqual([...lefts].sort((a, b) => a - b));
+    expect(hovered.line.top, `${name}: under the bubble`).toBeGreaterThanOrEqual(hovered.bubble.bottom - 0.5);
+    expect(hovered.line.bottom, `${name}: inside the row`).toBeLessThanOrEqual(hovered.row.bottom + 0.5);
+    if (caption === null) expectNear(hovered.actions.right, hovered.bubble.right, `${name}: the controls end at the bubble’s edge`);
+    else {
+      expectNear(hovered.tail!.box.right, hovered.bubble.right, `${name}, R12: the caption flush with the bubble’s edge`);
+      expect(hovered.tail!.box, `${name}, R20: the caption does not move when the controls appear`).toEqual(rest.tail!.box);
+    }
+    await atRest();
+    // focusing Copy scrolls a control partly out of view into it, which moves the whole row: the parts are compared in
+    // the row's own box, and the scroll the focus made is told
+    const scrolled = () => row.evaluate((frame) => frame.closest('[data-transcript-scroller]')!.scrollTop);
+    const scrollBefore = await scrolled();
+    await row.getByRole('button', { name: 'Copy' }).focus();
+    const scrollAfter = await scrolled();
+    await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on focus within`).toHaveCSS('opacity', '1');
+    const focused = await measure(row);
+    expect(focused.row.height, `${name}: focus adds no height`).toBe(rest.row.height);
+    const inRow = (drawn: typeof focused) => drawn.parts.map(({ box }) => ({ left: box.left - drawn.row.left, top: box.top - drawn.row.top, width: box.width, height: box.height }));
+    expect(inRow(focused), `${name}: on keyboard focus the controls and the caption stand where they do on hover, in the row (the list scrolled from ${scrollBefore} to ${scrollAfter} on focus)`).toEqual(inRow(hovered));
+  };
+  // at each transcript width
+  await roomForWidths(harness);
+  for (const width of TRANSCRIPT_WIDTHS) {
+    await transcriptWidth(page, width);
+    await checkRow(short, `${width} px, a one-line message`, ['Copy', 'Edit'], null);
+    await checkRow(steer, `${width} px, a steer`, ['Copy', 'Edit'], 'Sent during this turn');
+    await checkRow(long, `${width} px, a message of twenty lines`, ['Copy', 'Edit'], null);
+  }
+  await transcriptWidth(page, 768);
+
+  // the nineteen-line fold still works under the line
+  await mounted(page, long);
+  await expect(long.locator('[data-bubble]')).toHaveAttribute('data-collapsed', '');
+  await long.getByRole('button', { name: 'Show more' }).click();
+  await expect(long.locator('[data-bubble]')).toHaveAttribute('data-open', '');
+  const opened = await measure(long);
+  expect(opened.row.height - opened.bubble.height, 'opened, still the bubble’s height plus 16 px').toBe(16);
+  await long.getByRole('button', { name: 'Show less' }).click();
+
+  // Tab reaches Copy from the message's row and shows the controls (R20); the rings sit at offset 0 and cover no words (R22)
+  await atRest();
+  await mounted(page, short);
+  await short.focus();
+  await page.keyboard.press('Tab');
+  const copy = short.getByRole('button', { name: 'Copy' });
+  await expect(copy, 'R20: Tab lands on Copy').toBeFocused();
+  await expect(short.locator('.transcript-user-line-actions')).toHaveCSS('opacity', '1');
+  const turnId = await short.getAttribute('data-turn-id');
+  const turnLine = page.locator(`.transcript-row[data-kind="divider"][data-turn-id="${turnId}"]`);
+  for (const control of [copy, short.getByRole('button', { name: 'Edit' })]) {
+    if (!(await control.evaluate((element) => element === document.activeElement))) await page.keyboard.press('Tab');
+    await expect(control).toBeFocused();
+    const ring = await control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const width = parseFloat(style.outlineWidth) + Math.max(0, parseFloat(style.outlineOffset));
+      const { left, top, right, bottom } = element.getBoundingClientRect();
+      return { offset: style.outlineOffset, box: { left: left - width, top: top - width, right: right + width, bottom: bottom + width, width: right - left + 2 * width, height: bottom - top + 2 * width } };
+    });
+    expect(ring.offset, 'R22: the ring at offset 0').toBe('0px');
+    const words = await page.evaluate(
+      ([turn]) => {
+        const rects = (el: Element | null) => {
+          if (!el) return [];
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return Array.from(range.getClientRects()).filter((rect) => rect.width > 0).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
+        };
+        const user = Array.from(document.querySelectorAll(`.transcript-row[data-kind="user"][data-turn-id="${turn}"]`)).find((row) => row.textContent?.includes('Check the north gauge'));
+        return [...rects(user?.querySelector('[data-user-content]') ?? null), ...rects(document.querySelector(`.transcript-row[data-kind="divider"][data-turn-id="${turn}"] button`))];
+      },
+      [turnId] as const,
+    );
+    expect(words.length, 'the bubble’s and the turn line’s words were read').toBeGreaterThan(0);
+    expect(words.filter((rect) => overlaps(rect, ring.box)), 'R22: the ring covers no neighbour’s words').toEqual([]);
+  }
+
+  // R21 (amended 2026-11-17): Copy's and Edit's targets overhang the line 7 px up and 1 px down, 1 px clear of the turn
+  // line's button, more than the virtual list's rounding of a row's height can take; at 360 and 280 px neither overlaps
+  // the other or the turn line's button. R20 at 280 px: at rest the caption is whole.
+  for (const width of [360, 280]) {
+    await paneWidth(page, width);
+    await atRest();
+    if (width === 280) {
+      const rest = await measure(steer);
+      expect(rest.tail!.whole, '280 px, R20: at rest the caption is whole').toBe(true);
+    }
+    await mounted(page, short);
+    await short.getByRole('button', { name: 'Copy' }).focus();
+    await expect(short.locator('.transcript-user-line-actions')).toHaveCSS('opacity', '1');
+    const line = await boxOf(short.locator('.transcript-user-line'));
+    const [copyBox, editBox, turnButton] = [await boxOf(short.getByRole('button', { name: 'Copy' })), await boxOf(short.getByRole('button', { name: 'Edit' })), await boxOf(turnLine.locator('button').first())];
+    for (const [name, target] of [['Copy', copyBox], ['Edit', editBox]] as const) {
+      expectNear(line.top - target.top, 7, `${width} px, R21: ${name}’s target overhangs 7 px up`);
+      expectNear(target.bottom - line.bottom, 1, `${width} px, R21: and 1 px down`);
+      expect(target.height, `${width} px, R9 and R21: ${name} is a 24 px target`).toBeGreaterThanOrEqual(24);
+      expect(overlaps(target, turnButton), `${width} px, R21: ${name}’s target clear of the turn line’s button (${JSON.stringify({ target, turnButton, line })})`).toBe(false);
+    }
+    expect(overlaps(copyBox, editBox), `${width} px, R21: Copy’s and Edit’s targets do not overlap`).toBe(false);
+  }
+
+  // R14: where the line cannot fit, the caption alone shrinks, cut with an ellipsis, its sentence its title; the controls
+  // keep their width and nothing wraps or spills past the column
+  await paneWidth(page, 1280);
+  await mounted(page, steer);
+  await steer.getByRole('button', { name: 'Copy' }).focus();
+  const wideControls = (await measure(steer)).actions.width;
+  await paneWidth(page, 200);
+  await mounted(page, steer);
+  await steer.getByRole('button', { name: 'Copy' }).focus();
+  const narrow = await measure(steer);
+  expect(narrow.tail!.whole, '200 px, R14: the caption is cut').toBe(false);
+  expect(narrow.tail!.title, 'its whole sentence as its title').toBe('Sent during this turn');
+  expectNear(narrow.actions.width, wideControls, '200 px, R14: the controls keep their width');
+  expect(narrow.line.height, 'nothing wraps').toBe(16);
+  expect(narrow.lineScrolls, 'nothing spills').toBe(false);
+  expect(narrow.line.left >= narrow.column.left - 0.5 && narrow.line.right <= narrow.column.right + 0.5, 'the line stays inside the column').toBe(true);
+
+  // M2-2: a dropped prompt's "Not sent" stands last on the line, always shown, flush with the bubble's edge
+  await paneWidth(page, 1280);
+  await loadAll(page, 'transcript/idle-drop');
+  await atRest();
+  const dropped = await measure(userRow('Summarise the last release notes.'));
+  expect(dropped.tail, 'M2-2: “Not sent” last on the line').toMatchObject({ last: true, whole: true });
+  expect(dropped.parts.at(-1)!.text).toBe('Not sent');
+  expectNear(dropped.tail!.box.right, dropped.bubble.right, 'M2-2: flush with the bubble’s edge');
+  await expect(page.locator('.transcript-not-sent')).toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 7 (l2-transcript-07; decisions 12 to 15, R15): the last answer before the owner's next prompt, and the list's
+// last answer, carry Copy, "Fork from here" and the answer's time, always laid out and shown on hover: hovering moves
+// nothing. The row is 20 px tall, stands 12 px up in the answer's padding with 8 px under it. Copy takes every block of
+// the answer, whatever the drawn list holds; Fork forks from before the next prompt (or the whole conversation under the
+// last answer). The harness names each act in a toast.
+test('the last answer before the owner’s next prompt offers Copy, Fork from here and its time on hover, moving nothing; Copy takes both blocks of the answer', async ({ harness }) => {
+  const { page, app } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'events/message-actions');
+  const answer = (text: string) => page.locator('.transcript-row[data-kind="assistant_text"]').filter({ hasText: text });
+  const firstBlock = answer('The north gauge reads 0.42 mm high');
+  const secondBlock = answer('I logged the offset in the checklist');
+  const last = answer('All twenty gauges read within their windows');
+  const next = page.locator('.transcript-row[data-kind="user"]').filter({ hasText: 'Here are this week' });
+  await mounted(page, secondBlock);
+  await expect(firstBlock.locator('.transcript-answer-actions'), 'the answer’s first block carries none').toHaveCount(0);
+  const actions = secondBlock.locator('.transcript-answer-actions');
+  await expect(actions.locator(':scope > *')).toHaveText(['Copy', 'Fork from here', /\d/]);
+  await expect(actions.getByRole('button', { name: 'Fork from here' })).toHaveAttribute('title', 'Starts a new session from this point. This one stays as it is.');
+  await expect(actions.getByRole('button', { name: 'Fork from here' })).toBeEnabled();
+
+  await page.mouse.move(0, 0);
+  await expect(actions).toHaveCSS('opacity', '0');
+  const before = [await boxOf(secondBlock), await boxOf(next), await boxOf(actions)];
+  await secondBlock.hover();
+  await expect(actions, 'shown on hover').toHaveCSS('opacity', '1');
+  expect([await boxOf(secondBlock), await boxOf(next), await boxOf(actions)], 'hovering moves nothing').toEqual(before);
+  const placed = await secondBlock.evaluate((frame) => {
+    const row = frame.getBoundingClientRect();
+    const text = frame.querySelector('.transcript-answer')!.getBoundingClientRect();
+    const bar = frame.querySelector('.transcript-answer-actions')!.getBoundingClientRect();
+    return { height: bar.height, up: text.bottom - bar.top, under: row.bottom - parseFloat(getComputedStyle(frame).paddingBottom) - bar.bottom };
+  });
+  expect(placed, 'R15: 20 px tall, 12 px up in the answer’s padding, 8 px under it: 16 px more than an answer without it').toEqual({ height: 20, up: 12, under: 8 });
+
+  // Fork: from before the next prompt here, from the whole conversation under the last answer
+  await actions.getByRole('button', { name: 'Fork from here' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'forkFrom u-msg-2' }), 'Fork from here forks from before the next prompt').toBeVisible();
+  await mounted(page, last);
+  await last.hover();
+  await last.getByRole('button', { name: 'Fork from here' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'forkFrom the whole conversation' }), 'under the last answer, the whole conversation').toBeVisible();
+
+  // Copy: both blocks of the answer, as markdown
+  const both = ['The north gauge reads 0.42 mm high, and the bench rig agrees within 0.01 mm.', "I logged the offset in the checklist with the rig's serial number:\n\n- north: 0.42 mm, rig R7\n- south: 0.03 mm, rig R3"].join('\n\n');
+  await withNativeClipboard(app, [both], async () => {
+    await mounted(page, secondBlock);
+    await secondBlock.hover();
+    await actions.getByRole('button', { name: 'Copy' }).click();
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText()), { message: 'Copy takes both blocks of the answer' }).toBe(both);
+  });
   expect(harness.consoleErrors()).toEqual([]);
 });
 
@@ -1397,7 +2127,9 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
   await page.getByRole('button', { name: 'Show child · Read and report one.txt content' }).click();
   const child = page.locator('[data-harness-child]');
   await expect(child.locator('.transcript')).toHaveCount(1);
-  await expect(child.locator('[data-kind="assistant_text"]')).toHaveText(['ONE']);
+  // the answer's words: the row also holds its action row (UX wave U3b: Copy and the time; a child draws no Fork)
+  await expect(child.locator('[data-kind="assistant_text"]')).toHaveCount(1);
+  await expect(child.locator('[data-kind="assistant_text"] :is(.transcript-answer, .transcript-commentary)')).toHaveText(['ONE']);
   // The parent reported the child finished, so the child's turn is closed: its divider has settled (not "Working for …")
   // and, like any closed turn, its work area opens from the divider.
   const childDivider = child.locator('[data-kind="divider"] button[aria-expanded]').first();
@@ -1959,7 +2691,9 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(report).toContainText('Concise reference style');
     await expect(report).toContainText('Friendly guide style');
     await expect(report).not.toContainText('Checked the tree first: it is clean.');
-    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not(:scope > .transcript-answer-actions button)')).toHaveCount(0);
+    // UX wave U3b, statement 13: the turn's answer is this closed stretch's head, an owner prompt after it: Copy under it
+    await expect(report.locator(':scope > .transcript-answer-actions').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(1);
     await expect(pane.getByText('To you', { exact: true })).toHaveCount(0);
     const label = report.locator('.owner-message-label').first();
     await expect(label).toHaveCSS('font-weight', '600');
@@ -2012,7 +2746,9 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await closedLines.nth(1).click();
     await expect(report).toContainText('Checked the tree first: it is clean.');
     await expect(report.locator('.transcript-prose')).toHaveCount(1);
-    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not(:scope > .transcript-answer-actions button)')).toHaveCount(0);
+    // its stretch opened, the head is the turn's last drawn answer block: the same action row under it (statement 13)
+    await expect(report.locator(':scope > .transcript-answer-actions').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(1);
     await pane.getByRole('button', { name: '‹ fold to report', exact: true }).click();
     await expect(report).not.toContainText('Checked the tree first: it is clean.');
     await expect(closedLines).toHaveCount(3);

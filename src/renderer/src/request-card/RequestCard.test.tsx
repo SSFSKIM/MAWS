@@ -745,6 +745,8 @@ describe('request card placements and delivery states', () => {
     const longCommand = permission({ input: { command: LONG } });
     const edit = permission({ toolName: 'Edit', displayName: 'Edit', input: { file_path: '/w/a.ts', old_string: 'a', new_string: 'b' } });
     const defaultToNo = permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' }, defaultToNo: true });
+    // the branch panel's finding 4 (ruled, fail closed): a user's HTTP server named `web` has a fetch named as the web plugin's
+    const userWebFetch = permission({ toolName: 'mcp__web__fetch', displayName: 'fetch', input: { url: 'https://example.com' }, mcpServer: { name: 'web', source: 'user' } });
 
     it('offers Allow once and Deny for an unflagged Read, answering by pointer only', async () => {
       const { item } = mount(unflaggedRead, 'hover');
@@ -778,6 +780,7 @@ describe('request card placements and delivery states', () => {
       ['a file change', edit],
       ['a request flagged “default to no”', defaultToNo],
       ['a request needing its own consent surface', flaggedRead],
+      ['a fetch by a user’s HTTP server named web', userWebFetch],
     ])('offers Deny alone for %s, and Deny sends the plain deny', async (_, event) => {
       mount(event, 'hover');
       expect(hoverButtons()).toEqual(['tab 0', 'Open session', 'Deny']);

@@ -91,8 +91,10 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 }
 .transcript-quiet-button { margin-top: 4px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-quiet-button:hover { color: var(--fg); }
-/* Time, Copy and Edit overlay beside the bubble's foot on hover or focus, reserving no line under it (W2) */
-.transcript-user-actions {
+/* W2's overlay: time and Copy beside the bubble's foot on hover or focus, reserving no line under it. Only the desk's
+   own chat bubble draws it now (it writes this markup by hand: an actions group inside the bubble's body); MAWS's
+   message draws the line below (UX wave U3b, decision 10). */
+.transcript-user-body > .transcript-user-actions {
   position: absolute;
   right: 100%;
   bottom: 0;
@@ -107,10 +109,41 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   opacity: 0;
   transition: opacity 0.12s;
 }
-.transcript-user:hover .transcript-user-actions, .transcript-user:focus-within .transcript-user-actions { opacity: 1; }
-.transcript-user-actions button:hover { color: var(--fg); }
-/* What a message waits for, or that it was not sent: always shown, under the bubble */
-.transcript-user-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-user:hover .transcript-user-body > .transcript-user-actions, .transcript-user:focus-within .transcript-user-body > .transcript-user-actions { opacity: 1; }
+.transcript-user-body > .transcript-user-actions button:hover { color: var(--fg); }
+/* UX wave U3b (O-02; decision 10, R12 to R14, R20 to R22): one line under the bubble, at its side, laid out in the 16 px
+   the message already has there, so the row is the bubble's height plus 16 px in every state: the time, Copy and Edit,
+   shown on hover or focus within, then the caption, always shown and flush with the bubble's edge. At rest the controls
+   take no width (they stay in the tab order: Tab reaches Copy and shows them), so the caption has the whole line and
+   never moves; where the line cannot fit, the caption is what shrinks, cut with an ellipsis (its title holds it whole).
+   Copy and Edit keep 16 px of text height and overhang the line to 24 px targets, 7 px up into the bubble's bottom
+   padding and 1 px down, 1 px clear of the turn line's button (which starts 2 px into its row) so a row placed up to
+   0.5 px early by the list's rounding still leaves them apart (R21, amended 2026-11-17); their focus rings sit on those
+   targets, not 3 px beyond them over the bubble and the turn line. */
+.transcript-user:has(> .transcript-user-line) { padding-bottom: 0; }
+.transcript-user-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
+  height: 16px;
+  margin-top: -4px; /* the row's 4 px gap: the line starts at the bubble's foot */
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.transcript-user-line > :not(.transcript-user-line-actions) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* At rest the three keep their widths inside a box of none: packed to its end, they overflow it on the bubble's side,
+   inside the line, where the box clips them; packed to its start their boxes ran past the line's end, and past a
+   phone's screen in the desk's session view. Shown, the box is as wide as they are and the packing changes nothing. */
+.transcript-user-line-actions { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; width: 0; overflow: hidden; opacity: 0; transition: opacity 0.12s; }
+.transcript-user:hover .transcript-user-line-actions, .transcript-user:focus-within .transcript-user-line-actions { width: auto; overflow: visible; opacity: 1; }
+.transcript-user:hover .transcript-user-line-actions:not(:last-child), .transcript-user:focus-within .transcript-user-line-actions:not(:last-child) { margin-right: 8px; }
+.transcript-user-line-actions button { padding: 7px 2px 1px; margin: -7px -2px -1px; }
+.transcript-user-line-actions button:hover { color: var(--fg); }
+.transcript .transcript-user-line-actions button:focus-visible { outline-offset: 0; }
+/* That a message was not sent: always shown, last on the line under the bubble */
 .transcript-not-sent { color: var(--warning); }
 /* W1: a message waiting for the engine (Claude Desktop's dimmed tail bubble), and its caption, always shown */
 .transcript-user[data-pending] .transcript-user-bubble { opacity: 0.55; }
@@ -120,6 +153,15 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 
 /* Assistant text: a long path or URL wraps rather than scrolling a narrow transcript sideways (as the bubble does) */
 .transcript-answer { padding: 4px 0 12px; line-height: var(--lh-prose); overflow-wrap: anywhere; }
+/* UX wave U3b (decision 12, Interfaces §C; ruled R15 and R22): the action row under the answer its mount placed it on:
+   Copy, Fork from here and the time, always laid out, so hovering moves nothing, and shown on hover or focus within the
+   row. 20 px tall, it stands 12 px up in the answer's own bottom padding with 8 px under it: an answer that carries it is
+   16 px taller. Its controls' focus rings sit on their boxes, clear of the answer's last line and the next bubble. */
+.transcript-answer-actions { display: flex; align-items: center; gap: 8px; height: 20px; margin: -12px 0 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 20px; white-space: nowrap; opacity: 0; transition: opacity 0.12s; }
+.transcript-row:hover > .transcript-answer-actions, .transcript-row:focus-within > .transcript-answer-actions { opacity: 1; }
+.transcript-answer-actions button:hover:not(:disabled) { color: var(--fg); }
+.transcript-answer-actions button:disabled { color: var(--fg-faint); }
+.transcript .transcript-answer-actions button:focus-visible { outline-offset: 0; }
 /* P5 O9: a terminal session's reply an interrupt cut before the engine kept it: muted, under its note */
 .transcript-cut { padding: 2px 0 6px; color: var(--fg-muted); line-height: var(--lh-prose); overflow-wrap: anywhere; }
 .transcript-cut-note { font-size: var(--text-ui-sm); color: var(--fg-muted); margin-bottom: 2px; }
@@ -157,21 +199,42 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* A fence draws at the code size (Streamdown's body is text-sm, the chrome size) */
 .transcript-prose [data-streamdown="code-block-body"] { font-size: var(--text-code); }
 .transcript-prose pre code { font-size: inherit; }
-/* W2: an answer's wide table or code block may break out of the text to --measure-wide, centred on the column and never
-   past the pane; one no wider than the text keeps the text's width. A completed answer (static mode) holds its blocks
-   directly; a streaming one wraps each in a `display: contents` [dir] div. A message's blocks sit one level deeper,
-   in its `.owner-message-ink` wrapper. */
-:is(.transcript-answer, .transcript-commentary) > .transcript-prose > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]),
-:is(.transcript-answer, .transcript-commentary) > .transcript-prose > [dir] > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]),
-:is(.transcript-answer, .transcript-commentary) > .transcript-prose > .owner-message-ink > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]),
-:is(.transcript-answer, .transcript-commentary) > .transcript-prose > [dir] > .owner-message-ink > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]) {
-  position: relative;
-  left: 50%;
-  transform: translateX(-50%);
-  width: fit-content;
-  min-width: 100%;
-  max-width: min(calc(var(--measure-wide) - 2 * var(--measure-pad)), calc(100cqi - 2 * var(--measure-pad)));
+/* UX wave U3b (O-08, reversing W2's breakout; decision 9): a table and a code block are never wider than the text
+   column, at any depth under the prose (an answer's, a commentary's, a message's ink wrapper, a streaming block's). */
+.transcript-prose :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]) { max-width: 100%; }
+/* UX wave U3b (O-07; decision 7, R6 to R9): a code block is Streamdown's, restyled. Its outer box is the one frame (one
+   ground, one border); the header is not drawn and the copy control's sticky row takes no height (its 32 px and the
+   frame's 8 px gap), so the code starts where the frame's padding ends. The lines wrap inside the frame instead of
+   scrolling sideways; the first two source lines keep 32 px at their end for the control, on every line they wrap to.
+   The control is a 24 px target. Copy still takes the fence's source, so a wrapped line gains no line end. */
+.transcript-prose [data-streamdown="code-block-header"] { display: none; }
+.transcript-prose [data-streamdown="code-block-header"] + div:not([data-streamdown]) { margin-top: 0; margin-bottom: -40px; }
+.transcript-prose [data-streamdown="code-block-body"] { overflow-x: hidden; border: 0; border-radius: 0; background: transparent; }
+.transcript-prose [data-streamdown="code-block-body"] > pre { background: transparent; white-space: pre-wrap; overflow-wrap: break-word; }
+.transcript-prose [data-streamdown="code-block-body"] > pre > code > span:nth-child(-n + 2) { padding-right: 32px; }
+.transcript-prose [data-streamdown="code-block-copy-button"] { padding: 5px; }
+/* UX wave U3b (O-08; decision 8, R9 to R11): a table has one frame, Streamdown's wrapper, with one ground. The row that
+   holds the copy control takes no height: the control stands at the frame's top right on the code control's ground,
+   shown on hover or focus within; the inner scroller keeps its sideways and downward scroll (and the 320 px bound) and
+   loses its border and ground. Cells wrap as before. */
+.transcript-prose [data-streamdown="table-wrapper"] { position: relative; }
+.transcript-prose [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--bg-raised);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg-raised) 70%, transparent);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.12s;
 }
+.transcript-prose [data-streamdown="table-wrapper"]:hover > div:first-child:not(:last-child),
+.transcript-prose [data-streamdown="table-wrapper"]:focus-within > div:first-child:not(:last-child) { opacity: 1; }
+.transcript-prose [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) > div > button { padding: 5px; }
+.transcript-prose [data-streamdown="table-wrapper"] > div:last-child { border: 0; border-radius: 0; background: transparent; }
 .transcript-prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .transcript-image { max-width: 100%; border-radius: var(--radius-sm); }
 
@@ -228,6 +291,11 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* R1: a plugin's most recent status line under a working divider, aligned with its label (the chevron and the gap) */
 .transcript-divider:has(+ .transcript-plugin-status) { padding-bottom: 0; }
 .transcript-plugin-status { margin: 0; padding: 0 0 14px 19px; overflow: hidden; color: var(--fg-faint); font-size: var(--text-ui-sm); white-space: nowrap; text-overflow: ellipsis; }
+/* UX wave U3b (decisions 16 and 17, Interfaces §E; ruled R18): "Compacting session…" at the drawn list's end, in the
+   turn line's type and as tall as it (ESTIMATES.activity, 40 px): the divider's 2 px and its button's 3 px over the
+   words, its 14 px and 3 px under them. It starts at the rows' left edge, where a run's and a text's words start, not
+   indented to the turn line's words. */
+.transcript-activity { margin: 0; padding: 5px 0 17px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 1.5; }
 .transcript-popover {
   max-width: 420px;
   padding: 10px 12px;
@@ -240,7 +308,36 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   z-index: 20;
 }
 
-/* Replayed rows: local-command echoes */
+/* UX wave U3b (O-18, and the architect's rulings R1 to R5 on the drawn example): a slash command's output is a light line
+   under its command's bubble, with no frame and no heading: a dim ⎿, then the output in muted 12 px type at 1.5, with
+   16 px under the line. One line of text sits on the bubble's side, as wide as its words; text with a line end is a block
+   of the column's width, its words starting after the mark (R2). Closed, the one drawing of the output is cut at the
+   bottom of its second drawn line, which the row measures (R19), and fades over at most a third of a line ending there
+   (R3); open, it has no bound. Markdown is
+   drawn at the line's scale: headings the line's size in bold, blocks 4 px apart, a table's text the line's size (R1).
+   A terminal's text keeps its columns and scrolls sideways (R5). */
+.transcript-command { display: flex; justify-content: flex-end; align-items: baseline; gap: 6px; min-width: 0; padding: 0 0 16px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 1.5; }
+.transcript-command[data-block] { justify-content: flex-start; }
+.transcript-command-mark { flex: none; color: var(--fg-faint); }
+.transcript-command-body { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.transcript-command[data-block] .transcript-command-body { flex: 1 1 auto; }
+.transcript-command-text { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+.transcript-command[data-block] .transcript-command-text { width: 100%; }
+.transcript-command-name { flex: none; white-space: nowrap; } /* R23: the line's own font; monospace is only a terminal's grid */
+.transcript-command-output { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.transcript-command-output:not([data-open]) { max-height: var(--command-bound, none); overflow: hidden; } /* R19: set by the row where it is cut */
+.transcript-command-output[data-collapsed] { mask-image: linear-gradient(to bottom, var(--fg) calc(100% - 0.5em), transparent); }
+.transcript-command[data-error] .transcript-command-output { color: var(--danger); }
+.transcript-command-output > pre { margin: 0; overflow-x: auto; font-family: var(--font-mono); font-size: inherit; line-height: inherit; white-space: pre; overflow-wrap: normal; }
+.transcript-command-output > .transcript-prose { color: inherit; font-size: inherit; line-height: inherit; }
+.transcript-command-output .transcript-prose :where(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, [data-streamdown="table-wrapper"], [data-streamdown="code-block"]) { margin-top: 0; margin-bottom: 0; } /* :where, so the 4 px between blocks below outranks it */
+.transcript-command-output .transcript-prose :is(h1, h2, h3, h4, h5, h6) { font-size: inherit; line-height: inherit; font-weight: 600; }
+.transcript-command-output .transcript-prose > * + *,
+.transcript-command-output .transcript-prose > [dir] > * + * { margin-top: 4px; }
+.transcript-command-output .transcript-prose :is(table, th, td) { font-size: inherit; line-height: inherit; }
+.transcript-command-body > .transcript-quiet-button { margin-top: 2px; }
+
+/* Replayed rows: the `!` shell row (rows/Bash.tsx) */
 .transcript-replayed { margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); }
 .transcript-replayed-header { padding: 4px 10px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-replayed-output { max-height: 144px; margin: 0; padding: 6px 10px; overflow: auto; font-family: var(--font-mono); font-size: var(--text-code); white-space: pre-wrap; }
