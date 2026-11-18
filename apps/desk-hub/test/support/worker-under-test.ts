@@ -341,7 +341,12 @@ export class Registry extends DeployedRegistry {
       return Response.json({ unlisted: row?.unlisted ?? null });
     }
     if (url.pathname === PASS_HOLD_PATH) {
-      const { hold, release } = request.method === 'POST' ? ((await request.json()) as { hold?: number; release?: boolean }) : {};
+      const { hold, release, reset } = request.method === 'POST' ? ((await request.json()) as { hold?: number; release?: boolean; reset?: boolean }) : {};
+      if (reset) {
+        // What is stored stays; the pass held, and every call in flight, go with this instance.
+        await this.ctx.storage.sync();
+        this.ctx.abort(ABORT_REASON);
+      }
       if (hold !== undefined) this.ctx.storage.kv.put('pass-hold', hold);
       if (release) {
         const released = this.passRelease;

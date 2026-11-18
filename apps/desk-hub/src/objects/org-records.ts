@@ -322,18 +322,22 @@ export class OrgRecords {
   /**
    * A machine's projects record, kept at its highest revision; `409 stale-projects` for one not above it, naming the
    * revision held (the same bytes again are taken, and nothing is stored). A record of a machine the head has since
-   * retired stays kept: every reader verifies it, and refuses it then. `stored` runs in the step that stores it, so
-   * what the caller keeps beside it (the Registry's owed pushes) commits with it or not at all.
+   * retired stays kept: every reader verifies it, and refuses it then. `accepted` runs in the step that judges it,
+   * whether it stores the record or holds its bytes already (`stored` says which), so what the caller keeps beside it
+   * (the Registry's owed pushes, the channels' rows it lists) commits with it or not at all.
    */
-  async storeProjects(body: unknown, stored?: (record: ProjectsRecord) => void): Promise<Result<{ stored: boolean }>> {
+  async storeProjects(body: unknown, accepted?: (record: ProjectsRecord, stored: boolean) => void): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isProjectsRecord)) return fail(400, 'malformed', 'a projects record is a machine-signed ProjectsRecord, {body, sig}');
     const r = body.body;
     return this.machineSigned<ProjectsRecord, { stored: boolean }>(verifyProjectsRecord, body, () => {
       const held = this.sql.exec<{ revision: number; body: string }>('SELECT revision, body FROM projects_records WHERE machine = ?', r.machine).toArray()[0];
-      if (held && held.body === canonicalize(body)) return ok({ stored: false });
+      if (held && held.body === canonicalize(body)) {
+        accepted?.(r, false);
+        return ok({ stored: false });
+      }
       if (held && r.revision <= held.revision) return fail(409, 'stale-projects', `the projects record held is at revision ${held.revision}`);
       this.sql.exec('INSERT OR REPLACE INTO projects_records (machine, revision, body, stored) VALUES (?, ?, ?, ?)', r.machine, r.revision, canonicalize(body), iso());
-      stored?.(r);
+      accepted?.(r, true);
       return ok({ stored: true });
     });
   }

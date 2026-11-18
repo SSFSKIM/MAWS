@@ -84,7 +84,8 @@ export const UNLISTED_PATH = '/__test/unlisted';
 export const PROJECTS_BEFORE_UNLISTED_PATH = '/__test/projects-before-unlisted';
 /** Where the suites' `Registry` is armed (`{hold: n}`) to hold its next `n` passes over sminos channels' rows once each
  * has verified its records, before it applies them, until released (`{release: true}` releases the one held); answers
- * whether one is held and the projects records held now (`{held, records: [{machine, revision}]}`). */
+ * whether one is held and the projects records held now (`{held, records: [{machine, revision}]}`). `{reset: true}`
+ * resets the object (`ctx.abort()`) once what it stored is durable, the pass held and every call in flight with it. */
 export const PASS_HOLD_PATH = '/__test/pass-hold';
 /** Where the suites' `Registry` is armed to hold its next `leave` until it is released, as the Worker would be held
  * between resolving a machine's credential and asking for its revocation. */

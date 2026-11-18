@@ -1667,22 +1667,25 @@ export class Registry extends DurableObject<Env> {
    * already goes nowhere. Each ref is owed the machine's record (`projects_owed`) in the step that stores it, and the
    * alarm is set before any is sent, so a push lost with this object's reset is sent by the alarm (`pushProjects`).
    *
-   * A record accepted, stored or held already, is then applied to the channels' rows before it is relayed and before the
-   * answer: a pass that applies the records held at some moment after this one was stored has run, its pass run again
-   * for as long as each finds the records it verified replaced meanwhile. So a listing in an accepted record reaches the
-   * rows before the machine can send its next record, which might withdraw it; a pass left beside the answer could be
-   * lost to a reset; and a machine shown its record back has had it applied. A head that cannot be read leaves it to the
-   * alarm. The same bytes again count, since an endpoint sends its kept record again at each welcome, which makes up a
-   * pass lost so.
+   * A record accepted, stored or held already (an endpoint sends its kept record again at each welcome), is applied to
+   * the channels' rows in two halves. The channels it lists as known take §F's listed side in the step that accepts it
+   * (`applyListed`): a clock cleared, a retired row made active again. That half only keeps or brings back a row, and it
+   * is durable with the record, so neither a reset before the pass nor a pass that applies nothing loses the listing
+   * before the machine's next record can withdraw it. Then one pass runs, before the record is relayed and before the
+   * answer, for what the record no longer lists: a pass that finds the records replaced leaves it to the newer store's
+   * own pass, and one that cannot read the head to the alarm.
    */
   async storeProjects(record: unknown): Promise<Result<{ stored: boolean }>> {
-    const kept = await this.records.storeProjects(record, (body) => this.oweProjects(body.machine, body.revision));
+    let returned: string[] = [];
+    const kept = await this.records.storeProjects(record, (body, stored) => {
+      if (stored) this.oweProjects(body.machine, body.revision);
+      returned = this.applyListed(body.known.map((k) => k.id)).returned;
+    });
     if (!kept.ok) return kept;
-    // The owed pushes' alarm, before the pass can suspend.
-    if (kept.value.stored) await this.scheduleAlarm();
-    let pass: ChannelPass;
-    do pass = await this.passChannels();
-    while (pass === 'moved');
+    this.returnToGrid(returned);
+    // The owed pushes' alarm and the listed rows' recheck, before the pass can suspend.
+    await this.scheduleAlarm();
+    await this.passChannels();
     if (!kept.value.stored) return kept;
     const { machine } = (record as Signed<ProjectsRecord>).body;
     this.toApps({ t: 'projects', record: record as Signed<ProjectsRecord> });
@@ -1772,9 +1775,9 @@ export class Registry extends DurableObject<Env> {
    * is active with no clock, a retired one so made active again; an active row not listed starts its clock, or, its
    * clock `CHANNEL_RETENTION_MS` old, is retired. With no channel's row it does nothing and verifies nothing. The
    * listing applied is that of the records held when it applies, in one synchronous step with the rows as they are then:
-   * when the records verified are no longer the ones held (one was accepted meanwhile, whose store runs a pass that
-   * applies), it applies nothing, as it does when the head cannot be read. A retirement sends the grid again whole; a row
-   * made active returns as a new one does.
+   * when the records verified are no longer the ones held (one was accepted meanwhile, whose store runs its own pass),
+   * it applies nothing, as it does when the head cannot be read. A retirement sends the grid again whole; a row made
+   * active returns as a new one does.
    */
   private async channelPass(): Promise<ChannelPass> {
     if (this.channelRows().length === 0) return 'applied';
@@ -1785,19 +1788,12 @@ export class Registry extends DurableObject<Env> {
     const listed = new Set(verified.counted.flatMap((record) => record.known.map((k) => k.id)));
     const now = Date.now();
     const retired: string[] = [];
-    const returned: string[] = [];
-    let changed = false;
-    this.ctx.storage.transactionSync(() => {
+    const { changed, returned } = this.ctx.storage.transactionSync(() => {
+      const applied = this.applyListed(listed);
+      let changed = applied.changed;
       for (const row of this.channelRows()) {
-        const isListed = listed.has(row.id);
-        if (row.retired === 1) {
-          if (!isListed) continue;
-          this.sql.exec('UPDATE projects SET retired = 0, unlisted = NULL WHERE id = ?', row.id);
-          returned.push(row.id);
-        } else if (isListed) {
-          if (row.unlisted === null) continue;
-          this.sql.exec('UPDATE projects SET unlisted = NULL WHERE id = ?', row.id);
-        } else if (row.unlisted === null) {
+        if (row.retired === 1 || listed.has(row.id)) continue;
+        if (row.unlisted === null) {
           this.sql.exec('UPDATE projects SET unlisted = ? WHERE id = ?', iso(now), row.id);
         } else if (Date.parse(row.unlisted) + CHANNEL_RETENTION_MS <= now) {
           this.sql.exec('UPDATE projects SET retired = 1 WHERE id = ?', row.id);
@@ -1805,14 +1801,43 @@ export class Registry extends DurableObject<Env> {
         } else continue;
         changed = true;
       }
+      return { changed, returned: applied.returned };
     });
     if (retired.length > 0) this.toGrid(this.gridFrame());
-    for (const id of returned) {
+    this.returnToGrid(returned);
+    if (changed) await this.scheduleAlarm();
+    return 'applied';
+  }
+
+  /**
+   * §F's listed side, for the channels' rows among `ids`: an active row's clock cleared, a retired row made active again
+   * with none. It only keeps or brings back a row, never retires one. Run inside the caller's synchronous step (a pass's
+   * apply, a record's acceptance); answers whether it changed a row and the rows it made active, for `returnToGrid`
+   * once that step is done.
+   */
+  private applyListed(ids: Iterable<string>): { changed: boolean; returned: string[] } {
+    const returned: string[] = [];
+    let changed = false;
+    for (const id of new Set(ids)) {
+      if (!isChannelId(id)) continue;
+      const row = this.sql.exec<{ retired: number; unlisted: string | null }>("SELECT retired, unlisted FROM projects WHERE id = ? AND kind = 'hub'", id).toArray()[0];
+      if (row === undefined) continue;
+      if (row.retired === 1) {
+        this.sql.exec('UPDATE projects SET retired = 0, unlisted = NULL WHERE id = ?', id);
+        returned.push(id);
+      } else if (row.unlisted !== null) this.sql.exec('UPDATE projects SET unlisted = NULL WHERE id = ?', id);
+      else continue;
+      changed = true;
+    }
+    return { changed, returned };
+  }
+
+  /** Rows made active again return to the grid as a new row does: the head owed to their projects, then a summary. */
+  private returnToGrid(ids: string[]): void {
+    for (const id of ids) {
       this.seedProject(id);
       this.toGrid({ t: 'summary', project: this.summaryOf(this.project(id)!) });
     }
-    if (changed) await this.scheduleAlarm();
-    return 'applied';
   }
 
   /** The projects records held and those of them that count (`OrgRecords.countedProjects`), under the head as a Project

@@ -402,6 +402,19 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async passHold(change: { hold?: number; release?: boolean } = {}): Promise<{ held: boolean; records: Array<{ machine: string; revision: number }> }> {
       return JSON.parse(await seam('REGISTRY', ORG, PASS_HOLD_PATH, change)) as { held: boolean; records: Array<{ machine: string; revision: number }> };
     },
+    /** Resets the Registry (`ctx.abort()`) once what it stored is durable, as a code update would: a pass held and every
+     * call in flight end with it. The seam's request fails with the abort's own reason, and only that failure counts. */
+    async resetRegistry() {
+      let failure: unknown;
+      try {
+        await seam('REGISTRY', ORG, PASS_HOLD_PATH, { reset: true });
+      } catch (error) {
+        failure = error;
+      }
+      if (!(failure instanceof Error && failure.message.includes(ABORT_REASON))) {
+        throw new Error(`the Registry was not reset: ${failure === undefined ? 'its seam answered' : String(failure)}`);
+      }
+    },
     /** Sets how long an unfinished offline revocation waits before it is tried again (null: the deployed minute), and
      * wakes the Registry's alarm. */
     async offlineRetry(ms: number | null) {

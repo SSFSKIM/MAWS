@@ -387,7 +387,7 @@ describe('a sminos channel’s row', () => {
     m.endpoint.close();
   });
 
-  it('answers a record once a pass has applied the records held after it, so its listing reaches the row before the machine can withdraw it', async () => {
+  it('keeps a listing whose passes all apply nothing: the withdrawal that follows runs its seven days from itself', async () => {
     const [a, b] = [await online('cr-lost-a'), await online('cr-lost-b')];
     const C = channel(13);
     await hello(a, C);
@@ -403,17 +403,18 @@ describe('a sminos channel’s row', () => {
     const other = await nextRecord(b, []);
     const bStored = hub.registryRpc<Stored>('storeProjects', other);
     await heldAt(b, other.body.revision);
-    // Released, A's pass applies nothing; the next pass (B's) is held in its turn.
+    // Released, A's pass applies nothing and A is answered; the next pass (B's) is held in its turn.
     await hub.passHold({ hold: 1, release: true });
+    await a.endpoint.next(backAt(a, listing.body.revision), 'the listing back', back);
     await passHeld();
-    // A is not answered: no pass has yet applied the records held since its listing was stored.
-    await sleep(300);
-    expect(a.endpoint.frames.slice(back).filter(backAt(a, listing.body.revision))).toEqual([]);
+    // The listing reached the row at its acceptance, though no pass has applied it.
+    expect(await hub.unlisted(C)).toBeNull();
 
-    // A withdraws it, behind its listing on the connection.
+    // A withdraws it while B's pass is held, so B's pass applies nothing either.
     const withdrawal = await nextRecord(a, []);
     const sent = Date.now();
     a.endpoint.sendText({ t: 'projects', record: withdrawal });
+    await heldAt(a, withdrawal.body.revision);
     await hub.passHold({ release: true });
     expect(await bStored).toEqual({ ok: true, value: { stored: true } });
     await a.endpoint.next(backAt(a, withdrawal.body.revision), 'the withdrawal back', back);
@@ -421,6 +422,68 @@ describe('a sminos channel’s row', () => {
     expect(await unlistedMs(C)).toBeGreaterThanOrEqual(sent);
     a.endpoint.close();
     b.endpoint.close();
+  });
+
+  it('keeps a listing through a reset between its record’s store and its pass: the withdrawal’s seven days run from itself', async () => {
+    const m = await online('cr-reset');
+    const C = channel(16);
+    await hello(m, C);
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION - DAY) }], clearAlarm: true });
+    // The listing is stored and its pass held; the Registry is reset under it, and the store's call fails with it.
+    await hub.passHold({ hold: 1 });
+    const listing = await nextRecord(m, [C]);
+    m.endpoint.sendText({ t: 'projects', record: listing });
+    await passHeld();
+    await hub.resetRegistry();
+    // The withdrawal follows, on the same connection.
+    const withdrawal = await nextRecord(m, []);
+    const back = m.endpoint.frames.length;
+    const sent = Date.now();
+    m.endpoint.sendText({ t: 'projects', record: withdrawal });
+    await m.endpoint.next(backAt(m, withdrawal.body.revision), 'the withdrawal back', back);
+    expect(await unlistedMs(C)).toBeGreaterThanOrEqual(sent);
+    expect(await row(C)).toMatchObject({ retired: false });
+    m.endpoint.close();
+  });
+
+  it('clears the clock of a channel a record lists while the head cannot be read', async () => {
+    const m = await online('cr-blind-listing');
+    const C = channel(17);
+    await hello(m, C);
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION - DAY) }], clearAlarm: true });
+    await hub.headFault(true);
+    try {
+      await store(m, [C]);
+      expect(await hub.unlisted(C)).toBeNull();
+    } finally {
+      await hub.headFault(false);
+    }
+    m.endpoint.close();
+  });
+
+  it('brings a retired row back when a record lists it, its summary on the grid, before any pass and before the store answers', async () => {
+    const m = await online('cr-back-early');
+    const C = channel(18);
+    await hello(m, C);
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION) }], clearAlarm: true });
+    await hub.registrySweep({ clear: true });
+    expect(await row(C)).toMatchObject({ retired: true });
+    const grid = await GridClient.open(hub, ADMIN);
+    const from = grid.frames.length;
+    // The store's pass is held: what follows is the store's acceptance alone.
+    await hub.passHold({ hold: 1 });
+    const listing = await nextRecord(m, [C]);
+    const back = m.endpoint.frames.length;
+    m.endpoint.sendText({ t: 'projects', record: listing });
+    await passHeld();
+    expect(await row(C)).toMatchObject({ retired: false });
+    expect(await hub.unlisted(C)).toBeNull();
+    await gridFrame(grid, from, (f): f is Extract<GridDown, { t: 'summary' }> => f.t === 'summary' && f.project.id === C, 'its summary');
+    expect(m.endpoint.frames.slice(back).filter(backAt(m, listing.body.revision))).toEqual([]);
+    await hub.passHold({ release: true });
+    await m.endpoint.next(backAt(m, listing.body.revision), 'the listing back', back);
+    grid.close();
+    m.endpoint.close();
   });
 
   it('runs no pass for a redemption, which Access does not guard: only the alarm’s sweep retires a row past its deadline', async () => {
