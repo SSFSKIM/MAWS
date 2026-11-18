@@ -19,6 +19,8 @@
 // P5 O6 M2: the page holds addresses. `window.__maws_cards` speaks the raw bridge's bare ids, as the specs read them from
 // `window.maws`: the page addresses each id it is handed with the local machine, and answers bare ones; its own labels
 // name the bare id.
+// UX wave U1c (M5's scenes): the transcript's "Approve and retry" under a call auto mode blocked, registered as App.tsx
+// registers it, so a composer pane's transcript draws it as a session's pane does.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -26,6 +28,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { addressOf, bareOf } from '@shared/machine/address';
+import { registerBlockedCalls } from '../../blocked-call'; // UX wave U1c
 import { Composer, ComposerAppKeys, connectComposer, connectInlineEdit, DictationKeys, DockedCardFrame, dockCard, registerSlashWidget, WidgetDialogHost } from '../../composer';
 import { useDictationStore } from '../../composer/dictation/store';
 import { setRewindWindow } from '../../composer/resubmit-seam';
@@ -159,7 +162,7 @@ export function ComposerHarness() {
     // started session draws its transcript above its composer rather than C5's "Transcript unavailable"
     // UX wave U1b: and the request card as App.tsx connects it (the transcript's request renderer and the followers of
     // settlements), so a composer pane's transcript and a `shell` pane draw a waiting request where the app does
-    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), connectRequestCard(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect()];
+    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), connectRequestCard(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect(), registerBlockedCalls()];
     window.__maws_cards = {
       // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
       // a test's next step to find (a docked card answering for the inline one it moved to).

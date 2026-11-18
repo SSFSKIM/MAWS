@@ -84,6 +84,10 @@ export interface TranscriptStore {
   attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>;
   retry(key: string): Promise<void>; // hydrate a failed key again from its source, keeping its attachments
   detach(key: string): void;
+  // UX wave U1c (M3's review, finding 3): keeps the key's attachment, whatever its source, as one more holder, so what
+  // follows it lives on when its last view detaches; nothing when no source is attached. The returned function lets go
+  // once, and lets go of nothing when another source has replaced that attachment since.
+  hold(key: string): () => void;
   drop(key: string): void; // release every attachment and forget the state, and the key's agent lookup
   // L197: the agents the host knows beyond the key's loaded turns (MAWS: the session's task graph, transcript/view/
   // agent-lookup.ts; the desk: its tree), naming a message to or from one no loaded turn launched. Kept for the key
@@ -524,6 +528,18 @@ export function createTranscriptStore() {
         release(attached);
         attachments.delete(key);
         set({}); // UX wave U5a (Decision Log 52): `attached(key)` changed, so a selector that reads it is asked again
+      },
+
+      hold(key) {
+        const attached = attachments.get(key);
+        if (!attached) return () => {};
+        attached.count += 1;
+        let held = true;
+        return () => {
+          if (!held) return;
+          held = false;
+          if (attachments.get(key) === attached) get().detach(key);
+        };
       },
 
       drop(key) {

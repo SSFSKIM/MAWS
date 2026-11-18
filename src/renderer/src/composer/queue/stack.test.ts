@@ -6,6 +6,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
+import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
 import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { answerWords, firstToSend, newestToTake, rowText, stackRows, type Read, type StackRow } from './stack';
 
@@ -204,5 +205,50 @@ describe('the rows the keys act on', () => {
     expect(newestToTake(rows)?.key).toBe('q-1');
     expect(newestToTake(stackRows(queue({ steers: [steer(U2, 9, ANSWER)] }), NONE, read()))).toBeNull();
     expect(newestToTake([])).toBeNull();
+  });
+});
+
+// UX wave U1c (the U1c document, Interfaces §G; card 2): a waiting "Approve and retry" reads as the line it becomes.
+describe('a grant’s row', () => {
+  const GRANT = consentMessage('command', 'make build');
+  it('a row whose whole text is one grant carries it and reads “You approved <the command>”, whichever wait it is in', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 1, GRANT)], entries: [entry('q-1', 2, { content: GRANT }), entry('q-u', 0, { content: GRANT, uncertain: true })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'grant' in row ? row.grant : undefined, rowText(row)])).toEqual([
+      ['next', { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['after', { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['uncertain', { kind: 'command', subject: 'make build' }, 'You approved make build'],
+    ]);
+  });
+
+  it('a row with only text (handed, sending) whose message is one grant reads so too: a handed one as its transcript row records it', () => {
+    const rows = stackRows(queue({ entries: [entry('q-s', 1, { content: GRANT, state: 'submitting', submittedAt: at(1) })] }), new Set(['q-s']), read([{ messageUuid: U3, text: GRANT, at: at(3), grant: { kind: 'command', subject: 'make build' } }]));
+    expect(rows.map((row) => [row.kind, rowText(row)])).toEqual([['handed', 'You approved make build'], ['sending', 'You approved make build']]);
+  });
+
+  // Decision Log 53: no row reads a grant from the text it draws, which is the message with MAWS's envelopes taken out
+  it('a handed row whose drawn text is the sentence and whose transcript row records no grant reads as its text', () => {
+    const [row] = stackRows(queue(), NONE, read([{ messageUuid: U3, text: GRANT, at: at(3) }]));
+    expect(row).toMatchObject({ kind: 'handed', grant: null });
+    expect(rowText(row!)).toBe(GRANT);
+  });
+
+  it('a message that holds a grant line among other words is the person’s own message: no grant, its own words', () => {
+    const words = `Go ahead with this one.\n${GRANT}`;
+    const [row] = stackRows(queue({ entries: [entry('q-1', 1, { content: words })] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'after', grant: null });
+    expect(rowText(row!)).toBe(words);
+  });
+
+  it('an answer’s row is unchanged: no grant, its envelope’s words', () => {
+    const [row] = stackRows(queue({ steers: [steer(U1, 1, ANSWER)] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'next', answer: answerWords(ANSWER, read().questions), grant: null });
+    expect(rowText(row!)).toBe(answerWords(ANSWER, read().questions));
+  });
+
+  it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 5)], entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read());
+    expect(newestToTake(rows)?.key).toBe(U1);
+    expect(newestToTake(stackRows(queue({ entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read()))).toBeNull();
+    expect(firstToSend(stackRows(queue({ entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read()))?.key).toBe('q-g');
   });
 });

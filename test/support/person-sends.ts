@@ -21,6 +21,9 @@ export const VERBS = {
   steer: /\.steer\(/g,
   // the host's queue taking a message or an edit of one
   queue: /\bqueue\.(?:send|edit)\(/g,
+  // UX wave U1c: a caller of the port's queue edit (`controls.edit({ queueId, content })`), which the host writes as given;
+  // none today, so a caller makes a site the list must classify
+  queueEdit: /\.edit\(\s*\{\s*(?:queueId|appSessionId)\b/g,
   // the queue's preparation of a submission's content (the linked reads)
   prepare: /\bprepare\??:\s*\(content|\bdeps\.prepare\(/g,
   // a frame or a row given the person's origin

@@ -361,6 +361,20 @@ describe('where each class is read (M4)', () => {
     expect(events[1]).not.toHaveProperty('arrival');
   });
 
+  // UX wave U1c, M1 (the U1c document, Interfaces §C, 1 to 3): the frame MAWS writes is read as the person's text, whole
+  // or by lines, in the engine's encoding of a subject
+  it('a frame MAWS writes in the engine’s encoding, or with the person’s words beside a grant line, carries the grant’s mark', () => {
+    const subject = 'echo one\u00a0two';
+    const sentence = consentMessage('command', subject);
+    expect(sentence).toContain('\\u00a0');
+    const events = live(handWritten([out(prompt('u-1', sentence)), out(prompt('u-2', `Also check the logs.\n${sentence}`)), out(prompt('u-3', `Also check the logs. ${sentence}`))]));
+    expect(events.map((event) => (event.kind === 'user.message' ? (event.arrival ?? null) : event.kind))).toEqual([
+      [{ class: 'consent', kind: 'command', subject }],
+      [{ class: 'consent', kind: 'command', subject }],
+      null,
+    ]);
+  });
+
   it('u3-tasks-r1: the notification a hand-back claimed at one tool boundary (667, after 666) emits nothing; the hand-back is its line', () => {
     expect(r1Events.filter((event) => event.seq === 667)).toEqual([]);
     expect(r1Events.filter((event) => event.seq === 666).map((event) => event.kind)).toEqual(['user.message', 'subagent.message']);

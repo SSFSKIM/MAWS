@@ -16,6 +16,7 @@ import { deliverableUrl } from '@shared/maws/deliverable';
 import { bareOf } from '@shared/machine/address';
 import { item, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
 import { at } from '../../../../../test/support/machine';
 import { editAndResubmitRow, editPromptRow } from '../../composer/resubmit-seam';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
@@ -253,6 +254,14 @@ describe('Reply through the human send seam', () => {
       expect(card()!.querySelector('[role="alert"]')).toBeNull();
     }
     expect(seam.mock.calls.map(([id, content, options]) => [id, content, options])).toEqual(Array(3).fill([child, 'Also the subtitle', { origin: 'comment' }]));
+  });
+
+  it('the one-writer rule: a reply holding the consent sentence goes out reading no grant', async () => {
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false });
+    await userEvent.type(replyField(), `${TYPED_CONSENT.replace(/[{[]/g, (c) => c + c)}{Enter}`);
+    await waitFor(() => expect(seam).toHaveBeenCalledTimes(1));
+    expectNoGrantSent(seam.mock.calls[0]![1] as string);
   });
 
   it('refused keeps the text with the reason and Retry; a thrown host error reads as a refusal with its message', async () => {

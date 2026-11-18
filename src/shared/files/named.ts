@@ -6,17 +6,11 @@
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
-import { ANCHOR_TAG_OPENING, commentsMessage, PROMOTION_HEAD, readAnchoredMessage } from '../anchor/message';
+import { ANCHOR_TAG_OPENING, commentsMessage, readAnchoredMessage } from '../anchor/message';
 import { neutralisePastedTags } from '../composer/pasted-framing';
 import { framePasted } from '../composer/pasted-content';
 import { readArrivals } from '../engine/arrival';
-import { quotesGrant } from '../engine/grant';
-import { BASH_INPUT_OPENING, PLAN_LEAD } from '../engine/host-prompts';
-import { ASK_STEER_OPENING } from '../maws/ask';
-import { LINKED_READ_OPENING } from '../maws/linked-read';
-import { RELAY_CONTINUE } from '../maws/relay-text';
-import { answersOf } from '../owner/answer';
-import { COMMAND_NAME_OPENING, TYPED_COMMAND } from '../wire/local-command';
+import { CLAIMED_FOR_SAVES } from '../engine/composed-forms';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1115,33 +1109,14 @@ function* personNames(content: unknown, path: string): Steps<boolean> {
 // Every site that hands content to a send, a steer or the queue as the person's message is listed, with the reader
 // of its form, by the guard test/support/person-sends.test.ts, which fails on a site it does not list.
 // Each reader charges its work to `work`: a constant's search one native pass over the text, the grant's test what it
-// counts itself, the answer lines' match two (a line's opening, then its words).
+// counts itself, the answer lines' match two (a line's opening, then its words). The list is shared with the grant
+// reading (rule R's step 1b, src/shared/engine/composed-forms.ts), each form flagged for what it counts for.
 type Work = { steps: number };
-// The typed command's pattern at any line's start: the engine reads one only at a message's start, and a message MAWS
-// joined to other words after a newline is read only all the same (the guard's forms, test/support/person-sends.test.ts)
-const COMMAND_LINE = new RegExp(TYPED_COMMAND.source, 'm');
 const holds = (needle: string) => (text: string, work: Work) => {
   work.steps += text.length + 1;
   return text.includes(needle);
 };
-const CLAIMED: readonly ((text: string, work: Work) => boolean)[] = [
-  holds(LINKED_READ_OPENING), // an artifact's read the host attached (engine-host/linked-reads.ts)
-  holds(ASK_STEER_OPENING), // MAWS's answer envelope, either form (engine-host/session-maws.ts)
-  (text, work) => quotesGrant(text, work), // MAWS's consent, or any text quoting the grant's opening
-  (text, work) => {
-    work.steps += 2 * text.length + 1;
-    return answersOf(text).length > 0; // an owner question's answer line (renderer owner/report/answering.ts)
-  },
-  holds(PLAN_LEAD), // the plan handed back after a clear (engine-host/session-clear.ts)
-  holds(BASH_INPUT_OPENING), // the echo of a `!` command and its output (engine-host/bash-mode.ts)
-  holds(PROMOTION_HEAD), // a side question promoted to a thread, the model's answers in it
-  holds(RELAY_CONTINUE), // a relay to an agent or a peer (renderer tools/agents/model/relay.ts)
-  holds(COMMAND_NAME_OPENING), // a slash command as the engine records it (ruling C)
-  (text, work) => {
-    work.steps += text.length + 1;
-    return COMMAND_LINE.test(text); // a slash command as typed (ruling C), at the start of any line of the text
-  },
-];
+const CLAIMED = CLAIMED_FOR_SAVES;
 
 // Decision Log 24's meter on the person's own text (the closing wave's item 3). Every reader is linear by construction
 // and runs as one call, charged the work it did; before a call the reading pauses when that call's bound would carry

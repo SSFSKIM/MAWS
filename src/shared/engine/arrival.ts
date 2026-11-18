@@ -10,19 +10,23 @@
 // The rules of reading (UC-2): (1) marks first, text second: a class is given only where the carrier's own marks allow
 // it (its origin object, its envelope tag, its attachment type, `local_command_source`, the fields the engine writes for
 // a scheduled fire), and the person's typed prompt is never an arrival, but for MAWS's own two texts (its answer
-// envelope and its consent message) and a background session's prompt that opens with a whole sminos frame line
-// (decision 19); (2) sminos's frame line says whose a delivered row is: `human` is the person (`own`), any other sender
-// a peer; (3) one carrier can hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two
-// carriers is read once (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
-import { PASTED_BLOCK } from '../composer/pasted-content';
+// envelope, read whole, and its consent message, read whole or, in a text the engine may have joined, line by line, and,
+// where a sminos bridge carried it for the person to a terminal session (submitted as the user, or appended into the
+// running turn as another machine's rows draw it), read whole: UX wave U1c) and a background
+// session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's
+// frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer; (3) one carrier can
+// hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
+// (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { askSteerOpening, parseAskSteer } from '../maws/ask';
+import { keptLines, type ReadingWork } from '../maws/ask-strict';
+import { holdsGrantForm } from './composed-forms';
 import { stripAnsi } from '../wire/ansi';
 import type { Arrival } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
-import { GRANT_OPENING } from './grant';
+import { GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL } from './grant';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
-import { BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
+import { BRIDGE_PLUGINS, BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
 import { notificationText, taskNotificationBlocks } from './task-notification';
 
 export { ArrivalEntrySchema, CarriedArrivalSchema, carriedOf, type Arrival, type ArrivalEntry, type CarriedArrival } from './arrival-schema';
@@ -118,7 +122,11 @@ export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest
  */
 export const MAX_ENVELOPE_CHECKS = 64;
 
-/** What one reading of `readAnswerEnvelopes` cost: its whole-slice checks, and the steps of marking the pasted lines. */
+/**
+ * What one reading of `readAnswerEnvelopes` cost: its whole-slice checks, and the steps of marking the pasted lines
+ * (rule R's `pastedBodies`, the one definition of a pasted segment's lines, linear in the lines; the architect's ruling
+ * 3865, in place of the pattern's own search, which was not linear on opening tags that never close).
+ */
 export interface EnvelopeReadingCost {
   checks: number;
   markingSteps: number;
@@ -130,7 +138,9 @@ export function readAnswerEnvelopesWithCost(text: string): { envelopes: AskSteer
   const whole = { envelopes: [], rest: text, cost };
   if (!text.includes(TAG_OPENS)) return whole; // read on every user text the transcript draws
   const lines = text.split('\n');
-  const pasted = pastedLines(text, lines, cost);
+  const marking: ReadingWork = { lines: 0, blockCharacters: 0, formSteps: 0 };
+  const pasted = pastedBodies(lines, marking);
+  cost.markingSteps = marking.lines;
   const envelopes: AskSteer[] = [];
   const kept: string[] = [];
   for (let i = 0; i < lines.length; ) {
@@ -166,51 +176,191 @@ function envelopeEnd(lines: readonly string[], pasted: readonly boolean[], start
   return null;
 }
 
-// Which lines start inside a pasted segment, from its opening tag through its closing one (the terminal's frame,
-// `PASTED_BLOCK`, as the transcript's `splitPastedSegments` reads it). One walk over the lines and the segments together,
-// both in text order: a step for each line and for each segment passed. A span runs from the opening tag's `<` to the
-// closing tag's `>`, the at most two newlines the frame takes on each side left out.
-function pastedLines(text: string, lines: readonly string[], cost: EnvelopeReadingCost): boolean[] {
-  const spans = [...text.matchAll(PASTED_BLOCK)].map((match) => ({ from: match.index + match[0].indexOf('<'), to: match.index + match[0].lastIndexOf('>') + 1 }));
-  const marks: boolean[] = [];
-  let span = 0;
-  let at = 0;
-  for (const line of lines) {
-    for (; span < spans.length && spans[span]!.to <= at; span++) cost.markingSteps += 1;
-    cost.markingSteps += 1;
-    marks.push(span < spans.length && at >= spans[span]!.from);
-    at += line.length + 1;
-  }
-  return marks;
-}
+type Consent = Extract<Arrival, { class: 'consent' }>;
+type GrantKind = Consent['kind'];
 
 /**
  * The one definition of the consent sentence: U1c sends it, the reader matches it whole. It is the engine's own
- * "Recently blocked" sentence for one call (`cli.pretty.js` of 2.1.322, the template that ends "if you would like."),
- * the command or the call's input quoted as one JSON string.
+ * "Recently blocked" sentence for one call (`cli.pretty.js` of 2.1.322, `Yn`, the template that ends "if you would
+ * like."), the command or the call's input quoted as one JSON string in the engine's encoding (`quoted`).
  */
-export function consentMessage(kind: 'command' | 'call', subject: string): string {
-  return `${consentHead(kind)}${JSON.stringify(subject)}${consentTail(kind)}`;
+export function consentMessage(kind: GrantKind, subject: string): string {
+  return grantSentence(kind, [quoted(subject)]);
 }
 export { GRANT_OPENING, quotesGrant } from './grant'; // board ticket 711: the one definition, in a module with no imports
-const consentHead = (kind: 'command' | 'call') => `${GRANT_OPENING}this exact ${kind} only, as one whole string: `;
-const consentTail = (kind: 'command' | 'call') =>
-  `. This does not approve any other ${kind}, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact ${kind} if you would like.`;
 
-/** The consent a text is, whole, from its first word to its last; null for any other text, one word changed included. */
-function consentOf(text: string): Extract<Arrival, { class: 'consent' }> | null {
+// UX wave U1c (the U1c document, Design 2 and Interfaces §C, 1): the engine quotes each subject as JSON, then escapes
+// every invisible or separator character but the plain space as `\uXXXX`, one escape per UTF-16 unit (`Dp`, `Pp`), so
+// such a character is visible in the sentence the model reads. For printable ASCII it is `JSON.stringify` alone.
+const INVISIBLE = /(?! )[\p{C}\p{Z}\p{Default_Ignorable_Code_Point}]/gu;
+const escapedUnits = (match: string): string => Array.from({ length: match.length }, (_, i) => `\\u${match.charCodeAt(i).toString(16).padStart(4, '0')}`).join('');
+const quoted = (subject: string): string => JSON.stringify(subject).replace(INVISIBLE, escapedUnits);
+
+/** The engine's sentence for one call or for several (`Yn`), its subjects already quoted. */
+function grantSentence(kind: GrantKind, subjects: readonly string[]): string {
+  const one = subjects.length === 1;
+  const these = one ? `${GRANT_ONE} ${kind}` : `${GRANT_SEVERAL} ${kind}s`;
+  return `${grantHead(kind, one)}${subjects.join(', ')}. This does not approve any other ${kind}, any part of ${one ? 'this one' : 'these'}, or running ${one ? 'it' : 'them'} with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry ${these} if you would like.`;
+}
+// the review round's R1: built from the two words the writer's patterns are (grant.ts `GRANT_ONE`, `GRANT_SEVERAL`)
+const grantHead = (kind: GrantKind, one: boolean): string => `${GRANT_OPENING}${one ? `${GRANT_ONE} ${kind}` : `${GRANT_SEVERAL} ${kind}s`} only, ${one ? 'as one whole string' : 'each as one whole string'}: `;
+
+/**
+ * The grants a text is, whole, from its first word to its last, in order: the sentence for one call or the engine's
+ * for several (read from the bundle; no recording holds it), every subject in the engine's encoding or every one in the
+ * plain one (what builds before U1c sent, and what a person may paste). None for any other text, one word changed
+ * included: the text must equal the sentence rebuilt from what was parsed.
+ */
+export function readConsents(text: string): Consent[] {
   for (const kind of ['command', 'call'] as const) {
-    const [head, tail] = [consentHead(kind), consentTail(kind)];
-    if (!text.startsWith(head) || !text.endsWith(tail) || text.length < head.length + tail.length) continue;
-    let subject: unknown;
+    for (const one of [true, false]) {
+      const head = grantHead(kind, one);
+      if (!text.startsWith(head)) continue;
+      const subjects = quotedStrings(text, head.length);
+      if (subjects === null || (one ? subjects.length !== 1 : subjects.length < 2)) continue;
+      if (grantSentence(kind, subjects.map(quoted)) === text || grantSentence(kind, subjects.map((subject) => JSON.stringify(subject))) === text) {
+        return subjects.map((subject) => ({ class: 'consent', kind, subject }));
+      }
+    }
+  }
+  return [];
+}
+
+/** The JSON strings at `from`, separated by ", ", up to the first character that follows none; null when none parses there. */
+function quotedStrings(text: string, from: number): string[] | null {
+  const subjects: string[] = [];
+  let at = from;
+  for (;;) {
+    if (text[at] !== '"') return subjects.length > 0 ? subjects : null;
+    let end = at + 1;
+    while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+    if (end >= text.length) return null;
     try {
-      subject = JSON.parse(text.slice(head.length, text.length - tail.length));
+      subjects.push(JSON.parse(text.slice(at, end + 1)) as string);
     } catch {
+      return null;
+    }
+    if (!text.startsWith(', "', end + 1)) return subjects;
+    at = end + 3;
+  }
+}
+
+/** The grants in a person's message (rule R, `personsLines`), in order. */
+export function personsGrants(text: string): Consent[] {
+  return personsLines(text)?.flatMap((line) => line.grants) ?? [];
+}
+
+/**
+ * Rule R (the architect's ruling of 2026-11-16, on the wave coordinator's proposal): the one reading of the grants in a
+ * person's message, its text blocks joined as `messageText` joins them. Every reader of a grant in a person's message
+ * comes here: the host's mark on a frame it writes and the file's rows (`personsText`), the queue's gate (`keysIn`,
+ * blocked-call/grants.ts) and the transcript's rows beside the grants (`wordsBesideGrants`, transcript/model/derive.ts).
+ * The lines of what is left, each with its grants, or null where the message yields none.
+ *
+ *  0. A text that is the sentence whole is that grant (`readConsents`), first and as before (Decision Log 52): a sentence
+ *     holds no line break, so no envelope can stand in it, and the readers that read a text whole agree with this one.
+ *  1. This build's envelopes are taken out strictly, in one forward pass with no pasted-segment logic
+ *     (`takeOutEnvelopes`, maws/ask-strict.ts); an opening line that does not read strictly yields no grant.
+ *  1b. A message whose whole joined text holds a form MAWS composes around words a model, a command or a page wrote
+ *     (the list in composed-forms.ts, the forms it flags for grants) yields no grant; nothing is set aside first (the
+ *     architect's ruling 3865, its exemption withdrawn).
+ *  2. What is left fails closed: an envelope's tag anywhere in it, or a line that opens a json fence, yields no grant,
+ *     pasted or not, and no line is exempt.
+ *  3. Otherwise each line of what is left that is a whole sentence gives its grants, but a line inside a pasted segment,
+ *     where a sentence is data (`pastedBodies`), of the text as it came or of what is left.
+ *
+ * Why no sentence a model wrote is read as the person's. Model text reaches a person's message in two ways: inside an
+ * answer envelope an earlier build wrote (that build wrote the question's words on the envelope's line), and inside the
+ * forms MAWS composes around a model's, a command's or a page's words and sends as the person's (a side question's
+ * answers promoted to a thread, the plan handed back after a clear, a `!` command's echo, an artifact's read, a relay,
+ * an anchored comment's page text, a recorded slash command, an owner question's answer line). Step 1b answers the
+ * forms: each carries a constant its writer writes and nothing removes, so a message holding one yields nothing (board
+ * ticket 733 is the writer-side follow-up). Steps 1 and 2 answer the envelopes. A strict envelope's lines are all of
+ * the writer's grammar (numbered answer lines, indented paths and notes, the fence, a block of JSON, the close), and none
+ * of them is a bare sentence, whoever wrote it, so taking one out leaves none behind. Every envelope of either form
+ * carries two lines the host wrote and the model cannot remove or alter: its opening line and the fence line that opens
+ * its real result block. An earlier envelope cannot be taken out strictly: its real block holds the question's words
+ * in each answer (the tool's input requires a question of at least one character, and the earlier builds' sheet copied
+ * them into each answer; the answer's schema itself admits an empty one), so a reading that reaches it fails and
+ * yields nothing; and a reading that ends earlier, at a block the model forged in a question, leaves the real fence
+ * line after it, and step 2 then yields nothing. Pasted
+ * segments are read only in step 3, on a text that holds no envelope's line, so a pasted tag cannot hide one.
+ *
+ * Linear in the text: each line is looked at a bounded number of times (the take-out once, the check of what is left
+ * once, the pasted segments' two passes on the text and two on what is left, the reading once), each block is parsed
+ * once, each composed form's reader is a native pass or two over the text, and every test of a line is anchored with
+ * no nested repetition. `work` counts it where it is done (arrival.test.ts pins the counts).
+ */
+export function personsLines(text: string, work: ReadingWork = { lines: 0, blockCharacters: 0, formSteps: 0 }): { line: string; grants: Consent[] }[] | null {
+  const whole = readConsents(text);
+  if (whole.length > 0) return [{ line: text, grants: whole }];
+  if (!text.includes('\n') || !text.includes(GRANT_OPENING)) return null;
+  const formWork = { steps: 0 };
+  const composed = holdsGrantForm(text, formWork);
+  work.formSteps += formWork.steps;
+  if (composed) return null;
+  const all = text.split('\n');
+  const kept = keptLines(all, work);
+  if (kept === null) return null;
+  const left = kept.map((i) => all[i]!);
+  for (const line of left) {
+    work.lines += 1;
+    if (line.includes(TAG_OPENS) || line.startsWith('```json')) return null;
+  }
+  // a line inside a segment of the text as it came, or of what is left (R-2: the take-out can free a line from one, or
+  // pair an opening tag with another closing tag): either marking only adds skips
+  const asCame = pastedBodies(all, work);
+  const asLeft = pastedBodies(left, work);
+  const lines = left.map((line, i) => {
+    work.lines += 1;
+    return { line, grants: asCame[kept[i]!] || asLeft[i] ? [] : readConsents(line) };
+  });
+  return lines.some((line) => line.grants.length > 0) ? lines : null;
+}
+
+// Which lines are inside a pasted segment, as `PASTED_BLOCK` finds segments (the terminal's frame, as the transcript's
+// `splitPastedSegments` reads it): from a line that ends with an opening tag to the first line, at least two after it,
+// that begins with the closing tag of the same id, both marked; the next segment is looked for from that line. Linear:
+// every line is looked at once in each of the two passes, and each closing line once more as a segment passes it.
+// The one definition: the envelope slicer marks its pasted lines with it too (`readAnswerEnvelopesWithCost`).
+const OPENING_TAG = /^<pasted_content id="([0-9a-f]{4})">$/;
+const CLOSING_TAG = /^<\/pasted_content id="([0-9a-f]{4})">$/;
+const OPENING_TAG_LENGTH = '<pasted_content id="abcd">'.length;
+const CLOSING_TAG_LENGTH = '</pasted_content id="abcd">'.length;
+function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
+  const closings = new Map<string, number[]>();
+  lines.forEach((line, i) => {
+    work.lines += 1;
+    const id = CLOSING_TAG.exec(line.slice(0, CLOSING_TAG_LENGTH))?.[1];
+    if (id === undefined) return;
+    const ends = closings.get(id);
+    if (ends === undefined) closings.set(id, [i]);
+    else ends.push(i);
+  });
+  const passed = new Map<string, number>();
+  const pasted = lines.map(() => false);
+  for (let i = 0; i < lines.length; ) {
+    work.lines += 1;
+    const id = OPENING_TAG.exec(lines[i]!.slice(-OPENING_TAG_LENGTH))?.[1];
+    const ends = id === undefined ? undefined : closings.get(id);
+    let k = ends === undefined ? 0 : (passed.get(id!) ?? 0);
+    while (ends !== undefined && k < ends.length && ends[k]! < i + 2) {
+      work.lines += 1;
+      k += 1;
+    }
+    if (ends !== undefined) passed.set(id!, k); // the place kept whether or not a segment closes, so no closing line is passed twice
+    if (ends === undefined || k === ends.length) {
+      i += 1;
       continue;
     }
-    if (typeof subject === 'string' && consentMessage(kind, subject) === text) return { class: 'consent', kind, subject };
+    const end = ends[k]!;
+    for (let line = i; line <= end; line += 1) {
+      work.lines += 1;
+      pasted[line] = true;
+    }
+    i = end;
   }
-  return null;
+  return pasted;
 }
 
 type Read = { arrivals: Arrival[]; open: OpenArrivals };
@@ -267,11 +417,10 @@ function personsPrompt(row: Json, text: string): Arrival[] {
   return personsText(text);
 }
 
+// MAWS's answer envelope is read on the whole text; a text that is one is never a grant, nor are its lines (U1c).
 function personsText(text: string): Arrival[] {
-  const consent = consentOf(text);
-  if (consent !== null) return [consent];
   const answer = readAnswerEnvelope(text);
-  return answer === null ? [] : [answer];
+  return answer === null ? personsGrants(text) : [answer];
 }
 
 /** A row or a queued command of the peer origin (or a teammate's, which has none): the engine's inbox. */
@@ -311,7 +460,12 @@ function inboxPeer(text: string, origin: Json | null, frame: string | null, via:
   ];
 }
 
-/** A row of the bridge's plugin: its answer prompt, its wake, or a delivery it submitted as the user or appended into the running turn. */
+/**
+ * A row of the bridge's plugin: its answer prompt, its wake, or a delivery it submitted as the user or appended into the
+ * running turn. UX wave U1c (M4, Interfaces §C, 6): a row a bridge plugin submitted as the user whose whole text is the
+ * grant is the grant it carried for the person (MAWS's "Approve and retry" through the terminal's bridge, probe T); a
+ * row that opens with a sminos frame line is read as the delivery it is, before this.
+ */
 function pluginRow(row: Json): Arrival[] {
   const answers = answersOf(row);
   if (answers.length > 0) return answers;
@@ -325,8 +479,14 @@ function pluginRow(row: Json): Arrival[] {
   }
   const text = deliveredText(prompts);
   const delivery = text === null ? null : framedDelivery(text, 'bridge', appended);
-  return delivery === null ? [] : [delivery];
+  if (delivery !== null) return [delivery];
+  if (appended || !isBridgePlugin(object(row.origin)?.name)) return [];
+  // the grant is the row's whole content, every block of it (never its first text block alone): a string, or text
+  // blocks alone, joined by a line break as the reader joins them everywhere, so that only one block can hold it
+  const whole = typeof prompts.content === 'string' ? prompts.content : textBlocksText(prompts.content);
+  return whole === null ? [] : readConsents(whole);
 }
+const isBridgePlugin = (name: unknown): boolean => (BRIDGE_PLUGINS as readonly unknown[]).includes(name);
 
 /**
  * A delivery whose text opens with sminos's whole frame line, the words after it: the person's own when the frame names
@@ -366,9 +526,17 @@ function scheduledRow(row: Json, text: string, open: OpenArrivals): Read {
 function attachmentRow(row: Json, open: OpenArrivals): Read {
   const attachment = object(row.attachment);
   if (attachment?.type === 'hook_additional_context') return { arrivals: answersOf(row), open };
-  if (attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return none(open);
-  const prompt = attachment.prompt;
+  if (attachment?.type !== 'queued_command') return none(open);
   const origin = object(attachment.origin);
+  const persons = origin?.kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
+  if (typeof attachment.prompt !== 'string') {
+    // UX wave U1c (M4, Interfaces §C, 7): a prompt of the person's whose content is text blocks alone, the form the
+    // reader of another machine's rows gives a row a sminos bridge appended into the running turn (`steerAsDrawn`),
+    // is read for the grant whole, as the bridge's words are on every route (§C, 6 and 8)
+    const text = persons ? textBlocksText(attachment.prompt) : null;
+    return text === null ? none(open) : { arrivals: readConsents(text), open };
+  }
+  const prompt = attachment.prompt;
   if (attachment.commandMode === 'task-notification') {
     if (attachment.isMeta === true) return none(open); // context, as the backfill reads it today
     const notifications = notificationText(prompt, origin?.kind ?? 'task-notification');
@@ -386,8 +554,14 @@ function attachmentRow(row: Json, open: OpenArrivals): Read {
     const delivery = framedDelivery(prompt, 'bridge', true);
     return { arrivals: delivery === null ? [] : [delivery], open };
   }
-  if (origin?.kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true) return { arrivals: personsText(prompt), open };
+  if (persons) return { arrivals: personsText(prompt), open };
   return none(open);
+}
+
+/** The text of content that is text blocks and nothing else, one or more; null for any other. */
+function textBlocksText(content: unknown): string | null {
+  if (!Array.isArray(content) || content.length === 0 || !content.every((block) => object(block)?.type === 'text' && typeof object(block)!.text === 'string')) return null;
+  return messageText(content.filter(isBlock));
 }
 
 /** The answers a plugin's prompt or a hook's context delivers, one arrival each, in order (rule 3). */

@@ -12,16 +12,29 @@
 // replay under the last one's uuid holds all their texts. The replay is told from an echo by its content's length and
 // hash (a waiting message may hold a 32 MiB document, so the content itself is not kept), and the prompts it joins are
 // the host's whose `started` arrived since the turn's last output.
+//
+// The marks a joined message keeps (UX wave U1c, docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md,
+// Design 2 and Interfaces §C, 4). The host remembers the consent marks it put on each frame it wrote, and the joined
+// message carries every member's, in the joined order: nothing is read from the joined text, so no text gains a mark it
+// did not have. A member's own replay comes before the joined one (u1c-b-twoend-1: 400, then 405), so the marks outlive
+// that echo; they go when a join takes them, when the prompt is withdrawn or dropped, once it started and the main lane
+// answered (it can be joined no more), and past a bound.
+import type { Arrival } from '@shared/engine/arrival';
 import type { MessageUuid } from '@shared/graph/ids';
+
+type Consent = Extract<Arrival, { class: 'consent' }>;
 
 export interface SendNowState {
   sentNow: Set<MessageUuid>;
   stopAsked: boolean;
   written: Map<MessageUuid, string>; // a host-written prompt the engine has not replayed: its content's digest
   startedSinceOutput: MessageUuid[]; // the host's prompts whose `started` arrived since the main lane's last output
+  marks: Map<MessageUuid, Consent[]>; // UX wave U1c: the consent marks the host put on a prompt it wrote, until no join can take them
 }
 
-export const noSendNow = (): SendNowState => ({ sentNow: new Set(), stopAsked: false, written: new Map(), startedSinceOutput: [] });
+export const noSendNow = (): SendNowState => ({ sentNow: new Set(), stopAsked: false, written: new Map(), startedSinceOutput: [], marks: new Map() });
+
+const MARKS_KEPT = 64; // waiting prompts that carry a grant; the oldest is forgotten past it
 
 // An `out` control request: a send-now request adds its message; a plain interrupt while a turn is open is a stop asked.
 export function interruptWritten(state: SendNowState, request: { subtype: string; send_now?: unknown; message_uuid?: unknown }, turnOpen: boolean): void {
@@ -45,12 +58,29 @@ export function promptWritten(state: SendNowState, uuid: MessageUuid, content: u
   state.written.set(uuid, contentDigest(content));
 }
 
+// UX wave U1c: the consent marks the host put on a prompt it wrote, for a join that may take it.
+export function marksWritten(state: SendNowState, uuid: MessageUuid, marks: readonly Consent[]): void {
+  if (marks.length === 0) return;
+  state.marks.delete(uuid);
+  state.marks.set(uuid, [...marks]);
+  if (state.marks.size > MARKS_KEPT) state.marks.delete(state.marks.keys().next().value!);
+}
+
+// UX wave U1c: the marks a joined message carries, each member's in the joined order and then its own; taken.
+export function joinedMarks(state: SendNowState, uuid: MessageUuid, joined: readonly MessageUuid[]): Consent[] {
+  const members = [...joined, uuid];
+  const marks = members.flatMap((member) => state.marks.get(member) ?? []);
+  for (const member of members) state.marks.delete(member);
+  return marks;
+}
+
 // A `command_lifecycle` naming a sent-now message: read in the same turn (`started` while a turn is open), withdrawn or
 // dropped, it no longer ends a turn. A prompt withdrawn or dropped is never replayed, so its digest goes too.
 export function lifecycleSeen(state: SendNowState, uuid: MessageUuid, lifecycle: string, turnOpen: boolean): void {
   const gone = lifecycle === 'cancelled' || lifecycle === 'discarded' || lifecycle === 'refused';
   if ((lifecycle === 'started' && turnOpen) || gone) state.sentNow.delete(uuid);
   if (gone) state.written.delete(uuid);
+  if (gone) state.marks.delete(uuid); // UX wave U1c
 }
 
 // A host-written prompt the engine started.
@@ -60,7 +90,9 @@ export function promptStarted(state: SendNowState, uuid: MessageUuid): void {
 
 // The main lane's output: an assistant message, a tool's result, or a turn's result.
 export function outputSeen(state: SendNowState): void {
-  if (state.startedSinceOutput.length > 0) state.startedSinceOutput = [];
+  if (state.startedSinceOutput.length === 0) return;
+  for (const uuid of state.startedSinceOutput) state.marks.delete(uuid); // UX wave U1c: no join can take it now
+  state.startedSinceOutput = [];
 }
 
 // At a main-lane end that is not an echo's receipt: whether it is marked, and the set and the stop emptied.

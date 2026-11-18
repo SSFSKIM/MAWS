@@ -16,11 +16,12 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { askedSteerStopJournal, asyncAsk, invoke, launchReady, queueInterruptJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { consentMessage } from '../src/shared/engine/arrival';
+import { askedSteerStopJournal, asyncAsk, blockedTurnJournal, invoke, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
 import { askSteerText } from '../src/shared/maws/ask';
@@ -996,6 +997,168 @@ test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers
   }
   await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
   expect((await queueOf(page, id)).paused).toBe(true);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U1c: "Approve and retry" under a call auto mode blocked --------------------------------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, §H, M5's scenes; each runs alone on a Mac before
+// its group.) Each draws its session's transcript above the composer as U4a's scenes do, the pane spanning the page; the
+// page registers the control as App.tsx does. What the press wrote is read from the engine host's journal of the launch
+// (the replay matches a `user` write by its type). The probe's tool use ids name the rows: a cell's id is its call's.
+
+const MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"'; // the probe's blocked command
+const APPROVE = 'Approve and retry';
+const cellIn = (page: Page, toolUseId: string) => transcriptOf(page, 0).locator(`[data-cell-id="cell:${toolUseId}"]`);
+const labelOf = (cell: Locator) => cell.locator('.transcript-cell-label');
+const grantsWritten = async (page: Page, id: string, subject: string) => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.message?.content === consentMessage('command', subject));
+
+// A replayed session in the wide transcript pane, its prompt sent.
+async function blockedSession(page: Page, id: string, journal: string, prompt: string): Promise<void> {
+  await openComposerPage(page);
+  await launchReady(page, id, journal);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true, wide: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(prompt);
+  await page.keyboard.press('Enter');
+  await expect(messageIn(page, 0), 'the box is cleared by the send').toHaveText('');
+}
+
+// The transcript read from its top, so a row of the first turn is drawn: a wheel stops it following the tail, as a person's would.
+const toTop = (page: Page) =>
+  transcriptOf(page, 0).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+
+// A cell of the newest turn, which folded when it ended: its line opened until the cell is drawn.
+async function inNewestTurn(page: Page, toolUseId: string): Promise<Locator> {
+  const cell = cellIn(page, toolUseId);
+  await expect(async () => {
+    const line = transcriptOf(page, 0).locator('.transcript-divider .transcript-disclosure').last();
+    if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
+    await expect(cell).toBeVisible({ timeout: 1_000 });
+  }, 'the newest turn opened to its cell').toPass();
+  return cell;
+}
+
+// S1 (Acceptance 1, 13): `u1-soft-seeded-1`, the block (seq 32 to 36) in the prompt's turn, the grant the press writes
+// (48), the turn it opens and the retry that runs (66 to 70).
+test('U1c S1: a blocked command reads its short label with the button under its whole line; the press writes the engine’s grant, "You approved" is drawn, the row reads approved and the retry runs', async ({ editor }, testInfo) => {
+  const { page } = editor;
+  const id = 'u1c-approve';
+  await blockedSession(page, id, recordedBlockJournal(scratch, id, 'u1-soft-seeded-1'), 'Run the marker command.');
+  const transcript = transcriptOf(page, 0);
+
+  // the block's turn ends and folds; its line counts the block, and the count opens the row
+  const count = transcript.getByRole('link', { name: '1 auto-denied' });
+  await expect(count).toBeVisible();
+  await count.click();
+  const row = cellIn(page, 'toolu_01JqskAh583hVgaieABZQ9yn');
+  await expect(labelOf(row), 'the short label, no reason: the classifier gave only its stand-in').toHaveText(`Auto mode blocked: ${MARKER}`);
+  await expect(row, 'the line names the command whole').toHaveAttribute('data-names-whole', '');
+  await expect(row.locator('.transcript-blocked-subject'), 'so no subject block').toHaveCount(0);
+  const button = row.getByRole('button', { name: APPROVE });
+  await expect(button).toBeEnabled();
+  expect(await labelOf(row).evaluate((el) => ({ whiteSpace: getComputedStyle(el).whiteSpace, clipped: el.scrollWidth > el.clientWidth + 1 })), 'the line wraps, never clips').toEqual({ whiteSpace: 'pre-wrap', clipped: false });
+  const [line, place] = [(await labelOf(row).boundingBox())!, (await button.boundingBox())!];
+  expect(place.y, 'the button stands under the line').toBeGreaterThanOrEqual(line.y + line.height - 1);
+  await expect(transcript, 'the stand-in reason is drawn nowhere').not.toContainText('it gave no explanation');
+  await testInfo.attach('u1c-s1-offered', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+
+  await button.click();
+  await expect.poll(async () => (await grantsWritten(page, id, MARKER)).length, 'the press writes the engine’s sentence once').toBe(1);
+  await expect(transcript.locator('.transcript-consent')).toHaveText(`You approved ${MARKER}`);
+  await expect((await inNewestTurn(page, 'toolu_01SuiSQhK6v2WVoFVJ5DMz9s')), 'the retry ran').toHaveAttribute('data-status', 'done');
+  await toTop(page);
+  await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${MARKER} · approved`);
+  await expect(row.getByRole('button', { name: APPROVE }), 'an approved row offers no button').toHaveCount(0);
+  await testInfo.attach('u1c-s1-approved', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+  expect(await grantsWritten(page, id, MARKER), 'one grant, whatever followed').toHaveLength(1);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// S2 (Acceptance 2): `u1-hard-seeded-1`, a rule that always denies: the block (seq 31 to 35), the grant (47), and the
+// retry blocked again in the turn the grant opens (65 to 69).
+test('U1c S2: a retry blocked again reads "Auto mode blocked again", offers the button once more and says in one muted line that such a rule blocks every time', async ({ editor }, testInfo) => {
+  const { page } = editor;
+  const id = 'u1c-again';
+  await blockedSession(page, id, recordedBlockJournal(scratch, id, 'u1-hard-seeded-1'), 'Run the marker command.');
+  const transcript = transcriptOf(page, 0);
+  const counts = transcript.getByRole('link', { name: '1 auto-denied' });
+  await expect(counts).toHaveCount(1);
+  await counts.click();
+  const first = cellIn(page, 'toolu_01AkGpuG3dxh4J2MM2ofSfZ9');
+  await first.getByRole('button', { name: APPROVE }).click();
+  await expect.poll(async () => (await grantsWritten(page, id, MARKER)).length).toBe(1);
+
+  // the turn the grant opened ends blocked again: its own count opens its row
+  await expect(transcript.locator('.transcript-consent')).toHaveText(`You approved ${MARKER}`);
+  await expect(counts).toHaveCount(2);
+  await counts.last().click();
+  const again = cellIn(page, 'toolu_01DFoKqdVo4KipfKh9bopZFU');
+  await expect(labelOf(again)).toHaveText(`Auto mode blocked again: ${MARKER}`);
+  await expect(again.getByRole('button', { name: APPROVE }), 'offered once more').toBeEnabled();
+  await expect(again.getByRole('status')).toHaveText('A rule that always denies this command blocks it every time. Change the rule or the mode to run it.');
+  await testInfo.attach('u1c-s2-blocked-again', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+  await toTop(page);
+  await expect(labelOf(first), 'the first row reads approved').toHaveText(`Auto mode blocked: ${MARKER} · approved`);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// S3 (Acceptance 11, 13): `blockedTurnJournal`, a blocked command of two lines and the call after it still running.
+const TWO_LINES = `${MARKER}\nwc -c marker-1.txt`;
+test('U1c S3: a blocked command of two lines shows its subject whole above the button; pressed while the turn runs, the grant waits at the next step in the stack and greys the button; Delete brings the button back; pressed again, it is read at the running call’s result and the row reads approved', async ({ editor }, testInfo) => {
+  const { page } = editor;
+  const id = 'u1c-during-turn';
+  const prompt = 'Do the two steps of the task, then reply DONE.';
+  await blockedSession(page, id, blockedTurnJournal(scratch, id, prompt, TWO_LINES), prompt);
+  await expect.poll(async () => (await statusOf(page, id)).turn, 'the turn runs on: the call after the block is held').not.toBeNull();
+
+  // the open turn draws the blocked row: the subject the grant quotes, whole, then the button under it
+  const row = cellIn(page, 'toolu_01UhxMDp7hAUYgsRA67ph4Dr');
+  const subject = row.locator('pre.transcript-blocked-subject');
+  await expect.poll(() => subject.textContent(), 'the block holds exactly the command the grant quotes').toBe(TWO_LINES);
+  expect(await row.getAttribute('data-names-whole'), 'a command of two lines is not named on the line').toBeNull();
+  const button = row.getByRole('button', { name: APPROVE });
+  await expect(button).toBeEnabled();
+  const [block, place] = [(await subject.boundingBox())!, (await button.boundingBox())!];
+  expect(place.y, 'the button stands under the subject').toBeGreaterThanOrEqual(block.y + block.height - 1);
+  await testInfo.attach('u1c-s3-subject', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+
+  // pressed while the turn runs: a steer at the next step, waiting in the stack as the line it becomes
+  await button.click();
+  await expect.poll(async () => (await grantsWritten(page, id, TWO_LINES)).map((f) => f.priority)).toEqual(['next']);
+  const waiting = stackOf(page, 0).locator('li[data-queue-state="next"]');
+  await expect(waiting.locator('[data-mark]')).toHaveText('Next step');
+  await expect(waiting.locator('[data-row-text]')).toContainText(`You approved ${MARKER}`);
+  await expect(waiting.locator('[data-row-text]')).toContainText('wc -c marker-1.txt');
+  await expect(waiting.getByRole('button', { name: 'Send now' })).toHaveCount(1);
+  await expect(waiting.getByRole('button', { name: 'Delete' })).toHaveCount(1);
+  await expect(waiting.getByRole('button', { name: 'More' }), 'a grant is not edited or moved').toHaveCount(0);
+  await expect(button, 'greyed while the grant waits').toBeDisabled();
+  await expect(labelOf(row)).not.toHaveText(/· approved$/);
+  await testInfo.attach('u1c-s3-greyed-with-stack', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+
+  // Delete withdraws the steer (the engine's `cancel_async_message` for the grant's write), and the button is back
+  await clickRevealed(waiting, waiting.getByRole('button', { name: 'Delete' }));
+  const [firstWrite] = await grantsWritten(page, id, TWO_LINES);
+  await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'cancel_async_message').map((f) => f.request?.message_uuid)).toEqual([firstWrite!.uuid]);
+  await expect(stackOf(page, 0)).toHaveCount(0);
+  await expect(button, 'the withdrawn grant leaves nothing waiting').toBeEnabled();
+
+  // pressed again: written at the next step, read at the held call's result; the retry runs in the same turn
+  await button.click();
+  await expect.poll(async () => (await grantsWritten(page, id, TWO_LINES)).map((f) => f.priority)).toEqual(['next', 'next']);
+  await expect(transcriptOf(page, 0).locator('.transcript-consent:not([data-dropped])')).toContainText(`You approved ${MARKER}`);
+  await expect.poll(async () => (await statusOf(page, id)).turn, 'the turn ends').toBeNull();
+  await toTop(page);
+  const count = transcriptOf(page, 0).getByRole('link', { name: '1 auto-denied' });
+  await count.click(); // the ended turn folded its work: the count opens it again
+  await expect(labelOf(row)).toHaveText(/ · approved$/);
+  await expect(row.getByRole('button', { name: APPROVE })).toHaveCount(0);
+  await expect(cellIn(page, 'toolu_01QgESWU7YNR7Dsx71taDieF'), 'the retry ran').toHaveAttribute('data-status', 'done');
+  await testInfo.attach('u1c-s3-approved', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
   expect(editor.consoleErrors()).toEqual([]);
 });
 

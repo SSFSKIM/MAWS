@@ -15,6 +15,7 @@ import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
+import { showsAutoModeBlock } from './blocked'; // UX wave U1c (Decision Log 46)
 import { cellOf, editCounts, engineRefusalOf, filePathOf, movedToBackground, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { artifactTitlesOf, type ArtifactTitles } from './cells'; // UX wave U2
@@ -34,6 +35,7 @@ import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { consentMessage, personsLines } from '@shared/engine/arrival'; // UX wave U1c; rule R
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
@@ -183,7 +185,9 @@ const isUnread = (row: Row): boolean => row.kind === 'user' && row.unread === tr
 // UX wave U4a (decision 12): a mount with a stack (`'stacked'`) draws a message there while it is unread, so no row
 // marked unread either.
 export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[], waiting?: 'stacked'): Row[] {
-  const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
+  // UX wave U1c: an approval row drawn beside a message goes with it (`beside`)
+  const ofMessage = (row: RowOf<'user'>) => row.messageUuid ?? row.beside ?? null;
+  const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && ofMessage(row) !== null && withdrawn.has(ofMessage(row)!) && (row.dropped || row.pending !== undefined)));
   const read = waiting === 'stacked' && kept.some(isUnread) ? kept.filter((row) => !isUnread(row)) : kept;
   return tail.length === 0 ? read : [...read, ...tail];
 }
@@ -296,7 +300,8 @@ type Item =
   | { kind: 'later'; row: () => Row } // E7: a message or listing row, filled once the turn's results and agents are known
   | { kind: 'artifact'; toolUseId: ToolUseId } // E2: as E1's, for an artifact call
   | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
-  | { kind: 'message'; toolUseId: ToolUseId }; // P4-R7: a message tool's call, a message or (refused) a cell
+  | { kind: 'message'; toolUseId: ToolUseId } // P4-R7: a message tool's call, a message or (refused) a cell
+  | { kind: 'advisory'; toolUseId: ToolUseId; row: RowOf<'error'> }; // UX wave U1c: the engine's advisory for a refused call, drawn unless that call's own row says it
 
 // UX wave U3: the questions of an ask call, by its tool-use id, for the words of an answer's line
 type CallQuestions = (call: string) => ReadonlyArray<{ question: string; header?: string }> | null;
@@ -407,6 +412,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (block.completeEventId) byComplete.set(block.completeEventId, block);
   }
   let user: RowOf<'user'> | null = null;
+  let userBeside: RowOf<'user'>[] = []; // UX wave U1c: the approval rows beside the opening message, after it
   let model: string | null = null;
   let retry: RowOf<'error'> | null = null;
   let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
@@ -460,16 +466,38 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
   const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
-  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
-    const text = envelopesAnsweredHere(event) ? attachmentsAlone(event) : userTextOf(event.content);
+  // U1c: a row drawn from given content (the words beside a message's grants, an approval's sentence) draws that content
+  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false, content?: Event<'user.message'>['content']): RowOf<'user'> => {
+    const text = content !== undefined ? userTextOf(content) : envelopesAnsweredHere(event) ? attachmentsAlone(event) : userTextOf(event.content);
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
       ...(turn.waited && turn.state === 'open' && !turn.accepted && !openerDropped && !steer && { unread: true as const }), // UX wave U4a (decision 12)
       ...anchorOf(text), // E3
-      ...consentOf(event), // UX wave U3 (decision 10)
     };
   };
+  // UX wave U3 (decision 10); U1c (the U1c document, Design 2 and Interfaces §C, 5): the rows of a person's message. A
+  // message that carries consent marks is drawn by its lines: the bubble for its other words, the grant lines taken out,
+  // and one approval row per mark after it, in order (an approval row beside its message is no point to rewind to and no
+  // prompt to edit); with no other words the first mark takes the message's own row. When the lines do not give exactly
+  // the marks, the bubble keeps the whole text and every mark still gets its row, so no approval is lost to a text this
+  // rule did not foresee. One mark on a text that is its sentence is the one row it always was.
+  // U1c (Decision Log 45): an approval row says the engine started its message only when its turn is accepted (the
+  // message's `turn.started`, or its `started` folding it into the running turn); in every other state it waits
+  const started = turn.accepted ? { started: true as const } : {};
+  const messageRows = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'>[] => {
+    const marks = consentMarks(event);
+    if (marks.length === 0) return [userRow(event, id, editable, steer)];
+    const beside = (from: number) => marks.slice(from).map((mark, n): RowOf<'user'> => ({
+      ...userRow(event, rowId.grant(event.messageUuid ?? event.id, from + n), false, steer, consentMessage(mark.kind, mark.subject)), messageUuid: null, consent: mark, ...started,
+      ...(event.messageUuid !== null && { beside: event.messageUuid }),
+    }));
+    const words = wordsBesideGrants(event.content, marks);
+    if (words === undefined) return [userRow(event, id, editable, steer), ...beside(0)];
+    if (words === null) return [{ ...userRow(event, id, editable, steer), consent: marks[0]!, ...started }, ...beside(1)];
+    return [userRow(event, id, editable, steer, words), ...beside(0)];
+  };
+  const openingRows = ([first, ...beside]: RowOf<'user'>[]): [RowOf<'user'>, RowOf<'user'>[]] => [first!, beside];
   // UX wave U3 (UC-2, "Where a row sits"; the U3a document, decision 5): the items an arrival made, by its class, and
   // those that came before any of the turn's work (head.ts, the reducer's reading too), so the resolution pass can place
   // them
@@ -565,11 +593,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (answersHeldAsk(event)) {
           // an async ask's answer: its capsule draws it (above)
         } else if (event.messageUuid !== null && opensTurn(event, turn.id) && user === null && !dropped(event.messageUuid)) {
-          user = userRow(event, rowId.user(event.messageUuid), true);
+          [user, userBeside] = openingRows(messageRows(event, rowId.user(event.messageUuid), true));
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
-          user = userRow(event, rowId.userOfEvent(event.id), false);
+          [user, userBeside] = openingRows(messageRows(event, rowId.userOfEvent(event.id), false));
         } else if (!event.isSynthetic && !isInterruptionMarker(event.origin, event.content) && !dropped(event.messageUuid)) {
-          items.push({ kind: 'steer', row: userRow(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true) });
+          for (const row of messageRows(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true)) items.push({ kind: 'steer', row });
         }
         break;
       }
@@ -810,7 +838,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       case 'notice.posted':
         if (isHistoryGap(event)) items.push({ kind: 'row', row: gapRow(event, turn.id) }); // P5 O7 M2
-        else if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
+        else if (!supersededByHookRow(event)) {
+          const advised = advisedCall(event); // UX wave U1c (Design 1, ruling F6)
+          items.push(advised === null ? { kind: 'row', row: noticeRow(event, event.text, turn.id) } : { kind: 'advisory', toolUseId: advised, row: noticeRow(event, event.text, turn.id) });
+        }
         break;
       case 'plugin.log':
       case 'plugin.load_issue':
@@ -875,6 +906,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
   // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class
   const heads = new Map<(typeof resolved)[number], Arrival['class']>();
+  const advisories = new Map<(typeof resolved)[number], ToolUseId>(); // UX wave U1c: each advisory's entry, by the call it names
   for (const item of items) {
     const from = resolved.length;
     const arrivalClass = arrivals.get(item);
@@ -912,6 +944,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'later': // E7
         resolved.push({ kind: 'row', row: item.row() });
         break;
+      case 'advisory': // UX wave U1c (Design 1, ruling F6; Decision Log 46): left out below where its call's drawn row shows the block
+        resolved.push({ kind: 'row', row: item.row });
+        advisories.set(resolved[resolved.length - 1]!, item.toolUseId);
+        break;
       case 'artifact': // E2
         resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id, context) });
         break;
@@ -938,6 +974,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push(item);
     }
     if (arrivalClass !== undefined && atHead.has(item)) for (const entry of resolved.slice(from)) heads.set(entry, arrivalClass);
+  }
+  // UX wave U1c (Decision Log 46): an advisory is left out only where the row drawn for its call shows the block; one
+  // predicate over that row (showsAutoModeBlock) decides, so a row kind that does not carry the block keeps its advisory
+  if (advisories.size > 0) {
+    const showsBlock = new Set(resolved.flatMap((entry) => (entry.kind === 'cell' && entry.cell.toolUseId !== null && showsAutoModeBlock(entry.cell) ? [entry.cell.toolUseId] : [])));
+    for (let i = resolved.length - 1; i >= 0; i -= 1) {
+      const call = advisories.get(resolved[i]!);
+      if (call !== undefined && showsBlock.has(call)) resolved.splice(i, 1);
+    }
   }
   // A task's end with an outcome and a scheduled fire that came before the turn's work stand above its divider, where a
   // prompt stands (above the prompt, in a turn the person's prompt opened); every other arrival there is the first row
@@ -1004,7 +1049,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // E11: the engine's process ended it; UX wave U4a (Interfaces B): a message sent now ended it
   const cause = turn.closedCause ?? (turn.ended?.endedForMessage === true ? 'message' : null);
   const rows: Row[] = [...above];
-  if (user) rows.push(user);
+  if (user) rows.push(user, ...userBeside);
   // The divider summarises a work area. UX wave U2 (O-15, l2-transcript-04): a turn in which nothing was done has no
   // line, whoever started it (an arrival's line already names a turn the person did not start); a turn the engine
   // accepted keeps one while it runs and when stopped, even with only partial text or no output. A pending prompt has
@@ -1564,11 +1609,29 @@ function callQuestions(turn: TurnState | null, state: TranscriptState | null, ca
   return Array.isArray(questions) ? questions.map(record).filter((q) => typeof q.question === 'string').map((q) => ({ question: str(q.question), header: str(q.header) })) : [];
 }
 
-// UX wave U3 (decision 10): the consent an "Approve and retry" prompt carries, for its user row.
-function consentOf(event: Event<'user.message'>): Pick<RowOf<'user'>, 'consent'> {
-  if (event.isSynthetic) return {};
-  const consent = carriedOf(event.arrival).find((entry) => entry.class === 'consent');
-  return consent === undefined ? {} : { consent: { kind: consent.kind, subject: consent.subject } };
+// UX wave U3 (decision 10); U1c: the consents an "Approve and retry" message carries, in order, for its rows.
+function consentMarks(event: Event<'user.message'>): NonNullable<RowOf<'user'>['consent']>[] {
+  if (event.isSynthetic) return [];
+  return carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [{ kind: entry.kind, subject: entry.subject }] : []));
+}
+
+// UX wave U1c (Interfaces §C, 5): the person's words beside the grants a message's lines hold, when those grants are
+// exactly its marks, matched by the reader and nothing looser: null when no other line holds a character; undefined
+// when the lines do not give the marks, when the content holds anything but text (an image, a document: the whole
+// bubble keeps it), or when the words cannot be told apart from content that is not one string. The lines read are the
+// person's as the reader gives them (`personsLines`, rule R): MAWS's answer envelopes the engine joined in are no words
+// of theirs, so an envelope joined with grants and nothing else leaves no bubble, and a pasted segment's lines are
+// words, never grants. A message rule R reads no grant in (the host marked a grant it wrote, which the engine joined with
+// an earlier build's envelope) keeps its whole bubble, beside its approval rows.
+function wordsBesideGrants(content: string | ContentBlock[], marks: readonly NonNullable<RowOf<'user'>['consent']>[]): string | null | undefined {
+  if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return undefined;
+  const lines = personsLines(messageText(content));
+  if (lines === null) return undefined;
+  const grants = lines.flatMap((line) => line.grants);
+  if (grants.length !== marks.length || grants.some((grant, i) => grant.kind !== marks[i]!.kind || grant.subject !== marks[i]!.subject)) return undefined;
+  const others = lines.filter((line) => line.grants.length === 0).map((line) => line.line);
+  if (others.every((line) => line.trim() === '')) return null;
+  return typeof content === 'string' ? others.join('\n') : undefined;
 }
 
 function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, context: TurnContext): RowOf<'agent_list'> {
@@ -1751,6 +1814,11 @@ function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): R
 // occurred · ctrl+o to see", also sent when a Stop hook re-prompts) and the informational "UserPromptSubmit operation
 // blocked by hook: …" (2.1.283 cli.pretty.js 807758, 919121).
 const supersededByHookRow = (event: Event<'notice.posted'>) => event.key === 'stop-hook-error' || event.text.startsWith('UserPromptSubmit operation blocked by hook:');
+// UX wave U1c (Design 1, ruling F6): the call the engine's advisory for a refusal names (`permission_denied:<tool use id>`,
+// normalizer-system.ts); the turn draws it unless the turn's results say auto mode blocked that call, whose row then
+// says it on every route (a transcript file has no advisory)
+const ADVISORY_KEY = 'permission_denied:';
+const advisedCall = (event: Event<'notice.posted'>): ToolUseId | null => (event.key?.startsWith(ADVISORY_KEY) ? (event.key.slice(ADVISORY_KEY.length) as ToolUseId) : null);
 
 // P5 O7 M2: the gap bar, where the transcript's source put its event (model/gap.ts).
 function gapRow(event: Event<'notice.posted'>, turnId: TurnId | null): RowOf<'gap'> {

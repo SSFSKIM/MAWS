@@ -17,6 +17,9 @@ import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; 
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U3
 
+/** UX wave U1c: what a grant names (the U1c document, Interfaces §B); here with the row types, so they need nothing of `blocked.ts`. */
+export interface BlockedCall { kind: 'command' | 'call'; subject: string }
+
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
 export type CellId = string & z.$brand<'CellId'>; // `cell:<toolUseId>`; `cell:think:<apiMessageId>:<blockIndex>`; `cell:reads:<firstToolUseId>` for a merged read cell
@@ -73,6 +76,13 @@ export type Row = RowBase &
         // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): the prompt is MAWS's "Approve and retry" for
         // a call auto mode blocked, drawn as one line of the person's act, never a bubble; absent on every other prompt
         consent?: { kind: 'command' | 'call'; subject: string };
+        // UX wave U1c (the U1c document, Design 2): on an approval row drawn beside a message (its own `messageUuid` is
+        // null: no point to rewind to, no prompt to edit), the message it stands beside, so the rows go where it goes
+        beside?: MessageUuid;
+        // UX wave U1c (Decision Log 45): on an approval row, the engine has started its message (its turn accepted); the
+        // one sign by which its blocked call reads approved, absent in every state before that and in any the model
+        // cannot place
+        started?: true;
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true; reportOnly?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through; reportOnly (UX wave U2b): set by the mirror alone, on a closed stretch's head, whose words outside its messages are out of sight
     | {
@@ -297,6 +307,8 @@ export interface Cell {
   // UX wave U2 (decision 13): why a failed call failed, the first line of its error, which its row draws after the label;
   // only on a cell whose status is `error` (a refused call says why in its label, a stopped one did not fail)
   error?: string;
+  /** UX wave U1c: what a grant for this call names; present only on a call auto mode blocked that has a name. */
+  blocked?: BlockedCall;
 }
 
 export type CellDetail =

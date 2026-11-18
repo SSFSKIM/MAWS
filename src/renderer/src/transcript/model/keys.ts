@@ -20,6 +20,9 @@ export const rowId = {
   timeOfRow: (loose: RowId) => row(`time:${loose}`), // a separator before a loose row (one outside any turn)
   user: (uuid: MessageUuid) => row(`user:${uuid}`),
   userOfEvent: (id: EventId) => row(`user:${id}`),
+  // UX wave U1c (Interfaces §C, 5): the n-th grant of a person's message drawn as an approval row beside it, keyed by the
+  // message's uuid (its event's id when it has none) and the grant's place among the message's marks
+  grant: (message: MessageUuid | EventId, n: number) => row(`grant:${message}:${n}`),
   text: (apiMessageId: ApiMessageId, blockIndex: number) => row(`text:${blockIdentity(apiMessageId, blockIndex)}`),
   think: (apiMessageId: ApiMessageId, blockIndex: number) => row(`think:${blockIdentity(apiMessageId, blockIndex)}`),
   divider: (turn: TurnId) => row(`divider:${turn}`),

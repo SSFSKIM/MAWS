@@ -21,7 +21,8 @@ import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOpt
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
-import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, nestedAgentRecords, pluginStopNoteRecord, queuedNotificationRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
+import { consentMessage } from '../src/shared/engine/arrival';
+import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, nestedAgentRecords, pluginStopNoteRecord, probeTerminalRecords, queuedNotificationRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
 import { menu } from './support/menu';
 import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
@@ -141,18 +142,19 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   });
 
   // A launch over an engine store holding the session's transcript (one exchange, then the rows `more` gives after its
-  // answer), the session in the sidebar.
-  async function begin(more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => []): Promise<Case> {
+  // answer; or, UX wave U1c, the rows `seed` gives in their place), the session in the sidebar.
+  async function begin(more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => [], seed?: (sid: string, cwd: string) => Record<string, unknown>[]): Promise<Case> {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const sid = randomUUID();
     const prompt = randomUUID();
     const answer = randomUUID();
-    const transcript = await store.addTranscript(repo.root, sid, [
-      JSON.stringify(userRecord(sid, repo.root, prompt, null, 'Tell me a story.', T0)),
-      JSON.stringify(assistantRecord(sid, repo.root, answer, prompt, 'A short one, then.', '2026-10-28T10:00:02.000Z')),
-      ...more(sid, repo.root, answer).map((row) => JSON.stringify(row)),
-    ]);
+    const rows = seed?.(sid, repo.root) ?? [
+      userRecord(sid, repo.root, prompt, null, 'Tell me a story.', T0),
+      assistantRecord(sid, repo.root, answer, prompt, 'A short one, then.', '2026-10-28T10:00:02.000Z'),
+      ...more(sid, repo.root, answer),
+    ];
+    const transcript = await store.addTranscript(repo.root, sid, rows.map((row) => JSON.stringify(row)));
     const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome } });
     const { page } = maws;
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
@@ -1400,6 +1402,187 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(decided(bridge), 'one decision, the dismissal').toEqual([{ request: record.call, behavior: 'dismiss', ...AS_MAWS }]);
     expect(bridge.commands.slice(commandsAtDismiss).map((cmd) => cmd.op).filter((op) => op !== 'read' && op !== 'ping'), 'no command after the dismissal').toEqual([]);
     await expect(end(page)).toHaveCount(0);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // ---- UX wave U1c: "Approve and retry" on a terminal session (S4) -----------------------------------------------------
+  // (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, §H S4, Acceptance 7a to 7c; Decision Log 11, 36 to
+  // 39.) Probe T's recorded transcripts (`probeTerminalRecords`): the session's file holds a run to the moment of the press,
+  // the press reaches the fake bridge, and the scene writes the rows the bridge and the engine wrote after it, as recorded,
+  // in that state, in steps that stop at the state's read boundary (findings-uxwave-u1c-terminal-grant.txt; Decision Log 38
+  // and 39): idle, the row the bridge submitted; running, the running call's result; stopped, the bridge's wake. Every
+  // state is offered (`TERMINAL_OFFERED`, M4), and each part first asserts the state the window recognises. The run's
+  // lines are the findings' numbers.
+  const BLOCKED_MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"'; // run 1 of each state
+  const APPROVE = 'Approve and retry';
+  const labelOf = (cell: Locator) => cell.locator('.transcript-cell-label');
+  const recordLines = (records: Record<string, unknown>[], from: number, to: number) => records.slice(from - 1, to).map((row) => JSON.stringify(row));
+  // the call auto mode blocked (its result row carries `toolDenialKind: "automode-blocked"`), and the marker's call after the grant
+  const blockedId = (records: Record<string, unknown>[]) => (records.find((row) => row.toolDenialKind === 'automode-blocked')!.message as { content: { tool_use_id: string }[] }).content[0]!.tool_use_id;
+  const retryId = (records: Record<string, unknown>[], after: number) => records.slice(after).flatMap((row) => (row.type === 'assistant' ? (row.message as { content: { type: string; id?: string; input?: { command?: string } }[] }).content : [])).find((block) => block.type === 'tool_use' && block.input?.command === BLOCKED_MARKER)!.id!;
+  // the bridge enters each delivery as the row the recording names, as the bridge's stream tells it (`delivered`, `entered`)
+  const entersAs = (bridge: FakeBridge, uuid: unknown) =>
+    bridge.answer('deliver', (body) => {
+      bridge.emit({ type: 'delivered', key: body.key, outcome: 'submitted' });
+      bridge.emit({ type: 'delivered', key: body.key, outcome: 'entered', uuid });
+      return { status: 200, body: { ok: true, result: { submitted: true } } };
+    });
+  // The blocked row, its turn's count clicked (the ended turn folds its work).
+  async function openBlocked(page: Page, toolUseId: string): Promise<Locator> {
+    const count = main(page).getByRole('link', { name: '1 auto-denied' });
+    await expect(count).toBeVisible({ timeout: 15_000 });
+    await count.click();
+    const row = main(page).locator(`[data-cell-id="cell:${toolUseId}"]`);
+    await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
+    return row;
+  }
+  // The state the window gives the session, as `terminalStateOf` reads it: the bridge's word on the main loop's turn
+  // (`laneA.state`), and, when no turn runs, whether the newest turn's line reads stopped.
+  async function recognisedAs(page: Page, appId: string, state: 'idle' | 'running' | 'stopped'): Promise<void> {
+    await expect.poll(async () => value(await invoke(page, 'laneA.state', { appSessionId: appId }))?.turn, { timeout: 10_000 }).toEqual({ running: state === 'running', unknown: false });
+    if (state !== 'running') await expect(main(page).locator('.transcript-divider .transcript-disclosure').last(), `the newest turn's line reads ${state === 'stopped' ? 'stopped' : 'not stopped'}`).toHaveText(state === 'stopped' ? /^You stopped after/ : /^Worked for/);
+  }
+  // The newest line the session's follower has read, as the window hears it: each `fs.followState` names its chain's
+  // leaf, reported whenever the chain grows. A positive sign of a read where the lines read draw nothing.
+  async function followerLeaves(page: Page, appId: string): Promise<() => Promise<(string | null)[]>> {
+    await page.evaluate((id) => {
+      const w = window as unknown as { __u1cLeaves: (string | null)[] };
+      w.__u1cLeaves = [];
+      window.maws.on('fs.followState', (e) => {
+        if (e.appSessionId === id && e.agentId === null) w.__u1cLeaves.push(e.leafUuid);
+      });
+    }, appId);
+    return () => page.evaluate(() => (window as unknown as { __u1cLeaves: (string | null)[] }).__u1cLeaves);
+  }
+  // At its read boundary: the row reads approved and offers nothing, the grant is the approval's line.
+  async function approvedAt(page: Page, row: Locator): Promise<void> {
+    await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER} · approved`, { timeout: 15_000 });
+    await expect(row.getByRole('button', { name: APPROVE })).toHaveCount(0);
+    await expect(main(page).locator('.transcript-consent')).toHaveText(`You approved ${BLOCKED_MARKER}`);
+  }
+  // After the retry's turn has ended: the retry, in the newest turn (folded when it ended), ran.
+  async function retried(page: Page, retry: string): Promise<void> {
+    const cell = main(page).locator(`[data-cell-id="cell:${retry}"]`);
+    await expect(async () => {
+      const line = main(page).locator('.transcript-divider .transcript-disclosure').last();
+      if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
+      await expect(cell).toBeVisible({ timeout: 1_000 });
+    }, 'the newest turn opened to the retry').toPass();
+    await expect(cell, 'the retry ran').toHaveAttribute('data-status', 'done');
+  }
+
+  test('U1c S4, idle (u1c-t-idle-1): held in the holder’s words before the bridge is live, then offered; the press is one delivery of the grant, and the row the bridge submitted draws the line, the row reads approved and the retry runs', async () => {
+    test.setTimeout(120_000);
+    const run = 'u1c-t-idle-1';
+    const c = await begin(undefined, (sid, cwd) => probeTerminalRecords(run, sid, cwd).slice(0, 49)); // to the block's turn end (48, 49)
+    const { page } = c;
+    const records = probeTerminalRecords(run, c.sid, c.repo.root);
+
+    // the terminal holds it and no bridge answers: read-only, the button held in the holder's words, nothing sent
+    c.terminal = await terminalSession({ store: c.store, sminosHome: c.maws.sminosHome, sessionId: c.sid, cwd: c.repo.root, bridged: false });
+    await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('terminal');
+    await (await sidebarRow(page, { appSessionId: c.appId })).click();
+    await expect(notice(page)).toContainText('read-only');
+    const row = await openBlocked(page, blockedId(records));
+    const button = row.getByRole('button', { name: APPROVE });
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('title', /^Held by /);
+    await test.info().attach('u1c-s4-held', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    // its bridge comes up, the session idle: offered
+    const bridge = await startFakeBridge({ home: c.maws.sminosHome, session: c.sid, pid: c.terminal.pid, sessionInfo: { session: c.sid, cwd: c.repo.root, model: 'claude-opus-4-5', version: '2.1.300' } });
+    bridge.emit({ type: 'catalog', ...CATALOG });
+    const registryOnly = c.terminal;
+    c.terminal = { bridge, pid: registryOnly.pid, close: async () => (await bridge.close(), await registryOnly.close()) };
+    await expect(editor(page)).toBeVisible({ timeout: 15_000 });
+    await recognisedAs(page, c.appId, 'idle');
+    await expect(button).toBeEnabled();
+    await test.info().attach('u1c-s4-idle-offered', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    entersAs(bridge, records[52]!.uuid); // line 53, the row the bridge submitted as the user
+    await button.click();
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
+    await c.store.appendLines(c.transcript, recordLines(records, 50, 53)); // the bridge's submit: the queue's rows (50, 51), a snapshot, the row it submitted (53)
+    await approvedAt(page, row); // read at the row the bridge submitted, which opens its turn
+    await c.store.appendLines(c.transcript, recordLines(records, 54, 61)); // the retry (56, 57), the reply, the turn's end
+    await retried(page, retryId(records, 53));
+    await test.info().attach('u1c-s4-idle-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
+    expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('U1c S4, running (u1c-t-busy-1): offered while a turn runs; the grant the bridge appended waits in the stack at the next step with the button greyed until the running call’s result, then the row reads approved and the retry runs', async () => {
+    test.setTimeout(120_000);
+    const run = 'u1c-t-busy-1';
+    const c = await begin(undefined, (sid, cwd) => probeTerminalRecords(run, sid, cwd).slice(0, 51)); // to the 30 s call (51)
+    const { page } = c;
+    const records = probeTerminalRecords(run, c.sid, c.repo.root);
+    const { bridge } = await drive(c);
+    bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-wait' }); // the bridge says a turn runs
+    const row = await openBlocked(page, blockedId(records));
+    await recognisedAs(page, c.appId, 'running');
+    const button = row.getByRole('button', { name: APPROVE });
+    await expect(button).toBeEnabled();
+
+    entersAs(bridge, records[51]!.uuid); // line 52, the row the bridge appended into the turn
+    await button.click();
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
+    await c.store.appendLines(c.transcript, recordLines(records, 52, 53)); // the appended row and the bridge's mirror line
+    const waiting = main(page).getByRole('region', { name: 'Queued messages' }).locator('li');
+    await expect(waiting.locator('[data-row-text]'), 'the approval waits above the composer as the line it becomes').toHaveText(`You approved ${BLOCKED_MARKER}`, { timeout: 15_000 });
+    await expect(waiting.locator('[data-mark]')).toHaveText('Next step');
+    await expect(button, 'greyed while it waits').toBeDisabled();
+    await expect(labelOf(row), 'not approved before the engine reads it').toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
+    await test.info().attach('u1c-s4-running-waiting', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    await c.store.appendLines(c.transcript, recordLines(records, 54, 54)); // the running call's result (54): the engine reads the grant in the request after it
+    await approvedAt(page, row);
+    await expect(main(page).getByRole('region', { name: 'Queued messages' }), 'nothing waits').toHaveCount(0);
+    await c.store.appendLines(c.transcript, recordLines(records, 55, records.length)); // the request (55), the retry (58, 59), the reply, the turn's end
+    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-wait' });
+    await retried(page, retryId(records, 53));
+    await test.info().attach('u1c-s4-running-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
+    expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('U1c S4, stopped (u1c-t-esc-1): offered after an Esc; the grant the bridge appended is read at the bridge’s wake, then the row reads approved and the retry runs', async () => {
+    test.setTimeout(120_000);
+    const run = 'u1c-t-esc-1';
+    const c = await begin(undefined, (sid, cwd) => probeTerminalRecords(run, sid, cwd).slice(0, 55)); // to the rejected call (54) and the interruption line (55)
+    const { page } = c;
+    const records = probeTerminalRecords(run, c.sid, c.repo.root);
+    const { bridge } = await drive(c);
+    bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-esc' });
+    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-esc', reason: 'aborted' }); // the Esc: no turn runs, the newest reads stopped
+    const row = await openBlocked(page, blockedId(records));
+    await recognisedAs(page, c.appId, 'stopped');
+    const button = row.getByRole('button', { name: APPROVE });
+    await expect(button).toBeEnabled();
+    await test.info().attach('u1c-s4-stopped-offered', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    entersAs(bridge, records[55]!.uuid); // line 56, the row the bridge appended after the Stop
+    await button.click();
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
+    await expect(button, 'the grant is out').toBeDisabled();
+    const leaves = await followerLeaves(page, c.appId);
+    await c.store.appendLines(c.transcript, recordLines(records, 56, 60)); // the appended row (56), the mirror line (57), the queue's rows (58, 59), 60
+    // Lines 56 to 60 draw nothing after a Stop (the grant waits for the wake, the mirror is its second carrier, the rest
+    // carry nothing), so the checkpoint is the follower's: its chain has grown to the mirror line, the last line with a uuid
+    // before the wake, and 58 to 60 came in the same write.
+    await expect.poll(async () => (await leaves()).at(-1), { timeout: 10_000, message: 'the follower has read to the mirror line (57)' }).toBe(String(records[56]!.uuid));
+    // Read, and nothing reads approved: no approval row comes, so the grant out ends by its clock (SETTLE_MS after the
+    // delivery's outcome) and the button is back, the row unapproved and no "You approved" line drawn
+    await expect(button, 'no approval before the wake').toBeEnabled({ timeout: 15_000 });
+    await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
+    await expect(main(page).locator('.transcript-consent')).toHaveCount(0);
+    await test.info().attach('u1c-s4-stopped-before-wake', { body: await main(page).screenshot(), contentType: 'image/png' });
+    await c.store.appendLines(c.transcript, recordLines(records, 61, 61)); // the bridge's wake (61), whose turn reads the grant
+    await approvedAt(page, row);
+    await c.store.appendLines(c.transcript, recordLines(records, 62, records.length)); // the request (62), the retry (70, 71), the reply, the turn's end
+    await retried(page, retryId(records, 56));
+    await test.info().attach('u1c-s4-stopped-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
+    expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 });

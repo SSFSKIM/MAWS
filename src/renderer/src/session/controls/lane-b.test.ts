@@ -8,6 +8,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import { digest, humanTurn, item, record, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { REMOTE_INLINE_MAX_BYTES, REMOTE_TOO_LARGE_WORDS, type RemoteSession } from '@shared/ipc/schema/remote';
@@ -179,6 +180,14 @@ describe('lane B’s compact and background stop answer as controls', () => {
       { appSessionId: APP, content: '/compact keep the file list' },
       { appSessionId: APP, content: '/compact' },
     ]);
+  });
+
+  it('the one-writer rule: Compact’s instructions holding the consent sentence go out reading no grant', async () => {
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q3', messageUuid: UUID } });
+    await laneBControls(null, { appSessionId: APP, client: fake.client }).compact(`keep it\n${TYPED_CONSENT}`);
+    const [sent] = fake.invoked('session.send') as { content: string }[];
+    expect(sent!.content.startsWith('/compact keep it\n')).toBe(true);
+    expectNoGrantSent(sent!.content);
   });
 
   it('keeps a failed compact’s code and words, a timeout included', async () => {

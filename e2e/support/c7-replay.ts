@@ -10,6 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { AskQuestion } from '@shared/maws/tools';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
+import { consentMessage } from '../../src/shared/engine/arrival';
 import { REPO_ROOT } from './launch';
 
 export const replaySpec = (appSessionId: string, replay: string, over: Partial<LaunchSpec> = {}): LaunchSpec => ({
@@ -261,4 +262,65 @@ export function askWaitJournal(dir: string, name: string): string {
 export function sendNowAfterJournal(dir: string, name: string): string {
   const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4b-two-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
   return writeJournal(dir, `${name}-send-now-after`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
+// UX wave U1c (M5, scenes S1 and S2): a call auto mode blocked, its grant and what followed, as the probe recorded them on
+// engine 2.1.322 under MAWS's launch (`uxwave/u1-soft-seeded-1`: the block, the grant, the retry that ran;
+// `uxwave/u1-hard-seeded-1`: the block, the grant, the retry blocked again). C3's prelude stands in for the probe's
+// handshake, and the probe's prompt is the first write; the answer to its thinking-display write goes (the host's own
+// write is answered in its place), and the meta rows with it, the exit included, so the replay waits for the test's end.
+// The replay holds at the grant's `user` write until the press writes it.
+export function recordedBlockJournal(dir: string, name: string, fixture: 'u1-soft-seeded-1' | 'u1-hard-seeded-1'): string {
+  const rows = rowsOf(`spikes/protocol-probe/fixtures/uxwave/${fixture}.jsonl`);
+  const thinking = rows.find((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame.request as { subtype?: string }).subtype === 'set_max_thinking_tokens')!.frame.request_id;
+  const answersThinking = (r: Row) => r.direction === 'in' && r.frame.type === 'control_response' && (r.frame.response as { request_id?: string }).request_id === thinking;
+  const prompt = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'user');
+  const kept = rows.slice(prompt).filter((r) => r.direction !== 'meta' && !answersThinking(r));
+  return writeJournal(dir, `${name}-${fixture}`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...kept]);
+}
+
+// UX wave U1c (M5, scene S3): a blocked command of two lines whose turn runs on, built from `uxwave/u1c-b-1` (engine
+// 2.1.322, probe B: in one turn the model runs the marker command, auto mode blocks it, and a 30 s foreground call
+// follows; the grant written at the next step is read at that call's result, in the same turn). No recording holds a
+// command of two lines, so the recorded command, the grant's sentence for it and the prompt are swapped for the scene's,
+// wherever a frame holds one of them whole; the streamed deltas, the thinking and the task file's read go, so no frame
+// holds the recorded command in part. The prompt's turn, the block (the call, the engine's `permission_denied` and the
+// result marked `automode-blocked`) and the model's step past it, then the held call started (seq 12 to 201). The replay
+// holds there, at the grant written at the next step (the recorded write, seq 137), until the press writes it; then the
+// engine queues it (143), Delete withdraws it as `pass3/steer-next-cancelled` answers a withdrawal (seq 34 to 36), and
+// the second press writes it again under a uuid of its own, which the engine queues. The held call's result, the grant
+// read at it (the replay of its frame and its `started`, 205 and 206), the retry, which runs, and the turn's end follow
+// (202 to 278), naming the second write.
+export function blockedTurnJournal(dir: string, name: string, prompt: string, command: string): string {
+  const recorded = rowsOf('spikes/protocol-probe/fixtures/uxwave/u1c-b-1.jsonl');
+  const at = (seq: number) => recorded.find((r) => r.seq === seq)!;
+  const recordedPrompt = (at(12).frame.message as { content: string }).content;
+  const marker = (at(133).frame.message as { content: { input: { command: string } }[] }).content[0]!.input.command;
+  const first = at(137).frame.uuid as string; // the grant's recorded write
+  const second = '00000000-0000-4000-8000-0000000001c3'; // the second press's write
+  const session = at(15).frame.session_id as string;
+  const scene = swapping([[recordedPrompt, prompt], [marker, command], [consentMessage('command', marker), consentMessage('command', command)]]);
+  const head = [12, 14, 15, 16, 17, 18, 133, 135, 140, 142, 183, 197, 201].map((seq) => scene(at(seq)));
+  const grant = scene(at(137));
+  const queued = at(143);
+  const withdrawal = rowsOf('spikes/protocol-probe/fixtures/pass3/steer-next-cancelled.jsonl')
+    .filter((r) => [34, 35, 36].includes(r.seq))
+    .map(swapping([['d7fade79-6f39-40b6-91f3-9998597857b4', first], ['31f347b4-c94c-4fe7-a295-65e7667a8d76', session]]));
+  const again = [{ ...grant, frame: { ...grant.frame, uuid: second } }, { ...queued, frame: { ...queued.frame, command_uuid: second, uuid: '10000000-0000-4000-8000-0000000001c3' } }];
+  const named = swapping([[first, second]]);
+  const tail = [202, 203, 204, 205, 206, 207, 262, 266, 267, 271, 275, 276, 278].map((seq) => named(scene(at(seq))));
+  const prelude = rowsOf('test/fixtures/engine/replay-handshake.jsonl');
+  const rows = [...head, grant, queued, ...withdrawal, ...again, ...tail].map((row, k) => ({ ...row, seq: prelude.at(-1)!.seq + 1 + k }));
+  return writeJournal(dir, `${name}-blocked-turn`, [...prelude, ...rows]);
+}
+
+// A row with every string value that equals one of the pairs' first members replaced by its second, at any depth.
+function swapping(pairs: [string, string][]): (row: Row) => Row {
+  const map = new Map(pairs);
+  const walk = (value: unknown): unknown =>
+    typeof value === 'string' ? (map.get(value) ?? value)
+      : Array.isArray(value) ? value.map(walk)
+        : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, walk(entry)]))
+          : value;
+  return (row) => ({ ...row, frame: walk(row.frame) as Row['frame'] });
 }
