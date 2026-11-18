@@ -443,7 +443,7 @@ describe('Transcript', () => {
     const boundaryId = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'boundary')!.id;
     const place = () => {
       const element = document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!;
-      return { transform: element.style.transform, index: useTranscriptStore.getState().rows(key).findIndex((row) => row.id === boundaryId) };
+      return { top: element.style.top, index: useTranscriptStore.getState().rows(key).findIndex((row) => row.id === boundaryId) };
     };
     const before = place();
     expect(document.querySelectorAll('[data-muted]')).toHaveLength(0);
@@ -461,6 +461,17 @@ describe('Transcript', () => {
 
   // A turn the owner did not start has no user row, a peer turn as much as an engine turn. UX wave U2 (O-15): one that only
   // answers has no divider either, so the mark goes on the turn's first drawn row, here its answer.
+  // Ruling R8: a row is placed at its start by `top` and carries no transform, under which Chromium placed a sticky box
+  // inside it (a code block's actions row) from the untransformed position, at the bottom of its frame.
+  it('places each row at its start by top, with no transform', async () => {
+    await mounted(deniedThenAnswer());
+    await waitFor(() => expect(document.querySelectorAll('[data-row-id]').length).toBeGreaterThan(2));
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-row-id]')].sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+    expect(rows.map((row) => row.style.transform)).toEqual(rows.map(() => ''));
+    // every row is 40 px high here, and all of them are mounted: each starts where the one before it ends
+    await waitFor(() => expect(rows.map((row) => Number.parseFloat(row.style.top))).toEqual(rows.map((row) => 40 * Number(row.dataset.index))));
+  });
+
   it('a revealed peer turn without a user row says Not in context on its first drawn row', async () => {
     const b = builder();
     b.turn('u1');
@@ -558,7 +569,7 @@ describe('the scroll carried across a card’s float and dock', () => {
   };
   const scroller = () => document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
   const rendered = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')];
-  const startOf = (row: HTMLElement) => Number(/translateY\((-?[\d.]+)px\)/.exec(row.style.transform)![1]);
+  const startOf = (row: HTMLElement) => Number.parseFloat(row.style.top); // a row is placed at its start by `top`
   // happy-dom has no scroll metrics: the scroller's, by hand, and every scroll the list makes kept
   function scrollMetrics() {
     let top = 0;
