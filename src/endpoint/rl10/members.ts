@@ -13,6 +13,10 @@
 // while sminos or the endpoint was away, and is withdrawn as if it had sent `gone` (M3's note: its listing would
 // otherwise stay at the hub for good). A connection that ends before its `restated` withdraws nothing.
 //
+// A session whose lane changes (a sminos thread reopened under the other lane) leaves and arrives: a `member` frame whose
+// lane is not the held one is taken after `gone`, so its old listing, under its session id or its appSessionId, is
+// withdrawn then and not left at the hub (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §E).
+//
 // P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): the handed-off mark. Until the
 // endpoint first sees a sminos record for a lane B session, authorization ranks the spawner the spine's record names
 // (`launchedBy`) as its owner (authorize.ts's bridge); once it has, the record decides, and a missing record fails closed,
@@ -176,6 +180,11 @@ export class Members implements RecordSource, CheckoutSource {
     }
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
+    // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
+    // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
+    // and the frame is then the session's first.
+    const held = this.#members.get(member.session);
+    if (held !== undefined && held.lane !== member.lane) await this.gone(member.session);
     this.#unrestated?.delete(member.session);
     const before = this.#members.get(member.session);
     this.#members.set(member.session, member);
