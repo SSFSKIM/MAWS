@@ -28,29 +28,34 @@ const memberFrame = (session: string, lane: 'A' | 'B', fields: Record<string, un
 });
 
 /**
- * Members over a machine whose engine host names `live` (engine session → app session) and whose spine holds no record;
- * the listings it keeps (`listed`), every report, every withdrawal and every session notify forgets, in order. A
- * withdrawal is counted as `Listings.gone` makes one: of a session that is listed (a second of one already withdrawn
- * signs and sends nothing).
+ * Members over a machine whose engine host names `live` (engine session → app session) and whose spine holds `records`
+ * (its `session.list`, for a join by spawn; none answers `session.get`); the listings it keeps (`listed`, seeded with
+ * `before`, the ids listed at the hub before this `Members` started), every report, every withdrawal and every session
+ * notify forgets, in order. A withdrawal is counted as `Listings` makes one: of a session that is listed (a second of one
+ * already withdrawn signs and sends nothing), and a private report withdraws, since a private session is never listed.
  */
-function machine(live: Record<string, string> = {}) {
-  const listed = new Map<string, SessionReport>();
+function machine(live: Record<string, string> = {}, { before = [], records = [] }: { before?: string[]; records?: Record<string, unknown>[] } = {}) {
+  const listed = new Map<string, SessionReport>(before.map((session) => [session, { session, project: P, lane: 'A', state: 'idle', title: '', owners: ['@machine'] }]));
   const reports: SessionReport[] = [];
   const withdrawn: string[] = [];
   const forgotten: string[] = [];
+  const withdraw = (session: string) => {
+    if (listed.delete(session)) withdrawn.push(session);
+  };
   const members = new Members({
     dispatch: async (_owner, name) =>
       name === 'engine.sessions'
         ? { t: 'res', id: '0', ok: true, value: Object.entries(live).map(([engineSessionId, appSessionId]) => ({ engineSessionId, appSessionId })) }
-        : { t: 'res', id: '0', ok: false, error: { code: 'unknown_command', message: name } },
+        : name === 'session.list'
+          ? { t: 'res', id: '0', ok: true, value: { sessions: records, revision: 1 } }
+          : { t: 'res', id: '0', ok: false, error: { code: 'unknown_command', message: name } },
     listings: {
       report: async (report) => {
         reports.push(report);
-        listed.set(report.session, report);
+        if (report.access === 'private') withdraw(report.session);
+        else listed.set(report.session, report);
       },
-      gone: async (session) => {
-        if (listed.delete(session)) withdrawn.push(session);
-      },
+      gone: async (session) => withdraw(session),
     },
     listed: () => [...listed.keys()],
     forget: (session) => void forgotten.push(session),
@@ -135,5 +140,78 @@ describe('a lane change', () => {
     await back.members.restated();
     expect(back.withdrawn).toEqual([APP]);
     expect([...back.listed.keys()]).toEqual([S1]);
+  });
+});
+
+// A restatement after a restart: the endpoint holds no member, only the listings at the hub. A frame confirms the listing
+// it reports (lane A its session id, lane B its app session id once joined), so one listed under the other lane before
+// the restart is withdrawn at `restated`, as the restart had not happened.
+describe('a lane change across an endpoint restart', () => {
+  it('withdraws a lane A listing from before the restart when its session is restated in lane B', async () => {
+    const m = machine({ [S1]: APP }, { before: [S1] });
+    m.members.welcome();
+    await m.members.member(memberFrame(S1, 'B'));
+    await m.members.restated();
+    expect(m.withdrawn).toEqual([S1]);
+    expect([...m.listed.keys()]).toEqual([APP]);
+  });
+
+  it('withdraws a lane B listing from before the restart when its session is restated in lane A', async () => {
+    const m = machine({ [S1]: APP }, { before: [APP] });
+    m.members.welcome();
+    await m.members.member(memberFrame(S1, 'A'));
+    await m.members.restated();
+    expect(m.withdrawn).toEqual([APP]);
+    expect([...m.listed.keys()]).toEqual([S1]);
+  });
+
+  it('keeps that lane B listing while another restated member reports under the app session', async () => {
+    const m = machine({ [S2]: APP }, { before: [APP] });
+    m.members.welcome();
+    await m.members.member(memberFrame(S1, 'A'));
+    await m.members.member(memberFrame(S2, 'B'));
+    await m.members.restated();
+    expect(m.withdrawn).toEqual([]);
+    expect([...m.listed.keys()].sort()).toEqual([APP, S1].sort());
+  });
+
+  it('withdraws, as before, a held member and a listing the restatement left out', async () => {
+    const m = machine({}, { before: [S2] });
+    await m.members.member(memberFrame(S1, 'A'));
+    m.members.welcome();
+    await m.members.restated();
+    expect(m.withdrawn.sort()).toEqual([S1, S2].sort());
+    expect(m.members.sessions()).toEqual([]);
+  });
+});
+
+// Two engine sessions on one app session (one before a `/clear`, one after): when one leaves, the listing they shared
+// follows the record that stays, not the one that left.
+describe('a listing two members share, when one leaves', () => {
+  const S3 = 'c3d0e1f2-4b5c-4d6e-8f70-819203a4b5c6';
+
+  it('follows the record that stays: a private survivor withdraws the listing the departed one made', async () => {
+    const m = machine({ [S1]: APP, [S2]: APP });
+    await m.members.member(memberFrame(S1, 'B', { access: 'private', title: 'the first' }));
+    await m.members.member(memberFrame(S2, 'B', { access: 'listed', title: 'the second' }));
+    expect(m.listed.get(APP)).toMatchObject({ title: 'the second', access: 'listed' });
+    await m.members.member(memberFrame(S2, 'A', { access: 'listed', title: 'the second' }));
+    expect(m.reports.filter((r) => r.session === APP).at(-1)).toMatchObject({ title: 'the first', access: 'private' });
+    expect(m.listed.has(APP)).toBe(false);
+    expect([...m.listed.keys()]).toEqual([S2]);
+  });
+
+  it('follows the standing record over a superseded one, in one report', async () => {
+    // S3 is joined by its spawn while the spine names S2 for the app session: superseded (P5 Decision Log 190 (b))
+    const spawn = { action: 'session.spawn', opId: 'op-shared' };
+    const m = machine({ [S1]: APP, [S2]: APP }, { records: [{ appId: APP, engineSessionId: S2, launchedBy: { opId: 'op-shared' } }] });
+    await m.members.member(memberFrame(S1, 'B', { title: 'the first' }));
+    await m.members.member(memberFrame(S2, 'B', { title: 'the second' }));
+    await m.members.member(memberFrame(S3, 'B', { title: 'the superseded', ownersProof: [spawn] }));
+    expect(m.members.appSessionId(S3)).toBe(APP);
+    const from = m.reports.length;
+    await m.members.member({ t: 'member', session: S2, gone: true });
+    expect(m.reports.slice(from).map((r) => [r.session, r.title])).toEqual([[APP, 'the first']]);
+    expect(m.withdrawn).toEqual([]);
   });
 });
