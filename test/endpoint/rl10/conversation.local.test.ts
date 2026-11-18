@@ -326,9 +326,10 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
     }
     case 'holds': {
       // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §I: whether the endpoint counts a member of
-      // `log` among the logs this machine holds one of (this suite's endpoint signs no record, so not its `known`)
+      // `log` among the logs this machine holds one of (this suite's endpoint signs no record, so not its `known`); with no
+      // sminos connected there is no answer, which is neither
       const log = step.log as string;
-      await until(() => (endpoint.rl10.sminosView()?.sessionProjects().includes(log) ?? false) === step.held, `${log} ${step.held === true ? 'held' : 'not held'}`, step.within as number);
+      await until(() => endpoint.rl10.sminosView()?.sessionProjects().includes(log) === step.held, `${log} ${step.held === true ? 'held' : 'not held'}`, step.within as number);
       return;
     }
     case 'not-rejected':
