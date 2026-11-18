@@ -28,7 +28,8 @@
 //   - a `Registry` whose machines' `seen` and `confirmed`, keys' expiry, enrollments' expiry and projects' `unlisted` and
 //     `created` are moved back, as the time having passed would leave them, whose alarm is read or cleared and whose
 //     sweep is run as its alarm would run it, which answers a project's `unlisted`, and whose `projects` lose that
-//     column, as a registry stored before it had it;
+//     column, as a registry stored before it had it; and one armed to hold a pass over sminos channels' rows between
+//     its verification and its apply, as a slow verification would;
 //   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
@@ -60,6 +61,7 @@ import {
   BACKDATE_PATH,
   UNLISTED_PATH,
   PROJECTS_BEFORE_UNLISTED_PATH,
+  PASS_HOLD_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
@@ -136,6 +138,7 @@ const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'storeProjects', 'notify
 export class Registry extends DeployedRegistry {
   private leaveRelease: (() => void) | undefined;
   private pageRelease: (() => void) | undefined;
+  private passRelease: (() => void) | undefined;
   /** Set once an armed reset of the projects pushes began (`pushProjects`). */
   private resetting = false;
 
@@ -143,6 +146,17 @@ export class Registry extends DeployedRegistry {
   head(): ReturnType<DeployedRegistry['head']> {
     if (this.ctx.storage.kv.get<boolean>('head-fault')) throw new Error('a failure the suite injected into head');
     return super.head();
+  }
+
+  /** Armed (PASS_HOLD_PATH), a pass waits once its records are verified, before it applies them, until released. */
+  protected async countedProjects() {
+    const verified = await super.countedProjects();
+    const armed = this.ctx.storage.kv.get<number>('pass-hold') ?? 0;
+    if (armed > 0) {
+      this.ctx.storage.kv.put('pass-hold', armed - 1);
+      await new Promise<void>((resolve) => (this.passRelease = resolve));
+    }
+    return verified;
   }
 
   /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
@@ -325,6 +339,17 @@ export class Registry extends DeployedRegistry {
       const { id } = (await request.json()) as { id: string };
       const row = this.ctx.storage.sql.exec<{ unlisted: string | null }>('SELECT unlisted FROM projects WHERE id = ?', id).toArray()[0];
       return Response.json({ unlisted: row?.unlisted ?? null });
+    }
+    if (url.pathname === PASS_HOLD_PATH) {
+      const { hold, release } = request.method === 'POST' ? ((await request.json()) as { hold?: number; release?: boolean }) : {};
+      if (hold !== undefined) this.ctx.storage.kv.put('pass-hold', hold);
+      if (release) {
+        const released = this.passRelease;
+        this.passRelease = undefined;
+        released?.();
+      }
+      const records = this.ctx.storage.sql.exec<{ machine: string; revision: number }>('SELECT machine, revision FROM projects_records ORDER BY machine').toArray();
+      return Response.json({ held: this.passRelease !== undefined, records });
     }
     if (url.pathname === PROJECTS_BEFORE_UNLISTED_PATH) {
       this.ctx.storage.sql.exec('ALTER TABLE projects DROP COLUMN unlisted');

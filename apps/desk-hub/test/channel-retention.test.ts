@@ -38,6 +38,7 @@ let head: SignedOrgState;
 let A: string;
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const mac = () => ({ nonce: newNonce(), value: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url') });
 const event = (writer: string, seq: number): LogEvent => ({ ts: new Date().toISOString(), writer, seq, kind: 'say', text: `say ${seq}`, mac: mac() }) as unknown as LogEvent;
 
@@ -89,6 +90,16 @@ async function retire(m: Online): Promise<void> {
   });
 }
 
+/** The Registry's answer to a projects record. */
+type Stored = { ok: boolean; value?: { stored: boolean } };
+/** Whether `f` is the machine's own record of `revision` come back to it: the store that sent it was answered. */
+const backAt = (m: Online, revision: number) => (f: { t: string } & Record<string, unknown>) =>
+  f.t === 'projects' && (f.record as Signed<ProjectsRecord>).body.machine === m.machine.ref && (f.record as Signed<ProjectsRecord>).body.revision === revision;
+/** Waits until the Registry holds the machine's record of `revision`. */
+const heldAt = (m: Online, revision: number) =>
+  waitFor(async () => ((await hub.passHold()).records.some((r) => r.machine === m.machine.ref && r.revision === revision) ? true : undefined), 10_000);
+const passHeld = () => waitFor(async () => ((await hub.passHold()).held ? true : undefined), 10_000);
+
 /** Opens the channel's log on the machine's socket, which registers its row when the hub holds none. */
 const hello = (m: Online, id: string) => m.endpoint.project(id, 'desk-integration');
 
@@ -133,6 +144,12 @@ describe('a sminos channel’s row', () => {
     await hub.backdate({ projects: [V4, V5, own.id].map((id) => ({ id, created: ago(30 * DAY) })) });
     const grid = await GridClient.open(hub, ADMIN);
     const before = await directory();
+    // The shapes as they were before this work: no key added to a directory row or a grid line.
+    for (const id of [V4, V5, own.id]) expect(Object.keys(before.find((p) => p.id === id)!).sort()).toEqual(['archive_machine', 'created', 'id', 'kind', 'name', 'registered_by', 'retired']);
+    expect(grid.frames[0]?.t).toBe('grid');
+    const first = grid.frames.find(whole)!;
+    for (const id of [V4, V5, own.id]) expect(Object.keys(first.projects.find((p) => p.id === id)!).sort()).toEqual(['id', 'kind', 'live', 'machines', 'machines_online', 'name', 'waiting', 'working']);
+    await sleep(300);
     const from = grid.frames.length;
 
     await hub.registrySweep();
@@ -141,7 +158,9 @@ describe('a sminos channel’s row', () => {
     await hub.registrySweep();
     expect(await directory()).toEqual(before);
     for (const id of [V4, V5, own.id]) expect(await hub.unlisted(id)).toBeNull();
-    expect(grid.frames.slice(from).filter(whole)).toEqual([]);
+    // Not a frame more: no grid again whole, and no summary.
+    await sleep(300);
+    expect(grid.frames.slice(from)).toEqual([]);
     // No deadline from them: once what the steps owed is done, a sweep leaves no alarm.
     await waitFor(async () => ((await hub.registrySweep({ clear: true })) === null ? true : undefined), 10_000);
     grid.close();
@@ -298,7 +317,6 @@ describe('a sminos channel’s row', () => {
     const m = await online('cr-race');
     const C = channel(9);
     await hello(m, C);
-    type Stored = { ok: boolean; value?: { stored: boolean } };
     const both = async (first: string[], second: string[]) => {
       const records = [await nextRecord(m, first), await nextRecord(m, second)];
       const answers = await hub.registryRpcs<Stored>(records.map((record) => ({ method: 'storeProjects' as const, args: [record] })));
@@ -338,6 +356,103 @@ describe('a sminos channel’s row', () => {
     await store(m, []);
     expect(await row(C)).toMatchObject({ retired: true });
     m.endpoint.close();
+  });
+
+  it('applies no pass over records replaced while it verified: a sweep held past its verification never takes off the grid a row a record stored meanwhile lists', async () => {
+    const m = await online('cr-order');
+    const C = channel(12);
+    await hello(m, C);
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION + HOUR) }], clearAlarm: true });
+    const grid = await GridClient.open(hub, ADMIN);
+    expect((grid.frames.find(whole)?.projects ?? []).map((p) => p.id)).toContain(C);
+    const from = grid.frames.length;
+
+    // The sweep's pass verifies the records that do not list the channel, and is held there.
+    await hub.passHold({ hold: 1 });
+    const sweep = hub.registrySweep();
+    await passHeld();
+    // A record that lists it is stored meanwhile; its store's pass waits its turn.
+    const record = await nextRecord(m, [C]);
+    const back = m.endpoint.frames.length;
+    m.endpoint.sendText({ t: 'projects', record });
+    await heldAt(m, record.body.revision);
+    await hub.passHold({ release: true });
+    await sweep;
+    await m.endpoint.next(backAt(m, record.body.revision), 'its record back', back);
+
+    expect(await row(C)).toMatchObject({ retired: false });
+    expect(await hub.unlisted(C)).toBeNull();
+    expect(grid.frames.slice(from).filter((f) => whole(f) && !f.projects.some((p) => p.id === C))).toEqual([]);
+    grid.close();
+    m.endpoint.close();
+  });
+
+  it('answers a record once a pass has applied the records held after it, so its listing reaches the row before the machine can withdraw it', async () => {
+    const [a, b] = [await online('cr-lost-a'), await online('cr-lost-b')];
+    const C = channel(13);
+    await hello(a, C);
+    // Six days unlisted: one day short of its retirement.
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION - DAY) }], clearAlarm: true });
+
+    // A lists it; A's pass is held after verifying, and B stores meanwhile, so A's pass finds the records replaced.
+    await hub.passHold({ hold: 1 });
+    const listing = await nextRecord(a, [C]);
+    const back = a.endpoint.frames.length;
+    a.endpoint.sendText({ t: 'projects', record: listing });
+    await passHeld();
+    const other = await nextRecord(b, []);
+    const bStored = hub.registryRpc<Stored>('storeProjects', other);
+    await heldAt(b, other.body.revision);
+    // Released, A's pass applies nothing; the next pass (B's) is held in its turn.
+    await hub.passHold({ hold: 1, release: true });
+    await passHeld();
+    // A is not answered: no pass has yet applied the records held since its listing was stored.
+    await sleep(300);
+    expect(a.endpoint.frames.slice(back).filter(backAt(a, listing.body.revision))).toEqual([]);
+
+    // A withdraws it, behind its listing on the connection.
+    const withdrawal = await nextRecord(a, []);
+    const sent = Date.now();
+    a.endpoint.sendText({ t: 'projects', record: withdrawal });
+    await hub.passHold({ release: true });
+    expect(await bStored).toEqual({ ok: true, value: { stored: true } });
+    await a.endpoint.next(backAt(a, withdrawal.body.revision), 'the withdrawal back', back);
+    // The listing reached the row, so its seven days run from the withdrawal.
+    expect(await unlistedMs(C)).toBeGreaterThanOrEqual(sent);
+    a.endpoint.close();
+    b.endpoint.close();
+  });
+
+  it('runs no pass for a redemption, which Access does not guard: only the alarm’s sweep retires a row past its deadline', async () => {
+    const m = await online('cr-redeem');
+    const C = channel(14);
+    await hello(m, C);
+    m.endpoint.close();
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION + HOUR) }], clearAlarm: true });
+    const response = await hub.fetchAs(null, '/machine/enroll', { body: { token: 'B'.repeat(43), machine: 'cr-ghost' } });
+    expect(response.status).toBe(404);
+    expect(await row(C)).toMatchObject({ retired: false });
+    await hub.registrySweep();
+    expect(await row(C)).toMatchObject({ retired: true });
+  });
+
+  it('past its deadline on a fresh instance, which knows of no pass that tried: the alarm is set no sooner than the retry wait', async () => {
+    const m = await online('cr-fresh');
+    const C = channel(15);
+    await hello(m, C);
+    m.endpoint.close();
+    await hub.backdate({ projects: [{ id: C, unlisted: ago(RETENTION + HOUR) }], clearAlarm: true });
+    await hub.evict('Registry', ORG);
+    await waitFor(async () => {
+      await hub.registryAlarm(true);
+      const at = Date.now();
+      const alarm = await hub.backdate({});
+      return alarm !== null && alarm >= at + RETRY ? true : undefined;
+    }, 10_000);
+    expect(await row(C)).toMatchObject({ retired: false });
+    // Not left behind: the alarm's sweep retires it.
+    await hub.registrySweep({ clear: true });
+    expect(await row(C)).toMatchObject({ retired: true });
   });
 
   // Last: it evicts the Registry.

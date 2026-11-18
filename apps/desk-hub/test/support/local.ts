@@ -19,6 +19,7 @@ import {
   BACKDATE_PATH,
   UNLISTED_PATH,
   PROJECTS_BEFORE_UNLISTED_PATH,
+  PASS_HOLD_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
@@ -395,6 +396,11 @@ export async function startLocalHub(options: { script?: string } = {}) {
      * construction adds the column again. */
     async projectsBeforeUnlisted() {
       await seam('REGISTRY', ORG, PROJECTS_BEFORE_UNLISTED_PATH);
+    },
+    /** Holds the Registry's next `hold` passes over sminos channels' rows between their verification and their apply
+     * (`release` lets the one held go on); answers whether one is held, and the projects records held now. */
+    async passHold(change: { hold?: number; release?: boolean } = {}): Promise<{ held: boolean; records: Array<{ machine: string; revision: number }> }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PASS_HOLD_PATH, change)) as { held: boolean; records: Array<{ machine: string; revision: number }> };
     },
     /** Sets how long an unfinished offline revocation waits before it is tried again (null: the deployed minute), and
      * wakes the Registry's alarm. */

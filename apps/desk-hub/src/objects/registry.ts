@@ -190,6 +190,8 @@ export const CHANNEL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const CHANNEL_RECHECK_MS = 24 * 60 * 60 * 1000;
 /** A sminos channel's row as a pass and the alarm read it. */
 type ChannelRow = { id: string; retired: number; unlisted: string | null };
+/** What a pass over the channels' rows did (`Registry.passChannels`). */
+type ChannelPass = 'applied' | 'moved' | 'unreadable';
 const sameHeld = (a: HeldProjects, b: HeldProjects) => a.length === b.length && a.every((r, i) => r.machine === b[i].machine && r.revision === b[i].revision);
 /** How long an upload's policy call waits for the registry's fill before it is refused `state-unavailable`. */
 const POLICY_FILL_WAIT_MS = 10_000;
@@ -1106,9 +1108,10 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** Expired enrollments, orphaned tokens, revocations, state announcements projects have not taken and projects
-   * records ref objects have not taken, swept when their time comes. */
+   * records ref objects have not taken, swept when their time comes; and a pass over the sminos channels' rows, which
+   * the sweep waits for before it sets the next alarm. */
   async alarm(): Promise<void> {
-    await this.sweep();
+    await this.sweep({ channels: true });
   }
 
   private enrollmentById(id: string): EnrollmentRow | undefined {
@@ -1143,7 +1146,9 @@ export class Registry extends DurableObject<Env> {
     this.sql.exec('INSERT OR REPLACE INTO orphans (token_name, since) VALUES (?, ?)', tokenName, iso(Date.now()));
   }
 
-  private async sweep(): Promise<void> {
+  /** The housekeeping a redemption runs too; the channels' pass only for the alarm (`channels`), since a redemption is
+   * the route Access does not guard and a pass verifies every record held. */
+  private async sweep(options: { channels?: boolean } = {}): Promise<void> {
     const now = Date.now();
     const live = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE state IN ('open', 'pending')`).toArray();
     for (const enrollment of live) if (lapsed(enrollment, now) && !this.busy.has(enrollment.id)) this.expire(enrollment);
@@ -1152,8 +1157,8 @@ export class Registry extends DurableObject<Env> {
     this.sweepProjects(now);
     await this.sweepRevocations();
     await this.sweepOrphans();
-    // A pass that applied nothing leaves a channel's passed deadline to wait the retry (`scheduleAlarm`).
-    if (!(await this.passChannels())) this.channelRetry = Date.now() + RETRY_MS;
+    // A pass that applies nothing leaves a passed deadline to the next alarm, the retry's wait on (`scheduleAlarm`).
+    if (options.channels) await this.passChannels();
     await this.scheduleAlarm();
   }
 
@@ -1255,8 +1260,9 @@ export class Registry extends DurableObject<Env> {
   /** The alarm at the next expiry or offline revocation, or sooner when an orphan or a revocation waits for a retry;
    * never in the past, so an enrollment kept open by a mint in flight does not spin it, and an offline revocation that
    * failed waits for its retry. An active channel's row adds the end of its seven days unlisted, and a listed one a day
-   * from now, so that a record that stopped counting with no event (a certificate expired) is seen within a day; a
-   * deadline passed that the sweep's pass could not act on waits the retry rather than wake the alarm at once. */
+   * from now, so that a record that stopped counting with no event (a certificate expired) is seen within a day. A
+   * deadline already passed is one the alarm's pass could not act on (the alarm was set for it while it was ahead), or
+   * one this object forgot it tried: either way it wakes the alarm no sooner than the retry's wait on, never at once. */
   protected async scheduleAlarm(): Promise<void> {
     const now = Date.now();
     const next = this.sql
@@ -1269,7 +1275,7 @@ export class Registry extends DurableObject<Env> {
       if (row.unlisted === null) recheck = true;
       else {
         const due = Date.parse(row.unlisted) + CHANNEL_RETENTION_MS;
-        next.push(due <= now && this.channelRetry !== null ? Math.max(due, this.channelRetry) : due);
+        next.push(due <= now ? now + RETRY_MS : due);
       }
     }
     if (recheck) next.push(now + CHANNEL_RECHECK_MS);
@@ -1661,19 +1667,25 @@ export class Registry extends DurableObject<Env> {
    * already goes nowhere. Each ref is owed the machine's record (`projects_owed`) in the step that stores it, and the
    * alarm is set before any is sent, so a push lost with this object's reset is sent by the alarm (`pushProjects`).
    *
-   * A record accepted, stored or held already, runs a pass over the channels' rows before anything else and before the
-   * answer: a pass left running beside the answer could be lost to a reset with nothing owed to run it again, and a
-   * machine shown its record back has had it applied. The same bytes again count, since an endpoint sends its kept record
-   * again at each welcome, which makes up a pass lost so.
+   * A record accepted, stored or held already, is then applied to the channels' rows before it is relayed and before the
+   * answer: a pass that applies the records held at some moment after this one was stored has run, its pass run again
+   * for as long as each finds the records it verified replaced meanwhile. So a listing in an accepted record reaches the
+   * rows before the machine can send its next record, which might withdraw it; a pass left beside the answer could be
+   * lost to a reset; and a machine shown its record back has had it applied. A head that cannot be read leaves it to the
+   * alarm. The same bytes again count, since an endpoint sends its kept record again at each welcome, which makes up a
+   * pass lost so.
    */
   async storeProjects(record: unknown): Promise<Result<{ stored: boolean }>> {
     const kept = await this.records.storeProjects(record, (body) => this.oweProjects(body.machine, body.revision));
     if (!kept.ok) return kept;
-    await this.passChannels();
+    // The owed pushes' alarm, before the pass can suspend.
+    if (kept.value.stored) await this.scheduleAlarm();
+    let pass: ChannelPass;
+    do pass = await this.passChannels();
+    while (pass === 'moved');
     if (!kept.value.stored) return kept;
     const { machine } = (record as Signed<ProjectsRecord>).body;
     this.toApps({ t: 'projects', record: record as Signed<ProjectsRecord> });
-    await this.scheduleAlarm();
     const org = this.ensureOrg().id;
     for (const { ref } of this.sql.exec<{ ref: string }>('SELECT ref FROM projects_owed WHERE machine = ?', machine).toArray()) void this.pushProjects(org, ref, machine);
     return kept;
@@ -1740,20 +1752,18 @@ export class Registry extends DurableObject<Env> {
 
   /** The tail of the passes queued in this object's life: one runs at a time. */
   private channelPasses: Promise<unknown> = Promise.resolve();
-  /** Set when the sweep's pass applied nothing: a channel's passed deadline wakes the alarm no sooner (`scheduleAlarm`).
-   * Held in memory: after a reset the next sweep tries once more, and sets it again if that pass applies nothing too. */
-  private channelRetry: number | null = null;
 
   /** Every channel's row, active and retired: a `hub` row whose id is a sminos channel's. */
   private channelRows(): ChannelRow[] {
     return this.sql.exec<ChannelRow>("SELECT id, retired, unlisted FROM projects WHERE kind = 'hub'").toArray().filter((row) => isChannelId(row.id));
   }
 
-  /** A pass, once every pass asked for before it has run; it reads the records as it starts. True when it applied the
-   * listing (with no channel's row, there is nothing to apply), false when it applied nothing. */
-  private passChannels(): Promise<boolean> {
+  /** A pass, once every pass asked for before it has run; it reads the records as it starts. `applied` when it applied
+   * the listing (with no channel's row, there is nothing to apply); `moved` when the records it verified were replaced
+   * before it could apply, and `unreadable` when the head could not be read: either way it applied nothing. */
+  private passChannels(): Promise<ChannelPass> {
     const pass = this.channelPasses.then(() => this.channelPass());
-    this.channelPasses = pass.catch(() => false);
+    this.channelPasses = pass.catch(() => {});
     return pass;
   }
 
@@ -1762,15 +1772,16 @@ export class Registry extends DurableObject<Env> {
    * is active with no clock, a retired one so made active again; an active row not listed starts its clock, or, its
    * clock `CHANNEL_RETENTION_MS` old, is retired. With no channel's row it does nothing and verifies nothing. The
    * listing applied is that of the records held when it applies, in one synchronous step with the rows as they are then:
-   * when the records verified are no longer the ones held (one was accepted meanwhile, whose own pass follows), it
-   * applies nothing, as it does when the head cannot be read. A retirement sends the grid again whole; a row made active
-   * returns as a new one does.
+   * when the records verified are no longer the ones held (one was accepted meanwhile, whose store runs a pass that
+   * applies), it applies nothing, as it does when the head cannot be read. A retirement sends the grid again whole; a row
+   * made active returns as a new one does.
    */
-  private async channelPass(): Promise<boolean> {
-    if (this.channelRows().length === 0) return true;
+  private async channelPass(): Promise<ChannelPass> {
+    if (this.channelRows().length === 0) return 'applied';
     const verified = await this.countedProjects();
+    if (verified === null) return 'unreadable';
     // From here on synchronous: the records found counting are the ones held as the listing is applied.
-    if (verified === null || !sameHeld(verified.held, this.records.projectsHeld())) return false;
+    if (!sameHeld(verified.held, this.records.projectsHeld())) return 'moved';
     const listed = new Set(verified.counted.flatMap((record) => record.known.map((k) => k.id)));
     const now = Date.now();
     const retired: string[] = [];
@@ -1795,19 +1806,19 @@ export class Registry extends DurableObject<Env> {
         changed = true;
       }
     });
-    this.channelRetry = null;
     if (retired.length > 0) this.toGrid(this.gridFrame());
     for (const id of returned) {
       this.seedProject(id);
       this.toGrid({ t: 'summary', project: this.summaryOf(this.project(id)!) });
     }
     if (changed) await this.scheduleAlarm();
-    return true;
+    return 'applied';
   }
 
   /** The projects records held and those of them that count (`OrgRecords.countedProjects`), under the head as a Project
-   * reads it (`head`) with the certificates kept beside it; null when the head cannot be read. */
-  private async countedProjects(): Promise<{ held: HeldProjects; counted: ProjectsRecord[] } | null> {
+   * reads it (`head`) with the certificates kept beside it; null when the head cannot be read. (The suites' Worker holds
+   * a pass here, between its verification and its apply.) */
+  protected async countedProjects(): Promise<{ held: HeldProjects; counted: ProjectsRecord[] } | null> {
     try {
       const view = this.head();
       if (view.head === null) return null;
