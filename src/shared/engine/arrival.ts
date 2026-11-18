@@ -14,7 +14,8 @@
 // (decision 19); (2) sminos's frame line says whose a delivered row is: `human` is the person (`own`), any other sender
 // a peer; (3) one carrier can hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two
 // carriers is read once (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
-import { parseAskSteer } from '../maws/ask';
+import { PASTED_BLOCK } from '../composer/pasted-content';
+import { askSteerOpening, parseAskSteer } from '../maws/ask';
 import { stripAnsi } from '../wire/ansi';
 import type { Arrival } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
@@ -78,6 +79,109 @@ export function turnOriginOf(arrival: Arrival): 'human' | 'peer' | 'engine' {
 export function readAnswerEnvelope(text: string): Answer | null {
   const steer = parseAskSteer(text);
   return steer === null ? null : { class: 'answer', tool: 'maws', call: steer.askId, summary: text, answers: steer.result.answers, dismissed: false };
+}
+
+type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
+const TAG_OPENS = '[MAWS ask ';
+const TAGGED_ID = /^\[MAWS ask ([^\]\s]+)\] /; // the tag's id as `parseAskSteer` reads it
+
+// A line that opens an envelope: the whole first line `askSteerText` writes, built by the writer's own function. A line
+// that only begins with the tag (the model's question, header and labels are written verbatim) opens nothing.
+function opensEnvelope(line: string): boolean {
+  const id = TAGGED_ID.exec(line)?.[1];
+  return id !== undefined && line === askSteerOpening(id);
+}
+
+/**
+ * MAWS's answer envelopes inside a user text the engine may have joined from several waiting messages (members in order,
+ * one newline between, under the last one's uuid; U4a's decision 32 c), and the rest of the text (the UX wave, U4b: the
+ * Decision Log's line on the architect's medium review, form (b), and on the architect's review of the joined answer).
+ * An envelope opens at the writer's whole first line (`askSteerOpening`), and is the shortest slice from there that
+ * `parseAskSteer` reads whole and that ends the text or a line, before the next such line: shortest and bounded, so a
+ * later member is never swallowed. A line that opens nothing stays text, as does an opening whose slices never parse.
+ * A pasted segment's body is data: none of its lines opens or ends an envelope, so an envelope pasted as a log stays in
+ * its segment, whole. The rest is the other members, the newline that separated each envelope gone; a text that is all
+ * envelope has an empty rest. A text that would cost more than `MAX_ENVELOPE_CHECKS` whole-slice checks is left whole:
+ * no envelope, the rest the text unchanged, so every reader sees one ordinary text. The transcript (its row text, the
+ * answers it records, the rows it hides) and the recall all read here, so they agree.
+ */
+export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
+  const { envelopes, rest } = readAnswerEnvelopesWithCost(text);
+  return { envelopes, rest };
+}
+
+/**
+ * The most whole-slice checks (`parseAskSteer` on a candidate slice, each one a join and a scan of it) one text may
+ * cost. A writer-made envelope costs one, its result block's close being its only line that ends in a fence, and a
+ * joined message holds one envelope per answer waiting at a turn's end; so the reader's work on a text stays within
+ * this many slices of it (the architect's ruling of 2026-11-16).
+ */
+export const MAX_ENVELOPE_CHECKS = 64;
+
+/** What one reading of `readAnswerEnvelopes` cost: its whole-slice checks, and the steps of marking the pasted lines. */
+export interface EnvelopeReadingCost {
+  checks: number;
+  markingSteps: number;
+}
+
+/** `readAnswerEnvelopes`, with what the reading cost, for the tests that pin its bounds. */
+export function readAnswerEnvelopesWithCost(text: string): { envelopes: AskSteer[]; rest: string; cost: EnvelopeReadingCost } {
+  const cost: EnvelopeReadingCost = { checks: 0, markingSteps: 0 };
+  const whole = { envelopes: [], rest: text, cost };
+  if (!text.includes(TAG_OPENS)) return whole; // read on every user text the transcript draws
+  const lines = text.split('\n');
+  const pasted = pastedLines(text, lines, cost);
+  const envelopes: AskSteer[] = [];
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    const end = !pasted[i] && opensEnvelope(lines[i]!) ? envelopeEnd(lines, pasted, i, cost) : null;
+    if (end === OVER_CAP) return whole;
+    if (end === null) {
+      kept.push(lines[i]!);
+      i += 1;
+      continue;
+    }
+    envelopes.push(end.steer);
+    i = end.next;
+  }
+  return { envelopes, rest: kept.join('\n'), cost };
+}
+
+const OVER_CAP = 'over cap';
+
+// The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does,
+// and `OVER_CAP` where finding it would take a check past the text's cap. A run ends before the next opening line:
+// `parseAskSteer` pairs the first tag with the last result block, so a malformed member would otherwise run over the
+// words and the envelope after it (the joined answer's task review).
+function envelopeEnd(lines: readonly string[], pasted: readonly boolean[], start: number, cost: EnvelopeReadingCost): { steer: AskSteer; next: number } | null | typeof OVER_CAP {
+  for (let last = start; last < lines.length; last++) {
+    if (pasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
+    if (last > start && opensEnvelope(lines[last]!)) return null;
+    if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
+    if (cost.checks === MAX_ENVELOPE_CHECKS) return OVER_CAP;
+    cost.checks += 1;
+    const steer = parseAskSteer(lines.slice(start, last + 1).join('\n'));
+    if (steer !== null) return { steer, next: last + 1 };
+  }
+  return null;
+}
+
+// Which lines start inside a pasted segment, from its opening tag through its closing one (the terminal's frame,
+// `PASTED_BLOCK`, as the transcript's `splitPastedSegments` reads it). One walk over the lines and the segments together,
+// both in text order: a step for each line and for each segment passed. A span runs from the opening tag's `<` to the
+// closing tag's `>`, the at most two newlines the frame takes on each side left out.
+function pastedLines(text: string, lines: readonly string[], cost: EnvelopeReadingCost): boolean[] {
+  const spans = [...text.matchAll(PASTED_BLOCK)].map((match) => ({ from: match.index + match[0].indexOf('<'), to: match.index + match[0].lastIndexOf('>') + 1 }));
+  const marks: boolean[] = [];
+  let span = 0;
+  let at = 0;
+  for (const line of lines) {
+    for (; span < spans.length && spans[span]!.to <= at; span++) cost.markingSteps += 1;
+    cost.markingSteps += 1;
+    marks.push(span < spans.length && at >= spans[span]!.from);
+    at += line.length + 1;
+  }
+  return marks;
 }
 
 /**

@@ -7,7 +7,7 @@
 // under the line.
 import type { ReactNode } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
-import { ASK, askAnswerCopy, askStateCopy } from '../../model/copy';
+import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy } from '../../model/copy';
 import type { AskRowData, Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
 import { QuestionIcon } from './icons';
@@ -23,7 +23,7 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
   const answer = row.answers?.find((candidate) => candidate.id === question.id);
   return (
     <li className="transcript-question-line" data-ask-answer="" title={question.question}>
-      <span className="transcript-question-label">{question.header ?? question.question}</span>
+      <span className="transcript-question-label">{askQuestionTitle(question)}</span>
       <span className="transcript-question-arrow" aria-hidden="true">
         →
       </span>

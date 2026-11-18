@@ -8,6 +8,7 @@ import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
+import type { AskQuestion } from '@shared/maws/tools';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
 import { REPO_ROOT } from './launch';
 
@@ -182,6 +183,33 @@ export function steerStopJournal(dir: string, name: string, releases: 1 | 2 = 1)
   return writeJournal(dir, `${name}-steer-stop`, rows);
 }
 
+// UX wave U4b (M4, the waiting answer's scene; the architect's ruling after the cascade merge with board ticket 711):
+// `steerStopJournal` with the agent's async ask in its running turn, so the window holds the ask's row and a waiting
+// answer to it reads through the ask's questions. The ask is `pass3/p1-maws-ask-async`'s: its call (seq 95, the
+// assistant's `mcp__maws__ask` tool use) and the host's acknowledgement as the engine echoes it (107, `asked`), placed
+// after the prompt's echo (9) and before the turn's first message starts (10), under this recording's session. The host
+// serves no call here (the `tools/call` and its permission are not replayed): the transcript reads the ask from the call
+// and its result, as a session read from the engine's transcript does.
+const ASK_ASYNC = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
+const asyncAskRows = () => {
+  const rows = rowsOf(ASK_ASYNC);
+  return [rows.find((r) => r.seq === 95)!, rows.find((r) => r.seq === 107)!];
+};
+/** The recorded async ask's id (its call's tool use id) and questions, as its call holds them. */
+export function asyncAsk(): { askId: string; questions: AskQuestion[] } {
+  const [call] = asyncAskRows();
+  const use = (call!.frame.message as { content: { id: string; input: { questions: AskQuestion[] } }[] }).content[0]!;
+  return { askId: use.id, questions: use.input.questions };
+}
+export function askedSteerStopJournal(dir: string, name: string): string {
+  const rows = (readFileSync(steerStopJournal(dir, name), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Row));
+  const echo = rows.findIndex((r) => r.seq === 9);
+  const session = rows.find((r) => r.seq === 150)!.frame.session_id;
+  const asked = asyncAskRows().map((r, k): Row => ({ ...r, seq: 9 * 100 + k, at: rows[echo]!.at, frame: { ...r.frame, session_id: session } }));
+  rows.splice(echo + 1, 0, ...asked);
+  return writeJournal(dir, `${name}-asked-steer-stop`, rows);
+}
+
 // UX wave U4a (M8, the Send now scene): Send now behind a running command, as `uxwave/u4p2-a-1` recorded it on engine
 // 2.1.322 under the environment MAWS's launch sets. C3's prelude stands in for the probe's handshake (seq 3 to 11, and
 // the answer to its thinking-display write at 14, which the host's own write is answered in place of); then the probe's
@@ -221,13 +249,16 @@ export function askWaitJournal(dir: string, name: string): string {
   return writeJournal(dir, `${name}-ask-wait`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
 
-// UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
-// promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
-// Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),
-// which has the command moved (46) and the turn cut (`success`, `aborted_tools`, 49); the `now` message's own turn, and
-// the waiting message read at its first tool boundary (120 to 122). C3's prelude stands in for the probe's handshake,
-// and the answer at 14 and the meta rows go, as in `sendNowJournal`.
-export function promoteNowJournal(dir: string, name: string): string {
-  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p3-promote-late-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
-  return writeJournal(dir, `${name}-promote-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+// UX wave U4b (M3's conditional step; the Decision Log's line on the first Mac run): Send now on a row that waits after
+// the turn while a turn runs is a promote at `next` and then the engine's send-now request for the uuid it answered, as
+// `uxwave/u4b-two-1` recorded it early in a shell call with a message already waiting (spikes/protocol-probe/
+// findings-uxwave-u4b-send-now-early.txt): the probe's prompt (seq 12) and its Bash call (32); the message at the next
+// step (37, queued 39); the promoted message at `next` (40) and the request naming it (41), answered `delivering` with
+// both still queued (44); the command moved (46 to 48) and the turn cut (`success`, `aborted_tools`, 50); both messages
+// `started` (53, 54) and read as one turn (the joined replay, 58). The replay matches a user write by its type and maps
+// each recorded uuid onto the one the host minted, so the request's `message_uuid` is held to the promoted message's own.
+// C3's prelude stands in for the probe's handshake, and the answer at 14 and the meta rows go, as in `sendNowJournal`.
+export function sendNowAfterJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4b-two-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-send-now-after`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }

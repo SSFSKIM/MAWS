@@ -33,7 +33,7 @@ import { Composer } from '../Composer';
 import { resetDockedCards } from '../docked/registry';
 import { resetEffectiveEfforts } from '../effective-effort';
 import { DRAFT_DELAY_MS } from '../editor/drafts';
-import { resetTakeBack, TAKE_BACK_WORDS } from './take-back';
+import { resetTakeBack, SETTLE_RETRY_MS, TAKE_BACK_WORDS } from './take-back';
 
 const A_ID = 'app-a' as AppSessionId;
 const A = at(A_ID);
@@ -364,5 +364,34 @@ describe('a held settle that meets another window’s newer stage', () => {
     expect(fake.invoked('session.send')).toHaveLength(1);
     B.takeBackB.resetTakeBack();
     B.holder.remove();
+  });
+});
+
+// UX wave U4b (decision 12; Acceptance 14): through the composer itself, a record that could not be asked leaves the box
+// held and read-only under "Taking the message back…" with nothing loaded, and is asked again by itself; its answer then
+// decides, as any answer of the record does.
+describe('a record that could not be asked', () => {
+  it('keeps the box held and empty, the stage stored and nothing settled, asks the record again, and loads the message on its answer', async () => {
+    busy();
+    mountComposer();
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    listed([entry('q-1', TEXT)]);
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'ArrowUp' });
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(1));
+    await act(() => fake.fail('session.queue.remove', 'no queued entry q-1', 'invalid_input'));
+    await waitFor(() => expect(fake.pending('session.promptHistory')).toBe(1));
+    await act(() => fake.fail('session.promptHistory', 'the record could not be read', 'host_unavailable'));
+    expect(editorOf().getAttribute('contenteditable')).toBe('false'); // held, read-only under “Taking the message back…”
+    expect(editorOf().editor.getText()).not.toContain(TEXT);
+    expect(stageKept()).toBe(true);
+    expect(drafted.filter((d) => d.replaces?.startsWith(settles('')))).toEqual([]);
+    expect(screen.queryByText(TAKE_BACK_WORDS.mayHaveRead)).toBeNull();
+    await waitFor(() => expect(fake.pending('session.promptHistory')).toBe(1), { timeout: SETTLE_RETRY_MS * 3 }); // asked again, by itself
+    expect(fake.invoked('session.queue.remove')).toHaveLength(1); // the record alone
+    await act(() => fake.reply('session.promptHistory', { events: [removed('q-1')], complete: true }));
+    await waitFor(() => expect(editorOf().editor.getText()).toContain(TEXT));
+    await waitFor(() => expect(stageKept()).toBe(false));
+    await waitFor(() => expect(editorOf().getAttribute('contenteditable')).toBe('true'));
   });
 });

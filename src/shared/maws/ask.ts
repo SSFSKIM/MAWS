@@ -187,6 +187,10 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined, given:
   }
 }
 
+// The steer's first line, whole: the tag with the ask's id, then the writer's fixed sentence. A reader of envelopes the
+// engine joined with other messages opens a member only at this line (`readAnswerEnvelopes`, shared/engine/arrival.ts).
+export const askSteerOpening = (askId: string): string => `${ASK_STEER_OPENING}${askId}] The user answered the questions you asked:`; // the opening's one constant (UX wave U6e)
+
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order,
 // `<n>. <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3), then the
 // AskResult of status `answered` as a fenced JSON block. Neither a question's header, its words, its labels nor its id
@@ -214,7 +218,7 @@ export function askSteerText(askId: string, questions: readonly AskQuestion[], a
     return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
   });
   const result: AskResult = { status: 'answered', askId, answers: steered };
-  return [`${ASK_STEER_OPENING}${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
+  return [askSteerOpening(askId), ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
 }
 
 // The answers a steer carried, read with the ask's questions in hand: each new-form answer joined to its question by

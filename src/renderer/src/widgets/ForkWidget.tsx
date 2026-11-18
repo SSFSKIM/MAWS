@@ -3,10 +3,11 @@
 // one. Typed with a prompt it acts through its `apply`, as `/btw <question>` does; picked from the palette or typed bare,
 // its component acts and closes, as `/rename`'s does. A refusal is a toast in the host's words, as the session menu's
 // Fork shows one. Where U9's helper answers a sentence for the session (another machine), nothing is forked: the typed
-// form opens the panel, which says why.
+// form opens the panel, which says why. UX wave U4b (decision 11): the panel also says the turn's words while a turn runs
+// there, by the same reading the session menu's Fork takes (`useForkUnavailable`).
 import { useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable';
+import { remoteUnavailableOf, useForkUnavailable } from '../lane-b/remote-unavailable';
 import { forkSession } from '../sessions/record-ops';
 import { toast } from '../stores/notices';
 import { WIDGET_TITLE } from './copy';
@@ -26,13 +27,13 @@ export const applyFork: TypedApply = async (appSessionId, args) => {
 };
 
 export function ForkWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
-  const unavailable = useRemoteUnavailable(appSessionId, 'session.fork');
-  // once, on open, before the dialog is drawn: fork and close
+  const unavailable = useForkUnavailable(appSessionId);
+  // once, as soon as nothing refuses it: on open, before the dialog is drawn; or, opened while the turn runs there, when
+  // the refusal lifts with the panel still open (U4b, decision 11). A panel dismissed meanwhile is gone, and forks nothing.
   const started = useRef(false);
   useLayoutEffect(() => {
-    if (started.current) return;
+    if (started.current || unavailable !== null) return;
     started.current = true;
-    if (unavailable !== null) return;
     close();
     void forkConversation(appSessionId, args);
   });

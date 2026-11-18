@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
 import type { MessageUuid } from '@shared/graph/ids';
+import { askSteerText } from '@shared/maws/ask';
 import type { Row, TurnActivity } from '../../transcript';
+import { userTextOf } from '../../transcript/model/user-text';
 import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
@@ -124,6 +126,59 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     ];
     const recalled = recallEntries(rows, activity, listed).map((r) => plain(recallDoc(r)));
     expect(recalled).toEqual(['from the terminal', 'first', 'second', 'see <pasted_content>[Pasted text #1 +2 lines]\nok']);
+  });
+
+  // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its
+  // text MAWS's answer envelope; ↑ skips it as the stack's take-back does, and never puts the envelope in the box
+  it('never recalls an answer envelope: with one waiting at the newest end, ↑ goes to the prompt before it', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const rows = [userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', envelope), steer: true } as Row];
+    const recalls = recallEntries(rows, [turn('t1', 'human')], []);
+    expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.']);
+    const first = historyNavigation({ index: null, draft: null }, 'up', recalls.length, doc(''));
+    expect(first.show).toEqual({ kind: 'entry', index: 0 });
+    expect(plain(recallDoc(recalls[0]!))).toBe('Count to ten.');
+  });
+
+  // the engine joins the waiting messages into one text (U4b, form (b), step 1): ↑ recalls the person's words alone, as
+  // the transcript's row holds them (finding 4 of the architect's review: the recall reads the row's text as derived)
+  it('recalls a joined envelope and prompt as the prompt alone, in either order, and the search reads the same', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
+      const recalls = recallEntries([userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', userTextOf(text).text), steer: true } as Row], [turn('t1', 'human')], []);
+      expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.', 'Also fix the footer.']);
+      expect(recalls.map(recallText)).toEqual(['Count to ten.', 'Also fix the footer.']);
+    }
+  });
+
+  // the architect's review of the joined answer (the Decision Log), finding 4: the recall reads its row once. The row's
+  // text is the transcript's first read; read again, fragments that read left as text can pair into an envelope, and the
+  // recall then dropped words the bubble shows
+  it('recalls a row as the bubble shows it, even where its text read again would pair fragments into an envelope', () => {
+    const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const theme = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice' as const, options: [{ label: 'Light' }, { label: 'Dark' }] };
+    const a1 = askSteerText('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+    const a2 = askSteerText('ask-2', [theme], [{ id: 'q2', question: theme.question, status: 'answered', value: ['Dark'] }]);
+    const lines = a1.split('\n');
+    const [head, tail] = [lines.slice(0, 2).join('\n'), lines.slice(2).join('\n')];
+    const bubble = userTextOf(`Keep these notes.\n${head}\n${a2}\n${tail}`).text; // the transcript's one read: a2 is the envelope
+    expect(bubble).toBe(`Keep these notes.\n${a1}`);
+    const recalls = recallEntries([userRow('u1', 't1', bubble)], [turn('t1', 'human')], []);
+    expect(recalls.map(recallText)).toEqual([bubble]);
+  });
+
+  // the task review of the fix wave: a row of an orphan envelope (its ask not held here) and an image draws both, as
+  // finding 2 rules; the recall keeps it too, as the row draws it, rather than skipping the image with the envelope
+  it('recalls a row of an orphan envelope and an image once, as the row draws it', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-9', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const read = userTextOf([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }, { type: 'text', text: envelope }]);
+    expect(read.text).toBe(envelope);
+    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments)], [turn('t1', 'human')], []);
+    expect(recalls.length).toBe(1);
+    expect(recalls[0]).toMatchObject({ source: 'session', prefill: { text: envelope, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] } });
   });
 
   it('keeps two entries with the same display and different bodies apart', () => {

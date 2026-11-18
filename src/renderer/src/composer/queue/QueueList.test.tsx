@@ -3,17 +3,18 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingSteer, QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import { REMOTE_UNAVAILABLE, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
+import { SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
-import { remoteRow } from '../../../../../test/support/builders';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
+import { humanTurn, remoteRow, status } from '../../../../../test/support/builders';
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetRemoteLaneBStore } from '../../lane-b/remote-session';
-import { remoteUnavailableOf } from '../../lane-b/remote-unavailable';
 import { resetComposerStore } from '../../stores/composer';
 import { useHosts } from '../../stores/hosts';
 import { useMachines } from '../../stores/machines';
@@ -21,6 +22,9 @@ import { useNotices } from '../../stores/notices';
 import type { SessionQueue } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
+import { rowsOf } from '../../transcript/model/derive';
+import { applyEvents, createState } from '../../transcript/model/reduce';
+import { builder } from '../../transcript/model/test-events';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { HOST_UPDATING } from './host-wire';
 import { PAUSED_COPY, QueueList, UNCERTAIN_TEXT } from './QueueList';
@@ -126,11 +130,27 @@ describe('the stack’s rows and their marks', () => {
     expect(rows().map(mark)).toEqual(['Sending…']);
   });
 
-  it('says the agent has the message when Send now finds nothing waiting', async () => {
-    const { client } = bridge({ 'session.steer.sendNow': { ok: true, value: { outcome: 'nothing_waiting' } } });
+  // UX wave U4b (decision 13): `nothing_waiting` is no evidence that the agent read anything; the row's own state says
+  // what became of the message
+  it('shows nothing when Send now finds nothing waiting, and marks no row Sending…', async () => {
+    const { client, invoke } = bridge({ 'session.steer.sendNow': { ok: true, value: { outcome: 'nothing_waiting' } } });
     render(<QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, 'late')] })} client={client} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Send now' }));
-    await waitFor(() => expect(notice()).toBe(STACK_WORDS.readAlready));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.steer.sendNow', { appSessionId: APP, messageUuid: U1 }));
+    await waitFor(() => expect((within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(notice()).toBeNull();
+    expect(rows().map(mark)).toEqual(['Next step']);
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it('a Send now whose answer never comes ends at main’s bound as a toast, the row left as it was', async () => {
+    const { client } = bridge({ 'session.steer.sendNow': { ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } } });
+    render(<QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, 'out there')] })} client={client} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['mini took the request but hasn’t confirmed it']));
+    expect(rows().map(mark)).toEqual(['Next step']);
+    expect((within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(notice()).toBeNull();
   });
 
   it('a Send now whose answer is withheld closes that row’s controls and no other row’s', async () => {
@@ -170,6 +190,70 @@ describe('the stack’s rows and their marks', () => {
     expect(row.getAttribute('data-queue-state')).toBe('handed');
     expect(mark(row)).toBe('Next step');
     expect(within(row).queryAllByRole('button')).toEqual([]);
+  });
+});
+
+describe('a waiting answer (UX wave U4b, X-049)', () => {
+  // an invented async ask: two questions, the first with a header, in a turn that has ended and folded
+  const LAYOUT: AskQuestion = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+  const THEME: AskQuestion = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice', options: [{ label: 'Dark' }, { label: 'Light' }] };
+  const SIZE: AskQuestion = { id: 'q3', question: 'How large should the tiles be?', modality: 'text' };
+  const GRID: AskAnswer = { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] };
+  const asked = (questions: AskQuestion[]) => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_a', 'mcp__maws__ask', { blocking: false, questions });
+    b.result('toolu_a', [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_a' }) }]);
+    b.text('m1', 0, 'I will go on meanwhile.');
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(state); // the turn folded: the ask's capsule is one of the rows it leaves in view
+    expect(rows.some((row) => row.kind === 'ask')).toBe(true);
+    useTranscriptStore.setState({ entries: { [APP]: { state, rows } as never } });
+  };
+  const texts = () => rows().map((row) => row.querySelector('[data-row-text]')?.textContent);
+
+  it('reads "Answer to <header>: <words>" where the window holds the ask under a folded turn, and the question’s own text where it holds none', () => {
+    const { client } = bridge();
+    // board ticket 711: the host writes the new form, which holds no text the model wrote; without the ask, the bare
+    // words and the pick by its place; the question's own text is an earlier build's envelope's
+    const view = (content: string) => <QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, content)] })} client={client} />;
+    const { rerender } = render(view(askSteerText('toolu_a', [LAYOUT], [GRID])));
+    expect(texts()).toEqual(['Answer: option 1']);
+    rerender(view(earlierAskSteerText('toolu_a', [LAYOUT], [GRID])));
+    expect(texts()).toEqual(['Answer to Which layout should the gallery use?: Grid']);
+    asked([LAYOUT]);
+    rerender(view(askSteerText('toolu_a', [LAYOUT], [GRID])));
+    expect(texts()).toEqual(['Answer to Layout: Grid']);
+    expect(mark(rows()[0])).toBe('Next step');
+    rerender(view(earlierAskSteerText('toolu_a', [LAYOUT], [GRID])));
+    expect(texts()).toEqual(['Answer to Layout: Grid']);
+  });
+
+  it('reads the same once a Stop holds it, marked Held', () => {
+    asked([LAYOUT]);
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-a', { content: askSteerText('toolu_a', [LAYOUT], [GRID]) })], { paused: true, pauseReason: 'interrupt' })} client={client} />);
+    expect(texts()).toEqual(['Answer to Layout: Grid']);
+    expect(mark(rows()[0])).toBe('Held');
+  });
+
+  it('several questions read counted and in the asked order, whole in the row’s hover title; the row offers Send now only', () => {
+    asked([LAYOUT, THEME, SIZE]);
+    const answers: AskAnswer[] = [GRID, { id: 'q2', question: THEME.question, status: 'skipped' }, { id: 'q3', question: SIZE.question, status: 'decide_for_me' }];
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, askSteerText('toolu_a', [LAYOUT, THEME, SIZE], answers))] })} client={client} />);
+    const line = 'Answers to 3 questions: Layout: Grid; Theme: Skipped; How large should the tiles be?: Decide for me';
+    expect(texts()).toEqual([line]);
+    expect(rows()[0].querySelector('[data-row-text]')?.getAttribute('title')).toBe(line);
+    expect(within(rows()[0]).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Send now']);
+  });
+
+  it('a folded stack whose first row is an answer names it', () => {
+    asked([LAYOUT]);
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1'), entry('q-2')], { steers: [steer(U1, askSteerText('toolu_a', [LAYOUT], [GRID]))] })} client={client} />);
+    expect(within(stack()).getByRole('button', { expanded: false }).textContent).toBe('3 queued · Next: Answer to Layout: Grid');
   });
 });
 
@@ -307,10 +391,11 @@ describe('the stack’s refused controls', () => {
     delete (window as { maws?: unknown }).maws;
   });
 
-  // From the master that holds U9 (the landing's edge): `session.steer.cancel` is offered behind `rl2.session-acts`, so
-  // Edit and Delete read U9's helper (its sentence on a machine that does not list the capability, nothing on one that
-  // does); Send now stays declared until U4b
-  it('on another machine closes a next-step row’s Send now with its declared sentence, and Edit and Delete with the helper’s where the machine does not take them back', async () => {
+  // UX wave U4b (Interfaces D and G): each control reads the helper with its own label, and the three builds' lists draw
+  // three states. Build F's (neither capability): Send now, Edit and Delete closed on a next-step row, and Edit on any
+  // other row closed from the first draw (decision 10), its Delete open. Build G's (`rl2.session-acts` alone): Send now
+  // closed, the rest open. This build's: all open.
+  it('on another machine closes each control with its own sentence by what the machine’s build lists', async () => {
     window.maws = { localMachine: TEST_MACHINE } as never;
     const machineLists = (capabilities: string[]) => {
       resetRemoteSurfaces();
@@ -320,34 +405,54 @@ describe('the stack’s refused controls', () => {
     };
     const { client, invoke } = bridge();
     const mount = () => render(<QueueList appSessionId={R} busy queue={queue([entry('q-1', { appSessionId: R })], { steers: [steer(U1, 'remote steer')] })} client={client} />);
+    const button = (row: HTMLElement, name: string) => within(row).getByRole('button', { name }) as HTMLButtonElement;
+    const editItem = async (row: HTMLElement) => {
+      await userEvent.setup().click(within(row).getByRole('button', { name: 'More' }));
+      const item = await screen.findByRole('menuitem', { name: 'Edit' });
+      const state = [item.getAttribute('aria-disabled') === 'true', item.getAttribute('title')];
+      await userEvent.setup().keyboard('{Escape}');
+      return state;
+    };
 
-    machineLists([]); // a build that serves no session acts
-    const cancelWords = remoteUnavailableOf(R, 'session.steer.cancel');
-    expect(cancelWords).toContain('Update MAWS on mini');
-    const view = mount();
-    const [next, after] = rows();
-    const send = within(next).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
-    expect(send.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.sendNow']);
-    const del = within(next).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
-    expect(del.disabled).toBe(true);
-    expect(del.getAttribute('title')).toBe(cancelWords);
-    expect((within(after).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false);
-    await userEvent.setup().click(within(next).getByRole('button', { name: 'More' }));
-    const edit = await screen.findByRole('menuitem', { name: 'Edit' });
-    expect(edit.getAttribute('aria-disabled')).toBe('true');
-    expect(edit.getAttribute('title')).toBe(cancelWords);
+    machineLists(['rl2.executor.machine']); // build F's
+    let view = mount();
+    let [next, after] = rows();
+    expect([button(next, 'Send now').disabled, button(next, 'Send now').getAttribute('title')]).toEqual([true, 'Can’t send now on mini yet. Update MAWS on mini and try again.']);
+    expect([button(next, 'Delete').disabled, button(next, 'Delete').getAttribute('title')]).toEqual([true, 'Can’t delete on mini yet. Update MAWS on mini and try again.']);
+    expect(await editItem(next)).toEqual([true, 'Can’t edit on mini yet. Update MAWS on mini and try again.']);
+    expect(button(after, 'Send now').disabled).toBe(false);
+    expect(button(after, 'Delete').disabled).toBe(false);
+    expect(await editItem(after)).toEqual([true, TAKE_BACK_WORDS.needsNewer('mini')]);
     view.unmount();
 
-    machineLists([SESSION_ACTS_CAPABILITY]); // one that takes a waiting message back
-    expect(remoteUnavailableOf(R, 'session.steer.cancel')).toBeNull();
+    machineLists(['rl2.executor.machine', SESSION_ACTS_CAPABILITY]); // build G's
+    view = mount();
+    [next, after] = rows();
+    expect([button(next, 'Send now').disabled, button(next, 'Send now').getAttribute('title')]).toEqual([true, 'Can’t send now on mini yet. Update MAWS on mini and try again.']);
+    expect(button(next, 'Delete').disabled).toBe(false);
+    expect((await editItem(next))[0]).toBe(false);
+    expect((await editItem(after))[0]).toBe(false);
+    view.unmount();
+
+    machineLists(['rl2.executor.machine', SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY]); // this build's
     mount();
-    const [nextThere] = rows();
-    expect((within(nextThere).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'Send now stays declared').toBe(true);
-    expect((within(nextThere).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false);
-    await userEvent.setup().click(within(nextThere).getByRole('button', { name: 'More' }));
-    expect((await screen.findByRole('menuitem', { name: 'Edit' })).getAttribute('aria-disabled')).not.toBe('true');
+    [next] = rows();
+    expect(button(next, 'Send now').disabled).toBe(false);
+    expect(button(next, 'Delete').disabled).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('on a machine that is offline, says each control is unavailable while it is', () => {
+    window.maws = { localMachine: TEST_MACHINE } as never;
+    resetRemoteSurfaces();
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', since: '2026-11-15T09:00:00.000Z', generation: 0 }]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    const { client } = bridge();
+    render(<QueueList appSessionId={R} busy queue={queue([], { steers: [steer(U1, 'remote steer')] })} client={client} />);
+    const [next] = rows();
+    expect(within(next).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe('Send now is unavailable while mini is offline.');
+    expect(within(next).getByRole('button', { name: 'Delete' }).getAttribute('title')).toBe('Delete is unavailable while mini is offline.');
   });
 
   // the panel's finding 7: a next-step row can outlive its turn (the queue, the status and the lifecycles arrive apart),
@@ -356,13 +461,13 @@ describe('the stack’s refused controls', () => {
     window.maws = { localMachine: TEST_MACHINE } as never;
     resetRemoteSurfaces();
     resetRemoteLaneBStore();
-    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities: ['rl2.executor.machine', SESSION_ACTS_CAPABILITY] }]); // build G's
     useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
     const { client, invoke } = bridge();
     const { unmount } = render(<QueueList appSessionId={R} busy={false} queue={queue([], { steers: [steer(U1, 'outlived its turn')] })} client={client} />);
     const remote = within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
     expect(remote.disabled).toBe(true);
-    expect(remote.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.sendNow']);
+    expect(remote.getAttribute('title')).toBe('Can’t send now on mini yet. Update MAWS on mini and try again.');
     unmount();
     useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
     render(<QueueList appSessionId={APP} busy={false} queue={queue([], { steers: [steer(U1, 'outlived its turn')] })} client={client} />);
@@ -400,5 +505,143 @@ describe('the stack’s refused controls', () => {
     expect(edit.getAttribute('aria-disabled')).toBe('true');
     expect(edit.getAttribute('title')).toBe(TAKE_BACK_WORDS.needsServices);
     resetTakeBack();
+  });
+});
+
+// UX wave U4b (decision 13; Interfaces E): "The agent has already read this message" is said only where the session's
+// record says so. A Delete answered `already_started`, or refused because the session is not running on its machine,
+// reads the record once from the row's time; any other refusal is said as a toast in main's words.
+describe('what a Delete says', () => {
+  const STARTED = { id: 'ev-started', sessionId: 'eng-1', at: '2026-09-29T09:50:01.000Z', seq: 1, agentId: null, parentToolUseId: null, kind: 'command.lifecycle', commandUuid: U1, state: 'started' };
+  const deleteOn = async (answers: Record<string, unknown>) => {
+    const { client, invoke } = bridge(answers);
+    const view = render(<QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, 'gone already')] })} client={client} />);
+    await userEvent.setup().click(within(rows()[0]).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect((within(rows()[0]).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false));
+    return { invoke, view };
+  };
+  const ALREADY = { 'session.steer.cancel': { ok: true, value: { outcome: 'already_started' } } };
+  const NOT_LIVE = { 'session.steer.cancel': { ok: false, error: { code: 'internal', message: 'Not taken back: the session isn’t running on mini', issues: { refusal: 'not-live' } } } };
+
+  it.each([
+    ['already_started, the record says read: the line', ALREADY, { ok: true, value: { events: [STARTED], complete: true } }, STACK_WORDS.readAlready],
+    ['already_started, the record says nothing of it: nothing', ALREADY, { ok: true, value: { events: [], complete: true } }, null],
+    ['already_started, the record could not be asked: nothing', ALREADY, { ok: false, error: { code: 'host_unavailable', message: 'mini is offline' } }, null],
+    ['not running there, the record says read: the line', NOT_LIVE, { ok: true, value: { events: [STARTED], complete: true } }, STACK_WORDS.readAlready],
+    ['not running there, the record says nothing of it: nothing', NOT_LIVE, { ok: true, value: { events: [], complete: true } }, null],
+  ])('%s', async (_name, cancel, history, line) => {
+    const { invoke } = await deleteOn({ ...cancel, 'session.promptHistory': history });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.promptHistory', { appSessionId: APP, since: steer(U1, '').createdAt }));
+    await waitFor(() => expect(notice()).toBe(line));
+    expect(invoke.mock.calls.filter(([name]) => name === 'session.promptHistory')).toHaveLength(1);
+    expect(useNotices.getState().notices).toEqual([]); // no toast
+  });
+
+  it('any other refusal is said as a toast, and the record is not read', async () => {
+    const { invoke } = await deleteOn({ 'session.steer.cancel': { ok: false, error: { code: 'host_unavailable', message: 'Not taken back: mini is offline', issues: { refusal: 'offline' } } } });
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Not taken back: mini is offline']));
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(['session.steer.cancel']);
+    expect(notice()).toBeNull();
+  });
+});
+
+// UX wave U4b, M3's conditional step (decision 15; the Decision Log's line on the probe's result): while a turn runs, Send
+// now on an after-the-turn row is a promote at `next` and then, with the uuid the promote answered, the engine's send-now.
+// The order is the rule: the request written before the frame answers `nothing_waiting` and moves nothing
+// (spikes/protocol-probe/findings-uxwave-u4b-send-now-early.txt, reqfirst). Everywhere else it is today's promote at `now`.
+describe('Send now on an after-the-turn row while a turn runs', () => {
+  const running = (id: AppSessionId) => useSessions.setState({ engine: new Map([[id, status(id, { engineState: 'running', turn: humanTurn })]]) });
+  afterEach(() => {
+    cleanup();
+    useSessions.setState({ engine: new Map(), listed: new Map(), listedMachines: new Set() });
+    delete (window as { maws?: unknown }).maws;
+  });
+  const NEXT = { appSessionId: APP, queueId: 'q-1', priority: 'next' };
+
+  it('promotes it at the next step, and only once the promote answered its uuid sends that uuid now; never a promote at `now`', async () => {
+    running(APP);
+    let promoted!: (value: unknown) => void;
+    const { client, invoke } = bridge({ 'session.queue.promote': new Promise((resolve) => (promoted = resolve)), 'session.steer.sendNow': { ok: true, value: { outcome: 'delivering' } } });
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers: [steer(U1, 'waits at the next step')] })} client={client} />);
+    await userEvent.setup().click(within(rows()[1]).getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    expect(invoke.mock.calls).toEqual([['session.queue.promote', NEXT]]); // held open: nothing else yet
+    await act(async () => promoted({ ok: true, value: { messageUuid: U2 } }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls).toEqual([['session.queue.promote', NEXT], ['session.steer.sendNow', { appSessionId: APP, messageUuid: U2 }]]);
+  });
+
+  it('a promote refused, or answering no uuid, sends nothing now: the refusal is said as today', async () => {
+    running(APP);
+    const refused = bridge({ 'session.queue.promote': { ok: false, error: { code: 'internal', message: 'entry is in flight' } } });
+    const view = render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')])} client={refused.client} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['entry is in flight']));
+    expect(refused.invoke.mock.calls).toEqual([['session.queue.promote', NEXT]]);
+    view.unmount();
+    const unnamed = bridge(); // the promote answers `{ messageUuid: null }`
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')])} client={unnamed.client} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(unnamed.invoke.mock.calls).toEqual([['session.queue.promote', NEXT]]);
+  });
+
+  it('`nothing_waiting` after the pair shows nothing', async () => {
+    running(APP);
+    const { client, invoke } = bridge({ 'session.queue.promote': { ok: true, value: { messageUuid: U2 } }, 'session.steer.sendNow': { ok: true, value: { outcome: 'nothing_waiting' } } });
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')])} client={client} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(notice()).toBeNull();
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it('a send-now that fails after the promote is said as any Send now’s failure, and nothing more is invoked: the message stays waiting at the next step', async () => {
+    running(APP);
+    const { client, invoke } = bridge({ 'session.queue.promote': { ok: true, value: { messageUuid: U2 } }, 'session.steer.sendNow': { ok: false, error: { code: 'internal', message: 'Not sent now: mini is offline' } } });
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers: [steer(U1, 'waits at the next step')] })} client={client} />);
+    await userEvent.setup().click(within(rows()[1]).getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Not sent now: mini is offline']));
+    await waitFor(() => expect((within(rows()[1]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(invoke.mock.calls).toEqual([['session.queue.promote', NEXT], ['session.steer.sendNow', { appSessionId: APP, messageUuid: U2 }]]); // no rollback, no interrupt, no second promote
+    expect(screen.queryByText('Sending…')).toBeNull();
+    expect(notice()).toBeNull();
+  });
+
+  it('is today’s promote at `now` with no turn running, in a paused queue, under an engine host of another build, and on a machine that does not list `rl2.send-now`', async () => {
+    const press = async (appSessionId: AppSessionId, busy: boolean, over: Partial<SessionQueue> = {}) => {
+      const { client, invoke } = bridge();
+      const view = render(<QueueList appSessionId={appSessionId} busy={busy} queue={queue([entry('q-1', { appSessionId })], over)} client={client} />);
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Send now' }));
+      await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+      view.unmount();
+      return invoke.mock.calls;
+    };
+    const NOW = (appSessionId: AppSessionId) => [['session.queue.promote', { appSessionId, queueId: 'q-1', priority: 'now' }]];
+    expect(await press(APP, false), 'no turn running').toEqual(NOW(APP));
+    running(APP);
+    expect(await press(APP, false, { paused: true, pauseReason: 'user' }), 'a paused queue').toEqual(NOW(APP));
+    useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
+    expect(await press(APP, true), 'an engine host of another build').toEqual(NOW(APP));
+    useHosts.setState({ supervisor: hostStatus() });
+    const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    window.maws = { localMachine: TEST_MACHINE } as never;
+    resetRemoteSurfaces();
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities: ['rl2.executor.machine', SESSION_ACTS_CAPABILITY] }]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    running(R);
+    expect(await press(R, true), 'a machine of build G').toEqual(NOW(R));
+  });
+
+  it('titles such a row’s Send now by the messages that go with it', () => {
+    running(APP);
+    const { client } = bridge();
+    const view = (steers: PendingSteer[]) => <QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers })} client={client} />;
+    const { rerender } = render(view([steer(U1, 'first')]));
+    expect(within(rows()[1]).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe(STACK_WORDS.sendNowAll(2));
+    rerender(view([]));
+    expect(within(rows()[0]).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe(STACK_WORDS.sendNowWhileRunning);
   });
 });

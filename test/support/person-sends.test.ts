@@ -58,7 +58,7 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/renderer/src/side/card/CardThread.tsx': { kind: 'typed', verbs: { seam: 1 }, field: 'a comment card thread’s reply field (`useReply`)' },
   'src/renderer/src/sessions/setup-actions.ts': { kind: 'typed', verbs: { seam: 1, start: 1 }, field: 'the docked composer’s draft of a session being set up (`serializeDraft`), sent or as its start’s first message' },
   'src/renderer/src/sessions/remote-spawn.ts': { kind: 'typed', verbs: { start: 1 }, field: 'the composer’s draft as a spawn’s brief (its serialized text), or none, the draft then the new session’s own' },
-  'src/renderer/src/widgets/ForkWidget.tsx': { kind: 'typed', verbs: { start: 2, startSeam: 1 }, field: '`/fork <prompt>`: the prompt as typed, the fork’s first message, without the command' },
+  'src/renderer/src/widgets/ForkWidget.tsx': { kind: 'typed', verbs: { start: 1, startSeam: 1 }, field: '`/fork <prompt>`: the prompt as typed, the fork’s first message, without the command' },
   'src/main/attention/actions.ts': { kind: 'typed', verbs: { command: 1 }, field: 'a notification’s reply field (`reply`)' },
   // MAWS's forms
   // the comments sent to the main conversation, and a thread's first message (`adoptFork`, which a session's start intent
@@ -108,7 +108,6 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/renderer/src/app/session-actions.ts': { kind: 'declaration', verbs: { start: 1 }, what: 'the command a session menu’s item asks about' },
   'src/renderer/src/artifacts/session-context.ts': { kind: 'declaration', verbs: { start: 1 }, what: 'an artifact’s session started with no message' },
   'src/renderer/src/gateway/session-start.ts': { kind: 'declaration', verbs: { start: 1 }, what: 'a gateway session started with no message' },
-  'src/renderer/src/composer/mentions/SlashPalette.tsx': { kind: 'declaration', verbs: { start: 1 }, what: 'whether a fork is offered' },
   'src/renderer/src/lane-b/remote-unavailable.ts': { kind: 'declaration', verbs: { start: 1 }, what: 'whether a fork is offered' },
   'src/renderer/src/side/BtwView.tsx': { kind: 'declaration', verbs: { start: 1 }, what: 'whether a promotion is offered' },
   'src/renderer/src/side/comment-form.ts': { kind: 'declaration', verbs: { start: 1 }, what: 'whether a thread is offered' },
