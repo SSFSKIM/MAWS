@@ -156,13 +156,20 @@ async function runScript(variant: Variant): Promise<Run> {
     await until(() => started.hub.connected && started.registry.directory().complete && up.some((f) => f.t === 'projects') && started.rl10.serving && fs.existsSync(rl10Path), 'the hub link, its snapshot, the record and rl10.json');
 
     const down = (): Frame[] => sminos?.received ?? [];
-    /** Waits for `done` (the frames a step causes), then until no frame has come either way for QUIET_MS. */
+    /**
+     * Waits for `done` (what a step causes, seen), then until no frame has come either way for QUIET_MS: the counts are
+     * sampled after each wait and before the window is judged, so a frame in the window's last wait restarts it.
+     */
     const settled = async (done: () => boolean, what: string) => {
       await until(done, what);
-      let counts = `${down().length}/${up.length}`;
-      for (let quiet = Date.now(); Date.now() - quiet < QUIET_MS; await sleep(25)) {
-        const now = `${down().length}/${up.length}`;
+      const sample = () => `${down().length}/${up.length}`;
+      let counts = sample();
+      let quiet = Date.now();
+      for (;;) {
+        await sleep(25);
+        const now = sample();
         if (now !== counts) [counts, quiet] = [now, Date.now()];
+        else if (Date.now() - quiet >= QUIET_MS) return;
       }
     };
     await settled(() => true, 'the endpoint at rest');
@@ -193,15 +200,19 @@ async function runScript(variant: Variant): Promise<Run> {
       const records = () => up.filter((f) => f.t === 'projects').length;
 
       // 3. P's machine presence; S1 (lane A, project P); S2 (lane A, project Q, which has no folder here); restated.
+      // Each waits on what it is seen to cause: the checkout held, each session held and its audience told, the
+      // restatement closed.
+      const members = started.rl10.members;
+      const audienceOf = (session: string) => has('audience', (f) => f.session === session);
       s.send({ t: 'session', message: { project: P, machine: NAME, session: null, kind: 'machine', sub: null, n: null, body: { online: true, policy: { read_only: false, ceiling: 'settings' }, checkouts: [{ path: FOLDER, branch: 'main' }] } } });
-      await settled(() => true, 'the presence taken');
+      await settled(() => members.projectOfCheckout(FOLDER) === P, 'the presence’s checkout held');
       const channels = variant === 'with' ? [C] : undefined;
       s.send(member(S1, P, FOLDER, 'the main session', channels));
-      await settled(() => true, 'S1’s member frame taken');
+      await settled(() => members.get(S1) !== null && audienceOf(S1), 'S1 held and its audience told');
       s.send(member(S2, Q, '/srv/fleet/elsewhere', 'another session', channels));
-      await settled(() => true, 'S2’s member frame taken');
+      await settled(() => members.get(S2) !== null && audienceOf(S2), 'S2 held and its audience told');
       s.send({ t: 'restated' });
-      await settled(() => true, 'the restatement closed');
+      await settled(() => started.rl10.sminosView()?.restating === false, 'the restatement closed');
 
       // 4. Log-plane hellos, one at a time: P and Q without follow, R following, and C, a channel's id, without follow.
       // P's opening lists S1, a session of a project the endpoint now relays; Q's lists S2, and makes Q known, so the
