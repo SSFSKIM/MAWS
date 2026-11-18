@@ -33,9 +33,9 @@ Status words: *specified* (ready to build), *building*, *built* (reviewed clean 
 - [x] (2026-11-18) The order made binding: M1 lands alone and first (Decision Log 4).
 - [x] (2026-11-18) M1 — The predicate, the shared vectors, and the readers of a stopped thread; the first pull request, alone — built: reviewed clean at `doperpowers:reviewer-high` in three rounds (Decision Log 6 to 11); `channel-rule.json` at version 1 with five `retired` cases. Landed 2026-11-18: #765, merged as `8a7f308ff` (its tree is the PR head `9c2f9679f`'s), green on class 1a and `e2e:desk-web` in run 44413845424.
 - [x] (2026-11-18) The master commit that holds `channel-rule.json` handed to the session holding the parent, for T1's pin (the architect): `8a7f308ff`, version 1, the file's last commit `7665dba00`, sha256 `7cd64b2dbd5a97c28e8640f3e5e44c5574a9f2377d8ac0765788b0227b748f52`. From here the file changes only by §B's sync rule; the second pull request does not touch it.
-- [ ] M2 — Channels at the endpoint: the capability pair, `channels` into `known`, the two refusals, the baseline — building, on `mw-channels-2` from master `8a7f308ff`
-- [ ] M3 — The hub retires an unlisted channel's row and brings it back — building, beside M2 (Decision Log 12)
-- [ ] M4 — The second pull request's acceptance, its review, and what is handed to sminos (the controller and the architect) — specified
+- [x] (2026-11-18) M2 — Channels at the endpoint: the capability pair, `channels` into `known`, the two refusals, the baseline — built on `mw-channels-2` from master `8a7f308ff`: reviewed clean at `doperpowers:reviewer-high` in four rounds (Decision Log 13); the baseline captured from `77af813a4` before the endpoint changed, equal on the Linux runner.
+- [x] (2026-11-18) M3 — The hub retires an unlisted channel's row and brings it back — built on `mw-channels-2-m3`, merged into `mw-channels-2`: reviewed at `doperpowers:reviewer-high` in three rounds, the third leaving two deferred P2s (Decision Log 14).
+- [ ] M4 — The second pull request's acceptance, its review, and what is handed to sminos (the controller and the architect) — building: the gates and the baseline's second capture by the controller; the branch is panel-sized (about 24 files and 2,800 lines), so its review is the xhigh panel from the main session (Decision Log 1 (c), 4)
 
 ## The contract
 
