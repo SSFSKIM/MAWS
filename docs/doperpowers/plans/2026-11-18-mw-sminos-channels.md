@@ -736,4 +736,17 @@ The first pull request is one milestone under twenty files: its review is M1's, 
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+2026-11-18, at the second pull request's opening; the branch review (the xhigh panel) and its fix waves refresh it.
+
+**What holds.** The first pull request landed alone as `8a7f308ff`, and `channel-rule.json` is pinned there at version 1 with five `retired` cases. The second, on `mw-channels-2`, carries the capability pair, `channels` into `known` (lane A only, 128 at most, read in one place), the two refusals, the fixture's channel case, the baseline oracle, and the hub's retention. Each milestone's tests are in "Acceptance"'s files. The baseline was captured from `77af813a4` twice to the byte before the endpoint changed, captured twice more at the acceptance with no difference, and is equal on the Linux runner. Step 0's hub half is still the owner's, and it gates the second pull request's landing.
+
+**Against the purpose.** Everything the contract lists is built and tested. No live scene exists until sminos's CH lands. Until a sminos lists `channels`, the endpoint's frames are master's, except the two changes Constraint 4 allows: the lane change and the member refusal.
+
+**What the reviews changed.** Every milestone's first review found a real defect, and most were in what the design left implicit, not in what it said:
+- the lane change after a restart (Decision Log 9);
+- a refused lane B record's hand-off, which leaked access (Decision Log 13);
+- §F's listing, which reached the rows only through a pass that can skip, so a row could retire six days early (Decision Log 14).
+
+The fix for §F follows the shape of the design's own event 1: a step that can only keep or bring back a row runs in the synchronous part of the store, so it needs no ordering. That shape would have served at authoring.
+
+**What to watch.** One fix was reverted. A fix that diverged from master for an older sminos (the shared lane B listing's re-report) cost a review round and was taken back; Constraint 4 decided it. Seven review findings are deferred with reasons in `docs/tech-debt-tracker.md`. Two concern the kept lifecycle (M1), one concerns the stale shared lane B listing (master's), and four concern the hub's retention at scale or under rare interleavings (M3).
