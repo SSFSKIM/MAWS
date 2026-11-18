@@ -17,7 +17,7 @@ import type { DocumentHandle } from '../host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { TAB, World, doc, para, until } from '../test-world';
 import { MARGIN_SETTLE_MAX_MS, MARGIN_SETTLE_QUIET_MS } from './margin-settle';
-import { resetScene, resized, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
+import { resetScene, resized, resizedInFrame, scene, shiftOf, stubCoords, stubGeometry, topOf, unstubGeometry } from './margin-test-support';
 import { MarginThreads } from './MarginThreads';
 import { activeThread, commentDisplayKey, commentSelection, pinnedThread } from './plugins';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from './surface';
@@ -785,6 +785,18 @@ describe('the tiers (N1 to N6) and the view states', () => {
     scene.bodyWidth = 600; // the drawer's range: the margin is off
     resized();
     expect(margin()).toBeNull();
+  });
+
+  // #760: the panel floated, the body widens out of the drawer's range; the frame whose observer reports it paints the
+  // cards, not the docked panel's off, and the column says which widths it drew them from
+  it('draws the tier a resize brings in the frame that reports it, with the widths it read', async () => {
+    scene.bodyWidth = 600;
+    await mount(content());
+    const column = () => document.querySelector<HTMLElement>('.doc-margin');
+    expect([column()!.dataset.marginTier, column()!.dataset.marginMeasured]).toEqual(['off', '600 1400 816']);
+    scene.bodyWidth = 1400;
+    resizedInFrame();
+    expect([column()!.dataset.marginTier, column()!.dataset.marginMeasured]).toEqual(['cards', '1400 1400 816']);
   });
 
   // P4-B1 (N2 on LC-1 item 7): Docs' Minimize stacked three threads on adjacent lines as three icons 46 px apart, the

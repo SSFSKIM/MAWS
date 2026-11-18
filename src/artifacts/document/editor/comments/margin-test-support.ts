@@ -64,13 +64,29 @@ class FakeResizeObserver {
 }
 
 /** Reports a resize of every observed target (the scene has changed meanwhile), or of those `only` takes (P4-B1). */
-export const resized = (only?: (target: Element) => boolean): void =>
-  act(() => {
-    for (const { callback, self, targets } of [...observers]) {
-      const entries = [...targets].filter((target) => only?.(target) ?? true).map((target) => ({ target, contentRect: rectOf(target), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }) as unknown as ResizeObserverEntry);
-      if (entries.length > 0) callback(entries, self);
-    }
-  });
+export const resized = (only?: (target: Element) => boolean): void => act(() => report(only));
+
+/**
+ * #760: reports a resize as the frame's rendering step does, outside act (React's act environment off meanwhile), so
+ * what a test reads right after it is what that frame paints: a render React only scheduled has not happened yet.
+ */
+export function resizedInFrame(only?: (target: Element) => boolean): void {
+  const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const before = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    report(only);
+  } finally {
+    environment.IS_REACT_ACT_ENVIRONMENT = before;
+  }
+}
+
+function report(only?: (target: Element) => boolean): void {
+  for (const { callback, self, targets } of [...observers]) {
+    const entries = [...targets].filter((target) => only?.(target) ?? true).map((target) => ({ target, contentRect: rectOf(target), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }) as unknown as ResizeObserverEntry);
+    if (entries.length > 0) callback(entries, self);
+  }
+}
 
 const box = (x: number, y: number, w: number, h: number) => new DOMRect(x, y, w, h);
 
