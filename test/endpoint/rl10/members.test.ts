@@ -267,6 +267,21 @@ describe('a member whose project is a declared channel’s id', () => {
     expect(m.reports).toEqual([]);
   });
 
+  it('drops a held record and tells its readers before the app session’s lookup is awaited', async () => {
+    for (const lane of ['A', 'B'] as const) {
+      const m = machine(); // no live row and no spawn: a lane B member stays unjoined
+      await m.members.member(memberFrame(S1, lane));
+      const told: unknown[] = [];
+      m.members.onChange((changed) => void told.push(changed));
+      const refused = m.members.member(memberFrame(S1, 'B', { project: C }));
+      expect(m.members.get(S1)).toBeNull();
+      expect(m.members.record({ lane, session: S1, appSessionId: '' })).toBeNull();
+      expect(told).toContainEqual(lane === 'A' ? { lane: 'A', session: S1 } : { lane: 'B', session: S1, appSessionId: '' });
+      await refused;
+      expect(m.members.sessions()).toEqual([]);
+    }
+  });
+
   it('hands a first lane B record off and tells authorization before anything it awaits', async () => {
     let open!: () => void;
     const withdrawing = new Promise<void>((resolve) => (open = resolve));

@@ -232,8 +232,7 @@ export class Members implements RecordSource, CheckoutSource {
     // record, and the session stays closed with no record to decide on.
     if (isChannelId(member.project)) {
       this.#ctx.log(`endpoint: session ${member.session.slice(0, 8)} names a sminos channel as its project; a channel is no project, and the session is not held`);
-      if (member.lane === 'B') await this.#refusedSight(member);
-      return this.gone(member.session);
+      return member.lane === 'B' ? this.#refusedSight(member) : this.gone(member.session);
     }
     // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
     // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
@@ -473,24 +472,29 @@ export class Members implements RecordSource, CheckoutSource {
 
   /**
    * P5 O12 M11 for a lane B record refused, its member held by nothing (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
-   * M2's review): its sight handed off as the join hands one off. Before anything is awaited, the app session it is joined to
-   * keeps its mark (placed again), or else its engine session is marked, and authorization is told; then the app session
-   * is placed as the join finds it, the live rows' first and else the spawn's (`#bySpawn`, which tells each app session it
-   * passes the sight to), so a `/clear` either side of it finds its app session handed off.
+   * M2's review): the session leaves, and its sight is handed off as the join hands one off. Before anything is awaited,
+   * the app session it is joined to keeps its mark (placed again), or else its engine session is marked, authorization is
+   * told, and the record held before goes with `gone`'s own steps, its readers told. Then an unjoined session's app
+   * session is placed as the join finds it, the live rows' first and else the spawn's (`#bySpawn`, joining nothing, which
+   * tells each app session it passes the sight to), so a `/clear` either side of it finds its app session handed off.
    */
   async #refusedSight(member: Member): Promise<void> {
     const { session } = member;
     const joined = this.#apps.get(session);
-    if (joined !== undefined) {
-      this.#placed(session, joined);
-      return this.#tell({ lane: 'B', session, appSessionId: joined });
+    if (joined !== undefined) this.#placed(session, joined);
+    else this.#mark('engines', session);
+    this.#tell({ lane: 'B', session, appSessionId: joined ?? '' });
+    const leaving = this.gone(session); // its synchronous part runs now: the held record dropped, its readers told
+    if (joined === undefined) {
+      const live = (await this.#liveRows()).find((status) => status.engineSessionId === session);
+      if (live === undefined) {
+        await this.#bySpawn(session, member.ownersProof, false);
+      } else {
+        this.#placed(session, live.appSessionId);
+        this.#tell({ lane: 'B', session, appSessionId: live.appSessionId });
+      }
     }
-    this.#mark('engines', session);
-    this.#tell({ lane: 'B', session, appSessionId: '' });
-    const live = (await this.#liveRows()).find((status) => status.engineSessionId === session);
-    if (live === undefined) return this.#bySpawn(session, member.ownersProof);
-    this.#placed(session, live.appSessionId);
-    this.#tell({ lane: 'B', session, appSessionId: live.appSessionId });
+    await leaving;
   }
 
   /**
@@ -502,7 +506,7 @@ export class Members implements RecordSource, CheckoutSource {
    * op ledger's `KEPT_S`) joins neither and marks each handed off, the mark's closed side: a spawner's bridge on either
    * ends until that session's own record decides. Every record counts, the archived too, so a reuse is never missed.
    */
-  async #bySpawn(session: string, ownersProof: readonly unknown[] | undefined = this.#members.get(session)?.ownersProof): Promise<void> {
+  async #bySpawn(session: string, ownersProof: readonly unknown[] | undefined = this.#members.get(session)?.ownersProof, join = true): Promise<void> {
     const proof = ownersProof?.find((act) => isObject(act) && act.action === 'session.spawn');
     const opId = isObject(proof) ? proof.opId : undefined;
     if (!isId(opId)) return;
@@ -517,9 +521,10 @@ export class Members implements RecordSource, CheckoutSource {
     const spawned = sessions.filter((record): record is Record<string, unknown> & { appId: string } => isObject(record) && isId(record.appId) && isObject(record.launchedBy) && record.launchedBy.opId === opId);
     const spawns = [...new Set(spawned.map((record) => record.appId))];
     if (spawns.length > 1) this.#ctx.log(`endpoint: a lane B record's spawn ${opId.slice(0, 64)} names ${spawns.length} app sessions; it is placed under none, and each is handed off`);
-    // A member gone or joined meanwhile is not joined here; its sight is passed on all the same, and each app session
-    // it passed to, but not joined under, is told, so a subscription held there by the bridge is decided again.
-    if (spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) {
+    // A member gone or joined meanwhile is not joined here, nor any for a refused record (`join` false); its sight is
+    // passed on all the same, and each app session it passed to, but not joined under, is told, so a subscription held
+    // there by the bridge is decided again.
+    if (join && spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) {
       this.#apps.set(session, spawns[0]!);
       const current = spawned[0]!.engineSessionId;
       if (isId(current) && current !== session) this.#superseded.add(session);
