@@ -31,7 +31,7 @@ Status words: *specified* (ready to build), *building*, *built* (reviewed clean 
 - [ ] Step 0 — The pre-adoption check (the architect and the owner; no executor). Done: the records half and the local sminos store on one Mac, read 2026-11-18, no id of version 8 (Surprises & Discoveries 1). Remaining: the hub's own table, which only the owner reads ("Step 0's commands").
 - [x] (2026-11-18) The adversarial review of the execution section (Decision Log 1): two findings, both taken. A listing record that reaches the hub before its channel's row is registered (Decision Log 2), and a mixed-fleet proof that compared the new endpoint only with itself (Decision Log 3).
 - [x] (2026-11-18) The order made binding: M1 lands alone and first (Decision Log 4).
-- [ ] M1 — The predicate, the shared vectors, and the readers of a stopped thread; the first pull request, alone — specified
+- [ ] M1 — The predicate, the shared vectors, and the readers of a stopped thread; the first pull request, alone — building (built on the branch 2026-11-18; the fifth vector of Decision Log 6, then its review)
 - [ ] The master commit that holds `channel-rule.json` handed to the session holding the parent, for T1's pin.
 - [ ] M2 — Channels at the endpoint: the capability pair, `channels` into `known`, the two refusals, the baseline — specified
 - [ ] M3 — The hub retires an unlisted channel's row and brings it back — specified
@@ -114,7 +114,7 @@ The parent's acceptance sentence, split into items in its own order. A10 is D6's
 | A5 | A member whose project is a channel id is refused | `test/endpoint/rl10/members.test.ts` | M2 | class 1a |
 | A6 | A channel's row retires after seven days unlisted and is active again when listed | `apps/desk-hub/test/channel-retention.test.ts` | M3 | class 1a |
 | A7 | A lane change withdraws the old listing | `test/endpoint/rl10/members.test.ts` | M1 | class 1a |
-| A8 | `projectSessions` passes the four shared cases for a `retired` without `thread` | `src/main/org/channel/address.test.ts` (the reader), `src/main/org/channel/cache.test.ts` (the same cases through the kept lifecycle) | M1 | class 1a |
+| A8 | `projectSessions` passes the four shared cases for a `retired` without `thread`, and the fifth of Decision Log 6 | `src/main/org/channel/address.test.ts` (the reader), `src/main/org/channel/cache.test.ts` (the same cases through the kept lifecycle) | M1 | class 1a |
 | A9 | The RL10 conversation fixture carries the capability and one case with `channels` | `test/endpoint/rl10/conversation.local.test.ts` on the edited `conversation.json` | M2 | class 1a |
 | A10 | The web desk's two sentences are true of a thread | `apps/desk-web/src/conversation/capabilities.test.ts`; `apps/desk-web/e2e/conversation.spec.ts` | M1 | class 1a; `e2e:desk-web` |
 
@@ -184,7 +184,7 @@ The cut follows the code and the verification, not the contract's bullets. The l
 
 **It proves** A3, A7, A8 and A10, and of A2 the app's half. Red first: the first shared `retired` case through `projectSessions` (today the session is no member after the unstamped `ended`). Beyond the acceptance its tests pin:
 - every `ids` entry answers as its `channel` says, the trailing newline included; the file's shape and its version;
-- the four shared cases through `projectSessions`, and the same four through a cache that is fed the events one at a time, written to its file and read back;
+- the five shared cases through `projectSessions`, and the same five through a cache that is fed the events one at a time, written to its file and read back;
 - a stamped `joined`, an unstamped `moved`, then an unstamped `ended`: no member, read from the kept lifecycle (the displacement the cache's key exists for);
 - a stamped `joined`, then an unstamped `joined`, then an unstamped `ended`: no member (the rule reads the latest `joined`);
 - an unstamped `retired` with reason `continued`, and one with reason `retire`, after a stamped `joined`: no member;
@@ -481,13 +481,19 @@ One file, beside `project-rule.json`, exported from `apps/org-protocol/vectors/i
           "steps": [
             {"event": {"kind": "joined"}, "member": true},
             {"event": {"kind": "retired", "reason": "ended"}, "member": false}
+          ] },
+        { "name": "a stamped joined, then an unstamped moved, then an unstamped ended: a member no more",
+          "steps": [
+            {"event": {"kind": "joined", "thread": "11111111-1111-4111-8111-111111111111"}, "member": true},
+            {"event": {"kind": "retired", "reason": "moved"}, "member": false},
+            {"event": {"kind": "retired", "reason": "ended"}, "member": false}
           ] }
       ]
     }
 
 `apps/org-protocol/test/channel-rule.test.ts` checks the file's shape (these keys and no others, `version` a positive integer, at least one `ids` entry of each answer, every step's `event.kind` one of `joined` and `retired`) and runs `ids` through `isChannelId`. The `retired` cases are run by `address.test.ts` and `cache.test.ts`, whose harness gives every event of a case one session, that session's own writer, rising offsets and a verdict that authenticates it.
 
-The four cases are the parent's four clauses, in its order; the second and the third each continue the first. Each step's `member` covers every prefix.
+The first four cases are the parent's four clauses, in its order; the second and the third each continue the first. The fifth follows from D7 alone (an honoured `moved`, then an unstamped `ended` the rule passes by) and is there for a reader that keeps one `retired` per session, as MAWS's cache did before §G: such a reader lets the `ended` displace the `moved` and reads a member again, and the parent's four cases cannot show it, since none puts an honoured `retired` before an unstamped one (Decision Log 6). Each step's `member` covers every prefix.
 
 **The sync rule** is `project-rule.json`'s (the project registry's execution document, Interfaces §B), for this file:
 - a change is a MAWS pull request that raises `version`, with MAWS's tests green on it, reviewed by the architect and by the session holding the parent;
@@ -705,6 +711,10 @@ The first pull request is one milestone under twenty files: its review is M1's, 
    Evidence: `apps/desk-hub/src/objects/relay.ts`: `logPlane` runs a log's frames in the queue `project:<id>`, and `record` runs a record in the queue `registry`.
 8. Observation: a pattern written with `^` and `$` passes a trailing newline in Python and not in JavaScript, which is why the vectors hold one.
    Evidence: the 29 `ids` entries run through both at authoring: 0 mismatches with JavaScript's `test` and with Python's `fullmatch`; Python's `match` on the `^…$` form passes the entry with the trailing newline.
+9. Observation: the parent's four `retired` cases pass through master's cache once the reader alone is fixed; only a case with an honoured `retired` before an unstamped `ended` shows the cache's displacement (M1, 2026-11-18).
+   Evidence: `cache.test.ts` with `address.ts` fixed and `cache.ts` unchanged: the four shared cases green, `keeps a moved that an unstamped end follows` red (`[true, false, true]` against `[true, false, false]`). Hence Decision Log 6.
+10. Observation: the web desk's retire note is also the body of its retire confirmation (`ChannelView.tsx`: "Retire X? This …"), so §H's first sentence shows there too, with no test pinning it.
+    Evidence: M1's executor's read of `apps/desk-web`, 2026-11-18.
 
 ## Decision Log
 
@@ -714,6 +724,9 @@ The first pull request is one milestone under twenty files: its review is M1's, 
 4. 2026-11-18 — **M1 lands alone and first; the order binds** (the architect's ruling, agreed with the session holding the parent). The document allowed it; it is now required. sminos's T1 pins `apps/org-protocol/vectors/channel-rule.json` from the master commit that holds M1, so that commit's pull request carries M1 and this document and nothing of M2 or M3. What moved: the header; "Plan of Work" (two pull requests; the second on `mw-channels-2` from a master that holds the first); Constraint 7; M1's landing; M4, which is now the second pull request's acceptance; Concrete Steps 6 and 7; "Size and review". The parent has MW as "one change in that repository"; this is the difference, and it is the parent's holder who agreed it. The verification call of entry 1 now reads: (b) stands; (c) the first pull request's review is M1's, at `doperpowers:reviewer-high` on its whole range; the second's is the xhigh panel with entry 1's lenses, or one `doperpowers:reviewer-high` on the whole branch if it ends under twenty files and two thousand lines.
 
 5. 2026-11-18 — **The base moves to master `874b73f54`** (the architect's instruction at dispatch), merged into `mw-channels` as `a41e39e49` before M1. Concrete Steps 1's four greps answer on it. Master's drift since `77af813a4` touches none of M1's files (it is in `src/endpoint/capabilities.ts`, `offers.ts`, `src/shared/ipc/remote-unavailable.ts`, `apps/org-protocol/src/channel.ts` and their tests). "Today" stands as written. §K's baseline stays a capture of `77af813a4`; if its comparison goes red on the merged base, §K's "When master moves a frame" applies.
+6. 2026-11-18 — **A fifth `retired` case in the shared vectors, at version 1** (M1's executor's discovery, taken by the controller). With the reader fixed, the parent's four cases passed through master's cache unchanged: none of them puts an honoured `retired` before an unstamped `ended`, so none shows the displacement §G's cache key exists for ("Where the contract meets the code" 1). Only M1's own extra case did. The vectors are what sminos's suite runs, and a reader there that keeps one `retired` per session would pass the four with the same bug. So a fifth case is appended after the parent's four, derived from D7 alone: a stamped `joined`, an unstamped `moved` (no member), an unstamped `ended` (still no member). The file stays at version 1: nothing has pinned it, and the sync rule binds it from the master commit that holds it (M1's landing). The parent's four keep their order and their words. Alternative rejected: the parent's four alone now and the case later as version 2, which would cost T1 a second sync for a case known today.
+7. 2026-11-18 — **The lane change keeps `gone` whole** (M1's executor's discovery, left as §E has it). A lane B to lane A change inside a restatement withdraws the app session's listing at the frame, and `restated` asks `listings.gone` for it once more, since only a member frame takes an id out of the set still to restate. The second call reaches the hub as nothing (`Listings.#withdraw` returns at a listing already `gone`; notify's `forget` is idempotent), and master's explicit `gone` frame during a restatement does the same. Not changed: dropping the id from that set in `Members.gone` would change today's explicit-`gone` path for no frame that differs.
+8. 2026-11-18 — **M1's small names** (M1's executor's decisions, kept). The cache keys an unstamped `ended` under the kind segment `retired-unstamped-ended`, with the session still the key's first segment and the provenance in it, so `boundSessions` is unchanged and a legacy `ended` never displaces an authenticated one. `isUnstampedEnd` also requires `kind === 'retired'`. A passed-by `ended` creates no row in `projectSessions`. `test/endpoint/rl10/members.test.ts` is named for `Members` whole, so M2's member refusal joins it. The suites read the vectors through the `CHANNEL_RULE` export, as `PROJECT_RULE` is read.
 
 ## Outcomes & Retrospective
 
