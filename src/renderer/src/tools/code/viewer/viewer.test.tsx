@@ -28,9 +28,11 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { openChosen } from '../files/open-chosen';
 import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
+import { resetFollows } from '../follow'; // UX wave U6b-4c
+import { MarkdownView } from './MarkdownView'; // UX wave U6b-4c
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
-import { fakeHash, frameToken, installDisk, leaveRl2, OUTSIDE_REFUSAL, overRl2, refused, rosterSays } from '../../../test-support/code-disk';
+import { fakeHash, frameToken, installDisk, leaveRl2, OUTSIDE_REFUSAL, overRl2, refused, rosterSays, type DiskLink } from '../../../test-support/code-disk';
 import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
@@ -2519,8 +2521,9 @@ describe('a file outside the folders on another machine (U6f)', () => {
 });
 
 // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, decision 4, L14): a shown Markdown file
-// resolves a relative link against the folder of the path its tab holds; a link there, or in a subagent's transcript,
-// asks for the file as any chip does and adds no evidence of its own.
+// resolves a relative link against the folder of the path its tab holds. UX wave U6b-4c (Q9) reverses its L14 and N2.3 in
+// the window: a link there, or in a subagent's transcript, asks the daemon to follow it first (`files.follow`), and the
+// read then asks by name as any chip's does; what the daemon finds is the only evidence the link adds.
 describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b-4b)', () => {
   const OUT = '/elsewhere/notes.txt';
   const offs: (() => void)[] = [];
@@ -2528,6 +2531,7 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
+    resetFollows(); // UX wave U6b-4c
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
     offs.push(registerPanelTool(filesTool));
   });
@@ -2536,10 +2540,11 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     offs.splice(0).forEach((off) => off());
   });
 
-  // `/elsewhere` is outside the folders; `named` the paths session A's transcript names there
-  function disk(files: Record<string, string>, named: string[] = []) {
+  // `/elsewhere` is outside the folders; `named` the paths session A's transcript names there; U6b-4c: `links` what the
+  // daemon's follow finds
+  function disk(files: Record<string, string>, named: string[] = [], links: DiskLink[] = []) {
     const names = new Set(named);
-    return { ...installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path) }), names };
+    return { ...installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path), links }), names };
   }
   const sideFiles = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
   const mainFile = (path: string) => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).find((tab): tab is Extract<TabRef, { kind: 'file' }> => tab.kind === 'file' && tab.path === path);
@@ -2559,7 +2564,8 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     expect(mainFile('/r/app.ts')).toMatchObject({ line: 3, appSessionId: A });
   });
 
-  it('a relative link in a shown file outside the folders asks for its sibling by name for the tab’s session: one read of exactly that path (N2.3)', async () => {
+  // U6b-4c reverses it in the window (Q9): one follow of exactly that path from the shown file, then the one read
+  it('a relative link in a shown file outside the folders follows, then asks for its sibling by name for the tab’s session: one follow and one read of exactly that path, refused where the daemon finds no link (N2.3)', async () => {
     const main = disk({ '/elsewhere/docs/guide.md': '[setup](setup.md)', '/elsewhere/docs/setup.md': 'not named\n' }, ['/elsewhere/docs/guide.md']);
     shownFile('/elsewhere/docs/guide.md');
     const setup = await screen.findByTitle('setup.md');
@@ -2568,7 +2574,10 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     expect(tab).toMatchObject({ appSessionId: A });
     render(<FileViewer tab={tab} />);
     await waitFor(() => expect(noticeLines()).toEqual(outsideHere('/elsewhere/docs/setup.md')));
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: MAIN_A, path: '/elsewhere/docs/setup.md', from: { file: '/elsewhere/docs/guide.md' } }]);
     expect(main.callsOf('files.read').filter((input) => input.path === '/elsewhere/docs/setup.md')).toEqual([asked('/elsewhere/docs/setup.md')]);
+    const order = main.calls.filter((call) => call.input.path === '/elsewhere/docs/setup.md' && call.name !== 'files.watch').map((call) => call.name);
+    expect(order).toEqual(['files.follow', 'files.read']);
   });
 
   // L5 (R2): the window resolves the relative chip against the session's working folder; the transcript wrote the relative
@@ -2597,10 +2606,14 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     }
   });
 
-  it('a path link in a subagent’s transcript and in a shown Markdown file asks by name alone: refused with no evidence, opened once the transcript names it (L14)', async () => {
-    const main = disk({ '/elsewhere/guide.md': `[the notes](${OUT})`, [OUT]: 'the notes\n' }, ['/elsewhere/guide.md']);
-    // a subagent's transcript is keyed `<session>:<agent>`; its rows act on the session (useRowSession)
-    const subagent = { storeKey: `${A}:agent-1`, variant: 'child', actions: { ...NO_ACTIONS, openFile: codeTranscriptActions.openFile }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'agent' } as const;
+  // U6b-4c reverses it in the window (Q9): each click follows from its own source first, and then reads by name; the
+  // subagent's transcript, which the daemon finds holds no such link, admits nothing; the shown file, which does, admits it
+  it('a path link in a subagent’s transcript and in a shown Markdown file each follow from their source and then ask by name: refused where the daemon finds no link, opened where it does (L14)', async () => {
+    const main = disk({ '/elsewhere/guide.md': `[the notes](${OUT})`, [OUT]: 'the notes\n' }, ['/elsewhere/guide.md'], [{ from: { file: '/elsewhere/guide.md' }, path: OUT }]);
+    // a subagent's transcript is keyed `<session>:<agent>`; its rows act on the session (useRowSession), and its mount adds
+    // the agent's id to every open (Transcript.tsx, held in Transcript.test.tsx)
+    const openFromAgent: typeof codeTranscriptActions.openFile = (path, line, session, options) => codeTranscriptActions.openFile(path, line, session, { ...options, agent: 'agent-1' });
+    const subagent = { storeKey: `${A}:agent-1`, variant: 'child', actions: { ...NO_ACTIONS, openFile: openFromAgent }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'agent' } as const;
     render(
       <TranscriptProvider value={subagent}>
         <Markdown markdown={`Wrote [the notes](${OUT}).`} live={false} />
@@ -2610,18 +2623,510 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     await waitFor(() => expect(screen.getAllByTitle(OUT)).toHaveLength(2));
     const [inSubagent, inFile] = screen.getAllByTitle(OUT);
     const reads = () => main.callsOf('files.read').filter((input) => input.path === OUT);
+    const follows = () => main.callsOf('files.follow');
     act(() => void fireEvent.click(inSubagent, { metaKey: true }));
     render(<FileViewer tab={mainFile(OUT)!} />);
     await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(follows()).toEqual([{ appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } }]);
     expect(reads()).toEqual([asked(OUT)]);
-    act(() => void fireEvent.click(inFile, { metaKey: true })); // the same tab, read again: its last read failed
-    await waitFor(() => expect(reads()).toEqual([asked(OUT), asked(OUT)]));
-    await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull());
-    main.names.add(OUT); // the control: the session's own transcript now writes the path
-    act(() => void fireEvent.click(inSubagent, { metaKey: true }));
-    await waitFor(() => expect(useViewer.getState().entries.get(FILE(OUT))).toMatchObject({ status: 'ready', text: 'the notes\n', named: true }));
-    expect(reads()).toEqual([asked(OUT), asked(OUT), asked(OUT)]);
+    act(() => void fireEvent.click(inFile, { metaKey: true })); // the same tab, read again after the follow: its last read failed
+    await waitFor(() => expect(useViewer.getState().entries.get(FILE(OUT))).toMatchObject({ status: 'ready', text: 'the notes\n', named: true, locked: null }));
+    expect(follows()).toEqual([
+      { appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } },
+      { appSessionId: MAIN_A, path: OUT, from: { file: '/elsewhere/guide.md' } },
+    ]);
+    expect(reads()).toEqual([asked(OUT), asked(OUT)]);
     expect(mainFile(OUT)).toMatchObject({ appSessionId: A });
+  });
+});
+
+// ---- UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, M4; W1, Interfaces §F) -------
+// A click on a link in a shown Markdown file, or on a link or a chip in a subagent's transcript, of a session on this Mac
+// asks the daemon to follow it (`files.follow`) before the tab is placed, and the tab's read waits for the follow; a read
+// sent before the click that lands refused, or read-only, after a follow that found the link is read once more. The fake
+// disk's daemon finds the links each case gives (`links`). Invented paths under `/elsewhere` (outside session A's folders)
+// and `/r`, invented text.
+describe('a link followed from a shown Markdown file, or from a subagent’s transcript (U6b-4c)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const DOC = '/r/docs/guide.md';
+  const LINKED = `[the notes](${OUT})`;
+  const FROM_DOC = { appSessionId: MAIN_A, path: OUT, from: { file: DOC } };
+  const LINKED_ONLY = 'Read-only: the file that links this one is read-only in this conversation. Choose it with File ▸ Open File… to edit it';
+  const RESULT_ONLY = 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it';
+  const REFUSED = 'Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    resetFollows();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    offs.push(registerPanelTool(filesTool));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  // `/elsewhere` is outside the folders; what admits a file there for A: a counted name, a result-only name; `links` what
+  // the daemon's follow finds
+  function disk(files: Record<string, string>, how: { links?: DiskLink[]; names?: string[]; results?: string[]; older?: boolean } = {}) {
+    const forA = (paths: string[] = []) => (appSessionId: string, path: string) => appSessionId === MAIN_A && paths.includes(path);
+    return installDisk(files, { outside: ['/elsewhere'], names: forA(how.names), results: forA(how.results), links: how.links ?? [{ from: { file: DOC }, path: OUT }], older: how.older });
+  }
+  const shown = (path = OUT) => useViewer.getState().entries.get(FILE(path));
+  const reads = (main: ReturnType<typeof installDisk>, path = OUT) => main.callsOf('files.read').filter((input) => input.path === path);
+  const asked = (path: string, extra: Record<string, unknown> = {}) => ({ appSessionId: MAIN_A, path, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true, ...extra });
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const saveButton = () => screen.queryByRole('button', { name: 'Save' });
+  const label = () => document.querySelector<HTMLElement>('[data-read-only]');
+  const retryButton = () => document.querySelector<HTMLButtonElement>('[data-notice-retry]');
+  const sideFiles = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  // A file's main tab and its viewer, as an open from the main area makes them
+  const showFile = (path: string, appSessionId: AppSessionId = A) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={fileTab(path, null, appSessionId)} />);
+  };
+  // The shown Markdown file `DOC` and its link to `path`, found before anything else is drawn with that title
+  const linkIn = async (path = OUT, doc = DOC) => {
+    showFile(doc);
+    await waitFor(() => expect(shown(doc)?.status).toBe('ready'));
+    return screen.findByTitle(path);
+  };
+  const click = (chip: HTMLElement, main = true) => act(() => void fireEvent.click(chip, { metaKey: main }));
+  // A subagent's chip, as the child's mount opens it (Transcript.tsx gives `agent`)
+  const fromAgent = (path: string, agent = 'agent-1') => act(() => codeTranscriptActions.openFile(path, undefined, A, { main: true, agent }));
+  const unreachable = () => fail('files.read: no answer within 10 s', 'timeout');
+
+  it('K1: the click follows from the shown file before its one read; the file opens beside the chat, and on ⌘ in the main area editable, with no label, and Save writes it', async () => {
+    const main = disk({ [DOC]: `Notes: ${LINKED}`, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip, false);
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
+    expect(sideFiles()).toEqual([{ file: OUT, line: null, preview: true }]); // nothing of the source on the tab
+    click(chip);
+    expect(main.callsOf('files.follow')).toHaveLength(2); // the first had settled, so this is a follow of its own
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true, named: true, locked: null, pin: OUT }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    expect(label()).toBeNull();
+    expect(reads(main)).toEqual([asked(OUT)]);
+    const order = main.calls.filter((call) => call.input.path === OUT && call.name !== 'files.watch').map((call) => call.name);
+    expect(order).toEqual(['files.follow', 'files.follow', 'files.read']);
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: MAIN_A, path: OUT, content: 'two one\n', expectedHash: fakeHash('one\n'), real: OUT }]);
+  });
+
+  it('K1: a PDF linked the same way is drawn in its frame', async () => {
+    const PDF = '/elsewhere/ledger.pdf';
+    const main = disk({ [DOC]: `[the ledger](${PDF})`, [PDF]: '%PDF-1.4 invented\n' }, { links: [{ from: { file: DOC }, path: PDF }] });
+    click(await linkIn(PDF));
+    render(<FileViewer tab={fileTab(PDF)} />);
+    await waitFor(() => expect(shown(PDF)).toMatchObject({ kind: 'frame', named: true, frame: { status: 'ready' } }));
+    expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: MAIN_A, path: PDF }]);
+  });
+
+  it('X3.4 (M4): a relative chip of a file at /base/dir/doc.md follows with the entry’s path as its source and the path the read then asks; an artifact’s view follows nothing', async () => {
+    const main = disk({ '/base/dir/doc.md': '[a](sub/a.md) and [up](../up.txt)', '/base/dir/sub/a.md': 'a\n', '/base/up.txt': 'u\n' });
+    click(await linkIn('sub/a.md', '/base/dir/doc.md'));
+    render(<FileViewer tab={fileTab('/base/dir/sub/a.md')} />);
+    await waitFor(() => expect(shown('/base/dir/sub/a.md')?.status).toBe('ready'));
+    const [followed] = main.callsOf('files.follow');
+    expect(followed).toEqual({ appSessionId: MAIN_A, path: '/base/dir/sub/a.md', from: { file: '/base/dir/doc.md' } });
+    expect(reads(main, '/base/dir/sub/a.md').map((input) => input.path)).toEqual([followed.path]);
+    cleanup();
+    render(<MarkdownView entry={shown('/base/dir/doc.md')!} artifactView />); // an artifact's view: resolved against nothing, and no source
+    click(screen.getByTitle('../up.txt'));
+    expect(main.callsOf('files.follow')).toHaveLength(1);
+  });
+
+  it('W1 (a): while the follow is under way the tab shows its loading state and sends no files.read; when it is answered, exactly one', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    expect(main.callsOf('files.watch')).toContainEqual({ appSessionId: MAIN_A, path: '/elsewhere' }); // the watch was asked; the read waits
+    expect(shown()).toMatchObject({ status: 'loading', pending: 1 });
+    expect(reads(main)).toEqual([]);
+    await act(async () => held.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    await settle();
+    expect(reads(main)).toEqual([asked(OUT)]); // one read: it noted the count after the wait, so nothing reads again
+  });
+
+  it.each([
+    ['answers not-linked', (main: ReturnType<typeof installDisk>) => void main.links.splice(0)],
+    ['is refused by a daemon of an older build (K11)', (main: ReturnType<typeof installDisk>) => void (main.daemon.older = true)],
+    ['times out', (main: ReturnType<typeof installDisk>) => void (main.answers.by = (name) => (name === 'files.follow' ? fail('files.follow: no answer within 10 s', 'timeout') : null))],
+    ['finds no host', (main: ReturnType<typeof installDisk>) => void (main.answers.by = (name) => (name === 'files.follow' ? fail('the files service is not running', 'host_unavailable') : null))],
+    ['is refused to the caller', (main: ReturnType<typeof installDisk>) => void (main.answers.by = (name) => (name === 'files.follow' ? fail('forbidden sender', 'forbidden_sender') : null))],
+  ])('W1 (b): a follow that %s settles the wait the same way: the read is sent and its refusal draws the notice', async (_, how) => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    how(main);
+    click(await linkIn());
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
+    expect(reads(main)).toEqual([asked(OUT)]);
+  });
+
+  it('K11: on a daemon of an older build a link to a file inside the folders opens as before', async () => {
+    const main = disk({ [DOC]: '[the app](/r/app.ts)', '/r/app.ts': 'export const a = 1;\n' }, { older: true });
+    click(await linkIn('/r/app.ts'));
+    render(<FileViewer tab={fileTab('/r/app.ts')} />);
+    await waitFor(() => expect(codeText()).toBe('export const a = 1;'));
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: MAIN_A, path: '/r/app.ts', from: { file: DOC } }]);
+  });
+
+  it('W1 (c): a second click on the link while its follow is under way starts no second follow', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    click(chip);
+    click(chip, false);
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await act(async () => held.release());
+    await waitFor(() => expect(shown()?.status).toBe('ready'));
+    expect(reads(main)).toHaveLength(1);
+  });
+
+  it('W1 (d): the same tab opened for another session while the follow is under way reads at once for it, and the read that waited lands nowhere', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    const { rerender } = render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    expect(reads(main)).toEqual([]);
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />); // the other session's read does not wait
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }));
+    expect(reads(main).map((input) => input.appSessionId)).toEqual(['app-b']);
+    await act(async () => held.release());
+    await settle();
+    expect(reads(main).map((input) => input.appSessionId)).toEqual(['app-b', MAIN_A]); // sent when its follow settled ...
+    expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }); // ... and its answer landed nowhere
+  });
+
+  it('W1 (d): the tab closed while the follow is under way leaves no entry when its read answers', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    const { unmount } = render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    unmount();
+    act(() => useLayout.getState().closeTab(FILE(OUT)));
+    expect(shown()).toBeUndefined();
+    await act(async () => held.release());
+    await settle();
+    expect(shown()).toBeUndefined();
+  });
+
+  it('W1 (f): a tab that shows the file’s refusal is read again after the follow, and then shows the file', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    showFile(OUT);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    click(chip);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    expect(reads(main)).toEqual([asked(OUT), asked(OUT)]);
+  });
+
+  it('W1 (g): a read sent before the click that lands refused after the follow found the link is read once more: two reads in all', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read'); // answered as the disk is when it arrives: refused, no record yet
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    click(chip); // the read is pending, so the open itself reads nothing
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    await act(async () => before.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    await settle();
+    expect(reads(main)).toEqual([asked(OUT), asked(OUT)]);
+  });
+
+  it('W1 (g): the held read landing refused before the follow answers waits for it, then reads once more: two reads in all', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT))); // drawn as it is
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    await act(async () => followed.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g): a file that opened read-only before the click is read once more after the follow, and is editable', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' }, { results: [OUT] });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    await act(async () => before.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: null, editable: true }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g): no further read for a key whose entry became another session’s while the follow was under way', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    const { rerender } = showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT))); // landed refused; the store waits for the follow
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }));
+    await act(async () => followed.release());
+    await settle();
+    expect(reads(main).map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b']);
+  });
+
+  it('W1 (g): a hidden tab whose read landed refused before the follow found the link reads again when it is next shown, once', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    const { unmount } = showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(shown()?.status).toBe('error'));
+    unmount(); // the tab hidden: left for its next mount
+    await act(async () => followed.release());
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g) and Retry: while the store’s read again is out Retry is not offered and starts nothing', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? unreachable() : null);
+    const before = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(retryButton()?.disabled).toBe(false)); // unreachable: Retry offered, nothing out
+    main.answers.by = () => null; // the daemon answers again
+    const again = main.hold('files.read');
+    await act(async () => followed.release());
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    expect(shown()).toMatchObject({ retrying: true });
+    expect(retryButton()!.disabled).toBe(true);
+    act(() => useViewer.getState().retry(FILE(OUT)));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+    await act(async () => again.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', retrying: false }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g) and Retry: a Retry’s read out when the follow found the link starts nothing meanwhile; landing refused it is read once more, the guard held to the end', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? unreachable() : null);
+    showFile(OUT);
+    await waitFor(() => expect(retryButton()?.disabled).toBe(false));
+    main.answers.by = () => null;
+    const retried = main.hold('files.read'); // Retry's read, answered refused: no record yet
+    fireEvent.click(retryButton()!);
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    await settle();
+    expect(reads(main)).toHaveLength(2); // nothing read while Retry's read is out
+    const again = main.hold('files.read');
+    await act(async () => retried.release());
+    await waitFor(() => expect(reads(main)).toHaveLength(3));
+    expect(shown()).toMatchObject({ retrying: true }); // the read again holds the guard Retry took
+    await act(async () => again.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', retrying: false }));
+    await settle();
+    expect(reads(main)).toHaveLength(3);
+  });
+
+  it('W1 (g) and Retry: a Retry pressed while the follow is under way reads after it, noting its count: one read and no read again', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? unreachable() : null);
+    showFile(OUT);
+    await waitFor(() => expect(retryButton()?.disabled).toBe(false));
+    main.answers.by = () => null;
+    const followed = main.hold('files.follow');
+    click(chip);
+    fireEvent.click(retryButton()!);
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    await act(async () => followed.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', retrying: false }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (h): a Markdown file’s and a subagent’s clicks for one path are two follows, and the read waits for both, the one that came during its wait included', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' }, { links: [{ from: { file: DOC }, path: OUT }, { from: { agent: 'agent-1' }, path: OUT }] });
+    const chip = await linkIn();
+    const first = main.hold('files.follow');
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    const second = main.hold('files.follow');
+    fromAgent(OUT);
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC, { appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } }]);
+    await act(async () => first.release());
+    await settle();
+    expect(reads(main)).toEqual([]);
+    await act(async () => second.release());
+    await waitFor(() => expect(shown()?.status).toBe('ready'));
+    expect(reads(main)).toHaveLength(1);
+  });
+
+  it('W1 (i): several loads that waited for one follow each send their read when it settles; only the newest lands', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    act(() => useViewer.getState().applyChanged({ appSessionId: A, path: OUT, kind: 'changed' })); // a second load, waiting too
+    main.files[OUT] = 'newer notes\n';
+    await settle();
+    expect(reads(main)).toEqual([]);
+    await act(async () => held.release());
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'newer notes\n' }));
+  });
+
+  it('K4: a file a read-only Markdown file links opens read-only with its own sentence and Open File…; once the Markdown file is chosen, the same link opens it editable', async () => {
+    const SOURCE = '/elsewhere/docs/guide.md';
+    const main = disk({ [SOURCE]: LINKED, [OUT]: 'the notes\n' }, { results: [SOURCE], links: [{ from: { file: SOURCE }, path: OUT }] });
+    const chip = await linkIn(OUT, SOURCE);
+    expect(shown(SOURCE)).toMatchObject({ locked: 'result' });
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', named: true, locked: 'linked', editable: false }));
+    expect(readOnlyReason(shown()!)).toBe('linked');
+    const at = [...document.querySelectorAll<HTMLElement>('[data-read-only]')].find((node) => node.getAttribute('data-read-only') === 'linked')!;
+    expect(at.getAttribute('aria-description')).toBe(LINKED_ONLY);
+    await userEvent.setup().click(at);
+    const panel = await screen.findByRole('dialog');
+    expect(within(panel).getByText(LINKED_ONLY)).toBeTruthy();
+    expect(within(panel).queryByRole('button', { name: 'Open File…' })).not.toBeNull();
+    main.grant(MAIN_A, SOURCE); // the person chose the Markdown file
+    click(chip);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: null, editable: true }));
+    expect(main.linked(MAIN_A, OUT)).toEqual({ why: null });
+  });
+
+  it('K5: a subagent’s link to a file its counted text names opens editable; a path only a tool’s result there holds opens read-only', async () => {
+    const RESULT = '/elsewhere/listed.txt';
+    const main = disk({ [OUT]: 'the notes\n', [RESULT]: 'listed\n' }, { links: [{ from: { agent: 'agent-1' }, path: OUT }, { from: { agent: 'agent-1', why: 'result' }, path: RESULT }] });
+    fromAgent(OUT);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: null, editable: true }));
+    cleanup();
+    fromAgent(RESULT);
+    render(<FileViewer tab={fileTab(RESULT)} />);
+    await waitFor(() => expect(shown(RESULT)).toMatchObject({ status: 'ready', locked: 'result', editable: false }));
+    expect(label()!.getAttribute('aria-description')).toBe(RESULT_ONLY);
+    expect(main.callsOf('files.follow')).toEqual([
+      { appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } },
+      { appSessionId: MAIN_A, path: RESULT, from: { agent: 'agent-1' } },
+    ]);
+  });
+
+  it('K6: a link the shown file draws but the daemon no longer finds opens nothing: U6b-4b’s first notice', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' }, { links: [] }); // the file on disk changed since it was drawn
+    click(await linkIn());
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(main.linked(MAIN_A, OUT)).toBeNull();
+  });
+
+  it('K8: an open the agent asked for never follows, and a file only a link record admits is refused to it; the person’s own click then opens it', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    act(() => void openFile(A, OUT, null, { main: true, asked: 'agent', from: { file: DOC } }));
+    expect(main.callsOf('files.follow')).toEqual([]);
+    click(chip); // the person's click records the link; the agent's mark on the tab still reads as the agent's
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    const agentTab = render(<FileViewer tab={fileTab(OUT)} agent />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(reads(main).at(-1)).toEqual(asked(OUT, { agent: true }));
+    agentTab.unmount();
+    render(<FileViewer tab={fileTab(OUT)} />); // the person's tab: read without the mark
+    click(chip);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', agent: false, editable: true }));
+    expect(reads(main).at(-1)).toEqual(asked(OUT));
+  });
+
+  it('K10: a click for a session on another machine sends no follow', () => {
+    const main = disk({});
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    act(() => void openFile(REMOTE, OUT, null, { main: true, from: { file: DOC } }));
+    act(() => codeTranscriptActions.openFile(OUT, undefined, REMOTE, { main: true, agent: 'agent-1' }));
+    expect(main.callsOf('files.follow')).toEqual([]);
+  });
+
+  it('X5.14: with unsaved edits and the record gone, Save is refused and the edits stand; pressed while the click’s follow is under way, refused again; after it answers linked, Save writes', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    main.unlink(MAIN_A, OUT); // pushed out of the session's records
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(shown()!.saveError).not.toBeNull());
+    expect(document.body.textContent).toContain(REFUSED);
+    expect(view().state.doc.toString()).toBe('two one\n');
+    expect(main.files[OUT]).toBe('one\n');
+    const held = main.hold('files.follow');
+    click(chip);
+    fireEvent.click(saveButton()!);
+    await settle();
+    expect(main.callsOf('files.writeOutside')).toHaveLength(2);
+    expect(main.files[OUT]).toBe('one\n');
+    expect(shown()).toMatchObject({ dirty: true, saving: false });
+    await act(async () => held.release());
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    expect(shown()).toMatchObject({ dirty: false, saveError: null });
+    expect(reads(main)).toHaveLength(1); // nothing was read over the edits
   });
 });
 
