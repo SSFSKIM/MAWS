@@ -37,15 +37,17 @@ export interface ExtensionUiDeps {
   linkTarget(): LinkTarget;
   seam: Pick<BrowserSeam, 'openExternal'>;
   env: NodeJS.ProcessEnv;
+  zoomOf?(win: BrowserWindow): number; // UX wave U6b-5b: the app window's zoom, for the popup's place (placement 2)
 }
 
 export interface ExtensionUi {
   removing(partition: string): void; // a profile's removal begins: its popups and options tabs close
+  placeAgain(windowId: number): void; // UX wave U6b-5b: the window's zoom changed: its popup stands again under its button
   seam: ExtensionsInspector;
   stop(): void;
 }
 
-export function startExtensionUi({ store, views, partitions, leaveInternal, records, menus, windowOf, emit, register, linkTarget, seam, env }: ExtensionUiDeps): ExtensionUi {
+export function startExtensionUi({ store, views, partitions, leaveInternal, records, menus, windowOf, emit, register, linkTarget, seam, env, zoomOf }: ExtensionUiDeps): ExtensionUi {
   const actions = new ExtensionActions({ records, emit });
   const popups = new ExtensionPopups({
     store,
@@ -56,6 +58,7 @@ export function startExtensionUi({ store, views, partitions, leaveInternal, reco
     linkTarget,
     seam,
     log: (event) => importLog(event, env),
+    ...(zoomOf && { zoomOf: (window) => zoomOf(window as unknown as BrowserWindow) }), // UX wave U6b-5b: the popup's window is an app window
   });
   const pages = new ExtensionPages({ store, actions, emit });
   // the tab whose action shows pressed, per window: on while its popup is open, off when it closes
@@ -89,6 +92,7 @@ export function startExtensionUi({ store, views, partitions, leaveInternal, reco
       popups.closeAll(partition);
       pages.close(partition, null);
     },
+    placeAgain: (windowId) => popups.placeAgain(windowId),
     seam: {
       popup: () => {
         const found = open();

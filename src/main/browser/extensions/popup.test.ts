@@ -15,7 +15,8 @@ vi.mock('electron', () => ({
 }));
 
 const { TabStore } = await import('../tabs');
-const { ExtensionPopups, POPUP_REOPEN_GUARD_MS, createPopupView, popupBounds } = await import('./popup'); // P3-F1: createPopupView
+const { ExtensionPopups, POPUP_REOPEN_GUARD_MS, createPopupView } = await import('./popup'); // P3-F1: createPopupView
+const { popupBounds } = await import('@shared/browser/popup-bounds'); // UX wave U6b-5b: moved there from ./popup
 
 const A = 'App-A' as AppSessionId;
 const PART = 'persist:maws-chrome-Default';

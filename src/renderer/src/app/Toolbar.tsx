@@ -118,7 +118,7 @@ export function Toolbar() {
   return (
     <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-start-1 col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
       <div
-        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
+        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[calc(78px/var(--app-zoom,1))]"
         style={{ width: leading }}
       >
         <div className="flex items-center gap-1">

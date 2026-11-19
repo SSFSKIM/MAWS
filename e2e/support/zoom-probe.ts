@@ -8,7 +8,6 @@
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
-import { EXTENSION_POPUP_MAX, EXTENSION_POPUP_MIN } from '@shared/browser/extensions';
 import { REPO_ROOT } from './launch';
 
 export const ZOOM_PROBE = process.env.MAWS_ZOOM_PROBE === '1';
@@ -80,20 +79,6 @@ export function timesFactor(r: Rect, f: number): Rect {
   const y = Math.round(r.y * f);
   return { x, y, width: Math.round((r.x + r.width) * f) - x, height: Math.round((r.y + r.height) * f) - y };
 }
-// The extension popup's place as `popupBounds` (src/main/browser/extensions/popup.ts, at the pin) computes it, mirrored
-// here since the e2e does not load main's code: the popup's size clamped to Chrome's bounds and the content, its right
-// edge on the anchor's, under the anchor or above it, held inside the content. With the probe's own size for
-// `preferred` (the popup's bounds as read), so a clamp at the content's edge is predicted, not read as "off".
-export function popupPlace(anchor: Rect, preferred: { width: number; height: number }, content: { width: number; height: number }): Rect {
-  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-  const width = Math.min(clamp(Math.round(preferred.width), EXTENSION_POPUP_MIN.width, EXTENSION_POPUP_MAX.width), content.width);
-  const height = Math.min(clamp(Math.round(preferred.height), EXTENSION_POPUP_MIN.height, EXTENSION_POPUP_MAX.height), content.height);
-  const x = clamp(anchor.x + anchor.width - width, 0, content.width - width);
-  const below = anchor.y + anchor.height;
-  const y = below + height <= content.height ? below : anchor.y - height >= 0 ? anchor.y - height : Math.max(0, content.height - height);
-  return { x, y, width, height };
-}
-
 export const sameRect = (a: Rect | null, b: Rect | null) => a !== null && b !== null && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 // Where two rectangles in one unit disagree, edge by edge (b's edge less a's).
 export const edgeDeltas = (a: Rect, b: Rect) => ({ left: b.x - a.x, top: b.y - a.y, right: b.x + b.width - (a.x + a.width), bottom: b.y + b.height - (a.y + a.height) });

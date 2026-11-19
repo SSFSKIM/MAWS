@@ -11,6 +11,7 @@ export const commands = [
   'layout.openFile', // UX wave U6e: Open File…
   'layout.frameFile', 'layout.releaseFrame', // UX wave U6b-2
   'layout.openInApps', 'layout.openIn', // UX wave U6b-4a: Open in
+  'layout.zoom', // UX wave U6b-5b
 ] as const;
 
 export const events = [
@@ -20,4 +21,5 @@ export const events = [
   'layout.saveAll', // E5
   'layout.edit', // P4-B2 K6: Edit ▸ Undo and Redo
   'layout.frameFailed', // UX wave U6b-2
+  'layout.zoomChanged', // UX wave U6b-5b
 ] as const;

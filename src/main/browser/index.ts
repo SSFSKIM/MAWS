@@ -86,6 +86,9 @@ export interface BrowserDeps {
   // P5 O7 M3: a session of another machine's tabs (machines.ts: this machine, and its events said from theirs) and the
   // forwarded ports their loopback links load from (forwarded.ts); without them (E4a's own tests) every session is local
   remote?: { local: MachineRef; emitFrom: EmitFrom; forwards: BrowserForwards };
+  // UX wave U6b-5b: the app window's zoom (main's `zoomOf`), by which the view, the popup, the menus and the pin are placed
+  // in window points; without it (E4a's own tests) every window is at 100 %
+  zoomOf?(win: BrowserWindow): number;
 }
 
 export interface Browser {
@@ -98,9 +101,10 @@ export interface Browser {
   partitions: Partitions;
   // E4b end
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
+  placeAgain(win: BrowserWindow): void; // UX wave U6b-5b (S3 step 4): the window's views and its popup, at its new zoom
 }
 
-export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, machineHost = false, remote }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, machineHost = false, remote, zoomOf }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -156,6 +160,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
     windowOf,
     focusEmulation,
     setFocusEmulation,
+    ...(zoomOf && { zoomOf }), // UX wave U6b-5b
   });
   const memory = new MemorySampler({ store, emit, metrics: () => app.getAppMetrics() });
 
@@ -179,7 +184,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   });
 
   // cua #90 start: the bookmarks bar's menus (recorded for the e2e's seam under MAWS_E2E=1) and its commands
-  const menus = new NativeMenus({ e2e: env.MAWS_E2E === '1' });
+  const menus = new NativeMenus({ e2e: env.MAWS_E2E === '1', ...(zoomOf && { zoomOf }) /* UX wave U6b-5b */ });
   const confirmOpenAll = openAllConfirmation(env);
   const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: data.bookmarks, menus, confirmOpenAll });
   // cua #90 end
@@ -192,7 +197,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
     writeImage: (image) => clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]),
   });
   // cua #90: the extensions action bar (its list, popups, options tabs and menus)
-  const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
+  const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env, ...(zoomOf && { zoomOf }) /* UX wave U6b-5b */ });
   // E13 start: cua's primitive server over the store (its socket directory swept now); a session's socket listens from
   // its first launch (the launch mapping asks `socketPathFor`) or, for an engine that outlived a relaunch (D-16), from its
   // first status, and closes with the session's record
@@ -287,7 +292,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
-  const commentMode = startCommentMode({ store, emit, register, userData, env, ...(machines && { away: (key: string) => machines.away(key) }) });
+  const commentMode = startCommentMode({ store, emit, register, userData, env, ...(machines && { away: (key: string) => machines.away(key) }), ...(zoomOf && { zoomOf }) /* UX wave U6b-5b */ });
   // E4d end
   // E4c start: the agent's presence (the dialogs' wrap, parking, the e2e seam's `agent`), re-homed from E4c's browser
   // tools when they left (the in-app browser spec of 2026-10-08, M4)
@@ -326,6 +331,10 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
     cua, // E13
     partitions, // E4b
     extensions: extensionUi, // cua #90
+    placeAgain: (win) => {
+      views.placeAgain(win);
+      extensionUi.placeAgain(win.id);
+    },
     // At will-quit, once the hosts' drain has settled (P4 W2-B): nothing more is sampled or placed, tabs.json is written,
     // every page closed.
     stop: () => {

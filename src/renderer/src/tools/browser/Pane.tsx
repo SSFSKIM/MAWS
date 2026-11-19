@@ -51,6 +51,7 @@ import { ShownElsewhere } from './pages/ShownElsewhere';
 import { paneRect, Placement, type PlacementMode } from './placement';
 import { onShowRequest, useBrowser } from './store';
 import { pageBox, type Room } from './viewport'; // U12a
+import { useZoom } from '../../stores/zoom'; // UX wave U6b-5b: the device size in the window's CSS pixels
 
 const PANE = 'relative h-full w-full overflow-hidden bg-bg';
 // P2-E2: a placed pane's page, over the card's strip. U12a: in its page box, which takes the column's flexible place; the
@@ -174,7 +175,8 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
       window.removeEventListener('resize', read);
     };
   }, []);
-  const sized = mode !== 'elsewhere' && room !== null ? pageBox(tab.viewport, tab.zoom, room) : null;
+  const appZoom = useZoom((s) => s.factor); // UX wave U6b-5b (decision 35)
+  const sized = mode !== 'elsewhere' && room !== null ? pageBox(tab.viewport, tab.zoom, room, appZoom) : null;
   // the page's element moved or resized with the room or its size: reported at once (a move inside a box that grew is no
   // resize of the element's own, which its observer would miss)
   const [sizedWidth, sizedHeight] = [sized?.width ?? null, sized?.height ?? null];
