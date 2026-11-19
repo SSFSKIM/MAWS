@@ -30,7 +30,7 @@ How to see it working: in a session on this Mac, have the agent write `[report](
 - [x] (2026-11-18) The delta review of revisions 2 and 3 (`3bfe490ad`): nine findings, all accepted; revision 4. No further review of this document.
 - [x] (2026-11-18) The architect's rulings on P13 to P15, and on the insertion that changed (`harness/main.tsx` in place of `default-actions.ts`) (Decision Log 9).
 - [x] (2026-11-18) M1 — The rule's three gaps closed, and the `file:` form read alike by the rule and the window. Built in `8e703698c..4382edc5c`; the task review found 16 more places where the scanner named a link the window does not draw, each fixed red first; its loop ended by ux-wave's ruling (Decision Log 11), with two open cases left for a board ticket.
-- [ ] M2 — A relative path, and the chips that did nothing.
+- [x] (2026-11-18) M2 — A relative path, and the chips that did nothing. Built in `d34bbd505..2774d2ef8`, with a test-only fix wave `8de807e3c` (one opener call per click in the side suites; L5 from a transcript click). Reviewed clean.
 - [ ] M3 — The notice.
 - [ ] M4 — Localhost.
 - [ ] M5 — The sentence, the scenes, the record, and the acceptance run.
