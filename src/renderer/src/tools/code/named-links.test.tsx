@@ -216,6 +216,53 @@ describe('the chip’s and the anchor’s readers', () => {
   });
 });
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1, "The scanner's three gaps"): the rule
+// reads a text's blocks as the window's parser does, or names less. Each case states what both the window's chips and
+// the rule's names are, beside its control.
+function agree(markdown: string, paths: string[]): void {
+  expect(chipPaths(markdown), `chips of ${JSON.stringify(markdown)}`).toEqual(paths);
+  expect(linkPaths(markdown), `names of ${JSON.stringify(markdown)}`).toEqual(paths);
+}
+
+describe('the rule reads the blocks the window draws', () => {
+  it('a table’s cell past the head’s width is not drawn, and names nothing; a cell the head covers does (N1.11)', () => {
+    agree('| a | b |\n|---|---|\n| x | y | [r](/work/x.md) |', []);
+    agree('| a | b |\n|---|---|\n| x | [r](/work/x.md) | y |', ['/work/x.md']);
+  });
+
+  it('a delimiter row of a colon and dashes alone makes a table of one column (N1.13)', () => {
+    agree('Title\n:---\ntext | [r](/work/x.md)', []);
+    agree('Title\n:---\n[r](/work/x.md) | text', ['/work/x.md']);
+  });
+
+  // N1.14: the tokenizer takes no head of one pipe alone. Recorded: the window draws prose there, and the rule reads it
+  // as prose too, so a code span the paragraph opens before it still holds the link
+  it('a line of one pipe alone is no table’s head (N1.14)', () => {
+    agree('|\n|-|\n[r](/work/x.md) | [s](/work/y.md)', ['/work/x.md', '/work/y.md']);
+    agree('`a\n|\n|-|\n[r](/work/x.md)`', []);
+  });
+
+  // N1.15: the window's parser drops a leading byte order mark; one that does not lead the text is a character
+  it('a byte order mark before a fence’s opening: a fence to both (N1.15)', () => {
+    for (const fence of ['```', '~~~']) {
+      agree(`﻿${fence}\n[r](/work/x.md)\n${fence}`, []);
+      agree(`﻿[s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+      // the mark after a first line of prose opens no fence for either: the link is prose, and the closing run opens one
+      agree(`prose\n﻿${fence}\n[r](/work/x.md)\n${fence}`, ['/work/x.md']);
+    }
+  });
+
+  // N1.16: the window ends a line at a carriage return alone; the rule names nothing of such a text
+  it('lone carriage returns round a fence: the rule names nothing, the window draws no chip in the fence (N1.16)', () => {
+    for (const fence of ['```', '~~~']) {
+      const lone = `see [s](/work/s.md)\r${fence}\r[r](/work/x.md)\r${fence}`;
+      expect(chipPaths(lone), fence).toEqual(['/work/s.md']);
+      expect(linkPaths(lone), fence).toEqual([]);
+      agree(`see [s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+    }
+  });
+});
+
 // The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own
 // Markdown. One direction is asserted, the one that admits: every path the rule names is a path chip the window draws.
 // The other direction (a chip the rule refuses) fails towards the refusal; it is counted and a few are printed.

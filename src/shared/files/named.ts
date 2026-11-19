@@ -167,12 +167,20 @@ const isControl = (code: number) => code < 32 || code === 127;
 const isDigit = (code: number) => code >= 48 && code <= 57;
 const escapes = (text: string, at: number, limit: number) => text.charCodeAt(at) === 92 && at + 1 < limit && ASCII_PUNCTUATION.test(text[at + 1]!);
 
-// The end of the line that starts at `start` (its line ending, or the text's end), found a pause's worth at a time.
+// The end of the line that starts at `start` (its line ending, or the text's end), found a pause's worth at a time. A
+// carriage return not followed by a line feed refuses the text (UX wave U6b-4b, R1): the window's parser ends a line
+// there, and this pass, which ends one at a line feed alone, would read a fence the window sees as prose.
 function* lineEndFrom(text: string, start: number, m: Meter): Generator<typeof PAUSE, number, void> {
   for (let at = start; ; ) {
     const limit = Math.min(text.length, at + SCAN_STEP_CHARS);
-    const found = text.slice(at, limit).indexOf('\n');
+    const stretch = text.slice(at, limit);
+    const found = stretch.indexOf('\n');
     charge(m, (found < 0 ? limit - at : found) + 1);
+    // Only a return directly before the line feed is part of a line ending; one at the stretch's end is checked again
+    // against the character after it
+    const read = found < 0 ? stretch : stretch.slice(0, found);
+    const lone = read.indexOf('\r');
+    if (lone >= 0 && (lone < read.length - 1 || (found < 0 && text.charCodeAt(limit) !== 10))) throw new ScanRefused();
     if (found >= 0) return at + found;
     if (limit >= text.length) return text.length;
     at = limit;
@@ -563,22 +571,26 @@ function cellsOf(text: string, at: number, end: number, m: Meter): [number, numb
   return cells;
 }
 // GFM's delimiter row, read in one pass (it was a regular expression whose whitespace runs overlapped): cells of
-// `:?-+:?` between spaces or tabs, split by `|`, a leading and a trailing `|` optional, at least one `|` in the row, and
+// `:?-+:?` between spaces or tabs, split by `|`, a leading and a trailing `|` optional, at least one `|` or `:` in the
+// row (the tokenizer's `seen`, micromark-extension-gfm-table: `:---` alone is a delimiter row, `---` alone is not), and
 // only spaces, tabs or carriage returns after its last cell.
 function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolean {
   const limit = lineLimit(at, end);
   let i = at;
-  let pipes = 0;
+  let seen = false; // a `|` or a `:` stands in the row
   let valid = false;
   const code = () => (i < limit ? text.charCodeAt(i) : -1);
   if (code() === 124) {
     i += 1;
-    pipes += 1;
+    seen = true;
   }
   for (let first = true; ; first = false) {
     while (isSpaceOrTab(code())) i += 1;
     const cell = i;
-    if (code() === 58) i += 1;
+    if (code() === 58) {
+      i += 1;
+      seen = true;
+    }
     const dashes = i;
     while (code() === 45) i += 1;
     if (i === dashes) {
@@ -589,11 +601,14 @@ function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolea
       }
       break;
     }
-    if (code() === 58) i += 1;
+    if (code() === 58) {
+      i += 1;
+      seen = true;
+    }
     while (isSpaceOrTab(code())) i += 1;
     if (code() === 124) {
       i += 1;
-      pipes += 1;
+      seen = true;
       continue;
     }
     while (isSpaceOrTab(code()) || code() === 13) i += 1;
@@ -602,11 +617,20 @@ function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolea
   }
   charge(m, i - at + 1);
   decided(i, limit, end);
-  return valid && pipes > 0;
+  return valid && seen;
 }
-// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells.
-const isTableHeader = (text: string, line: Line, below: Line, m: Meter) =>
-  below.quote === line.quote && !below.opens && below.indent < 4 && isDelimiterRow(text, below.content, below.end, m) && cellsOf(text, below.content, below.end, m).length === cellsOf(text, line.content, line.end, m).length;
+// A row that is one pipe alone, between spaces, tabs or a carriage return: the tokenizer takes no head of it (its
+// `headRowBreak` needs more than one divider or run of data).
+function onePipe(text: string, line: Line, m: Meter): boolean {
+  return text.charCodeAt(line.content) === 124 && blankFrom(text, line.content + 1, line.end, m);
+}
+// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells, and that is not one pipe
+// alone. How many cells the head has, or 0 when the row is no head.
+function tableHeadCells(text: string, line: Line, below: Line, m: Meter): number {
+  if (below.quote !== line.quote || below.opens || below.indent >= 4 || onePipe(text, line, m) || !isDelimiterRow(text, below.content, below.end, m)) return 0;
+  const cells = cellsOf(text, line.content, line.end, m).length;
+  return cellsOf(text, below.content, below.end, m).length === cells ? cells : 0;
+}
 
 // Where inline links can stand: a paragraph after its leading reference definitions, a heading's text, a table's cell.
 interface Context {
@@ -624,7 +648,7 @@ interface Context {
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
   let fence: { marker: number; length: number; quote: number; column: number } | null = null;
   let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean } | null = null;
-  let table: { quote: number } | null = null;
+  let table: { quote: number; cells: number } | null = null; // `cells`: the head's, as many as the window draws in a row
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
   // draws it only where a call names it, so nothing in it is read as a link.
   let footnote = false;
@@ -654,10 +678,14 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     }
     if (!dropped) contexts.push({ start: at, end });
   }
-  const row = (line: Line) => {
-    if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end, m)) contexts.push({ start, end });
+  // A table's row: a context for each of its first `cells` cells and for no other. The window draws as many cells as the
+  // head has (mdast-util-to-hast's `tableRow` renders `align.length` of them), so a link in a cell past them is never
+  // drawn, and names nothing (UX wave U6b-4b, R1).
+  const row = (line: Line, cells: number) => {
+    if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end, m).slice(0, cells)) contexts.push({ start, end });
   };
-  for (let start = 0; start < text.length; ) {
+  // A leading byte order mark is passed over, as the window's parser drops it (micromark's `preprocess`)
+  for (let start = text.charCodeAt(0) === 0xfeff ? 1 : 0; start < text.length; ) {
     if (m.work >= m.pause) yield pauseAt(m);
     const line: Line = ahead !== null && ahead.start === start ? ahead : yield* lineFrom(start);
     ahead = null;
@@ -698,7 +726,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     const blockStarts = opened !== null || heading >= 0 || line.thematic;
     if (table !== null && (line.quote < table.quote || line.opens || blockStarts)) table = null;
     if (table !== null) {
-      row(line);
+      row(line, table.cells);
       start = next;
       continue;
     }
@@ -721,10 +749,11 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     } else {
       if (m.work >= m.pause) yield pauseAt(m);
       ahead = next < text.length ? yield* lineFrom(next) : null;
-      if (ahead !== null && isTableHeader(text, line, ahead, m)) {
+      const cells = ahead !== null ? tableHeadCells(text, line, ahead, m) : 0;
+      if (ahead !== null && cells > 0) {
         yield* closeParagraph();
-        table = { quote: line.quote };
-        row(line);
+        table = { quote: line.quote, cells };
+        row(line, cells);
         start = ahead.end + 1; // the delimiter row holds no link
         ahead = null;
         continue;

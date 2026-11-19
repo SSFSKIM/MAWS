@@ -171,6 +171,46 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(text)).toContain(S);
   });
 
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1, N1.11): the window draws as many cells
+  // of a row as the table's head has, so a link in a cell past them is never drawn and names nothing
+  it('a link in a body row’s cell past the head’s width names nothing; one in a cell the head covers does', () => {
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | y | [r](${P}) |`)).toEqual([]);
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | [r](${P}) | y |`)).toEqual([P]);
+    expect(linkPaths(`a | b\n--|--\nx | y | [r](${P})\n[s](${P}.bak) | z`)).toEqual([`${P}.bak`]);
+  });
+
+  // N1.13: the window's tokenizer takes a delimiter row that holds a `:` or a `|`; under a head of one cell, `:---` makes
+  // a table of one column, whose rows draw their first cell alone
+  it('a delimiter row of a colon and dashes alone makes a table: a link past its one cell names nothing, one in it does', () => {
+    expect(linkPaths(`Title\n:---\ntext | [r](${P})`)).toEqual([]);
+    expect(linkPaths(`Title\n:---\n[r](${P}) | text`)).toEqual([P]);
+    expect(linkPaths(`Title\n---:\ntext | [r](${P})`)).toEqual([]);
+    expect(linkPaths(`Title\n---\ntext | [r](${P})`)).toEqual([P]); // no `:` and no `|`: a heading's underline, then prose
+  });
+
+  // N1.15: the window's parser drops a leading byte order mark before it reads a block, so a fence after it is a fence
+  it('a byte order mark before a fence’s opening is passed over: the fence holds its link; prose after the mark names its own', () => {
+    for (const fence of ['```', '~~~']) {
+      expect(linkPaths(`﻿${fence}\n[r](${P})\n${fence}`), fence).toEqual([]);
+      expect(linkPaths(`﻿[s](/work/s.md)\n${fence}\n[r](${P})\n${fence}`), fence).toEqual(['/work/s.md']);
+    }
+  });
+
+  // N1.16: the window's parser ends a line at a carriage return alone; the rule refuses such a text whole
+  it('a lone carriage return refuses the text whole; with line feeds the fence holds its link and the prose names its own', () => {
+    for (const fence of ['```', '~~~']) {
+      expect(linkPaths(`see [s](/work/s.md)\r${fence}\r[r](${P})\r${fence}`), fence).toEqual([]);
+      expect(linkPaths(`see [s](/work/s.md)\n${fence}\n[r](${P})\n${fence}`), fence).toEqual(['/work/s.md']);
+      expect(linkPaths(`see [s](/work/s.md)\r\n${fence}\r\n[r](${P})\r\n${fence}`), fence).toEqual(['/work/s.md']); // a line ending of both
+    }
+    expect(linkPaths(`[s](/work/s.md)\r`)).toEqual([]); // the last character
+    expect(linkPaths(`[s](/work/s.md)\r\n`)).toEqual(['/work/s.md']);
+    // a return and its line feed on either side of a pause's stretch are one line ending
+    const across = `${'a'.repeat(64 * 1024 - 1)}\r\n[s](/work/s.md)`;
+    expect(across.charCodeAt(64 * 1024 - 1)).toBe(13);
+    expect(linkPaths(across)).toEqual(['/work/s.md']);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);
