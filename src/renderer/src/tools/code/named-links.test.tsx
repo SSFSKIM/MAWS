@@ -251,10 +251,10 @@ describe('the rule reads the blocks the window draws', () => {
   // N1.15: the window's parser drops a leading byte order mark; one that does not lead the text is a character
   it('a byte order mark before a fence’s opening: a fence to both (N1.15)', () => {
     for (const fence of ['```', '~~~']) {
-      agree(`﻿${fence}\n[r](/work/x.md)\n${fence}`, []);
-      agree(`﻿[s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+      agree(`\uFEFF${fence}\n[r](/work/x.md)\n${fence}`, []);
+      agree(`\uFEFF[s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
       // the mark after a first line of prose opens no fence for either: the link is prose, and the closing run opens one
-      agree(`prose\n﻿${fence}\n[r](/work/x.md)\n${fence}`, ['/work/x.md']);
+      agree(`prose\n\uFEFF${fence}\n[r](/work/x.md)\n${fence}`, ['/work/x.md']);
     }
   });
 
@@ -317,7 +317,7 @@ describe.each([false, true])('the file: form (live: %s)', (live) => {
 
   // N1.10: an offset is not an index into the text (the parser drops a leading byte order mark before it counts)
   it('after a leading byte order mark the inline form is a chip and is named; its autolink is neither (N1.10)', () => {
-    for (const [markdown, paths] of [['﻿[r](file:///work/x.md)', ['/work/x.md']], ['﻿<file:///work/x.md>', []]] as const) {
+    for (const [markdown, paths] of [['\uFEFF[r](file:///work/x.md)', ['/work/x.md']], ['\uFEFF<file:///work/x.md>', []]] as const) {
       expect(chipPaths(markdown, live), JSON.stringify(markdown)).toEqual(paths);
       expect(linkPaths(markdown), JSON.stringify(markdown)).toEqual(paths);
     }

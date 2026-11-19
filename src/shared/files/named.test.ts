@@ -193,8 +193,8 @@ describe('the link form: linkPaths', () => {
   // N1.15: the window's parser drops a leading byte order mark before it reads a block, so a fence after it is a fence
   it('a byte order mark before a fence’s opening is passed over: the fence holds its link; prose after the mark names its own', () => {
     for (const fence of ['```', '~~~']) {
-      expect(linkPaths(`﻿${fence}\n[r](${P})\n${fence}`), fence).toEqual([]);
-      expect(linkPaths(`﻿[s](/work/s.md)\n${fence}\n[r](${P})\n${fence}`), fence).toEqual(['/work/s.md']);
+      expect(linkPaths(`\uFEFF${fence}\n[r](${P})\n${fence}`), fence).toEqual([]);
+      expect(linkPaths(`\uFEFF[s](/work/s.md)\n${fence}\n[r](${P})\n${fence}`), fence).toEqual(['/work/s.md']);
     }
   });
 
