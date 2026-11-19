@@ -4,7 +4,7 @@
 //
 // Placement has one owner. A pane reports `browser.view.place` with its own token; a report with `claim` makes that pane
 // the owner, and a report from any other pane is ignored, `null` included, so a pane that lost the view can neither move
-// it nor hide it. A rect (CSS px of the window's content area, which maps 1:1 onto `setBounds` under `hiddenInset`) is
+// it nor hide it. A rect (CSS px of the window's content area, which maps 1:1 onto `setBounds` under `hiddenInset` at 100 %) is
 // rounded and applied at once; the view moves into the reporting window's contentView first if it lives elsewhere (a view
 // lives in one contentView at a time). The owner's `null` hides the view and releases it; the view stays attached to its
 // last window, hidden, so a reselection is one `setVisible`. UX wave U6b-5b (placement 1; decision 27): the rect is kept in

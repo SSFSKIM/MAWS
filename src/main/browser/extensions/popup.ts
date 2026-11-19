@@ -3,8 +3,8 @@
 // partition session (sandboxed, isolated, sized by `preferred-size-changed`), placed under the action's button in window
 // coordinates (flipped above when it would not fit below; `popupBounds`), on top of the window's views. UX wave U6b-5b
 // (placement 2): the button's box arrives in the window's CSS px and is kept so; each placement takes it times the
-// window's zoom (decision 27), and a change of the zoom places the popup again (`placeAgain`) at its last size. Like the native menus it is
-// drawn by macOS above the page, so the page stays live under it and it takes no part in the cover protocol; instead it
+// window's zoom (decision 27), and a change of the zoom places the popup again (`placeAgain`) at its last size. Like the
+// native menus it is drawn by macOS above the page, so the page stays live under it and it takes no part in the cover protocol; instead it
 // closes the moment the window's cover goes on (a sheet or palette freezes the page to its still, and a live popup must
 // not float over that), and is raised again whenever a page view is added to its window after it (a place, a view
 // created for a placed tab, a page back from the cover's staging window), which would otherwise rise above it.
