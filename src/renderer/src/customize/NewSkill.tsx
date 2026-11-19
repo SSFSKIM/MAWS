@@ -5,7 +5,8 @@
 import { DropdownMenu } from 'radix-ui';
 import { useMemo } from 'react';
 import { useSettings } from '../stores/settings';
-import { useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import type { CommandOutput } from '@shared/ipc/schema';
 import { pluginsReadKey, usePluginsEnv, usePluginsRead } from '../widgets/plugins/read';
 import { SKILL_ACTIONS as A } from './copy';
 import { usePlace } from './place';
@@ -22,17 +23,20 @@ export function NewSkill() {
   // the plugins a chat started here goes without, as the session's Skills dialog reads them (widgets/SkillsWidget.tsx)
   const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
   const pluginsOff = useMemo(() => (off === undefined ? null : new Set(off)), [off]);
-  // the plugins in effect for this place, as the plugin library counts them (widgets/plugins/library.ts, `enabledHere`), from
-  // a current listing only: one being read again, invalidated or whose last read failed is unknown, the plain sentence
-  const listing = usePluginsRead('plugins.list', directory);
-  const key = pluginsReadKey('plugins.list', directory);
-  const reading = useIsFetching({ queryKey: key }) > 0;
-  const invalidated = useQueryClient().getQueryState(key)?.isInvalidated ?? false;
-  const installed = listing.error === null && !reading && !invalidated ? listing.data?.plugins : undefined;
-  const enabledHere = useMemo(() => (installed === undefined ? null : new Set(installed.filter((p) => p.enabled).map((p) => p.id))), [installed]);
+  // the plugins in effect for this place, as the plugin library counts them (widgets/plugins/library.ts, `enabledHere`),
+  // read when it is pressed and from a current listing only: one being read again, invalidated or whose last read failed
+  // is unknown, the plain sentence. Read from the query client at the press, not from the last render, whose state a
+  // refresh begun or failed just before may not have reached yet (the query client tells its observers a moment later).
+  usePluginsRead('plugins.list', directory);
+  const client = useQueryClient();
+  const enabledNow = (): ReadonlySet<string> | null => {
+    const state = client.getQueryState<CommandOutput<'plugins.list'>>(pluginsReadKey('plugins.list', directory));
+    if (state === undefined || state.status !== 'success' || state.fetchStatus !== 'idle' || state.isInvalidated || state.data === undefined) return null;
+    return new Set(state.data.plugins.filter((p) => p.enabled).map((p) => p.id));
+  };
   const start = (where: SkillPlace) => {
     if (where === 'yours' && configHome === null) return;
-    const creator = inventory.data ? creatorInvocation(inventory.data.skills, pluginsOff, enabledHere) : null;
+    const creator = inventory.data ? creatorInvocation(inventory.data.skills, pluginsOff, enabledNow()) : null;
     void startNewSkill({ projectId, cwd }, A.firstMessage(where, configHome === null ? '' : skillsHomeOf(configHome), creator));
   };
   const waiting = configHome === null;

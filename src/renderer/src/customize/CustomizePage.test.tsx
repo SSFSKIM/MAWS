@@ -737,23 +737,21 @@ describe('a skill’s actions', () => {
     mountCustomize({ view: 'mine', show: 'all' });
     await envRead();
     const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
-    await waitFor(() => expect(invoked('plugins.list')).not.toEqual([]));
+    await pluginRow('skill-creator@official'); // the listing has answered
+    expect(invoked('plugins.list')).toHaveLength(1); // and no other read of it is on its way
     await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
-    await act(async () => undefined);
     fireEvent.click(newSkill());
     await waitFor(() => expect(prefill(1)).toBe(`/skill-creator:skill-creator ${PLAIN}`));
-    // a refresh that fails: the list shown is the last one read, which confirms nothing now
-    listAnswer = rejected('listing failed');
+    // pressed in the same task as a Refresh whose read is still on its way: the last render still shows the listing that
+    // was current, and the press reads the listing as it is now
+    let fail: (error: Error) => void = () => undefined;
+    listAnswer = new Promise((_, reject) => (fail = reject));
     fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(invoked('plugins.list').length).toBeGreaterThan(1));
-    await act(async () => undefined);
     fireEvent.click(newSkill());
     await waitFor(() => expect(prefill(2)).toBe(PLAIN));
-    // a refresh still being read
-    listAnswer = new Promise(() => {});
-    const asked = invoked('plugins.list').length;
-    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(invoked('plugins.list').length).toBeGreaterThan(asked));
+    // that read fails: the list shown is the last one read, which confirms nothing now
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(2));
+    await act(async () => fail(new Error('listing failed')));
     fireEvent.click(newSkill());
     await waitFor(() => expect(prefill(3)).toBe(PLAIN));
     act(() => useSettings.setState({ state: null }));
