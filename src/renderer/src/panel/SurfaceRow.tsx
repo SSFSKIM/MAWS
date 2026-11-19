@@ -57,7 +57,8 @@ export function toggleSurface(toolId: string) {
 // Decision 2: the tool is asked (its own answer: Terminal's shell, Files' view or tree, a mod's pane), and two frames
 // later, once its answer has had a render to land, the keyboard goes to F6's stop for the tab unless it is inside the
 // tab's surface already. Nothing moves when the person pressed a key or a pointer in between (the press that ran this
-// one was dispatched before it began), or when by then the tab is out of view or a dialog holds the keyboard.
+// one was dispatched before it began), when a later request for the tab superseded the key's (an open that reuses it),
+// or when by then the tab is out of view or a dialog holds the keyboard.
 function focusShown(tabId: string): void {
   requestFocus(tabId);
   const request = usePanelHost.getState().focus[tabId] ?? 0;
@@ -70,7 +71,7 @@ function focusShown(tabId: string): void {
     if (showing.get(tabId) === request) showing.delete(tabId);
     window.removeEventListener('keydown', heard, true);
     window.removeEventListener('pointerdown', heard, true);
-    if (pressed || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
+    if (pressed || (usePanelHost.getState().focus[tabId] ?? 0) !== request || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
     focusSurfaceStop(tabId);
   }));
 }
