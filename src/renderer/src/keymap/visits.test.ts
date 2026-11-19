@@ -439,11 +439,13 @@ describe('history after the branch panel', () => {
   });
 
   it('reveals the main area when a step brings back a tab under a maximized side column (scalpel-2#4)', async () => {
-    await visit('a', 'b');
-    // the side column maximized over the main area (as with a terminal shown in it; written whole, since the store's own
-    // act keeps no maximize for a column that shows no surface)
-    const { regions } = layout();
-    useLayout.setState({ regions: { ...regions, panel: { ...regions.panel, maximized: true, collapsed: false } } });
+    // a chat and its file share the session's side column: its terminal, maximized while the file is in front
+    await visit('a');
+    layout().openTab({ kind: 'file', path: '/work/notes.md', line: null, appSessionId: S('a'), machine: TEST_MACHINE });
+    await turn();
+    layout().setPanelTabs(S('a'), { tabs: [{ id: 'terminal:probe', toolId: 'terminal', pinned: false }], activeTabId: 'terminal:probe' });
+    layout().showSurfaceTab(S('a'), 'terminal:probe');
+    layout().setPanel({ maximized: true, collapsed: false });
     await turn();
     expect(layout().regions.panel.maximized).toBe(true); // the control: reading the layout leaves the column as it is
     runAction('go.back');
