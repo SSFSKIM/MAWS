@@ -2,7 +2,7 @@
 // link out of a session's transcript or terminal. A loopback http(s) link of a session on this Mac opens in that session's
 // in-app browser, with no forward; ⌘ in a transcript leaves it to the system browser; a link of another machine's session
 // is forwarded or refused as before, ⌘ or not; every other link is left to its surface.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf, bareOf } from '@shared/machine/address';
@@ -15,7 +15,7 @@ import { useMachines } from '../../stores/machines';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
 import { browserTab, T1 } from '../../test-support/browser';
-import { installFakeMain, ok } from '../../test-support/code';
+import { deferred, installFakeMain, ok } from '../../test-support/code';
 import { A, B, C, panelOf, resetPanelStores } from '../../test-support/panel';
 import { browserTool } from './BrowserTool';
 import { BROWSER_COPY } from './copy';
@@ -35,6 +35,8 @@ const LOOKALIKE = ['http://localhost.example.com/', 'http://127.0.0.1.example.co
 const OTHER_SCHEME = ['ftp://localhost/', 'ws://127.0.0.1:9/', 'file:///a'];
 
 let main: ReturnType<typeof installFakeMain>;
+// The forward's answer, held by a test until it releases it; null answers at once
+let tunnel: ReturnType<typeof deferred<ReturnType<typeof ok>>> | null = null;
 const browserTabs = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((t) => t.toolId === browserTool.id);
 const toasts = () => useNotices.getState().notices.map((n) => n.text);
 const sent = () => main.calls.map(({ name }) => name);
@@ -49,11 +51,12 @@ beforeEach(() => {
   registerPanelTool(browserTool);
   main = installFakeMain((name, input) => {
     if (name === 'browser.tabs.open') return ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url: input.url as string }), reused: false });
-    if (name === 'remote.forward.open') return ok({ localPort: 54321 });
+    if (name === 'remote.forward.open') return tunnel?.promise ?? ok({ localPort: 54321 });
     return ok();
   });
 });
 afterEach(() => {
+  tunnel = null;
   resetForwards();
   useMachines.setState({ machines: new Map() });
   delete (window as { maws?: unknown }).maws;
@@ -127,6 +130,20 @@ describe('openLinkInApp, a session on another machine', () => {
     expect(main.callsOf('layout.openExternal')).toEqual([]);
   });
 
+  // The forward to its end: nothing opens while the tunnel is out; once it answers, the page opens once, at its listener
+  it.each([undefined, { external: true }])('opens a forwarded link once, at the listener the forward answers, and never directly: %o', async (options) => {
+    tunnel = deferred<ReturnType<typeof ok>>();
+    expect(openLinkInApp(R, 'http://localhost:3000/app?x=1', options)).toBe(true);
+    expect(main.callsOf('remote.forward.open')).toEqual([{ machine: OTHER_MACHINE, port: 3000 }]);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the tool's open is under way and waits on the forward
+    expect(main.callsOf('browser.tabs.open')).toEqual([]);
+    tunnel.resolve(ok({ localPort: 61234 }));
+    await vi.waitFor(() => expect(main.callsOf('browser.tabs.open')).toHaveLength(1));
+    expect(main.callsOf('browser.tabs.open')[0]).toMatchObject({ url: 'http://127.0.0.1:61234/app?x=1', select: true, reuse: 'url' });
+    expect(main.callsOf('layout.openExternal')).toEqual([]);
+    expect(sent()).toEqual(['remote.forward.open', 'browser.tabs.open']);
+  });
+
   // N3.3: the local branch would open these in R's browser; it reads the session's machine, so it never runs for R
   it.each([
     ['http://app.localhost:3000/', undefined],
@@ -145,6 +162,20 @@ describe('openLinkInApp, a session on another machine', () => {
   it('leaves a link that is not loopback to its surface', () => {
     expect(openLinkInApp(R, 'https://example.com/')).toBe(false);
     expect(sent()).toEqual([]);
+    expect(browserTabs(R)).toEqual([]);
+    expect(openLinkInApp(R, 'http://localhost:3000/')).toBe(true); // the control: the same session's loopback link is taken
+    expect(sent()).toEqual(['remote.forward.open']);
+  });
+});
+
+// A session id that is no address names no machine: no mounted route passes one (a transcript's store key and a
+// terminal's session are addresses), so the decision takes nothing of it and the surface opens the link as before
+describe('openLinkInApp, an id that is no address', () => {
+  it('leaves even a loopback link to its surface, and sends nothing', () => {
+    expect(openLinkInApp('app-bare' as AppSessionId, LOCAL)).toBe(false);
+    expect(sent()).toEqual([]);
+    expect(openLinkInApp(A, LOCAL)).toBe(true); // the control: the same link of an addressed session on this Mac
+    expect(sent()).toEqual(['browser.tabs.open']);
   });
 });
 

@@ -11,7 +11,7 @@ import { registerPanelTool } from '../../../panel/host';
 import { useMachines } from '../../../stores/machines';
 import { useNotices } from '../../../stores/notices';
 import { browserTab, T1 } from '../../../test-support/browser';
-import { installFakeMain, ok } from '../../../test-support/code';
+import { deferred, installFakeMain, ok } from '../../../test-support/code';
 import { A, panelOf, resetPanelStores } from '../../../test-support/panel';
 import { browserTool } from '../../../tools/browser/BrowserTool';
 import { BROWSER_COPY } from '../../../tools/browser/copy';
@@ -59,6 +59,7 @@ describe('a web call’s receipt', () => {
 
 describe('a web call’s receipt through the window’s opener', () => {
   let main: ReturnType<typeof installFakeMain>;
+  let tunnel: ReturnType<typeof deferred<ReturnType<typeof ok>>> | null = null; // the forward's answer, held by a test
   const browserTabs = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((t) => t.toolId === browserTool.id);
   const toasts = () => useNotices.getState().notices.map((n) => n.text);
 
@@ -69,29 +70,41 @@ describe('a web call’s receipt through the window’s opener', () => {
     registerPanelTool(browserTool);
     main = installFakeMain((name, input) => {
       if (name === 'browser.tabs.open') return ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url: input.url as string }), reused: false });
-      if (name === 'remote.forward.open') return ok({ localPort: 54321 });
+      if (name === 'remote.forward.open') return tunnel?.promise ?? ok({ localPort: 54321 });
       return ok();
     });
   });
   afterEach(() => {
+    tunnel = null;
     resetForwards();
     useMachines.setState({ machines: new Map() });
     delete (window as { maws?: unknown }).maws;
   });
 
   // N3.8
-  it('of a session on another machine forwards its loopback address, and this Mac’s browsers open it nowhere', () => {
-    fireEvent.click(renderReceipt('http://localhost:3000/', R, openWebLink));
+  it('of a session on another machine forwards its loopback address, and this Mac’s browsers open it nowhere', async () => {
+    tunnel = deferred<ReturnType<typeof ok>>();
+    fireEvent.click(renderReceipt('http://localhost:3000/docs', R, openWebLink));
     expect(main.callsOf('remote.forward.open')).toEqual([{ machine: OTHER_MACHINE, port: 3000 }]);
-    expect(main.callsOf('layout.openExternal')).toEqual([]);
     expect(browserTabs(R)).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the tool's open is under way and waits on the forward
+    expect(main.callsOf('browser.tabs.open')).toEqual([]); // nothing opens the link directly while the forward is out
+    tunnel.resolve(ok({ localPort: 61234 }));
+    await vi.waitFor(() => expect(main.callsOf('browser.tabs.open')).toHaveLength(1));
+    expect(main.callsOf('browser.tabs.open')[0]).toMatchObject({ url: 'http://127.0.0.1:61234/docs', select: true, reuse: 'url' });
+    expect(main.callsOf('layout.openExternal')).toEqual([]);
+    expect(main.calls.map(({ name }) => name)).toEqual(['remote.forward.open', 'browser.tabs.open']);
   });
 
-  it('of a session on another machine refuses a loopback address that cannot be forwarded, with the line', () => {
+  it('of a session on another machine refuses a loopback address that cannot be forwarded, with the line; a forwardable one opens', () => {
     fireEvent.click(renderReceipt('http://app.localhost:3000/', R, openWebLink));
     expect(main.calls).toEqual([]);
     expect(browserTabs(R)).toEqual([]);
     expect(toasts()).toEqual([BROWSER_COPY.forwarded.refused('mini')]);
+    fireEvent.click(renderReceipt('http://localhost:3000/', R, openWebLink)); // the control: the same session's receipt, forwardable
+    expect(main.callsOf('remote.forward.open')).toEqual([{ machine: OTHER_MACHINE, port: 3000 }]);
+    expect(browserTabs(R)).toHaveLength(1);
+    expect(main.callsOf('layout.openExternal')).toEqual([]);
   });
 
   // N3.9
