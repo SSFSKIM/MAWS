@@ -336,7 +336,7 @@ describe('search and web detail', () => {
     }, 'cell:t2');
     expect(web.cell.textContent).toContain('TanStack Virtual docs');
     fireEvent.click(within(web.cell).getByRole('button', { name: 'https://tanstack.com/virtual' }));
-    expect(web.actions.openExternal).toHaveBeenCalledWith('https://tanstack.com/virtual');
+    expect(web.actions.openExternal).toHaveBeenCalledWith('https://tanstack.com/virtual', web.store.key); // UX wave U6b-4b (R3): with the row's session
   });
 
   // UX wave U3b, M5 (acceptance 12): the web plugin's fetch opens onto the same detail as WebFetch, its string result
@@ -350,7 +350,7 @@ describe('search and web detail', () => {
       expect(web.line.textContent, label).toContain('Fetched example.com');
       expect(web.cell.querySelector('pre')?.textContent, label).toBe(call.result);
       fireEvent.click(within(web.cell).getByRole('button', { name: 'https://example.com' }));
-      expect(web.actions.openExternal, label).toHaveBeenCalledWith('https://example.com');
+      expect(web.actions.openExternal, label).toHaveBeenCalledWith('https://example.com', web.store.key);
       cleanup();
     }
   });

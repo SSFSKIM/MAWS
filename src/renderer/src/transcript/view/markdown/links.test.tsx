@@ -42,6 +42,32 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     expect(actions.openExternal).toHaveBeenCalledWith('http://localhost:5173/', 'OtherMachineRef0000000/session-r');
   });
 
+  // UX wave U6b-4b (R3, decision 13): ⌘ reaches the opener as a third argument, so a loopback link of a session on this
+  // Mac can open in the system browser; a plain click passes none, as before
+  it('a ⌘-click on a web link asks the opener for the system browser; a plain click asks nothing more', () => {
+    const session = 'TestMachineRef00000000/app-web';
+    const { actions } = renderWith('Running at [localhost:5173](http://localhost:5173/).', live, session);
+    const link = screen.getByRole('link', { name: 'localhost:5173' });
+    fireEvent.click(link, { metaKey: true });
+    fireEvent.click(link);
+    expect(vi.mocked(actions.openExternal).mock.calls).toEqual([['http://localhost:5173/', session, { external: true }], ['http://localhost:5173/', session]]);
+  });
+
+  // N3.6: a Markdown surface outside any transcript has no session; its link reaches the host's opener as today
+  it('outside any Transcript, a loopback link reaches the host’s openExternal with no session, ⌘ or not', () => {
+    const openExternal = vi.fn();
+    setHostActions({ ...DEFAULT_ACTIONS, openExternal });
+    try {
+      render(<Markdown markdown="Running at [the app](http://localhost:5173/)." live={live} />);
+      const link = screen.getByRole('link', { name: 'the app' });
+      fireEvent.click(link);
+      fireEvent.click(link, { metaKey: true });
+      expect(openExternal.mock.calls).toEqual([['http://localhost:5173/', null], ['http://localhost:5173/', null, { external: true }]]);
+    } finally {
+      setHostActions(DEFAULT_ACTIONS);
+    }
+  });
+
   it('a scheme-less link is a path chip that opens the file, with a line when the path names one', () => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts) and [y](src/y.ts#L42).', live);
     fireEvent.click(screen.getByRole('button', { name: 'x.ts' }));
