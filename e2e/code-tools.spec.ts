@@ -652,6 +652,29 @@ test.describe('the product in stub mode over a scratch repository', () => {
     );
   });
 
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, A3): a file's bar hands the file to an
+  // editor at the cursor's line, and a terminal the file's folder (never the file), each by the path the daemon admits.
+  test('Open in, in a file’s bar, hands the file at the cursor’s line to an editor and its folder to a terminal', async () => {
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, 'src/app.ts');
+        const logged = () => readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' });
+        await viewer.locator('[data-code-view] .cm-content').click();
+        await p.page.keyboard.press('Meta+ArrowUp'); // the document's start
+        for (let i = 0; i < 4; i++) await p.page.keyboard.press('ArrowDown'); // line 5, in view
+        await viewer.getByRole('button', { name: 'Open in', exact: true }).click();
+        const apps = p.page.getByRole('menu').filter({ has: p.page.getByRole('menuitem', { name: 'Finder', exact: true }) });
+        await expect(apps.getByRole('menuitem')).toHaveText(['Zed', 'Terminal', 'Finder']);
+        await apps.getByRole('menuitem', { name: 'Zed', exact: true }).click();
+        await expect.poll(logged).toBe(`open-in zed ${p.scratch.path('src/app.ts')}:5\n`);
+        await viewer.getByRole('button', { name: 'Open in', exact: true }).click();
+        await p.page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+        await expect.poll(logged).toBe(`open-in zed ${p.scratch.path('src/app.ts')}:5\nopen-in terminal ${p.scratch.path('src')}\n`);
+      },
+      (scratch) => void (scratch.env.MAWS_E2E_OPEN_IN_APPS = 'zed'),
+    );
+  });
+
   test('a PDF is an Open externally row', async () => {
     await withProduct(async (p) => {
       const viewer = await openInViewer(p, 'doc.pdf');
