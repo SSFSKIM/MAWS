@@ -15,12 +15,13 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/
 import { connectCodeEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool, usePanelHost } from '../../../panel/host';
 import { toggleSurface } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
+import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
 import { installDisk } from '../../../test-support/code-disk';
-import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
+import { A, B, mainShowing, panelOf, probeTool, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { focusedFile, registerEditor, sideFilesViewer } from '../editor/register';
 import { openFile, resetKeptOpens } from '../open-file';
 import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from '../viewer/viewer-store';
@@ -1654,6 +1655,29 @@ describe('the keyboard a surface’s key gives the tree', () => {
     expect(document.getElementById('region-panel')!.hasAttribute('inert'), 'the column drawn uncovered: its effects have run').toBe(false);
     expect(inTree(), 'not taken later either').toBe(false);
     showAgain(); // the control: the same tree, shown by its key with nothing over it
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+
+  // The branch panel's fix wave (G3): the key's show ends when the host asks any tab for the keyboard, and what it asked
+  // of this tree ends with it, though this tab is still in view and no key or pointer was pressed
+  it('a newer request of the host’s for another tab before the listing answers: the tree takes nothing', async () => {
+    held = deferred<void>();
+    offs.push(registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool));
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await act(() => asked.promise); // its roots' listing out, and held
+    let terminal = '';
+    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A })));
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower')); // two groups: Files above, Terminal below
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files')); // shown by its key, both groups in view
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['files', 'terminal']);
+    act(() => panelHost.selectTab(terminal)); // a native menu's act: no key or pointer press
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort(), 'Files still in view').toEqual(['files', 'terminal']);
+    await act(async () => held!.resolve());
+    await waitFor(() => expect(row('/r')).not.toBeNull()); // the rows drawn: the tree's taker has run over a settled listing
+    expect(inTree()).toBe(false);
+    showAgain(); // the control: shown by its key with no newer request
     await waitFor(() => expect(document.activeElement).toBe(row('/r')));
   });
 

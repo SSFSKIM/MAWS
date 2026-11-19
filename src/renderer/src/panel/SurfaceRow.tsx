@@ -31,6 +31,7 @@ const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay
 export function toggleSurface(toolId: string) {
   const state = useLayout.getState();
   const session = surfaceSession(state);
+  handOver?.end(); // this act is the newest
   if (!state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId)) {
     if (pageOpen(state)) state.closeDestination();
     else {
@@ -54,34 +55,79 @@ export function toggleSurface(toolId: string) {
   if (shown !== null) focusShown(shown);
 }
 
+// The branch panel's fix wave (G3): one hand-over of the keyboard at a time, a show's or a hide's return, owned by the
+// newest act. It ends when a newer act of a surface's key begins, when the host asks any tab for the keyboard after it
+// (a newer show, a reopen of the column, an open in a tab, the agent's show: every such request is one write of
+// `usePanelHost`'s `focus`), or, for a show, at the person's next key or pointer press. Once it has ended, nothing it
+// scheduled moves the keyboard: neither a show's F6 fallback, nor Files' deferred answer (`followKeyShow`), nor a
+// return to the composer. While it lasts, a menu closing after the act that began it does not take the keyboard back to
+// the menu's trigger (`keepHandOver`).
+interface HandOver {
+  tabId: string | null; // the tab a show gave the keyboard to; null for a return
+  request: number; // the tab's focus request the show made
+  ended: boolean;
+  end(): void;
+  watchers: (() => void)[]; // told once when it ends
+}
+let handOver: HandOver | null = null;
+
+function beginHandOver(tabId: string | null, endsOnPress: boolean): HandOver {
+  handOver?.end();
+  const focus = usePanelHost.getState().focus; // every later request writes a new map
+  const own: HandOver = {
+    tabId,
+    request: tabId === null ? 0 : (focus[tabId] ?? 0),
+    ended: false,
+    watchers: [],
+    end() {
+      if (own.ended) return;
+      own.ended = true;
+      offHost();
+      window.removeEventListener('keydown', press, true);
+      window.removeEventListener('pointerdown', press, true);
+      if (handOver === own) handOver = null;
+      own.watchers.splice(0).forEach((watcher) => watcher());
+    },
+  };
+  const offHost = usePanelHost.subscribe((state) => {
+    if (state.focus !== focus) own.end();
+  });
+  const press = () => own.end();
+  if (endsOnPress) {
+    window.addEventListener('keydown', press, true);
+    window.addEventListener('pointerdown', press, true);
+  }
+  handOver = own;
+  return own;
+}
+
 // Decision 2: the tool is asked (its own answer: Terminal's shell, Files' view or tree, a mod's pane), and two frames
 // later, once its answer has had a render to land, the keyboard goes to F6's stop for the tab unless it is inside the
-// tab's surface already. Nothing moves when the person pressed a key or a pointer in between (the press that ran this
-// one was dispatched before it began), when a later request for the tab superseded the key's (an open that reuses it),
-// or when by then the tab is out of view or a dialog holds the keyboard.
+// tab's surface already, or the show has ended (above), or by then the tab is out of view or a dialog holds the keyboard.
+// The show lasts past its frames, for an answer that waits on a listing (Files), until it ends.
 function focusShown(tabId: string): void {
   requestFocus(tabId);
-  const request = usePanelHost.getState().focus[tabId] ?? 0;
-  showing.set(tabId, request);
-  let pressed = false;
-  const heard = () => void (pressed = true);
-  window.addEventListener('keydown', heard, true);
-  window.addEventListener('pointerdown', heard, true);
+  const own = beginHandOver(tabId, true);
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (showing.get(tabId) === request) showing.delete(tabId);
-    window.removeEventListener('keydown', heard, true);
-    window.removeEventListener('pointerdown', heard, true);
-    if (pressed || (usePanelHost.getState().focus[tabId] ?? 0) !== request || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
+    if (own.ended || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
     focusSurfaceStop(tabId);
   }));
 }
 
-// The focus request a surface's key made, by tab, until its second frame. The host also asks a tab for the keyboard when
-// it opens something in it (a link's file, the agent's show), with a later value of the same counter; a tool that answers
-// only the person's show by a surface's key (Files) asks for the value it was given, so those opens, even one that reuses
-// the tab before the second frame, leave the keyboard where it was.
-const showing = new Map<string, number>();
-export const shownByItsKey = (tabId: string, request: number): boolean => showing.get(tabId) === request;
+// A tool that answers only the person's show by a surface's key (Files) asks with the request it was given: true while
+// that request is the live show's, and `ended` is called once when the show ends; false for any other request (an open
+// in the tab, the agent's show), whose answer leaves the keyboard where it is.
+export function followKeyShow(tabId: string, request: number, ended: () => void): boolean {
+  const own = handOver;
+  if (own === null || own.tabId !== tabId || own.request !== request) return false;
+  own.watchers.push(ended);
+  return true;
+}
+
+// A menu whose item ran the act closes after it: its return of the keyboard to its trigger would undo the hand-over.
+function keepHandOver(event: Event): void {
+  if (handOver !== null) event.preventDefault();
+}
 
 // Decision 3: the keyboard comes back from the column when the column held it or nothing did; anywhere else (the
 // sidebar, the main area) it stays. Read before the hide.
@@ -92,10 +138,13 @@ function keyboardInColumn(): boolean {
 
 // The composer of the session on screen takes it, else the pane in front, in the next frame: a side surface that covered
 // the main area (maximized, a sheet) leaves it inert until the hide has been drawn, and inert takes no keyboard (as the
-// sheet's own dismissal waits, `dismissSheet`). Nothing moves when by then something outside the column holds it (the
-// person moved it).
+// sheet's own dismissal waits, `dismissSheet`). Nothing moves when the return has ended by then (a newer act or request,
+// a reopen of the column), or when something outside the column holds the keyboard (the person moved it).
 function giveKeyboardBack(): void {
+  const own = beginHandOver(null, false);
   requestAnimationFrame(() => {
+    if (own.ended) return;
+    own.end();
     const holder = document.activeElement;
     if (holder instanceof HTMLElement && holder !== document.body && holder.isConnected && available(holder) && !(document.getElementById('region-panel')?.contains(holder) ?? false)) return;
     const session = focusedSession();
@@ -155,7 +204,7 @@ export function SurfaceRow({ maxIcons = Infinity, overflowControls }: { maxIcons
       })}
       <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild><IconButton label="More surfaces"><Icon><path d="M3 8h.01M8 8h.01M13 8h.01" strokeWidth="2.5" /></Icon></IconButton></DropdownMenu.Trigger>
-        <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={6} className={MENU}>
+        <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={6} onCloseAutoFocus={keepHandOver} className={MENU}>
           {overflow.map((tool) => <SurfaceContext key={tool.id} toolId={tool.id}><DropdownMenu.Item disabled={!session && !held.some((tab) => tab.toolId === tool.id)} className={ITEM} onSelect={() => toggleSurface(tool.id)}><tool.icon className="size-4 text-fg-muted" />{tool.title}</DropdownMenu.Item></SurfaceContext>)}
           {!cardsIcon && <DropdownMenu.Item disabled={!hasSessionTab} className={ITEM} onSelect={toggleSessionCards}>Session cards</DropdownMenu.Item>}
           {overflowControls}
@@ -193,7 +242,7 @@ function SurfaceContext({ toolId, children }: { toolId: string; children: ReactE
       const box = event.currentTarget.getBoundingClientRect();
       event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
     }}>{children}</ContextMenu.Trigger>
-    <ContextMenu.Portal><ContextMenu.Content className={MENU}>
+    <ContextMenu.Portal><ContextMenu.Content onCloseAutoFocus={keepHandOver} className={MENU}>
       {!PRIMARY.includes(toolId) && <ContextMenu.Item className={ITEM} onSelect={() => state.toggleSurfacePin(toolId)}>{pinned ? 'Unpin from toolbar' : 'Pin to toolbar'}</ContextMenu.Item>}
       {tab && tool?.pinnable && session && <ContextMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? 'Keep with this session only' : 'Keep open for every session'}</ContextMenu.Item>}
       <ContextMenu.Item className={ITEM} onSelect={() => toggleSurface(toolId)}>{opened ? COPY.hideSurface : COPY.openSurface}</ContextMenu.Item>
