@@ -2801,6 +2801,29 @@ describe('the mode said aloud', () => {
     await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
   });
 
+  // Decision Log 10 (vii), as amended: presses answered with one mode before the chip shows it are one change heard once
+  it('two presses answered with the same mode before the chip shows it are said once', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    const written: Node[] = [];
+    const observer = new MutationObserver((records) => records.forEach((record) => written.push(...record.addedNodes)));
+    observer.observe(region(), { childList: true, subtree: true });
+    try {
+      await shiftTab();
+      await answer(0, taken('acceptEdits'));
+      await shiftTab(); // the chip still shows Manual: Accept edits asked again
+      await answer(1, taken('acceptEdits'));
+      expect(said(), 'both answered, the chip not yet').toBe('');
+      mode(A, 'acceptEdits');
+      await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
+      mode(A, 'acceptEdits'); // a render more: nothing is left waiting to be said
+      await act(async () => {});
+      expect(written.filter((node) => node.nodeName === 'SPAN'), 'one sentence').toHaveLength(1);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it('a repeat of one sentence is written again', async () => {
     mode(A, 'plan');
     mount([{ index: 0, id: A }]);

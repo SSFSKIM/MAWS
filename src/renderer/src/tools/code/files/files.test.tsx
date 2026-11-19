@@ -1369,28 +1369,42 @@ describe('a file beside the chat as an editor', () => {
     await waitFor(() => expect(editor()!.hasFocus).toBe(true));
   });
 
-  // UX wave U6b-5a (M1, decision 4; the task review's first finding): an open that reuses the tab the key showed, before
-  // the key's second frame, asks the host for the keyboard with a later value of the counter, which is not the key's
-  it('an open that reuses the tab a surface’s key showed, before its second frame, gives the file no keyboard', async () => {
+  // UX wave U6b-5a (M1, decisions 2 and 4; the task review's first finding, and its re-review): an open that reuses the
+  // tab a surface's key showed, before the key's second frame, asks the host for the keyboard with a later value of the
+  // counter; neither Files' answer nor the side column's fallback is the key's any more, and the keyboard stays where it is
+  it('an open that reuses the tab a surface’s key showed, before its second frame, leaves the keyboard where it was', async () => {
     const frames: FrameRequestCallback[] = [];
+    const frame = () => act(() => frames.splice(0).forEach((callback) => callback(0)));
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
     try {
-      render(<TestHost />);
-      act(() => {
-        toggleSurface('files'); // the tree's tab, shown by its key
-        openFile(A, APP); // reused for the file in the same turn, the key's frames still to come
-      });
+      render(<>
+        <section id="region-sidebar"><input aria-label="Find a session" /></section>
+        <section id="region-panel"><TestHost /></section>
+      </>);
+      const holder = screen.getByLabelText('Find a session');
+      const inColumn = () => document.getElementById('region-panel')!.contains(document.activeElement);
+      act(() => holder.focus());
+      act(() => toggleSurface('files')); // the tree's tab, shown by its key
+      const tab = sideTabs(A)[0].id;
+      act(() => void openFile(A, APP, null, { asked: 'agent' })); // the agent's open reuses it, the key's frames to come
+      expect(sideTabs(A).map((t) => t.id)).toEqual([tab]);
       await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
-      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-      act(() => frames.splice(0).forEach((callback) => callback(0)));
-      act(() => frames.splice(0).forEach((callback) => callback(0)));
-      expect(editor()!.hasFocus, 'the open gave the keyboard to nothing').toBe(false);
-      act(() => useLayout.getState().hideSurfaces(A)); // the control: the key's own show of the same tab
+      frame();
+      frame();
+      expect(document.activeElement, 'the keyboard holder is unchanged').toBe(holder);
+      expect(inColumn()).toBe(false);
+
+      act(() => useLayout.getState().hideSurfaces(A)); // the control, in this test: the key's show with no later open
+      frame();
+      act(() => holder.focus());
       act(() => toggleSurface('files'));
-      await waitFor(() => expect(editor()!.hasFocus).toBe(true));
+      frame();
+      frame();
+      await waitFor(() => expect(inColumn()).toBe(true));
+      expect(document.activeElement).not.toBe(holder);
     } finally {
-      act(() => frames.splice(0).forEach((callback) => callback(0)));
-      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      frame();
+      frame();
       vi.unstubAllGlobals();
     }
   });
@@ -1523,18 +1537,23 @@ describe('the keyboard a surface’s key gives the tree', () => {
   const MANY = Array.from({ length: 200 }, (_, index) => file(`/r/f${String(index).padStart(3, '0')}.ts`));
   let roots: FilesEntry[] | string;
   let held: ReturnType<typeof deferred<void>> | null;
+  let asked: ReturnType<typeof deferred<void>>; // released when main is asked for the roots
+  let fakeMain: ReturnType<typeof installFakeMain>;
+  const main = () => fakeMain;
   beforeEach(() => {
+    asked = deferred<void>();
     resetPanelStores();
     resetTreeState();
     useFiles.getState().reset();
     useViewer.getState().reset();
     roots = [dir('/r')];
     held = null;
-    installFakeMain(async (name, input) => {
+    fakeMain = installFakeMain(async (name, input) => {
       if (QUIET[name]) return QUIET[name];
       if (name === 'files.watch' || name === 'files.unwatch') return answer();
       if (name === 'files.list') {
         if (input.path !== undefined) return answer({ root: '/r', path: input.path, entries: input.path === '/r' ? MANY : [], truncated: false });
+        asked.resolve();
         if (held) await held.promise;
         return typeof roots === 'string' ? fail(roots) : answer({ root: null, path: '', entries: roots, truncated: false });
       }
@@ -1567,7 +1586,8 @@ describe('the keyboard a surface’s key gives the tree', () => {
     held = deferred<void>();
     render(<TestHost />);
     act(() => toggleSurface('files'));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await act(() => asked.promise); // the listing is out, the tab's effects have run
+    expect(main().callsOf('files.list').filter((input) => input.path === undefined)).toHaveLength(1);
     expect(inTree()).toBe(false);
     await act(async () => held!.resolve());
     await waitFor(() => expect(document.activeElement).toBe(row('/r')));
@@ -1631,7 +1651,7 @@ describe('the keyboard a surface’s key gives the tree', () => {
     await waitFor(() => expect(row('/r')).not.toBeNull());
     expect(inTree()).toBe(false);
     act(() => useLayout.getState().closeDestination());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(document.getElementById('region-panel')!.hasAttribute('inert'), 'the column drawn uncovered: its effects have run').toBe(false);
     expect(inTree(), 'not taken later either').toBe(false);
     showAgain(); // the control: the same tree, shown by its key with nothing over it
     await waitFor(() => expect(document.activeElement).toBe(row('/r')));
@@ -1645,8 +1665,7 @@ describe('the keyboard a surface’s key gives the tree', () => {
     act(() => useLayout.getState().hideSurfaces(A));
     await act(async () => held!.resolve());
     act(() => useLayout.getState().showSurfaceTab(A, tab));
-    await waitFor(() => expect(row('/r')).not.toBeNull());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await waitFor(() => expect(row('/r')).not.toBeNull()); // the rows drawn: the tree's taker has run over a settled listing
     expect(inTree()).toBe(false);
     showAgain(); // the control: shown by its key
     await waitFor(() => expect(document.activeElement).toBe(row('/r')));
