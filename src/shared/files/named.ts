@@ -685,7 +685,10 @@ interface Context {
 // brought nearer to GFM case by case, board ticket 776 is the structural fix): where a line meets one, a quote marker
 // after a list marker, a table candidate in a list item (its delimiter row at any indentation) or under a deeper quote's
 // paragraph, or an indented line that opens a deeper quote under a paragraph, nothing is read from the paragraph that
-// line meets or opens to the next blank line (`doubtful`), and a fence such a line could open refuses the text.
+// line meets or opens to the next blank line (`doubtful`), and a fence such a line could open refuses the text. Such a
+// discard never resets what the window's parse keeps (fix wave 2): only a blank line ends `doubtful`, or a block start read
+// from a line's own prefix with no marker stripped that might not interrupt, and a dropped table head that could be a
+// reference definition refuses the text.
 // A refusal here (a cap, the budget) refuses the whole text: its definitions, which every context reads, are not all
 // known.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
@@ -782,6 +785,22 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     // the paragraph's text. It joins the paragraph, now not read, and `doubtful` stays until a blank line or a line whose
     // own reading needs no such marker. A fence it may open would run past any blank line: the text is refused. While a
     // line is doubtful, no later weak line is placed either.
+    // Fix wave 2 (the delta review's first): a fail-closed discard keeps what the window's parse keeps. While nothing is
+    // read, a weak line starts no block of its own, also where the pass holds no paragraph for it (a table candidate it
+    // did not read closed one the window may still hold): it is that paragraph's text, not read, and `doubtful` stays; a
+    // fence it may open refuses the text, as below
+    if (line.weak && doubtful && (paragraph === null || line.quote < paragraph.quote)) {
+      if (fenceAt(text, line.content, line.end, m) !== null) throw new ScanRefused();
+      if (paragraph === null) paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: true, column: line.column, opened: line.opens };
+      else {
+        paragraph.dropped = true;
+        paragraph.lines.push(line.content);
+        paragraph.end = line.end;
+      }
+      afterBlank = false;
+      start = next;
+      continue;
+    }
     if (line.weak && paragraph !== null && line.quote >= paragraph.quote) {
       // a weak line over a delimiter row may be a table's head to the window, read from the line's first character: the
       // pass does not place it either
@@ -871,6 +890,9 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
         // up to the next blank line, since the window's paragraph may run on past the table's end lazily (`doubtful`); a
         // table met where nothing is read is not read either.
         const dropped: boolean = doubtful || listOpen || (paragraph !== null && line.quote < paragraph.quote);
+        // Fix wave 2 (the delta review's second): a head the pass does not read may be a reference definition to the
+        // window, which every context reads (a link around its label is no link); one that could be names nothing at all
+        if (dropped && text.charCodeAt(line.content) === 91) throw new ScanRefused();
         if (dropped) {
           if (paragraph !== null) paragraph.dropped = true;
           doubtful = true;
