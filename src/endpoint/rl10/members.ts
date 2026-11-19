@@ -188,6 +188,13 @@ export class Members implements RecordSource, CheckoutSource {
   /** P5 O12 M11: the handed-off mark as on disk, read on first use (null until then), and the marks not written yet. */
   #durable: MarkSets | null = null;
   readonly #pending: MarkSets = { apps: new Set(), engines: new Set() };
+  /**
+   * The turn of the latest `member` frame taken of each session while its handler runs (M2's branch review, the panel's
+   * scalpel-2#2): a handler that awaited goes on only while its frame is still the latest, so a later frame of the same
+   * session, which a replacement RL10 socket can take meanwhile, decides what is held.
+   */
+  readonly #turns = new Map<string, number>();
+  #turn = 0;
 
   constructor(ctx: MembersContext) {
     this.#ctx = ctx;
@@ -221,11 +228,28 @@ export class Members implements RecordSource, CheckoutSource {
   /** A `member` frame: the session's record as it stands. */
   async member(frame: Record<string, unknown>): Promise<void> {
     if (frame.gone === true) {
-      if (isId(frame.session)) await this.gone(frame.session);
+      const session = frame.session;
+      if (isId(session)) await this.#taking(session, () => this.gone(session));
       return;
     }
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
+    return this.#taking(member.session, (latest) => this.#take(member, latest));
+  }
+
+  /** Runs a frame's handler of `session` as its latest turn; `latest()` says whether no later frame of it was taken since. */
+  async #taking(session: string, handle: (latest: () => boolean) => Promise<void>): Promise<void> {
+    const turn = ++this.#turn;
+    this.#turns.set(session, turn);
+    try {
+      await handle(() => this.#turns.get(session) === turn);
+    } finally {
+      if (this.#turns.get(session) === turn) this.#turns.delete(session);
+    }
+  }
+
+  /** A `member` frame read: held, joined and reported, giving way after each wait to a later frame of the session. */
+  async #take(member: Member, latest: () => boolean): Promise<void> {
     // A session whose project is a declared channel's id is not held (Interfaces §D): a channel is no project, and its
     // frame is not kept, restates nothing and reports no listing. A lane B frame is still a sminos record seen (P5 O12
     // M11), handed off as the join hands one off (`#refusedSight`), so a spawner's bridge ends at it as at any first
@@ -238,7 +262,10 @@ export class Members implements RecordSource, CheckoutSource {
     // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
     // and the frame is then the session's first.
     const held = this.#members.get(member.session);
-    if (held !== undefined && held.lane !== member.lane) await this.gone(member.session);
+    if (held !== undefined && held.lane !== member.lane) {
+      await this.gone(member.session);
+      if (!latest()) return; // a later frame of the session was taken meanwhile: it decides what is held
+    }
     this.#unrestated?.delete(member.session);
     const before = this.#members.get(member.session);
     this.#members.set(member.session, member);
@@ -248,12 +275,13 @@ export class Members implements RecordSource, CheckoutSource {
     if (member.lane === 'B' && !this.#apps.has(member.session)) {
       this.#mark('engines', member.session); // P5 O12 M11: seen, on disk before the join, which may never place it
       await this.#join(member.session);
+      if (!latest()) return;
       if (this.#apps.has(member.session)) this.#changed(member, undefined);
     }
     // The listing the frame reports is restated: lane A its session id, lane B its appSessionId once the join placed it.
     const listing = this.listingId(member.session);
     if (listing !== null) this.#unreported?.delete(listing);
-    await this.#report(member);
+    await this.#report(member, latest);
   }
 
   /** A session that left (or wasn't restated): withdrawn, its record gone. */
@@ -477,6 +505,8 @@ export class Members implements RecordSource, CheckoutSource {
    * told, and the record held before goes with `gone`'s own steps, its readers told. Then an unjoined session's app
    * session is placed as the join finds it, the live rows' first and else the spawn's (`#bySpawn`, joining nothing, which
    * tells each app session it passes the sight to), so a `/clear` either side of it finds its app session handed off.
+   * After its waits it holds, joins and reports nothing, so a later frame of the session taken meanwhile keeps what it
+   * set; the hand-off it still places is a sight that happened, which no later frame takes back.
    */
   async #refusedSight(member: Member): Promise<void> {
     const { session } = member;
@@ -613,13 +643,15 @@ export class Members implements RecordSource, CheckoutSource {
     this.#persist(durable, { apps: gone });
   }
 
-  async #report(member: Member): Promise<void> {
+  /** `latest`: whether the frame `member` came in is still its session's latest, read again after the record's read. */
+  async #report(member: Member, latest: () => boolean = () => true): Promise<void> {
     const session = this.listingId(member.session);
     if (session === null) return;
     // P5 Decision Log 190 (b): a superseded record never replaces the listing of one that is not.
     if (this.#superseded.has(member.session) && this.sessions().some((other) => other !== member.session && !this.#superseded.has(other) && this.listingId(other) === session)) return;
     // U9: a lane B session's listing follows its record: withdrawn while archived, under the record's title
     const says = member.lane === 'B' ? await this.#recordOf(session) : null;
+    if (!latest()) return; // a later frame of the session reports for itself (M2's branch review)
     if (says?.archived === true) return this.#ctx.listings.gone(session);
     await this.#ctx.listings.report({
       session,

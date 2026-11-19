@@ -318,3 +318,47 @@ describe('a member whose project is a declared channel’s id', () => {
     expect([...m.listed.keys()]).toEqual([S2]);
   });
 });
+
+// M2's branch review (the panel's scalpel-2#2): a frame's handler that awaited gives way to any later frame for the same
+// session, so the latest frame taken decides what is held. Two handlers interleave when a replacement RL10 socket takes
+// a frame while the last socket's handler waits; here, two `member` calls.
+describe('a frame that awaited, and a later frame of the same session', () => {
+  /** A lane A session S1 held and listed, its next lane change paused at the withdrawal until `open()`. */
+  async function paused() {
+    let open!: () => void;
+    const withdrawing = new Promise<void>((resolve) => (open = resolve));
+    const m = machine({ [S1]: APP }, { withdrawing });
+    await m.members.member(memberFrame(S1, 'A'));
+    const update = m.members.member(memberFrame(S1, 'B'));
+    return { m, update, open };
+  }
+
+  it('leaves a session refused by the later frame not held, not joined, unlisted, and with no owner to authorize', async () => {
+    const { m, update, open } = await paused();
+    const refusal = m.members.member(memberFrame(S1, 'B', { project: C }));
+    open();
+    await Promise.all([update, refusal]);
+    const target = { lane: 'B' as const, session: S1, appSessionId: APP };
+    expect(m.members.get(S1)).toBeNull();
+    expect(m.members.appSessionId(S1)).toBeNull();
+    expect(m.members.sessions()).toEqual([]);
+    expect(m.reports.map((r) => r.session)).toEqual([S1]); // the first frame's, and none after
+    expect(m.listed.size).toBe(0);
+    // what authorization reads (authorize.ts, `recordOf`): no record, and handed off, so no bridge to a spawner
+    expect(m.members.record(target)).toBeNull();
+    expect(m.members.recordOf(S1)).toBeNull();
+    expect(m.members.handedOff(target)).toBe(true);
+  });
+
+  it('leaves the later ordinary frame held', async () => {
+    const { m, update, open } = await paused();
+    const newer = m.members.member(memberFrame(S1, 'A', { title: 'the newer frame' }));
+    open();
+    await Promise.all([update, newer]);
+    expect(m.members.get(S1)).toMatchObject({ lane: 'A', title: 'the newer frame' });
+    expect(m.members.appSessionId(S1)).toBeNull();
+    expect(m.members.listingId(S1)).toBe(S1);
+    expect(m.reports.at(-1)).toMatchObject({ session: S1, lane: 'A', title: 'the newer frame' });
+    expect(m.reports.some((r) => r.lane === 'B')).toBe(false);
+  });
+});
