@@ -599,6 +599,12 @@ Found while this document was written and reviewed; each changed a decision abov
 
 14. **2026-11-19 (UTC) · M1: the chrome probe's premise names one element.** The rerun at `ef018d192` (manual gate `ef018d1921f2-20261119T210723Z`) stopped at the premise "the bookmarks bar is drawn" before any line was recorded. `folder.or(moreIn(main))` matched the chip F and » together, which is a strict-mode violation. The premise is now the bar itself (`[data-bookmarks-bar]`). The actions' premise takes `.first()`, because an inline action and the puzzle can also be drawn together. The extension's id still comes from the fixture (`chrome.extensions.probe.id`), which differs with each unpacked path.
 
+15. **2026-11-19 (UTC) · M1: the reruns at `ef018d192`.**
+    - The pin probe measured placement 4 off at all four factors. Its button sits 34.5 px higher at 200 % because of the tab page's own scroll, not a placement.
+    - Against build F, the default-mode write control was established once the app was held out of App Nap, and a kill after the write kept the default-mode zoom.
+    - In isolated mode the control was still not established: nothing reached `Preferences` in 120 s, the control's default-mode key included. That cycle therefore does not answer "kill after a write" for isolated mode. P7 rests on the harness's rows c and d and on this build's same-key relaunches.
+    - The isolated-cycle write is left as an open observation in FINDINGS.md, with the harness row that would settle it.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.

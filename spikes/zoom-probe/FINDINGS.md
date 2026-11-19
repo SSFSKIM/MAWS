@@ -193,7 +193,7 @@ What the Mac says:
 - **The default-mode control was established on a quit:** this build relaunched at 1.5, its key under
   `partition.per_host_zoom_levels` for `<this build>/out/renderer/index.html?e2e=1`. After a kill at once it read 1,
   with no Preferences file, as row b predicts.
-- **"Kill after the control wrote" was not established in either mode.** Nothing reached Preferences within 60 s, not
+- **"Kill after the control wrote" was not established in either mode in this run** (the reruns below establish it in default mode). Nothing reached Preferences within 60 s, not
   even the app's own default-mode key. The control was right to refuse. The likely cause is Chromium's delayed commit
   of Preferences in a quiet (transparent, never key) e2e window open to App Nap, against the harness's visible
   windows, whose key was on disk within 15 s. The probe now holds the app out of App Nap during the wait, up to
@@ -206,8 +206,54 @@ What the Mac says:
   `innerWidth` read 375, and the frame as drawn is 375 times the factor. The menu offers Mobile from 375 CSS pixels at
   every factor, so its offer does not follow the factor. At 200 % the chip read `375 × 513`, because the room's height
   was short.
-- **Placement 4 (the pin) is off at 0.5, 0.8 and 1.25:** the caret stands at the pick's position undivided. At 200 %
-  it is not yet measured (the probe fault above).
+- **Placement 4 (the pin) is off at every factor:** the caret stands at the pick's position undivided (the 200 %
+  reading is in the reruns below).
 - **Placements 2 and 3 are not yet measured.**
 - **Row j and the look have not run.**
 
+### Mac, the reruns after the probe fixes (2026-11-19, at `ef018d192`)
+
+**`e2e:browser-comment` (host; manual gate `ef018d1921f2-20261119T211042Z`), "zoom probe: the pin": passed**, with one
+line at each of the four factors. These replace the earlier run's three lines.
+
+    {"probe":"pin","placement":4,"factor":0.5,"pane":{"x":2197,"y":141,"width":2916,"height":2568},"viewBounds":{"x":2197,"y":141,"width":2916,"height":2568},"viewport":{"width":2916,"height":2568},"button":{"x":37,"y":275.4921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":307},"caretCentreX":2278,"caretTopY":2485.1396484375,"caretAttr":"81","drawnAt":{"x":4555.2734375,"y":895.984375},"undivided":{"x":2278,"y":448},"off":true}
+    {"probe":"pin","placement":4,"factor":0.8,"pane":{"x":1429,"y":140,"width":1764,"height":1551},"viewBounds":{"x":1429,"y":140,"width":1764,"height":1551},"viewport":{"width":1764,"height":1551},"button":{"x":37,"y":275.4921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":307},"caretCentreX":1509.619140625,"caretTopY":1470.836669921875,"caretAttr":"81","drawnAt":{"x":1887.0458984375,"y":558.740234375},"undivided":{"x":1510,"y":447},"off":true}
+    {"probe":"pin","placement":4,"factor":1.25,"pane":{"x":968,"y":140,"width":1073,"height":940},"viewBounds":{"x":968,"y":140,"width":1073,"height":940},"viewport":{"width":1073,"height":940},"button":{"x":37,"y":275.4921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":307},"caretCentreX":1048.800048828125,"caretTopY":857.73974609375,"caretAttr":"81","drawnAt":{"x":838.909375,"y":357.59375},"undivided":{"x":1049,"y":447},"off":true}
+    {"probe":"pin","placement":4,"factor":2,"pane":{"x":661,"y":159,"width":612,"height":513},"viewBounds":{"x":661,"y":159,"width":612,"height":513},"viewport":{"width":612,"height":513},"button":{"x":37,"y":240.9921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":272},"caretCentreX":742,"caretTopY":446.13970947265625,"caretAttr":"81","drawnAt":{"x":370.818359375,"y":215.74609375},"undivided":{"x":742,"y":431},"off":true}
+
+- **Placement 4 is off at every factor, 200 % included.** The caret stands at the pick's position undivided (742 at
+  200 %, where the element is drawn at 370.8).
+- **The button's 34.5 CSS pixels higher at 200 % (y 240.99 against 275.49) is the tab page's own scroll, not a
+  placement.** The probe scrolls the button to the centre of the page's viewport (`scrollIntoView({ block: 'center' })`).
+  At 200 % the viewport is 513 tall, so centring the button's middle (275.49 + 15.75 = 291.24) needs a scroll of
+  291.24 − 256.5 = 34.74, which Chromium snaps to the device pixel: 34.5 at scale 2. At the other factors the
+  viewport is at least 940 tall, the scroll needed is negative and is held at 0, and the button stays at 275.49. The
+  pick's position follows the button: (81, 272) is the bottom of a box at 240.99 + 31.5. Nothing in it points to a
+  placement fault.
+
+**`e2e:cross-build` against `--peer-exact f1852de3a` (guest; manual gate `ef018d1921f2-20261119T211314Z`): passed**,
+with six lines. These replace the earlier run's six.
+
+    [cross-build] (zoom probe) isolated mode, quit: this build was at {"factor":1.5,"mode":"isolated"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1 on the same zoom key, P7’s same-URL observation; Preferences' zoom keys after this build's run: []
+    [cross-build] (zoom probe) isolated mode, kill after the control wrote: not established: the write control's key never reached Preferences within 120 s (the app held out of App Nap: true), so the kill's timing shows nothing; Preferences' zoom keys: []
+    [cross-build] (zoom probe) isolated mode, kill at once (an extra): this build was at {"factor":1.5,"mode":"isolated"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1 on the same zoom key, P7’s same-URL observation; Preferences' zoom keys after this build's run: null
+    [cross-build] (zoom probe) default mode, quit: this build was at {"factor":1.5,"mode":"default"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1.5 on the same zoom key, the control (a kept default-mode zoom shows here): established; Preferences' zoom keys after this build's run: [{"key":"partition.per_host_zoom_levels","value":{"11389987517603032168":{"<this build>/out/renderer/index.html?e2e=1":2.223901085741545}}}]
+    [cross-build] (zoom probe) default mode, kill after the control wrote (the write control’s key was in Preferences; the app held out of App Nap: true): this build was at {"factor":1.5,"mode":"default"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1.5 on the same zoom key, the control (a kept default-mode zoom shows here): established; Preferences' zoom keys after this build's run: [{"key":"partition.per_host_zoom_levels","value":{"3974075007774293422":{"<this build>/out/renderer/index.html?e2e=1":2.223901085741545,"<scratch>/zoom-control.html":1.2239010857415449}}}]
+    [cross-build] (zoom probe) default mode, kill at once (an extra): this build was at {"factor":1.5,"mode":"default"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1 on the same zoom key, the control (a kept default-mode zoom shows here): NOT established; Preferences' zoom keys after this build's run: null
+
+- **The default-mode write control is now established.** With the app held out of App Nap, the control's key
+  (`<scratch>/zoom-control.html`, at level 1.2239, that is 1.25) and this build's own key were both in `Preferences`
+  before the kill. This build relaunched at 1.5. So a forced exit after a write keeps a default-mode zoom, as
+  expected. This supports the App Nap reading of the earlier failure, though it does not prove it.
+- **In isolated mode the control was still not established, and that row is not answered by this run.** The control
+  is a default-mode window, so its zoom should have been written whatever mode this build's window was in. In this
+  cycle nothing reached `Preferences` in 120 s, the control's key included. So the cycle cannot tell "an isolated
+  zoom writes nothing" from "no write happened at all". It cannot be read as "isolated keeps no zoom across a kill,
+  by design".
+- **P7 is answered by the other evidence.** That is the harness's rows c and d on this Mac, including the SIGKILL 15 s
+  after the call, beside row b's default-mode key on disk at 15 s. It is also this build relaunched at 1 on its own
+  page's zoom key, after a quit and after a kill at once.
+- **An observation left open:** in the cycle where this build's window was isolated, a default-mode window's zoom of
+  the same session did not reach `Preferences` within 120 s, where the same control did in the default cycle. It does
+  not bear on P7, since P7 wants nothing kept. A harness row could separate the two readings: an isolated window
+  beside a default-mode one, killed once the default one's key is on disk.
