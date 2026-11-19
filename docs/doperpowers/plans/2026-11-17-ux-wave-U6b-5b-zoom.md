@@ -26,7 +26,7 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-17) The delta review of revision 2 and the architect's rulings on its two findings here; revision 3.
 - [x] (2026-11-17) The owner's answer to K3; revision 4.
 - [ ] (2026-11-17) M1 built on `ux-wave/U6b-5b` (`366e995bf` to the head): the seam's two additions, `placedOn`, the harness and the four probe scenes. On the build VM the node and e2e typechecks, `src/main/browser`, eslint and the gate's script tests are green, and the harness's rows a to i have run (j: not run, one display). The task review's fix wave is `d78e60abf`; the independent review's nine findings, as ruled, are `c9343eb08` and `ca7d21a89`, with the harness's run of record at `ca7d21a89`. The architect's review and the Mac runs are still to come.
-- [ ] (2026-11-19) M1's Mac rows 2 and 3 ran at `76d0bbc9d`. The harness and `e2e:browser` measured; the pin probe failed at 200 % and the chrome probe failed before any factor, both probe faults, fixed (Decision Log 13). The peers' probe passed against build F; build M is still to run. FINDINGS.md holds the run of record. To rerun: `e2e:browser-chrome` and `e2e:browser-comment`'s probes, and the peers' probe against both peers.
+- [ ] (2026-11-19) M1's Mac rows 2 and 3 ran at `76d0bbc9d`. The harness and `e2e:browser` measured; the pin probe failed at 200 % and the chrome probe failed before any factor, both probe faults, fixed (Decision Log 13). The peers' probe passed against build F; build M is still to run. FINDINGS.md holds the run of record. The reruns at `ef018d192` and `e458d10c1` measured the pin, the popup and the menus, and the peers' probe established its default-mode control against build F. Every placement is now measured on the Mac (Decision Log 15, 16).
 - [ ] M1 — Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
 - [ ] M2 — Zoom (on the architect's word after M1's verdict; on a head that holds U6b-5a).
 - [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
@@ -604,6 +604,14 @@ Found while this document was written and reviewed; each changed a decision abov
     - Against build F, the default-mode write control was established once the app was held out of App Nap, and a kill after the write kept the default-mode zoom.
     - In isolated mode the control was still not established: nothing reached `Preferences` in 120 s, the control's default-mode key included. That cycle therefore does not answer "kill after a write" for isolated mode. P7 rests on the harness's rows c and d and on this build's same-key relaunches.
     - The isolated-cycle write is left as an open observation in FINDINGS.md, with the harness row that would settle it.
+
+16. **2026-11-19 (UTC) · M1: the popup and the menus measured, and the architect's rulings on what stays open.**
+    - The rerun at `e458d10c1` measured placements 2 and 3 off at every factor: main took the CSS anchor and the CSS point as window points. At 0.5 and 0.8 the popup's x is held by the clamp at the content's edge, so there the reading rests on its y.
+    - Every placement of Interfaces §G now has its Mac observation, in the direction §G gives (FINDINGS.md).
+    - Ruled: no harness row for the isolated "kill after a write" cycle, since it does not bear on P7.
+    - Ruled: the peers' probe against `2c7044231` is dropped.
+    - Ruled: rows 4 (the look) and j (a second display) are owed to the owner.
+    - M2 waits for U6b-5a's merged head.
 
 ## Outcomes & Retrospective
 

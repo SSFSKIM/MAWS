@@ -208,8 +208,8 @@ What the Mac says:
   was short.
 - **Placement 4 (the pin) is off at every factor:** the caret stands at the pick's position undivided (the 200 %
   reading is in the reruns below).
-- **Placements 2 and 3 are not yet measured.**
-- **Row j and the look have not run.**
+- **Placements 2 and 3** are measured in the run at `e458d10c1` below.
+- **Row j and the look have not run.** Both are owed to the owner (Decision Log 16).
 
 ### Mac, the reruns after the probe fixes (2026-11-19, at `ef018d192`)
 
@@ -256,4 +256,44 @@ with six lines. These replace the earlier run's six.
 - **An observation left open:** in the cycle where this build's window was isolated, a default-mode window's zoom of
   the same session did not reach `Preferences` within 120 s, where the same control did in the default cycle. It does
   not bear on P7, since P7 wants nothing kept. A harness row could separate the two readings: an isolated window
-  beside a default-mode one, killed once the default one's key is on disk.
+  beside a default-mode one, killed once the default one's key is on disk. The architect ruled it not built (Decision
+  Log 16).
+
+### Mac, the popup and the menus (2026-11-19, at `e458d10c1`)
+
+**`e2e:browser-chrome` (host; manual gate `e458d10c170e-20261119T214214Z`), "zoom probe: the popup and the menu":
+passed**, with 12 lines: placement 2 and both menus of placement 3, at each of the four factors.
+
+    {"probe":"popup","placement":2,"factor":0.5,"icon":{"x":4638.921875,"y":80,"width":24,"height":24},"anchor":{"x":4639,"y":80,"width":24,"height":24},"content":{"width":2560,"height":1358},"bounds":{"x":2535,"y":104,"width":25,"height":25},"predictedUnscaled":{"x":2535,"y":104,"width":25,"height":25},"predictedScaled":{"x":2307,"y":52,"width":25,"height":25},"unscaledClamped":true,"off":true}
+    {"probe":"menu: bookmarks folder","placement":3,"factor":0.5,"chip":{"x":331.984375,"y":112,"width":40.875,"height":24},"at":{"x":332,"y":136},"corner":{"x":332,"y":136},"cornerTimesFactor":{"x":166,"y":68},"off":true}
+    {"probe":"menu: extension action","placement":3,"factor":0.5,"icon":{"x":4638.921875,"y":80,"width":24,"height":24},"at":{"x":4650,"y":92},"press":{"x":4651,"y":92},"pressTimesFactor":{"x":2326,"y":46},"off":true}
+    {"probe":"popup","placement":2,"factor":0.8,"icon":{"x":2719.7265625,"y":79.990234375,"width":23.994140625,"height":23.994140625},"anchor":{"x":2720,"y":80,"width":24,"height":24},"content":{"width":2560,"height":1358},"bounds":{"x":2535,"y":104,"width":25,"height":25},"predictedUnscaled":{"x":2535,"y":104,"width":25,"height":25},"predictedScaled":{"x":2170,"y":83,"width":25,"height":25},"unscaledClamped":true,"off":true}
+    {"probe":"menu: bookmarks folder","placement":3,"factor":0.8,"chip":{"x":331.923828125,"y":111.9921875,"width":40.859375,"height":23.994140625},"at":{"x":332,"y":136},"corner":{"x":332,"y":136},"cornerTimesFactor":{"x":266,"y":109},"off":true}
+    {"probe":"menu: extension action","placement":3,"factor":0.8,"icon":{"x":2719.7265625,"y":79.990234375,"width":23.994140625,"height":23.994140625},"at":{"x":2731,"y":91},"press":{"x":2732,"y":92},"pressTimesFactor":{"x":2186,"y":74},"off":true}
+    {"probe":"popup","placement":2,"factor":1.25,"icon":{"x":1567.3250732421875,"y":80,"width":24,"height":24},"anchor":{"x":1567,"y":80,"width":24,"height":24},"content":{"width":2560,"height":1358},"bounds":{"x":1566,"y":104,"width":25,"height":25},"predictedUnscaled":{"x":1566,"y":104,"width":25,"height":25},"predictedScaled":{"x":1964,"y":130,"width":25,"height":25},"unscaledClamped":false,"off":true}
+    {"probe":"menu: bookmarks folder","placement":3,"factor":1.25,"chip":{"x":331.9750061035156,"y":112,"width":40.868743896484375,"height":24},"at":{"x":332,"y":136},"corner":{"x":332,"y":136},"cornerTimesFactor":{"x":415,"y":170},"off":true}
+    {"probe":"menu: extension action","placement":3,"factor":1.25,"icon":{"x":1567.3250732421875,"y":80,"width":24,"height":24},"at":{"x":1579,"y":92},"press":{"x":1579,"y":92},"pressTimesFactor":{"x":1974,"y":115},"off":true}
+    {"probe":"popup","placement":2,"factor":2,"icon":{"x":798.9296875,"y":80,"width":24,"height":24},"anchor":{"x":799,"y":80,"width":24,"height":24},"content":{"width":2560,"height":1358},"bounds":{"x":798,"y":104,"width":25,"height":25},"predictedUnscaled":{"x":798,"y":104,"width":25,"height":25},"predictedScaled":{"x":1621,"y":208,"width":25,"height":25},"unscaledClamped":false,"off":true}
+    {"probe":"menu: bookmarks folder","placement":3,"factor":2,"chip":{"x":331.97265625,"y":112,"width":40.8671875,"height":24},"at":{"x":332,"y":136},"corner":{"x":332,"y":136},"cornerTimesFactor":{"x":664,"y":272},"off":true}
+    {"probe":"menu: extension action","placement":3,"factor":2,"icon":{"x":798.9296875,"y":80,"width":24,"height":24},"at":{"x":810,"y":92},"press":{"x":811,"y":92},"pressTimesFactor":{"x":1622,"y":184},"off":true}
+
+- **Placement 2 (the extension's popup) is off at every factor:** main places it from the icon's CSS rectangle taken
+  as window points.
+  - At 1.25 and 2 the anchor is not clamped, and the popup stands exactly at the icon's CSS corner: its right edge on
+    the icon's (1566 + 25 = 1567 + 24 at 1.25, 798 + 25 = 799 + 24 at 2) and its top at the icon's bottom (104 =
+    80 + 24). The corner times the factor would put it at (1964, 130) and (1621, 208).
+  - At 0.5 and 0.8 the icon's CSS x (4639 and 2720) lies beyond the window's 2560 points of content, so `popupBounds`
+    holds the popup to the content's right edge (x 2535), both as it stands and in the unscaled prediction. The
+    reading there rests on y: 104 is the CSS bottom, where the factor predicts 52 and 83.
+  - The popup is 25 × 25 at every factor, Chrome's minimum: under Playwright the page reports no preferred size, as
+    the action bar's own scene records. Its size says nothing about the factor.
+- **Placement 3 (the native menus) is off at every factor:** the point handed to the presenter is the CSS point,
+  whatever the factor.
+  - The bookmarks folder's menu is handed (332, 136), the chip's bottom-left corner in CSS pixels, at all four
+    factors. The corner times the factor is (166, 68), (266, 109), (415, 170) and (664, 272).
+  - The extension action's menu is handed the press point in CSS pixels (`clientX`, `clientY`), within the one pixel
+    of the probe's own rounding of the icon's centre. Times the factor it would be (2326, 46) at 0.5 and
+    (1622, 184) at 2.
+- With this run every placement of Interfaces §G has been measured on the Mac, each off in the direction §G gives:
+  placement 1 and the pointer, 2, 3, 4 and 5. Placement 6 matches the pin's code as predicted, and its menu offer
+  does not follow the factor.
