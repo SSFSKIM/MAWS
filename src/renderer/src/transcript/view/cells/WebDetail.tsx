@@ -1,6 +1,6 @@
-// A web call's detail (WebFetch, WebSearch): the URL, which opens outside through C5, or the query, then the output as
-// text, bounded (never rendered as markup: it is fetched content). UX wave U6b-4b (R3): the address opens as a Markdown
-// link does, with the row's session and ⌘, so a loopback address follows the session's machine.
+// A web call's detail (WebFetch, WebSearch): the URL, or the query, then the output as text, bounded (never rendered as
+// markup: it is fetched content). UX wave U6b-4b (R3): the URL opens through the same opener as a Markdown link, with the
+// row's session and ⌘, so a loopback address opens where a link to it would (the in-app browser, a forward, or outside).
 import type { CellDetail } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
 import { Output } from './Truncated';

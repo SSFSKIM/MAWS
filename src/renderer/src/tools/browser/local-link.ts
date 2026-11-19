@@ -26,12 +26,16 @@ export function isLocalWebLink(url: string): boolean {
 
 /** The one decision for a web link out of a session's transcript or terminal. True: it was taken (forwarded, refused with its line, or opened in the in-app browser). False: the surface opens it as before. */
 export function openLinkInApp(appSessionId: AppSessionId, url: string, options?: { external?: boolean }): boolean {
-  // The local branch reads the session's machine itself, so no link of another machine's session can reach it.
-  const onThisMac = !isAddress(appSessionId) || machineOf(appSessionId) === ipc.localMachine;
-  if (!onThisMac) return openForwardedLink(appSessionId, url);
-  if (options?.external === true || !isLocalWebLink(url)) return false;
-  openBrowserUrl(appSessionId, url);
-  return true;
+  // Each branch names its own machine: the in-app open requires an address of this Mac, the forward one of another
+  // machine, so neither depends on the other's place. An id that is no address names no machine (every mounted route
+  // passes an address: a transcript's store key, a terminal's session), and its link is left to the surface.
+  const machine = isAddress(appSessionId) ? machineOf(appSessionId) : null;
+  if (machine === ipc.localMachine && options?.external !== true && isLocalWebLink(url)) {
+    openBrowserUrl(appSessionId, url);
+    return true;
+  }
+  if (machine !== null && machine !== ipc.localMachine) return openForwardedLink(appSessionId, url);
+  return false;
 }
 
 /** A mounted transcript's web-link opener (App.tsx registers it as `openExternal`): the decision above, else the host's default, which asks main told the session's machine. */
