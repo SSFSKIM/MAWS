@@ -34,11 +34,14 @@ export const FILE_WIDTH_MIN = 320; // what the file keeps beside the tree
 export type TreePlace = 'alone' | 'beside' | 'folded' | 'instead';
 
 // `treeWidth`: the tree's width as the person set it (or the default); `folded`: the session's stored choice; `shown`: the
-// button pressed in this tab while it is too narrow for both (not stored).
-export function treePlace(input: { holdsFile: boolean; tabWidth: number; treeWidth: number; folded: boolean; shown: boolean }): TreePlace {
+// button pressed in this tab while it is too narrow for both (not stored). UX wave U6b-3b
+// (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 9; the owner's answer on the card): `finding`,
+// the tab Go to file chose while the search lasts, shows the column whatever the fold: beside where there is room for
+// both, in the file's place where there is not. Absent: not finding.
+export function treePlace(input: { holdsFile: boolean; tabWidth: number; treeWidth: number; folded: boolean; shown: boolean; finding?: boolean }): TreePlace {
   if (!input.holdsFile) return 'alone';
-  if (input.tabWidth >= input.treeWidth + FILE_WIDTH_MIN) return input.folded ? 'folded' : 'beside';
-  return input.shown ? 'instead' : 'folded';
+  if (input.tabWidth >= input.treeWidth + FILE_WIDTH_MIN) return input.finding || !input.folded ? 'beside' : 'folded';
+  return input.finding || input.shown ? 'instead' : 'folded';
 }
 
 export interface SessionTree {
@@ -49,9 +52,15 @@ export interface SessionTree {
   scrollTop: number; // this run's
   defaultRoot: string | null; // this run's: the first root, opened once
   restored: boolean; // read from the stored value: its first root is noted, not opened
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 7 and 11, S4): this run's
+  reveal: string | null; // a folder to scroll into view once, when its row is first in the list
+  changedFolded: boolean; // the Changed group folded by its heading; open at first in every session, never stored
+  // UX wave U6b-3b (decision 9; "What is stored and sent"): this run's
+  filter: string; // Go to file's field's text
+  finding: string | null; // the tab Go to file chose, while the search lasts
 }
 
-const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false };
+const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false, reveal: null, changedFolded: false, filter: '', finding: null };
 
 export interface TreeStateStore {
   loaded: boolean; // the read has answered (or failed): the tree can be drawn
@@ -63,6 +72,15 @@ export interface TreeStateStore {
   select(appSessionId: AppSessionId, path: string): void;
   scrolled(appSessionId: AppSessionId, scrollTop: number): void;
   firstRoot(appSessionId: AppSessionId, root: string): void; // the session's first root, opened once
+  // UX wave U6b-3a: a folder opened from its Changed row, with the folders above it (each closed one opened as the
+  // person's toggle would, stored), selected and noted to show; the note dropped once shown, or when the person scrolls
+  // or selects another row
+  revealIn(appSessionId: AppSessionId, path: string, ancestors: readonly string[]): void;
+  revealed(appSessionId: AppSessionId): void;
+  foldChanged(appSessionId: AppSessionId, folded: boolean): void; // this run's: never written
+  // UX wave U6b-3b: this run's, never written
+  setFilter(appSessionId: AppSessionId, text: string): void;
+  setFinding(appSessionId: AppSessionId, tabId: string | null): void; // null: the search ended
 }
 
 export const treeOf = (state: Pick<TreeStateStore, 'trees'>, appSessionId: AppSessionId): SessionTree => state.trees.get(appSessionId) ?? NEW_TREE;
@@ -137,7 +155,11 @@ export function createTreeStateStore(
     };
     const answered = (stored: unknown) => {
       let trees: ReadonlyMap<AppSessionId, SessionTree> = storedTrees(stored);
-      for (const [id, tree] of get().trees) if (!trees.has(id)) trees = new Map(trees).set(id, tree); // drawn before the read
+      for (const [id, tree] of get().trees) {
+        const read = trees.get(id);
+        if (read === undefined) trees = new Map(trees).set(id, tree); // drawn before the read
+        else if (tree.filter !== '' || tree.finding !== null) trees = new Map(trees).set(id, { ...read, filter: tree.filter, finding: tree.finding }); // U6b-3b: a search begun before the read goes on
+      }
       for (const [id, patch] of early) trees = apply(trees, id, patch);
       const acted = early.length > 0;
       early = [];
@@ -176,7 +198,7 @@ export function createTreeStateStore(
         act(id, () => ({ folded }));
       },
       select(id, path) {
-        change(id, () => ({ selected: path }));
+        change(id, (tree) => ({ selected: path, ...(tree.reveal !== null && tree.reveal !== path ? { reveal: null } : {}) })); // another selection ends the wait
       },
       scrolled(id, scrollTop) {
         change(id, () => ({ scrollTop }));
@@ -186,6 +208,23 @@ export function createTreeStateStore(
         if (tree.defaultRoot === root) return;
         const noted = tree.restored && tree.defaultRoot === null; // after a relaunch: the stored folders stand as the person left them
         change(id, (current) => ({ defaultRoot: root, ...(noted || current.expanded.has(root) ? {} : { expanded: new Set([...current.expanded, root]) }) }));
+      },
+      revealIn(id, path, ancestors) {
+        const closed = [...ancestors, path].filter((folder) => !treeOf(get(), id).expanded.has(folder));
+        if (closed.length > 0) act(id, (tree) => ({ expanded: closed.reduce((open, folder) => withFolder(open, folder, true), tree.expanded) }));
+        change(id, () => ({ selected: path, reveal: path }));
+      },
+      revealed(id) {
+        if (treeOf(get(), id).reveal !== null) change(id, () => ({ reveal: null }));
+      },
+      foldChanged(id, folded) {
+        change(id, () => ({ changedFolded: folded }));
+      },
+      setFilter(id, text) {
+        if (treeOf(get(), id).filter !== text) change(id, () => ({ filter: text }));
+      },
+      setFinding(id, tabId) {
+        if (treeOf(get(), id).finding !== tabId) change(id, () => ({ finding: tabId }));
       },
     };
   });

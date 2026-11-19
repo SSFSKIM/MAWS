@@ -85,8 +85,12 @@ export const ACTIONS = {
   'theme.light':          { title: 'Appearance: Light',           chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
   'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
   'theme.system':         { title: 'Appearance: System',          chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
-  // Go, in its order (U6a; l7-shell-07): the palette, the session steps, the tab steps, the region steps
+  // Go, in its order (U6a; l7-shell-07): the palette and Go to file, the session steps, the tab steps, the region steps
   'palette.open':         { title: 'Command palette',             chord: 'Cmd+K',        sink: 'menu', menu: 'go',   scope: 'app' },
+  // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 11): Go to file, the keyboard
+  // in Files' field above the tree; registered while it can end there (`files/finder.ts`). Directly under the palette with
+  // no separator (`GROUP_OF_PREFIX`); no rebinding while build F may run (`isRebindable`)
+  'files.goToFile':       { title: 'Go to file',                  chord: 'Cmd+P',        sink: 'menu', menu: 'go',   scope: 'app' },
   'session.previous':    { title: 'Previous session', chord: 'Cmd+Shift+[', sink: 'menu', menu: 'go', scope: 'app' },
   'session.next':        { title: 'Next session', chord: 'Cmd+Shift+]', sink: 'menu', menu: 'go', scope: 'app' },
   'session.markUnread':  { title: 'Mark session unread', chord: 'Cmd+Alt+U', sink: 'menu', menu: 'go', scope: 'app' },

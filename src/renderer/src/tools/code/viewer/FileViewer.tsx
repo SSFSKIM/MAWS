@@ -24,8 +24,15 @@
 // `'main'` in the main area), and only the PDF's fragment reads it. `inView` false: the tab's body is kept mounted while it
 // is not in view (Files' tree in its place, the panel collapsed), and a framed file draws no element (Decision Log 29). A tab
 // of the main area is in view while the main area is on screen (the shell's `useMainAreaOnScreen`, Decision Log 35).
+//
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 10, M2 decision 5; S3): a file
+// tab's body takes the keyboard under the tab's key (`takesKeyboard`): it is focusable, and when the request for the
+// keyboard names its key (Go to file's Enter, `files/finder.ts`) and it is in view, it takes the keyboard on itself and
+// hands it to the file's editor at once when one is drawn, or as soon as one is drawn while the body itself still has it.
+// A read on its way, a read that failed and a kind with no editor leave it on the body, inside the element ⌘S and the
+// comment key look in. Wherever the tab is drawn, beside the chat or in the main area, never on a tab's button.
 import { Popover } from 'radix-ui';
-import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -34,6 +41,7 @@ import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 
 import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
+import { takeKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosen } from '../files/open-chosen';
 import { ExternalRow, OpenExternally } from './ExternalRow';
 import { FrameBody } from './FrameBody';
@@ -176,6 +184,7 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
   return (
     <FileBody
       tabId={tab.id}
+      takesKeyboard={tab.id}
       appSessionId={appSessionId}
       path={tab.path}
       line={tab.line}
@@ -190,12 +199,22 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
   );
 }
 
+const NO_SESSION = 'flex h-full flex-col items-center justify-center gap-1 p-6 text-center';
+
 function NoSession({ path }: { path: string }) {
   return (
-    <div data-file-viewer data-path={path} className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+    <div data-file-viewer data-path={path} className={NO_SESSION}>
+      <NoSessionNotice path={path} />
+    </div>
+  );
+}
+
+function NoSessionNotice({ path }: { path: string }) {
+  return (
+    <>
       <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
       <p className="text-ui text-fg">{VIEWER_COPY.noSession}</p>
-    </div>
+    </>
   );
 }
 
@@ -226,9 +245,28 @@ interface FileBodyProps {
   host?: 'side' | 'main'; // UX wave U6b-2: where the tab is drawn; the main area when absent
   inView?: boolean; // UX wave U6b-2 (Decision Log 29): false while the mounted body is not in view
   agent?: boolean; // UX wave U6e (decision 19): the tab holds the agent's mark, and its reads say so
+  takesKeyboard?: string; // UX wave U6b-3b: the key the body takes the keyboard under (a file tab's id); the File artifact's view gives none
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false }: FileBodyProps) {
+// The app's own focus outline, inside the body's box.
+const TAKES_KEYBOARD = 'outline-accent focus-visible:outline-2 -outline-offset-2';
+
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, takesKeyboard }: FileBodyProps) {
+  // UX wave U6b-3b: the request for the keyboard by this body's key, taken while it is in view; the editor, when one is
+  // drawn in it, is told through `editorFocus`.
+  const body = useRef<HTMLDivElement>(null);
+  const editorFocus = useRef<(() => void) | null>(null);
+  const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
+  useEffect(() => {
+    const element = body.current;
+    if (asked === 0 || !inView || takesKeyboard === undefined || element === null || !takeKeyboard({ into: 'file', key: takesKeyboard })) return;
+    element.focus({ preventScroll: true });
+    editorFocus.current?.();
+  }, [asked, inView, takesKeyboard]);
+  const onEditor = useCallback((focus: (() => void) | null) => {
+    editorFocus.current = focus;
+    if (focus !== null && body.current !== null && document.activeElement === body.current) focus(); // the body still has it
+  }, []);
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -240,11 +278,27 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
 
-  if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) return <NoSession path={path} />;
+  // The keyboard's place is the same element whatever the body draws, a failed read's notice among them, so a request
+  // taken while the read is on its way stays on the view when it fails, and one made after is taken (S3; B5).
+  const place = {
+    ref: body,
+    tabIndex: takesKeyboard === undefined ? undefined : -1,
+    'data-file-keyboard': takesKeyboard === undefined ? undefined : '',
+    'data-key': takesKeyboard,
+    'data-file-viewer': true,
+    'data-path': path,
+  };
+  const outline = takesKeyboard === undefined ? '' : TAKES_KEYBOARD;
+  if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) {
+    return (
+      <div {...place} className={`${NO_SESSION} ${outline}`}>
+        <NoSessionNotice path={path} />
+      </div>
+    );
+  }
   return (
     <div
-      data-file-viewer
-      data-path={path}
+      {...place}
       data-kind={entry?.kind ?? ''}
       data-frame={entry ? frameMarker(entry) : ''}
       data-editable={String(entry !== null && entry.editable && showsCode(entry))}
@@ -252,7 +306,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       data-theirs={entry?.theirs?.view ?? ''}
       data-loads={entry?.loads ?? 0}
       data-pending={entry?.pending ?? 0}
-      className="flex h-full min-h-0 flex-col bg-bg"
+      className={`flex h-full min-h-0 flex-col bg-bg ${outline}`}
     >
       <div className={bar}>
         {lead ? lead(entry) : <span className="flex-1" />}
@@ -267,7 +321,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {end}
         {entry ? below?.(entry) : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} onEditor={takesKeyboard === undefined ? undefined : onEditor} /> : <Loading />}</div>
     </div>
   );
 }
@@ -290,14 +344,14 @@ const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom, host, inView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean }) {
+function Body({ entry, wrap, zoom, host, inView, onEditor }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; onEditor?(focus: (() => void) | null): void }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
   if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
   if (showsCode(entry)) {
     return (
       <Suspense fallback={<Loading />}>
-        <CodeView entry={entry} wrap={wrap} />
+        <CodeView entry={entry} wrap={wrap} onEditor={onEditor} />
       </Suspense>
     );
   }

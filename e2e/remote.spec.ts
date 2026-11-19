@@ -87,6 +87,7 @@ import { isAlive, tcpListeners } from './support/processes';
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { applicationOf, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
+import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
@@ -746,7 +747,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
     // The panel's tools over B's checkout. Each surface's rows, by path.
     const files = surface(page, 'files');
-    const treeRow = (name: string) => files.locator(`[role="treeitem"][data-path="${name === '' ? checkout : join(checkout, name)}"]`);
+    // UX wave U6b-3a (Decision Log 14, ruling 1): tree rows by their `data-kind`, which a Changed row of the same path lacks
+    const treeRow = (name: string) => files.locator(`[role="treeitem"][data-kind][data-path="${name === '' ? checkout : join(checkout, name)}"]`);
     // UX wave U5b-2: Source control is a page to read; its Uncommitted count is B's status
     const scm = surface(page, 'source-control').locator('[data-scm-page]');
     const uncommittedCount = scm.locator('[data-scm-part="uncommitted"] [data-scm-count]');
@@ -1143,13 +1145,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
       await openSurface(again, 'Files');
       const files = surface(again, 'files');
-      const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
+      const checkoutRow = files.locator(`[role="treeitem"][data-kind][data-path="${checkout}"]`);
       await expect(checkoutRow, `B's checkout in A's Files tool\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
       await expect(async () => {
         if ((await checkoutRow.getAttribute('aria-expanded')) !== 'true') await checkoutRow.click();
         await expect(checkoutRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
       }).toPass({ timeout: 30_000 });
-      const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      const pageRow = files.locator(`[role="treeitem"][data-kind][data-path="${join(checkout, PAGE_ON_B.name)}"]`); // UX wave U6b-3a: the tree's row
       await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pageRow.click();
       const pageViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
@@ -1175,7 +1177,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       rmSync(dirname(copy!), { recursive: true, force: true });
 
       // a PDF of B's checkout, drawn here from a copy by Chromium's viewer: its page's black square painted
-      const pdfRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PDF_ON_B)}"]`);
+      const pdfRow = files.locator(`[role="treeitem"][data-kind][data-path="${join(checkout, PDF_ON_B)}"]`); // UX wave U6b-3a: the tree's row
       await expect(pdfRow, 'the PDF written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pdfRow.click();
       const pdfViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PDF_ON_B)}"]`);
@@ -1187,7 +1189,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
       // a file one byte past the copy's bound: its row says it is too large to show here, with its size, and offers no
       // Open externally, whose copy has the same bound (L4)
-      const largeRow = files.locator(`[role="treeitem"][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      const largeRow = files.locator(`[role="treeitem"][data-kind][data-path="${join(checkout, LARGE_ON_B)}"]`); // UX wave U6b-3a: the tree's row
       await expect(largeRow, 'the large file written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await largeRow.click();
       const largeViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, LARGE_ON_B)}"]`);
@@ -3691,6 +3693,161 @@ test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the wo
     const refusalOf = async () => { const answer = await status(); return answer.ok ? 'admitted' : ((answer.error.issues as { refusal?: unknown } | undefined)?.refusal ?? answer.error.message); }; // prettier-ignore
     await expect.poll(refusalOf, { timeout: 30_000, message: 'the read is refused at B’s endpoint once the worktree is not registered' }).toBe('no-target');
     expect((await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout, 'B’s record still names it: the refusal is the admission’s, at the act').toBe(worktree);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, §F, scene G3; acceptance B4): a
+// session MAWS runs on B, beside the U8c-2 scene. A's Files reads B's status and listings on B (`git.watch` and
+// `files.list` over the link, under B's checkout rule): the Changed group holds B's two changes, the tree carries their
+// letters and a dot on the root, and the folder B's git ignores is muted. B's checkout is made a repository before A
+// opens the session, so the first watch A holds of it (the session's cards, then Files) is answered with a status. With B
+// stopped the group and the tree stay as they were and Files draws no error. Waits on the heading's count and on the
+// muted row's `data-ignored` before it reads the group and the tree; after B stops, on the status line A draws for the
+// link and on B's state there before it reads them again. Every name in B's checkout is invented.
+const CHANGED_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e3';
+const CHANGED_REPLY = 'B’s agent left two changes.';
+test('U6b-3a G3, a session on B: A’s Files shows B’s changed files and marks and what B’s git ignores; with B stopped they stay and Files draws no error', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-changed-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-changed-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(CHANGED_SESSION, checkout);
+    journal.turn(CHANGED_REPLY);
+    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Make two changes.', firstReply: CHANGED_REPLY, title: 'B’s changed session', open: false }, held);
+    // B's checkout made a repository, whatever the session left there committed with notes.txt and a .gitignore naming
+    // logs/; then notes.txt modified, draft.md new, and logs/run.log written under the ignored folder. Every git command
+    // here runs under a home of its own, empty, so no ignore file or configuration of the runner's home decides the fixture;
+    // and the checkout's core.excludesFile is an empty file of the scene's, so B's mawsd, which keeps the runner's HOME,
+    // reads what git ignores from the scene's .gitignore alone
+    const gitHome = join(root, 'git-home');
+    mkdirSync(gitHome);
+    const gitHere = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: { ...isolatedGitEnv(), HOME: gitHome, XDG_CONFIG_HOME: join(gitHome, '.config') }, encoding: 'utf8' }).trim();
+    gitHere(checkout, 'init', '--quiet', '-b', 'main');
+    const noGlobalIgnores = join(gitHome, 'excludes');
+    writeFileSync(noGlobalIgnores, '');
+    gitHere(checkout, 'config', 'core.excludesFile', noGlobalIgnores);
+    writeFileSync(join(checkout, NOTES), NOTES_TEXT);
+    writeFileSync(join(checkout, '.gitignore'), 'logs/\n');
+    gitHere(checkout, 'add', '-A');
+    gitHere(checkout, 'commit', '--quiet', '-m', 'B’s checkout');
+    writeFileSync(join(checkout, NOTES), `${NOTES_TEXT}A line B’s agent added.\n`);
+    writeFileSync(join(checkout, 'draft.md'), '# An invented draft on B\n');
+    mkdirSync(join(checkout, 'logs'));
+    writeFileSync(join(checkout, 'logs', 'run.log'), 'An invented log line on B.\n');
+    expect([gitHere(checkout, 'diff', '--name-only'), gitHere(checkout, 'ls-files', '--others', '--exclude-standard')], 'B’s checkout holds the two changes and nothing else').toEqual([NOTES, 'draft.md']);
+
+    // A opens B's session, then Files
+    await sessionRow(page, addressOf(b.ref, app)).click();
+    await quoting(expect(main(page).getByText(CHANGED_REPLY).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    await openSurface(page, 'Files');
+    const files = surface(page, 'files');
+    const heading = files.locator('[data-files-changed]');
+    await quoting(expect(heading, 'A’s Files: B’s two changes').toHaveAttribute('data-count', '2', { timeout: 60_000 }), () => mainSaid(page));
+    const logs = files.locator(`[role="treeitem"][data-kind="dir"][data-path="${join(checkout, 'logs')}"]`);
+    await quoting(expect(logs, 'the folder B’s git ignores, muted').toHaveAttribute('data-ignored', '', { timeout: 60_000 }), () => mainSaid(page));
+    // what A draws of B's changes: the Changed rows by letter and path, and every tree row that carries a mark
+    const drawn = async () => ({
+      rows: await files.locator('[data-changed-row]').evaluateAll((rows) => rows.map((row) => [row.getAttribute('data-letter'), row.getAttribute('data-path')])),
+      marked: await files
+        .locator('[role="treeitem"][data-kind]')
+        .evaluateAll((rows) => rows.filter((row) => row.hasAttribute('data-letter') || row.hasAttribute('data-dot') || row.hasAttribute('data-ignored')).map((row) => [row.getAttribute('data-path'), row.getAttribute('data-letter'), row.getAttribute('data-dot'), row.hasAttribute('data-ignored')])),
+    });
+    const expected = {
+      rows: [['U', join(checkout, 'draft.md')], ['M', join(checkout, NOTES)]],
+      marked: [[checkout, null, 'M', false], [join(checkout, 'logs'), null, null, true], [join(checkout, 'draft.md'), 'U', null, false], [join(checkout, NOTES), 'M', null, false]],
+    };
+    await expect.poll(drawn, { timeout: 30_000, message: 'A’s Files draws B’s changes, their marks and what B’s git ignores' }).toEqual(expected);
+
+    // B stopped: A says the link is down, and Files keeps what it drew, with no error
+    await b.stop();
+    await quoting(expect(linkLine(page), 'the status line A draws for the link to B').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: 'A’s link to B is down' }).not.toBe('up');
+    expect(await drawn(), 'the group and the tree as they were').toEqual(expected);
+    await expect(heading, 'the heading and its count').toHaveAttribute('data-count', '2');
+    await expect(files.locator('[role="alert"], [data-notice="error"], [data-notice="refused"]'), 'Files draws no error').toHaveCount(0);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G7; acceptance B7): a session
+// MAWS runs on B, beside U6b-3a's scene. Go to file's list is read on B (`git.lsFiles` over the link, under B's checkout
+// rule; the checkout is a plain folder, so B's lister walks it): a file written in B's checkout is a result. A's way to
+// the hub cut (B unreachable), once the link's phase is offline the list says B is offline, whole, in the tree's column at
+// its least (160 px); restored, the text is asked again and the file is listed again. Go to file is its menu row's own
+// click (which is what ⌘P does; the row is read first, enabled and carrying ⌘P). Waits on the field being the active
+// element; on the result's row in the list not busy; after Enter, on the file's view beside the chat and on the tree beside
+// it; after the cut, on the link's offline mark (`data-link-phase`) before it reads the line; after the tree's divider is
+// at its least, it measures the column and the line (their boxes printed when a claim fails); after the restore, on A's
+// link up and the row again. Every name in B's checkout is invented.
+const FINDER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e7';
+const FINDER_REPLY = 'B’s agent wrote its tide tables.';
+const TIDES_ON_B = 'tide-tables-on-b.txt';
+const boxWords = (name: string, box: { x: number; y: number; width: number; height: number } | null) =>
+  box === null ? `${name}: not drawn` : `${name}: x ${Math.round(box.x)}, y ${Math.round(box.y)}, ${Math.round(box.width)} × ${Math.round(box.height)}`;
+test('U6b-3b G7, a session on B: Go to file lists a file that exists on B alone; with B stopped the list says B is offline; with B back the text is asked again', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-finder-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-finder-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(FINDER_SESSION, checkout);
+    journal.turn(FINDER_REPLY);
+    const { scene, b, page, electron } = await laneBOpened({ root, aUserData, journal, first: 'Write the tide tables.', firstReply: FINDER_REPLY, title: 'B’s tide session' }, held);
+    const tides = join(checkout, TIDES_ON_B);
+    writeFileSync(tides, 'Invented tide tables, written in B’s checkout.\n');
+
+    // Go to file: the field takes the keyboard, and the text lists B's file
+    await goToFile(electron);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false), { message: 'the field has the keyboard' }).toBe(true);
+    await page.keyboard.type('tidetables');
+    const files = surface(page, 'files');
+    const result = files.locator(`[data-files-results]:not([aria-busy]) [data-files-result][data-path="${tides}"]`);
+    await quoting(expect(result, 'the file in B’s checkout, listed on B').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    // Enter: the file beside the chat, read on B; the side column at its widest, so the tree stands beside it with the
+    // field still holding the text and its list
+    await page.keyboard.press('Enter');
+    const tab = sideColumn(page).locator(`[data-files-tab][data-file="${tides}"]`);
+    await quoting(expect(tab.locator(`[data-file-viewer][data-path="${tides}"]`), 'B’s file beside the chat').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    const panelDivider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel', exact: true });
+    await panelDivider.focus();
+    await panelDivider.press('End');
+    const column = tab.locator('[data-files-tree][data-place="beside"]');
+    await expect(column, 'the tree beside the file').toBeVisible();
+    await quoting(expect(result, 'the list in the tree’s column').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    // B unreachable: once A's link is offline, the list says so and asks nothing; the sentence whole at 160 px
+    scene.aHub.cut();
+    await quoting(expect(linkLine(page), 'the link’s offline mark').toHaveAttribute('data-link-phase', 'offline', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), () => mainSaid(page));
+    const OFFLINE = `File search is unavailable while ${B_NAME} is offline.`;
+    const line = files.locator('[data-files-line][data-line="offline"]');
+    await expect(line, 'the list’s line').toHaveText(OFFLINE);
+    const treeDivider = tab.getByRole('separator', { name: 'Resize files', exact: true });
+    await treeDivider.focus();
+    await treeDivider.press('Home');
+    await expect(treeDivider, 'the tree’s column at its least').toHaveAttribute('aria-valuenow', '160');
+    const [box, said] = [await column.boundingBox(), await line.boundingBox()];
+    const clipped = await line.evaluate((el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
+    const boxes = `${boxWords('the column', box)}; ${boxWords('the line', said)}`;
+    expect(box !== null && Math.abs(box.width - 160) <= 1, `the column 160 px wide: ${boxes}`).toBe(true);
+    expect(box !== null && said !== null && said.x >= box.x - 0.5 && said.x + said.width <= box.x + box.width + 0.5, `the line no wider than the column: ${boxes}`).toBe(true);
+    expect(clipped, `the sentence not clipped: ${boxes}`).toBe(false);
+    await expect(line, 'the sentence whole').toHaveText(OFFLINE);
+
+    // B reachable again: the text is asked again and the file is listed
+    scene.aHub.restore();
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+    await quoting(expect(result, 'asked again: the file listed again').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
   } finally {
     await held.a?.cleanup();
     await held.scene?.stop();

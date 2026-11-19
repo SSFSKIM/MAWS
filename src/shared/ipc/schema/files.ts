@@ -46,6 +46,9 @@ export const FilesEntrySchema = z.strictObject({
   size: z.number().int(),
   mtimeMs: z.number(),
   target: z.string().nullable(), // readlink for a symlink, else null; shown, never followed
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §A): git ignores the
+  // entry, by the rules of the repository that holds the listed directory; sent only when true, never on a root
+  ignored: z.literal(true).optional(),
 });
 export type FilesEntry = z.infer<typeof FilesEntrySchema>;
 
