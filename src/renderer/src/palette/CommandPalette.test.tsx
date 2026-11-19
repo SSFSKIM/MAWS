@@ -564,6 +564,24 @@ describe('Recent', () => {
     // answer is drawn above the session that was first, the artifact is selected and no session stays selected above it
     const selected = within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
     expect(selected.dataset.value).toBe(`artifact:${TEST_MACHINE}/${notes.id}`);
+    // the widget's own selection follows too: the combobox names the artifact's option as its active descendant
+    await vi.waitFor(() => expect(within(dialog()).getByRole('combobox').getAttribute('aria-activedescendant')).toBe(selected.id));
+  });
+
+  // M4's re-review: a press or a hover that does not change the row is no move, and Enter still runs the row selected
+  it.each([
+    ['Home', (row: HTMLElement) => fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Home' }) && row],
+    ['the pointer over the selected row', (row: HTMLElement) => fireEvent.pointerMove(row)],
+  ])('keeps Enter on the first row after %s, which changes no row', async (_, act_) => {
+    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }] });
+    await openAndType('');
+    const first = () => within(group('Recent')!).getAllByRole('option')[0]!;
+    await vi.waitFor(() => expect(first().getAttribute('aria-selected')).toBe('true'));
+    act(() => void act_(first()));
+    expect(first().getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${idOf('Quota reset recovery')}`);
   });
 
   // Decision Log 16 (v): Recent's reads are staged, no more out at once than the slots left in the first eight

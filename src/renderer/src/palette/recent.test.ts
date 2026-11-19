@@ -62,6 +62,14 @@ describe('Recent', () => {
     expect(recentRows({ opened, records: records(...ALL), activity, answered }).ask).toEqual([2, 3, 4, 5, 6, 7, 8].map((n) => artifact(n)));
   });
 
+  // M4's re-review: reads out hold no place from a session opened before them in age; it is drawn at once
+  it('draws a session opened before artifacts not answered yet, ahead of the fill by activity', () => {
+    const opened = [...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => artifact(n)), session('s1')]; // s1 is the least active
+    const { rows, ask } = recentRows({ opened, records: records(...ALL), activity, answered: new Map() });
+    expect(ask).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map((n) => artifact(n)));
+    expect(ids(rows)).toEqual(['s1', 's11', 's10', 's9', 's8', 's7', 's6', 's5'].map(S));
+  });
+
   it('asks only for the artifacts it could draw before the eighth row', () => {
     const opened = [...['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8'].map(session), artifact(9)];
     expect(recentRows({ opened, records: records(...ALL), activity, answered: new Map() }).ask).toEqual([]);
