@@ -6,6 +6,8 @@ import { EXTENDED_TABLE, sample } from '@shared/keymap/sample-rows'; // U6a
 import { formatChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
 import { isActionEnabled, registerAction, runAction } from '../keymap/actions-runtime';
+import { connectKeys } from '../keymap/dispatcher'; // M4's second re-review
+import { bindChord } from '../keymap/useKeyChord';
 import { connectVisits, useVisits } from '../keymap/visits'; // UX wave U6b-5a M4: Recent
 import { EMPTY_RECORD } from '../keymap/places';
 import { useLibraryView, resetLibraryView } from '../library/view';
@@ -566,6 +568,29 @@ describe('Recent', () => {
     expect(selected.dataset.value).toBe(`artifact:${TEST_MACHINE}/${notes.id}`);
     // the widget's own selection follows too: the combobox names the artifact's option as its active descendant
     await vi.waitFor(() => expect(within(dialog()).getByRole('combobox').getAttribute('aria-activedescendant')).toBe(selected.id));
+  });
+
+  // M4's second re-review: a late answer that changes the first row sends nothing the rest of the app reads as a key
+  it('follows a late first row without a key event: a profile’s action rebound to Home is not run; the person’s Home is', async () => {
+    const notes = libraryRow(1, { title: 'Launch notes' });
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    const stop = vi.fn();
+    offs.push(connectKeys(window, () => ({ 'composer.stop': 'Home' })), bindChord({ id: 'composer.stop', within: null, run: stop }));
+    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }, { kind: 'artifact', artifactId: notes.id, machine: TEST_MACHINE }] });
+    // the artifact was opened before the session, so its answer comes above nothing; make it the newer one
+    useVisits.setState({ opened: [...useVisits.getState().opened].reverse() });
+    await openAndType('');
+    await vi.waitFor(() => expect(fake.pending('library.get')).toBe(1));
+    const value = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+    expect(value()).toBe(`session:${idOf('Quota reset recovery')}`);
+    await act(() => fake.reply('library.get', { row: notes }));
+    await vi.waitFor(() => expect(value()).toBe(`artifact:${TEST_MACHINE}/${notes.id}`));
+    const selected = within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+    expect(within(dialog()).getByRole('combobox').getAttribute('aria-activedescendant')).toBe(selected.id);
+    expect(stop).not.toHaveBeenCalled();
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Home' }); // the control: the person's Home reaches the dispatcher
+    expect(stop).toHaveBeenCalledOnce();
   });
 
   // M4's re-review: a press or a hover that does not change the row is no move, and Enter still runs the row selected
