@@ -44,9 +44,9 @@ describe('the artifact search', () => {
 
   it('leaves out, and says nothing of, a machine that does not answer, this Mac included, or whose call throws', async () => {
     const fake = fakeClient();
-    const invoke = fake.client.invoke.bind(fake.client);
-    vi.spyOn(fake.client, 'invoke').mockImplementation(((name: never, input: never, opts?: { machine?: MachineRef }) =>
-      opts?.machine === THIRD ? Promise.reject(new Error('bridge gone')) : invoke(name, input, opts as never)) as never);
+    const invoke = fake.client.invoke.bind(fake.client) as (...args: unknown[]) => Promise<unknown>;
+    vi.spyOn(fake.client, 'invoke').mockImplementation(((name: unknown, input: unknown, opts?: { machine?: MachineRef }) =>
+      opts?.machine === THIRD ? Promise.reject(new Error('bridge gone')) : invoke(name, input, opts)) as never);
     const search = searchArtifacts(fake.client, '  plan ', [OTHER_MACHINE, THIRD]);
     expect(fake.invoked('library.list')).toEqual([{ filter: { query: 'plan' } }, { filter: { query: 'plan' } }]); // the text as the Library asks it
     await fake.fail('library.list', 'index unavailable', 'host_unavailable');

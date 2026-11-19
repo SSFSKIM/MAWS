@@ -3,12 +3,15 @@
 // once per turn of the event loop, in a microtask after the first change, and compares only the navigation projection
 // (`places.ts`), so an act that writes the store twice in one run (the Overview's close after a change of the strip) is
 // one visit, and a write that changes nothing of the projection is no event. `opened` is what the palette's Recent reads
-// (M4): the sessions and artifacts that came to be in front as main tabs, newest first, each once. Nothing here writes
-// the strip or stores anything: a step goes through the layout store's own acts (the wave's UC-12).
+// (M4): the sessions and artifacts that came to be in front as main tabs, and the artifacts shown beside the chat (M4,
+// decision 18), newest first, each once. Nothing here writes the strip or stores anything: a step goes through the
+// layout store's own acts (the wave's UC-12).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MachineRef } from '@shared/machine/ref';
-import { useLayout } from '../stores/layout';
+import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
+import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
+import { ipc } from '../ipc/client';
+import { useLayout, type LayoutState } from '../stores/layout';
 import { allTabs, currentSet } from '../stores/layout-model';
 import { focusPaneElement } from '../main/pane-dom';
 import { registerAction } from './actions-runtime';
@@ -29,6 +32,38 @@ function openedOf(tabId: string): Opened | null {
   if (tab?.kind === 'session') return { kind: 'session', appSessionId: tab.appSessionId };
   if (tab?.kind === 'artifact') return { kind: 'artifact', artifactId: tab.artifactId, machine: tab.machine };
   return null;
+}
+
+// UX wave U6b-5a M4 (decision 18; Decision Log 11 (iii)): the opened list's second source, an artifact shown beside the
+// chat, read from the layout with no edit in the Artifacts tool: it writes `{ target, machine }` under its side tab's
+// `panelParams` while the tab shows a record (`tools/artifacts/ArtifactsTool.tsx`, `persist`). What hydration restored
+// is the baseline, and a change of a tab's value after it is an artifact opened. A record stored before records named
+// their machine reads as this Mac's, as the tool restores it, so the tool writing it back with this Mac opens nothing.
+type ArtifactOpened = Extract<Opened, { kind: 'artifact' }>;
+
+function shownBeside(state: Pick<LayoutState, 'panelPinned' | 'panelBySession' | 'panelParams'>): Map<string, ArtifactOpened> {
+  const shown = new Map<string, ArtifactOpened>();
+  for (const tab of [...state.panelPinned, ...[...state.panelBySession.values()].flatMap((panel) => panel.tabs)]) {
+    if (tab.toolId !== ARTIFACTS_TOOL_ID) continue;
+    const params = state.panelParams[tab.id];
+    const { target, machine } = typeof params === 'object' && params !== null ? (params as { target?: unknown; machine?: unknown }) : {};
+    if (typeof target !== 'string' || target === '') continue;
+    const ref = MachineRefSchema.safeParse(machine);
+    shown.set(tab.id, { kind: 'artifact', artifactId: target, machine: ref.success ? ref.data : ipc.localMachine });
+  }
+  return shown;
+}
+
+// The artifacts the side tabs came to show since the last read join `opened`, newest first.
+function readBeside(last: ReadonlyMap<string, ArtifactOpened>, next: ReadonlyMap<string, ArtifactOpened>): void {
+  const came = [...next].filter(([tab, shown]) => {
+    const before = last.get(tab);
+    return before === undefined || !sameOpened(before, shown);
+  });
+  if (came.length === 0) return;
+  let { opened } = useVisits.getState();
+  for (const [, shown] of came) opened = [shown, ...opened.filter((o) => !sameOpened(o, shown))];
+  useVisits.setState({ opened: opened.slice(0, OPENED_MAX) });
 }
 
 const sameView = (a: Projection, b: Projection) =>
@@ -177,10 +212,11 @@ function connectHandlers(): () => void {
 
 // The reader, the step and the two handlers; mounted once from App.tsx after the layout's persistence is connected. The
 // record starts with this run: nothing is read before the layout is hydrated, and the first read makes the restored
-// place the record's first entry, which opens nothing.
+// place the record's first entry, which opens nothing, and takes the side tabs' artifacts as they were restored.
 export function connectVisits(): () => void {
   useVisits.setState({ record: EMPTY_RECORD, opened: [] });
   let last: Projection | null = null;
+  let beside: ReadonlyMap<string, ArtifactOpened> | null = null;
   let pending = false;
   let live = true;
   const take = () => {
@@ -193,6 +229,9 @@ export function connectVisits(): () => void {
       if (place !== null) useVisits.setState({ record: seen(EMPTY_RECORD, place) });
     } else read(last, next);
     last = next;
+    const shown = shownBeside(state);
+    if (beside !== null) readBeside(beside, shown);
+    beside = shown;
   };
   take();
   const offLayout = useLayout.subscribe(() => {
