@@ -175,7 +175,9 @@ export function CommandPalette() {
     // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
     // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop. UX wave
     // U6b-3b: Go to file records where the keyboard is for Esc's second step, which is the opener, not the palette's field.
-    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile';
+    // The branch panel's sweep#4: a surface's toggle moves the keyboard too (into the tool it shows, or back to the composer
+    // when it hides the column), and asks where the keyboard is as it runs.
+    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile' || id.startsWith('surface.');
     if (afterClose) {
       closeThen(() => runAction(id));
       return;
@@ -264,24 +266,29 @@ function Palette({ run }: { run(id: ActionId): void }) {
     ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
     : [];
   const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
-  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-reviews): one effective selection, cmdk's controlled
-  // value. In the All scope, until the person moves it, it is the first row and follows the first row as answers arrive;
-  // a move is the person's key or pointer making cmdk report another row, and is forgotten at every change of the text or
-  // the scope. The Conversations scope keeps cmdk's selection by value, as before. Following sends no event: an answer
-  // that changes the first row must never look like a key to the rest of the app (the window's key dispatcher, Back and
-  // Forward's hand-off). cmdk 1.1.1 does not move its active descendant when its controlled value changes, so the input's
-  // `aria-activedescendant` is kept on the effective row here.
-  const firstRow = (() => {
-    const [lead] = recent;
-    if (lead) return lead.kind === 'session' ? ROW.session(lead.record.appId) : ROW.artifact(lead.machine, lead.artifactId);
-    if (typed && entries.sessions[0]) return ROW.session(entries.sessions[0].appId);
-    const artifact = artifactGroups[0]?.rows[0];
-    if (artifact) return ROW.artifact(artifactGroups[0]!.machine, artifact.id);
-    if (entries.projects[0]) return ROW.project(entries.projects[0].id);
-    if (entries.channels[0]) return ROW.channel(entries.channels[0].project);
-    if (actions[0]) return ROW.action(actions[0]);
-    return typed ? ROW.library : null;
-  })();
+  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-reviews; the branch panel's scalpel-4#1, #2): one
+  // effective selection, cmdk's controlled value, always a row that is drawn. In the All scope, until the person moves it,
+  // it is the first row and follows the first row as answers arrive; a move is the person's key or pointer making cmdk
+  // report another row, and is forgotten at every change of the text or the scope, and when its row goes. The
+  // Conversations scope keeps cmdk's selection by value while its row is drawn. Following sends no event: an answer that
+  // changes the first row must never look like a key to the rest of the app (the window's key dispatcher, Back and
+  // Forward's hand-off). cmdk 1.1.1 neither moves its active descendant nor scrolls when its controlled value changes, so
+  // the input's `aria-activedescendant` is kept on the effective row here, and a row the palette selected by itself is
+  // scrolled into view.
+  const rowValues = [
+    ...recent.map((row) => (row.kind === 'session' ? ROW.session(row.record.appId) : ROW.artifact(row.machine, row.artifactId))),
+    ...(scope === 'all' && typed ? entries.sessions.slice(0, RESULT_LIMIT).map((record) => ROW.session(record.appId)) : []),
+    ...artifactGroups.flatMap(({ machine, rows }) => rows.slice(0, RESULT_LIMIT).map((row) => ROW.artifact(machine, row.id))),
+    ...groups.flatMap((group) => group.entries.slice(0, RESULT_LIMIT).map((entry) => ROW.session(entry.appId))),
+    ...(scope === 'all'
+      ? [
+          ...entries.projects.slice(0, RESULT_LIMIT).map((project) => ROW.project(project.id)),
+          ...entries.channels.slice(0, RESULT_LIMIT).map((entry) => ROW.channel(entry.project)),
+          ...actions.map(ROW.action),
+          ...(typed ? [ROW.library] : []),
+        ]
+      : []),
+  ]; // the rows as the list below draws them, in its order
   const listKey = `${scope}\n${query}`;
   const [moved, setMoved] = useState(false);
   const [movedIn, setMovedIn] = useState(listKey);
@@ -289,7 +296,11 @@ function Palette({ run }: { run(id: ActionId): void }) {
     setMovedIn(listKey); // a new text or scope: whatever was moved is forgotten
     setMoved(false);
   }
-  const value = scope === 'all' && !moved && firstRow !== null ? firstRow : selected;
+  const drawn = rowValues.includes(selected);
+  if (moved && !drawn) setMoved(false); // the moved row went: the selection follows the first row again
+  const value = (scope === 'sessions' || moved) && drawn ? selected : (rowValues[0] ?? selected);
+  // the row the palette selected by itself is the selection held from now on (cmdk reports none for its controlled value)
+  if (value !== selected) setSelected(value);
   const root = useRef<HTMLDivElement>(null);
   const acting = useRef(false); // the person's key or pointer is being handled (one task)
   const personActs = () => {
@@ -301,12 +312,18 @@ function Palette({ run }: { run(id: ActionId): void }) {
     if (acting.current) setMoved(true);
     setSelected(next);
   };
+  const shown = useRef<string | null>(null); // the value last brought into view
   useLayoutEffect(() => {
     const input = root.current?.querySelector('[cmdk-input]');
     if (!input) return;
     const row = [...root.current!.querySelectorAll('[cmdk-item]')].find((item) => item.getAttribute('data-value') === value);
     if (row?.id) input.setAttribute('aria-activedescendant', row.id);
     else input.removeAttribute('aria-activedescendant');
+    if (row === undefined || shown.current === value) return;
+    shown.current = value;
+    // as cmdk brings its own selection into view: the group's heading too when the row is its first
+    if (row.parentElement?.firstElementChild === row) row.closest('[cmdk-group]')?.querySelector('[cmdk-group-heading]')?.scrollIntoView({ block: 'nearest' });
+    row.scrollIntoView({ block: 'nearest' });
   });
   const close = () => usePalette.setState({ open: false });
 

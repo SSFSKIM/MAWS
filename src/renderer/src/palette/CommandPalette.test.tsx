@@ -150,6 +150,29 @@ describe('command palette', () => {
     expect(options('Sessions')).toEqual([expect.stringContaining('Deploy checklist'), expect.stringContaining('Undeployable plan'), expect.stringContaining('Ship it')]);
   });
 
+  // The branch panel's scalpel-4#2: the row the palette selects by itself is scrolled into view, as cmdk scrolls its own
+  it('scrolls the first row into view when new text gives the selection back to it', async () => {
+    const owner = (() => {
+      let proto: object | null = Object.getPrototypeOf(document.createElement('div'));
+      while (proto && !Object.prototype.hasOwnProperty.call(proto, 'scrollIntoView')) proto = Object.getPrototypeOf(proto);
+      return proto as { scrollIntoView(): void };
+    })();
+    const scrolled: Element[] = [];
+    const spy = vi.spyOn(owner, 'scrollIntoView').mockImplementation(function (this: Element) { scrolled.push(this); });
+    try {
+      await openAndType('e');
+      const combobox = within(dialog()).getByRole('combobox');
+      fireEvent.keyDown(combobox, { key: 'End' });
+      const options = () => within(dialog()).getAllByRole('option');
+      expect(options().at(-1)!.getAttribute('aria-selected')).toBe('true');
+      scrolled.length = 0;
+      act(() => usePalette.setState({ query: 'e ' })); // the same rows: the selection goes back to the first
+      const first = options()[0]!;
+      expect(first.getAttribute('aria-selected')).toBe('true');
+      expect(scrolled).toContain(first);
+    } finally { spy.mockRestore(); }
+  });
+
   // Decision Log 11 (vii): Back and Forward are listable rows with handlers, listed while they can run
   it('lists Back while there is a place before, and Forward only once there is one after', async () => {
     offs.push(connectVisits());
@@ -237,6 +260,22 @@ describe('command palette', () => {
     await user.keyboard('Diagnostics');
     await user.keyboard('{Enter}');
     expect(seen.diagnostics).toBe(field);
+  });
+
+  // The branch panel's sweep#4: a surface's toggle moves the keyboard (it shows a tool and gives it the keyboard, or hides
+  // the column and gives it back), so from the palette it runs once the dialog has given the keyboard back to its opener
+  it.each(['surface.terminal', 'surface.files', 'surface.source-control'] as const)('runs %s after the palette gives the keyboard back to its opener', async (id) => {
+    const user = userEvent.setup();
+    const seen: (Element | null)[] = [];
+    offs.push(registerAction(id, () => void seen.push(document.activeElement)));
+    render(<><textarea aria-label="Composer" /><CommandPalette /></>);
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+    act(() => runAction('palette.open'));
+    await user.keyboard(ACTIONS[id].title);
+    await user.click(within(group('Actions')!).getAllByRole('option').find((o) => o.dataset.value === `action:${id}`)!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await vi.waitFor(() => expect(seen).toEqual([composer]));
   });
 
   it('a project reveals it in the sidebar: shown, its row expanded', async () => {
@@ -592,6 +631,32 @@ describe('Recent', () => {
   });
 
   // M4's re-review: a press or a hover that does not change the row is no move, and Enter still runs the row selected
+  // The branch panel's scalpel-4#1: a moved selection whose row goes falls back to a live row, the first, in one render
+  it('falls back to the first row when two artifacts arriving together take the moved selection’s row out', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    useVisits.setState({ opened: [1, 2].map((n) => ({ kind: 'artifact' as const, artifactId: artifactId(n), machine: TEST_MACHINE })) });
+    await openAndType('');
+    await vi.waitFor(() => expect(fake.pending('library.get')).toBe(2));
+    const combobox = within(dialog()).getByRole('combobox');
+    const rows = () => within(group('Recent')!).getAllByRole('option');
+    expect(rows()).toHaveLength(RECENT_MAX); // eight sessions of the fill
+    for (let n = 0; n < RECENT_MAX - 2; n++) fireEvent.keyDown(combobox, { key: 'ArrowDown' }); // to Recent's penultimate row
+    const penultimate = rows()[RECENT_MAX - 2]!.dataset.value;
+    expect(rows()[RECENT_MAX - 2]!.getAttribute('aria-selected')).toBe('true');
+    await act(async () => {
+      await Promise.all([fake.reply('library.get', { row: libraryRow(1, { title: 'Field notes' }) }), fake.reply('library.get', { row: libraryRow(2, { title: 'Field report' }) })]);
+    });
+    await vi.waitFor(() => expect(rows()[0]!.textContent).toContain('Field notes'));
+    expect(rows().map((o) => o.dataset.value)).not.toContain(penultimate); // the moved row went with the fill's last two
+    const selected = within(dialog()).getAllByRole('option').filter((o) => o.getAttribute('aria-selected') === 'true');
+    expect(selected).toEqual([rows()[0]]);
+    expect(combobox.getAttribute('aria-activedescendant')).toBe(rows()[0]!.id);
+    fireEvent.keyDown(combobox, { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${artifactId(1)}`);
+  });
+
   it.each([
     ['Home', (row: HTMLElement) => fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Home' }) && row],
     ['the pointer over the selected row', (row: HTMLElement) => fireEvent.pointerMove(row)],
