@@ -85,7 +85,8 @@ export interface EditorHandle {
   beginDictation(onEnded: () => void): DictationSink | null;
   settleDictation(): void; // the interim words become ordinary text where they stand and the sink ends (a card covered the box)
   // UX wave U6b-5a (decisions 8 and 30; Interfaces §C): an attached block, once this mount's draft is restored. 'present'
-  // when the document holds a block of its id (nothing changes); else one block, at the caret the editor left (the
+  // when the document holds a block of its id, or a send of the session holding one was accepted while it waited
+  // (nothing changes); else one block, at the caret the editor left (the
   // keyboard with it, the caret after the block) or at the end (the caret, any selection and the keyboard untouched),
   // never over a selection (Decision Log 14 (iv)). 'busy': a submission is in flight. 'closed':
   // the editor takes no typing. 'gone': it unmounted meanwhile. Nothing changes in those three. With `save`, the pending
@@ -761,17 +762,27 @@ export class EditorController {
 
   // UX wave U6b-5a (decisions 8 and 30; S1): an attached block, as `EditorHandle.attachPasted` says. A remount meanwhile
   // is waited for in its turn, as files from outside are (`attachFromOutside`). A document that holds the block answers
-  // `present` first, even while it is being sent: the block then goes with the message, once.
+  // `present` first, even while it is being sent: the block then goes with the message, once; so does a send of the
+  // session that held it, accepted while this waited (Decision Log 17).
   private async attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean }): Promise<EditorAttach> {
-    for (;;) {
-      const lifetime = this.lifetime;
-      await this.restoring;
-      if (!this.live) return 'gone';
-      if (this.lifetime === lifetime) break;
+    // Decision Log 17: a send of the session accepted while this waits on its restore, holding the block, took it
+    let sent = false;
+    const unwatch = watchAcceptedSends(this.inputs.appSessionId, (doc) => {
+      if (holdsBlock(doc, block.id)) sent = true;
+    });
+    try {
+      for (;;) {
+        const lifetime = this.lifetime;
+        await this.restoring;
+        if (!this.live) return 'gone';
+        if (this.lifetime === lifetime) break;
+      }
+    } finally {
+      unwatch();
     }
     const editor = this.editor;
     if (!editor || editor.isDestroyed) return 'gone';
-    if (holdsBlock(editor.getJSON(), block.id)) return 'present';
+    if (sent || holdsBlock(editor.getJSON(), block.id)) return 'present';
     if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId)) return 'busy';
     if (this.inputs.disabled !== null || !editor.isEditable) return 'closed';
     const node = pastedBlock(block.text, block.id);
