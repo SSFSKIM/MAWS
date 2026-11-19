@@ -25,14 +25,15 @@ export interface RecentInput {
   answered: ReadonlyMap<string, LibraryRow | null>; // `library.get`'s answers by `artifactKey`; absent: not answered yet
 }
 
-// The rows to draw, and the artifacts to ask `library.get` for: those not answered yet that come before the eighth row,
-// so an answer that turns out null lets the next one be asked.
+// The rows to draw, and the artifacts to ask `library.get` for. An artifact not answered yet holds its place in the first
+// eight (Decision Log 16 (v)): no more reads are out at once than the places left, and an answer that turns out null
+// frees its place for the next. The fill with sessions is drawn at once and gives way as the artifacts' rows come.
 export function recentRows({ opened, records, activity, answered }: RecentInput): { rows: RecentRow[]; ask: OpenedArtifact[] } {
   const rows: RecentRow[] = [];
   const ask: OpenedArtifact[] = [];
   const listed = new Set<AppSessionId>();
   for (const entry of opened) {
-    if (rows.length === RECENT_MAX) break;
+    if (rows.length + ask.length === RECENT_MAX) break;
     if (entry.kind === 'session') {
       const record = records.get(entry.appSessionId);
       if (record === undefined || record.archived || listed.has(record.appId)) continue;

@@ -264,11 +264,11 @@ function Palette({ run }: { run(id: ActionId): void }) {
     ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
     : [];
   const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
-  // U6b-5a M4 (S5; Decision Log 15 (viii)): until the person moves the selection (a key, the pointer) for the text and
-  // scope now, it is the first row and follows the first row as answers arrive; from then on it is kept by value. Enter
-  // runs what is selected when it is pressed.
+  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii)): in the All scope, until the person moves the selection (a
+  // key, the pointer), it is the first row and follows the first row as answers arrive; from then on it is kept by value.
+  // A move is forgotten at every change of the text or the scope. The Conversations scope keeps its selection by value,
+  // as before. Enter runs what is selected when it is pressed.
   const firstRow = (() => {
-    if (scope === 'sessions') return groups[0]?.entries[0] ? ROW.session(groups[0].entries[0].appId) : null;
     const [lead] = recent;
     if (lead) return lead.kind === 'session' ? ROW.session(lead.record.appId) : ROW.artifact(lead.machine, lead.artifactId);
     if (typed && entries.sessions[0]) return ROW.session(entries.sessions[0].appId);
@@ -280,8 +280,13 @@ function Palette({ run }: { run(id: ActionId): void }) {
     return typed ? ROW.library : null;
   })();
   const listKey = `${scope}\n${query}`;
-  const [movedFor, setMovedFor] = useState<string | null>(null);
-  const value = movedFor === listKey ? selected : (firstRow ?? selected);
+  const [moved, setMoved] = useState(false);
+  const [movedIn, setMovedIn] = useState(listKey);
+  if (movedIn !== listKey) {
+    setMovedIn(listKey); // a new text or scope: whatever was moved is forgotten
+    setMoved(false);
+  }
+  const value = scope === 'all' && !moved ? (firstRow ?? selected) : selected;
   const close = () => usePalette.setState({ open: false });
 
   const openSession = (appSessionId: AppSessionId, split: boolean) => {
@@ -308,7 +313,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
   };
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
-    if (movesSelection(event)) setMovedFor(listKey);
+    if (movesSelection(event)) setMoved(true);
     if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:')) return;
     event.preventDefault();
     openSession(value.slice('session:'.length) as AppSessionId, true);
@@ -342,7 +347,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
       <Command.List
         // the pointer selects the row it moves over (cmdk): the person's move
         onPointerMove={(event) => {
-          if (event.target instanceof Element && event.target.closest('[cmdk-item]') !== null) setMovedFor(listKey);
+          if (event.target instanceof Element && event.target.closest('[cmdk-item]') !== null) setMoved(true);
         }}
         className="max-h-[min(420px,60vh)] overflow-y-auto p-1"
       >

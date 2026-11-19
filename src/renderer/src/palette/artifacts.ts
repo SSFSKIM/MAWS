@@ -41,10 +41,15 @@ export function openPaletteArtifact(artifactId: string, machine: MachineRef): vo
   const local = ipc.localMachine;
   recordArtifactMachine(artifactId, machine, local);
   const session = focusedSession();
-  if (session !== null && showOpenArtifactTab(session, artifactId)) return;
-  if (session !== null && canShowArtifactInPanel(session) && sessionArtifactMachine(session, artifactId, local) === machine) {
-    openArtifactInPanel(session, artifactId);
-    return;
+  // Steps 2 and 3 read the artifact on the machine the session's view reads it on (`sessionArtifactMachine`), so they are
+  // taken only when that is the row's machine: a main tab of another machine's artifact with the same id is not reused
+  // (Decision Log 16 (iii)), and the side column would read the wrong one.
+  if (session !== null && sessionArtifactMachine(session, artifactId, local) === machine) {
+    if (showOpenArtifactTab(session, artifactId)) return;
+    if (canShowArtifactInPanel(session)) {
+      openArtifactInPanel(session, artifactId);
+      return;
+    }
   }
   openArtifactTab(artifactId, undefined, machine);
 }
