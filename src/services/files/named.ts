@@ -391,6 +391,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     try {
       handle = job.agentId === null ? await open(job.transcript, TRANSCRIPT_FLAGS) : await openAgent(job, job.agentId);
       if (handle === null) return false;
+      if (job.agentId !== null) stay(job); // U6b-4c: a subagent's descriptor is judged only for a job someone waits for
       return await decide(job, handle);
     } catch {
       return false;
@@ -425,6 +426,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     }
     const handle = await open(found, TRANSCRIPT_FLAGS | NO_LINK);
     try {
+      stay(job); // an open that answered for nobody is closed, nothing asked of its descriptor
       await confirmOpened(handle.fd, found);
     } catch {
       await handle.close().catch(() => {});
