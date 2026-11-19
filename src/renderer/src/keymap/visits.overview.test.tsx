@@ -198,6 +198,10 @@ describe('a step and the mounted Overview over a split', () => {
   });
 
   it('a step between two Overview entries keeps the Overview open and its keyboard; a step from a tab onto one opens it with the keyboard', async () => {
+    // A and C on the left, B on the right: C shown under the Overview changes the left pane's tab in front
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a'), ref('c')], activeTabId: tabOf('a') }, { tabs: [ref('b')], activeTabId: tabOf('b') }], focusedPane: 0 } });
+    await settle();
+    useVisits.setState({ record: { entries: [T('a')], at: 0 } });
     render(<Split />);
     act(() => tab('a').focus());
     await settle();
@@ -205,17 +209,17 @@ describe('a step and the mounted Overview over a split', () => {
     await settle();
     const panel = screen.getByRole('dialog', { name: 'Overview' });
     expect(document.activeElement).toBe(panel);
-    act(() => layout().activateTab(tabOf('b'))); // an act outside the Overview shows B under it, and leaves it open
+    act(() => layout().activateTab(tabOf('c'))); // an act outside the Overview shows C under it, and leaves it open
     await settle();
     expect(layout().overviewOpen).toBe(true);
-    expect(record()).toEqual({ entries: [T('a'), over(T('a')), over(T('b'))], at: 2 });
+    expect(record()).toEqual({ entries: [T('a'), over(T('a')), over(T('c'))], at: 2 });
     act(() => runAction('go.back')); // to the Overview over A
     await settle();
     expect(layout().overviewOpen).toBe(true);
     expect(frontOf(layout())).toBe(tabOf('a'));
     expect(screen.getByRole('dialog', { name: 'Overview' })).toBe(panel); // the same panel, never closed between
     expect(document.activeElement).toBe(panel);
-    expect(record()).toEqual({ entries: [T('a'), over(T('a')), over(T('b'))], at: 1 });
+    expect(record()).toEqual({ entries: [T('a'), over(T('a')), over(T('c'))], at: 1 });
     // the control: back to the tab A, then Forward from it opens the Overview over A, which takes the keyboard
     act(() => runAction('go.back'));
     await settle();
