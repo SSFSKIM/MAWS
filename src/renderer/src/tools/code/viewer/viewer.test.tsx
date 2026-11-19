@@ -2574,7 +2574,8 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
   // string, which names nothing, so the one read for the absolute path is refused
   it('a relative transcript chip that climbs out of the working folder makes one named read of the absolute path for the row’s session, refused (L5)', async () => {
     const main = installDisk({ '/outside/secret.md': 'secret\n' }, { outside: ['/outside'], names: () => false });
-    useSessions.setState({ records: new Map([[A, record(A, { directory: '/r/work' })], [B, record(B, { directory: '/b' })]]) });
+    // B's folder is deeper than A's, so a path resolved against B's would be /b/deep/outside/secret.md: only A's gives the one below
+    useSessions.setState({ records: new Map([[A, record(A, { directory: '/r/work' })], [B, record(B, { directory: '/b/deep/er/work' })]]) });
     try {
       useLayout.getState().openTab({ kind: 'session', appSessionId: B }); // another session in front
       const row = { storeKey: A, variant: 'session', actions: { ...NO_ACTIONS, openFile: codeTranscriptActions.openFile }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'row' } as const;
