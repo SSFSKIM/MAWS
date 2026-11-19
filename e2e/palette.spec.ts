@@ -3,8 +3,10 @@
 // place and focuses its row). A closing Radix FocusScope would return focus to the element focused before it opened in
 // a zero-delay timer, which could land after the reveal. It does not here: Radix's modal Dialog prevents the scope's restore and
 // focuses its Trigger instead, and the palette has no Trigger (it opens from the action table), so nothing takes focus
-// back. The first case leaves the timing to the browser; the second forces the order the loss would need (every frame
-// at once, ahead of any timer). Both pin the row's focus, so a Trigger or a focus restore added later fails here.
+// back. The case pins the row's focus past the close's timers, so a Trigger or a focus restore added later fails here;
+// the late restore's order itself (the close's autofocus running after the row took the keyboard, and leaving it there)
+// is pinned at the focus handler's boundary, `src/renderer/src/app/dialog-focus.test.tsx` (UX wave U6b-5a M5's
+// re-review: nothing on the close's path asks for a frame, so a forced frame order proved nothing here).
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
@@ -28,8 +30,7 @@ const focused = (page: Page) =>
 // ux-wave-U6b-5-rest-of-keyboard.md, §I; Decision Logs 15 and 19): End no longer lands on the project, since the last row
 // is "Search the Library for …", and the selection follows the first row until a key moves it; the row is picked by its
 // value (`project:<id>`, read from the drawn option) and reached by ArrowDown, each press waited on the selection moving.
-// `beforeEnter` runs once the row is selected, just before ⏎ (the second case's frame patch, which must cover the close).
-async function reveal(page: Page, app: ElectronApplication, project: string, beforeEnter?: () => Promise<void>): Promise<void> {
+async function reveal(page: Page, app: ElectronApplication, project: string): Promise<void> {
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   await page.locator('[data-region="sidebar"] [role="treeitem"]').first().focus();
   await menu(app, 'palette.open');
@@ -49,7 +50,6 @@ async function reveal(page: Page, app: ElectronApplication, project: string, bef
     await expect.poll(() => selected.getAttribute('data-value'), { message: 'ArrowDown moves the selection' }).not.toBe(from);
   }
   await expect(palette.locator(`[cmdk-item][data-value="${value}"]`)).toHaveAttribute('aria-selected', 'true');
-  await beforeEnter?.();
   await page.keyboard.press('Enter');
   await expect(palette).toHaveCount(0);
 }
@@ -59,41 +59,13 @@ async function reveal(page: Page, app: ElectronApplication, project: string, bef
 const timersRun = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 const framesRun = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-// The row takes focus, and still holds it once the close's timers and two frames after them have run. `afterTimers`
-// runs between the two (the second case takes its frame order out there).
-async function expectRowKeepsFocus(page: Page, project: string, afterTimers?: () => Promise<void>): Promise<void> {
+// The row takes focus, and still holds it once the close's timers and two frames after them have run.
+async function expectRowKeepsFocus(page: Page, project: string): Promise<void> {
   await expect.poll(() => focused(page)).toEqual({ kind: 'project', row: project });
   await timersRun(page);
-  await afterTimers?.();
   await framesRun(page);
   expect(await focused(page), `${project}'s row still holds focus`).toEqual({ kind: 'project', row: project });
 }
-
-type ForcedWindow = { __forcedFrames?: { ran: number; original: typeof requestAnimationFrame } };
-
-// The order the loss would need: every frame callback asked for runs at once (a microtask), ahead of any timer.
-const forceFrames = (page: Page) =>
-  page.evaluate(() => {
-    const forced = { ran: 0, original: window.requestAnimationFrame };
-    window.requestAnimationFrame = (callback) => {
-      queueMicrotask(() => {
-        forced.ran++;
-        callback(performance.now());
-      });
-      return 0;
-    };
-    (window as unknown as ForcedWindow).__forcedFrames = forced;
-  });
-
-// The browser's frames back; answers how many callbacks ran in the forced order.
-const unforceFrames = (page: Page) =>
-  page.evaluate(() => {
-    const win = window as unknown as ForcedWindow;
-    const forced = win.__forcedFrames!;
-    window.requestAnimationFrame = forced.original;
-    delete win.__forcedFrames;
-    return forced.ran;
-  });
 
 test('palette reveal project: the row keeps focus as the browser orders the frame and the dialog restore', async () => {
   const { page, app } = maws;
@@ -102,18 +74,6 @@ test('palette reveal project: the row keeps focus as the browser orders the fram
       await reveal(page, app, project);
       await expectRowKeepsFocus(page, project);
     }
-  }
-});
-
-test('palette reveal project: the row keeps focus when a frame runs before the dialog restores focus', async () => {
-  const { page, app } = maws;
-  for (const project of PROJECTS) {
-    // forced once the project's row is selected, so it covers the ⏎ and the dialog's close, and taken out once the
-    // close's timers have run; a frame of the close ran in the forced order, or the case tested nothing
-    await reveal(page, app, project, () => forceFrames(page));
-    await expectRowKeepsFocus(page, project, async () => {
-      expect(await unforceFrames(page), 'a frame of the close ran in the forced order').toBeGreaterThan(0);
-    });
   }
 });
 

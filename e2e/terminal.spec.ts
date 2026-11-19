@@ -1044,7 +1044,7 @@ test('Attach selection to chat: the menu’s fifth item attaches the selection a
     // B3: with nothing selected, Edit ▸ Attach selection to chat attaches what the screen shows, a second block. The
     // click that types the command clears the selection; the menu's item, drawn disabled, says none is left, and a
     // click on blank cells gives the terminal the keyboard back without choosing any.
-    await runIn(page, terminal, "clear; printf 'attach-%s\\n' second", 'attach-second');
+    await runIn(page, terminal, "clear; printf 'attach-%s\\n' second third", 'attach-third');
     const cleared = await terminalMenu(page, terminal, 'blank');
     await expect(cleared.getByRole('menuitem', { name: 'Attach selection to chat' }), 'nothing is selected').toBeDisabled();
     await page.keyboard.press('Escape');
@@ -1054,7 +1054,8 @@ test('Attach selection to chat: the menu’s fifth item attaches the selection a
     await expect.poll(() => s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('terminal.attachSelection')?.enabled ?? null), { message: 'Edit ▸ Attach selection to chat enabled while the terminal has the keyboard' }).toBe(true);
     await menu(s.maws.app, 'terminal.attachSelection');
     await expect(chips).toHaveCount(2);
-    await expect(chips.nth(1)).toHaveAttribute('title', /^attach-second\n/); // the screen from its first row, not a selection
+    // the screen from its first row, both lines the command printed (the prompt after them, if drawn by then)
+    await expect(chips.nth(1)).toHaveAttribute('title', /^attach-second\nattach-third(\n|$)/);
     await expect(box).toBeFocused();
 
     // nothing was sent: no message of the person's among the session's events (what its transcript draws its rows from);
