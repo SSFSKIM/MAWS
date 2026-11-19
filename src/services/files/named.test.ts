@@ -267,6 +267,15 @@ describe('names: what the transcript names', () => {
     expect(await named.names(S, outer)).toBe('counted');
   });
 
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, N1.11): the window draws as many cells of a
+  // row as the table's head has; a path linked only in a cell past them is not named
+  it('a path linked only in a table cell past the head’s width is not named; in a cell the head covers it is', async () => {
+    await writeTranscript([...filler(4), assistant(text(`| a | b |\n|---|---|\n| x | y | [r](${P}) |`)), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe(false);
+    await writeTranscript([...filler(4), assistant(text(`| a | b |\n|---|---|\n| x | [r](${P}) | y |`)), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe('counted');
+  });
+
   it('a hit before a compaction boundary still names the path', async () => {
     await writeTranscript([linkTo(P), ...filler(4), { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }, user('Summary of the conversation so far', { isCompactSummary: true }), ...filler(4)]);
     expect(await paths().names(S, P)).toBe('counted');

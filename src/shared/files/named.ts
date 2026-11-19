@@ -604,9 +604,13 @@ function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolea
   decided(i, limit, end);
   return valid && pipes > 0;
 }
-// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells.
-const isTableHeader = (text: string, line: Line, below: Line, m: Meter) =>
-  below.quote === line.quote && !below.opens && below.indent < 4 && isDelimiterRow(text, below.content, below.end, m) && cellsOf(text, below.content, below.end, m).length === cellsOf(text, line.content, line.end, m).length;
+// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells. How many cells the head
+// has, or 0 when the row is no head.
+function tableHeadCells(text: string, line: Line, below: Line, m: Meter): number {
+  if (below.quote !== line.quote || below.opens || below.indent >= 4 || !isDelimiterRow(text, below.content, below.end, m)) return 0;
+  const cells = cellsOf(text, line.content, line.end, m).length;
+  return cellsOf(text, below.content, below.end, m).length === cells ? cells : 0;
+}
 
 // Where inline links can stand: a paragraph after its leading reference definitions, a heading's text, a table's cell.
 interface Context {
@@ -624,7 +628,7 @@ interface Context {
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
   let fence: { marker: number; length: number; quote: number; column: number } | null = null;
   let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean } | null = null;
-  let table: { quote: number } | null = null;
+  let table: { quote: number; cells: number } | null = null; // `cells`: the head's, as many as the window draws in a row
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
   // draws it only where a call names it, so nothing in it is read as a link.
   let footnote = false;
@@ -654,8 +658,11 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     }
     if (!dropped) contexts.push({ start: at, end });
   }
-  const row = (line: Line) => {
-    if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end, m)) contexts.push({ start, end });
+  // A table's row: a context for each of its first `cells` cells and for no other. The window draws as many cells as the
+  // head has (mdast-util-to-hast's `tableRow` renders `align.length` of them), so a link in a cell past them is never
+  // drawn, and names nothing (UX wave U6b-4b, R1).
+  const row = (line: Line, cells: number) => {
+    if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end, m).slice(0, cells)) contexts.push({ start, end });
   };
   for (let start = 0; start < text.length; ) {
     if (m.work >= m.pause) yield pauseAt(m);
@@ -698,7 +705,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     const blockStarts = opened !== null || heading >= 0 || line.thematic;
     if (table !== null && (line.quote < table.quote || line.opens || blockStarts)) table = null;
     if (table !== null) {
-      row(line);
+      row(line, table.cells);
       start = next;
       continue;
     }
@@ -721,10 +728,11 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     } else {
       if (m.work >= m.pause) yield pauseAt(m);
       ahead = next < text.length ? yield* lineFrom(next) : null;
-      if (ahead !== null && isTableHeader(text, line, ahead, m)) {
+      const cells = ahead !== null ? tableHeadCells(text, line, ahead, m) : 0;
+      if (ahead !== null && cells > 0) {
         yield* closeParagraph();
-        table = { quote: line.quote };
-        row(line);
+        table = { quote: line.quote, cells };
+        row(line, cells);
         start = ahead.end + 1; // the delimiter row holds no link
         ahead = null;
         continue;

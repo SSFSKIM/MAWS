@@ -171,6 +171,14 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(text)).toContain(S);
   });
 
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1, N1.11): the window draws as many cells
+  // of a row as the table's head has, so a link in a cell past them is never drawn and names nothing
+  it('a link in a body row’s cell past the head’s width names nothing; one in a cell the head covers does', () => {
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | y | [r](${P}) |`)).toEqual([]);
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | [r](${P}) | y |`)).toEqual([P]);
+    expect(linkPaths(`a | b\n--|--\nx | y | [r](${P})\n[s](${P}.bak) | z`)).toEqual([`${P}.bak`]);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

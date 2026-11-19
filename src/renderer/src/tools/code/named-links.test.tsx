@@ -216,6 +216,21 @@ describe('the chip’s and the anchor’s readers', () => {
   });
 });
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1, "The scanner's three gaps"): the rule
+// reads a text's blocks as the window's parser does, or names less. Each case states what both the window's chips and
+// the rule's names are, beside its control.
+function agree(markdown: string, paths: string[]): void {
+  expect(chipPaths(markdown), `chips of ${JSON.stringify(markdown)}`).toEqual(paths);
+  expect(linkPaths(markdown), `names of ${JSON.stringify(markdown)}`).toEqual(paths);
+}
+
+describe('the rule reads the blocks the window draws', () => {
+  it('a table’s cell past the head’s width is not drawn, and names nothing; a cell the head covers does (N1.11)', () => {
+    agree('| a | b |\n|---|---|\n| x | y | [r](/work/x.md) |', []);
+    agree('| a | b |\n|---|---|\n| x | [r](/work/x.md) | y |', ['/work/x.md']);
+  });
+});
+
 // The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own
 // Markdown. One direction is asserted, the one that admits: every path the rule names is a path chip the window draws.
 // The other direction (a chip the rule refuses) fails towards the refusal; it is counted and a few are printed.
