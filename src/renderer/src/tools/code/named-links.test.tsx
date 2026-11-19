@@ -290,10 +290,22 @@ describe('the rule reads the blocks the window draws', () => {
     agree(`x\n2. [r](${destination})`, [path]);
     agree(`x \`y\n1. [r](${destination}) \``, [path]);
     agree(`- a\n\n  x \`y\n  2) [r](${destination}) \``, []);
-    // a sibling item: the window draws it, the rule cannot tell it from the case above and names nothing
-    const sibling = `1. a \`x\n2. [r](${destination}) \``;
-    expect(chipPaths(sibling)).toEqual([path]);
-    expect(linkPaths(sibling)).toEqual([]);
+  });
+
+  // The review's refinement: a following item of a list is a sibling; a weak line inside the item holding the paragraph is text
+  it.each(['/x/', 'file:///x/'])('a list of links, and a weak line outside or inside its item (%s)', (at) => {
+    agree(`1. [a](${at}a.md)\n2. [b](${at}b.md)\n3. [c](${at}c.md)`, ['/x/a.md', '/x/b.md', '/x/c.md']);
+    agree(`1) [a](${at}a.md)\n2) [b](${at}b.md)\n3) [c](${at}c.md)`, ['/x/a.md', '/x/b.md', '/x/c.md']);
+    agree(`9. [a](${at}a.md)\n10. [b](${at}b.md)`, ['/x/a.md', '/x/b.md']);
+    agree(`* [a](${at}a.md)\n* [b](${at}b.md)`, ['/x/a.md', '/x/b.md']);
+    agree(`1. a \`x\n2. [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`1. a \`x\n2) [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`- a\n  - b \`x\n  2. [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`- a\n  1. b \`x\n     2) [r](${at}r.md) \``, []);
+    // what still drops: a paragraph that does not open its item, and a weak line less indented than its text
+    const uncertain = `- a\n\n  x \`y\n2. [r](${at}r.md) \``;
+    expect(chipPaths(uncertain)).toEqual(['/x/r.md']);
+    expect(linkPaths(uncertain)).toEqual([]);
   });
 
   // N1.16: the window ends a line at a carriage return alone; the rule names nothing of such a text
@@ -453,6 +465,7 @@ describe('the differential: every path the rule names is a chip the window draws
       // lines whose interrupting a paragraph the two readings may judge apart: an ordered item that does not start at
       // one, an item with nothing after its marker, indented code, a setext underline and a thematic break
       '2. [r](/secret) `', '2) [r](/secret)`', '2. x `y', '1.', '1. ', '-', '*', '+', '- ', '    [r](/secret)`', '    `a', '---', '===', '***', '- - -',
+      '  2. [r](/secret) `', '  - x `y', '   2) x', '1. x `y', '3) [r](/secret)', '* [r](/secret)', '10. x',
     ];
     const random = mulberry32(seed);
     const faults: string[] = [];

@@ -238,7 +238,20 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`x\n2. [r](${destination})`), 'continued, the link stands').toEqual([path]);
     expect(linkPaths(`x \`y\n1. [r](${destination}) \``), 'the control: `1.` interrupts').toEqual([path]);
     expect(linkPaths(`- a\n\n  x \`y\n  2) [r](${destination}) \``), 'inside a list item').toEqual([]);
-    expect(linkPaths(`1. a \`x\n2. [r](${destination}) \``), 'a sibling, which the rule cannot tell: nothing').toEqual([]);
+  });
+
+  // The review's refinement: a following item of a list is a sibling, not an interruption. A weak line outside the item
+  // that holds the paragraph (indented less than its content) starts an item, whatever its kind; inside it, it is text
+  it.each(['/x/', 'file:///x/'])('a numbered or bulleted list of links names every item (%s)', (at) => {
+    expect(linkPaths(`1. [a](${at}a.md)\n2. [b](${at}b.md)\n3. [c](${at}c.md)`)).toEqual(['/x/a.md', '/x/b.md', '/x/c.md']);
+    expect(linkPaths(`1) [a](${at}a.md)\n2) [b](${at}b.md)\n3) [c](${at}c.md)`)).toEqual(['/x/a.md', '/x/b.md', '/x/c.md']);
+    expect(linkPaths(`9. [a](${at}a.md)\n10. [b](${at}b.md)`)).toEqual(['/x/a.md', '/x/b.md']);
+    expect(linkPaths(`* [a](${at}a.md)\n* [b](${at}b.md)`)).toEqual(['/x/a.md', '/x/b.md']);
+    expect(linkPaths(`1. a \`x\n2. [r](${at}r.md) \``), 'a sibling').toEqual(['/x/r.md']);
+    expect(linkPaths(`1. a \`x\n2) [r](${at}r.md) \``), 'an item of another list').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n  - b \`x\n  2. [r](${at}r.md) \``), 'nested: out of the inner item, in the outer').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n  1. b \`x\n     2) [r](${at}r.md) \``), 'nested: inside the inner item, text').toEqual([]);
+    expect(linkPaths(`- a\n\n  x \`y\n2. [r](${at}r.md) \``), 'a paragraph not opening its item, the line less indented: not read').toEqual([]);
   });
 
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
