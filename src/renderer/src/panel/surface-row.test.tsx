@@ -243,25 +243,19 @@ describe('the keyboard on show and hide', () => {
   // The branch panel's fix wave (G3): one hand-over of the keyboard at a time. A newer act of the keys, a newer request of
   // the host for any tab, or (for a show) a press ends the one before, and nothing it scheduled moves the keyboard after.
   it('a show’s fallback does nothing once the host has asked another tab for the keyboard; the control: alone, it lands', () => {
-    offs.push(registerPanelTool(probeTool('session-info', { title: 'Session info' }).tool)); // answers nothing either
     render(<Window />);
-    act(() => toggleSurface('background')); // the upper group
-    let terminal = '';
-    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A, group: 'lower' }))); // the lower group
-    act(() => void panelHost.addTool('session-info', { appSessionId: A })); // in the upper group's place: Background out of view
-    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['session-info', 'terminal']);
-    frame();
-    frame();
     act(() => box().focus());
     act(() => toggleSurface('background')); // shown by its key in the upper group; it answers nothing
-    act(() => panelHost.selectTab(terminal)); // a native menu's act asks for Terminal: no key or pointer press here
+    act(() => void panelHost.addTool('terminal', { appSessionId: A, group: 'lower' })); // a native menu's act: no press here
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['background', 'terminal']);
     expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
     frame();
     frame();
     expect(document.activeElement, 'the background tool’s fallback is stale').toBe(screen.getByLabelText('Shell input'));
 
-    act(() => box().focus()); // the control, in this test: the same show with no newer request
-    act(() => toggleSurface('session-info'));
+    act(() => useLayout.getState().hideSurfaces(A)); // the control, in this test: the same show with no newer request
+    act(() => box().focus());
+    act(() => toggleSurface('background'));
     frame();
     frame();
     expect(document.activeElement).toBe(upperContent());
@@ -275,9 +269,9 @@ describe('the keyboard on show and hide', () => {
     act(() => toggleSurface('terminal')); // hidden: the return waits for the next frame
     act(() => toggleSurface('terminal')); // shown again first: the shell takes the keyboard
     expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
-    frame();
-    frame();
+    frame(); // the hide's frame: what is typed now goes where the keyboard is
     expect(document.activeElement, 'the hide’s return is stale').toBe(screen.getByLabelText('Shell input'));
+    frame();
 
     const terminal = tabOf('terminal'); // by the host this time: a reopen that is no key's
     act(() => toggleSurface('terminal'));

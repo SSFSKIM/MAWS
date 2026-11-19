@@ -15,6 +15,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/
 import { connectCodeEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool, usePanelHost } from '../../../panel/host';
 import { toggleSurface } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
+import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
@@ -1663,11 +1664,10 @@ describe('the keyboard a surface’s key gives the tree', () => {
     held = deferred<void>();
     offs.push(registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool));
     render(<TestHost />);
-    let terminal = '';
-    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A, group: 'lower' })));
-    act(() => toggleSurface('files')); // the upper group, shown by its key; the lower keeps Terminal
+    act(() => toggleSurface('files')); // shown by its key; its roots' listing held
     await act(() => asked.promise);
-    act(() => panelHost.selectTab(terminal)); // a native menu's act
+    act(() => void panelHost.addTool('terminal', { appSessionId: A, group: 'lower' })); // a native menu's act: no press
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort(), 'Files still in view').toEqual(['files', 'terminal']);
     await act(async () => held!.resolve());
     await waitFor(() => expect(row('/r')).not.toBeNull()); // the rows drawn: the tree's taker has run over a settled listing
     expect(inTree()).toBe(false);
