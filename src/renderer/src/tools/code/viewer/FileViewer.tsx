@@ -41,7 +41,7 @@ import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 
 import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
-import { FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, takeKeyboard, useKeyboardRequest } from '../files/finder';
+import { describeElement, FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, traceKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosen } from '../files/open-chosen';
 import { ExternalRow, OpenExternally } from './ExternalRow';
 import { FrameBody } from './FrameBody';
@@ -251,31 +251,50 @@ interface FileBodyProps {
 // The app's own focus outline, inside the body's box.
 const TAKES_KEYBOARD = 'outline-accent focus-visible:outline-2 -outline-offset-2';
 
+// Decision Log 19: why the page may refuse the view the keyboard, as the trace says it.
+function refusalOf(element: HTMLElement): string {
+  if (!element.isConnected) return 'is out of the page';
+  if (element.closest('[inert]') !== null) return 'is under an inert ancestor';
+  if (element.closest('[hidden]') !== null) return 'is under a hidden ancestor';
+  if (element.getClientRects().length === 0) return 'has no box';
+  if (getComputedStyle(element).visibility !== 'visible') return 'is not visible';
+  return 'looks focusable';
+}
+
 export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, takesKeyboard }: FileBodyProps) {
   // UX wave U6b-3b: the request for the keyboard by this body's key, taken while it is in view; the editor, when one is
   // drawn in it, is told through `editorFocus`. Decision Log 17: the page can refuse the focus (an inert or hidden
-  // ancestor while the view mounts), so the request is ended only once the keyboard is inside the body, its text
-  // included; until then it is tried again when the editor is drawn and when an attribute that can hide or free an
-  // element changes in the page. The person's own key or pointer press still drops it (`files/finder.ts`). Decision Log
-  // 18: so does the keyboard landing anywhere outside this view but the document's body, by any means (a native menu's
-  // command makes no press in the page), and the bound: a request still not taken `FILE_TAKE_BOUND_MS` after the view is
-  // ready (in view, its read settled, its editor drawn where it draws one) is given up, and the page no longer watched.
+  // ancestor while the view mounts), so the take is tried again when the editor is drawn and when an attribute that can
+  // hide or free an element changes in the page. Decision Log 18: the person's own key or pointer press drops the request
+  // (`files/finder.ts`), and so does the keyboard landing anywhere outside this view but the document's body, by any means
+  // (a native menu's command makes no press in the page). Decision Log 19: the request is held, landed or not, until
+  // `FILE_TAKE_BOUND_MS` after the view is ready (in view, its read settled, its editor drawn where it draws one), counted
+  // again each time it is ready again; so a view drawn again meanwhile (its editor made anew, an ancestor hidden for a
+  // moment), which leaves the keyboard on the document's body, takes it back. Each take that moves the keyboard, or that
+  // the page refuses, is traced (`traceKeyboard`).
   const body = useRef<HTMLDivElement>(null);
   const editorFocus = useRef<(() => void) | null>(null);
   const [editorDrawn, setEditorDrawn] = useState(false);
   const shown = useRef(inView);
   const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
-  const take = useCallback(() => {
-    const element = body.current;
-    if (!shown.current || takesKeyboard === undefined || element === null || !keyboardWaits({ into: 'file', key: takesKeyboard })) return;
-    if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
-    editorFocus.current?.();
-    if (element.contains(document.activeElement)) takeKeyboard({ into: 'file', key: takesKeyboard }); // landed: the request ends
-  }, [takesKeyboard]);
+  const take = useCallback(
+    (why: string) => {
+      const element = body.current;
+      if (!shown.current || takesKeyboard === undefined || element === null || !keyboardWaits({ into: 'file', key: takesKeyboard })) return;
+      const before = document.activeElement;
+      if (element.contains(before) && (editorFocus.current === null || before !== element)) return; // in place already
+      if (!element.contains(before)) element.focus({ preventScroll: true });
+      editorFocus.current?.();
+      const now = document.activeElement;
+      const landed = element.contains(now);
+      traceKeyboard(`file ${takesKeyboard}`, landed ? 'took' : 'refused', `${why}; from ${describeElement(before)} to ${describeElement(now)}${landed ? '' : `; the view ${refusalOf(element)}`}`);
+    },
+    [takesKeyboard],
+  );
   useEffect(() => {
     shown.current = inView;
     if (asked === 0 || !inView) return;
-    take();
+    take('asked in view');
     // at most one try a frame: a focus that something takes straight back (a modal's trap) changes a class each time, and
     // a try per change would never let the page draw
     let frame = 0;
@@ -283,7 +302,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       if (frame === 0)
         frame = requestAnimationFrame(() => {
           frame = 0;
-          take();
+          take('the page changed');
         });
     });
     retry.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] });
@@ -297,7 +316,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     if (asked === 0 || takesKeyboard === undefined) return;
     const elsewhere = (event: FocusEvent) => {
       const target = event.target;
-      if (target instanceof Node && target !== document.body && !(body.current?.contains(target) ?? false)) releaseKeyboard({ into: 'file', key: takesKeyboard });
+      if (target instanceof Element && target !== document.body && !(body.current?.contains(target) ?? false)) releaseKeyboard({ into: 'file', key: takesKeyboard }, `focus landed on ${describeElement(target)}`);
     };
     document.addEventListener('focusin', elsewhere, true);
     return () => document.removeEventListener('focusin', elsewhere, true);
@@ -306,11 +325,12 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     (focus: (() => void) | null) => {
       editorFocus.current = focus;
       setEditorDrawn(focus !== null);
+      if (takesKeyboard !== undefined) traceKeyboard(`file ${takesKeyboard}`, focus === null ? 'editor gone' : 'editor drawn', `the keyboard on ${describeElement(document.activeElement)}`);
       if (focus === null) return;
       if (body.current !== null && document.activeElement === body.current) focus(); // the body still has it
-      else take(); // a request still waiting, its take refused so far
+      else take('the editor drawn'); // a request still held
     },
-    [take],
+    [take, takesKeyboard],
   );
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
@@ -322,12 +342,12 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     [tabId, appSessionId, path, line, readOnly, agent, artifactId, revision],
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
-  // Decision Log 18: the bound on a request not taken, from the moment the view is ready
+  // Decision Log 18 and 19: the bound on the request, from the moment the view is ready, again each time it is
   const needsEditor = entry !== null && entry.status === 'ready' && entry.kind !== 'frame' && showsCode(entry);
   const ready = entry !== null && entry.status !== 'loading' && (!needsEditor || editorDrawn);
   useEffect(() => {
     if (asked === 0 || !inView || !ready || takesKeyboard === undefined) return;
-    const bound = setTimeout(() => releaseKeyboard({ into: 'file', key: takesKeyboard }), FILE_TAKE_BOUND_MS);
+    const bound = setTimeout(() => releaseKeyboard({ into: 'file', key: takesKeyboard }, 'the bound passed'), FILE_TAKE_BOUND_MS);
     return () => clearTimeout(bound);
   }, [asked, inView, ready, takesKeyboard]);
 

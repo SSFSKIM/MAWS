@@ -66,7 +66,10 @@ const keyboardInText = (page: Page) =>
     if (active !== null && active.getAttribute('role') !== 'tab' && active.closest('.cm-content') !== null && key !== null) return key;
     const where = active === null ? 'no active element' : `<${active.tagName.toLowerCase()}> role=${active.getAttribute('role')} data-key=${active.getAttribute('data-key')}`;
     const what = active === document.body ? 'the document’s body' : active?.matches('[data-file-keyboard]') ? 'a file view’s body' : key !== null ? `inside the file view ${key}, not its text` : 'outside every file view';
-    return `not in a file’s text: ${where}, ${what}; the page ${document.hasFocus() ? 'has' : 'lacks'} the focus`;
+    // Decision Log 19: and what happened to the requests for the keyboard, as files/finder.ts traced them
+    const seam = (window as unknown as { __maws_keyboard?: { trace(): { at: number; taker: string; event: string; detail?: string }[] } }).__maws_keyboard;
+    const trace = (seam?.trace() ?? []).map((entry) => `${entry.at} ${entry.taker.slice(entry.taker.lastIndexOf('/') + 1)} ${entry.event}${entry.detail ? `: ${entry.detail}` : ''}`);
+    return `not in a file’s text: ${where}, ${what}; the page ${document.hasFocus() ? 'has' : 'lacks'} the focus; the trace:\n${trace.join('\n')}`;
   });
 
 // ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): a session's file in its frame --
