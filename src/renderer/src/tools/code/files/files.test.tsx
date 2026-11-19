@@ -1664,9 +1664,15 @@ describe('the keyboard a surface’s key gives the tree', () => {
     held = deferred<void>();
     offs.push(registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool));
     render(<TestHost />);
-    act(() => toggleSurface('files')); // shown by its key; its roots' listing held
-    await act(() => asked.promise);
-    act(() => void panelHost.addTool('terminal', { appSessionId: A, group: 'lower' })); // a native menu's act: no press
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await act(() => asked.promise); // its roots' listing out, and held
+    let terminal = '';
+    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A })));
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower')); // two groups: Files above, Terminal below
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files')); // shown by its key, both groups in view
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['files', 'terminal']);
+    act(() => panelHost.selectTab(terminal)); // a native menu's act: no key or pointer press
     expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort(), 'Files still in view').toEqual(['files', 'terminal']);
     await act(async () => held!.resolve());
     await waitFor(() => expect(row('/r')).not.toBeNull()); // the rows drawn: the tree's taker has run over a settled listing

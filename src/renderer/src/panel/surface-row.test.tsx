@@ -244,10 +244,17 @@ describe('the keyboard on show and hide', () => {
   // the host for any tab, or (for a show) a press ends the one before, and nothing it scheduled moves the keyboard after.
   it('a show’s fallback does nothing once the host has asked another tab for the keyboard; the control: alone, it lands', () => {
     render(<Window />);
+    let terminal = '';
+    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A })));
+    act(() => void panelHost.addTool('background', { appSessionId: A }));
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower')); // two groups: Background above, Terminal below
+    frame();
+    frame();
+    act(() => useLayout.getState().hideSurfaces(A));
     act(() => box().focus());
-    act(() => toggleSurface('background')); // shown by its key in the upper group; it answers nothing
-    act(() => void panelHost.addTool('terminal', { appSessionId: A, group: 'lower' })); // a native menu's act: no press here
+    act(() => toggleSurface('background')); // shown by its key (the column with both groups); Background answers nothing
     expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['background', 'terminal']);
+    act(() => panelHost.selectTab(terminal)); // a native menu's act asks for Terminal: no key or pointer press here
     expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
     frame();
     frame();
