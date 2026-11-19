@@ -5,6 +5,10 @@
 // than that event and is dropped. Main announces a move of the app's switch only for sessions with stored marks, so a
 // change of `mods.toHuman.enabled` reads every attached session again. A session main cannot answer for holds nothing,
 // and draws as it did before the lane (P1).
+// UX wave U2b (M5; M4's second review, item 3): it fails closed. Each time main hears the local machine's host again (a
+// daemon's restart among them, `host.status`) the state is read again, and a current read that fails drops what the
+// session held: a state the old daemon reported (`drawnBy` among it) is no longer backed, so the window draws as for a
+// session whose channel answered nothing, and no mirror is drawn on it, until a read answers again.
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -21,6 +25,13 @@ export const useOwnerChannelStore = create<OwnerChannelStore>()(() => ({ bySessi
 const put = (appSessionId: AppSessionId, state: OwnerChannelState) =>
   useOwnerChannelStore.setState((s) => ({ bySession: new Map(s.bySession).set(appSessionId, state) }));
 
+const drop = (appSessionId: AppSessionId) => useOwnerChannelStore.setState((s) => {
+  if (!s.bySession.has(appSessionId)) return s;
+  const bySession = new Map(s.bySession);
+  bySession.delete(appSessionId);
+  return { bySession };
+});
+
 const attachments = new Map<AppSessionId, { count: number; off: () => void }>();
 
 // Hydrates a session's owner channel and keeps it current while anything is attached; the disposer releases one.
@@ -34,7 +45,9 @@ export function attachOwnerChannel(appSessionId: AppSessionId, client: MawsBridg
     const read = () => {
       const asked = ++reads;
       void client.invoke('ownerChannel.state', { appSessionId }).then((result) => {
-        if (live && asked === reads && result.ok) put(appSessionId, result.value);
+        if (!live || asked !== reads) return;
+        if (result.ok) put(appSessionId, result.value);
+        else drop(appSessionId);
       });
     };
     const offChanged = client.on('ownerChannel.changed', (e) => {
@@ -48,6 +61,9 @@ export function attachOwnerChannel(appSessionId: AppSessionId, client: MawsBridg
       switchOn = on;
       if (live && moved) read();
     });
+    const offHost = client.on('host.status', (_status, { machine }) => {
+      if (live && machine === client.localMachine) read();
+    });
     read();
     attachments.set(appSessionId, {
       count: 1,
@@ -55,6 +71,7 @@ export function attachOwnerChannel(appSessionId: AppSessionId, client: MawsBridg
         live = false;
         offChanged();
         offSettings();
+        offHost();
       },
     });
   }

@@ -2,7 +2,7 @@
 // desktop. P5 O7 M5a (A10): it opens a copy of the file here instead (`remote.openCopy`), saying where the file is; a
 // local session's opens as before. UX wave U6c (M3, Interfaces §E): a session on this Mac asks with `named`, so a file
 // outside its folders that its transcript names opens; a session on another machine is asked as today.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -15,9 +15,10 @@ import { remoteSessionState } from '../../../lane-b/test-support/remote-session'
 import { useLayout } from '../../../stores/layout';
 import { useMachines } from '../../../stores/machines';
 import { ok } from '../../../test-support/code';
-import { installDisk } from '../../../test-support/code-disk';
+import { installDisk, leaveRl2, overRl2 } from '../../../test-support/code-disk';
 import { formatSize, VIEWER_COPY } from '../copy';
 import { useFiles } from '../files/store';
+import { forgetOpenedThere, openedThere } from '../files/elsewhere';
 import { ExternalRow, OpenExternally, rowWords } from './ExternalRow';
 import { FileViewer } from './FileViewer';
 import { useViewer, type EntryFrame, type ViewerEntry } from './viewer-store';
@@ -66,12 +67,74 @@ describe('Open externally', () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith('files.openExternal', { appSessionId: LOCAL, path: '/r/doc.pdf', named: true });
   });
 
+  // UX wave U6b-4b (M3; decision 9, L11): the line under the button reads the first sentence of the refusal's cause
+  it.each([
+    ['outside the folders', { code: 'internal', message: "path outside the session's directories" }, 'This file is outside the folders this session works in.'],
+    ['gone', { code: 'internal', message: 'not found: /r/doc.pdf' }, 'No file at this path.'],
+    ['this Mac’s service not answering', { code: 'host_unavailable', message: 'files.openExternal: the files service is not running' }, "MAWS's service on this Mac is not answering."],
+  ] as const)('a refused open of a local session’s file (%s) reads the first sentence of its cause', async (_, error, sentence) => {
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error } as never);
+    render(<OpenExternally appSessionId={addressOf(TEST_MACHINE, 'app-l' as AppSessionId)} path="/r/doc.pdf" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(sentence);
+  });
+
+  it('the line is drawn from the failure kept, so a roster that arrives after the click names the machine', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error: { code: 'host_unavailable', message: 'remote.openCopy: machine mini is not reachable' } } as never);
+    render(<OpenExternally appSessionId={REMOTE} path="/r/doc.pdf" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(`${OTHER_MACHINE} is not reachable.`); // no roster yet: the ref
+    act(() =>
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+      ]),
+    );
+    expect(screen.getByRole('alert').textContent).toBe('mini is not reachable.');
+  });
+
   it('asks without named for a session on another machine that MAWS does not run there', () => {
     const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: true, message: null } } as never);
     const TERMINAL = addressOf(OTHER_MACHINE, 'app-t' as AppSessionId); // no lane B state for it: not a session MAWS runs there
     render(<OpenExternally appSessionId={TERMINAL} path="/r/doc.pdf" />);
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
     expect(invoke).toHaveBeenCalledExactlyOnceWith('files.openExternal', { appSessionId: TERMINAL, path: '/r/doc.pdf' });
+  });
+});
+
+// UX wave U6f, the branch review (sweep#1; Decision Log 33 (3)): for a session that takes the remote route, Open externally
+// carries `open` under the rule a frame's ask follows: only for a path the person opened on that machine this run
+// (`openedThere`), as the tab's own reads carry it.
+describe('Open externally on another machine, a protected folder opened there (U6f)', () => {
+  const T = addressOf(OTHER_MACHINE, 'app-there' as AppSessionId);
+  const DOCS = '/home/someone/Documents';
+  afterEach(() => {
+    leaveRl2();
+    forgetOpenedThere();
+  });
+  const opensWith = (path: string) => {
+    const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: true, message: null } } as never);
+    render(<OpenExternally appSessionId={T} path={path} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    return invoke;
+  };
+
+  it('sends open on the copy of a path under a folder the person opened on that machine this run', () => {
+    overRl2(T);
+    openedThere(OTHER_MACHINE).add(DOCS);
+    expect(opensWith(`${DOCS}/minutes.pdf`)).toHaveBeenCalledExactlyOnceWith('remote.openCopy', { machine: OTHER_MACHINE, source: { appSessionId: T, path: `${DOCS}/minutes.pdf` }, open: true });
+  });
+
+  it('the negative case: no open for a path the person did not open there, nor for one that leaves the opened folder by ".."', () => {
+    overRl2(T);
+    openedThere(OTHER_MACHINE).add(DOCS);
+    for (const path of ['/home/someone/Desktop/minutes.pdf', `${DOCS}/../Desktop/minutes.pdf`]) {
+      expect(opensWith(path), path).toHaveBeenCalledExactlyOnceWith('remote.openCopy', { machine: OTHER_MACHINE, source: { appSessionId: T, path } });
+      cleanup();
+      vi.restoreAllMocks();
+    }
   });
 });
 
@@ -87,6 +150,8 @@ describe('what a row says (rowWords)', () => {
     bytes: 3 * MiB, loaded: 0, complete: true, text: '', epoch: 1, base64: null, removed: false, updated: 0, sourceView: false, line: null, pendingJump: null, loadingMore: false,
     hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 1, pending: 0, readOnly: false, named: false, frame: null,
     locked: null, pin: null, agent: false, textEditable: false, // UX wave U6e's fields of the entry
+    said: false, needsOpen: false, offersOpenFile: false, saveSaid: false, // UX wave U6f's
+    failure: null, retrying: false, // UX wave U6b-4b's
     ...over,
   });
   const openButton = () => screen.queryByRole('button', { name: 'Open externally' });

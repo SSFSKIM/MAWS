@@ -264,7 +264,7 @@ describe('shell focus actions from native browser views', () => {
     electron.focused = null;
   });
 
-  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open'])(
+  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open', 'files.goToFile'])(
     '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
       const otherPage = contents(1);
       const hostPage = contents(2);
@@ -396,6 +396,33 @@ describe('File ▸ Open File…', () => {
   });
 });
 
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 11; B4): Go ▸ Go to file
+describe('Go ▸ Go to file', () => {
+  const go = (overrides: KeymapOverrides, enabled: ReadonlySet<ActionId>) => top(menuTemplate(ACTIONS, overrides, enabled, vi.fn()), 'Go')!.submenu as Item[];
+  const goToFile: ActionId = 'files.goToFile';
+
+  it('stands directly under Command palette at ⌘P with no separator between them, and a separator after it', () => {
+    expect(go({}, ALL).slice(0, 3).map((item) => item.id ?? item.type)).toEqual(['palette.open', 'files.goToFile', 'separator']);
+    expect(byId(go({}, ALL), 'files.goToFile')).toMatchObject({ label: 'Go to file', accelerator: 'Cmd+P', enabled: true });
+  });
+
+  it('is disabled until the page registers its handler', () => {
+    expect(byId(go({}, new Set(ACTION_IDS.filter((id) => id !== goToFile))), 'files.goToFile')).toMatchObject({ enabled: false });
+    expect(byId(go({}, new Set()), 'files.goToFile')).toMatchObject({ enabled: false });
+  });
+
+  it('has no accelerator while a stored rebinding of another action holds ⌘P, and has it again once that goes', () => {
+    const taken = go({ 'attention.next': 'Cmd+P' }, ALL);
+    expect(byId(taken, 'files.goToFile')!.accelerator).toBeUndefined();
+    expect(byId(taken, 'attention.next')!.accelerator).toBe('Cmd+P');
+    expect(byId(go({ 'files.goToFile': 'Cmd+Alt+P' }, ALL), 'files.goToFile')!.accelerator).toBe('Cmd+P'); // its own stored value is never read
+  });
+
+  it('keeps its chord from a page of the in-app browser, which leaves ⌘P to the menu', () => {
+    expect(keyAction({ type: 'keyDown', key: 'p', meta: true, control: false, alt: false, shift: false }, { findOpen: false, loading: false })).toBeNull();
+  });
+});
+
 // U6a start (the UX wave's U6, first landing; A9, A7's first sentence, decisions 2 to 5, 10 and 12): the menus drawn
 // from the table's order, placements and submenus, with separators between groups of ids. Every generic assertion runs
 // over the table and over the table extended with sample rows shaped as the siblings' will be.
@@ -462,7 +489,7 @@ describe('the menus drawn from the table', () => {
     expect(shape(submenuOf(view, 'Comments'))).toEqual(['Expand comments', 'Minimize comments', 'Hide comments']);
     expect(shape(submenuOf(view, 'Developer'))).toEqual(['reload', 'forceReload', 'toggleDevTools']);
     expect(subsequence(shape(submenuOf(template, 'Go')), [
-      'Command palette', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
+      'Command palette', 'Go to file', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
       'Next tab in strip', 'Previous tab in strip', '—', 'Focus next region', 'Focus previous region', 'Focus sidebar',
     ]), shape(submenuOf(template, 'Go')).join(' · ')).toBe(true);
   });

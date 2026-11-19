@@ -13,7 +13,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { focusedSession } from '../../composer/ComposerAppKeys';
 import type { TranscriptUi } from '../../transcript/model/reduce';
 import { useTranscriptStore } from '../../stores/transcript';
-import { SWITCH } from './copy';
+import { toast } from '../../stores/notices'; // M5
+import { MOD_DRAWS_NOTICE, SWITCH } from './copy';
 import { reportViewOf } from './mirror';
 import './view.css';
 
@@ -43,10 +44,14 @@ export function ViewSwitch({ appSessionId }: { appSessionId: AppSessionId }) {
   );
 }
 
-/** `transcript.toggleReport`: the focused pane's session tab between its report and its full transcript, while its lane is on. */
+/**
+ * `transcript.toggleReport`: the focused pane's session tab between its report and its full transcript, while its lane is
+ * on. In a session the mod draws (M5; decision 20, R9) it changes nothing and says why in a notice.
+ */
 export function toggleView(): void {
   const appSessionId = focusedSession();
   if (appSessionId === null) return;
   const ui = useTranscriptStore.getState().entries[appSessionId]?.state.ui;
-  if (ui?.ownerLane) useTranscriptStore.getState().setView(appSessionId, reportViewOf(ui) ? 'transcript' : 'report');
+  if (ui?.modDraws === true) toast({ id: 'to-human-mod-draws', level: 'info', text: MOD_DRAWS_NOTICE, actions: [], dismissible: true });
+  else if (ui?.ownerLane) useTranscriptStore.getState().setView(appSessionId, reportViewOf(ui) ? 'transcript' : 'report');
 }

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
@@ -70,6 +71,23 @@ describe('main answers git.* on the services bus', () => {
     expect(await invoke('git.status', { directory: '/tmp' })).toEqual({ ok: false, error: { code: 'internal', message: 'not a git repository' } });
     expect(await invoke('git.watch', { directory: '/tmp' })).toEqual({ ok: false, error: { code: 'internal', message: 'not a git repository' } });
     expect(await invoke('git.log', { directory: repo.root, limit: 501 })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+  });
+
+  // UX wave U5b-2: the three reads, answered on the bus; a commit or an against that is not a whole hash (one that reads
+  // as an option among them) is refused by the schema before any git runs
+  it('answers the three reads, and refuses a revision that is not a whole hash before git runs', async () => {
+    const spawn = vi.fn(execFile as unknown as ExecFileFn);
+    await install({ execFile: spawn });
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    expect(await invoke('git.branchCommits', { directory: repo.root, limit: 5 })).toMatchObject({ ok: true, value: { base: null, commits: [{ subject: 'initial', pushed: false }] } });
+    expect(await invoke('git.commitDiff', { directory: repo.root, commit: head })).toMatchObject({ ok: true, value: { onHead: true, files: [{ path: 'README.md' }] } });
+    expect(await invoke('git.changesSince', { directory: repo.root, against: 'HEAD' })).toMatchObject({ ok: true, value: { files: [], untracked: [] } });
+    spawn.mockClear();
+    for (const bad of [`-${head.slice(1)}`, '--output=/tmp/x', head.slice(0, 12), 'HEAD~1']) {
+      expect(await invoke('git.commitDiff', { directory: repo.root, commit: bad }), bad).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(await invoke('git.changesSince', { directory: repo.root, against: bad }), bad).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    }
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('answers timeout when git is killed at its deadline', async () => {

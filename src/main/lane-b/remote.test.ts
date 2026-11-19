@@ -17,6 +17,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
+import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { CallResult } from '../machines/remote/link';
 import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
@@ -38,7 +39,7 @@ const tabsOf = (...apps: string[]) => {
 };
 const permission: SessionEvent = { id: `${APP}:L1:3:0`, sessionId: `eng-${APP}`, at: '2026-10-31T00:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: 'req-1', toolUseId: 'tu-1', toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent;
 
-function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[]; record?: (input: Record<string, unknown>) => CallResult } = {}) {
+function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[]; record?: (input: Record<string, unknown>) => CallResult; owns?: boolean | null } = {}) {
   const link = new FakeLink();
   let links: Map<MachineRef, FakeLink> = new Map([[MINI, link]]);
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
@@ -59,6 +60,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
     },
     laneOf: (machine, session) => (machine === MINI && options.laneA?.includes(session) ? 'A' : null),
     othersOf: (machine, session) => machine === MINI && options.others?.includes(session) === true, // board #525
+    ...(options.owns !== undefined && { owns: () => options.owns! }), // the UX wave (U6f): whether the person owns the machine
     timing: { sendPendingMs: 60_000, ...options.timing },
     log: (line) => void logs.push(line),
   });
@@ -1558,6 +1560,82 @@ describe('Send now (`rl2.send-now`), and the acts on a live launch alone', () =>
   });
 });
 
+// The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, decision 14): the
+// branch read, the commit read and the working-tree read go only on a channel whose capabilities were read and list
+// `rl2.git-reads`, each naming the session it is made for, which the endpoint's checkout rule bounds it by. While no
+// channel's capabilities are known a read is refused at once, never held for the next channel; a channel that ends under
+// a read fails it, never resent to the next channel's peer. The router here is the composition root's: what the adapter
+// doesn't take goes by the manager's path, `dispatchOverLink` on the same link, where nothing reads REMOTE_NEEDS.
+describe('the git reads (`rl2.git-reads`)', () => {
+  const SERVES = ['rl2.executor.machine', 'rl2.call-session', 'rl2.git-reads'];
+  const OLDER = ['rl2.executor.machine', 'rl2.call-session']; // an endpoint of a build before the reads
+  const HASH = 'a'.repeat(40);
+  const commit = { sha: HASH, shortSha: 'aaaaaaa', author: 'Ada', authoredAt: '2026-11-15T00:00:00.000Z', subject: 'Add the parser', parents: [] };
+  const READS: Array<[CommandName, Record<string, unknown>, unknown]> = [
+    ['git.branchCommits', { directory: `/work/${APP}`, limit: 50 }, { base: null, upstream: null, commits: [], counts: null, behind: null }],
+    ['git.commitDiff', { directory: `/work/${APP}`, commit: HASH }, { commit, onHead: true, patch: '', files: [] }],
+    ['git.changesSince', { directory: `/work/${APP}`, against: HASH }, { patch: '', files: [], untracked: [] }],
+  ];
+  const readCalls = (l: ReturnType<typeof lab>) => l.link.calls.filter((c) => c.name.startsWith('git.'));
+  /** The router over the manager's path, each read made from the session's tab (the envelope's session). */
+  function routed(l: ReturnType<typeof lab>) {
+    const route = routeLaneB((_machine, name, input, ctx) => dispatchOverLink(l.link, name, input, ctx.session), (m) => (m === MINI ? l.link : null), l.adapter);
+    return (name: CommandName, input: unknown) => route(MINI, name, input, { client: endableClientRef('page-1'), target: MINI, session: APP as AppSessionId });
+  }
+
+  it('are taken by the adapter', () => {
+    const l = lab({ tabs: [] });
+    for (const [name] of READS) expect([name, l.adapter.handles(name)]).toEqual([name, true]);
+  });
+
+  it('go as calls to a peer that lists the capability, each naming the session it is made for', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SERVES);
+    for (const [name, input, output] of READS) {
+      l.link.answers.set(name, () => ({ ok: true, output }));
+      expect([name, await l.cmdFrom(name, input, APP)]).toEqual([name, { ok: true, value: output }]);
+    }
+    expect(readCalls(l)).toEqual(READS.map(([name, input]) => ({ name, input, session: { lane: 'B', id: APP } })));
+    expect(l.base).toEqual([]);
+  });
+
+  it('are refused `host_unavailable` while the link’s capabilities are unknown, and an older peer connecting next is sent nothing', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    for (const [name, , output] of READS) l.link.answers.set(name, () => ({ ok: true, output }));
+    l.link.lose(); // still `up` for the grace: no channel current, no peer known
+    for (const [name, input] of READS) expect([name, await read(name, input)]).toEqual([name, { ok: false, error: { code: 'host_unavailable', message: `${name}: machine mini is not reachable` } }]);
+    l.link.relink(OLDER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readCalls(l)).toEqual([]);
+  });
+
+  it('fail when the channel they went on ends before the answer, and are not resent to the older peer on the next channel', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    l.link.relink(SERVES);
+    for (const [name] of READS) l.link.answers.set(name, () => new Promise<never>(() => {}));
+    const answers: Array<CommandResult<CommandName> | undefined> = READS.map(() => undefined);
+    READS.forEach(([name, input], i) => void read(name, input).then((answer) => (answers[i] = answer)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readCalls(l)).toHaveLength(READS.length);
+    l.link.lose();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toEqual(READS.map(([name]) => ({ ok: false, error: { code: 'host_unavailable', message: `${name}: machine mini is not reachable` } })));
+    l.link.relink(OLDER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readCalls(l)).toHaveLength(READS.length);
+  });
+
+  it('are refused `not-offered`, unsent, by a peer whose handshake lacks the capability', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    l.link.relink(OLDER);
+    for (const [name, input] of READS) expect([name, await read(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(readCalls(l)).toEqual([]);
+  });
+});
+
 // The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1, M2's Decisions): a
 // fork in place is a `machine` act, signed before its first copy goes, carrying the capability, made from a tab or with
 // none, and not through the spawn table: two forks from one tab are two forks. Its answer is waited for within the fork's
@@ -1758,5 +1836,56 @@ describe('the timing lines', () => {
     await vi.advanceTimersByTimeAsync(30);
     await sheet;
     expect(timing(l)).toHaveLength(1);
+  });
+});
+
+// The UX wave (U6f, M2 and M3; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C, "The
+// capability"; §D): the four acts on a file outside a session's folders are `machine` acts the adapter carries, each only
+// to a peer whose handshake lists `rl2.outside-files` and carrying it as `requires`, and only for a person the roster says
+// owns the machine; a peer that does not list it is sent nothing. Their order, pages and words are
+// ./remote-outside-files.test.ts's.
+describe('the outside acts (`rl2.outside-files`)', () => {
+  const SERVES = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads', 'rl2.outside-files'];
+  const OLDER = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads']; // an endpoint of a build before them
+  const ACTS: Array<[string, Record<string, unknown>, unknown]> = [
+    ['files.readOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }, { encoding: 'utf8', content: 'an invented line\n', bytes: 17, offset: 0, length: 17, truncated: false, mime: 'text/plain', hash: null, utf8: null, named: true, outside: { real: '/srv/elsewhere/notes.txt', writable: true } }],
+    ['files.listOutside', { appSessionId: APP, path: '/srv/elsewhere' }, { status: 'listed', path: '/srv/elsewhere', parent: '/srv', home: '/home/someone', entries: [], cursor: null }],
+    ['files.chooseOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }, { status: 'granted', path: '/srv/elsewhere/notes.txt' }],
+    ['files.writeOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt', content: 'an invented line\n', expectedHash: 'a'.repeat(64), real: '/srv/elsewhere/notes.txt' }, { status: 'ok', hash: 'b'.repeat(64) }],
+  ];
+
+  it('are taken by the adapter', () => {
+    const l = lab({ tabs: [] });
+    for (const [name] of ACTS) expect([name, l.adapter.handles(name as CommandName)]).toEqual([name, true]);
+  });
+
+  it('go as `machine` acts carrying the capability to a peer that lists it, for an owner, on a session no tab holds', async () => {
+    const l = lab({ tabs: [], owns: true });
+    l.link.relink(SERVES);
+    l.link.onAct = (act) => act.settle({ state: 'done', result: ACTS.find(([name]) => name === act.request.action)![2] });
+    for (const [name, input, output] of ACTS) expect([name, await l.cmd(name, input)]).toEqual([name, { ok: true, value: output }]);
+    // M3: the read in pages on one channel (decision 4), the listing and the choice on one channel, the save held (decision 6)
+    const shapes: Record<string, Record<string, unknown>> = { 'files.readOutside': { oneChannel: true }, 'files.listOutside': { oneChannel: true }, 'files.chooseOutside': { oneChannel: true }, 'files.writeOutside': {} };
+    const pageOf = (action: string, args: Record<string, unknown>) => (action === 'files.readOutside' ? { ...args, offset: 0, length: 256 * 1024 } : args);
+    expect(l.link.acts.map((a) => a.request)).toEqual(ACTS.map(([action, args]) => ({ action, args: pageOf(action, args), executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.outside-files', ...shapes[action] })));
+    expect(l.base).toEqual([]);
+  });
+
+  it('are refused `owners-only`, unsent, where the roster does not say the person owns the machine (R10)', async () => {
+    for (const owns of [false, null, undefined]) {
+      const l = lab({ tabs: [], ...(owns !== undefined && { owns }) });
+      l.link.relink(SERVES);
+      for (const [name, input] of ACTS) expect([owns, name, await l.cmd(name, input)]).toMatchObject([owns, name, { ok: false, error: { code: 'internal', issues: { refusal: 'owners-only' } } }]);
+      expect(l.link.acts).toEqual([]);
+    }
+  });
+
+  it('are refused `not-offered`, unsent, by a peer whose handshake lacks the capability', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(OLDER);
+    for (const [name, input] of ACTS) expect([name, await l.cmd(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(l.link.acts).toEqual([]);
+    expect(l.link.calls.filter((c) => c.name.startsWith('files.'))).toEqual([]);
+    expect(l.base).toEqual([]);
   });
 });

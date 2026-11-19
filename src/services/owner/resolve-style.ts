@@ -44,6 +44,10 @@ export interface ResolvedStyle {
   contract: number | null; // the declared contract version, when it has a shape
   unresolved: string | null; // why the style could not be found, when it could not
   messageTool: boolean; // P4-R7z: whether the to-human plugin registers its message tool under it in such a launch
+  // UX wave U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A): the install paths of the enabled
+  // `to-human` installations that apply to the cwd, and whether no setting keeps their hooks from loading, whatever the
+  // style; the launch reads each one's declaration
+  toHuman: { paths: string[]; hooksLoad: boolean };
 }
 
 type SettingsFile = Record<string, unknown>;
@@ -89,7 +93,9 @@ export async function lookupStyle(name: string, ctx: StyleContext): Promise<Reso
 }
 
 async function lookupIn(name: string, ctx: StyleContext, settings: Sources): Promise<ResolvedStyle> {
-  const none = (unresolved: string | null): ResolvedStyle => ({ name, shape: 'none', contract: null, unresolved, messageTool: false });
+  const installed = await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings);
+  const toHuman = { paths: typeof installed === 'string' ? [] : installed, hooksLoad: !hooksDisabled(settings.all) && !managedHooksOnly(settings.managed) };
+  const none = (unresolved: string | null): ResolvedStyle => ({ name, shape: 'none', contract: null, unresolved, messageTool: false, toHuman });
   if (BUILT_IN_STYLES.has(name)) return none(null);
   const colon = name.indexOf(':');
   const directories =
@@ -104,8 +110,8 @@ async function lookupIn(name: string, ctx: StyleContext, settings: Sources): Pro
     const contract = contractOf(style);
     const shape = styleShape(contract);
     if (shape === 'none') return none(null);
-    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && !hooksDisabled(settings.all) && !managedHooksOnly(settings.managed) && typeof (await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings)) !== 'string';
-    return { name, shape, contract, unresolved: null, messageTool };
+    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && toHuman.hooksLoad && toHuman.paths.length > 0;
+    return { name, shape, contract, unresolved: null, messageTool, toHuman };
   }
   return none(colon > 0 ? `the plugin ${name.slice(0, colon)} has no output style ${wanted}` : `no output style named ${name} in the project or the config home`);
 }

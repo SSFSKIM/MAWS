@@ -7,9 +7,11 @@ import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
 import type { ClientPort } from '@shared/client/port';
 import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
+import { gradeOf } from '@shared/ipc/grades';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import type { AllowlistRecord } from './allowlist';
 import { registerFilesHandlers, type FilesHandlerDeps } from './register';
+import { claimable } from '../machine-ops';
 
 // The asking page, as main's router hands a handler its ClientRef (src/main/ipc/clients.ts): a reload ends this
 // document's ref and the page asks with the next generation's; a close ends it.
@@ -305,5 +307,19 @@ describe('main answers files.* on the services bus', () => {
     await answer;
     expect(followed.size).toBe(0);
     expect(files.watching()).toEqual([]);
+  });
+});
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, condition (a)): the four
+// acts on a file outside a session's folders take the terminal's grade by reference, so a change of `pty.spawn`'s moves
+// them, and each is an act `machine.op` claims
+describe('the four outside acts', () => {
+  const OUTSIDE = ['files.readOutside', 'files.listOutside', 'files.chooseOutside', 'files.writeOutside'];
+
+  it('are graded by the value pty.spawn’s declaration holds, and claimed by machine.op', () => {
+    for (const name of OUTSIDE) {
+      expect(gradeOf(name), name).toBe(gradeOf('pty.spawn'));
+      expect(claimable(name), name).toBe(true);
+    }
   });
 });

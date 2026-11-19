@@ -9,7 +9,8 @@ import { rowId } from '../../transcript/model/keys';
 import { applyEvents, createState, withUi } from '../../transcript/model/reduce';
 import type { Row, TurnId } from '../../transcript/model/rows';
 import { BASH_RESULT, builder } from '../../transcript/model/test-events';
-import { carriedKeys, holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView, reportViewOf, stretchesOf, stretchHolding, stretchKey } from './mirror';
+import { carriedKeys, holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView, reportViewOf, stretchesOf, stretchHolding, stretchKey, type Stretch } from './mirror';
+import { labelsOf } from './label'; // UX wave U2b, M7
 
 const T1 = 'turn:u1' as TurnId;
 const T2 = 'turn:u2' as TurnId;
@@ -453,5 +454,67 @@ describe('a stretch stays the one the reader opened', () => {
       before = rows;
       expect(lines(mirrorRows(rows, { openStretches })).map((line) => line.open), step).toEqual([true]);
     }
+  });
+});
+
+// UX wave U2b, M7 (the execution document, Interfaces §M; decision 28): the labels are handed to the mirror as its last
+// argument, and it writes one on a closed record line alone. A line whose words change is the same row.
+describe('the record line’s label', () => {
+  it('is written on the closed row and on no other, asked for the closed stretches alone, and leaves the row’s id', () => {
+    const rows = [prompt(), cell('toolu_x'), prompt(), cell('toolu_y'), prompt(), cell('toolu_z')];
+    const asked: [string, boolean][] = [];
+    const label = (stretch: Stretch, last: boolean) => {
+      asked.push([stretch.key, last]);
+      return `Did ${stretch.key}`;
+    };
+    const plain = mirrorRows(rows, {});
+    const labelled = mirrorRows(rows, {}, undefined, label);
+    expect(labelled.map((r) => r.id)).toEqual(plain.map((r) => r.id));
+    expect(labelled.filter((r) => r.kind === 'record_fold').map((r) => (r.kind === 'record_fold' ? r.label : null))).toEqual(['Did toolu_x', 'Did toolu_y', 'Did toolu_z']);
+    expect(asked).toEqual([['toolu_x', false], ['toolu_y', false], ['toolu_z', true]]);
+    expect(labelled.filter((r) => r.kind !== 'record_fold')).toEqual(plain.filter((r) => r.kind !== 'record_fold'));
+    asked.length = 0;
+    const open = mirrorRows(rows, { openStretches: new Set(['toolu_y']) }, undefined, label);
+    const folds = open.filter((r): r is Extract<Row, { kind: 'record_fold' }> => r.kind === 'record_fold');
+    expect(folds.map((r) => [r.open, r.label])).toEqual([[false, 'Did toolu_x'], [true, undefined], [false, 'Did toolu_z']]);
+    expect(folds[1]).not.toHaveProperty('label');
+    expect(asked.map(([key]) => key)).toEqual(['toolu_x', 'toolu_z']);
+  });
+
+  it('with none handed in, no line carries one', () => {
+    const drawn = mirrorRows([prompt(), cell(), prompt()], {}, undefined, undefined);
+    expect(drawn.find((r) => r.kind === 'record_fold')).not.toHaveProperty('label');
+  });
+
+  it('a stretch regrouped and paged keeps its words, and its line keeps its id', () => {
+    // a turn whose one call MAWS draws as a run of one while it runs and as a single call once it ends, then the same
+    // session with an older turn paged in above it
+    const b = builder();
+    b.turn('u0', 'Set up');
+    b.text('m0', 0, '<message>Ready.</message>');
+    b.end(['u0']);
+    const older = b.events.length;
+    b.turn('u1', 'Check the dates');
+    b.toolUse('toolu_c', 'Bash', { command: 'pnpm test dates', description: 'Run the date tests' });
+    b.result('toolu_c', 'ok', { structured: BASH_RESULT('ok') });
+    const running = b.events.length; // the run of one still active: the turn runs and nothing follows the call
+    b.text('m1', 0, '<message>The date tests pass.</message>');
+    b.end(['u1']);
+    const view = (events: typeof b.events) => {
+      const state = applyEvents(createState(null, null), events);
+      const ui = withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 });
+      const rows = rowsOf(ui);
+      // while the turn runs the stretch is live, and with no call after the stored run's last its summary reads on
+      const drawn = mirrorRows(rows, {}, liveMarkedRowIds(ui), labelsOf(rows, { stored: [{ first: 'toolu_c', last: 'toolu_c', summary: 'Ran the date tests: all pass' }], running: ui.current !== null, turns: ui.turns }));
+      const line = drawn.find((r): r is Extract<Row, { kind: 'record_fold' }> => r.kind === 'record_fold')!;
+      return { shape: rows.find((r) => r.kind === 'group' || r.kind === 'cell')!.kind, line: [line.id, line.label] };
+    };
+    const live = view(b.events.slice(older, running));
+    const ended = view(b.events.slice(older));
+    const paged = view(b.events);
+    expect([live.shape, ended.shape]).toEqual(['group', 'cell']); // regrouped
+    expect(ended.line).toEqual(live.line);
+    expect(paged.line).toEqual(live.line);
+    expect(live.line[1]).toBe('Ran the date tests: all pass');
   });
 });

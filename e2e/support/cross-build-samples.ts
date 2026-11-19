@@ -95,6 +95,9 @@ export const INPUTS: Record<string, unknown> = {
   // P5 O5 M4: on the wire as `machine`; an id no artifact has, one id for both probes so the two answers compare. Its
   // handler answers an unknown artifact `invalid_input` with its named refusal (`notFound`), which a parsed input alone reaches.
   'artifacts.export': { artifactId: '00000000-0000-4000-8000-00000000c0b5', format: 'pdf' },
+  // UX wave U5b-2: a commit is a full hash (the pattern the sampler cannot meet); a folder that is no checkout, so git
+  // is asked nothing it could change
+  'git.commitDiff': { directory: '/nonexistent/cross-build-probe', commit: '0'.repeat(40) },
 };
 
 // A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under

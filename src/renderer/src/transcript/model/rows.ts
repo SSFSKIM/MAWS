@@ -191,8 +191,9 @@ export type Row = RowBase &
     // E13 end
     // UX wave U2b (the execution document, Interfaces §C): a stretch's line in the to-human view where MAWS draws it,
     // never derived here, placed by the mirror (`owner/view/mirror.ts`): `stretch` is the stretch's key, `open` once the
-    // reader opened it (the line then stands under the stretch's last row)
-    | { kind: 'record_fold'; stretch: string; open: boolean }
+    // reader opened it (the line then stands under the stretch's last row). M7 (§M): `label`, on a closed line alone, the
+    // words it reads (the stretch's newest call while it grows, else the mod's stored summary); absent, `working record`
+    | { kind: 'record_fold'; stretch: string; open: boolean; label?: string }
     // P4-R7: a call of a message tool the host reads (`@shared/owner/message-call`; classify.ts, `presentationOf`) as the
     // to-human message it sends, at the call's place among the turn's rows, drawn as a message and never as an MCP row:
     // `pending` until its result is in.
@@ -303,6 +304,7 @@ export interface Cell {
   summary?: string; // optional engine summary; never replaces a denial diagnostic
   moved?: true; // UX wave U4a (decision 33): the engine moved the call to the background (rec.moved)
   paths: string[]; // file chips; a merged read cell lists every path
+  reads?: ToolUseId[]; // UX wave U2b (M7; §M): on a merged read cell alone, each member read's tool-use id, in order
   startedAt: string;
   endedAt: string | null;
   detail: CellDetail;

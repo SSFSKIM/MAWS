@@ -112,6 +112,7 @@ export const grades = {
   'session.deletions.preview': 'manage',
   // R2: the engine's remote surface
   'session.ui.render': 'view',
+  'session.ui.renderSite': 'view', // UX wave U2b: as session.ui.render
   // press, input and select run the plugin callback the caller names, a submission included, which may execute or
   // manage: the endpoint classifies the target or refuses it
   'session.ui.press': { floor: 'converse', byEffect: true },

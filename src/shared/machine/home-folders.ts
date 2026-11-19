@@ -75,7 +75,11 @@ export function readableInside(path: string, where: Home, opened: (folder: strin
 export type WalkOptions = {
   /** The protected folders the caller opened. */
   opened(folder: string): boolean;
-  /** The folder list's `open: true`: the protected folders the named path enters itself, before any link, are opened. */
+  /**
+   * The folder list's `open: true`: the protected folders the named path enters itself, before any link, are opened; and
+   * those entered resolving the target of its last component when that is a link (UX wave U6f: the person named the
+   * link). One a link met on the way leads into is not.
+   */
   open?: boolean;
   /** The last part may be a file (a pointer git or the trust read follows). */
   file?: boolean;
@@ -103,9 +107,10 @@ export async function walk(path: string, where: Home, options: WalkOptions): Pro
   if (named.length >= homeParts.length && sameParts(named.slice(0, homeParts.length), homeParts, where)) [current, parts] = [home, named.slice(homeParts.length)];
   else if (options.outside === true) [current, parts] = [sep, named];
   else return { ok: false, reason: 'outside-home' };
-  const entered = new Set<string>(); // the protected folders the named path entered itself (the list's `open`)
+  const entered = new Set<string>(); // the protected folders the named path entered itself, or its last link's target (the list's `open`)
   const opened = (folder: string) => options.opened(folder) || (options.open === true && entered.has(folder));
   let followed = false;
+  let lastLink = false; // a link met with no named part left: its target's folders count as named (the named parts are `parts`' tail)
   let links = 0;
   while (parts.length > 0) {
     const name = parts.shift()!;
@@ -123,6 +128,7 @@ export async function walk(path: string, where: Home, options: WalkOptions): Pro
     if (entry.link !== null) {
       if (++links > LINKS_MAX) return { ok: false, reason: 'symlink-escape' };
       followed = true;
+      if (parts.length === 0) lastLink = true;
       const target = partsOf(entry.link);
       if (!isAbsolute(entry.link)) parts = [...target, ...parts]; // from the link's own folder, `current`
       else if (target.length >= homeParts.length && sameParts(target.slice(0, homeParts.length), homeParts, where)) [current, parts] = [home, [...target.slice(homeParts.length), ...parts]];
@@ -131,7 +137,7 @@ export async function walk(path: string, where: Home, options: WalkOptions): Pro
       continue;
     }
     if (!entry.directory) return parts.length === 0 && options.file === true ? { ok: true, real: next } : { ok: false, reason: 'no-folder' };
-    if (!followed && isProtected(next, where)) entered.add(next);
+    if ((!followed || lastLink) && isProtected(next, where)) entered.add(next);
     current = next;
   }
   if (!readableInside(current, where, opened)) return { ok: false, reason: 'protected' };

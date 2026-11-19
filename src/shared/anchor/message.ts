@@ -28,8 +28,13 @@ function leadParts(anchor: Anchor): string[] {
   const { path, line, pageUrl } = anchor;
   const present = (...parts: (string | false | undefined)[]): string[] => parts.filter((part): part is string => typeof part === 'string' && part !== '');
   switch (anchor.kind) {
-    case 'file-line':
-      return present(path !== undefined && `file ${path}`, line !== undefined && `line ${line}`);
+    case 'file-line': // UX wave U5b-2 (§A): a commit's line adds its side and the commit, the old side as its first parent's
+      return present(
+        path !== undefined && `file ${path}`,
+        line !== undefined && `line ${line}`,
+        anchor.commit !== undefined && anchor.side !== undefined && `${anchor.side} side`,
+        anchor.commit !== undefined && (anchor.side === 'old' ? `the first parent of commit ${anchor.commit}` : `commit ${anchor.commit}`),
+      );
     case 'pr-line': {
       const where = path !== undefined && line !== undefined ? `${path} line ${line}` : path ?? (line !== undefined ? `line ${line}` : undefined);
       return present(anchor.prNumber !== undefined && `PR #${anchor.prNumber}`, where, anchor.side !== undefined && `${anchor.side} side`, pageUrl);
@@ -77,7 +82,7 @@ const unescapeAttribute = (value: string) => value.replace(/&(amp|quot|lt|gt);/g
 
 // The tag's attributes, in the order they are written (Interfaces): the tag is byte-stable, and the parse accepts it
 // only when re-writing the anchor it read gives the same bytes.
-const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */, 'artifactTarget' /* P3-E */] as const;
+const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */, 'artifactTarget' /* P3-E */, 'commit' /* UX wave U5b-2 */] as const;
 const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['line', 'prNumber']);
 
 // E4d start: the browser-element box (E4d execution document, Design §6) is one attribute, `x,y,width,height`; any other
@@ -288,11 +293,13 @@ function codeSpan(line: string): string {
   return `${ticks}${pad}${line}${pad}${ticks}`;
 }
 
-/** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line); unchanged when `quote` is null and the line is not a removed one. */
+/** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line outside a commit's diff); unchanged when `quote` is null and the line is not such a removed one. */
 export function quotedComment(anchor: Anchor, quote: string | null, text: string): string {
   if (text.trim() === '') return text; // a comment with no words is not sent
   const line = quote === null ? null : quoteLine(quote);
-  const parts = [...(anchor.kind === 'file-line' && anchor.side === 'old' ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
+  // UX wave U5b-2: a commit's old side says so in its lead ("the first parent of commit"), so its words take no caption
+  const caption = anchor.kind === 'file-line' && anchor.side === 'old' && anchor.commit === undefined;
+  const parts = [...(caption ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
   return parts.join('\n');
 }
 // UX wave U5b end

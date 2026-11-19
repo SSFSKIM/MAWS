@@ -2,10 +2,11 @@ import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { consentMessage, readArrivals } from '@shared/engine/arrival';
-import { neutraliseGrant } from '@shared/engine/grant';
+import { GRANT_ONE, GRANT_OPENING, neutraliseGrant } from '@shared/engine/grant';
 import { previewLine } from '@shared/owner/preview';
 import { currentChain } from '@shared/wire/transcript';
-import { loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { recordedJoin } from '../../../test/support/recorded-joins'; // ticket 704
 import { HEAD_TAIL_BYTES, summarize } from './summarize';
 
 const PARENT_FIXTURE = join(TEST_FIXTURE_DIR, 'transcripts/subagent-parent.jsonl');
@@ -306,6 +307,68 @@ describe('head and tail summary', () => {
   });
 });
 
+// Ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, M3; Acceptance 9): a session is never titled with an
+// answer envelope's words. The head's first user text is the person's words of a line (the engine's file holds a joined
+// message as one line); the fallback, the engine's `last-prompt`, is the one-line form, cut near 200 characters, where an
+// envelope never ends, so what stands before its opening sentence is the person's. Over the probes' recorded files, with
+// a head window that ends inside the first prompt's line and a tail window that begins at the joined line.
+describe('the title and an answer envelope (ticket 704)', () => {
+  const recordedBytes = (name: string) => readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`));
+  const holdsEnvelope = (text: string | null) => text !== null && (text.includes('[MAWS ask') || text.includes('```json'));
+  // the byte where the `n`-th line (from 1) begins
+  const lineStart = (bytes: Buffer, n: number) => {
+    let at = 0;
+    for (let k = 1; k < n; k++) at = bytes.indexOf(10, at) + 1;
+    return at;
+  };
+  const titleOf = (name: string): string | null => {
+    const bytes = recordedBytes(name);
+    const { joined } = recordedJoin(name);
+    const joinedAt = bytes.lastIndexOf(10, bytes.indexOf(Buffer.from(`"uuid":"${joined.uuid}"`))); // the newline before the joined line
+    const head = bytes.subarray(0, lineStart(bytes, 3) + 40); // inside the first prompt's line (line 3 of every recording)
+    const tail = bytes.subarray(joinedAt); // a window cut at a line's end: its first, empty line is passed over
+    return summarize(head, tail, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt;
+  };
+
+  it('u704-rewind-1: the rewind’s last-prompt (L54, cut inside the envelope’s opening sentence) titles with the prompt’s words', () => {
+    const title = titleOf('u704-rewind-1');
+    expect(title).toBe(recordedJoin('u704-rewind-1').prompt);
+    expect(holdsEnvelope(title)).toBe(false);
+  });
+
+  it.each(['u704-end-image-1', 'u704-end-image-2', 'u704-end-two-envelopes-1'])('%s: a last-prompt that opens with an envelope titles nothing', (name) => {
+    expect(titleOf(name)).toBeNull();
+  });
+
+  // made by hand: a first prompt with no words (an image alone), then the line a recording holds
+  const imageAlone = line({ type: 'user', uuid: 'u0', parentUuid: null, cwd: '/d', origin: { kind: 'human' }, message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } });
+  const recordedLine = (bytes: Buffer, uuid: string) => bytes.subarray(bytes.lastIndexOf(10, bytes.indexOf(Buffer.from(`"uuid":"${uuid}"`))) + 1, bytes.indexOf(10, bytes.indexOf(Buffer.from(`"uuid":"${uuid}"`)))).toString('utf8') + '\n';
+  const firstPromptOf = (text: string) => {
+    const bytes = Buffer.from(text, 'utf8');
+    return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt;
+  };
+
+  it.each(['u704-end-env-first-1', 'u704-end-prompt-first-1', 'u704-end-image-1'])('made by hand: a first prompt with no words, then %s’s joined line: the title is the prompt', (name) => {
+    const { joined, prompt } = recordedJoin(name);
+    const words = typeof prompt === 'string' ? prompt : String(prompt!.find((block) => block.type === 'text')!.text);
+    expect(firstPromptOf(imageAlone + recordedLine(recordedBytes(name), joined.uuid))).toBe(words.slice(0, 200));
+  });
+
+  it('made by hand: a first prompt with no words, then an answer sent alone (p1-maws-ask-async line 42), then words: the title is the words', () => {
+    const lone = readFileSync(join(TEST_FIXTURE_DIR, 'transcripts/p1-maws-ask-async.jsonl'), 'utf8').split('\n')[41]! + '\n';
+    expect(lone).toContain('[MAWS ask');
+    expect(firstPromptOf(imageAlone + lone + line({ type: 'user', uuid: 'u9', parentUuid: 'u0', origin: { kind: 'human' }, message: { role: 'user', content: 'Then this one' } }))).toBe('Then this one');
+    expect(firstPromptOf(imageAlone + lone)).toBeNull();
+  });
+
+  it('made by hand: a row of another origin that holds an envelope is read as today', () => {
+    const lone = readFileSync(join(TEST_FIXTURE_DIR, 'transcripts/p1-maws-ask-async.jsonl'), 'utf8').split('\n')[41]!;
+    const record = JSON.parse(lone) as { message: { content: string } };
+    const peer = line({ type: 'user', uuid: 'p1', parentUuid: 'u0', origin: { kind: 'peer' }, message: { role: 'user', content: record.message.content } });
+    expect(firstPromptOf(imageAlone + peer)).toBe(record.message.content.slice(0, 200));
+  });
+});
+
 // E3 (A-16's disk signal): a `--fork-session` copy repeats its parent's root record under its own session id, so the
 // first `parentUuid: null` record of the head names the conversation a transcript belongs to.
 describe('the transcript’s root uuid', () => {
@@ -439,5 +502,29 @@ describe('the one-writer rule: the first-prompt title', () => {
     expect(title).toBe(sentence.slice(0, title?.length));
     expect(title!.includes('\u2060')).toBe(false);
     expect(readArrivals(row).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+  });
+
+  // The chain merge of U1c's review round into ticket 704: both apply to one value, so the title is the person's words
+  // with the envelope taken out (ticket 704) and every U+2060 removed from them (R3), on the first prompt's row and on
+  // its `last-prompt` fallback. Made by hand: words holding the grant's longer opening, as the writer sends them, joined
+  // with a recorded envelope.
+  const envelope = recordedJoin('u704-end-prompt-first-1').envelopes[0]!;
+  const words = `Is ${GRANT_OPENING}${GRANT_ONE} command a sentence I may type?`;
+  const asTitled = (text: string) => {
+    const bytes = Buffer.from(text, 'utf8');
+    return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt;
+  };
+
+  it('made by hand: a joined row of the person’s neutralised words and an envelope titles with the words, without U+2060', () => {
+    expect(neutraliseGrant(words)).toContain('\u2060');
+    const joined = `${neutraliseGrant(words)}\n${envelope}`;
+    expect(asTitled(line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', origin: { kind: 'human' }, message: { role: 'user', content: joined } }))).toBe(words);
+  });
+
+  it('made by hand: the last-prompt fallback of that joined message titles with the words, without U+2060', () => {
+    const imageAlone = line({ type: 'user', uuid: 'u0', parentUuid: null, cwd: '/d', origin: { kind: 'human' }, message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } });
+    const oneLine = `${neutraliseGrant(words)} ${envelope}`.replaceAll('\n', ' ');
+    expect(oneLine.length).toBeGreaterThan(200);
+    expect(asTitled(imageAlone + line({ type: 'last-prompt', lastPrompt: `${oneLine.slice(0, 199)}…`, leafUuid: 'u0', sessionId: 'S' }))).toBe(words);
   });
 });

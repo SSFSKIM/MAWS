@@ -5,9 +5,12 @@
 // be stale (`plugin.invalidate`, from a live batch). A site whose answer says no plugin hooks it (`hooked: false`) is not
 // asked again until the next invalidate, as the engine allows; an answer to an ask made before the latest invalidate
 // never marks its site unhooked (the invalidate may say a plugin hooks it now), so the re-ask it queued still runs. The
-// answers live in a small store React reads; the bookkeeping is module state.
+// answers live in a small store React reads; the bookkeeping is module state. UX wave U2b (the execution document, §E
+// and §F): a site the wire's closed set does not name (`RENDER_SITE_ONLY`: the turn's line) is asked through
+// `session.ui.renderSite`; an engine host of an earlier build answers `unknown_command`, after which that session's such
+// sites are drawn as MAWS's own without asking again until its surface goes.
 import { create } from 'zustand';
-import type { RenderAnswer, SurfaceGeometry, SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
+import { isRenderSiteOnly, type AskedSite, type RenderAnswer, type SurfaceGeometry, type SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { remoteUnavailableOf } from '../lane-b/remote-unavailable'; // P5 O7 M8
@@ -15,7 +18,7 @@ import { parseTree, type SurfaceNode } from './tree';
 
 export interface SiteAddress {
   appSessionId: AppSessionId;
-  component: SurfaceSite;
+  component: AskedSite;
   instanceId: string;
 }
 
@@ -38,7 +41,7 @@ interface Entry extends SiteAddress {
 }
 
 export const siteKey = ({ appSessionId, component, instanceId }: SiteAddress): string => `${appSessionId}\u0000${component}\u0000${instanceId}`;
-export const hookKey = (appSessionId: AppSessionId, component: SurfaceSite) => `${appSessionId}\u0000${component}`;
+export const hookKey = (appSessionId: AppSessionId, component: AskedSite) => `${appSessionId}\u0000${component}`;
 
 interface SurfaceAnswers {
   answers: ReadonlyMap<string, SiteAnswer>;
@@ -49,6 +52,8 @@ export const useSurfaceAnswers = create<SurfaceAnswers>()(() => ({ answers: new 
 const entries = new Map<string, Entry>();
 const generations = new Map<AppSessionId, number>(); // invalidations seen per session
 const generationOf = (appSessionId: AppSessionId): number => generations.get(appSessionId) ?? 0;
+const renderSiteUnknown = new Set<AppSessionId>(); // UX wave U2b: sessions whose engine host answered `unknown_command` to `session.ui.renderSite`
+const NATIVE = (props: Record<string, unknown>): SiteAnswer => ({ tree: null, hooked: false, props, rewritten: false });
 
 const propsKeyOf = (props: Record<string, unknown>, viewport: SurfaceViewport | undefined): string => JSON.stringify([props, viewport ?? null]);
 
@@ -74,19 +79,27 @@ async function ask(key: string): Promise<void> {
   }
   if (useSurfaceAnswers.getState().hooked.get(hookKey(entry.appSessionId, entry.component)) === false) return;
   // P5 O7 M8: a session on another machine reached over RL2 is not offered `session.ui.render`: drawn as no plugin
-  // hooked it (the stock rendering), nothing asked
-  if (remoteUnavailableOf(entry.appSessionId, 'session.ui.render') !== null) {
-    store(key, { tree: null, hooked: false, props: entry.props, rewritten: false });
+  // hooked it (the stock rendering), nothing asked. UX wave U2b: nor `session.ui.renderSite`, nor by a host that has
+  // said it does not know it.
+  const named = isRenderSiteOnly(entry.component);
+  if (remoteUnavailableOf(entry.appSessionId, named ? 'session.ui.renderSite' : 'session.ui.render') !== null || (named && renderSiteUnknown.has(entry.appSessionId))) {
+    store(key, NATIVE(entry.props));
     return;
   }
   entry.inFlight = true;
   entry.again = false;
   const { appSessionId, component, instanceId, props, propsKey, viewport } = entry;
   const generation = generationOf(appSessionId);
-  const result = await entry.client.invoke('session.ui.render', { appSessionId, component, instanceId, props, ...entry.geometry, ...(viewport && { viewport }) });
+  const input = { appSessionId, instanceId, props, ...entry.geometry, ...(viewport && { viewport }) };
+  const result = isRenderSiteOnly(component) ? await entry.client.invoke('session.ui.renderSite', { ...input, component }) : await entry.client.invoke('session.ui.render', { ...input, component });
   entry.inFlight = false;
   if (entries.get(key) !== entry) return; // unmounted meanwhile
-  if (result.ok) {
+  if (!result.ok && named && result.error.code === 'unknown_command') {
+    // UX wave U2b: an engine host of an earlier build; the site draws MAWS's own, always, and so does every such site
+    // of the session's
+    renderSiteUnknown.add(appSessionId);
+    store(key, NATIVE(props));
+  } else if (result.ok) {
     // A response belongs to the process, invalidation and props that asked it. Old props may still tell us
     // whether the component is hooked, but may never replace a newer row's drawing.
     if (generation === generationOf(appSessionId)) {
@@ -147,6 +160,7 @@ export function invalidateSession(appSessionId: AppSessionId): void {
 export function forgetSession(appSessionId: AppSessionId): void {
   const prefix = `${appSessionId}\u0000`;
   generations.delete(appSessionId);
+  renderSiteUnknown.delete(appSessionId); // a later attach may be to another engine host
   for (const [key, entry] of entries) if (entry.appSessionId === appSessionId) entries.delete(key);
   useSurfaceAnswers.setState((s) => ({
     answers: new Map([...s.answers].filter(([key]) => !key.startsWith(prefix))),
@@ -154,10 +168,17 @@ export function forgetSession(appSessionId: AppSessionId): void {
   }));
 }
 
+// UX wave U2b (panel finding 2): the session's surface went without a word of its own (its engine host left ready, which
+// takes its status along): its host's `unknown_command` was that host's, and a later attach may be to another.
+export function forgetRenderSiteRefusal(appSessionId: AppSessionId): void {
+  renderSiteUnknown.delete(appSessionId);
+}
+
 // Tests.
 export function resetSurfaceRegistry(): void {
   entries.clear();
   generations.clear();
+  renderSiteUnknown.clear();
   useSurfaceAnswers.setState({ answers: new Map(), hooked: new Map() });
 }
 

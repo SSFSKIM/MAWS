@@ -38,12 +38,12 @@ import { ComposerAppKeys, connectComposer, connectInlineEdit, WidgetDialogHost }
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { DEFAULT_ACTIONS, registerTranscriptActions } from './transcript';
-import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 review 2)
+import { setHostActions, turnFileLinks } from './transcript/view/context'; // P3-F wave S (F14 review 2); UX wave U6b-4b
 // C7 end
 import { registerBlockedCalls } from './blocked-call'; // UX wave U1c
 // C8c start
 import { connectCodeEvents } from './ipc/events';
-import { codeTranscriptActions, registerCodeTools } from './tools/code';
+import { codeTranscriptActions, registerCodeTools, reviewTranscriptActions } from './tools/code';
 import { registerTranscriptActions as registerCodeTranscriptActions } from './transcript';
 // C8c end
 // C10 start
@@ -90,7 +90,7 @@ import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
 // E6 start
-import { connectScmRunEnds, registerScmTool } from './tools/scm';
+import { registerScmTool } from './tools/scm';
 // E6 end
 // E3 start
 import { CommentComposerHost } from './side/CommentComposer';
@@ -115,9 +115,9 @@ import { registerChromeExtra } from './tools/browser/extras';
 import { registerTranscriptActions as registerBrowserTranscriptActions } from './transcript';
 // E4d end
 // P5 O7 M3 start
-import { openForwardedLink } from './tools/browser/comment/actions';
 import { terminals } from './terminal/registry';
 // P5 O7 M3 end
+import { openLinkInApp, openWebLink } from './tools/browser/local-link'; // UX wave U6b-4b
 // E4b start
 import { connectBrowserImport } from './tools/browser/import/store';
 // E4b end
@@ -174,6 +174,7 @@ provideDocumentDesignSystem(DOCUMENT_DESIGN_SYSTEM);
 // sheet's previews, the Code tool's preview, a plugin surface) open an artifact link's main tab, so its chip works there;
 // at module load, before any surface renders
 setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
+turnFileLinks(true); // UX wave U6b-4b (decision 17): the window draws a `file:` link with an empty host as a path link; the desk does not
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -237,6 +238,7 @@ export function App() {
   }, []);
   useEffect(() => connectCodeEvents(), []);
   useEffect(() => registerCodeTranscriptActions(codeTranscriptActions), []);
+  useEffect(() => registerCodeTranscriptActions(reviewTranscriptActions), []); // UX wave U5b-2: the chip of a commit's comment opens Review
   // C8c end
   // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
   // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
@@ -296,8 +298,6 @@ export function App() {
   useEffect(() => {
     registerScmTool();
   }, []);
-  // and a run's end reads every PR state again, whether or not a Source control body is mounted
-  useEffect(() => connectScmRunEnds(), []);
   // E6 end
   // E3 start: side threads (E3 execution document, M3): the Side pane, registered once and never unregistered (C8a's
   // rule above); the comment composer in E5's seam and the transcript's summary-row Open
@@ -334,17 +334,10 @@ export function App() {
   // E4d end
   // P5 O7 M3 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Forwarding"): a loopback link out of another
   // machine's session, in its transcript or its terminal, opens in the in-app browser through a forwarded port; any other
-  // link opens as before (main told the session's machine)
-  useEffect(
-    () =>
-      registerBrowserTranscriptActions({
-        openExternal: (url, appSessionId) => {
-          if (appSessionId == null || !openForwardedLink(appSessionId, url)) DEFAULT_ACTIONS.openExternal(url, appSessionId);
-        },
-      }),
-    [],
-  );
-  useEffect(() => terminals.forwardLinksWith(openForwardedLink), []);
+  // link opens as before (main told the session's machine). UX wave U6b-4b (R3): and a loopback http(s) link of a session
+  // on this Mac opens in its in-app browser, unless ⌘ was held in a transcript (tools/browser/local-link.ts)
+  useEffect(() => registerBrowserTranscriptActions({ openExternal: openWebLink }), []);
+  useEffect(() => terminals.forwardLinksWith((appSessionId, url) => openLinkInApp(appSessionId, url)), []);
   // P5 O7 M3 end
   // E4b start: the Chrome profile import's mirror (the run's progress and end, the imported records), app-wide so a run
   // that ends with no sheet mounted still makes its profile the active one

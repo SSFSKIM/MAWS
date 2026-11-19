@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CollectedRun } from './remote-runner';
-import { checksSummary, prChecksArgv, prViewArgv, readChecks, readGhProbe, readPrView } from './pr-state';
+import { checksSummary, noGitHubRemote, prChecksArgv, prViewArgv, readChecks, readGhProbe, readPrView } from './pr-state';
 
 const FIXTURES = join(__dirname, '../../../test/fixtures/scm');
 const fixture = (name: string) => readFileSync(join(FIXTURES, name), 'utf8');
@@ -45,6 +45,29 @@ describe('scm pr state parses gh answers', () => {
         .toEqual({ pr: null, error: 'HTTP 502: Bad Gateway (https://api.github.com/graphql)' });
       expect(readPrView(run({ exitCode: null, failure: 'timed out after 30 s' }))).toEqual({ pr: null, error: 'timed out after 30 s' });
       expect(readPrView(run({ exitCode: 2 }))).toEqual({ pr: null, error: 'gh pr view exited with code 2' });
+    });
+
+    // UX wave U5b-2 (l5-code-12 d; Decision Log 29, 1): gh's own sentence for a checkout none of whose remotes is on
+    // GitHub (the sentence plans.test.ts scripts for `gh repo view`) is `no_remote`, which the PR line hides; a failure to
+    // ask stays gh's first line
+    it('answers no_remote for a checkout whose remotes are not on GitHub, matched without regard to case', () => {
+      const sentence = 'none of the git remotes configured for this repository point to a known GitHub host\nTo tell gh about a new GitHub host, please use `gh auth login`\n';
+      expect(readPrView(run({ exitCode: 1, stderr: sentence }))).toEqual({ pr: null, error: 'no_remote' });
+      expect(readPrView(run({ exitCode: 1, stderr: sentence.toUpperCase() }))).toEqual({ pr: null, error: 'no_remote' });
+      expect(noGitHubRemote(run({ exitCode: 1, stderr: sentence }))).toBe(true);
+    });
+
+    it('keeps gh\'s first line for the sentence when gh did not end by its own exit, and for an HTTP failure', () => {
+      const sentence = 'none of the git remotes configured for this repository point to a known GitHub host\n';
+      expect(readPrView(run({ exitCode: null, failure: 'timed out after 30 s', stderr: sentence }))).toEqual({ pr: null, error: 'timed out after 30 s' });
+      expect(readPrView(run({ exitCode: null, signal: 'SIGKILL', stderr: sentence }))).toEqual({ pr: null, error: 'none of the git remotes configured for this repository point to a known GitHub host' });
+      expect(readPrView(run({ exitCode: 1, stderr: 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n' }))).toEqual({ pr: null, error: 'HTTP 401: Bad credentials (https://api.github.com/graphql)' });
+    });
+
+    it('shows gh\'s first line for a wording of the case the predicate does not know (another gh version\'s sentence)', () => {
+      const other = 'no git remote here points to a GitHub host that gh knows\n';
+      expect(readPrView(run({ exitCode: 1, stderr: other }))).toEqual({ pr: null, error: 'no git remote here points to a GitHub host that gh knows' });
+      expect(noGitHubRemote(run({ exitCode: 1, stderr: other }))).toBe(false);
     });
 
     it('refuses an answer that is not the documented shape', () => {

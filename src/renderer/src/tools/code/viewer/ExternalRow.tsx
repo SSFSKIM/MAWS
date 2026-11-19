@@ -11,6 +11,10 @@
 // now"): a PDF, an HTML page, a video or a sound is drawn in MAWS now, so a row of one says why this file is not drawn,
 // and offers Open externally only where the act can work (`rowWords`, the one place). A kind MAWS does not frame keeps
 // today's words and today's rule for the button.
+// UX wave U6f, the branch review (Decision Log 33 (3)): for a session that takes the remote route, the copy carries `open`
+// under the test the tab's reads and its frame's ask take (`opens`): a path the person opened on that machine this run.
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; decision 9): a refused open reads the
+// first sentence of its cause, as the viewer's notice classifies it (`notice.ts`).
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { framedKindOf } from '@shared/files/framed';
@@ -22,28 +26,34 @@ import { COPY_WORDS, openSessionFile } from '../../../lane-b/open-copy';
 import { ELSEWHERE_WORDS, useElsewhereMachine } from '../../../lane-b/remote-session';
 import { formatSize, VIEWER_COPY } from '../copy';
 import { externalKindOf } from './kinds';
-import type { ViewerEntry } from './viewer-store';
+import { classifyFailure, failureOf, type FileFailure } from './notice';
+import { useNoticePlace } from './notice-place';
+import { opens, type ViewerEntry } from './viewer-store';
 
 // The row's button shape, which the framed file's failure body takes too (UX wave U6b-2, M5 decision 3).
 export const rowButton = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover';
 
 export function OpenExternally({ appSessionId, path, agent = false }: { appSessionId: AppSessionId; path: string; agent?: boolean }) {
-  const [problem, setProblem] = useState<string | null>(null);
+  // Fix wave 1 (review, Minor b): a refused open is kept as its failure and worded as it is drawn, so a roster or a listing
+  // that arrives later words it again, as the viewer's notice does; an open that did nothing keeps its sentence
+  const [problem, setProblem] = useState<{ failure: FileFailure } | { said: string } | null>(null);
   const elsewhere = useElsewhereMachine(appSessionId);
+  const place = useNoticePlace(appSessionId);
   const open = async () => {
-    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true, ...(agent ? { agent: true as const } : {}) }) : await openSessionFile(appSessionId, path, ipc);
-    if (!result.ok) setProblem(VIEWER_COPY.refused(result.error.message));
-    else setProblem(result.value.opened ? null : VIEWER_COPY.notOpened(result.value.message ?? ''));
+    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true, ...(agent ? { agent: true as const } : {}) }) : await openSessionFile(appSessionId, path, ipc, opens({ appSessionId, path }));
+    if (!result.ok) setProblem({ failure: failureOf(result.error) });
+    else setProblem(result.value.opened ? null : { said: VIEWER_COPY.notOpened(result.value.message ?? '') });
   };
+  const words = problem === null ? null : 'said' in problem ? problem.said : classifyFailure(problem.failure, { ...place, subject: 'file' }).lines[0];
   return (
     <span className="inline-flex items-center gap-2">
       <button type="button" className={rowButton} title={elsewhere === null ? undefined : COPY_WORDS.title(elsewhere)} onClick={() => void open()}>
         {VIEWER_COPY.openExternally}
       </button>
       {elsewhere !== null ? <span className="text-ui-sm text-fg-faint">{ELSEWHERE_WORDS.on(elsewhere)}</span> : null}
-      {problem ? (
+      {words ? (
         <span role="alert" className="text-ui-sm text-danger">
-          {problem}
+          {words}
         </span>
       ) : null}
     </span>

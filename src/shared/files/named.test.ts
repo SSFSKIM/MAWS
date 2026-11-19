@@ -41,6 +41,8 @@ describe('the link form: linkPaths', () => {
     '| a | b |\n|---|---|\n| [r](/work/out/report.md) | x |',
     '> quoted [r](/work/out/report.md)',
     'two lines [of\nlink text](/work/out/report.md)',
+    '[r](file:///work/out/report.md)', // UX wave U6b-4b (R1): a `file:` URL with an empty host
+    '[r](FILE:///work/out/report.md#L12)',
   ])('%j names the path', (text) => {
     expect(linkPaths(text)).toContain(P);
   });
@@ -79,7 +81,7 @@ describe('the link form: linkPaths', () => {
     '[r](</work/out/\nreport.md>)',
     '[r](/work/out/report.md\n\n)',
     '[r](host:/work/out/report.md)',
-    '[r](file:///work/out/report.md)',
+    '[r](file://localhost/work/out/report.md)',
     '[r](/mnt/work/out/report.md)',
     '[r](/WORK/out/report.md)',
     '[r](/work/out/%72eport.md)',
@@ -191,8 +193,8 @@ describe('the link form: linkPaths', () => {
   // N1.15: the window's parser drops a leading byte order mark before it reads a block, so a fence after it is a fence
   it('a byte order mark before a fence’s opening is passed over: the fence holds its link; prose after the mark names its own', () => {
     for (const fence of ['```', '~~~']) {
-      expect(linkPaths(`﻿${fence}\n[r](${P})\n${fence}`), fence).toEqual([]);
-      expect(linkPaths(`﻿[s](/work/s.md)\n${fence}\n[r](${P})\n${fence}`), fence).toEqual(['/work/s.md']);
+      expect(linkPaths(`\uFEFF${fence}\n[r](${P})\n${fence}`), fence).toEqual([]);
+      expect(linkPaths(`\uFEFF[s](/work/s.md)\n${fence}\n[r](${P})\n${fence}`), fence).toEqual(['/work/s.md']);
     }
   });
 
@@ -209,6 +211,55 @@ describe('the link form: linkPaths', () => {
     const across = `${'a'.repeat(64 * 1024 - 1)}\r\n[s](/work/s.md)`;
     expect(across.charCodeAt(64 * 1024 - 1)).toBe(13);
     expect(linkPaths(across)).toEqual(['/work/s.md']);
+  });
+
+  // M1's review, finding 1: a table in a list item, or under a paragraph it would continue lazily, is read by the window
+  // apart from the lines round it (a delimiter row or a body row is never a lazy line); the rule names nothing of it, and
+  // a table at the top level stays as it was
+  it.each(['/example/report.md', 'file:///example/report.md'])('a table in a container names nothing of it or round it; at the top level it names its cell (%s)', (destination) => {
+    const path = '/example/report.md';
+    const after = `\`a\n[r](${destination})\``;
+    expect(linkPaths(`- Title\n:---\n${after}`), 'the delimiter row lazy').toEqual([]);
+    expect(linkPaths(`- Title\n  :---\n${after}`), 'a table in the item, then a line out of it').toEqual([]);
+    expect(linkPaths(`- item\n\n  | a | b |\n  |---|---|\n${after}`), 'a table in the item after a blank line').toEqual([]);
+    expect(linkPaths(`> para \`x\nT | u\n|-|-|\n[r](${destination}) \``), 'a head lazy in a quote').toEqual([]);
+    expect(linkPaths(`T | u\n-|-\n> \`x\n[r](${destination})\``), 'a quote after the table, its next line lazy').toEqual([]);
+    expect(linkPaths(`Title\n:---\n${after}`), 'the control: at the top level').toEqual([path]);
+    expect(linkPaths(`- item\n\n| a | b |\n|---|---|\n| [r](${destination}) | x |`), 'the control: the list ended by a blank line').toEqual([path]);
+  });
+
+  // The same review, finding 1's neighbour: a list item that could not interrupt a paragraph (an ordered marker other
+  // than `1`, an empty `*`, `+` or ordered item) is the paragraph's text to the window; inside a list item it may be the
+  // next item, and the rule names nothing there
+  it.each(['/example/report.md', 'file:///example/report.md'])('a list item that cannot interrupt a paragraph continues it (%s)', (destination) => {
+    const path = '/example/report.md';
+    for (const marker of ['2.', '2)', '10.']) expect(linkPaths(`x \`y\n${marker} [r](${destination}) \``), marker).toEqual([]);
+    for (const marker of ['1.', '*', '+']) expect(linkPaths(`x \`y\n${marker}\n[r](${destination}) \``), marker).toEqual([]);
+    expect(linkPaths(`x\n2. [r](${destination})`), 'continued, the link stands').toEqual([path]);
+    expect(linkPaths(`x \`y\n1. [r](${destination}) \``), 'the control: `1.` interrupts').toEqual([path]);
+    expect(linkPaths(`- a\n\n  x \`y\n  2) [r](${destination}) \``), 'inside a list item').toEqual([]);
+  });
+
+  // The review's refinement: a following item of a list is a sibling, not an interruption. A weak line outside the item
+  // that holds the paragraph (indented less than its content) starts an item, whatever its kind; inside it, it is text
+  it.each(['/x/', 'file:///x/'])('a numbered or bulleted list of links names every item (%s)', (at) => {
+    expect(linkPaths(`1. [a](${at}a.md)\n2. [b](${at}b.md)\n3. [c](${at}c.md)`)).toEqual(['/x/a.md', '/x/b.md', '/x/c.md']);
+    expect(linkPaths(`1) [a](${at}a.md)\n2) [b](${at}b.md)\n3) [c](${at}c.md)`)).toEqual(['/x/a.md', '/x/b.md', '/x/c.md']);
+    expect(linkPaths(`9. [a](${at}a.md)\n10. [b](${at}b.md)`)).toEqual(['/x/a.md', '/x/b.md']);
+    expect(linkPaths(`* [a](${at}a.md)\n* [b](${at}b.md)`)).toEqual(['/x/a.md', '/x/b.md']);
+    expect(linkPaths(`1. a \`x\n2. [r](${at}r.md) \``), 'a sibling').toEqual(['/x/r.md']);
+    expect(linkPaths(`1. a \`x\n2) [r](${at}r.md) \``), 'an item of another list').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n  - b \`x\n  2. [r](${at}r.md) \``), 'nested: out of the inner item, in the outer').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n  1. b \`x\n     2) [r](${at}r.md) \``), 'nested: inside the inner item, text').toEqual([]);
+    expect(linkPaths(`- a\n\n  x \`y\n2. [r](${at}r.md) \``), 'a paragraph not opening its item, the line less indented: not read').toEqual([]);
+    // M1's re-review: nothing after a marker the rule cannot place is read as a block; the control, `1.`, is a heading
+    expect(linkPaths(`> - a\n>\n>   x \`y\n>   2. # [r](${at}r.md) \``), 'quoted').toEqual([]);
+    expect(linkPaths(`> - a\n>\n>   x \`y\n>   1. # [r](${at}r.md) \``), 'quoted, the control').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n\n  x \`y\n  2.\t# [r](${at}r.md) \``), 'a tab after the marker').toEqual([]);
+    expect(linkPaths(`- a\n\n  x \`y\n  1.\t# [r](${at}r.md) \``), 'a tab after the marker, the control').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n\n  x \`y\n  2.\t\`\`\`\n  [r](${at}r.md)\n\n[s](${at}s.md)`), 'a fence it may open: the text is refused').toEqual([]);
+    expect(linkPaths(`x \`y\n2. \`\`\`\n  :---\n| x | y | [r](${at}r.md) |`), 'a weak line over a delimiter row: a table to the window').toEqual([]);
+    expect(linkPaths(`x \`y\n2. a\n  b\n| x | y | [r](${at}r.md) |`), 'the control: no delimiter row, the code span stays open').toEqual(['/x/r.md']);
   });
 
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
@@ -440,6 +491,75 @@ describe('the window’s URL step: a parse that can only take a name away', () =
   });
 });
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): the `file:` form names exactly what the
+// scheme-less form names, by the reader the window shares; every other `file:` form, and every other scheme, names nothing.
+describe('the file: form of a link (U6b-4b)', () => {
+  const F = '/work/x.md';
+
+  it('clickPath of `file://` and a destination that begins with `/` is clickPath of the destination', () => {
+    const destinations = [
+      P, '/work/out/report.md:12', '/work/out/report.md#L12', '/work/out/my%20notes.md', '/work/out/my notes.md', '/work/out/a(1).md', '/work/out/a\\(1\\).md',
+      '/work/out/보고서.md', '/work/out/%EB%B3%B4%EA%B3%A0%EC%84%9C.md', '/vault/key,backup', '/vault/key:backup', '/work/tmp/../out/report.md', '/work//out/report.md',
+      '/a/%2e%2e/b', '//work/out/report.md', '/work/notes#1.md', '/work/%41.md', '/work/%zz', '/a/b/..#c/../d', '//x:/y', '//work:99999/x', '/work/out/report\\_v2.md',
+    ];
+    for (const destination of destinations) {
+      expect(clickPath(`file://${destination}`), destination).toBe(clickPath(destination));
+      expect(clickPath(`FILE://${destination}`), destination).toBe(clickPath(destination));
+    }
+    expect(clickPath(`file://${P}`)).toBe(P);
+    expect(clickPath('file:////work/out/report.md')).toBe(P);
+  });
+
+  it('the character-reference test stays first, on the whole destination', () => {
+    expect(clickPath('file&colon;///work/x.md')).toBeNull();
+    expect(clickPath('file:///work/&amp;x.md')).toBeNull();
+    expect(clickPath(`file://${F}`)).toBe(F);
+  });
+
+  // N1.1, N1.2, N1.5: a host, no `//`, an empty rest, and another scheme name nothing; the control beside them names
+  it.each([
+    '[r](file://host/work/x.md)',
+    '[r](file://localhost/work/x.md)',
+    '[r](file:/work/x.md)',
+    '[r](file:work/x.md)',
+    '[r](file://)',
+    '[r](files:///work/x.md)',
+    '[r](xfile:///work/x.md)',
+    '[r](http://file:///work/x.md)',
+    '[r](maws-path:file:///work/x.md)',
+  ])('%j names nothing; `[r](file:///work/x.md)` beside it names the path', (text) => {
+    expect(linkPaths(text)).toEqual([]);
+    expect(linkPaths(`${text} [c](file://${F})`)).toEqual([F]);
+  });
+
+  // N1.3, N1.4: an autolink, a bare URL in prose, the form in code or math, and a reference's destination name nothing
+  it.each([
+    `<file://${F}>`,
+    `see file://${F} here`,
+    `\`[r](file://${F})\``,
+    `\`\`\`\n[r](file://${F})\n\`\`\``,
+    `~~~\n[r](file://${F})\n~~~`,
+    `$$\n[r](file://${F})\n$$`,
+    `$$[r](file://${F})$$`,
+    `[r][l]\n\n[l]: file://${F}`,
+  ])('%j names nothing; the inline link after it names the path', (text) => {
+    expect(linkPaths(text)).toEqual([]);
+    expect(linkPaths(`${text}\n\n[c](file://${F})`)).toEqual([F]);
+  });
+
+  it('a table’s cell past the head’s width names nothing in this form too (N1.11, N1.13)', () => {
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | y | [r](file://${F}) |`)).toEqual([]);
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | [r](file://${F}) | y |`)).toEqual([F]);
+    expect(linkPaths(`Title\n:---\ntext | [r](file://${F})`)).toEqual([]);
+    expect(linkPaths(`Title\n:---\n[r](file://${F}) | text`)).toEqual([F]);
+  });
+
+  it('a leading byte order mark is passed over before the form, and before its autolink, which names nothing (N1.10)', () => {
+    expect(linkPaths(`\uFEFF[r](file://${F})`)).toEqual([F]);
+    expect(linkPaths(`\uFEFF<file://${F}>`)).toEqual([]);
+  });
+});
+
 describe('clickPath and hrefOf', () => {
   it('reads a destination as the click does', () => {
     expect(clickPath('/work/out/report.md')).toBe(P);
@@ -464,6 +584,19 @@ describe('clickPath and hrefOf', () => {
     expect(hrefOf("/!#$&'()*+,-./:;=?@_~")).toBe("/!#$&'()*+,-./:;=?@_~");
     expect(hrefOf('/\u{1F600}')).toBe('/%F0%9F%98%80');
     expect(hrefOf('/\uD800x')).toBe('/%EF%BF%BDx'); // a lone surrogate
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, N2.1): the window resolves a relative
+// link before it reads; the rule reads the string the transcript wrote, which never names an absolute path
+describe('a relative link names no absolute path (U6b-4b)', () => {
+  it('linkPaths of a relative destination holds no path that begins with `/`; the control, an absolute one, does', () => {
+    for (const text of ['[x](../../outside/secret.md)', '[x](notes/a.md)', '[x](./a.md) and [y](~/a.md)', '[x](file:../../outside/secret.md)']) {
+      expect(linkPaths(text).filter((path) => path.startsWith('/')), text).toEqual([]);
+    }
+    // the control: the same reading finds the absolute form beside it; the relative one it reads as written, relative
+    expect(linkPaths('[x](../../outside/secret.md) [y](/outside/secret.md)')).toEqual(['../../outside/secret.md', '/outside/secret.md']);
+    expect(clickPath('../../outside/secret.md')).toBe('../../outside/secret.md');
   });
 });
 

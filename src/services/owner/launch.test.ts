@@ -3,7 +3,7 @@
 // bring the snapshot to the desired state; the advertisement while the lane carries the plugin's message tool; the record
 // written at `launching`; and the mismatch check at the launch's first `session.init`. P4-R7z (the P4 spec's Decision
 // Log 92): only a style declaring the to-human plugin's message tool carries the lane, with supplement 3 beside it.
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,18 +12,20 @@ import type { SessionEvent } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import {
   CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_CONTRACT_7, LEGACY_MESSAGE_TOOL_ALIAS, LEGACY_SUPPLEMENT_1, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER,
-  TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
+  TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from '@shared/owner/contract';
+import { advertisementOf, drawnBy } from '@shared/owner/draws';
+import { FOLD_SUMMARIES_ENV } from '@shared/owner/folds';
 import { slugOf } from '../../engine-host/fs/paths';
 import { installToHumanPlugin, PLUGIN_STYLE } from '../../../test/support/to-human-plugin';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
 import type { HostDispatch } from '@shared/host/host-supervisor';
-import { decideFlags, desiredSource, laneOn, OwnerChannelLaunches, ownerChannelLaunch, type OwnerLaunchSetup } from './launch';
+import { decideFlags, desiredSource, laneOn, OwnerChannelLaunches, ownerChannelLaunch, ownerChannelLaunched, type OwnerChannelLaunchDeps, type OwnerLaunchSetup } from './launch';
 import type { RecordedState } from './prompt-state';
 
 const SUPP = `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` as const; // P4-R7z: supplement 3
-const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION);
+const ADVERTISED = String(TO_HUMAN_MIRROR_VERSION); // U2b: the number MAWS advertises where it draws the view
 
 it('MAWS appends supplement 3 and advertises 8, MAWS offering no message tool (P4-R7z)', () => {
   expect([SUPP, ADVERTISED]).toEqual(['supplement:3', '8']);
@@ -344,6 +346,171 @@ describe('ownerChannelLaunch over a scratch config home', () => {
   it('without the owner channel (no index), the spec goes unchanged and nothing is recorded', async () => {
     const plain = spec();
     expect(await ownerChannelLaunch({ ...s, owner: null }, plain, { kind: 'new', transcriptOf: null })).toEqual({ spec: plain, record: null });
+  });
+
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A, §G and §M; M4):
+  // the number follows who will draw, read from each applicable installation's declaration; it is reserved in the index
+  // as the decision's last act and bound when the host answers; the summaries' switch rides in the same settings env.
+  describe('who draws: the advertisement, its reservation, and the summaries’ value', () => {
+    const launchesWith = (over: Partial<OwnerChannelLaunchDeps>) => {
+      launches = new OwnerChannelLaunches({ store: index.ownerChannel, appEnabled: () => appEnabled, systemRoot: join(root, 'system'), log: () => {}, now: () => AT, ...over });
+      s = { ...s, owner: launches };
+    };
+    const envOf = (decided: LaunchSpec) => ((decided.extraSettings as { env?: Record<string, string> } | null)?.env ?? {}) as Record<string, string>;
+    const decide = async () => ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
+    // a second installation of the to-human plugin that applies here: project scope for the launch's folder
+    const secondInstallation = (declares: boolean) => {
+      const path = join(configHome, 'plugins', 'cache', 'other', 'to-human', '0.9.0');
+      mkdirSync(path, { recursive: true });
+      if (declares) writeFileSync(join(path, 'maws-surface.json'), JSON.stringify({ toHumanView: { drawsFrom: 9 } }));
+      const file = join(configHome, 'plugins', 'installed_plugins.json');
+      const registry = JSON.parse(readFileSync(file, 'utf8')) as { plugins: Record<string, unknown[]> };
+      registry.plugins['to-human@other'] = [{ scope: 'project', projectPath: work, installPath: path, version: '0', installedAt: AT, lastUpdated: AT }];
+      writeFileSync(file, JSON.stringify(registry));
+      const settings = JSON.parse(readFileSync(join(configHome, 'settings.json'), 'utf8')) as { enabledPlugins: Record<string, boolean> };
+      settings.enabledPlugins['to-human@other'] = true;
+      writeFileSync(join(configHome, 'settings.json'), JSON.stringify(settings));
+    };
+
+    // §G, the first table, with the cutover's switch injected on
+    describe('§G with the mod route on', () => {
+      beforeEach(() => launchesWith({ modRoute: true }));
+      it.each([
+        ['the lane off, no applicable installation', (): void => { appEnabled = false; }, null, false],
+        ['the lane off, an applicable installation whose hooks load (older)', (): void => { appEnabled = false; style(configHome); }, null, true],
+        ['the lane off, an applicable installation whose hooks load (newer)', (): void => { appEnabled = false; installToHumanPlugin(configHome, { declares: true }); }, null, true],
+        ['a style that carries no tool, an installation whose hooks load', (): void => { style(configHome, 4); }, null, true],
+        ['the lane on, an older installation', (): void => { style(configHome); }, 8, true],
+        ['the lane on, an installation with a higher version and no declaration', (): void => { installToHumanPlugin(configHome, { version: '9.9.9' }); }, 8, true],
+        ['the lane on, a newer installation', (): void => { installToHumanPlugin(configHome, { declares: true }); }, 9, true],
+        ['the lane on, two installations of which one lacks the declaration', (): void => { installToHumanPlugin(configHome, { declares: true }); secondInstallation(false); }, 8, true],
+        ['the lane on, two declaring installations', (): void => { installToHumanPlugin(configHome, { declares: true }); secondInstallation(true); }, 9, true],
+      ] as const)('%s: advertises %s; the reservation finds the plugin: %s', async (_, given, number, plugin) => {
+        given();
+        const { spec: decided, record: decision } = await decide();
+        expect(envOf(decided)[NATIVE_TO_HUMAN_ENV] ?? null).toBe(number === null ? null : String(number));
+        expect(decision).toMatchObject({ advertised: number, plugin, reserved: true });
+        expect(index.ownerChannel.session(record)?.advertised).toEqual({ launchId: null, number, plugin, at: AT });
+      });
+
+      it('under hooks none no installation’s hooks load: no advertisement, and the reservation finds no plugin', async () => {
+        installToHumanPlugin(configHome, { declares: true });
+        const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec({ extraSettings: { disableAllHooks: true } }), { kind: 'new', transcriptOf: null });
+        expect(envOf(decided)[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
+        expect(decision).toMatchObject({ advertised: null, plugin: false });
+      });
+
+      it('reads the declaration of each applicable installation at the launch', async () => {
+        const read: string[] = [];
+        launchesWith({ modRoute: true, readDeclaration: async (path) => (read.push(path), true) });
+        const first = installToHumanPlugin(configHome);
+        secondInstallation(false);
+        expect((await decide()).record).toMatchObject({ advertised: 9 });
+        expect(read.sort()).toEqual([first, join(configHome, 'plugins', 'cache', 'other', 'to-human', '0.9.0')].sort());
+      });
+    });
+
+    it('with the switch of contract.ts off, a newer installation still advertises 8: no launch carries 9 before the cutover', async () => {
+      launchesWith({ modRoute: false }); // the cutover's switch off
+      installToHumanPlugin(configHome, { declares: true });
+      const { spec: decided, record: decision } = await decide();
+      expect(envOf(decided)[NATIVE_TO_HUMAN_ENV]).toBe('8');
+      expect(decision).toMatchObject({ advertised: 8, plugin: true });
+    });
+
+    it('writes the reservation before the send and binds it when the host answers', async () => {
+      launchesWith({ modRoute: true });
+      installToHumanPlugin(configHome, { declares: true });
+      const { record: decision } = await decide();
+      expect(index.ownerChannel.session(record)).toMatchObject({ launchId: null, advertised: { launchId: null, number: 9, plugin: true } });
+      ownerChannelLaunched(s, decision, { launchId: 'l1', at: AT });
+      expect(index.ownerChannel.session(record)).toMatchObject({ launchId: 'l1', advertised: { launchId: 'l1', number: 9, plugin: true } });
+    });
+
+    it('the reservation of a 9 cannot be written: the launch’s settings env carries 8, and the decision records 8', async () => {
+      const store = index.ownerChannel;
+      const failing = new Proxy(store, { get: (target, key) => (key === 'reserveLaunch' ? () => { throw new Error('the index is read-only'); } : Reflect.get(target, key, target)) });
+      launchesWith({ modRoute: true, store: failing as typeof store });
+      installToHumanPlugin(configHome, { declares: true });
+      const { spec: decided, record: decision } = await decide();
+      expect(envOf(decided)[NATIVE_TO_HUMAN_ENV]).toBe('8');
+      expect(decision).toMatchObject({ advertised: 8, reserved: false });
+      ownerChannelLaunched(s, decision, { launchId: 'l1', at: AT });
+      const row = index.ownerChannel.session(record)!;
+      expect(row).toMatchObject({ launchId: 'l1', advertised: null });
+      expect(advertisementOf(row, 'l1')).toEqual({ known: true, number: 8, plugin: null }); // read from desired: the 8 it carried
+    });
+
+    // §A, "Two slots" (the architect's cases 1 and 3)
+    it('two relaunches refused in a row: the running launch still reads its own bound 9 and draws by the mod', async () => {
+      launchesWith({ modRoute: true });
+      installToHumanPlugin(configHome, { declares: true });
+      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // the running launch, at 9, bound
+      await decide(); // reserved at 9; the host refuses it
+      launchesWith({ modRoute: false }); // the cutover's switch off
+      await decide(); // reserved at 8; refused again
+      const row = index.ownerChannel.session(record)!;
+      expect(row.advertised).toEqual({ launchId: null, number: 8, plugin: true, at: AT, prior: { launchId: 'l1', number: 9, plugin: true } });
+      expect(advertisementOf(row, 'l1')).toEqual({ known: true, number: 9, plugin: true });
+      expect(drawnBy(advertisementOf(row, 'l1'), { launchId: 'l1', process: 'ready' }, { present: true, declares: true })).toBe('mod');
+    });
+
+    it('a relaunch that the host accepts reads its own, and nothing reads the launch before it', async () => {
+      launchesWith({ modRoute: false }); // the cutover's switch off
+      installToHumanPlugin(configHome, { declares: true });
+      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // at 8, bound
+      launchesWith({ modRoute: true });
+      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l2', at: AT }); // at 9, accepted and bound
+      const row = index.ownerChannel.session(record)!;
+      expect(row.advertised).toEqual({ launchId: 'l2', number: 9, plugin: true, at: AT });
+      expect(advertisementOf(row, 'l2')).toEqual({ known: true, number: 9, plugin: true });
+      expect(advertisementOf(row, 'l1')).toEqual({ known: false });
+    });
+
+    it('carries TO_HUMAN_FOLD_SUMMARIES=off in every launch decided while the switch is off, whatever the lane, and none while it is on', async () => {
+      launchesWith({ modRoute: true });
+      installToHumanPlugin(configHome, { declares: true });
+      for (const [lane, number] of [[true, '9'], [false, undefined]] as const) {
+        appEnabled = lane;
+        index.ownerChannel.setFoldSummaries(true);
+        const on = await ownerChannelLaunch(s, spec({ extraSettings: { env: { [FOLD_SUMMARIES_ENV]: 'off' } } }), { kind: 'new', transcriptOf: null });
+        expect(envOf(on.spec)[FOLD_SUMMARIES_ENV], `on, lane ${lane}`).toBeUndefined();
+        expect(envOf(on.spec)[NATIVE_TO_HUMAN_ENV]).toBe(number);
+        expect(on.record).toMatchObject({ summariesOff: false });
+        index.ownerChannel.setFoldSummaries(false);
+        const off = await decide();
+        expect(envOf(off.spec)[FOLD_SUMMARIES_ENV], `off, lane ${lane}`).toBe('off');
+        expect(envOf(off.spec)[NATIVE_TO_HUMAN_ENV]).toBe(number);
+        expect(off.record).toMatchObject({ summariesOff: true });
+      }
+      launchesWith({ modRoute: false }); // the cutover's switch off
+      appEnabled = true;
+      expect(envOf((await decide()).spec)).toEqual({ [NATIVE_TO_HUMAN_ENV]: '8', [FOLD_SUMMARIES_ENV]: 'off' });
+    });
+
+    it('reads the switch once, when the launch is decided: a write while it is decided is the next launch’s', async () => {
+      let release: (declares: boolean) => void = () => {};
+      let reading = 0;
+      launchesWith({
+        readDeclaration: (): Promise<boolean> => {
+          reading += 1;
+          return new Promise<boolean>((resolve) => {
+            release = resolve;
+          });
+        },
+      });
+      installToHumanPlugin(configHome, { declares: true });
+      const deciding = decide();
+      await vi.waitFor(() => expect(reading).toBe(1), { timeout: 2_000, interval: 5 });
+      index.ownerChannel.setFoldSummaries(false); // written while the launch waits on the declaration's read
+      release(true);
+      const first = await deciding;
+      expect(envOf(first.spec)[FOLD_SUMMARIES_ENV]).toBeUndefined();
+      const second = decide();
+      await vi.waitFor(() => expect(reading).toBe(2), { timeout: 2_000, interval: 5 });
+      release(true);
+      expect(envOf((await second).spec)[FOLD_SUMMARIES_ENV]).toBe('off');
+    });
   });
 
   describe('the mismatch check (Design §2)', () => {

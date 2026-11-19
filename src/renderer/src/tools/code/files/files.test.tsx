@@ -18,7 +18,8 @@ import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
-import { installDisk } from '../../../test-support/code-disk';
+import { installDisk, leaveRl2, overRl2, rosterSays } from '../../../test-support/code-disk';
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
 import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { focusedFile, registerEditor, sideFilesViewer } from '../editor/register';
 import { openFile, resetKeptOpens } from '../open-file';
@@ -128,7 +129,7 @@ describe('files tree', () => {
       ['/r', ok('/r', [dir('/r/.git'), dir('/r/src'), dir('/r/empty'), { ...file('/r/link'), kind: 'symlink', target: '/etc/hosts' }, file('/r/.env')])],
       ['/r/src', ok('/r/src', [file('/r/src/a.ts')], true)],
       ['/r/empty', ok('/r/empty', [])],
-      ['/w', { status: 'error', message: "path outside the session's directories" }],
+      ['/w', { status: 'error', message: "path outside the session's directories", failure: { code: 'internal', message: "path outside the session's directories", refusal: null } }],
     ]);
     const rows = rowsOf({ roots, listing: (path) => listings.get(path), expanded: new Set(['/r', '/r/src', '/r/empty', '/w']), roles: new Map([['/r', 'directory' as const]]) });
     expect(rows.map((row) => [row.kind, row.depth, row.kind === 'notice' ? row.notice : row.path])).toEqual([
@@ -150,7 +151,7 @@ describe('files tree', () => {
   it('shows a failed listing as its message and nothing while a first listing loads', () => {
     const rows = rowsOf({
       roots: [dir('/r'), dir('/s')],
-      listing: (path) => (path === '/r' ? { status: 'error', message: 'not found: /r' } : { status: 'loading' }),
+      listing: (path) => (path === '/r' ? { status: 'error', message: 'not found: /r', failure: { code: 'internal', message: 'not found: /r', refusal: null } } : { status: 'loading' }),
       expanded: new Set(['/r', '/s']),
       roles: new Map(),
     });
@@ -207,6 +208,28 @@ describe('files store', () => {
     useFiles.getState().applyChanged({ appSessionId: at('app-b' as AppSessionId), path: '/r/other/x', kind: 'created' }); // another session's
     await flush();
     expect(main.callsOf('files.list')).toEqual([{ appSessionId: MAIN_S, path: '/r/src' }]);
+  });
+
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decision 14 (a)): a change of an
+  // entry called `.gitignore` lists again every listing the session holds at or beneath its directory, and no other
+  it('applyChanged of a .gitignore re-lists every listing at or beneath its directory, and no other', async () => {
+    const tree = { '/r': [dir('/r/src')], '/r/src': [dir('/r/src/deep')], '/r/src/deep': [], '/r/srcs': [], '/r/other': [] };
+    const main = mainWith(tree);
+    for (const path of Object.keys(tree)) useFiles.getState().list(S, path);
+    useFiles.getState().list(at('app-b' as AppSessionId), '/r/src/deep'); // another session's listing
+    await flush();
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/.gitignore', kind: 'changed' });
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path).sort()).toEqual(['/r/src', '/r/src/deep']);
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/.gitignored-not', kind: 'changed' }); // the control: another name lists its directory alone
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path)).toEqual(['/r/src']);
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/.gitignore', kind: 'created' });
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path).sort()).toEqual(['/r', '/r/other', '/r/src', '/r/src/deep', '/r/srcs']);
   });
 
   it('counts watches per directory, installs once and unwatches only after the grace', async () => {
@@ -352,7 +375,8 @@ describe('files store', () => {
     mainWith({ '/r': "path outside the session's directories" });
     useFiles.getState().list(S, '/r');
     await flush();
-    expect(useFiles.getState().listing(S, '/r')).toEqual({ status: 'error', message: "path outside the session's directories" });
+    // UX wave U6b-4b: the failure kept whole beside its message, for the notice
+    expect(useFiles.getState().listing(S, '/r')).toEqual({ status: 'error', message: "path outside the session's directories", failure: { code: 'internal', message: "path outside the session's directories", refusal: null } });
   });
 
   it('retries a refused watch when a holder joins it again', async () => {
@@ -466,15 +490,65 @@ describe('files tool', () => {
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-path')).toBe('/r/src/app.ts');
   });
 
-  it('shows a refused root as the refusal with its path, and retries it when expanded again', async () => {
+  it('shows a refused root as the notice’s first sentence for a folder with its path, and retries it when expanded again', async () => {
     render(<TestHost />);
     openTool();
     fireEvent.click(await screen.findByText('docs'));
     await waitFor(() => expect(document.querySelector('[data-notice="refused"]')).not.toBeNull());
-    expect(document.querySelector('[data-notice="refused"]')!.textContent).toBe("Refused: path outside the session's directories/docs");
+    // UX wave U6b-4b (L11): the folder's sentence, the command's words as the row's title
+    const row = document.querySelector('[data-notice="refused"]')!;
+    expect(row.textContent).toBe('This folder is outside the folders this session works in./docs');
+    expect(row.getAttribute('data-notice-cause')).toBe('outside');
+    expect(row.getAttribute('title')).toBe("This folder is outside the folders this session works in.\npath outside the session's directories"); // the whole headline, then the command's words
     fireEvent.click(item('docs'));
     fireEvent.click(item('docs'));
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === '/docs')).toHaveLength(2));
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; L11): the Files list says the notice's
+  // sentences for a folder
+  it('a folder that is not there reads “No folder at this path.”, at the row’s height', async () => {
+    main = mainWith({ ...REPO, '/r/src': 'not found: /r/src' });
+    render(<TestHost />);
+    openTool();
+    fireEvent.click(await screen.findByText('src'));
+    await waitFor(() => expect(document.querySelector('[data-notice="error"]')).not.toBeNull());
+    const row = document.querySelector('[data-notice="error"]')!;
+    expect(row.textContent).toBe('No folder at this path.');
+    expect(row.getAttribute('data-notice-cause')).toBe('not-found');
+    expect(row.getAttribute('title')).toBe('No folder at this path.\nnot found: /r/src');
+  });
+
+  it('roots that could not be listed read the folder’s sentences and the command’s words, and Retry lists them again', async () => {
+    let up = false;
+    main = installFakeMain((name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list' && input.path === undefined) return up ? answer({ root: null, path: '', entries: [dir('/r')], truncated: false }) : fail('files.list: the files service is not running', 'host_unavailable');
+      if (name === 'files.list') return answer({ root: '/r', path: input.path, entries: [], truncated: false });
+      return fail(`unexpected ${name}`);
+    });
+    render(<TestHost />);
+    openTool();
+    const alert = await screen.findByRole('alert');
+    expect(alert.getAttribute('data-notice-cause')).toBe('unreachable');
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull(); // Retry is the one control that lists them again
+    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(["MAWS's service on this Mac is not answering.", 'files.list: the files service is not running']);
+    for (const p of alert.querySelectorAll('p:not([data-notice-detail])')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.)/); // the sentences; the command's words are the small line's
+    up = true;
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(item('r')).toBeTruthy()); // the root, listed now
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('roots refused as outside read the folder’s sentence with no Retry', async () => {
+    main = mainWith({ ...REPO, '': "path outside the session's directories" });
+    render(<TestHost />);
+    openTool();
+    const alert = await screen.findByRole('alert');
+    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['This folder is outside the folders this session works in.', "path outside the session's directories"]);
+    expect(within(alert).queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy(); // with no Retry, Refresh stands beside it as before
   });
 
   // UX wave U6b-1 (Decision 8): the reveal of `params.path`, which nothing in the window asked for, is gone
@@ -1432,5 +1506,84 @@ describe('a file beside the chat as an editor', () => {
     expect(sideTabs(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: APP, line: null }]);
     expect(mainTab(APP)).toBeUndefined();
     expect(entryOf(APP)?.dirty).toBe(true);
+  });
+});
+
+// ---- UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; decision 12) --------
+// The Files list's row for a session that takes the remote route: enabled for one of the machine's owners, opening MAWS's
+// own chooser there; otherwise disabled with the first sentence of decision 12's table that applies as its title.
+describe('the Files list’s menu for a session on another machine (U6f)', () => {
+  const offs: (() => void)[] = [];
+  let main: ReturnType<typeof mainWith>;
+  const T = addressOf(OTHER_MACHINE, 'app-there') as AppSessionId;
+  const TERMINAL = addressOf(OTHER_MACHINE, 'app-terminal') as AppSessionId;
+  beforeEach(() => {
+    resetPanelStores();
+    resetTreeState();
+    resetRemoteLaneBStore();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    main = mainWith(REPO);
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(T, record(T, { directory: '/r' })).set(TERMINAL, record(TERMINAL, { directory: '/r' })) }));
+    overRl2(T);
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+  });
+  const menuRow = async (appSessionId: AppSessionId) => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId }));
+    fireEvent.contextMenu(await screen.findByRole('tree'));
+    return within(await screen.findByRole('menu')).getByRole('menuitem');
+  };
+
+  it('for one of the machine’s owners the row is enabled, reads Open File…, and opens the chooser there, never main’s', async () => {
+    const row = await menuRow(T);
+    expect(row.textContent).toBe('Open File…');
+    expect(row.hasAttribute('data-open-file')).toBe(true);
+    expect(row.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(row);
+    await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+    expect(main.callsOf('files.listOutside')).toEqual([{ appSessionId: bareOf(T) }]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  it.each([
+    ['not one of the machine’s owners', { owner: false }, 'Only studio’s owners can open a file there.'],
+    ['the roster not yet saying (R10)', { owner: undefined }, 'Only studio’s owners can open a file there.'],
+    ['a build that does not list the capability', { capabilities: ['rl2.channel'] }, 'Can’t open a file on studio yet. Update MAWS on studio and try again.'],
+    ['the machine offline', { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }, 'Open File is unavailable while studio is offline.'],
+    ['the link connecting', { state: 'connecting', capabilities: undefined }, 'Connecting to studio…'],
+  ] as const)('%s: the row is disabled, its title the sentence, and nothing is asked', async (_, over, sentence) => {
+    rosterSays(T, over as Partial<MachineState>);
+    const row = await menuRow(T);
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.getAttribute('title')).toBe(sentence);
+    expect(row.textContent).toBe('Open File…');
+    fireEvent.click(row);
+    await act(flush);
+    expect(document.querySelector('[data-remote-chooser]')).toBeNull();
+    expect(main.callsOf('files.listOutside')).toEqual([]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  // UX wave U6b-4b (L11): a folder there is said with the machine's name
+  it('a refused folder there reads the folder’s sentence that names the machine', async () => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: T }));
+    fireEvent.click(await screen.findByText('docs'));
+    await waitFor(() => expect(document.querySelector('[data-notice="refused"]')).not.toBeNull());
+    expect(document.querySelector('[data-notice="refused"] span')!.textContent).toBe('This folder is outside the folders this session works in on studio.');
+  });
+
+  it('for a terminal session there the row keeps U6e’s sentence', async () => {
+    overRl2(TERMINAL, {}, 'A');
+    const row = await menuRow(TERMINAL);
+    expect(row.getAttribute('title')).toBe('Open File… (this session runs on studio)');
+    expect(row.getAttribute('aria-disabled')).toBe('true');
   });
 });

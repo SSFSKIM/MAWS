@@ -250,7 +250,7 @@ async function showSession(page: Page, id: string): Promise<void> {
 async function openFile(page: Page, repo: ScratchRepo, relative: string): Promise<Locator> {
   await openSurface(page, 'Files');
   const files = surface(page, 'files');
-  const row = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
+  const row = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${path}"]`);
   let at = repo.root;
   for (const segment of ['', ...relative.split('/').slice(0, -1)]) {
     at = segment ? `${at}/${segment}` : at;
@@ -620,10 +620,12 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
   // cards above it keep their boxes, and with the card closed the column draws as it did before /btw was asked.
   test('5. /btw: the side question goes to the engine beside the conversation and answers in the session’s side chat card at the card column’s foot, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
     test.setTimeout(120_000);
+    let appPath = ''; // UX wave U6b-4b: the file the second answer links, inside the session's folder
     const c = await begin((cwd, dir) => {
+      appPath = join(cwd, APP);
       const parent = parentJournal(cwd);
       parent.sideQuestions(SIDE_QUESTION_ROWS);
-      parent.sideQuestions(SIDE_FOLLOW_UP_ROWS);
+      parent.sideQuestions(SIDE_FOLLOW_UP_ROWS, { zebra: `zebra, as [the app](${appPath}) has it` });
       return [parent.write(dir, 'parent'), threadJournal(PROMOTED, cwd, 'Side question', [PROMOTED_REPLY]).write(dir, 'promoted')];
     });
     const { page, maws, parent } = c;
@@ -753,6 +755,21 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(firstPrompt).toContain(`Q: ${SIDE_FOLLOW_UP}\nA: zebra`);
     expect(writtenControls(maws, promoted, 'rename_session').map((r) => r.frame.request)).toEqual([{ subtype: 'rename_session', title: 'Side question', source: 'host' }]);
     expect(writtenUsers(maws, parent), 'still nothing written to the main conversation').toHaveLength(1);
+
+    // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; L6, R4): the second answer's path is a
+    // path link, and a click opens the file beside the chat of the session the card belongs to. The card is opened again by
+    // a bare /btw, wherever it stands now (at the pane's corner, a side surface being open).
+    await composer.click();
+    await page.keyboard.type('/btw');
+    await expect(commands.locator('[role="option"][aria-selected="true"]')).toContainText('/btw');
+    await page.keyboard.press('Enter');
+    const card = main.locator('[data-btw-card]');
+    await expect(card.locator('[data-side-exchange="answered"]'), 'the card with its two exchanges').toHaveCount(2);
+    const chip = card.locator('[data-side-exchange="answered"]').nth(1).locator(`[data-chip="path"][title="${appPath}"]`);
+    await expect(chip, 'the answer’s path drawn as a path link').toBeVisible();
+    await chip.click();
+    await expect(sideColumn(page).locator(`[data-file-viewer][data-path="${appPath}"]`), 'the file beside the chat').toBeVisible({ timeout: 20_000 });
+    await expect(sideColumn(page).locator(`[data-file-viewer][data-path="${appPath}"] .cm-content`)).toContainText('export const total', { timeout: 20_000 });
     expect(maws.consoleErrors()).toEqual([]);
   });
 

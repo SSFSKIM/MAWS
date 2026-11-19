@@ -202,6 +202,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.session.status.output.modelOverrides': MODEL_OVERRIDES,
   'commands.session.ui.render.input.props': SURFACE_PROPS,
   'commands.session.ui.render.output.props': SURFACE_PROPS,
+  'commands.session.ui.renderSite.input.props': SURFACE_PROPS, // UX wave U2b: session.ui.render's props, for a site outside its closed set
+  'commands.session.ui.renderSite.output.props': SURFACE_PROPS,
   'commands.settings.get.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.settings.set.input.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.settings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,

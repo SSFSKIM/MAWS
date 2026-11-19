@@ -293,12 +293,12 @@ export class SideJournal {
   }
 
   // Rows of `pass3/p1-side-question-session`, whole, under this journal's session id (their request ids are remapped by
-  // the transport).
-  sideQuestions(seqs: number[]): void {
+  // the transport); `answers` swaps a recorded string for a scene's own (UX wave U6b-4b: an answer that holds a path).
+  sideQuestions(seqs: number[], answers: Record<string, string> = {}): void {
     const rows = rowsOf(SIDE_QUESTIONS);
     for (const seq of seqs) {
       const row = rows.find((r) => r.seq === seq)!;
-      this.push(row.direction, swapped(row.frame, { [RECORDED.side.session]: this.sessionId }));
+      this.push(row.direction, swapped(row.frame, { ...answers, [RECORDED.side.session]: this.sessionId }));
     }
   }
 

@@ -10,6 +10,8 @@
 // A docked card (a request, or C10's trust and relay-down cards) takes the place of the draft's parts, the attachment
 // strip, the box and the toolbar (architect's ruling on M6, mockup 04): those parts stay mounted and hidden, so the
 // editor keeps its document, and they hide in the same commit the card mounts; a menu open in the toolbar closes then.
+// UX wave U10b (O-43, §F.3): in the float's bar (`bar`) the toolbar is mounted and hidden the same way, and the box
+// carries the float's border and shadow.
 import type { ReactNode, RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Attachment } from '../editor/doc';
@@ -32,10 +34,12 @@ export interface FrameProps {
   docked?: ReactNode; // a docked card, in the draft's place; null or absent: the draft shows
   onOpen?(what: 'models' | 'rules'): void; // a chip showing an engine read opened: the composer reads it then, not per mount
   ring?: ReactNode; // W2: the session's context ring, in the toolbar
+  bar?: boolean; // UX wave U10b (§F.3): the float's bar, the box alone
 }
 
-export function Frame({ appSessionId, bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen, ring = null }: FrameProps) {
+export function Frame({ appSessionId, bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen, ring = null, bar = false }: FrameProps) {
   const isDocked = docked !== null && docked !== undefined;
+  const toolbar = <Toolbar appSessionId={appSessionId} bindings={bindings} cwd={cwd} dirty={dirty} editor={editorHandle} onOpen={onOpen} ring={ring} />;
   return (
     <div data-composer-frame data-docked={isDocked || undefined} className="flex w-full min-w-0 flex-col gap-1">
       {docked}
@@ -46,11 +50,17 @@ export function Frame({ appSessionId, bindings, cwd, dirty, attachments, editorH
           <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
           {/* W2 (C1, Codex's): 22px corners and the faint shadow, no border; 44px at rest, the editor's 20px line inside
               12px above and below, the submit control 8px in from the box's foot */}
-          <div data-composer-box className="flex min-h-11 min-w-0 items-end gap-2 rounded-2xl bg-bg-raised pr-2 pl-3 shadow-composer">
+          <div data-composer-box className={`flex min-h-11 min-w-0 items-end gap-2 rounded-2xl bg-bg-raised pr-2 pl-3 ${bar ? 'border border-border-strong shadow-float' : 'shadow-composer'}`}>
             <div className="min-w-0 flex-1 py-3">{editor}</div>
             <div className="mb-2 shrink-0">{submit}</div>
           </div>
-          <Toolbar appSessionId={appSessionId} bindings={bindings} cwd={cwd} dirty={dirty} editor={editorHandle} onOpen={onOpen} ring={ring} />
+          {bar ? (
+            <DraftShownContext.Provider value={false}>
+              <div hidden>{toolbar}</div>
+            </DraftShownContext.Provider>
+          ) : (
+            toolbar
+          )}
         </div>
       </DraftShownContext.Provider>
     </div>

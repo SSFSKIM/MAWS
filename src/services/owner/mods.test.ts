@@ -11,7 +11,7 @@ import { BUILT_IN_MODS } from '@shared/mods/registry';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { installToHumanPlugin } from '../../../test/support/to-human-plugin';
 import { Index } from '../index/index';
-import { laneInEffect, modsList, setSessionOverride, styleCarriesNoLane, type ModsDeps } from './mods';
+import { laneInEffect, modsList, setFoldSummaries, setSessionOverride, styleCarriesNoLane, type ModsDeps } from './mods';
 import type { LaunchRecord } from './store';
 
 const AT = '2026-10-09T10:00:00.000Z';
@@ -19,7 +19,8 @@ const SUPPLEMENTED = 'external-style-plus-supplement';
 const launch = (over: Partial<LaunchRecord>): LaunchRecord => ({
   launchId: 'l1', at: AT, laneOn: true, desired: SUPPLEMENTED, recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: SUPPLEMENTED, style: 'to-human', ...over,
 });
-const MOD = { id: 'maws.to-human', name: BUILT_IN_MODS[0]!.name, description: BUILT_IN_MODS[0]!.description, version: 8 }; // P4-R7z: contract 8
+// P4-R7z: contract 8; the UX wave, U2b: 9, the number a launch advertises where the mod draws; the summaries' switch on
+const MOD = { id: 'maws.to-human', name: BUILT_IN_MODS[0]!.name, description: BUILT_IN_MODS[0]!.description, version: 9, summaries: true };
 
 describe('mods.list and mods.setSessionOverride', () => {
   let root: string;
@@ -61,6 +62,23 @@ describe('mods.list and mods.setSessionOverride', () => {
         style(declared);
         expect(await modsList(deps), String(declared)).toEqual([{ ...MOD, enabled: true, source: 'off' }]);
       }
+    });
+  });
+
+  // The UX wave, U2b (Interfaces §M, "The switch"): the to-human row carries the summaries' switch, kept in the index's
+  // own facts; `mods.setFoldSummaries` writes it
+  describe('the summaries’ switch', () => {
+    it('is on by default, and the row answers what was written last, with a session and without', async () => {
+      style(6);
+      expect((await modsList(deps))[0]).toMatchObject({ summaries: true });
+      setFoldSummaries(deps, { on: false });
+      expect((await modsList(deps))[0]).toMatchObject({ summaries: false });
+      expect((await modsList(deps, a))[0]).toMatchObject({ summaries: false });
+      setFoldSummaries(deps, { on: true });
+      setFoldSummaries(deps, { on: false });
+      expect((await modsList(deps))[0]).toMatchObject({ summaries: false });
+      setFoldSummaries(deps, { on: true });
+      expect((await modsList(deps, a))[0]).toMatchObject({ summaries: true });
     });
   });
 

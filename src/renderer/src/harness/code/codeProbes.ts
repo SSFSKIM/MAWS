@@ -94,14 +94,15 @@ function filesOf(target: ReviewTarget, scope: ReviewScope): { files: ReviewFile[
   const machine = machineFor(target.appSessionId);
   const status = useGit.getState().entries.get(checkoutKey(machine, target.directory))?.status ?? null;
   if (!status) return null;
+  // UX wave U5b-2: a target's key ends with the read it is made with and what it is against (review-store's `keys`)
   const prefix = `${checkoutKey(machine, target.directory)}\0${scope}\0`;
   const found = [...useReview.getState().diffs.keys()].find((key) => key.startsWith(prefix));
   if (!found) return null;
-  const base = found.slice(prefix.length);
-  const diffTarget: DiffTarget = { machine, directory: target.directory, scope, base: base === '' ? null : base };
+  const [read, against] = found.slice(prefix.length).split('\0') as [DiffTarget['read'], string];
+  const diffTarget: DiffTarget = { machine, directory: target.directory, scope, read, against: against === '' ? null : against };
   const diff = diffOf(useReview.getState(), diffTarget);
   if (diff?.status !== 'ok') return null;
-  return { files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status }), diff: diffTarget };
+  return { files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status, untracked: diff.untracked ?? null }), diff: diffTarget };
 }
 
 function hunksOf(root: HTMLElement, scope: ReviewScope | null, selected: string | null): string[] | null {

@@ -122,6 +122,8 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     for (const id of ACTION_IDS.filter((id) => isRebindable(id))) expect(within(row(ACTIONS[id].title)).getByRole('button', { name: `Change ${ACTIONS[id].title}` }), id).toBeTruthy();
     for (const title of ['Allow once', 'Allow with the lasting scope the prompt names']) expect(within(row(title)).queryByRole('button'), title).toBeNull(); // U1a's rows: not rebindable while build F may run
     expect(within(row(ACTIONS['channel.open'].title)).queryByRole('button'), 'U11a M5: a landed child’s row build F does not know').toBeNull();
+    expect(within(row('Go to file')).queryByRole('button'), 'U6b-3b: Go to file takes no rebinding while build F may run').toBeNull();
+    expect(chordOf('Go to file')).toBe('⌘P');
   });
 
   it('every action is a row, the docked request keys included', () => {

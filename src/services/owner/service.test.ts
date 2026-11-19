@@ -1281,3 +1281,56 @@ function replayOf(sim: OwnerHostSim): SessionEvent[] {
   const normalizer = new Normalizer({ appSessionId: sim.appSessionId, launchId: launch.launchId, sessionId: sim.sessionId });
   return launch.rows.flatMap((row) => normalizer.push(row));
 }
+
+// U2b (fix wave 1 of M4): who draws is published while the row cannot be read. `drawnBy` is the tracker's (it reads the
+// row as not known on its own); the rest of the state is the last one built, so the command answers and the change is
+// emitted with the fresh `drawnBy` rather than failing with the row.
+describe('who draws, published while the row cannot be read (U2b)', () => {
+  it('answers ownerChannel.state and emits ownerChannel.changed with the fresh drawnBy over the last state built', () => {
+    const emitted: OwnerChannelState[] = [];
+    let drawn: 'mod' | 'maws' = 'maws';
+    const service = new OwnerChannelService({
+      store: index.ownerChannel,
+      sessions: index.sessions,
+      appEnabled: () => true,
+      attention: { setOwnerItems: () => {} },
+      dispatch: async () => ({ ok: false, error: { code: 'internal', message: 'no host' } }),
+      transcriptEvidence: async () => null,
+      transcriptChain: async () => null,
+      emit: (_name, payload) => void emitted.push(payload.state),
+      log: () => {},
+      drawnBy: () => drawn,
+    });
+    services.push(service);
+    const before = service.state(app);
+    expect(before.lane).toMatchObject({ on: true, drawnBy: 'maws' });
+    const read = vi.spyOn(index.ownerChannel, 'session').mockImplementation(() => {
+      throw new Error('the index is busy');
+    });
+    drawn = 'mod';
+    service.drawnByChanged(app);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toEqual({ ...before, lane: { ...before.lane, drawnBy: 'mod' } });
+    expect(service.state(app)).toEqual({ ...before, lane: { ...before.lane, drawnBy: 'mod' } });
+    read.mockRestore();
+    drawn = 'maws';
+    expect(service.state(app).lane.drawnBy).toBe('maws');
+  });
+
+  it('with no state built yet for the session, the command fails as the row does and nothing is emitted', () => {
+    const emitted: OwnerChannelState[] = [];
+    const service = new OwnerChannelService({
+      store: index.ownerChannel, sessions: index.sessions, appEnabled: () => true, attention: { setOwnerItems: () => {} },
+      dispatch: async () => ({ ok: false, error: { code: 'internal', message: 'no host' } }), transcriptEvidence: async () => null, transcriptChain: async () => null,
+      emit: (_name, payload) => void emitted.push(payload.state), log: () => {}, drawnBy: () => 'mod',
+    });
+    services.push(service);
+    vi.spyOn(index.ownerChannel, 'session').mockImplementation(() => {
+      throw new Error('the index is busy');
+    });
+    expect(() => service.state(app)).toThrow('the index is busy');
+    service.drawnByChanged(app);
+    expect(emitted).toEqual([]);
+    vi.restoreAllMocks();
+  });
+});

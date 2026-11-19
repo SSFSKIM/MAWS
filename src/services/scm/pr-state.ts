@@ -20,10 +20,22 @@ export type PrChecks = Pr['checks'];
 export const prViewArgv = (branch: string) => ['pr', 'view', branch, '--json', PR_VIEW_FIELDS];
 export const prChecksArgv = (branch: string) => ['pr', 'checks', branch, '--json', PR_CHECKS_FIELDS];
 
-// `gh pr view <branch> --json …`: the PR, "no PR" (`pr: null, error: null`), or why there is no answer.
+// gh's sentence for a checkout none of whose remotes points to a GitHub host (gh 2.97.0; the sentence `planPr`'s
+// `gh repo view` meets in plans.test.ts). Another gh's wording of the case is not matched, and shows its first line.
+const NO_GITHUB_REMOTE = /none of the git remotes configured for this repository point to a known GitHub host/i;
+
+// UX wave U5b-2 (l5-code-12 d; Decision Log 29, 1): `gh pr view` ended by its own non-zero exit (no spawn failure, no
+// time-out, no signal) with that sentence. The PR line hides `no_remote`, as `planPr` answers it for the same checkout.
+export function noGitHubRemote(run: CollectedRun): boolean {
+  return run.failure === null && run.exitCode !== null && run.exitCode !== 0 && NO_GITHUB_REMOTE.test(run.stderr);
+}
+
+// `gh pr view <branch> --json …`: the PR, "no PR" (`pr: null, error: null`), `no_remote` for a checkout whose remotes
+// are not on GitHub, or why there is no answer.
 export function readPrView(run: CollectedRun): { pr: PrView | null; error: string | null } {
   if (run.exitCode !== 0) {
     if (run.failure === null && /no pull requests found/i.test(run.stderr)) return { pr: null, error: null };
+    if (noGitHubRemote(run)) return { pr: null, error: 'no_remote' };
     return { pr: null, error: reason(run, 'gh pr view') };
   }
   const answer = parse(run.stdout);
