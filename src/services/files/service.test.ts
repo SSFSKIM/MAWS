@@ -34,7 +34,7 @@ import { StoreFixture } from '../../../test/support/store-fixture';
 import { runGit } from '../../../test/support/git-fixture';
 import { execGit, type ExecFileFn } from '../git/runner';
 import { createIgnoreCheck, type IgnoreCheck } from './ignored';
-import { createNamedPaths, NAMED_PATH_MAX, NAMED_WAIT_MS, type Naming, type NamedPathsOptions } from './named';
+import { createNamedPaths, NAMED_PATH_MAX, NAMED_WAIT_MS, NAMED_WAITING_MAX, type Naming, type NamedPathsOptions } from './named';
 import { createFilesService, FOLLOW_IN_FLIGHT_MAX, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
 import { registerFilesHandlers } from './register';
 
@@ -3888,6 +3888,213 @@ describe('files saves outside the folders', () => {
         expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
         expect(seen.length, 'one located: one place given back').toBeGreaterThan(0);
         for (const located of locators.slice(1)) located();
+      });
+    });
+
+    // M3 (Interfaces §E): the daemon's own search over one subagent's transcript, composed as checkouts-root.ts composes
+    // it (one search, `names` and `namesInAgent` sharing its slot, its queue and its memory)
+    describe('a subagent’s transcript, searched by the daemon (M3)', () => {
+      const AGENT = 'a1b2c3';
+      type SearchPoint = NonNullable<Parameters<NonNullable<NonNullable<NamedPathsOptions['hooks']>['at']>>[0]>;
+      let searchPoints: Partial<Record<SearchPoint, () => void | Promise<void>>>;
+      function searched(locate: NamedPathsOptions['transcript'] = async (appSessionId) => transcripts.get(appSessionId) ?? null) {
+        const hooks: NamedPathsOptions['hooks'] = {
+          at: async (point) => {
+            const fn = searchPoints[point];
+            if (!fn) return;
+            delete searchPoints[point]; // each runs once
+            await fn();
+          },
+        };
+        const paths = createNamedPaths({ transcript: locate, hooks });
+        return { paths, files: followService({ named: paths.names, agentNames: paths.namesInAgent }) };
+      }
+      const folderOf = (appSessionId: AppSessionId) => transcripts.get(appSessionId)!.slice(0, -'.jsonl'.length);
+      // A subagent's file as the engine writes it beside the session's transcript: every record a sidechain, none with an
+      // origin, its first `user` record the prompt its parent wrote
+      function agentOf(appSessionId: AppSessionId, rows: object[], agentId = AGENT): string {
+        const path = join(folderOf(appSessionId), 'subagents', `agent-${agentId}.jsonl`);
+        write(path, rows.map((row) => `${JSON.stringify({ ...row, isSidechain: true })}\n`).join(''));
+        return path;
+      }
+      const prompt = (content: string) => ({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content } });
+      const turn = () => new Promise((resolve) => setImmediate(resolve));
+      function held() {
+        let release!: () => void;
+        const until = new Promise<void>((resolve) => (release = resolve));
+        let reach!: () => void;
+        const reached = new Promise<void>((resolve) => (reach = resolve));
+        return { hold: async () => (reach(), await until), reached, release };
+      }
+
+      beforeEach(async () => {
+        searchPoints = {};
+        await transcriptOf(A, [said('Started a subagent.')]);
+      });
+
+      it('records a file the subagent’s text links or its read’s chip names, which reads and saves; a path only its tool’s result or its prompt holds opens read-only (K5, X4.3)', async () => {
+        write(out('read.txt'), 'read by the subagent\n');
+        write(out('prompted.txt'), 'in the prompt\n');
+        agentOf(A, [
+          prompt(`Check ${link(out('prompted.txt'))}`),
+          said(link(out('notes.txt'))),
+          called('t-read', 'Read', { file_path: out('read.txt') }),
+          called('t-mcp', 'mcp__docs__find', { query: 'notes' }),
+          answered('t-mcp', [{ type: 'text', text: link(out('result.txt')) }]),
+        ]);
+        const { files } = searched();
+        await expect(shown(files, A, out('notes.txt')), 'before the follow').rejects.toThrow(new Error(OUT));
+        for (const path of [out('notes.txt'), out('read.txt')]) {
+          expect(await follow(files, path, { agent: AGENT }), path).toEqual(LINKED);
+          expect((await shown(files, A, path)).outside).toEqual({ real: path, writable: true });
+        }
+        expect(await saveShown(files, A, out('notes.txt'), 'saved through the subagent\n')).toEqual(ok('saved through the subagent\n'));
+        expect(readFileSync(out('notes.txt'), 'utf8')).toBe('saved through the subagent\n');
+        for (const path of [out('result.txt'), out('prompted.txt')]) {
+          const before = readFileSync(path, 'utf8');
+          expect(await follow(files, path, { agent: AGENT }), path).toEqual(LINKED);
+          const read = await shown(files, A, path);
+          expect(read.outside).toEqual({ real: path, writable: false, why: 'result' });
+          await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: path })).rejects.toThrow(new Error(OUT));
+          expect(readFileSync(path, 'utf8')).toBe(before);
+        }
+        expect(await follow(files, out('unnamed.txt'), { agent: AGENT })).toEqual(NOT_LINKED);
+        expect(recorded()![A]).toEqual([
+          { real: out('notes.txt'), at: expect.any(Number), from: { agent: AGENT } },
+          { real: out('read.txt'), at: expect.any(Number), from: { agent: AGENT } },
+          { real: out('result.txt'), at: expect.any(Number), from: { agent: AGENT }, why: 'result' },
+          { real: out('prompted.txt'), at: expect.any(Number), from: { agent: AGENT }, why: 'result' },
+        ]);
+      });
+
+      it('finds no agent of another session’s transcript folder, and reads no folder for a session with no transcript (X2.7, X2.8)', async () => {
+        const theirs = session('Theirs');
+        await transcriptOf(theirs, [said('Started a subagent.')]);
+        agentOf(theirs, [prompt('Go.'), said(link(out('notes.txt')))]);
+        mkdirSync(join(folderOf(A), 'subagents'), { recursive: true });
+        const { files } = searched();
+        expect(await follow(files, out('notes.txt'), { agent: AGENT }, A), 'asked under this session').toEqual(NOT_LINKED);
+        const unstarted = session('Unstarted');
+        const seen = recordTouches();
+        expect(await follow(files, out('notes.txt'), { agent: AGENT }, unstarted)).toEqual(NOT_LINKED);
+        expect(seen.filter((entry) => /^(readdir|open) /.test(entry)), 'no folder read, no file opened').toEqual([]);
+        touches.on = false;
+        expect(await follow(files, out('notes.txt'), { agent: AGENT }, theirs), 'the control: under its own session').toEqual(LINKED);
+        expect(Object.keys(recorded()!)).toEqual([theirs]);
+      });
+
+      it('keeps a record that admits a save, and where its link stood, when the subagent’s transcript names the path only in its prompt (X4.4)', async () => {
+        write(out('other.txt'), 'other\n');
+        write(guide(), `${link(out('notes.txt'))} ${link(out('other.txt'))}\n`);
+        agentOf(A, [prompt(`Look at ${link(out('notes.txt'))}`)]);
+        const { files } = searched();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('other.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('notes.txt'), { agent: AGENT })).toEqual(LINKED);
+        expect(recorded()![A]).toEqual([
+          { real: out('other.txt'), at: expect.any(Number), from: { file: guide() } },
+          { real: out('notes.txt'), at: expect.any(Number), from: { file: guide() } },
+        ]);
+        expect((await shown(files, A, out('notes.txt'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+      });
+
+      it('records the real path the named path leads to at the last resolution, for a target changed during the search or after it (X5.10)', async () => {
+        const target = out('t', 'b.txt');
+        write(target, 'the first\n');
+        write(out('u', 'b.txt'), 'the second\n');
+        write(out('v', 'b.txt'), 'the third\n');
+        agentOf(A, [prompt('Go.'), said(link(target))]);
+        const { files } = searched();
+        // at the search's end: the target's folder swapped for a link; the record is of the file the path now leads to
+        searchPoints.searched = () => swapToLink(out('t'), out('u'));
+        expect(await follow(files, target, { agent: AGENT })).toEqual(LINKED);
+        expect(searchPoints.searched, 'the search reached its end').toBeUndefined();
+        expect(realsOf(A)).toEqual([out('u', 'b.txt')]);
+        restore(out('t'));
+        // after the search answered, before the last resolution: another folder outside, then the target removed
+        points['before-follow-record'] = () => swapToLink(out('t'), out('v'));
+        expect(await follow(files, target, { agent: AGENT })).toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), out('v', 'b.txt')]);
+        restore(out('t'));
+        points['before-follow-record'] = () => renameSync(target, `${target}.gone`);
+        expect(await follow(files, target, { agent: AGENT })).toEqual(NOT_LINKED);
+        renameSync(`${target}.gone`, target);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), out('v', 'b.txt')]);
+        expect(await follow(files, target, { agent: AGENT }), 'the control: nothing changed meanwhile').toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), out('v', 'b.txt'), target]);
+      });
+
+      it('answers not-linked once its patience runs out while its subagent’s search is held, and records nothing after (X5.12)', async () => {
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const opened = held();
+        searchPoints.opened = opened.hold;
+        const { files } = searched();
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const answer = follow(files, out('notes.txt'), { agent: AGENT }, A, new AbortController().signal);
+          await opened.reached;
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await answer, 'answered with its search still held').toEqual(NOT_LINKED);
+          opened.release();
+          for (let i = 0; i < 20; i += 1) await turn();
+          expect(existsSync(linksFile), 'nothing recorded after the patience').toBe(false);
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(await follow(files, out('notes.txt'), { agent: AGENT }), 'the control').toEqual(LINKED);
+      });
+
+      it('keeps nine follows’ places while their locators are held past the patience; a tenth makes no file system call until one answers (K13, decision 7)', async () => {
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const locators: (() => void)[] = [];
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const { files } = searched(
+          (appSessionId) =>
+            new Promise((answer) => {
+              locators.push(() => answer(transcripts.get(appSessionId) ?? null));
+              if (locators.length === FOLLOW_IN_FLIGHT_MAX) nine();
+            }),
+        );
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), { agent: AGENT }));
+          await allIn;
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await Promise.all(follows), 'each answered, its locator held').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+          const seen = recordTouches();
+          expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+          expect(seen, 'a tenth, nine locators held').toEqual([]);
+          locators[0]!();
+          await turn();
+          expect(await follow(files, out('notes.txt')), 'one locator answered: one place given back').toEqual(LINKED);
+          expect(seen.length).toBeGreaterThan(0);
+          for (const answer of locators.slice(1)) answer();
+          for (let i = 0; i < 20; i += 1) await turn();
+          expect(recorded()![A], 'the late locators queue no search and record nothing').toEqual([{ real: out('notes.txt'), at: expect.any(Number), from: { file: guide() } }]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('with eight searches waiting, a follow answers not-linked at once and reads no folder of the transcript’s (K13)', async () => {
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const opened = held();
+        searchPoints.opened = opened.hold;
+        const { paths, files } = searched();
+        const running = paths.names(A, out('named.txt')); // holds the one slot
+        await opened.reached;
+        const waiting = Array.from({ length: NAMED_WAITING_MAX }, (_, i) => paths.names(A, out(`waiting-${i}.txt`)));
+        await turn();
+        const seen = recordTouches();
+        expect(await follow(files, out('notes.txt'), { agent: AGENT })).toEqual(NOT_LINKED);
+        expect(seen.filter((entry) => entry.startsWith('readdir ')), 'no folder read').toEqual([]);
+        expect(inside(seen, folderOf(A)), 'nothing of the transcript’s folder').toEqual([]);
+        touches.on = false;
+        opened.release();
+        expect(await running).toBe(false);
+        expect(await Promise.all(waiting)).toEqual(Array.from({ length: NAMED_WAITING_MAX }, () => false));
+        expect(await follow(files, out('notes.txt'), { agent: AGENT }), 'the control, the queue free').toEqual(LINKED);
       });
     });
 
