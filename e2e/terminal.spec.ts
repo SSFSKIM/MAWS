@@ -1050,7 +1050,7 @@ test('Attach selection to chat from a terminal kept open for every session, besi
   test.setTimeout(120_000);
   await scene({ titles: ['Attach alpha', 'Attach beta'], label: 'u6b5-attach-pinned' }, async (s) => {
     const { page } = s;
-    const [alpha, beta] = s.ids as [string, string];
+    const [alpha, beta] = [s.ids[0]!, s.ids[1]!];
     await show(s, alpha);
     await pinSurfaceForSessions(page, 'Terminal');
     const terminal = await shownTerminal(page);
