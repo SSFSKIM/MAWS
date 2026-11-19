@@ -272,7 +272,8 @@ export class EditorController {
       }
       return taken;
     });
-    return saved.then((taken) => {
+    // a port of the suites may answer nothing at all
+    return Promise.resolve(saved).then((taken) => {
       if (taken) this.unread = false; // what is kept is this mount's now
       return taken;
     });
