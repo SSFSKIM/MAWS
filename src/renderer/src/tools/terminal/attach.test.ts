@@ -32,7 +32,7 @@ vi.mock('../../terminal/registry', () => ({
 }));
 
 const { ATTACH } = await import('./copy');
-const { attachFromTerminal, connectTerminalAttach } = await import('./attach');
+const { attachFromTerminal, attachText, connectTerminalAttach } = await import('./attach');
 
 const HERE = at('app-here' as AppSessionId);
 const THERE = addressOf(OTHER_MACHINE, 'app-there' as AppSessionId);
@@ -73,6 +73,21 @@ describe('what is attached', () => {
     expect(attached.calls).toEqual([]);
     expect(lines()).toEqual([
       { level: 'warning', text: 'Nothing on this terminal\'s screen to attach.' },
+      { level: 'warning', text: 'Nothing on this terminal\'s screen to attach.' },
+    ]);
+  });
+});
+
+// The terminal's menu reads the selection and its session at the press and hands them over (Decision Log 20).
+describe('text the menu read at the press', () => {
+  it('goes to the session it names, as given, whatever that terminal now shows; blank text attaches nothing and says so', async () => {
+    terminal.selection = 'selected since';
+    terminal.screen = 'the screen since';
+    await attachText(THERE, ' 3 failed\n');
+    await attachText(HERE, '  ');
+    expect(attached.calls).toEqual([[THERE, ' 3 failed\n']]);
+    expect(lines()).toEqual([
+      { level: 'info', text: 'Added to Quarterly numbers' },
       { level: 'warning', text: 'Nothing on this terminal\'s screen to attach.' },
     ]);
   });

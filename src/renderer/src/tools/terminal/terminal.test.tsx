@@ -114,11 +114,11 @@ const registry = vi.hoisted(() => {
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
 // UX wave U6b-5a (M2): the menu's fifth item hands the terminal to the attach (./attach.test.ts holds what it does)
-vi.mock('./attach', () => ({ attachFromTerminal: vi.fn(async () => {}) }));
+vi.mock('./attach', () => ({ attachText: vi.fn(async () => {}) }));
 
 const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, REMOTE_ATTACH_TIMEOUT_MS, REMOTE_LIST_TIMEOUT_MS, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
 const { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } = await import('@shared/machine/remote-pending');
-const { attachFromTerminal } = await import('./attach');
+const { attachText } = await import('./attach');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -972,8 +972,26 @@ describe('terminal view', () => {
     expect(registry.renderer.clear).toHaveBeenCalled();
     open();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Attach selection to chat' }));
-    await vi.waitFor(() => expect(attachFromTerminal).toHaveBeenCalledWith(state.terminalId, 'menu')); // the attach's module is loaded at the press
     expect(screen.queryByRole('menu', { name: 'terminal' })).toBeNull();
+    await vi.waitFor(() => expect(attachText).toHaveBeenCalledWith(A, 'picked')); // the attach's module is loaded at the press
+  });
+
+  // The attach's module is loaded at the press (Decision Log 20): what is attached is what was selected at the press, in
+  // the session of the terminal pressed, whatever the selection or the terminal does while the module loads.
+  it('attaches the selection the press saw, though it changes before the attach’s module has loaded', async () => {
+    const state = newState();
+    render(<View state={state} ctx={context()} />);
+    fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Attach selection to chat' }));
+    const get = registry.terminals.get.getMockImplementation()!;
+    onTestFinished(() => {
+      registry.renderer.getSelection.mockImplementation(() => 'picked');
+      registry.terminals.get.mockImplementation(get);
+    });
+    registry.renderer.getSelection.mockImplementation(() => 'selected after the press');
+    registry.terminals.get.mockImplementation(() => undefined); // and the terminal gone
+    await vi.waitFor(() => expect(attachText).toHaveBeenCalledWith(A, 'picked'));
+    expect(attachText).toHaveBeenCalledTimes(1);
   });
 
   // UX wave U6b-5a (decision 6): with nothing selected the menu's item is drawn disabled; the chord attaches the screen

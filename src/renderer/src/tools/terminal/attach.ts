@@ -37,12 +37,17 @@ export async function attachFromTerminal(id: TerminalId, source: 'menu' | 'chord
   const renderer = handle?.renderer ?? null;
   if (!handle || renderer === null) return;
   const selected = renderer.hasSelection() ? renderer.getSelection() : '';
-  const text = selected !== '' ? selected : source === 'chord' ? renderer.screenText() : '';
+  await attachText(handle.info.appSessionId, selected !== '' ? selected : source === 'chord' ? renderer.screenText() : '');
+}
+
+/** Text already read from a terminal into the chat of `appSessionId`, and the outcome said; blank text attaches nothing
+ * and says so. The terminal's menu reads its selection and session at the press and hands them here, so a selection
+ * that changes, or a terminal that goes, while this module loads changes nothing. */
+export async function attachText(appSessionId: AppSessionId, text: string): Promise<void> {
   if (text.trim() === '') {
     line('warning', ATTACH.nothing);
     return;
   }
-  const appSessionId = handle.info.appSessionId;
   sayAttached(appSessionId, await attachPasted(appSessionId, text));
 }
 

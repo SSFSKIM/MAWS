@@ -196,7 +196,8 @@ function StatusBar({ info, hostReady, remoteName, close }: { info: TerminalInfo;
 
 function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; state: TerminalTabState; dismiss(): void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const renderer = (state.terminalId && terminals.get(state.terminalId)?.renderer) || null;
+  const handle = state.terminalId ? terminals.get(state.terminalId) : undefined;
+  const renderer = handle?.renderer || null;
 
   useEffect(() => {
     const outside = (ev: Event) => {
@@ -223,8 +224,9 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
     { label: 'Select all', enabled: !!renderer, run: () => renderer!.selectAll() },
     { label: 'Clear', enabled: !!renderer, run: () => renderer!.clear() },
     // the attach's module is loaded at the press, so the terminal's view imports nothing of the composer's hand-over (a
-    // static import, joined to this module's cycle with `./index`, left a transcript row's imports unset under vitest)
-    { label: ATTACH.menuItem, enabled: !!renderer?.hasSelection(), run: () => void import('./attach').then(({ attachFromTerminal }) => attachFromTerminal(state.terminalId!, 'menu')), separated: true },
+    // static import, joined to this module's cycle with `./index`, left a transcript row's imports unset under vitest);
+    // the selection and the session are read at the press, so what the module receives is what the press saw
+    { label: ATTACH.menuItem, enabled: !!renderer?.hasSelection(), run: () => attachAtPress(handle!.info.appSessionId, renderer!.getSelection()), separated: true },
   ];
   return (
     <div
@@ -254,6 +256,10 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
       ))}
     </div>
   );
+}
+
+function attachAtPress(appSessionId: AppSessionId, text: string): void {
+  void import('./attach').then(({ attachText }) => attachText(appSessionId, text));
 }
 
 export function TerminalIcon({ className }: { className?: string }) {
