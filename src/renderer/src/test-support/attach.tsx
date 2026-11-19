@@ -115,7 +115,6 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
         holds.splice(at, 1);
         return new Promise<Result>((resolve, rejectWith) => {
           let landedAs: Result | null = null;
-          let fail!: (error: Error) => void;
           const call: Held = {
             name,
             input: input as SetInput,
@@ -135,11 +134,10 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
             async reject(landed) {
               if (landed) call.land();
               call.answered = true;
-              fail(new Error('the route failed'));
+              rejectWith(new Error('the route failed'));
               await settle();
             },
           };
-          fail = rejectWith;
           held.push(call);
         });
       }
