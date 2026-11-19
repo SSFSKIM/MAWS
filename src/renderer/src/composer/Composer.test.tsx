@@ -2708,7 +2708,10 @@ describe('the mode said aloud', () => {
   const mode = (id: AppSessionId, effective: PermissionMode, requested: PermissionMode = effective) => act(() => live(id, { status: { permissionMode: { requested, effective, refusal: null } } }));
   const region = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLElement>('[data-mode-announcement]')!;
   const said = (index: 0 | 1 = 0) => region(index).textContent;
-  const shiftTab = (index: 0 | 1 = 0) => key(editorOf(index), { key: 'Tab', code: 'Tab', shiftKey: true });
+  const shiftTab = async (index: 0 | 1 = 0) => {
+    act(() => editorOf(index).focus()); // the chord is the box's: it answers only with the keyboard in it
+    await key(editorOf(index), { key: 'Tab', code: 'Tab', shiftKey: true });
+  };
 
   it('is one polite region, visually hidden and empty, mounted with the composer', async () => {
     mode(A, 'default');

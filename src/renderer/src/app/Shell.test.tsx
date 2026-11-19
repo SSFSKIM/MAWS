@@ -1069,13 +1069,13 @@ describe('a page beside the sidebar', () => {
       expect(inView('terminal')).toBe(true);
       act(() => useLayout.getState().openDestination(PAGE));
       const asked = usePanelHost.getState().focus;
-      const holder = document.activeElement;
       act(() => runAction('surface.terminal'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('terminal')).toBe(true);
-      // UX wave U6b-5a (M1, decision 3): leaving the page is all it does; no tool is asked for the keyboard, none moves it
+      // UX wave U6b-5a (M1, decision 3): leaving the page is all it does: no tool is asked for the keyboard, and the
+      // keyboard is where the page's close leaves it, outside the side column
       expect(usePanelHost.getState().focus).toBe(asked);
-      expect(document.activeElement).toBe(holder);
+      expect(document.getElementById('region-panel')?.contains(document.activeElement)).toBe(false);
     });
 
     it('a surface’s key for a tool not in view leaves the page and shows the tool', () => {

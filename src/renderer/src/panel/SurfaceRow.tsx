@@ -4,9 +4,13 @@ import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ActionId } from '@shared/keymap/actions';
 import { Icon, IconButton } from '../app/IconButton';
 import { pageOpen, useLayout } from '../stores/layout';
-import { paramsHoldFile } from '../stores/layout-model'; // UX wave U6b-1
+import { currentSet, paramsHoldFile } from '../stores/layout-model'; // UX wave U6b-1; U6b-5a: currentSet
+import { useComposerStore } from '../stores/composer'; // UX wave U6b-5a
+import { focusedSession, focusFocused } from '../composer/ComposerAppKeys'; // UX wave U6b-5a
+import { focusPaneElement } from '../main/pane-dom'; // UX wave U6b-5a
+import { focusSurfaceStop, sideSurfaceOf } from '../keymap/shell-navigation'; // UX wave U6b-5a
 import { usePanes, openPaneTab } from '../engine-surface/panes';
-import { lastInViewOf, panelHost, usePanelHost } from './host';
+import { lastInViewOf, panelHost, requestFocus, usePanelHost } from './host';
 import { COPY } from './copy';
 import { sideGroups, surfaceRefs, surfaceSession, surfaceTabs } from './surface-model';
 import { cardColumnNow, useCardColumn, useShellView } from '../app/shell-view';
@@ -21,12 +25,19 @@ const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay
 // a tool with no tab is added. Nothing is ever placed under another by it.
 // UX wave U7b (M6, decision 6; the owner's answer to question 4): with a page open it only shows. The page is left, and
 // a tool already in view behind it stays in view, so leaving the page is all it does; any other tool is shown as above.
+// UX wave U6b-5a (M1, decisions 1 to 3): the keyboard follows, the same from every control. A tool shown has it
+// (`focusShown`); the column hidden gives it back (`giveKeyboardBack`). With a page open and the tool in view behind it,
+// leaving the page moves no keyboard.
 export function toggleSurface(toolId: string) {
   const state = useLayout.getState();
   const session = surfaceSession(state);
   if (!state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId)) {
     if (pageOpen(state)) state.closeDestination();
-    else state.hideSurfaces(session);
+    else {
+      const holder = document.activeElement;
+      state.hideSurfaces(session);
+      giveKeyboardBack(holder);
+    }
     return;
   }
   const groups = sideGroups(state, session);
@@ -34,9 +45,41 @@ export function toggleSurface(toolId: string) {
   const held = lastInViewOf(session, toolId) ?? remembered ?? surfaceRefs(state, session).findLast((tab) => tab.toolId === toolId);
   if (!held && (!session || !usePanelHost.getState().tools.has(toolId))) return;
   state.closeDestination();
-  if (held) state.showSurfaceTab(session, held.id);
-  else if (session) panelHost.addTool(toolId, { appSessionId: session });
+  let shown: string | null = null;
+  if (held) {
+    state.showSurfaceTab(session, held.id);
+    shown = held.id;
+  } else if (session) shown = panelHost.addTool(toolId, { appSessionId: session });
   state.setPanel({ collapsed: false });
+  if (shown !== null) focusShown(shown);
+}
+
+// Decision 2: the tool is asked (its own answer: Terminal's shell, Files' view or tree, a mod's pane), and two frames
+// later, once its answer has had a render to land, the keyboard goes to F6's stop for the tab unless it is inside the
+// tab's surface already. Nothing moves when the person pressed a key or a pointer in between (the press that ran this
+// one was dispatched before it began), or when by then the tab is out of view or a dialog holds the keyboard.
+function focusShown(tabId: string): void {
+  requestFocus(tabId);
+  let pressed = false;
+  const heard = () => void (pressed = true);
+  window.addEventListener('keydown', heard, true);
+  window.addEventListener('pointerdown', heard, true);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    window.removeEventListener('keydown', heard, true);
+    window.removeEventListener('pointerdown', heard, true);
+    if (pressed || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
+    focusSurfaceStop(tabId);
+  }));
+}
+
+// Decision 3: with the keyboard in the side column, or held by nothing, the composer of the session on screen takes it,
+// else the pane in front; anywhere else (the sidebar, the main area) it stays.
+function giveKeyboardBack(holder: Element | null): void {
+  const column = document.getElementById('region-panel');
+  if (holder !== null && holder !== document.body && !(column?.contains(holder) ?? false)) return;
+  const session = focusedSession();
+  if (session !== null && useComposerStore.getState().focusTargets.has(session)) focusFocused();
+  else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
 }
 
 // The Session cards icon and its menu row: off when the column is shown, else shown (UX wave U8b: read from its one source).

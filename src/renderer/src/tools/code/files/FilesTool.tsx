@@ -54,6 +54,7 @@ import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; //
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, reviewEntry, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
 import { FinderColumn } from './FinderView';
+import { requestKeyboard } from './finder'; // UX wave U6b-5a
 import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
 import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
@@ -135,8 +136,12 @@ const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
   const held = fileOfTab(useLayout((s) => s.panelParams[state.tabId]));
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;
-  return <FilesTab tabId={state.tabId} appSessionId={ctx.appSessionId} session={ctx.session} held={held} visible={ctx.visible} />;
+  return <FilesTab tabId={state.tabId} appSessionId={ctx.appSessionId} session={ctx.session} held={held} visible={ctx.visible} focus={{ request: ctx.focusRequest, of: state }} />;
 }
+
+// UX wave U6b-5a (M1, decision 4): the last focus request each tab acted on; X5's counter outlives the tab's mounts, so a
+// remount under the same counter takes no keyboard.
+const focusSeen = new WeakMap<FilesState, number>();
 
 const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-border bg-bg px-3 py-1 text-ui-sm';
 
@@ -148,7 +153,7 @@ const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-bord
 // stays mounted (the cap never takes it), and it is not where the keyboard is.
 // UX wave U6b-2 (Decision Log 29): while the tree stands in the file's place or the panel is not on screen, the file is
 // not in view, and a framed file's element is not in the document.
-function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean }) {
+function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean; focus: { request: number; of: FilesState } }) {
   const machine = machineFor(appSessionId);
   const key = held ? fileKey(machine, held.file) : null;
   const [tabWidth, measure] = useWidth();
@@ -184,6 +189,22 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
+  // UX wave U6b-5a (M1, decision 4): a focus request (a surface's key shows the tab) is answered once: the file's view
+  // while the tab holds a file not covered by the tree (the view takes it under the file's key and hands it to its editor
+  // once drawn), else the tree: its selected row, else its first row, else the tree itself. Go to file's field is not
+  // where it lands. A tree not drawn yet takes nothing, and the side column's own step puts the keyboard in the tab.
+  useEffect(() => {
+    if (focus.request <= (focusSeen.get(focus.of) ?? 0)) return;
+    focusSeen.set(focus.of, focus.request);
+    if (key !== null && place !== 'instead') {
+      requestKeyboard({ into: 'file', key });
+      return;
+    }
+    const tree = document.getElementById(treeId)?.querySelector<HTMLElement>('[role="tree"]') ?? null;
+    const row = tree?.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]') ?? tree?.querySelector<HTMLElement>('[role="treeitem"]') ?? null;
+    if (row === null && tree !== null) tree.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
+    (row ?? tree)?.focus({ preventScroll: true });
+  }, [focus.request, focus.of, key, place, treeId]);
   // U6b-3b: the field above the tree, outside its menu, and while it holds text the list in the tree's place
   const column = (
     <FinderColumn

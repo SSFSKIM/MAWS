@@ -33,7 +33,10 @@ import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
-import { nextMode } from '../statusline';
+import { nextMode, type ModeBinding } from '../statusline';
+import { VisuallyHidden } from 'radix-ui'; // UX wave U6b-5a
+import type { PermissionMode } from '@shared/graph/enums'; // UX wave U6b-5a
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels'; // UX wave U6b-5a
 import { useAttention, selectPendingOf } from '../stores/attention';
 import { clearStackNotice, inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, showStackNotice, useComposerStore } from '../stores/composer';
 import { toast, useNotices } from '../stores/notices';
@@ -134,6 +137,47 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
     };
   }, [appSessionId, client]);
 }
+
+// UX wave U6b-5a (M1, decision 5; sequence S4): a change of the permission mode with ⇧Tab is said once per press, as
+// "Permission mode: <the chip's label>", with the mode the chip shows once the change is answered: a refusal at once,
+// with the mode in force; a change taken when the chip shows it (the render after the answer, or a later one), and if the
+// engine reports another mode than the one asked (a fallback), that one. A later press supersedes an earlier one not yet
+// said. A press while the chip takes no change asks nothing and says nothing. Only ⇧Tab writes here: the chip's menu says
+// its own selection, and a change the engine makes by itself is no one's press.
+function useModeAnnouncement(mode: ModeBinding): { said: { press: number; text: string } | null; cycle(): void } {
+  const [said, setSaid] = useState<{ press: number; text: string } | null>(null);
+  const [answered, setAnswered] = useState(0); // a render after each taken answer, so the chip is read then
+  const presses = useRef(0);
+  const waiting = useRef<{ press: number; asked: PermissionMode; from: PermissionMode | null; taken: boolean } | null>(null);
+  const shown = useRef(mode.value);
+  useLayoutEffect(() => void (shown.current = mode.value));
+  useEffect(() => {
+    const press = waiting.current;
+    if (press === null || !press.taken || (mode.value !== press.asked && mode.value === press.from)) return;
+    waiting.current = null;
+    setSaid({ press: press.press, text: modeSentence(mode.value) });
+  }, [mode.value, answered]);
+  const cycle = () => {
+    if (mode.disabled !== null) return;
+    const asked = nextMode(mode.value, mode.autoUnavailable === null);
+    presses.current += 1;
+    const press = presses.current;
+    waiting.current = { press, asked, from: mode.value, taken: false };
+    void mode.set(asked).then((result) => {
+      if (waiting.current?.press !== press) return; // superseded by a later press
+      if (!result.ok) {
+        waiting.current = null;
+        setSaid({ press, text: modeSentence(shown.current) });
+        return;
+      }
+      waiting.current = { ...waiting.current, taken: true };
+      setAnswered((n) => n + 1);
+    });
+  };
+  return { said, cycle };
+}
+
+const modeSentence = (mode: PermissionMode | null): string => `Permission mode: ${PERMISSION_MODE_LABELS[mode ?? 'auto']}`; // the chip's label
 
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
 // shows it has opened (never per mount), the route's model catalogue for the model chip's name (a host read, from the
@@ -315,15 +359,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     [appSessionId],
   );
 
-  // ⇧Tab in the editor cycles the permission mode (C5's composer-scoped `composer.cycleMode`).
+  // ⇧Tab in the editor cycles the permission mode (C5's composer-scoped `composer.cycleMode`); UX wave U6b-5a: and the
+  // change is said in the live region (`useModeAnnouncement`)
   const mode = bindings.mode;
-  useKeyChord(
-    'composer.cycleMode',
-    () => {
-      if (mode.disabled === null) void mode.set(nextMode(mode.value, mode.autoUnavailable === null));
-    },
-    { within: boxRef },
-  );
+  const announcement = useModeAnnouncement(mode);
+  useKeyChord('composer.cycleMode', announcement.cycle, { within: boxRef });
 
   // ---- submissions ---------------------------------------------------------------------------------------------
   const drafts = useDraftPort(appSessionId, setup, client);
@@ -539,6 +579,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   return (
     <section ref={rootRef} aria-label="Composer" data-composer={appSessionId} data-pane-index={paneIndex} className="flex min-w-0 flex-col gap-2">
+      {/* UX wave U6b-5a (M1, Interfaces §F): mounted for the composer's whole life, so a sentence written to it is read; a
+          sentence is a node of its own, so the same sentence written again is read again */}
+      <VisuallyHidden.Root data-mode-announcement="" aria-live="polite">
+        {announcement.said && <span key={announcement.said.press}>{announcement.said.text}</span>}
+      </VisuallyHidden.Root>
       {/* W2: the setup's phase in the dock above the frame, only while it runs (Claude Desktop's dock notices) */}
       {phase !== null && (
         <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
