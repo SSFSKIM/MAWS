@@ -87,6 +87,7 @@ const SHELL_FOCUS_ACTIONS: ReadonlySet<ActionId> = new Set([
   // the column; all nine, since the six with no default chord can be bound
   'surface.terminal', 'surface.review', 'surface.files', 'surface.browser', 'surface.source-control', 'surface.subagents',
   'surface.background', 'surface.session-info', 'surface.ask-sheet',
+  'go.back', 'go.forward', // UX wave U6b-5a (M3): a step shows a tab, a page or the Overview, and a browser page keeps no keyboard over it
 ]);
 
 function dispatchAction(id: ActionId, arg: number | null, emit: Emit, menuWindow?: BaseWindow): void {

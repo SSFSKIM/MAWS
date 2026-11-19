@@ -20,6 +20,7 @@ import { connectReaderGrades } from './sessions/share/reader-connect'; // board 
 import { queryClient } from './ipc/query';
 import { connectActions, connectKeys } from './keymap/dispatcher';
 import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
+import { connectVisits } from './keymap/visits'; // UX wave U6b-5a (M3): Back and Forward
 import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
@@ -188,6 +189,7 @@ export function App() {
   useEffect(() => connectLocalOwner(), []); // P5 O8 M5b: this Mac's one owner, for Add owner on its own sessions
   useEffect(() => connectReaderGrades(), []); // board 525: what another member's session refused is asked afresh when its listing or the member moves
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
+  useEffect(() => connectVisits(), []); // UX wave U6b-5a (M3): the record of places Back and Forward walk, from the hydrated layout
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast
   useEffect(() => connectChannelAction(), []); // U11a M5: View › Project channel, while the tab in front has a project with a channel

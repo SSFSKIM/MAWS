@@ -114,13 +114,15 @@ describe('Back and Forward over the layout', () => {
     expect(record().entries).toContainEqual(T('a')); // the control: the same read finds a tab that stayed
   });
 
-  it('shows nothing for a step whose tab left the strip in the same turn, and drops the entry at the next read', async () => {
+  it('shows nothing and moves nothing for a step whose tab left the strip in the same turn, and drops the entry at the next read', async () => {
     await visit('a', 'b', 'c');
     layout().closeTab(tabOf('b')); // not in front: the strip still shows c
     runAction('go.back');
     expect(frontOf(layout())).toBe(tabOf('c'));
     await turn();
-    expect(record().entries).toEqual([T('a'), T('c')]);
+    expect(record()).toEqual({ entries: [T('a'), T('c')], at: 1 }); // still on what the strip shows
+    runAction('go.back'); // the control: a step to a tab that stayed shows it
+    expect(frontOf(layout())).toBe(tabOf('a'));
   });
 });
 
