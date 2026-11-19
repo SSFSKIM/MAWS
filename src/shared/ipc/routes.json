@@ -145,6 +145,7 @@
   "daemon.e2eBrowserView",
   "engine.observedFacts",
   "files.chooseOutside",
+  "files.follow",
   "files.grant",
   "files.list",
   "files.listOutside",
