@@ -88,9 +88,10 @@ export const STOP_WAIT_MS = 2000;
 
 /**
  * `machine` acts whose sealed action the services' ledger does not keep: their args are bulk bytes (P5 O7 M4), or (P5 O8
- * M6a) a composer's draft, written at each pause in the typing, which no handler reads a proof from.
+ * M6a) a composer's draft, written at each pause in the typing, which no handler reads a proof from, or (UX wave U6f,
+ * point 3) the save of a file outside a session's folders, whose args hold the file's text.
  */
-export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload', 'session.drafts.set']);
+export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload', 'session.drafts.set', 'files.writeOutside']);
 /** The setup acts that read in their checked directory, and so take the asking member's opens with it. */
 const OPENED_ACTS: ReadonlySet<string> = new Set(['session.projects.addFolder', 'session.projects.relocate']);
 

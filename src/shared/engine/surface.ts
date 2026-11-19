@@ -23,6 +23,14 @@ export type SurfaceViewport = z.infer<typeof SurfaceViewportSchema>;
 // R2's shell sites and R3's seven transcript sites (waves plan §2 K2).
 export const SURFACE_SITES = ['AbovePrompt', 'SessionMode', 'PromptHint', 'Spinner', 'Pane', ...TRANSCRIPT_SITES] as const;
 export type SurfaceSite = (typeof SURFACE_SITES)[number];
+// UX wave U2b (the execution document, §E and §F): the sites MAWS asks through `session.ui.renderSite`, the command whose
+// component is an open string the engine host checks against its own list (`RENDER_SITE_COMPONENTS`,
+// src/engine-host/ipc.ts), since a name added to `session.ui.render`'s closed set is a wire major. An engine host of an
+// earlier build answers `unknown_command`, and the site then draws MAWS's own.
+export const RENDER_SITE_ONLY = ['TurnDuration'] as const;
+export type RenderSiteOnly = (typeof RENDER_SITE_ONLY)[number];
+export type AskedSite = SurfaceSite | RenderSiteOnly;
+export const isRenderSiteOnly = (component: AskedSite): component is RenderSiteOnly => (RENDER_SITE_ONLY as readonly string[]).includes(component);
 // The two sites that scroll and hold the keyboard.
 export const ScrollSiteSchema = z.enum(['Pane', 'AbovePrompt']);
 export type ScrollSite = z.infer<typeof ScrollSiteSchema>;

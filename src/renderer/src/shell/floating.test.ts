@@ -12,10 +12,12 @@ import { persistLayout, useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices'; // P3-F wave S (F6)
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
-import { cardHost, cardSession, cardSizeKey, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, openCard, placeCard, splitFloat, useFloatingCard } from './floating';
+import { cardHost, cardSession, cardSizeKey, chatPresentation, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, hideChat, openCard, placeCard, presentationForNewSession, showChat, showChatHeaderGone, splitFloat, useFloatingCard, useShowChatHeader, type ChatPresentation } from './floating';
+import { act, renderHook } from '@testing-library/react'; // UX wave U10b, M6
+import { clearEditorHost, registerEditorHost } from '../panel/editor-host'; // UX wave U10b, M6
 import { item, T0 } from '../../../../test/support/builders'; // P4-B3 M2
 import { useAttention } from '../stores/attention'; // P4-B3 M2
-import { activeTab } from '../stores/layout-model'; // P4-B3 M2
+import { activeTab, currentSet } from '../stores/layout-model'; // P4-B3 M2; UX wave U10b, M6: currentSet
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M2
 
 const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's ids are addresses
@@ -49,7 +51,7 @@ beforeEach(() => {
   resetShellStores();
   // Panel floats now require a real tool surface, never the session cards alone.
   useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' }]]) });
-  useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null });
+  useFloatingCard.setState({ closed: false, hidden: false, pillTakesFocus: false, showChatTakesFocus: false, column: null, columnDrag: null, pillHost: null });
   useComposerStore.setState({ focusOnMount: new Set() });
   off = registerShellActions(fakeClient({}).client);
 });
@@ -657,4 +659,400 @@ describe('the split’s card', () => {
     dockPanel();
     expect(takeTranscriptCarry(A)).toBeNull();
   });
+});
+
+// UX wave U10b (O-43; its execution document, §F.1 and M6): the float has three presentations, the card, the bar (the
+// composer's box alone, in code still the pill) and hidden. Each row of §F.1's table is a case that asserts the next
+// presentation and where the keyboard goes: the session's next composer to mount (the card's composer or the bar's
+// editor, by the presentation), Open conversation on the bar, Show chat in the header, or where it was (no mark, and the
+// focused element kept). S (session A) on the left beside an artifact on the right, whose body registers a header.
+describe('the float’s three presentations', () => {
+  const B = at('app-b' as AppSessionId);
+  const sessionTab = (id: AppSessionId): TabRef => ({ id: tabId({ kind: 'session', appSessionId: id }), kind: 'session', appSessionId: id, pinned: false });
+  const S = sessionTab(A);
+  const MEMO: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'memo-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'memo-1', machine: TEST_MACHINE, pinned: false };
+  const NOTES = { kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE } as const; // a tab whose body registers no header
+  const split = (): Strip => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [S], activeTabId: S.id }, { tabs: [MEMO], activeTabId: MEMO.id }], focusedPane: 1, splitRatio: 0.4 });
+  const layout = () => useLayout.getState();
+  const presentation = (): ChatPresentation | 'no float' => (cardHost(layout()) === null ? 'no float' : chatPresentation(useFloatingCard.getState()));
+  const name = (id: AppSessionId) => (id === A ? 'A' : id === B ? 'B' : String(id));
+  function keyboard(): string {
+    const { pillTakesFocus, showChatTakesFocus } = useFloatingCard.getState();
+    const goes = [...[...useComposerStore.getState().focusOnMount].map((id) => `the composer of ${name(id)}`), ...(pillTakesFocus ? ['Open conversation'] : []), ...(showChatTakesFocus ? ['Show chat'] : [])];
+    return goes.length === 0 ? 'where it was' : goes.join(' and ');
+  }
+  const unmark = () => {
+    useComposerStore.setState({ focusOnMount: new Set() });
+    useFloatingCard.setState({ pillTakesFocus: false, showChatTakesFocus: false });
+  };
+  const pending = (...items: ReturnType<typeof attention>[]) => useAttention.setState({ bySession: new Map([[items[0].appSessionId, items]]) });
+  const microtasks = () => new Promise<void>((resolve) => queueMicrotask(resolve));
+  // An element of the artifact that holds the keyboard, or the bar's editor (inside the bar's `data-compact-session`)
+  function focusIn(where: 'the artifact' | 'the bar'): HTMLElement {
+    const box = document.createElement('div');
+    if (where === 'the bar') box.dataset.compactSession = A;
+    const input = document.createElement('textarea');
+    box.append(input);
+    document.body.append(box);
+    input.focus();
+    return input;
+  }
+
+  // The split's float in each presentation, the marks cleared. The bar is Expand's, with the keyboard then moved to the
+  // artifact (a click in it), unless `keyboardInBar`; the card is the bar's Open conversation; hidden is the bar's Hide chat.
+  function splitIn(to: ChatPresentation, opts: { keyboardInBar?: boolean } = {}): void {
+    runAction('main.expandArtifactPane'); // the artifact's pane is focused, the session beside it
+    if (to === 'card') openCard();
+    else if (!opts.keyboardInBar) layout().focusPane(1);
+    if (to === 'hidden') hideChat();
+    unmark();
+  }
+  // The panel's float over its surface in each presentation, the marks cleared.
+  function panelIn(to: ChatPresentation): void {
+    useLayout.setState({ main: mainShowing(A) });
+    floatPanel();
+    if (to !== 'card') closeCard();
+    if (to === 'hidden') hideChat();
+    unmark();
+  }
+  const enterIn = (host: 'split' | 'panel', to: ChatPresentation) => (host === 'split' ? splitIn(to) : panelIn(to));
+
+  let releaseHeader: () => void;
+  beforeEach(() => {
+    useAttention.setState({ bySession: new Map() });
+    useLayout.setState({ main: split() });
+    useNotices.setState({ notices: [] });
+    const scope = { surface: 'main', tabId: MEMO.id } as const;
+    registerEditorHost(scope, { title: 'Invented memo' });
+    releaseHeader = () => clearEditorHost(scope);
+  });
+  afterEach(() => {
+    releaseHeader();
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.body.replaceChildren();
+  });
+
+  // ---- §F.1's table, row by row ----
+
+  it('split → Expand pane → bar; the keyboard in the bar’s editor', () => {
+    runAction('main.expandArtifactPane');
+    expect([presentation(), keyboard()]).toEqual(['bar', 'the composer of A']);
+  });
+
+  for (const host of ['split', 'panel'] as const) {
+    describe(`the ${host}’s float`, () => {
+      it('card → the card’s Close → bar; the keyboard on Open conversation', () => {
+        enterIn(host, 'card');
+        closeCard();
+        expect([presentation(), keyboard()]).toEqual(['bar', 'Open conversation']);
+      });
+
+      it('bar → Open conversation → card; the keyboard in the card’s composer', () => {
+        enterIn(host, 'bar');
+        openCard();
+        expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+      });
+
+      it('bar → Hide chat → hidden; the keyboard on Show chat in the header', () => {
+        enterIn(host, 'bar');
+        hideChat();
+        expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+      });
+
+      it('hidden → Show chat → bar; the keyboard in the bar’s editor', () => {
+        enterIn(host, 'hidden');
+        showChat();
+        expect([presentation(), keyboard()]).toEqual(['bar', 'the composer of A']);
+      });
+
+      it.each(['permission', 'question', 'plan', 'elicitation', 'dialog'] as const)('bar → a new %s request, the keyboard in the bar → card; the keyboard in the card’s composer', (kind) => {
+        enterIn(host, 'bar');
+        focusIn('the bar');
+        pending(attention(A, kind, T0));
+        expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+      });
+
+      it.each(['permission', 'question', 'plan', 'elicitation', 'dialog'] as const)('bar → a new %s request, the keyboard elsewhere → card; the keyboard where it was', (kind) => {
+        enterIn(host, 'bar');
+        const held = focusIn('the artifact');
+        pending(attention(A, kind, T0));
+        expect([presentation(), keyboard(), document.activeElement === held]).toEqual(['card', 'where it was', true]);
+      });
+
+      it.each(['permission', 'question', 'plan', 'elicitation', 'dialog'] as const)('hidden → a new %s request → hidden; the keyboard and the focused element where they were', (kind) => {
+        enterIn(host, 'hidden');
+        const held = focusIn('the artifact');
+        pending(attention(A, kind, T0));
+        expect([presentation(), keyboard(), document.activeElement === held]).toEqual(['hidden', 'where it was', true]);
+      });
+
+      it('hidden → the header gone → bar; the keyboard where it was', () => {
+        enterIn(host, 'hidden');
+        useFloatingCard.setState({ showChatTakesFocus: true }); // Hide chat's mark for Show chat, never consumed
+        const held = focusIn('the artifact');
+        showChatHeaderGone();
+        expect([presentation(), keyboard(), document.activeElement === held]).toEqual(['bar', 'where it was', true]);
+      });
+
+      it('hidden → Dock → no float, both flags cleared, the keyboard as today', () => {
+        enterIn(host, 'hidden');
+        if (host === 'split') dockSplit();
+        else dockPanel();
+        expect([presentation(), keyboard()]).toEqual(['no float', 'the composer of A']);
+        expect(useFloatingCard.getState()).toMatchObject({ closed: false, hidden: false, showChatTakesFocus: false, pillTakesFocus: false });
+      });
+
+      // §I: Hide chat wins in either order within one tick. The raise ran first and opened the card, marking the
+      // composer (the keyboard was in the bar); Hide chat in the same tick leaves the chat hidden, no mark pending.
+      it('a request arriving in the same tick before Hide chat is judged against the state the tick leaves: hidden, no card, no mark left', async () => {
+        enterIn(host, 'bar');
+        focusIn('the bar');
+        pending(attention(A, 'permission', T0));
+        hideChat();
+        expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+        await microtasks();
+        expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+        showChat();
+        expect(presentation(), 'the request was seen: Show chat brings the bar, not the card').toBe('bar');
+      });
+    });
+  }
+
+  it.each([
+    ['the session chosen in the sidebar', () => layout().openSession(A)],
+    ['its tab', () => layout().activateTab(S.id)],
+    ['⇧⌘\\', () => runAction('pane.focusOther')],
+  ])('bar → %s (the split’s float) → card; the keyboard in the card’s composer', (_, run) => {
+    splitIn('bar');
+    run();
+    expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+  });
+
+  it('bar → ⌥⌘B over a side surface → card; the keyboard in the card’s composer', () => {
+    panelIn('bar');
+    runAction('panel.float');
+    expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+  });
+
+  it.each([
+    ['the session chosen in the sidebar', () => layout().openSession(A)],
+    ['its tab', () => layout().activateTab(S.id)],
+    ['⇧⌘\\', () => runAction('pane.focusOther')],
+  ])('hidden → %s (the split’s float) → card; the keyboard in the card’s composer', (_, run) => {
+    splitIn('hidden');
+    run();
+    expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+  });
+
+  // B7: while hidden the side column's float control keeps its label and its act, which opens the card
+  it('hidden → ⌥⌘B over a side surface → card; the keyboard in the card’s composer', () => {
+    panelIn('hidden');
+    runAction('panel.float');
+    expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+  });
+
+  it('hidden → Restore split → no float, both flags cleared, the keyboard as today', () => {
+    splitIn('hidden');
+    runAction('main.expandArtifactPane'); // the artifact's pane is focused: its Expand is Restore split
+    expect([presentation(), keyboard(), splitFloat(layout().main)]).toEqual(['no float', 'the composer of A', null]);
+    expect(useFloatingCard.getState()).toMatchObject({ closed: false, hidden: false, showChatTakesFocus: false });
+  });
+
+  it('hidden → the split’s float ending (S’s tab closes) → no float, both flags cleared', () => {
+    splitIn('hidden');
+    useFloatingCard.setState({ showChatTakesFocus: true }); // Hide chat's mark for Show chat, never consumed
+    layout().closeTab(S.id);
+    expect(presentation()).toBe('no float');
+    expect(useFloatingCard.getState()).toMatchObject({ closed: false, hidden: false, showChatTakesFocus: false });
+  });
+
+  it('hidden → the panel’s float ending (a tab with no session comes in front) → no float, both flags cleared', async () => {
+    panelIn('hidden');
+    useFloatingCard.setState({ showChatTakesFocus: true }); // Hide chat's mark for Show chat, never consumed
+    layout().openTab({ kind: 'diagnostics' });
+    await microtasks(); // the dock of a float with no session to draw
+    expect([presentation(), layout().regions.panel.floating]).toEqual(['no float', false]);
+    expect(useFloatingCard.getState()).toMatchObject({ closed: false, hidden: false, showChatTakesFocus: false });
+  });
+
+  it('a float after an end starts as the card: nothing of hidden is carried', () => {
+    splitIn('hidden');
+    dockSplit();
+    layout().focusPane(1);
+    floatSplit(S.id);
+    expect(presentation()).toBe('card');
+  });
+
+  // The owner's answer of 2026-11-15 to the card "Other session" ("As you left it"; H12)
+  it.each(['card', 'bar', 'hidden'] as const)('over a side surface, another session’s tab coming in front leaves a %s as it was, for that session; the keyboard where it was', (left) => {
+    useLayout.setState({
+      main: mainShowing(A, B),
+      panelBySession: new Map([[A, { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' }], [B, { tabs: [{ id: 'terminal-2', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-2' }]]),
+    });
+    floatPanel();
+    if (left !== 'card') closeCard();
+    if (left === 'hidden') hideChat();
+    unmark();
+    layout().activateTab(sessionTab(A).id);
+    expect([cardSession(layout()), presentation(), keyboard()]).toEqual([A, left, 'where it was']);
+    layout().activateTab(sessionTab(B).id);
+    expect([cardSession(layout()), presentation(), keyboard()]).toEqual([B, left, 'where it was']);
+  });
+
+  it('presentationForNewSession answers what the person left', () => {
+    expect((['card', 'bar', 'hidden'] as const).map(presentationForNewSession)).toEqual(['card', 'bar', 'hidden']);
+  });
+
+  // ---- what M6 also proves ----
+
+  it('a request arriving in the same tick as Hide chat is judged against the state the tick leaves: hidden, nothing opens', async () => {
+    splitIn('bar', { keyboardInBar: true });
+    focusIn('the bar');
+    hideChat();
+    pending(attention(A, 'permission', T0));
+    expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+    queueMicrotask(() => pending(attention(A, 'permission', T0), attention(A, 'question', T0)));
+    await microtasks();
+    expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+  });
+
+  it('a request raised in an earlier tick stays the card: a Hide chat after it does nothing', async () => {
+    splitIn('bar');
+    pending(attention(A, 'permission', T0));
+    await microtasks();
+    hideChat();
+    expect(presentation()).toBe('card');
+  });
+
+  it('a card the person opened after a raise in the same tick is not taken back by Hide chat', () => {
+    splitIn('bar');
+    pending(attention(A, 'permission', T0));
+    openCard();
+    hideChat();
+    expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+  });
+
+  it('a request seen while hidden does not open the bar Show chat brings back; the next new one does', () => {
+    splitIn('hidden');
+    pending(attention(A, 'permission', T0));
+    showChat();
+    expect(presentation()).toBe('bar');
+    pending(attention(A, 'permission', T0), attention(A, 'question', T0));
+    expect(presentation()).toBe('card');
+  });
+
+  it('a request of another session leaves a hidden chat hidden', () => {
+    splitIn('hidden');
+    pending(attention(B, 'permission', T0));
+    expect([presentation(), keyboard()]).toEqual(['hidden', 'where it was']);
+  });
+
+  it('Hide chat on the split’s float puts the focused pane on the artifact, so the sidebar, its tab and ⇧⌘\\ reach the card', () => {
+    splitIn('bar', { keyboardInBar: true });
+    expect(currentSetOf().focusedPane, 'Expand leaves the bar standing for S').toBe(0);
+    hideChat();
+    expect(currentSetOf().focusedPane).toBe(1);
+  });
+
+  // M7 decisions 6 and 7: after Show chat the keyboard is in the box's editor. The mark and the focused pane agree: the
+  // bar's editor (S's session's composer) takes the keyboard when it mounts, and the focused pane is S's.
+  it('Show chat on the split’s float puts the focused pane on S, as Expand leaves it, marks the bar’s editor, and opens no card', () => {
+    splitIn('hidden');
+    showChat();
+    expect([presentation(), keyboard(), currentSetOf().focusedPane]).toEqual(['bar', 'the composer of A', 0]);
+  });
+
+  // Today's behaviour, kept (the architect's ruling of 2026-11-15; the fix is ticket six hundred ninety): with the
+  // keyboard in the bar the focused pane is already S's, so choosing S's session in the sidebar, or its tab, moves nothing
+  // and opens nothing. No synthetic move of the focus to the artifact here.
+  for (const [state, enter] of [
+    ['right after Expand', () => runAction('main.expandArtifactPane')],
+    ['right after Show chat', () => splitIn('hidden') /* the focused pane is the artifact's */],
+  ] as const) {
+    it.each([
+      ['the session chosen in the sidebar', () => layout().openSession(A)],
+      ['its tab', () => layout().activateTab(S.id)],
+    ])(`the split’s float ${state}: %s leaves the bar, and throws nothing`, (_, run) => {
+      enter();
+      if (state === 'right after Show chat') showChat();
+      expect(currentSetOf().focusedPane, 'the bar stands for S').toBe(0);
+      expect(run).not.toThrow();
+      expect(presentation()).toBe('bar');
+    });
+
+    // ⇧⌘\ from there focuses the other pane, the artifact's, as it does today: it opens no card either
+    it(`the split’s float ${state}: ⇧⌘\\ moves the focused pane to the artifact and leaves the bar`, () => {
+      enter();
+      if (state === 'right after Show chat') showChat();
+      runAction('pane.focusOther');
+      expect([presentation(), currentSetOf().focusedPane]).toEqual(['bar', 1]);
+    });
+  }
+
+  it('Hide chat acts only on the bar; Show chat and the header’s going only on a hidden chat', () => {
+    splitIn('card');
+    hideChat();
+    showChat();
+    showChatHeaderGone();
+    expect([presentation(), keyboard()]).toEqual(['card', 'where it was']);
+    closeCard();
+    showChat();
+    showChatHeaderGone();
+    expect([presentation(), keyboard()]).toEqual(['bar', 'Open conversation']);
+  });
+
+  it('Hide chat is refused where no header holds Show chat: the split’s float over a tab that registers none', () => {
+    splitIn('bar');
+    layout().openTab(NOTES, { pane: 1 });
+    hideChat();
+    expect([presentation(), keyboard()]).toEqual(['bar', 'where it was']);
+  });
+
+  it('setClosed, and every open of the card, clear hidden', () => {
+    splitIn('hidden');
+    useFloatingCard.getState().setClosed(true);
+    expect(presentation()).toBe('bar');
+    hideChat();
+    useFloatingCard.getState().setClosed(false);
+    expect(useFloatingCard.getState()).toMatchObject({ closed: false, hidden: false, showChatTakesFocus: false });
+  });
+
+  describe('useShowChatHeader (§F.2)', () => {
+    it('is false with no float, true for the panel’s float always', () => {
+      const { result, unmount } = renderHook(() => useShowChatHeader());
+      expect(result.current).toBe(false);
+      act(() => {
+        useLayout.setState({ main: mainShowing(A) });
+        floatPanel();
+      });
+      expect(result.current).toBe(true);
+      unmount();
+    });
+
+    it('for the split’s float, is true while the tab in front of the other pane registers a header', () => {
+      const { result, unmount } = renderHook(() => useShowChatHeader());
+      act(() => void floatSplit(S.id));
+      expect(result.current).toBe(true);
+      act(() => layout().openTab(NOTES, { pane: 1 }));
+      expect(result.current, 'a file’s tab registers no header').toBe(false);
+      act(() => layout().activateTab(MEMO.id));
+      expect(result.current).toBe(true);
+      act(() => releaseHeader());
+      expect(result.current, 'the artifact’s registration gone').toBe(false);
+      unmount();
+    });
+
+    it('turning false is the moment the float’s layer turns a hidden chat into the bar, which stays the bar when the header comes back', () => {
+      const { result, unmount } = renderHook(() => useShowChatHeader());
+      act(() => splitIn('hidden'));
+      act(() => layout().openTab(NOTES, { pane: 1 }));
+      expect(result.current).toBe(false);
+      act(() => showChatHeaderGone());
+      act(() => layout().activateTab(MEMO.id));
+      expect([result.current, presentation()]).toEqual([true, 'bar']);
+      unmount();
+    });
+  });
+
+  const currentSetOf = () => currentSet(layout().main);
 });

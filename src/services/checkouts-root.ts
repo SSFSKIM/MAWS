@@ -7,6 +7,7 @@
 // embedded binding is the suites'); a release or a yield also waits for scm's runs in flight (D14).
 import type { ClientPort } from '@shared/client/port';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Home } from '@shared/machine/home-folders';
 import type { ServicesBus } from '@shared/spine/bus';
 import type { SpineView } from '@shared/spine/view';
 import { fileAdmission } from './files/admission';
@@ -44,6 +45,10 @@ export interface CheckoutsDeps {
   grants: FileGrants | null;
   sent: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
   own: () => readonly string[];
+  // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §B): the machine's home
+  // and platform as `machine.folders.list` reads them, which another machine's outside acts walk under; absent: the
+  // service's own (`machineHome`, this process's platform)
+  where?: Home;
 }
 
 export interface CheckoutsRoot extends Settling {
@@ -51,7 +56,7 @@ export interface CheckoutsRoot extends Settling {
   stop(): void;
 }
 
-export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots, transcript, grants, sent, own }: CheckoutsDeps): CheckoutsRoot {
+export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots, transcript, grants, sent, own, where }: CheckoutsDeps): CheckoutsRoot {
   // The read-only git service (C4 M6): git.* for any directory in a repository, and git.changed for watched roots
   const git = new GitService({ emit: (change) => void bus.emit('git.changed', change), log: (line) => console.log(line) }); // P5 O3-E: [git] lines in mawsd's log
   registerGitHandlers(git, bus);
@@ -67,8 +72,9 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
   // P5 O3-E M3 (Interfaces §F): files.upload into the session's attachments directory, its roots recorded under the
   // spine's lock and swept at the start and hourly while the checkouts run. UX wave U6c: a file outside the roots that the
   // session's own transcript links, read-only, for this machine's callers that ask by name: one search and its queue for
-  // the daemon (./files/named.ts)
-  const uploadLog = (line: string) => console.warn(`[files] ${line}`);
+  // the daemon (./files/named.ts). UX wave U6f: each save and choice another machine makes outside a session's folders
+  // is a line of the same `[files]` log, in mawsd's log of this machine
+  const filesLog = (line: string) => console.warn(`[files] ${line}`);
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): which entries of
   // a listing git ignores, one bounded check per listing, at most four at once; its runs end at the stop, before files'
   const ignore = createIgnoreCheck();
@@ -82,10 +88,12 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
     sent,
     own,
     ignored: ignore.names,
-    upload: uploadRoots ? createUpload({ sessions: view, roots: uploadRoots, git: createGitRunner(), log: uploadLog }) : undefined,
+    outsideLog: filesLog, // U6f
+    ...(where === undefined ? {} : { home: () => where.home, platform: where.platform }), // U6f
+    upload: uploadRoots ? createUpload({ sessions: view, roots: uploadRoots, git: createGitRunner(), log: filesLog }) : undefined,
     readUploads: createUploadReader({ sessions: view }), // P5 O7 M8: a remote send's uploads, read for the endpoint
   });
-  const stopUploadSweep = uploadRoots ? scheduleUploadSweep(uploadRoots, { log: uploadLog }) : () => {};
+  const stopUploadSweep = uploadRoots ? scheduleUploadSweep(uploadRoots, { log: filesLog }) : () => {};
   // E6: source control over the session's checkout (reader R15); mutations through the mutating runner under the
   // login-shell capture, which is also the environment its trust gate reads (the engine's); after each mutation git's
   // watcher re-reads the root, so git.changed tells every surface. Push and gh stream as scm.remote.output; the stop ends

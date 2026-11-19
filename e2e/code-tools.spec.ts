@@ -55,13 +55,18 @@ async function storedFiles(page: Page): Promise<{ beside: string[]; main: string
 }
 
 // Where the keyboard is, as the page says: in Go to file's field; or inside a file's text, answered as the key of the file
-// view whose text holds it (null anywhere else, a tab's button among them).
+// view whose text holds it. Anywhere else (a tab's button among them) it answers where the keyboard is instead, which a
+// failed wait on a key prints: the active element's tag, its role and `data-key`, whether it is a file view's body
+// (`[data-file-keyboard]`) or the document's body, the key of the file view it is in, and whether the page has the focus.
 const fieldHasKeyboard = (page: Page) => page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false);
 const keyboardInText = (page: Page) =>
   page.evaluate(() => {
     const active = document.activeElement;
-    if (active === null || active.getAttribute('role') === 'tab' || active.closest('.cm-content') === null) return null;
-    return active.closest('[data-file-keyboard]')?.getAttribute('data-key') ?? null;
+    const key = active?.closest('[data-file-keyboard]')?.getAttribute('data-key') ?? null;
+    if (active !== null && active.getAttribute('role') !== 'tab' && active.closest('.cm-content') !== null && key !== null) return key;
+    const where = active === null ? 'no active element' : `<${active.tagName.toLowerCase()}> role=${active.getAttribute('role')} data-key=${active.getAttribute('data-key')}`;
+    const what = active === document.body ? 'the document’s body' : active?.matches('[data-file-keyboard]') ? 'a file view’s body' : key !== null ? `inside the file view ${key}, not its text` : 'outside every file view';
+    return `not in a file’s text: ${where}, ${what}; the page ${document.hasFocus() ? 'has' : 'lacks'} the focus`;
   });
 
 // ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): a session's file in its frame --
@@ -720,6 +725,29 @@ test.describe('the product in stub mode over a scratch repository', () => {
     );
   });
 
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, A3): a file's bar hands the file to an
+  // editor at the cursor's line, and a terminal the file's folder (never the file), each by the path the daemon admits.
+  test('Open in, in a file’s bar, hands the file at the cursor’s line to an editor and its folder to a terminal', async () => {
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, 'src/app.ts');
+        const logged = () => readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' });
+        await viewer.locator('[data-code-view] .cm-content').click();
+        await p.page.keyboard.press('Meta+ArrowUp'); // the document's start
+        for (let i = 0; i < 4; i++) await p.page.keyboard.press('ArrowDown'); // line 5, in view
+        await viewer.getByRole('button', { name: 'Open in', exact: true }).click();
+        const apps = p.page.getByRole('menu').filter({ has: p.page.getByRole('menuitem', { name: 'Finder', exact: true }) });
+        await expect(apps.getByRole('menuitem')).toHaveText(['Zed', 'Terminal', 'Finder']);
+        await apps.getByRole('menuitem', { name: 'Zed', exact: true }).click();
+        await expect.poll(logged).toBe(`open-in zed ${p.scratch.path('src/app.ts')}:5\n`);
+        await viewer.getByRole('button', { name: 'Open in', exact: true }).click();
+        await p.page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+        await expect.poll(logged).toBe(`open-in zed ${p.scratch.path('src/app.ts')}:5\nopen-in terminal ${p.scratch.path('src')}\n`);
+      },
+      (scratch) => void (scratch.env.MAWS_E2E_OPEN_IN_APPS = 'zed'),
+    );
+  });
+
   // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B1, B8): a PDF a session's path
   // names is drawn in its own tab by Chromium's viewer, from a token whose URL ends in the file's name; its toolbar is
   // hidden beside the chat and kept in the main area (card 4); Open externally is the bar's; no artifact is made.
@@ -804,8 +832,9 @@ test.describe('the product in stub mode over a scratch repository', () => {
         writeFileSync(scratch.path('web/unlabelled.html'), `<!doctype html><html><head><title>Unlabelled</title></head><body><p id="words">${UNLABELLED_WORDS}</p></body></html>`);
         writeFileSync(scratch.path('web/labelled.html'), Buffer.from('<!doctype html><html><head><meta charset="windows-1252"><title>Labelled</title></head><body><p id="words">Café naïve</p></body></html>', 'latin1'));
       },
-      // the page's own console: the stylesheet and the script beside it, each refused by the frame's CSP; nothing else
-      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the stylesheet '[^']*\/style\.css' because it violates the following Content Security Policy directive: "style-src /, /^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the script '[^']*\/app\.js' because it violates the following Content Security Policy directive: "script-src /] },
+      // the page's own console: the stylesheet and the script beside it, each refused by the frame's CSP; nothing else (in
+      // the pinned Electron's wording, "Loading the … '<url>' violates", which replaced Chromium's "Refused to load the …")
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Loading the stylesheet '[^']*\/style\.css' violates the following Content Security Policy directive: "style-src /, /^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Loading the script '[^']*\/app\.js' violates the following Content Security Policy directive: "script-src /] },
     );
   });
 
@@ -914,7 +943,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       }, soundTab);
       await expect(sideColumn(p.page).locator(`${soundTab} [data-files-tree][data-place="instead"]`), 'the tree in the file’s place').toBeVisible();
       await expect(p.page.locator('audio[data-artifact-media="audio"]'), 'no audio element left').toHaveCount(0);
-      await sideColumn(p.page).locator(`${soundTab} [data-files-tree-toggle]`).click();
+      // the tree's own button (the file's bar keeps its copy, hidden and inert with the file, while the tree stands in its place)
+      await sideColumn(p.page).locator(`${soundTab} [data-files-tree][data-place="instead"] [data-files-tree-toggle]`).click();
       const back = sound.locator('audio[data-artifact-media="audio"]');
       await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
       await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'at the time it left' }).toBeCloseTo(left, 0);
@@ -1447,6 +1477,11 @@ test.describe('the product over a session discovered from its transcript', () =>
     try {
       const sid = '5e551011-0000-4000-8000-0000000000d1';
       const worktree = await repo.addManagedWorktree('w1');
+      // The repository as the engine leaves one it makes a managed worktree in: its runtime-exclude block (which MAWS
+      // writes too, RUNTIME_EXCLUDE_BLOCK in src/services/git/worktrees.ts) excludes `.claude/worktrees/`, so the main
+      // checkout does not read the worktree's folder as an untracked `.claude/`
+      mkdirSync(repo.path('.git/info'), { recursive: true });
+      appendFileSync(repo.path('.git/info/exclude'), '**/.claude/worktrees/\n');
       const sub = join(worktree, 'sub');
       mkdirSync(sub);
       // One change in each checkout, so Review and Source control say which checkout they read.
@@ -2402,8 +2437,10 @@ test.describe('UX wave U6b-3b: Go to file', () => {
   // each opened by its menu row with the side column closed and the composer's editor the active element: waits on the
   // modal holding the keyboard; Go ▸ Go to file (whose helper waits on the row enabled); then waits on the modal gone, Files
   // in view and the field being the active element; after Esc in the empty field, on the composer's editor being the active
-  // element, the modal's opener. Then the Rename sheet from the session's row in the sidebar: waits on the sheet in view
-  // and polls the menu row to disabled; after Esc, on the sheet gone, and polls the row to enabled.
+  // element, the modal's opener. Then a sheet this launch has (the Mac run's finding: the stub-mode launch registers no
+  // Rename, Decision Log 17): src/app.ts opened beside the chat and a line typed into it, waited on the view being dirty;
+  // its tab's close asks "Save changes to app.ts?"; waits on that sheet in view and polls the menu row to disabled; after
+  // Esc, on the sheet gone and the tab still dirty, and polls the row to enabled. Then Don’t save, so no edit outlives it.
   test('G10: Go to file while the Command palette or Keyboard shortcuts holds the keyboard closes it and puts the keyboard in the field, Esc giving it back to the composer; while a sheet is open the menu row is disabled', async () => {
     await withProduct(async (p) => {
       const composer = composerOf(p);
@@ -2422,15 +2459,25 @@ test.describe('UX wave U6b-3b: Go to file', () => {
         await expect(composer, `Esc in the empty field: the keyboard back in the composer, ${name}’s opener`).toBeFocused();
       }
 
-      // a sheet holds what a person types into it: Go to file is disabled while it is open
-      await (await sidebarRow(p.page, { appSessionId: p.scratch.appSessionId })).click({ button: 'right' });
-      await p.page.getByRole('menuitem', { name: 'Rename…' }).click();
-      const sheet = p.page.getByRole('dialog', { name: 'Rename' });
-      await expect(sheet, 'the Rename sheet').toBeVisible();
+      // a sheet holds what a person types into it: Go to file is disabled while it is open (the sheet a dirty file's close
+      // asks with, a Sheet as every other is)
+      const viewer = await openInViewer(p, 'src/app.ts');
+      await expect(viewer.locator('.cm-content'), 'app.ts editable').toHaveAttribute('contenteditable', 'true');
+      await viewer.locator('.cm-content .cm-line').first().click({ position: { x: 3, y: 4 } });
+      await p.page.keyboard.type('// an invented edit');
+      await expect(viewer, 'app.ts dirty').toHaveAttribute('data-dirty', 'true');
+      const closeApp = () => sideFileTab(p.page, 'app.ts').getByRole('button', { name: 'Close app.ts', exact: true }).click();
+      await closeApp();
+      const sheet = p.page.getByRole('dialog', { name: 'Save changes to app.ts?', exact: true });
+      await expect(sheet, 'the close sheet').toBeVisible();
       await expect.poll(() => goToFileRow(p.maws.app), { message: 'Go ▸ Go to file disabled under the sheet' }).toEqual({ enabled: false, accelerator: 'Cmd+P' });
       await p.page.keyboard.press('Escape');
       await expect(sheet, 'the sheet closed').toHaveCount(0);
+      await expect(viewer, 'Esc: the tab kept, still dirty').toHaveAttribute('data-dirty', 'true');
       await expect.poll(() => goToFileRow(p.maws.app), { message: 'Go ▸ Go to file enabled again' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
+      await closeApp();
+      await sheet.getByRole('button', { name: 'Don’t save', exact: true }).click();
+      await expect(sheet, 'Don’t save: the sheet closed').toHaveCount(0);
     }, goToFileRepository, { gitHome: true });
   });
 });

@@ -12,7 +12,7 @@ import { useAgentLookup } from '../../transcript/view/agent-lookup';
 import { useRegisteredActions, useRegisteredRequestRenderer } from '../../transcript/view/registry';
 import type { TranscriptActions } from '../../transcript/view/context'; // UX wave U3b
 import { Transcript, type TranscriptListHandle } from '../../transcript/view/Transcript';
-import { useViewLane, type TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
+import { LIVE_LINE_ALONE, useViewLane, type TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
 import { useRemoteTranscript } from '../remote-source';
 import { useLaneAStreaming } from '../stream/use-overlay';
 import { drawnRows } from './drawn-rows';
@@ -86,6 +86,7 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
         placed={streaming.kept}
         promptAuthor={promptAuthor}
         compacting={compacting}
+        summaries={LIVE_LINE_ALONE} // UX wave U2b (M7): no summary is read from another machine in this landing
       />
     </>
   );

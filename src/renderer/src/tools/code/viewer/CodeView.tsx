@@ -27,7 +27,6 @@ import { Compartment, EditorState, StateEffect, StateField, Text, Transaction, t
 import { Decoration, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 import { fileLineAnchor, openCommentComposer, registerCursorComment } from '../anchor/anchor';
-import { EDITOR_COPY } from '../copy';
 import { commentGutter, comments } from '../editor/comment-gutter';
 import { conflictBlocks, conflicts, conflictsOf, stepConflict } from '../editor/conflicts';
 import { documentText, editing, editingExtensions, fromStore } from '../editor/editing';
@@ -36,7 +35,8 @@ import { attachNavigation, reportCounts } from '../editor/navigation';
 import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme';
 import { jumpTarget } from './kinds';
 import { languageFor, languageNameFor } from './languages';
-import { existingViewState, readOnlyReason, useViewer, viewState, type ViewerEntry } from './viewer-store';
+import { existingViewState, readOnlyWords, useViewer, viewState, type ViewerEntry } from './viewer-store';
+import { registerShownLine } from './shown-line'; // UX wave U6b-4a
 
 export const FLASH_MS = 2000;
 export const FLASH_CLASS = 'cm-flash-line';
@@ -132,8 +132,7 @@ export default function CodeView({ entry, wrap, onEditor }: { entry: ViewerEntry
   const applied = useRef<{ epoch: number; baseline: number; length: number }>({ epoch: -1, baseline: -1, length: 0 });
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { tabId, path, text, epoch, baseline, complete, pendingJump, editable } = entry;
-  const reason = readOnlyReason(entry);
-  const readOnlyTitle = reason ? EDITOR_COPY.readOnly[reason] : null;
+  const readOnlyTitle = readOnlyWords(entry); // UX wave U6f: the sentence the reason's words make, the standing's included
 
   // The editor, from the state this tab left behind when it still holds the store's text, else empty (the sync below
   // fills it); on unmount the state and the scroll go back to the store.
@@ -165,7 +164,16 @@ export default function CodeView({ entry, wrap, onEditor }: { entry: ViewerEntry
     });
     // E11 (W-C): "Comment on this line" comments on the cursor's line, as the gutter's mark on its own
     const offCursor = registerCursorComment(tabId, () => onComment(tabId)(view.state.doc.lineAt(view.state.selection.main.head).number));
+    // UX wave U6b-4a: the cursor's line and whether it is in the part shown, and the first line shown, for "Open in"
+    const offLine = registerShownLine(tabId, () => {
+      const box = view.scrollDOM.getBoundingClientRect();
+      const head = view.state.selection.main.head;
+      const at = view.coordsAtPos(head);
+      const top = view.state.doc.lineAt(view.lineBlockAtHeight(Math.max(0, box.top - view.documentTop)).from).number;
+      return { cursor: { line: view.state.doc.lineAt(head).number, shown: at !== null && at.top >= box.top && at.bottom <= box.bottom }, top };
+    });
     return () => {
+      offLine();
       offCursor();
       detach();
       themes.disconnect();

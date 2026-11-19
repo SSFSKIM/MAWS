@@ -46,6 +46,14 @@ describe.each(PEERS)('a peer of build $build', (peer) => {
     expect(Object.keys(built)).toEqual(expect.arrayContaining(['files.writeOutside', 'files.grant']));
   });
 
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): neither peer knows Open in's
+  // admission, so its daemon answers unknown_command and main opens nothing
+  it('knows no files.admit, so Open in opens nothing against its daemon', () => {
+    const known = new Set([...peer.names.commands, ...peer.names.mainOnlyCommands, ...Object.keys(peer.schema.commands)]);
+    expect(known.has('files.admit')).toBe(false);
+    expect(Object.keys(built)).toContain('files.admit');
+  });
+
   it('reads this build’s files.read and files.openExternal inputs less exactly the keys it does not know', () => {
     const unknown = peer.knowsNamed ? ['agent'] : ['agent', 'named'];
     const read = { appSessionId: SESSION, path: '/work/notes.txt', hash: true, named: true, agent: true };

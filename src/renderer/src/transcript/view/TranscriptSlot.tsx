@@ -21,6 +21,7 @@
 // from its machine's plane. 2026-11-06: a subagent's own transcript there draws through
 // `lane-a/view/RemoteAgentTranscript.tsx`, where its machine's endpoint carries it; elsewhere its port's gap is said in
 // its place.
+// UX wave U2b (M7): a session's slot hands its transcript what the record lines read (`useSummaries`, below).
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useWorkingFolder } from '../../sessions/working-folder';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
@@ -28,13 +29,17 @@ import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { isAddress, machineOf } from '@shared/machine/address'; // UX wave U2b
 import type { OwnerChannelState } from '@shared/owner/state'; // UX wave U2b
+import type { StoredRun } from '@shared/owner/folds'; // UX wave U2b (M7)
 import { ipc } from '../../ipc/client'; // UX wave U2b
-import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
+import { useOwnerChannel, useOwnerChannelStore } from '../../stores/owner-channel'; // P2-C; UX wave U2b (M5): the store, for who draws
+import { useSurfaceAttached } from '../../engine-surface/site'; // UX wave U2b (M5)
 import { useSettings } from '../../stores/settings'; // UX wave U2b
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript'; // L276
 import { useCompactingSince } from '../../stores/compacting'; // UX wave U3b (M4)
+import { foldsMoved, useStoredFolds } from '../../stores/folds'; // UX wave U2b (M7)
+import { mirrorsView } from '../../owner/view/mirror'; // UX wave U2b (M7)
 import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
@@ -64,6 +69,21 @@ export function useViewLane(appSessionId: AppSessionId | null): boolean {
   const appSwitch = useSettings((s) => s.state?.settings.mods.toHuman.enabled ?? false);
   const elsewhere = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
   return appSessionId !== null && viewLaneOf(owner, elsewhere, appSwitch);
+}
+
+// UX wave U2b (M5; the execution document, §A "What a window draws", §E): the to-human mod draws the session's view in
+// this window exactly when the lane's published `drawnBy` is `mod` and the session's surface is attached here. A session
+// on another machine never has it (its site asks do not cross the machine link); with no surface attached here, a `mod`
+// session is drawn by the mirror; an earlier daemon publishes no `drawnBy`, which reads `maws`.
+export function modDrawsOf(owner: Pick<OwnerChannelState, 'lane'> | null, elsewhere: boolean, attached: boolean): boolean {
+  return !elsewhere && attached && owner?.lane.drawnBy === 'mod';
+}
+
+export function useModDraws(appSessionId: AppSessionId | null): boolean {
+  const owner = useOwnerChannelStore((s) => (appSessionId === null ? null : (s.bySession.get(appSessionId) ?? null)));
+  const attached = useSurfaceAttached(appSessionId);
+  const elsewhere = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
+  return appSessionId !== null && modDrawsOf(owner, elsewhere, attached);
 }
 
 export interface TranscriptSlotProps {
@@ -150,8 +170,10 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useViewLane(agentId === undefined ? appSessionId : null); // P2-C: a session's, never a child's; UX wave U2b: its three sources
+  const modDraws = useModDraws(agentId === undefined ? appSessionId : null); // UX wave U2b (M5): a session's, never a child's
   const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board 525: another member's session names its prompts' authors
   const compacting = useCompactingSince(agentId === undefined ? appSessionId : null); // UX wave U3b (M4): a session's, never a child's
+  const summaries = useSummaries(agentId === undefined ? appSessionId : null, storeKey);
   return (
     <Transcript
       source={source}
@@ -168,11 +190,32 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       startAt={startAt}
       presentation={presentation}
       ownerLane={agentId === undefined ? ownerLane : undefined}
+      modDraws={agentId === undefined ? modDraws : undefined}
       atRest={atRest}
       placed={streaming.kept}
       promptAuthor={promptAuthor}
       waiting={waiting}
       compacting={compacting}
+      summaries={summaries}
     />
   );
+}
+
+const NO_RUNS: readonly StoredRun[] = [];
+/** What the record lines of a session on another machine read: no stored summary, each growing line its newest call. */
+export const LIVE_LINE_ALONE: { stored: readonly StoredRun[] } = { stored: NO_RUNS };
+
+// UX wave U2b (M7; §M, "The reads"; decisions 28 and 32): what a session's record lines read. This machine's session
+// reads the mod's stored summaries while the mirror is in force for the tab (the reads end when it is not), and starts
+// a round at each close of a stretch and end of a turn; a session on another machine reads its live line alone (no
+// summary is read from another machine in this landing); a child's transcript reads none.
+function useSummaries(appSessionId: AppSessionId | null, storeKey: string): { stored: readonly StoredRun[]; moved?: () => void } | undefined {
+  const elsewhere = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
+  const mirrored = useTranscriptStore((state) => mirrorsView(state.entries[storeKey]?.state.ui));
+  const stored = useStoredFolds(elsewhere ? null : appSessionId, mirrored);
+  return useMemo(() => {
+    if (appSessionId === null) return undefined;
+    if (elsewhere) return LIVE_LINE_ALONE;
+    return { stored: stored ?? NO_RUNS, moved: () => foldsMoved(appSessionId) };
+  }, [appSessionId, elsewhere, stored]);
 }

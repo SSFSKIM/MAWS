@@ -76,11 +76,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['files.openExternal'],
     guard: 'issued only when machineFor(appSessionId) is this Mac’s (the named open of UX wave U6c); a session on another machine opens through lane-b/open-copy.ts’ openSessionFile, under that module’s entry',
   },
-  'tools/code/viewer/viewer-store.ts': {
-    commands: ['files.writeOutside'],
-    guard: 'sent only for an entry with a pin, which only a read answered with `outside` sets; a session on another machine is read without `named` and never answered `outside`, so its save is files.write (UX wave U6e, §D)',
-  },
-  'test-support/code-disk.ts': { commands: ['files.openExternal', 'files.writeOutside'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e)' },
+  'test-support/code-disk.ts': { commands: ['files.openExternal'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e)' },
   // reported: issued for a session on another machine with no guard
   'lane-b/open-copy.ts': {
     commands: ['files.openExternal'],
@@ -95,6 +91,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['ownerChannel.markRead'], // UX wave U2b: the report's cards, and their answer and cancel, are gone
     reported: 'request-card/RequestCard.tsx’s MarkRead marks an essential item read with no guard, an item of another machine’s attention feed included (request-card/, owner/report/)',
   },
+  'stores/folds.ts': { commands: ['ownerChannel.folds'], guard: 'UX wave U2b (M7): read only while transcript/view/TranscriptSlot.tsx enables it, which it does for this Mac’s sessions alone (a session on another machine is given no key)' },
   'stores/owner-channel.ts': { commands: ['ownerChannel.state'], reported: 'read at mount by transcript/view/TranscriptSlot.tsx for a lane B session on another machine (stores/, transcript/view/)' },
   'composer/editor/submit.ts': {
     commands: ['session.history.append'],
@@ -183,6 +180,69 @@ describe('the window’s helper', () => {
     const helper = modules.find((m) => m.path === HELPER)!;
     expect(helper.source).not.toMatch(/ACTS_UNTIL_M4/);
     expect(helper.source).toMatch(/disabledWords\(/);
+  });
+});
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M4): the chooser's two
+// acts, which no declaration greys (they are offered behind a capability, and the helper's sentence closes Open File…), are
+// issued by the chooser's model alone, so no other control of the window lists or chooses a file on another machine.
+// Asking the window's helper for the act's sentence, or naming the act in a type, issues nothing. Test support answers
+// them as main does and issues none.
+describe('the chooser’s two acts on another machine', () => {
+  const CHOOSER = new Set(['files.listOutside', 'files.chooseOutside']);
+  const ASKS_WORDS = new Set(['useRemoteUnavailable', 'useRemoteUnavailableAs', 'remoteUnavailableOf', 'remoteUnavailableAsOf', 'outsideUnavailable', 'ownersOnly', 'disabledWords']);
+  const asksWords = (node: ts.Node): boolean => ts.isCallExpression(node.parent) && node.parent.arguments.includes(node as ts.Expression) && ts.isIdentifier(node.parent.expression) && ASKS_WORDS.has(node.parent.expression.text);
+  const inType = (node: ts.Node): boolean => (node.parent === undefined ? false : ts.isTypeNode(node.parent) || inType(node.parent));
+  const issues = (path: string, source: string): boolean => {
+    let found = false;
+    const visit = (node: ts.Node): void => {
+      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && CHOOSER.has(node.text) && !asksWords(node) && !inType(node)) found = true;
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed(path, source));
+    return found;
+  };
+
+  // Parsed only where the source may hold an act's name: parsing every renderer module again took the case past the 5 s
+  // default under the whole suite's load (M5's run). The text is read with every backslash escape a string or a template
+  // can hold taken as the character it may stand for, and a line continuation as nothing, so a name spelt with escapes
+  // still reaches the parser; a regular expression or a comment that holds escapes only costs a parse
+  const ESCAPE = /\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([0-7]{1,3})|(?:\r\n|[\n\r\u2028\u2029])|([\s\S]))/g;
+  const unescaped = (source: string) =>
+    source.includes('\\')
+      ? source.replace(ESCAPE, (_, braced?: string, four?: string, two?: string, octal?: string, other?: string) => {
+          const code = braced ?? four ?? two;
+          if (code !== undefined) return String.fromCodePoint(Math.min(parseInt(code, 16), 0x10ffff));
+          if (octal !== undefined) return String.fromCharCode(parseInt(octal, 8));
+          return other ?? '';
+        })
+      : source;
+  const mayName = (source: string) => {
+    const text = unescaped(source);
+    return text.includes('listOutside') || text.includes('chooseOutside');
+  };
+  const naming = (list: readonly Module[]) => list.filter((m) => !m.path.startsWith('test-support/') && mayName(m.source) && issues(m.path, m.source)).map((m) => m.path);
+
+  it('are named by no renderer source but the chooser’s model', () => {
+    expect(naming(modules)).toEqual(['tools/code/files/remote-chooser.ts']);
+  });
+
+  it('are found by the scan when the name is spelt with escapes', () => {
+    const found = naming([
+      moduleOf('plain.ts', "void ipc.invoke('files.listOutside', input);"),
+      moduleOf('escaped-string.ts', "void ipc.invoke('files.list\\u004Futside', input);"),
+      moduleOf('escaped-template.ts', 'void ipc.invoke(`files.\\x63hoose\\u{4F}utside`, input);'),
+      moduleOf('continued.ts', "void ipc.invoke('files.choose\\\nOutside', input);"),
+      moduleOf('unrelated.ts', "void ipc.invoke('files.read', { path: '\\x2F' });"),
+    ]);
+    expect(found).toEqual(['plain.ts', 'escaped-string.ts', 'escaped-template.ts', 'continued.ts']);
+  });
+
+  it('take a call of the command for an issue, and a question to the helper or a type for none', () => {
+    expect(issues('x.ts', "void ipc.invoke('files.listOutside', input);")).toBe(true);
+    expect(issues('x.ts', "const act = `files.chooseOutside`; void ipc.invoke(act, input);")).toBe(true);
+    expect(issues('x.ts', "const why = remoteUnavailableOf(session, 'files.chooseOutside');")).toBe(false);
+    expect(issues('x.ts', "type Act = 'files.listOutside' | 'files.chooseOutside';")).toBe(false);
   });
 });
 

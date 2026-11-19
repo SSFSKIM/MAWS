@@ -3,10 +3,18 @@
 // a damaged file read from offset 0; "as of" the last caught-up; migrated history kept past the bound by its writer's
 // checkpoint, whose record's signer is checked again at load; and other bytes at a covered position never `migrated`,
 // whatever offset served them and however often the cache is reloaded.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ChannelOrg, ORG, PROJECT, S1, S2, type Event } from '../../../../test/org/channel-world';
 import { addressOf } from './address';
 import { emptyLog, loadLog, type ChannelLimits, type Ground } from './cache';
+
+/** The shared vectors' `retired` cases (apps/org-protocol/vectors/channel-rule.json), read as the file sminos copies. */
+type ChannelRuleEvent = { kind: 'joined' | 'retired'; reason?: string; thread?: string };
+const CHANNEL_RULE = JSON.parse(readFileSync(join(__dirname, '../../../../apps/org-protocol/vectors/channel-rule.json'), 'utf8')) as {
+  retired: { name: string; steps: { event: ChannelRuleEvent; member: boolean }[] }[];
+};
 
 const LIMITS: ChannelLimits = { events: 5000, bytes: 8 * 1024 * 1024 };
 const ground = (o: ChannelOrg): Ground => {
@@ -189,6 +197,69 @@ describe("the project's sessions, by their lifecycle's provenance", () => {
     expect(log.events().map((e) => e.label)).toEqual(['migrated', 'migrated']);
     expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: true, authenticated: true }]);
     expect(addressOf('@old-one hi', log.sessions())).toEqual({ ok: true, to: [{ session: S2, alias: 'old-one' }] });
+  });
+});
+
+// sminos's threads (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §G): an unstamped `ended` is kept
+// apart from every other `retired`, so one that the reader passes by never displaces a `retired` it honours.
+describe("a stopped thread's membership, through the kept lifecycle", () => {
+  const THREAD = '11111111-1111-4111-8111-111111111111';
+  /** A bound of one event: what the sessions read is the kept lifecycle, not the events. */
+  const ONE: ChannelLimits = { events: 1, bytes: LIMITS.bytes };
+  /** One shared event as S1's, signed by mini from S1's own writer. */
+  const asS1 = (o: ChannelOrg, { kind, ...fields }: ChannelRuleEvent, seq: number) =>
+    o.lifecycle(o.mini, seq, kind, kind === 'joined' ? { alias: 'maws-45', machine: 'mini', cwd: '/w', ...fields } : { by: '', ...fields });
+  /** S1's membership after each event, fed one at a time, the file written and read back between them. */
+  async function membership(o: ChannelOrg, events: ChannelRuleEvent[]): Promise<Array<boolean | undefined>> {
+    let log = emptyLog(reader(o), PROJECT, ONE);
+    const members: Array<boolean | undefined> = [];
+    for (const [i, event] of events.entries()) {
+      await log.add(at([await asS1(o, event, i + 1)], i + 1), ground(o));
+      const live = log.sessions().find((s) => s.session === S1)?.member;
+      log = await loadLog(roundTrip(log.file()), { reader: reader(o), project: PROJECT, limits: ONE, ground: ground(o), log: () => {} });
+      const reloaded = log.sessions().find((s) => s.session === S1)?.member;
+      expect(reloaded, `step ${i + 1}, read back`).toBe(live);
+      members.push(live);
+    }
+    return members;
+  }
+  const stampedJoin = { kind: 'joined', thread: THREAD } as const;
+  const unstampedEnd = { kind: 'retired', reason: 'ended' } as const;
+
+  for (const { name, steps } of CHANNEL_RULE.retired) {
+    it(`passes the shared case: ${name}`, async () => {
+      const o = await ChannelOrg.make();
+      expect(await membership(o, steps.map((s) => s.event))).toEqual(steps.map((s) => s.member));
+    });
+  }
+
+  // The shared fifth case's membership runs above; here, that the file keeps both of its `retired` events.
+  it('keeps a moved that an unstamped end follows in the file, the two side by side', async () => {
+    const o = await ChannelOrg.make();
+    const log = emptyLog(reader(o), PROJECT, ONE);
+    await log.add(at([await asS1(o, stampedJoin, 1), await asS1(o, { kind: 'retired', reason: 'moved' }, 2), await asS1(o, unstampedEnd, 3)]), ground(o));
+    expect(log.file().lifecycle.map((e) => [e.offset, e.event.kind, e.event.reason])).toEqual([
+      [1, 'joined', undefined],
+      [2, 'retired', 'moved'],
+      [3, 'retired', 'ended'],
+    ]);
+  });
+
+  it('reads the latest joined: a stamped one, then an unstamped one, then an unstamped end is no member', async () => {
+    const o = await ChannelOrg.make();
+    expect(await membership(o, [stampedJoin, { kind: 'joined' }, unstampedEnd])).toEqual([true, true, false]);
+  });
+
+  it('honours an unstamped continued or retire after a stamped joined', async () => {
+    for (const reason of ['continued', 'retire']) {
+      const o = await ChannelOrg.make();
+      expect(await membership(o, [stampedJoin, { kind: 'retired', reason }]), reason).toEqual([true, false]);
+    }
+  });
+
+  it('lets a stamped end displace the unstamped one it follows, and a later joined make the session a member again', async () => {
+    const o = await ChannelOrg.make();
+    expect(await membership(o, [stampedJoin, unstampedEnd, { kind: 'retired', reason: 'ended', thread: THREAD }, stampedJoin, unstampedEnd])).toEqual([true, true, false, true, true]);
   });
 });
 

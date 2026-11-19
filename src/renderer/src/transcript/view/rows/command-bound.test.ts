@@ -5,7 +5,7 @@
 // of drawings, each given as the line boxes a layout would measure and the drawing's whole height (12 px type at 1.5,
 // 18 px lines; R1's 4 px between blocks).
 import { describe, expect, it } from 'vitest';
-import { closedBound, lineBoxes } from './command-bound';
+import { closedBound, lineBoxes, textLines } from './command-bound';
 
 const line = (top: number, height = 18) => ({ top, bottom: top + height });
 const LINE = 18;
@@ -42,5 +42,22 @@ describe('lineBoxes', () => {
 
   it('ignores a fragment with no height', () => {
     expect(lineBoxes([{ top: 0, bottom: 18 }, { top: 18, bottom: 18 }, { top: 18, bottom: 36 }])).toEqual([{ top: 0, bottom: 18 }, { top: 18, bottom: 36 }]);
+  });
+});
+
+// A range's client rects are font boxes, shorter than their lines: each is grown by its half-leading to the line box of
+// its own element's type before the lines are read (the manual gate run 0d49eae4f45e-20261117T094509Z measured these).
+describe('textLines', () => {
+  const font = (top: number, bottom: number, lineHeight = LINE) => ({ top, bottom, lineHeight });
+  const table: [name: string, fragments: { top: number; bottom: number; lineHeight: number }[], height: number, bound: number | null][] = [
+    ['a paragraph’s font boxes on 18 px lines: the bottom of its second line box', [font(1.5, 16), font(19.5, 34), font(37.5, 52), font(55.5, 70)], 72, 35.75],
+    // a heading of taller type (16 px on a 24 px line), 4 px, then two 18 px lines: each fragment grows by its own type
+    ['a heading over a line, each in its own type: the bottom of the line under it', [font(2.5, 21.5, 24), font(29.75, 44.25), font(47.75, 62.25)], 64, 46],
+  ];
+  for (const [name, fragments, height, bound] of table) it(name, () => expect(closedBound(textLines(fragments), height, LINE)).toBe(bound));
+
+  it('grows a font box by half the leading above and below, and not at all where the line is no taller', () => {
+    expect(textLines([font(1.5, 16)])).toEqual([{ top: -0.25, bottom: 17.75 }]);
+    expect(textLines([font(0, 20, 18)])).toEqual([{ top: 0, bottom: 20 }]);
   });
 });

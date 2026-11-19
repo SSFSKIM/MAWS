@@ -5,6 +5,7 @@
 // waiting message is offered behind a capability of its own, and it and taking a message back have their words.
 import { describe, expect, it } from 'vitest';
 import { ACT_WORDS, disabledWords, failureWords, REMOTE_NEEDS, REMOTE_UNAVAILABLE, refusalWords, SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY, type RemoteStanding } from './remote-unavailable';
+import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY, outsideOffer } from '@shared/files/outside';
 import { GIT_READS_CAPABILITY } from './schema/git';
 
 const M = 'Loft';
@@ -13,7 +14,7 @@ const at = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...UP, ...fie
 /** The UX wave U5b-2's three reads (M8), behind a capability of their own (below). */
 const GIT_READS = ['git.branchCommits', 'git.commitDiff', 'git.changesSince'] as const;
 /** What other capabilities than the session acts' gate, each pinned in its own block below. */
-const OWN_CAPABILITY: readonly string[] = ['artifacts.undelete', ...GIT_READS];
+const OWN_CAPABILITY: readonly string[] = ['artifacts.undelete', ...GIT_READS, ...OUTSIDE_ACTS];
 
 describe('the acts the wave offers', () => {
   it('leave the declared set and each needs `rl2.session-acts`, Fork among them (M2)', () => {
@@ -27,7 +28,8 @@ describe('the acts the wave offers', () => {
   });
 
   it('word the menu acts as closing while the link connects, and Send, Stop and Dismiss as held', () => {
-    expect(Object.entries(ACT_WORDS).filter(([, words]) => words?.closes === true).map(([command]) => command).sort()).toEqual(['session.archive', 'session.fork', 'session.rename', 'session.update']);
+    // U6f: Open File… (`files.chooseOutside`) is a menu act too
+    expect(Object.entries(ACT_WORDS).filter(([, words]) => words?.closes === true).map(([command]) => command).sort()).toEqual(['files.chooseOutside', 'session.archive', 'session.fork', 'session.rename', 'session.update']);
     expect(ACT_WORDS['maws.pane.answer']).toBeUndefined();
   });
 });
@@ -162,6 +164,71 @@ describe('the git reads over the link', () => {
       expect([command, REMOTE_NEEDS[command]]).toEqual([command, GIT_READS_CAPABILITY]);
       expect([command, REMOTE_UNAVAILABLE[command], ACT_WORDS[command]]).toEqual([command, undefined, undefined]);
     }
+  });
+});
+
+// UX wave U6f (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C): a file outside a
+// session's folders opened, listed, chosen and saved there goes only to a machine whose endpoint lists
+// `rl2.outside-files`; the save leaves the declared set U6e put it in. M3 gives the four their words.
+describe('the outside acts over the link', () => {
+  it('each need `rl2.outside-files`, and none is declared', () => {
+    expect(OUTSIDE_FILES_CAPABILITY).toBe('rl2.outside-files');
+    for (const command of OUTSIDE_ACTS) {
+      expect([command, REMOTE_NEEDS[command]]).toEqual([command, OUTSIDE_FILES_CAPABILITY]);
+      expect([command, REMOTE_UNAVAILABLE[command]]).toEqual([command, undefined]);
+    }
+  });
+
+  // M3 (decision 12, §D): the four's words, and the sentences of decision 12's table as the two functions answer them
+  const OUT: RemoteStanding = { machine: 'studio', phase: 'up', capabilities: [OUTSIDE_FILES_CAPABILITY], owner: true };
+  const out = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...OUT, ...fields });
+
+  it('are offered by this build only where the roster says the person owns the machine (decision 13; R10)', () => {
+    expect(outsideOffer(true)).toBe(true);
+    for (const owner of [false, null, undefined]) expect([owner, outsideOffer(owner)]).toEqual([owner, false]);
+  });
+
+  it('have their words, the noun where the act’s own does not open the offline sentence, and Open File closes while the link connects', () => {
+    expect(ACT_WORDS['files.readOutside']).toEqual({ act: 'open this file', done: 'opened', noun: 'Opening this file' });
+    expect(ACT_WORDS['files.writeOutside']).toEqual({ act: 'save this file', done: 'saved', noun: 'Saving this file' });
+    expect(ACT_WORDS['files.chooseOutside']).toEqual({ act: 'open a file', done: 'opened', noun: 'Open File', closes: true });
+    expect(ACT_WORDS['files.listOutside']).toEqual({ act: 'list a folder', done: 'listed', noun: 'Listing a folder' });
+  });
+
+  it('close Open File… with the first sentence of decision 12’s table that applies, and offer it to an owner alone', () => {
+    const open = (standing: RemoteStanding) => disabledWords('files.chooseOutside', standing);
+    expect(open(out({ capabilities: ['rl2.session-acts'] }))).toBe('Can’t open a file on studio yet. Update MAWS on studio and try again.');
+    expect(open(out({ capabilities: ['rl2.session-acts'], owner: false }))).toBe('Can’t open a file on studio yet. Update MAWS on studio and try again.');
+    expect(open(out({ phase: 'offline', capabilities: null }))).toBe('Open File is unavailable while studio is offline.');
+    expect(open(out({ phase: 'connecting', capabilities: null }))).toBe('Connecting to studio…');
+    expect(open(out({ phase: 'reconnecting', capabilities: null }))).toBe('Reconnecting to studio…');
+    expect(open(out({ owner: false }))).toBe('Only studio’s owners can open a file there.');
+    expect(open(out({ owner: null }))).toBe('Only studio’s owners can open a file there.'); // R10: an owner unknown is not offered
+    expect(open(OUT)).toBeNull();
+    expect(open(out({ capabilities: null }))).toBeNull(); // an unknown capability list closes nothing
+  });
+
+  it('word the save of a file that cannot be saved there, and its offline sentence', () => {
+    expect(disabledWords('files.writeOutside', out({ owner: false }))).toBe('Only studio’s owners can save this file there.');
+    expect(disabledWords('files.writeOutside', out({ phase: 'offline', capabilities: null }))).toBe('Saving this file is unavailable while studio is offline.');
+    expect(disabledWords('files.readOutside', out({ phase: 'offline', capabilities: null }))).toBe('Opening this file is unavailable while studio is offline.');
+    expect(disabledWords('files.writeOutside', OUT)).toBeNull();
+  });
+
+  it('word a read and a save that ended without their effect: an older build, an owner’s right, read-only, offline, a protected folder', () => {
+    expect(refusalWords('files.readOutside', 'studio', 'not-offered')).toBe('Not opened: update MAWS on studio and try again');
+    expect(refusalWords('files.readOutside', 'studio', 'owners-only')).toBe('Not opened: only studio’s owners can');
+    expect(refusalWords('files.readOutside', 'studio', 'read-only')).toBe('Not opened: studio is in read-only mode');
+    expect(refusalWords('files.writeOutside', 'studio', 'offline')).toBe('Not saved: studio is offline');
+    expect(refusalWords('files.writeOutside', 'studio', 'read-only')).toBe('Not saved: studio is in read-only mode');
+    expect(refusalWords('files.writeOutside', 'studio', 'not-offered')).toBe('Not saved: update MAWS on studio and try again');
+    expect(refusalWords('files.readOutside', 'studio', 'protected')).toBe('Not opened: the file is in a folder macOS protects on studio');
+  });
+
+  it('leave Fork’s and Restore’s words as they were', () => {
+    expect(disabledWords('session.fork', at({ phase: 'offline', capabilities: null }))).toBe('Fork is unavailable while Loft is offline.');
+    expect(disabledWords('session.fork', at({ owner: null }))).toBeNull();
+    expect(disabledWords('artifacts.undelete', at({ capabilities: ['rl2.artifact-undelete'], owner: null }))).toBeNull();
   });
 });
 

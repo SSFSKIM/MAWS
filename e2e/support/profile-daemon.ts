@@ -18,6 +18,10 @@
 // - cli: the daemon's own command line (`mawsd <args>`) under its environment, `input` on its stdin (P5 O7 M2's remote
 //   scene enrolls B with it); `nodeArgs` go before the script, Node's own flags for the daemon alone (the scene's fake
 //   tailnet preload; NODE_OPTIONS would not reach it, since supervisorEnv drops it).
+// - buildRoot (UX wave U6f, docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §G): the
+//   checkout whose build the daemon runs, its out/main/mawsd.js under its own Electron (another build the gate checked out
+//   and built beside this one, as e2e:cross-build's peer); this checkout when absent, as before. Its environment is this
+//   checkout's rig's, as above.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,17 +59,21 @@ export interface ProfileDaemonOptions {
   keepConfigHome?: boolean; // a relaunch keeps `<profile>/claude-config`, as launchMaws's keepConfigHome does
   prepare?: (paths: { claudeConfigDir: string }) => void; // before the daemon starts: the scene's seeded transcripts
   nodeArgs?: string[]; // Node's flags for the daemon's process alone, before its script (a `--require` preload)
+  buildRoot?: string; // UX wave U6f: the checkout whose build runs (its out/ and node_modules); this one when absent
 }
 
-// The Electron binary the daemon runs as Node (ELECTRON_RUN_AS_NODE, from supervisorEnv), as its `electron` package names it
-function electronBinary(): string {
-  return join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+// The Electron binary the daemon runs as Node (ELECTRON_RUN_AS_NODE, from supervisorEnv), as the build's own `electron`
+// package names it
+function electronBinary(root: string): string {
+  return join(root, 'node_modules', 'electron', 'dist', readFileSync(join(root, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
 }
 
 export async function startProfileDaemon(opts: ProfileDaemonOptions): Promise<ProfileDaemon> {
   const { userData } = opts;
-  const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
-  expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+  const root = opts.buildRoot ?? REPO_ROOT;
+  const script = join(root, 'out', 'main', 'mawsd.js');
+  expect(existsSync(script), `the build at ${root} has out/main/mawsd.js (scripts/e2e-build.sh plain)`).toBe(true);
+  const electron = electronBinary(root);
   const sminosHome = mkdtempSync('/tmp/mws-'); // short, as launchMaws makes it, so a bridge's socket path fits 103 bytes
   const base: Record<string, string> = { ...launchEnvironment(process.env, userData, sminosHome) };
   const claudeConfigDir = base.CLAUDE_CONFIG_DIR!;
@@ -81,7 +89,7 @@ export async function startProfileDaemon(opts: ProfileDaemonOptions): Promise<Pr
   const logFile = join(paths.dir, 'mawsd.log');
   const log = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8') : '');
   const servedBefore = log().split('\n').filter((line) => line.includes(' serving; ')).length;
-  const child: ChildProcess = spawn(electronBinary(), ['--disable-sigusr1', ...(opts.nodeArgs ?? []), script, 'run', '--private', '--dir', paths.dir], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
+  const child: ChildProcess = spawn(electron, ['--disable-sigusr1', ...(opts.nodeArgs ?? []), script, 'run', '--private', '--dir', paths.dir], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
   let exit: { exitedAt: number; code: number | null } | null = null;
   const exited = new Promise<{ exitedAt: number; code: number | null }>((resolve) => child.once('exit', (code) => resolve((exit = { exitedAt: Date.now(), code }))));
   const ended = async () => {
@@ -123,7 +131,7 @@ export async function startProfileDaemon(opts: ProfileDaemonOptions): Promise<Pr
     request: (name, input) => request(name, input),
     cli: (args, input = '') =>
       new Promise((done) => {
-        const run = spawn(electronBinary(), ['--disable-sigusr1', script, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'], argv0: MAWSD_ARGV0 });
+        const run = spawn(electron, ['--disable-sigusr1', script, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'], argv0: MAWSD_ARGV0 });
         let [stdout, stderr] = ['', ''];
         run.stdout!.on('data', (chunk: Buffer) => void (stdout += chunk.toString()));
         run.stderr!.on('data', (chunk: Buffer) => void (stderr += chunk.toString()));

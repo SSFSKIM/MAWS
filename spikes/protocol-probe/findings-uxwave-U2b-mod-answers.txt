@@ -1,0 +1,365 @@
+UX wave, landing U2b, check 1: what the to-human mod answers on MAWS's surface, before and after its pull request
+(docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, "Checks handed to the architect", check 1; §A, §E, §G,
+§I, §M; 2026-11-16 UTC, VM dc-uxwave5-26dc, branch ux-wave/U2b-mod-probe)
+
+Verdict, in the table's terms.
+  A1 expected. A2 expected on a resumed session and for the message call live, with one exception the table does not name:
+  a live stretch's record line disappears when the stretch's second call arrives (see "Found beside the table", 1). A3
+  expected. B expected. C1 yes. C2 yes for a thought asked under its row's bare uuid; NO for an id qualified by a block
+  (`<uuid>:thinking:0`, `<uuid>:text:0`): the thought is not placed at its message. C3 yes. C4 yes: each lone ask answers
+  by the fold, before and after each switch press and a reload. C5 yes. D yes, yes. E1 yes; none asked at 8 or with
+  TO_HUMAN_FOLD_SUMMARIES=off; the settings-env value reaches $.env.get. E2: one push per write a drawn button had read,
+  each naming that button's instance: item 11 is not needed. E3 yes. E4 yes to each, including atomic replacement over 55
+  writes and the merge across two processes. E5 yes. E6: the summary calls are NOT counted in any `result` frame; measured
+  386 and 388 tokens in, 23 and 40 out, per call.
+
+Method.
+  Engine 2.1.322 (/opt/maws-probe/engines/2.1.322; every system/init reads 2.1.322), run only under vm-run.sh (VM.md).
+  Two installations, both taken by git from the public doperpowers repository into a clone on the VM, with a worktree for
+  each: "before" = c7619f359 (to-human 0.8.2); "after" = 0fed175f3134f5669aad145bae3b29f5a03ed643 (to-human 0.9.0). Every
+  fixture's provenance row names its commit, version and the sha256 of to-human.tsx and folds.tsx. Branch heads seen:
+  d27248be at the start, then 0fed175f. The only "after" recordings made on d27248be were of the resumed part's after
+  cases; all of them were made again on 0fed175f, and only the 0fed175f recordings are committed. The branch's last
+  head, a98c578e, differs from 0fed175f by five lines of a comment in to-human.tsx (no code), so nothing was run again.
+  Each run copies the checkout's whole `to-human/` and `sminos/` folders, unchanged, into a scratch folder, plus a plugin
+  of doperpowers' `output-styles/to-human.md` alone, and loads all three with --plugin-dir, as live-maws-check.py does
+  (but the whole to-human folder, so maws-surface.json is there). The scratch HOME carries settings
+  `outputStyle: doperpowers:to-human` and `prependPlugins: [to-human@inline, sminos@inline]`;
+  CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1. No CLAUDE_CONFIG_DIR is set, as MAWS sets none: the config is $HOME/.claude.
+  The launch is MAWS's: ENGINE_FLAGS (-p, stream-json both ways, --permission-prompt-tool stdio,
+  --include-partial-messages, --forward-subagent-text, --replay-user-messages, --include-hook-events, setting sources
+  user,project,local), --await-initialize, --session-id or --resume, and buildEnvironment's constants (MAWS_LANE=B among
+  them). The advertisement goes where withOwnerChannel writes it, the settings env:
+  `--settings {"dialogExpiry":"never","env":{"MAWS_NATIVE_TO_HUMAN":"8"|"9"}}`, or no env for none. Permission mode
+  `default`, with every permission request answered allow. After initialize (appInitialize, the `maws` SDK server
+  served) the probe attaches as surface `desktop`, client `maws-main`, and sends `ui_render` with the props
+  src/renderer/src/transcript/surface/adapters.ts builds. Those are userInput (origin sdk), assistantInput,
+  callProps/groupInput (a run of three calls as `group:<first call>`), and engineUserProps (a hand-back as peer with
+  `from`, a task notice as task-notification with `task`). The new asks are as §E gives them: a thought as
+  AssistantMessage {text, isFirstOfReply:false, isSummary:true}, a turn's line as TurnDuration
+  {word, durationMs, isExpanded:true} under `<anchor>~turn` anchored at the turn's prompt, and a notice the host made as
+  UserMessage under `<anchor>~<tag>`.
+  The resumed part makes no model call (ANTHROPIC_BASE_URL is unreachable). It resumes a seeded transcript of invented
+  text, uxwave-u2b-mod-common.mjs seedRows: a prompt; a thought with text; three Bash calls; an unmarked text; a
+  message-tool call; a mixed text (a message and words beside it); a ListAgents call; a subagent hand-back; a task
+  notification; an asynchronous sminos question with its delivered answer; a final marked text.
+  The live part runs on haiku (claude-haiku-5-5) through the gateway. Its mechanical questions (E1's negatives and
+  control, E3, E4, E5) also run against uxwave-u2b-mock-api.mjs, a local stand-in for the Messages API. The stand-in
+  scripts the main loop from the prompt, answers every summary request with a fixed line, and logs every request it
+  receives. A summary request is recognised by the mod's own system prompt (LABEL_SYSTEM). The engine, launch and mod
+  are the same as in the real runs; only the endpoint differs. For E6 the real summary run goes through a local relay
+  that forwards each request to the gateway unchanged (headers never logged) and logs the usage each answer reports.
+  Real model requests spent: about 34 in all, about $0.02. That is 6 one-turn launches (1 main request and 1 short
+  side request each, the engine's own), and the summary run twice (11 requests and 2 summaries each). The first summary
+  run is discarded: the probe did not ask the message call's row, so the view never saw a mark.
+  Runs: each resumed case once; each live launch once; the real summary run once (after the discarded first run); each
+  stand-in case once; the in-place control once. Where timing could change a result, it says so below.
+
+A1. At 8, does every site MAWS asks today keep the engine's drawing, before and after? Expected: yes. Observed: yes.
+  "The six sites" are read as the six hooks the view gates that MAWS asks: UserMessage, AssistantMessage, ToolUse,
+  ToolResult, ToolGroup, AbovePrompt. Every row's answer is the engine's slot alone (`engine`), for the thought, the
+  run's group, every text, both calls and every arrival, at both installations and again after reload_plugins:
+  u2b-mod-8-before and u2b-mod-8-after, tables pass 1 @61, pass 2 @98, after reload_plugins @141. Live, the message
+  call's row and the band are the engine's (u2b-mod-8-{before,after}-live seq 60, 66).
+  One exception is not to-human: the async question's ToolUse and the band carry answer/dismiss buttons whose press
+  handles are the sminos plugin's (u2b-mod-8-before seq 52 to 101). The sminos ask mod draws at 8 with MAWS_LANE=B. That
+  contradicts the document's "Today": "the sminos ask mod step[s] out for any non-empty value".
+  9-before: every to-human site keeps the engine's drawing (u2b-mod-9-before pass 2 @98), as §G's "older steps aside".
+
+A2. At 9 after. Expected: yes. Observed: yes, resumed and for the message call live (u2b-mod-9-after; u2b-mod-9-after-live).
+  - The message call's answer is the mod's own message tree, with Markdown of the call's text and no engine slot, both
+    resumed (pass 2 @100) and live (u2b-mod-9-after-live seq 61, 70). The made-up final response's row answers an empty
+    Box (seq 64).
+  - Folded: the stretch's first row (the thought) answers `› working record`. Its other rows (the group, the unmarked
+    text) answer an empty Box. The second stretch is headed by the mixed text, whose answer is its message plus the
+    record line; the listing, hand-back and task notice answer empty (pass 2 @100).
+  - Opened (a press of the head's button): every row of the run answers the mod's tree around the engine's slot, and the
+    last row carries `‹ fold to report` (run open @145). Folded again @187 is as before.
+  - The band answers after the mark with `full transcript ›` (seq 103), and `report only ›` once pressed. In the full
+    transcript every row but the message call is the engine's (@232); back in the report the fold returns (@277).
+  - Each press pushed exactly one ui_invalidate with no instances (u2b_pushes notes).
+  Live, two stretches each closed by a message: see E1 and "Found beside the table", 1. The first stretch's rows answer
+  the engine's drawing until the first message has been drawn: before it the view has seen no mark. That is the mod's
+  rule, and the same as in a terminal.
+
+A3. Under a launch at 9, the installation swapped after → before → after with reload_plugins. Expected: yes. Observed: yes
+  (u2b-mod-reload). After as launched, the mod draws (step 1 @100). Swapped to before and reloaded: every to-human site is
+  the engine's at once (@145) and 4 s on (@182). Swapped back to after: the mod draws again at once (@228) and after
+  (@266). At each step the reload's answer reports `to-human` at the same path. That path holds maws-surface.json exactly
+  when the mod draws (u2b_reload @108: no declaration, 0.8.2; @190: declaration, 0.9.0). So §A's drawnBy, read from the
+  reported plugin, names exactly one side at each step. One ui_invalidate (no instances) accompanied each reload here
+  (seq 106, 188); compare C4.
+
+B. Expected: yes. Observed: yes. In system/init (u2b-mod-*-live, init @29) and in every reload_plugins answer
+  (u2b_reload notes) the mod's entry is `{ name: "to-human", path: <the --plugin-dir directory>, source: "to-human@inline",
+  version }`. Its `path` is the plugin's root directory: `.claude-plugin CLAUDE.md hooks maws-surface.json tests types`
+  for after, the same without maws-surface.json for before. The declaration reads `{ "toHumanView": { "drawsFrom": 9 } }`
+  (u2b-mod-9-after-live u2b_init @57). The message tool `mcp__to-human__message` is in init's tools at 8 and 9, both
+  installations, and absent with no advertisement (headless).
+
+C1. Expected: yes. Observed: yes (u2b-mod-rows). A probe plugin placed outermost logged each ui.render event as the hooks
+  received it (u2b_probe_log @187, @299, @418, @578). TurnDuration from surface `desktop` runs through the hooks with props
+  [durationMs, isExpanded, word]. When the view passes it through, `next(e)` returns the engine's slot (`next: "engine"`
+  at seq 241) and the answer is the engine's drawing. The line anchored at the turn's prompt (`<prompt uuid>~turn`) is
+  hidden while the turn's runs are folded (folded @186). It is shown, as the engine's drawing, once the turn's first run
+  is open (@298) or its second run is open (@417). The line of the second turn, whose only row is a marked text, stays
+  hidden. In the full transcript every line is shown (@577). A line under a plain id, the rule for the transcript's own
+  row, stays hidden in every folded state.
+
+C2. Expected: yes. Observed: half (u2b-mod-rows; u2b-mod-rows-none-before for "before", with no advertisement since 0.8.2
+  draws only there).
+  - isSummary:true is accepted: the hook receives props [isFirstOfReply, isSummary, text].
+  - Asked under the thought row's bare uuid, the thought folds with its run (it heads it: `› working record`), opens with
+    it (mod+engine), and is the engine's drawing in the full transcript. Before and after alike.
+  - Asked under `<uuid>:thinking:0` it is NOT placed at its message. The mod's rowKey takes a 36-character uuid by its
+    first 24 characters and any other id whole, so the qualified id has no place. It is guessed past every row: folded it
+    draws a second `› working record` (folded @186), and it stays folded when its own run opens (@298). `<uuid>:text:0` is
+    the same.
+  - So §E's "the id is the thought's message uuid qualified by its block, as a text block's is" does not reach the mod's
+    placement. The document is wrong here, not the mod: a thought must be asked under its row's own uuid (each content
+    block is its own transcript row with its own uuid in 2.1.322), or a form rowKey keys to that row.
+
+C3. Expected: yes. Observed: yes (u2b-mod-rows). `<anchor>~<tag>` reaches the hook unchanged as e.requestId, e.g.
+  `toolu_01SeedListAgents0006~peer-1` (u2b_probe_log @187). Notices anchored after the first stretch's unmarked text (a
+  scheduled trigger, a plugin wake) answer an empty Box while that run is folded and the engine's drawing within the run
+  once it opens. The wake, standing last, then carries `‹ fold to report`. Notices anchored after the listing in the second
+  stretch (task-notification with `task`, peer with `from`) answer empty while it is folded and are shown when it opens. A
+  scheduled trigger anchored after the final text starts a record line of its own. The `~turn` ask follows item 5 (C1).
+
+C4. Expected: yes. Observed: yes, by the mod's own rule of runs (u2b-mod-lone-thought, -listing, -notice, -turn: one
+  launch each, one row asked and no other row of the transcript).
+  - A lone thought, listing or notice answers `› working record` (seq 27, 30). Alone, it is the only drawn row of its run,
+    so it heads it.
+  - In the full transcript it answers the engine's drawing (seq 41); back in the report it answers `› working record`
+    again (seq 52); after reload_plugins likewise (seq 58, 61).
+  - A lone turn line answers an empty Box, the engine's drawing in the full transcript, and empty again.
+  - Each switch press pushed one ui_invalidate (no instances). reload_plugins pushed NONE in these four runs, in the 4 s
+    after it (seq 53 onward). The answers are right when re-asked, but MAWS cannot rely on a push at a reload to re-ask.
+    (In u2b-mod-reload, where the installation changed, one push did come.)
+  - The "after the first mark" clause was seen live: the first message's row drew, the mod pushed one ui_invalidate with
+    no instances (u2b-mod-summary seq 84), and the first stretch's rows answered by the fold from then on (seq 89).
+
+C5. Expected: yes. Observed: yes (u2b-mod-rows folded @186). A UserMessage with origin plugin and a notice's line as text,
+  anchored after the question (`<question call>~answered-1`), folds: it is record, and after the question's (read) row it
+  heads a record line of its own. The delivery's own text answers the engine's drawing under origins sdk, plugin and
+  unclassified.
+
+D. Expected: yes, yes. Observed: yes, yes.
+  - Resumed with a mark in the transcript and no advertisement, both installations draw the fold and the band
+    (u2b-mod-none-{before,after} pass 2 @98/@100, band seq 101/103).
+  - At a launch with no advertisement, after one turn whose reply is a marked text, both draw the message and the band
+    (u2b-mod-none-{before,after}-live seq 58, 61). No message tool is registered.
+  - With disableAllHooks in the launch's settings, every answer is the engine's with hooked:false, the sminos ask's
+    included (u2b-mod-none-after-nohooks, all 114 answers).
+
+E1. Expected: yes; none. Observed: yes; none.
+  Real run (u2b-mod-summary, headless at 9 after): each message that closed a stretch was followed by one summary request
+  on claude-haiku-5-5. The relay logged two, with no tools and no thinking (u2b_cost @514 `relay`); the debug log says
+  "$.model.complete (to-human): claude-haiku-5-5 answered in 1551ms, 69 chars" and "... 1479ms, 94 chars". The folds file
+  holds both summaries (u2b_summary @495). After a resume both stretches' first rows answer `› <summary>`
+  (u2b-mod-summary-resume seq 27, 33).
+  Stand-in (3 stretches each): 9 after made 3 summary requests and wrote 3 runs (u2b-mod-mock-9-after u2b_mock @79). 8 after
+  made 0 and wrote no file (u2b-mod-mock-8-after @79). 9 after with TO_HUMAN_FOLD_SUMMARIES=off in the settings env made 0
+  and wrote no file (u2b-mod-mock-9-after-off @79), so the settings env reaches $.env.get. With no advertisement, before
+  and after made 0 (u2b-mod-mock-grow-none-* u2b_grow).
+  Not recorded: the line reading `working record` under =off. That run asked no rows. By the code, `settle(run, undefined)`
+  leaves no live line and no summary, so labelFor gives nothing and the line reads `working record` (inference).
+  The live re-ask of a stretch's first row gave the summary only where the first row was asked as it was first asked:
+  ToolUse throughout (u2b-mod-mock-grow-9-after-head: the live lines `› Grow step 0/1/2`, then `› <summary>`), or
+  ToolGroup throughout (u2b-mod-mock-grow-9-after-group, the same, the summary at seq 131). With MAWS's own pattern (ToolUse
+  while the stretch has one call, ToolGroup from its second call) the group answers an empty Box and no line shows: "Found
+  beside the table", 1.
+
+E2. Expected: a push for each write a drawn button had read. Observed: yes, and each push names the instance.
+  In u2b-mod-summary the second stretch's head (ToolUse, seq 114) drew a button that read the tracker's state. From then
+  on, every write of `fold` or `folds` pushed one `ui_invalidate` with
+  `instances: [{surface:"desktop", component:"ToolUse", instance_id:<that call>}]`: seq 132 (the second call joined), 163
+  (the message closed the run), 177 (the made-up response's row), 194 (the summary settled, 03:46:08.746, 1 ms after the
+  debug log's answer). Four pushes for a run of two calls and its summary.
+  The first stretch's summary (03:46:03) pushed nothing: no drawn button had read it. Its rows had drawn the engine's
+  drawing, before the first mark.
+  The stand-in shows the same: 4 pushes, each naming the one ToolUse or ToolGroup instance that read the state
+  (u2b-mod-mock-grow-* u2b_grow `pushes`).
+  Invalidations the view raises itself (the first mark, a press, a row that moves a stretch's end) carry no instances
+  (seq 84; u2b-mod-label seq 32).
+  A re-ask of the instance named answers the new label (E1, -head). So the engine pushes on writes and item 11 is not
+  needed. A push may name an instance MAWS no longer mounts (1 below); MAWS re-asks every mounted site at any
+  invalidation, so that costs nothing more.
+
+E3. Expected: yes. Observed: yes, at 9 after and with no advertisement before and after.
+  While a stretch grows, its first row's answer reads the newest call's line: `› Grow step 0`, then `step 1`, then
+  `step 2` (u2b-mod-mock-grow-9-after-head / -group u2b_grow @146). Live, `› Second stretch, first command`
+  (u2b-mod-summary seq 114). With no advertisement, before and after alike, the first row answers `› Grow step 0`
+  (u2b-mod-mock-grow-none-before/after). So the tracker publishes the live line in every session, as §M and §G say. With
+  no advertisement no summary follows (0 requests).
+  Caveat: with MAWS's ask pattern the line is gone from the second call on (1 below).
+
+E4. Expected: yes to each. Observed: yes to each.
+  - Shape and runs: `to-human/folds/<session id>.json` under $HOME/.claude, `{"shape":2,"runs":[[first,last,summary],…]}`,
+    one run per summarised stretch (u2b_summary @495 foldsFile).
+  - Atomic replacement (u2b-mod-folds-stress; the reader's account u2b-mod-folds-stress.reader.json). How the writes were
+    provoked: the stand-in's script `cycles n=55`, in one turn at 9 after, answers 55 responses. Each response opens with a
+    marked text (from the second on), which closes the stretch before it, then one Bash call. A last marked text closes
+    the 55th. That makes 55 closed stretches, 55 summary requests (answered at once), and 55 writes of the file by the
+    mod's keepFile.
+    A separate process (uxwave-u2b-folds-reader.mjs) read the file in a tight loop throughout: 1,012,737 reads, 424,063 of
+    them before the file first existed. Not one read failed to parse. It saw exactly 55 distinct contents, holding 1, 2,
+    3, … 55 runs in order: always the file as one write left it.
+  - The reader's sensitivity (u2b-mod-folds-control.json): against a writer of the probe's own, 60 writes of a 192 kB file
+    in place made 343 of 11,000 reads fail to parse (empty, or cut at 65,536 bytes). The same 60 writes by a temporary and
+    a rename made 0.
+    Inode counts are not evidence here: the filesystem reuses inodes across renames.
+  - The temporary is named `<session id>.json.<token>.tmp` in the same folder, moved with `mv -f` (the code, keepFile).
+    Whether a temporary was left over was not checked: each run's scratch folder is removed after it.
+  - Two processes (u2b-mod-folds-two-a/-b; u2b-mod-folds-two.reader.json): A is a new session (`cycles n=25 delay=400`);
+    B is the same session id resumed 6 s later with its own `cycles n=25 delay=400`. Both run at 9 after, at once. 50
+    summaries, 50 writes, 0 unparsed reads. The final file holds all 25 of A's runs and all 25 of B's (none missing,
+    none foreign). In one transition of 50 (26 runs, then 26 runs) a write left out the other process's newest run, and
+    the next write put it back. That is the crossing item 12 itself allows; seen once in this run.
+  - Ids: every run's `first` and `last` (tool-use ids here) is among the ids of the wire's frames and of the transcript
+    file (u2b_summary foldsFile.runs: firstOnWire, lastOnWire, firstInFile, lastInFile all true). Each run's `first` is its
+    stretch's first call.
+  - Session id: the file is named by the id system/init and the result carry (u2b-mod-summary init @29, result @179).
+    After a resume it is the same: u2b-mod-summary-resume's frames carry only that id, and B's resumed process reported
+    A's id (u2b-mod-folds-two-b u2b_mock @365).
+
+E5. Expected: yes. Observed: yes (u2b-mod-summary-resume, against the counting stand-in). Resumed with no prompt, both
+  stretches answer `› <stored summary>` at the first ask (seq 27, 33) and 8 s on (seq 42, 48). The endpoint received no
+  summary request: it received no Messages request at all, only HEAD /api/hello and GET /v1/models (u2b_resume @52). The
+  folds file is byte-identical before and after.
+
+E6. Observed: not counted. Measured numbers:
+  - The relay logged each summary call (u2b-mod-summary u2b_cost @514 `relay`): model claude-haiku-5-5, no thinking,
+    max_tokens 6048 (the mod asks 4000), no tools, no prompt cache. Usage 386 in / 23 out (69 chars) and 388 in / 40 out
+    (94 chars), each about 1.5 s.
+  - Neither is counted in a `result` frame. Turn 1's modelUsage (1425 in, 505 out; result @179) is exactly its six
+    main-loop requests (12 in, 489 out) plus one side request of the engine's (1413 in, 16 out, no tools). The first
+    summary ran inside turn 1 and is not in it.
+  - Turn 2's cumulative modelUsage rose by exactly its one request (2 in, 4 out; result @513). The second summary is not
+    in it either.
+  - So the turn's summary popover will not show these calls. For "Cost on a long transcript": about 390 input tokens plus
+    the digest per call for a stretch of two short calls (the system prompt and wrapper are about 330 tokens of that), and
+    20 to 40 output tokens. Nothing on the wire reports them; only the engine's debug log names each call (model, time,
+    characters).
+
+Found beside the table.
+  1. FIXED at e511aad9 (the branch's `joinGroup`; see "Second round" below). What was observed at 0fed175f and in 0.8.2:
+     a live stretch loses its record line when its second call arrives, with MAWS's ask pattern. Seen in 0.8.2 and 0.9.0
+     alike: u2b-mod-summary seq 89, 146; u2b-mod-mock-grow-{none-before,none-after,9-after}, 3 of 3 runs.
+     - MAWS asks a lone call as ToolUse and a run of two or more as ToolGroup `group:<first call>` (§E). While a stretch
+       grows, its first call is first asked as ToolUse. That row enters the view's order and heads the run.
+     - When the second call arrives MAWS asks the group instead. The mod places the group at the same place, after the
+       lone row, so the group is not the run's first row and answers an empty Box. The lone ToolUse row, which MAWS no
+       longer mounts, keeps the button.
+     - Result: the stretch shows nothing, neither live line nor summary, until the view is rebuilt (a resume). The
+       engine's pushes go on naming the unmounted ToolUse instance.
+     - Asking the stretch's first row the same way throughout avoids it. ToolUse throughout (-head) or ToolGroup from the
+       first call, a group of one (-group): live line, then summary, each time.
+     - This is neither in §E nor in §I. It is a failure the A2 table does not name: the run is hidden but so is its line.
+       Recommendation: fix it in the mod before its pull request opens. In the ToolGroup hook, adopt the lone row of the
+       group's first call into the group, as `adopt` does for a row's other id. MAWS's asks then stay as §E gives them.
+       If the architect prefers MAWS's side, §E would have to ask a run's site as ToolGroup from its first call, which
+       changes how a lone call is drawn.
+  2. §I item 13 and the branch's follow-up hold (u2b-mod-label). The probe wrote a folds file whose first run begins at
+     the stretch's first call, after the thought that heads the stretch. The thought asked alone reads `working record`
+     (seq 27, 30): its stretch ends at itself. Once the group draws, the mod pushes one ui_invalidate (seq 32), and the
+     thought then reads the run's summary (clause 4; seq 38, and @76 for every row).
+  3. §I item 5's limit (a turn line whose next prompt was never asked shows for an unfolded run of the next turn) was not
+     provoked. The seed's second turn holds no run, and every lone turn ask had nothing open.
+  4. The seeded ids have tails of zeros, which rowKey/blockOf read as derived block indices. That affects only the order
+     of blocks sharing one key, and none of the seed's rows share a key. One case I tried and removed (the engine's
+     derived form beside the bare uuid in one connection) was confounded by it, and is not reported.
+
+§I, as recorded.
+  Items 1 (the gate: 8 steps aside, 9 draws, none draws), 2 (the declaration at the reported path), 3 (0.9.0), 4 (an
+  anchored ask's place), 5 (the turn line, as C1 shows it), 6 (a thought under its bare uuid), 9 (headless at 9 asks; 8
+  and none do not), 10 (=off stops the asking), 12 (atomic replacement, the merge, shape 2) and 13 (clause 4) behave as
+  written.
+  Item 11 is unbuilt and not needed (E2).
+  Not recorded here: items 7 and 8 (CLAUDE.md, the mod's own tests).
+  Wrong in the document, not the mod: §E's id for a thought (C2).
+  Missing from both: the lone-call-to-group transition (Found 1), since fixed in the mod at e511aad9.
+
+§M, sentences the recordings contradict or qualify.
+  - "What a person sees", where the mod draws: "the stretch is open and growing | › and its newest call", and "the summary
+    has arrived | › and the summary". At 0fed175f, not with MAWS's ask pattern once a stretch had a second call (Found
+    1). At e511aad9 both hold (Second round).
+  - "The engine sends it as one request …" holds. Two details: the request carries max_tokens 6048, not 4000, and no
+    request record of it is written to the transcript (its api-request rows are the main loop's, querySource `sdk`).
+  - "the read at 45 is past any summary": observed summaries settled about 1.5 s after the stretch closed.
+  - "Today" (the mod, as installed): "the sminos ask mod step[s] out for any non-empty value". Not at 8 under MAWS_LANE=B
+    (A1).
+
+Secret scan. gitleaks 8.30.1 (the pinned version) over spikes/protocol-probe/fixtures with .github/maws-app/gitleaks.toml:
+  no leaks found. node --test .github/scripts/maws-app-scan.test.mjs: 8 of 8 pass. The rows in fixtures.test.mjs
+  ("U2b …" and the u2b-mod-* integrity rows): 44 of 44 pass. Provenance notes of the first 14 resumed fixtures named the
+  doperpowers repository by URL. That field, which the probe itself writes, was replaced by the words "the public
+  doperpowers repository" before commit. No recording of the engine was changed.
+
+Second round, on e511aad9 (2026-11-16)
+
+  "after" = e511aad9d995c371e127ebca9e2bd4281a75076f: 0fed175f, the comment commit a98c578e, and `joinGroup` in the
+  ToolGroup hook (to-human.tsx +64 lines). `joinGroup` turns a call's lone record row into the group's row when a group
+  holds that call, and the hook invalidates once when it does. Every second-round fixture's provenance names this
+  commit. The first round's fixtures are kept as the record of the defect.
+
+  Item 1. Expected: one mounted instance answers the record line at every step, the newest call and then the summary,
+  and after the switch the pushes name the group's instance. Observed: yes.
+  - Stand-in, MAWS's own pattern (lone ToolUse, then ToolGroup from the second call):
+    - At 9 (u2b-mod-mock-grow-9-after-fix u2b_grow @150) the group answers `› Grow step 1` (seq 87) and `› Grow step 2`
+      (seq 109), then `› <summary>` after the turn (seq 140).
+    - With no advertisement and "after" (-none-after-fix @153) it answers the live lines and then `› working record`
+      (seq 138; no summary is asked there).
+    - From the switch on, the pushes name the ToolGroup instance beside the ToolUse that read the state first (seq 103,
+      128, 133), and one push with no instances comes at the switch itself (seq 85).
+    - The lone ToolUse, asked once more after the switch, answers an empty Box (seq 149), as the builder said.
+    - "Before" is unchanged: its group stays hidden (-none-before-fix @149). That is 0.8.2, not part of the fix.
+  - The two patterns that worked before still work: ToolUse throughout (-9-after-head-fix @146: live lines, then the
+    summary at seq 130) and ToolGroup from the first call (-9-after-group-fix @146, the same).
+  - Real run at 9 (u2b-mod-summary-fix u2b_summary @495; two stretches, two summaries):
+    - The first stretch's group reads its summary as soon as it settles, while the turn still runs (seq 110).
+    - The second stretch's single call reads `› Second stretch, first command` (seq 116); its group reads
+      `› Second stretch, second command` (seq 149) and then its summary (seq 197).
+    - After the switch the pushes name the groups' instances (seq 134 onward).
+    - Both lone ToolUses, asked after the switch, answer an empty Box (seq 491, 494).
+    - The folds file is shape 2 with two runs, their ids on the wire and in the file.
+    - The summaries measured 386/36 and 388/27 tokens in/out (u2b_cost @522), again not counted in the result.
+    - Resumed with no prompt (u2b-mod-summary-fix-resume): both groups read their summaries (seq 27, 33) with no summary
+      request (u2b_resume @52).
+  - Each case run once. The live lines move with the stand-in's 2 s calls; the 500 ms polling saw every step.
+  - No handling was added for a ToolResult asked for a call inside a group, and none was asked here.
+
+  Item 2. The rest of the recorded answers stand, from the diff. `joinGroup` acts only in the ToolGroup hook, and only
+  when a call the group holds already stands in the view's order as a lone record row, that is, after the same call was
+  asked as ToolUse. Its other changes (`heldBy` released for a call a group lets go; one invalidation when a row joined)
+  follow from that. None of the other recordings asks a group's call as ToolUse first:
+  - the resumed seed asks the run only as `group:<first call>`, and its ToolUse asks are the message call, the ListAgents
+    call and the question, none of them a group's member;
+  - the lone, reload and label runs likewise;
+  - the six live launches ask no group;
+  - the stand-in's E1, stress and two-process runs ask no rows at all.
+  So only the MAWS-pattern recordings (u2b-mod-summary, u2b-mod-mock-grow-*) could change, and those were made again.
+
+  Item 3. Terminal sessions, before and after: the record line reads the newest call and then the summary in both. The
+  view itself shows no difference between the two installations (u2b-mod-terminal-before.json and -after.json). Method:
+  scenarios/pass3/uxwave-u2b-mod-terminal.mjs runs `vm-run.sh term` (the engine in tmux, 160x48, under vm-run's
+  namespace and gateway route): haiku, --permission-mode default, no MAWS_NATIVE_TO_HUMAN, summaries on, the same three
+  plugin folders, the style and the owner's plugin order in --settings. Turn 1 is one marked message, so the view folds
+  from turn 2. Turn 2 is the read-only stretch, then a marked message. The pane was captured every 700 ms. Each case ran
+  once, 4 to 6 model requests plus 1 summary.
+  - After: the stretch was 6 calls (Read, Glob, Bash `find`, Grep, Bash `grep`, Read: the model added the two Bash calls
+    on its own). The line moved `› Read one.txt` (ms 15249), `› Search "*.txt"` (16680), `› List top-level .txt files
+    in the work directory` (18825), `› Search "ONE"` (20254), `› Search .txt files in the work directory for ONE`
+    (21684), `› Read one.txt` (23829). Then the marked message, and the summary on the line at ms 28113. The folds file
+    is shape 2.
+  - Before: the model made 2 calls (Read, then a ToolSearch for Glob, which it reported as unavailable in that session)
+    and ended with a message-tool message instead of continuing. The line moved `› Read one.txt` (ms 15768) to
+    `› Tool search "select:Glob"` (17909), then read the summary at ms 23627. The folds file is shape 1, as 0.8.2 writes
+    it.
+  - The difference in what the two models did is the model's, not the view's. The stretch in "before" was shorter than
+    asked (2 calls, not 3 or 4), so it did not reach a third call; the rule it shows is the same.
+  - Nothing differs in the drawing: one `› ` line per stretch, the band `to-human view · full transcript ›`, the message
+    under `● message`.
+  - Interactive sessions authenticate through vm-run's route as before; nothing was missing.
+
+  Scan, second round: gitleaks 8.30.1 over the fixtures, no leaks found; the U2b rows of fixtures.test.mjs, 53 of 53 pass.

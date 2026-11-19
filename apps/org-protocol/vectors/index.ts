@@ -7,7 +7,12 @@
 //
 // PROJECT_RULE is the project registry's shared rule vectors (project-rule.json, hand-written; Interfaces §B of
 // docs/doperpowers/plans/2026-11-10-project-registry.md), which sminos vendors and MAWS's harness runs.
+//
+// CHANNEL_RULE is sminos's declared channels and threads as both sides read them (channel-rule.json, hand-written;
+// Interfaces §B of docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md): the channel id's vectors and the reader
+// rule's `retired` cases, which sminos vendors and MAWS's suites run.
 import type { KeyName, VectorSet } from './scenario.ts';
+import channelRule from './channel-rule.json' with { type: 'json' };
 import keys from './keys.json' with { type: 'json' };
 import rule from './project-rule.json' with { type: 'json' };
 import vectors from './vectors.json' with { type: 'json' };
@@ -36,5 +41,12 @@ export type AnchorCase = {
 };
 export type ProjectRuleVectors = { about: string; version: number; org: string; machine: string; cases: RuleCase[]; anchors: AnchorCase[] };
 export const PROJECT_RULE = rule as unknown as ProjectRuleVectors;
+
+export type ChannelIdCase = { id: string; channel: boolean; why: string };
+/** One lifecycle event of a `retired` case: only the fields the reader rule reads. */
+export type ChannelRuleEvent = { kind: 'joined' | 'retired'; reason?: string; thread?: string };
+export type ChannelRetiredCase = { name: string; steps: { event: ChannelRuleEvent; member: boolean }[] };
+export type ChannelRuleVectors = { about: string; version: number; ids: ChannelIdCase[]; retired: ChannelRetiredCase[] };
+export const CHANNEL_RULE = channelRule as unknown as ChannelRuleVectors;
 export { A, B, KEY_NAMES, ORG, PROJECT, REF_MINI, REF_NEWCOMER, REF_VM1, REF_VM_BUILD, type Case, type DualCase, type EnrollmentCase, type KeyName, type PairingVector, type ProvisioningVector, type VectorSet } from './scenario.ts';
 export { replayVectors } from './replay.ts';

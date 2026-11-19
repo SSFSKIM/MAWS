@@ -306,7 +306,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       const columns = (table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
-      expect(columns('owner_channel_sessions')).toEqual(['app_session_id', 'override', 'enabled_at', 'launch_id', 'launched_at', 'desired', 'recorded', 'appended', 'snapshot_off', 'off_unavailable', 'applied', 'style', 'observed_style', 'style_mismatch']);
+      expect(columns('owner_channel_sessions')).toEqual(['app_session_id', 'override', 'enabled_at', 'launch_id', 'launched_at', 'desired', 'recorded', 'appended', 'snapshot_off', 'off_unavailable', 'applied', 'style', 'observed_style', 'style_mismatch', 'advertised']); // UX wave U2b: `advertised` (ADDED_COLUMNS)
       expect(columns('owner_channel_marks')).toEqual(['id', 'app_session_id', 'kind', 'message_uuid', 'block_index', 'span', 'grammar', 'head', 'at', 'item', 'live', 'state', 'answer_text', 'answer_origin', 'answer_members', 'answered_at', 'answer_attempts', 'read_at', 'state_changed_at']);
     } finally {
       db.close();
@@ -342,7 +342,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(index.applied).toEqual([9, 10, 11, 12, 13, 14, 15]); // P3-L's 10 follows
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(dump(db)).toEqual(before);
+      expect(dump(db)).toEqual(before.map((row) => ({ ...row, advertised: null }))); // UX wave U2b: the added column, null for every row
       const sql = (db.prepare("SELECT sql FROM sqlite_master WHERE name = 'owner_channel_sessions'").get() as { sql: string }).sql;
       expect(sql).toContain('external-style-plus-supplement');
       expect(sql).toContain('REFERENCES sessions(app_id) ON DELETE CASCADE');

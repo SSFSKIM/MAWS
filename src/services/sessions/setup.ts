@@ -248,7 +248,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     const answer = await launchOnHost(s, 'launching', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
-    ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now() }); // P2-C (2026-10-09): before any event of the launch
+    ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now(), launchedAt: answer.session.launchedAt /* U2b */ }); // P2-C (2026-10-09): before any event of the launch
     await run.progress({ launch: { launchId: answer.session.launchId, at: s.now() } });
     if (attempt.directFallback) directFallbackNotice(s, appSessionId, run.intent.progress.engineSessionId);
     const end = await watch.untilReady();

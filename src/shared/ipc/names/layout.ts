@@ -10,6 +10,7 @@ export const commands = [
   'layout.nativeEdit', // P4-B2 K6
   'layout.openFile', // UX wave U6e: Open File…
   'layout.frameFile', 'layout.releaseFrame', // UX wave U6b-2
+  'layout.openInApps', 'layout.openIn', // UX wave U6b-4a: Open in
 ] as const;
 
 export const events = [

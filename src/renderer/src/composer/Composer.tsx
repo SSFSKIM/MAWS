@@ -23,7 +23,7 @@
 // W3 (B6): a bubble's Edit edits the bubble in place (`InlineEdit.tsx`, over `resubmit-seam.ts`); the composer has no
 // edit mode. Only once a rewind hid the edited bubble with its turn and the resend still waits (it failed, or the
 // rewind was confirmed late) does the composer's dock carry the resubmit's line, with Send or Retry.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -74,6 +74,7 @@ import { ResubmitLine } from './InlineEdit'; // W3 (B6)
 import { endedBindings, intentBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
+import { ComposerBarContext } from './frame/bar'; // UX wave U10b (O-43, §F.3)
 import { PluginBand, PluginHint } from './frame/PluginSites'; // R2
 import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
@@ -215,6 +216,7 @@ function useLiveReads(
 
 export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProps) {
   const hook = useSetupIntent(appSessionId);
+  const bar = useContext(ComposerBarContext); // UX wave U10b (O-43, §F.3): the float's bar, the box alone
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const status = useSessionStatus(appSessionId, client);
   // Unstarted while C10 has an intent and C3 no status; the binding swaps when the status appears, without a remount.
@@ -329,7 +331,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         insertText: (text, options) => handle.current?.insertText(text, options),
         attachFiles: async (files, options) => (await handle.current?.attachFiles(files, options)) ?? false, // P3-G: Mark-up's Add to chat; registering drains the store's attachment queue
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
-        draftShown: () => !promptState.current.docked, // UX wave U4a M5: the menu chords ask for nothing under a card
+        draftShown: () => !promptState.current.docked && !bar, // UX wave U4a M5: the menu chords ask for nothing under a card; U10b (F5): nor in the bar
         empty: () => handle.current?.serialize().empty ?? true, // UX wave U1b (§F): a prompt's ⌘↩ yields to a draft
         // UX wave U6b-5a (decision 8): an attached block, where this composer's box stands (a card over it, its pane covered)
         attachPasted: (block, by, signal, atPress) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: () => promptState.current.docked, held: () => takingBack(appSessionId) }, signal, atPress),
@@ -363,7 +365,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           },
         },
       }),
-    [appSessionId],
+    [appSessionId, bar],
   );
 
   // ⇧Tab in the editor cycles the permission mode (C5's composer-scoped `composer.cycleMode`); UX wave U6b-5a: and the
@@ -636,10 +638,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {!unstarted && <PluginBand appSessionId={appSessionId} working={working} />}
       {/* UX wave U2b: the to-human view's switch, after the band, only while MAWS draws the view in force */}
       {!unstarted && <ViewSwitch appSessionId={appSessionId} />}
-      {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar it shows here */}
-      {docked && <DictationNotice appSessionId={appSessionId} client={client} />}
+      {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar, or in the bar, it shows here */}
+      {(docked || bar) && <DictationNotice appSessionId={appSessionId} client={client} />}
       <Frame
         appSessionId={appSessionId}
+        bar={bar}
         docked={
           card ? <div key={`card:${card.id}`}>{card.render()}</div> : null
         }
@@ -679,8 +682,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         }
         submit={<SubmitControl decision={decision} onPrimary={onPrimary} />}
       />
-      {/* R2: a plugin's hint under the frame, only while a plugin draws one */}
-      {!unstarted && <PluginHint appSessionId={appSessionId} isDraft={!draft.empty} isWorking={working} />}
+      {/* R2: a plugin's hint under the frame, only while a plugin draws one; none in the bar (U10b, H11) */}
+      {!unstarted && !bar && <PluginHint appSessionId={appSessionId} isDraft={!draft.empty} isWorking={working} />}
     </section>
   );
 }

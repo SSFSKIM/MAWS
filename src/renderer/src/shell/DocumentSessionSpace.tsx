@@ -1,7 +1,9 @@
 // WR #12: a document keeps 600 px for reading beside an open conversation. Narrower
 // surfaces retain the overlay; the editor stays mounted through either layout.
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { CARD_MIN, useColumnWidth, useFloatingCard } from './floating';
+// UX wave U10b (O-43, B6): under the bar a scrolling document or dashboard keeps the bar's height at the end of its
+// scroll (`--float-bar-room`, which the document editor's page reads), so its last line can stand above the bar.
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { CARD_MIN, useBarRoom, useColumnWidth, useFloatingCard } from './floating';
 
 const READING_WIDTH = 600;
 export function DocumentSessionSpace({ surface, enabled, children }: { surface: 'main' | 'panel'; enabled: boolean; children: ReactNode }) {
@@ -9,19 +11,25 @@ export function DocumentSessionSpace({ surface, enabled, children }: { surface: 
   const spacer = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const requested = useColumnWidth(surface);
+  const room = useBarRoom(surface);
+  // Ticket 760: measured also as the column is requested or enabled, not only when the observer reports: the render that
+  // floats the panel is laid out at the floated width before any frame runs the observer, so the column is reserved in
+  // that render rather than a frame after it
+  useLayoutEffect(() => {
+    if (self.current) setWidth(self.current.clientWidth);
+  }, [requested, enabled]);
   useLayoutEffect(() => {
     const element = self.current;
-    if (!element) return;
-    const measure = () => setWidth(element.clientWidth);
-    measure();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    observer?.observe(element);
-    return () => observer?.disconnect();
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
   const column = enabled && requested !== null && width >= READING_WIDTH + CARD_MIN.w ? Math.min(requested, width - READING_WIDTH) : null;
   const reserving = column !== null;
   useLayoutEffect(() => reserving && spacer.current ? useFloatingCard.getState().reserveColumn(spacer.current) : undefined, [reserving]);
-  return <div ref={self} className="flex h-full min-h-0 min-w-0">
+  // the width the column was last drawn from (`data-document-session-width`), so a reader can tell it from the width now
+  return <div ref={self} data-document-session-width={width} className="flex h-full min-h-0 min-w-0" style={room > 0 ? ({ '--float-bar-room': `${room}px` } as CSSProperties) : undefined}>
     <div className="relative min-h-0 min-w-0 flex-1">{children}</div>
     {column !== null && <div ref={spacer} aria-hidden data-document-session-column className="shrink-0" style={{ width: column }} />}
   </div>;
