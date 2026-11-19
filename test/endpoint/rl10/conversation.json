@@ -130,22 +130,23 @@
     {
       "name": "the log plane: an own event as _append writes it (ts, no created) signed once in its upload form, dual-coded, a session writer's attested, resent byte-identical, another body refused",
       "steps": [
-        { "up": { "t": "hello", "project": "{{project:P}}", "name": "maws", "have": { "{{name}}/{{session:S1}}": 3, "{{name}}/{{session:S2}}": 1, "{{name}}/{{session:S3}}": 1, "{{name}}/{{session:S4}}": 1, "{{name}}/human": 1 } }, "note": "the machine's vector of P: each member's joined, S1's titled and say, the operator's words" },
+        { "up": { "t": "hello", "project": "{{project:P}}", "name": "maws", "have": { "{{name}}/{{session:S1}}": 3, "{{name}}/{{session:S2}}": 2, "{{name}}/{{session:S3}}": 1, "{{name}}/{{session:S4}}": 1, "{{name}}/human": 1 } }, "note": "the machine's vector of P: each member's joined, S2's second (its adoption as a thread), S1's titled and say, the operator's words" },
         { "down": { "t": "have", "project": "{{project:P}}", "have": {}, "archive": false }, "vary": ["archive"] },
         { "scene": "listed", "session": "{{session:S1}}", "note": "the session is listed at the hub once its project is relayed" },
         { "scene": "listed", "session": "{{app:S3}}", "note": "a lane B session is listed under its appSessionId" },
         {
           "up": { "t": "events", "project": "{{project:P}}", "events": [
-            { "ts": "2026-10-27T18:01:00.100Z", "writer": "{{name}}/{{session:S1}}", "seq": 1, "kind": "joined", "session": "{{session:S1}}", "alias": "main", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main" },
-            { "ts": "2026-10-27T18:01:00.200Z", "writer": "{{name}}/{{session:S1}}", "seq": 2, "kind": "titled", "session": "{{session:S1}}", "title": "the main session" },
+            { "ts": "2026-10-27T18:01:00.100Z", "writer": "{{name}}/{{session:S1}}", "seq": 1, "kind": "joined", "session": "{{session:S1}}", "alias": "main", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main", "thread": "5a1e0c11-0f4b-4d27-9b6e-1c3a5e7f9a01" },
+            { "ts": "2026-10-27T18:01:00.200Z", "writer": "{{name}}/{{session:S1}}", "seq": 2, "kind": "titled", "session": "{{session:S1}}", "title": "the main session", "thread": "5a1e0c11-0f4b-4d27-9b6e-1c3a5e7f9a01" },
             { "ts": "2026-10-27T18:02:12.001Z", "writer": "{{name}}/{{session:S1}}", "seq": 3, "kind": "say", "from": "main", "to": "*", "text": "tests pass" },
             { "ts": "2026-10-27T18:01:00.300Z", "writer": "{{name}}/{{session:S2}}", "seq": 1, "kind": "joined", "session": "{{session:S2}}", "alias": "bob", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main", "owners": ["{{member:B}}"], "origin": { "kind": "maws", "requester": "{{member:B}}" } },
+            { "ts": "2026-10-27T18:01:00.600Z", "writer": "{{name}}/{{session:S2}}", "seq": 2, "kind": "joined", "session": "{{session:S2}}", "alias": "bob", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main", "owners": ["{{member:B}}"], "origin": { "kind": "maws", "requester": "{{member:B}}" }, "thread": "5a1e0c22-0f4b-4d27-9b6e-1c3a5e7f9a02" },
             { "ts": "2026-10-27T18:01:00.400Z", "writer": "{{name}}/{{session:S3}}", "seq": 1, "kind": "joined", "session": "{{session:S3}}", "alias": "lane-b", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main", "origin": { "kind": "maws" } },
-            { "ts": "2026-10-27T18:01:00.500Z", "writer": "{{name}}/{{session:S4}}", "seq": 1, "kind": "joined", "session": "{{session:S4}}", "alias": "unbridged", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main" },
+            { "ts": "2026-10-27T18:01:00.500Z", "writer": "{{name}}/{{session:S4}}", "seq": 1, "kind": "joined", "session": "{{session:S4}}", "alias": "unbridged", "name_source": "user", "machine": "{{name}}", "cwd": "{{checkout}}", "worktree": "", "role": "", "seat": "", "by": "", "session_kind": "interactive", "repo": "{{repo}}", "branch": "main", "thread": "5a1e0c44-0f4b-4d27-9b6e-1c3a5e7f9a04" },
             { "ts": "2026-10-27T18:02:11.482Z", "writer": "{{name}}/human", "seq": 1, "kind": "human", "from": "human", "to": [{ "session": "{{session:S1}}", "alias": "main" }], "text": "run the tests" }
           ] },
-          "vary": ["events.0.ts", "events.1.ts", "events.3.ts", "events.4.ts", "events.5.ts"],
-          "note": "events as stored: ts and no created, no mac; the first upload past an empty have, every own writer of P in writer order from its seq 1: the members' joined (a joined publishes owners and origin only from a final record, never @machine), S1's titled and say, the operator's words"
+          "vary": ["events.0.ts", "events.1.ts", "events.3.ts", "events.4.ts", "events.5.ts", "events.6.ts", "events.0.thread", "events.1.thread", "events.4.thread", "events.6.thread"],
+          "note": "events as stored: ts and no created, no mac; the first upload past an empty have, every own writer of P in writer order from its seq 1: the members' joined (a joined publishes owners and origin only from a final record, never @machine), S1's titled and say, the operator's words. A lane A session is a sminos thread, and its lifecycle events carry its thread's id in `thread` (S1's joined and titled, S4's joined; S3, lane B, carries none). S2 joins as lane B, unstamped; its bridge then relays lane A, and sminos adopts it as a thread with a second joined, stamped, at its writer's seq 2"
         },
         { "scene": "hub-holds", "writer": "{{name}}/human", "seq": 1, "created": "2026-10-27T18:02:11.482Z", "note": "the hub verifies its v2 sig; its DX1 mac verifies under the legacy key" },
         { "scene": "hub-holds", "writer": "{{name}}/{{session:S1}}", "seq": 3, "created": "2026-10-27T18:02:12.001Z", "attest": ["{{member:A}}"], "note": "attest {owners: @machine resolved}, inside the v2 signature" },
@@ -158,7 +159,8 @@
         { "up": { "t": "events", "project": "{{project:P}}", "events": [{ "ts": "2026-10-27T18:02:13Z", "writer": "{{name}}/human", "seq": 2, "kind": "human", "from": "human", "to": "*", "text": "an older log's whole second" }] } },
         { "scene": "hub-holds", "writer": "{{name}}/human", "seq": 2, "created": "2026-10-27T18:02:13.000Z" },
         { "up": { "t": "events", "project": "{{project:P}}", "events": [{ "ts": "2026-10-27T18:02:14.000Z", "created": "2026-10-27T18:09:00.000Z", "writer": "{{name}}/human", "seq": 3, "kind": "human", "from": "human", "to": "*", "text": "a created of its own" }] } },
-        { "down": { "t": "refused", "project": "{{project:P}}", "refusal": { "reason": "malformed", "writer": "{{name}}/human", "seq": 3, "message": "a created other than its ts" } }, "vary": ["refusal.message"] }
+        { "down": { "t": "refused", "project": "{{project:P}}", "refusal": { "reason": "malformed", "writer": "{{name}}/human", "seq": 3, "message": "a created other than its ts" } }, "vary": ["refusal.message"] },
+        { "scene": "hub-holds", "writer": "{{name}}/{{session:S2}}", "seq": 2, "created": "2026-10-27T18:01:00.600Z", "attest": ["{{member:B}}"], "thread": "5a1e0c22-0f4b-4d27-9b6e-1c3a5e7f9a02", "note": "the adoption's joined went up signed and attested like any session writer's event, its thread inside the signature" }
       ]
     },
     {
@@ -309,7 +311,7 @@
         { "up": { "t": "restated" }, "note": "sminos's restatement after the welcome is whole: what it left out left" },
         { "scene": "withdrawn", "session": "{{session:S4}}", "within": 2000, "note": "S4 and S3 left while the endpoint was down: their listings are withdrawn at once" },
         { "scene": "withdrawn", "session": "{{app:S3}}", "within": 2000 },
-        { "up": { "t": "hello", "project": "{{project:P}}", "name": "maws", "have": { "{{name}}/{{session:S1}}": 3, "{{name}}/{{session:S2}}": 1, "{{name}}/{{session:S3}}": 2, "{{name}}/{{session:S4}}": 2, "{{name}}/human": 9, "hub/{{member:B}}": 4, "old-mini/human": 1 } }, "note": "the machine's vector: S3's and S4's left after their joined, the operator's words to 9" },
+        { "up": { "t": "hello", "project": "{{project:P}}", "name": "maws", "have": { "{{name}}/{{session:S1}}": 3, "{{name}}/{{session:S2}}": 2, "{{name}}/{{session:S3}}": 2, "{{name}}/{{session:S4}}": 2, "{{name}}/human": 9, "hub/{{member:B}}": 4, "old-mini/human": 1 } }, "note": "the machine's vector: S2's two joined, S3's and S4's left after their joined, the operator's words to 9" },
         { "down": { "t": "have", "project": "{{project:P}}", "have": {}, "archive": false }, "vary": ["have", "archive"] },
         { "scene": "hub-repost", "writer": "hub/{{member:B}}", "from": 1, "to": 5, "note": "the inbound index survived the restart" },
         { "down": { "t": "spent", "project": "{{project:P}}", "writer": "hub/{{member:B}}", "seq": 5, "reason": "replayed" } },

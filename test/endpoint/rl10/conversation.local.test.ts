@@ -212,6 +212,7 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       expect(await verify(await importOrgKey(base64urlDecode(legacyKey)), 'log', PROJECT, event)).toBe(true);
       if (step.attest !== undefined) expect((event.attest as { owners: string[] }).owners).toEqual(step.attest);
       else expect(event.attest).toBeUndefined();
+      if (step.thread !== undefined) expect(event.thread).toBe(step.thread);
       // The hub took it: nothing came back refused for it.
       await sleep(200);
       expect(connections.get('main')?.received.some((f) => f.t === 'refused' && (f.refusal as { seq?: number }).seq === step.seq && (f.refusal as { writer?: string }).writer === step.writer)).toBe(false);
