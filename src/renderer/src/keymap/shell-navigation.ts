@@ -128,3 +128,9 @@ export function stepMainTab(delta: 1 | -1): void {
     if (region && available(region) && strip && available(strip)) focusPaneElement(pane);
   });
 }
+
+// UX wave U6b-5a (M1): built after its tests
+export function focusSurfaceStop(tabId: string): boolean {
+  void tabId;
+  return false;
+}

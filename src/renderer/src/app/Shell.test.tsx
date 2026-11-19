@@ -37,7 +37,7 @@ import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
-import { registerPanelTool } from '../panel/host';
+import { registerPanelTool, usePanelHost } from '../panel/host';
 import { surfaceTabs } from '../panel/surface-model';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
@@ -1068,9 +1068,14 @@ describe('a page beside the sidebar', () => {
       renderShell();
       expect(inView('terminal')).toBe(true);
       act(() => useLayout.getState().openDestination(PAGE));
+      const asked = usePanelHost.getState().focus;
+      const holder = document.activeElement;
       act(() => runAction('surface.terminal'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('terminal')).toBe(true);
+      // UX wave U6b-5a (M1, decision 3): leaving the page is all it does; no tool is asked for the keyboard, none moves it
+      expect(usePanelHost.getState().focus).toBe(asked);
+      expect(document.activeElement).toBe(holder);
     });
 
     it('a surface’s key for a tool not in view leaves the page and shows the tool', () => {
@@ -1081,6 +1086,9 @@ describe('a page beside the sidebar', () => {
       act(() => runAction('surface.files'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('files')).toBe(true);
+      // UX wave U6b-5a (M1, decision 3): a tool the key brings into view from behind a page is asked for the keyboard
+      const files = surfaceTabs(useLayout.getState(), A).find((tab) => tab.toolId === 'files')!;
+      expect(usePanelHost.getState().focus[files.id]).toBeGreaterThan(0);
     });
 
     it('Session cards with the card column placed behind the page leaves the page, and the column is still shown', () => {

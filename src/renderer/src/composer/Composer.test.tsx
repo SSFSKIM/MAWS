@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums'; // UX wave U6b-5a
 import type { OrgKey } from '@shared/machine/org-key'; // P5 O7 M4
 import type { SessionRecord } from '@shared/graph/session';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -2680,5 +2681,126 @@ describe('a Stop that fails says so (S-01)', () => {
       await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
       expect(stops.calls.filter((c) => c === 'invoke session.interrupt'), 'nothing sent to an offline machine').toEqual([]);
     });
+  });
+});
+
+// UX wave U6b-5a (M1, decision 5; sequence S4): a change of the permission mode with ⇧Tab is said once per press, in the
+// composer's polite live region, with the mode the chip shows once the change is answered; a refusal says the mode in
+// force; a later press supersedes an earlier one; a press while the chip takes no change says nothing.
+describe('the mode said aloud', () => {
+  type ModeAnswer = { effective: PermissionMode; refusal: AutoModeRefusalCode | null; error: string | null };
+  let held: ((value: { ok: true; value: ModeAnswer }) => void)[] = [];
+  // `session.setPermissionMode` held open until the test answers it; every other command as the suite's fake answers it
+  beforeEach(() => {
+    held = [];
+    const bridge = window.maws!;
+    window.maws = {
+      ...bridge,
+      invoke: ((name: string, input: unknown, target?: unknown) =>
+        name === 'session.setPermissionMode' ? new Promise((resolve) => held.push(resolve)) : (bridge.invoke as (n: string, i: unknown, t?: unknown) => Promise<unknown>)(name, input, target)) as PreloadBridge['invoke'],
+    };
+  });
+  const answer = (nth: number, value: ModeAnswer) => act(async () => {
+    held[nth]!({ ok: true, value });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const taken = (effective: PermissionMode): ModeAnswer => ({ effective, refusal: null, error: null });
+  const mode = (id: AppSessionId, effective: PermissionMode, requested: PermissionMode = effective) => act(() => live(id, { status: { permissionMode: { requested, effective, refusal: null } } }));
+  const region = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLElement>('[data-mode-announcement]')!;
+  const said = (index: 0 | 1 = 0) => region(index).textContent;
+  const shiftTab = (index: 0 | 1 = 0) => key(editorOf(index), { key: 'Tab', code: 'Tab', shiftKey: true });
+
+  it('is one polite region, visually hidden and empty, mounted with the composer', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    expect(composerOf(0).querySelectorAll('[data-mode-announcement]')).toHaveLength(1);
+    expect(region().getAttribute('aria-live')).toBe('polite');
+    expect(said()).toBe('');
+  });
+
+  it('the answer before the chip’s mode: said when the chip shows it', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    expect(held).toHaveLength(1);
+    await answer(0, taken('acceptEdits'));
+    expect(said(), 'the chip still shows Manual').toBe('');
+    mode(A, 'acceptEdits');
+    await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
+  });
+
+  it('the chip’s mode before the answer: said when the answer comes', async () => {
+    mode(A, 'acceptEdits');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    mode(A, 'plan');
+    expect(said(), 'not answered yet').toBe('');
+    await answer(0, taken('plan'));
+    await waitFor(() => expect(said()).toBe('Permission mode: Plan'));
+  });
+
+  it('a refused answer says the mode in force at once', async () => {
+    mode(A, 'plan');
+    mount([{ index: 0, id: A }]);
+    await shiftTab(); // asks for Auto
+    await answer(0, { effective: 'plan', refusal: 'auto_mode_model', error: 'model does not support auto' });
+    expect(said()).toBe('Permission mode: Plan');
+  });
+
+  it('a taken answer, then the engine reports another mode than the one asked: that mode is said', async () => {
+    mode(A, 'plan');
+    mount([{ index: 0, id: A }]);
+    await shiftTab(); // asks for Auto
+    await answer(0, taken('auto'));
+    expect(said()).toBe('');
+    mode(A, 'default', 'auto'); // the engine set the fallback
+    await waitFor(() => expect(said()).toBe('Permission mode: Manual'));
+  });
+
+  it('two presses before the first is answered: only the last is said', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    await shiftTab();
+    expect(held).toHaveLength(2);
+    await answer(0, { effective: 'default', refusal: null, error: 'refused for the test' }); // the first, superseded
+    expect(said(), 'a superseded press says nothing, even refused').toBe('');
+    await answer(1, taken('acceptEdits'));
+    mode(A, 'acceptEdits');
+    await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
+  });
+
+  it('a repeat of one sentence is written again', async () => {
+    mode(A, 'plan');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    await answer(0, { effective: 'plan', refusal: 'auto_mode_model', error: 'model does not support auto' });
+    expect(said()).toBe('Permission mode: Plan');
+    const first = region().firstChild;
+    await shiftTab();
+    await answer(1, { effective: 'plan', refusal: 'auto_mode_model', error: 'model does not support auto' });
+    expect(said()).toBe('Permission mode: Plan');
+    expect(region().firstChild, 'a new node, which a screen reader hears again').not.toBe(first);
+  });
+
+  it('a press while the chip takes no change asks nothing and says nothing; the same reader hears a press that changes the mode', async () => {
+    live(A, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 4242 } } }); // a terminal session: its mode is the terminal's
+    act(() => applyLaneAState(A, laneAState(A, { turn: { running: false, unknown: false } })));
+    mode(B, 'default');
+    try {
+      mount([{ index: 0, id: A }, { index: 1, id: B }]);
+      await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).not.toBe('Permission mode'));
+      await shiftTab(0);
+      expect(held).toHaveLength(0);
+      expect(said(0)).toBe('');
+      await shiftTab(1);
+      await answer(0, taken('acceptEdits'));
+      mode(B, 'acceptEdits');
+      await waitFor(() => expect(said(1)).toBe('Permission mode: Accept edits'));
+      expect(said(0)).toBe('');
+    } finally {
+      resetLaneAStore();
+    }
   });
 });

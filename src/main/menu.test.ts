@@ -264,7 +264,11 @@ describe('shell focus actions from native browser views', () => {
     electron.focused = null;
   });
 
-  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open', 'files.goToFile'])(
+  it.each([
+    'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open', 'files.goToFile',
+    // UX wave U6b-5a (M1, decision 1): every surface's action, the six with no default chord too (a person can bind them)
+    'surface.terminal', 'surface.review', 'surface.files', 'surface.browser', 'surface.source-control', 'surface.subagents', 'surface.background', 'surface.session-info', 'surface.ask-sheet',
+  ])(
     '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
       const otherPage = contents(1);
       const hostPage = contents(2);

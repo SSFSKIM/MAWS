@@ -13,7 +13,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { record } from '../../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
-import { panelHost, registerPanelTool } from '../../../panel/host';
+import { panelHost, registerPanelTool, requestFocus } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
@@ -1052,6 +1052,29 @@ describe('the tree at the file’s left', () => {
     expect(marked()).toEqual([STAGED]);
   });
 
+  // UX wave U6b-5a (M1, decision 4): Files answers a focus request in its own file (the side column asks on a surface's
+  // key): a tab with no file, its tree's selected row, else its first; a tab whose tree stands in its file's place, the tree
+  it('answers a focus request: a tab with no file on its tree’s first row; the tree in a file’s place on its selected row', async () => {
+    render(<TestHost />);
+    let tab = '';
+    act(() => void (tab = panelHost.addTool('files', { appSessionId: A })));
+    await shown('/r/src');
+    act(() => requestFocus(tab));
+    expect(document.activeElement).toBe(document.querySelector('[role="treeitem"]'));
+    expect(document.activeElement).toBe(row('/r'));
+
+    act(() => (document.activeElement as HTMLElement).blur());
+    await openBeside(APP);
+    widen(TREE_WIDTH_DEFAULT + FILE_WIDTH_MIN - 1);
+    fireEvent.click(toggle()!); // the tree in the file's place
+    fireEvent.click(row('/r/src')!);
+    await shown(APP);
+    expect(marked()).toEqual([APP]);
+    act(() => (document.activeElement as HTMLElement).blur());
+    act(() => requestFocus(sideTabs()[0].id));
+    expect(document.activeElement).toBe(row(APP));
+  });
+
   it('in a tab too narrow for both the tree folds, and its button shows the tree in the file’s place until a file is chosen or it is pressed again', async () => {
     render(<TestHost />);
     await openBeside(APP);
@@ -1336,6 +1359,16 @@ describe('a file beside the chat as an editor', () => {
     await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
     await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(path));
   }
+
+  // UX wave U6b-5a (M1, decision 4): a tab that holds a file answers a focus request with its file's editor
+  it('answers a focus request with the file’s editor', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(document.activeElement).toBe(document.body);
+    act(() => requestFocus(sideTabs(A)[0].id));
+    await waitFor(() => expect(editor()!.hasFocus).toBe(true));
+  });
 
   it('the first edit keeps the preview tab, so the next single click opens a second tab and the edited file stands', async () => {
     render(<TestHost />);
