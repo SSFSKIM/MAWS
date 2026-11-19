@@ -264,11 +264,24 @@ function Palette({ run }: { run(id: ActionId): void }) {
     ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
     : [];
   const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
-  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-review): cmdk holds the one selection, reported
-  // through `onValueChange`. In the All scope, until the person moves it (a key or the pointer that changes the row), the
-  // selection follows the first row as answers arrive: when another row comes first, cmdk is asked to select it as Home
-  // does (`followFirst`), so its active descendant and Enter's target move with it. A move is forgotten at every change
-  // of the text or the scope. The Conversations scope keeps its selection by value, as before.
+  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-reviews): one effective selection, cmdk's controlled
+  // value. In the All scope, until the person moves it, it is the first row and follows the first row as answers arrive;
+  // a move is the person's key or pointer making cmdk report another row, and is forgotten at every change of the text or
+  // the scope. The Conversations scope keeps cmdk's selection by value, as before. Following sends no event: an answer
+  // that changes the first row must never look like a key to the rest of the app (the window's key dispatcher, Back and
+  // Forward's hand-off). cmdk 1.1.1 does not move its active descendant when its controlled value changes, so the input's
+  // `aria-activedescendant` is kept on the effective row here.
+  const firstRow = (() => {
+    const [lead] = recent;
+    if (lead) return lead.kind === 'session' ? ROW.session(lead.record.appId) : ROW.artifact(lead.machine, lead.artifactId);
+    if (typed && entries.sessions[0]) return ROW.session(entries.sessions[0].appId);
+    const artifact = artifactGroups[0]?.rows[0];
+    if (artifact) return ROW.artifact(artifactGroups[0]!.machine, artifact.id);
+    if (entries.projects[0]) return ROW.project(entries.projects[0].id);
+    if (entries.channels[0]) return ROW.channel(entries.channels[0].project);
+    if (actions[0]) return ROW.action(actions[0]);
+    return typed ? ROW.library : null;
+  })();
   const listKey = `${scope}\n${query}`;
   const [moved, setMoved] = useState(false);
   const [movedIn, setMovedIn] = useState(listKey);
@@ -276,24 +289,24 @@ function Palette({ run }: { run(id: ActionId): void }) {
     setMovedIn(listKey); // a new text or scope: whatever was moved is forgotten
     setMoved(false);
   }
+  const value = scope === 'all' && !moved && firstRow !== null ? firstRow : selected;
   const root = useRef<HTMLDivElement>(null);
   const acting = useRef(false); // the person's key or pointer is being handled (one task)
-  const following = useRef(false); // `followFirst`'s own Home
   const personActs = () => {
     acting.current = true;
     queueMicrotask(() => void (acting.current = false));
   };
+  // cmdk reports a row only when it differs from the value it holds, which is `value`
   const onValueChange = (next: string) => {
-    if (acting.current && next !== selected) setMoved(true);
+    if (acting.current) setMoved(true);
     setSelected(next);
   };
   useLayoutEffect(() => {
-    if (scope !== 'all' || moved || root.current === null) return;
-    const first = root.current.querySelector('[cmdk-item]')?.getAttribute('data-value');
-    if (first == null || first === selected) return;
-    following.current = true;
-    root.current.dispatchEvent(new globalThis.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
-    following.current = false;
+    const input = root.current?.querySelector('[cmdk-input]');
+    if (!input) return;
+    const row = [...root.current!.querySelectorAll('[cmdk-item]')].find((item) => item.getAttribute('data-value') === value);
+    if (row?.id) input.setAttribute('aria-activedescendant', row.id);
+    else input.removeAttribute('aria-activedescendant');
   });
   const close = () => usePalette.setState({ open: false });
 
@@ -321,15 +334,14 @@ function Palette({ run }: { run(id: ActionId): void }) {
   };
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
-    if (following.current) return;
     if (movesSelection(event)) personActs();
-    if (event.key !== 'Enter' || !event.metaKey || !selected.startsWith('session:')) return;
+    if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:')) return;
     event.preventDefault();
-    openSession(selected.slice('session:'.length) as AppSessionId, true);
+    openSession(value.slice('session:'.length) as AppSessionId, true);
   };
 
   return (
-    <Command ref={root} label="Command palette" shouldFilter={false} value={selected} onValueChange={onValueChange} onKeyDown={onKeyDown} loop>
+    <Command ref={root} label="Command palette" shouldFilter={false} value={value} onValueChange={onValueChange} onKeyDown={onKeyDown} loop>
       <Command.Input
         value={query}
         onValueChange={setQuery}

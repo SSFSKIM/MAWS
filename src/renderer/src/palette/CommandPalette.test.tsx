@@ -577,9 +577,7 @@ describe('Recent', () => {
     window.maws = fake.client as unknown as PreloadBridge;
     const stop = vi.fn();
     offs.push(connectKeys(window, () => ({ 'composer.stop': 'Home' })), bindChord({ id: 'composer.stop', within: null, run: stop }));
-    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }, { kind: 'artifact', artifactId: notes.id, machine: TEST_MACHINE }] });
-    // the artifact was opened before the session, so its answer comes above nothing; make it the newer one
-    useVisits.setState({ opened: [...useVisits.getState().opened].reverse() });
+    useVisits.setState({ opened: [{ kind: 'artifact', artifactId: notes.id, machine: TEST_MACHINE }, { kind: 'session', appSessionId: idOf('Quota reset recovery') }] });
     await openAndType('');
     await vi.waitFor(() => expect(fake.pending('library.get')).toBe(1));
     const value = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
