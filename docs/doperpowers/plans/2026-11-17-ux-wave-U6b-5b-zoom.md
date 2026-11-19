@@ -28,7 +28,8 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [ ] (2026-11-17) M1 built on `ux-wave/U6b-5b` (`366e995bf` to the head): the seam's two additions, `placedOn`, the harness and the four probe scenes. On the build VM the node and e2e typechecks, `src/main/browser`, eslint and the gate's script tests are green, and the harness's rows a to i have run (j: not run, one display). The task review's fix wave is `d78e60abf`; the independent review's nine findings, as ruled, are `c9343eb08` and `ca7d21a89`, with the harness's run of record at `ca7d21a89`. The architect's review and the Mac runs are still to come.
 - [ ] (2026-11-19) M1's Mac rows 2 and 3 ran at `76d0bbc9d`. The harness and `e2e:browser` measured; the pin probe failed at 200 % and the chrome probe failed before any factor, both probe faults, fixed (Decision Log 13). The peers' probe passed against build F; build M is still to run. FINDINGS.md holds the run of record. The reruns at `ef018d192` and `e458d10c1` measured the pin, the popup and the menus, and the peers' probe established its default-mode control against build F. Every placement is now measured on the Mac (Decision Log 15, 16).
 - [x] (2026-11-19 22:30Z) M1 — reviewed clean (the task review, and the architect's acceptance at `76d0bbc9d`); Mac rows 2 and 3 in FINDINGS.md; its verdict is Decision Log 17. Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
-- [ ] (2026-11-19) U6b-5a's merged head (`06f265e4a` on `ux-wave/U6b-5`) merged into the branch (`e4af0692e`); the statements to check again hold on it (Decision Log 17).
+- [x] (2026-11-19 23:00Z) U6b-5a's merged head (`06f265e4a` on `ux-wave/U6b-5`) merged into the branch (`e4af0692e`, the resolution's fix `31e832468`); the statements to check again hold on it (Decision Log 17). On the build VM at `31e832468`: the three typechecks exit 0, `src/main/browser` passes, and the gate's script tests pass 588 of 588.
+- [ ] (2026-11-20) M2 built, `0c5110117` to `34dee1867`. The red cases at `0c5110117` are 40 failures, each placement failing with the Mac's recorded reading. At `34dee1867`: step 5's vitest set and the store's importers pass (290 files, 4,311 cases); the typechecks of node, web and e2e exit 0; eslint on the changed files exits 0; the desk's web app's typecheck, build and 801 cases pass; the routes patch holds `layout.zoom` alone (client class, no wire minor); the gate's script tests pass 588 of 588. The Toolbar's leading box at 50 % is being fixed (Decision Log 18), and the task review is still to come.
 - [ ] M2 — Zoom (on the architect's word after M1's verdict; on a head that holds U6b-5a).
 - [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
 
@@ -412,10 +413,10 @@ The e2e seam (M1): `__maws_browser.tab(id).placed` (`{ rect, count }`, the last 
 
 | file | owner | the insertion | named by |
 |---|---|---|---|
-| `src/main/browser/view.ts`, `extensions/popup.ts`, `bookmarks/menu.ts`, `comment/mode.ts` | U12 | placements 1 to 4 (§G) | the cut's X8 |
+| `src/main/browser/view.ts`, `extensions/popup.ts`, `bookmarks/menu.ts`, `comment/mode.ts`; `browser/index.ts`, `extensions/index.ts` (the factor passed through, Decision Log 18) | U12 | placements 1 to 4 (§G) | the cut's X8 |
 | `src/main/browser/view.ts`, `bookmarks/menu.ts`, `inspect.ts` | U12 | M1's two seam additions | finding 9, as ruled |
 | `src/renderer/src/tools/browser/viewport.ts`, `chrome/ViewportChip.tsx`, `Pane.tsx`, their tests | U12 | placement 6: the two functions' fourth argument and the two callers that pass it | P6; finding 8, as ruled |
-| `src/renderer/src/app/Toolbar.tsx` | U7 | one class: the lights' clearance (placement 5) | P6 |
+| `src/renderer/src/app/Toolbar.tsx`, its test | U7 | the lights' clearance, and the leading box's width at the factor (placement 5; Decision Log 18) | P6 |
 | `src/main/layout/store.ts`, its test | no child | `MAIN_KEYS`; `publish`; the writer given to the constructor | P6; finding 7, as ruled |
 | `src/main/window.ts`, `src/main/app.ts`, `src/shared/ipc/names/layout.ts`, `src/shared/ipc/routes.json`, `src/renderer/src/App.tsx` | no child | `zoomMode` and placement 5; the zoom's start and its command; one name; one name; one mount | P6, P7 |
 | `src/shared/ipc/schema/layout.ts` | by key | the key `window.zoom`, its schema, one command, one event | the root's row ("a child adds a key of its own") |
@@ -635,6 +636,20 @@ Found while this document was written and reviewed; each changed a decision abov
     - **The popup's clamp** is extracted per Decision Log 12, and the e2e's `popupPlace` goes.
     - **The wire:** this landing still moves no wire minor (`layout.*` is outside the manifest). If the routes' snapshot or a guard shows otherwise, the minor it takes is 61, since U6b-4c holds 60 at the chain merge, and the architect hears of it first.
     - **The statements to check again hold on the merged head.** Statement 1: the three zoom rows go between `artifact.moveToTab` and `comments.expand`, where nothing new stands, and `listable` is exported by `palette/CommandPalette.tsx`. Statements 2 to 6 and 8: since M1, nothing changed in `src/main/browser`, `tools/browser`, `src/main/layout` or `window.ts`. Statement 10: Electron is still 44.4.5. The lights' clear width is still `pl-[78px]` in `Toolbar.tsx`.
+
+18. **2026-11-20 (UTC) · M2: the means its executor chose, and the architect's two rulings on its concerns.**
+    - **The range's one place is the shared schema.** `ZOOM_MIN` and `ZOOM_MAX` stand in `src/shared/ipc/schema/layout.ts` beside `WindowZoomSchema`, which bounds the factor by them, and `src/main/zoom.ts` re-exports them. The window's handlers need the bounds and cannot import main. Card K3's "the one place for the range" is this place.
+    - **`toPoints` (decision 27) and `trafficLightsAt` (placement 5) are pure exports of `src/main/zoom.ts`.** `window.ts` applies the lights' position, and the browser's placements import `toPoints`. A pure function inside `window.ts` could not be tested without mocking all of its Electron graph.
+    - **The factor reaches U12's placements as an optional dependency, `zoomOf?(win)`, which defaults to 1.** It is passed through `startBrowser`, `startExtensionUi` and `startCommentMode`, so every existing case at factor 1 stands unedited. Ruled by the architect: the wiring in `src/main/browser/index.ts` and `src/main/browser/extensions/index.ts` is a named insertion (UC-8), added to §H's first row. It only passes the factor through.
+    - **A menu's point at factor 1 is handed through as the same object.** At any other factor it is multiplied and rounded. An existing case pins identity at 100 %, and another pins a fractional point there.
+    - **`publish` puts the whole map back from a copy when a write fails.** It does not fire `onChange`, since the key is main's own, as `window.main` is. Removing a key that is absent writes nothing.
+    - **The popup keeps its last preferred size**, so that S3 can place it again with no new layout event. `Browser.placeAgain(win)` places a window's views and its open popup again, for S3's step 4. It acknowledges nothing, because no report arrived.
+    - **The popup's clamp lives in `src/shared/browser/popup-bounds.ts`** (Decision Log 12). It is not in U12's `extensions.ts`. `popup.test.ts`'s cases are unedited, and the e2e's `popupPlace` is gone.
+    - **The window follows the event, never the command's answer** (decision 25). The answer to `current` is applied once, at connect.
+    - **The line's test is `stores/zoom.test.tsx`.** It mounts the real `ToastHost` and reads the announcement from Radix's live `role="status"` region.
+    - **`App.test.tsx`'s fake main answers `layout.zoom`.** That is a test beside the mount §H names. Without it, the new mount's read at connect became unhandled rejections there.
+    - **M3 does `expectOnPane`'s factor and `placedOn`-first** in `e2e/support/browser-scene.ts`, as part of the scenes.
+    - **Ruled by the architect: the Toolbar's leading box follows the factor.** At 50 % with the sidebar hidden, the leading box (150 CSS px) was narrower than the lights' clearance (156). The edit in `src/renderer/src/app/Toolbar.tsx` therefore grows past §H's one class. At every factor from `ZOOM_MIN` to `ZOOM_MAX`, the box holds the clearance plus its own controls. It is pinned red-first in `Toolbar.test.tsx`.
 
 ## Outcomes & Retrospective
 
