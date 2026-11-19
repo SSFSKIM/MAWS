@@ -415,3 +415,37 @@ describe('the step’s hand-off of the keyboard', () => {
   });
 });
 
+// The branch panel's fix wave (group G4): a close classified against the record as it stood, and a step that brings
+// back a tab under a maximized side column.
+describe('history after the branch panel', () => {
+  it('reads a close of the tab in front as a new visit to what the strip then shows, not as Back from a page (scalpel-2#2)', async () => {
+    const LIBRARY: Destination = { kind: 'library' };
+    await visit('a');
+    layout().openDestination(CUSTOMIZE);
+    await turn();
+    await visit('b');
+    layout().openDestination(LIBRARY);
+    await turn();
+    runAction('go.back'); // on B, the Library ahead
+    await turn();
+    expect(record()).toEqual({ entries: [T('a'), P, T('b'), { kind: 'page', destination: LIBRARY }], at: 2 });
+    layout().closeTab(tabOf('b')); // the strip shows A
+    await turn();
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(record()).toEqual({ entries: [T('a'), P, T('a')], at: 2 });
+    expect(isActionEnabled('go.forward')).toBe(false); // the abandoned branch is gone
+    runAction('go.back');
+    expect(shown()).toMatchObject({ page: CUSTOMIZE });
+  });
+
+  it('reveals the main area when a step brings back a tab under a maximized side column (scalpel-2#4)', async () => {
+    await visit('a', 'b');
+    layout().setPanel({ maximized: true, collapsed: false });
+    await turn();
+    expect(layout().regions.panel.maximized).toBe(true); // the control: reading the layout leaves the column as it is
+    runAction('go.back');
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(layout().regions.panel.maximized).toBe(false);
+  });
+});
+
