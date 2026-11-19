@@ -14,7 +14,8 @@
 // taker is told at once (`useKeyboardRequest`), one drawn later takes it when it draws (`takeKeyboard`, true once). The
 // person's next key or pointer press anywhere drops it, so the keyboard stays where that act put it; the menu's own key
 // reaches the page before the action runs, so the press that made the request is never heard. M1 builds the field's
-// taker; a file's view is M2's, on the same request (`viewer/FileViewer.tsx`).
+// taker; a file's view is M2's, on the same request (`viewer/FileViewer.tsx`), which reads it with `keyboardWaits` and
+// takes it only once its focus has landed (Decision Log 17: the page can refuse a focus).
 //
 // The search (M2; decisions 1 to 5, 8 and 12; sequences S1, S4 and S5): one hook (`useFinder`) owns the states and the
 // generation. The text's query (`parseQuery`) is asked of the working folder by `git.lsFiles` 80 ms after the last
@@ -73,6 +74,23 @@ export function requestKeyboard(request: KeyboardRequest): void {
   window.addEventListener('keydown', drop, true);
   window.addEventListener('pointerdown', drop, true);
   tell();
+}
+
+/**
+ * Decision Log 18: how long a file's view holds a request it has not taken, once the view is ready (in view, its read
+ * settled and its editor drawn where it draws one). Some frames' worth: long enough for a refusal while the view settles
+ * to pass, short enough that no later, unrelated change of the page moves the keyboard.
+ */
+export const FILE_TAKE_BOUND_MS = 500;
+
+/** True while the waiting request names this taker, which it leaves waiting: a taker whose focus the page may refuse reads it first. */
+export function keyboardWaits(request: KeyboardRequest): boolean {
+  return pending?.taker === takerOf(request);
+}
+
+/** Ends the waiting request when it names this taker, which gives it up (the keyboard put elsewhere, or the bound passed). */
+export function releaseKeyboard(request: KeyboardRequest): void {
+  if (keyboardWaits(request)) end();
 }
 
 /** True once, for the taker the waiting request names; false for any other, and while none waits. */
