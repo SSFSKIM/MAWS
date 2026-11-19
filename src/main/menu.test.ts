@@ -268,6 +268,8 @@ describe('shell focus actions from native browser views', () => {
     'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open', 'files.goToFile',
     // UX wave U6b-5a (M1, decision 1): every surface's action, the six with no default chord too (a person can bind them)
     'surface.terminal', 'surface.review', 'surface.files', 'surface.browser', 'surface.source-control', 'surface.subagents', 'surface.background', 'surface.session-info', 'surface.ask-sheet',
+    // UX wave U6b-5a (M3): a step shows a tab, a page or the Overview, which a browser page's keyboard must leave for
+    'go.back', 'go.forward',
   ])(
     '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
       const otherPage = contents(1);
@@ -406,7 +408,9 @@ describe('Go ▸ Go to file', () => {
   const goToFile: ActionId = 'files.goToFile';
 
   it('stands directly under Command palette at ⌘P with no separator between them, and a separator after it', () => {
-    expect(go({}, ALL).slice(0, 3).map((item) => item.id ?? item.type)).toEqual(['palette.open', 'files.goToFile', 'separator']);
+    const items = go({}, ALL);
+    const palette = items.findIndex((item) => item.id === 'palette.open'); // U6b-5a: Back and Forward lead Go
+    expect(items.slice(palette, palette + 3).map((item) => item.id ?? item.type)).toEqual(['palette.open', 'files.goToFile', 'separator']);
     expect(byId(go({}, ALL), 'files.goToFile')).toMatchObject({ label: 'Go to file', accelerator: 'Cmd+P', enabled: true });
   });
 
@@ -492,8 +496,11 @@ describe('the menus drawn from the table', () => {
     expect(shape(submenuOf(view, 'More surfaces'))).toEqual(['Source control', 'Subagents', 'Background tasks', 'Session info', 'Questions']);
     expect(shape(submenuOf(view, 'Comments'))).toEqual(['Expand comments', 'Minimize comments', 'Hide comments']);
     expect(shape(submenuOf(view, 'Developer'))).toEqual(['reload', 'forceReload', 'toggleDevTools']);
+    // U6b-5a (M3; B13): Back and Forward lead Go, a group of their own
+    expect(shape(submenuOf(template, 'Go')).slice(0, 3)).toEqual(['Back', 'Forward', '—']);
+    expect(['go.back', 'go.forward'].map((id) => byId(template, id)?.accelerator)).toEqual(['Cmd+[', 'Cmd+]']);
     expect(subsequence(shape(submenuOf(template, 'Go')), [
-      'Command palette', 'Go to file', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
+      'Back', 'Forward', '—', 'Command palette', 'Go to file', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
       'Next tab in strip', 'Previous tab in strip', '—', 'Focus next region', 'Focus previous region', 'Focus sidebar',
     ]), shape(submenuOf(template, 'Go')).join(' · ')).toBe(true);
   });

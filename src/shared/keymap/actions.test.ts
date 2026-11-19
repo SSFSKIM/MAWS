@@ -38,7 +38,8 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   'tab.overview': 'Cmd+0', 'palette.open': 'Cmd+K', 'composer.focus': 'Cmd+L', 'composer.stop': 'Cmd+.', 'attention.next': 'Cmd+Shift+J',
   'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
 };
-// The rows of landed children: each must exist (U6b adds its seven; U11a its one).
+// The rows of landed children: each must exist. U6b's seven ids join as their rows land, and none before: Go to file
+// (U6b-3b); Back, Forward and Attach selection to chat (U6b-5a); zoom's three (U6b-5b). U11a adds its one.
 const LANDED = [
   'surface.terminal', 'surface.review', 'surface.files', 'channel.open',
   // U4a: M2's rows
@@ -53,6 +54,8 @@ const LANDED = [
   'file.open',
   // U6b-3b: Go to file
   'files.goToFile',
+  // U6b-5a: Back and Forward (M3)
+  'go.back', 'go.forward',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -235,6 +238,19 @@ describe('keymap: the table', () => {
     expect(effectiveChord('files.goToFile', { 'attention.next': 'Cmd+P' })).toBeNull(); // a stored rebinding wins
     expect(effectiveChord('files.goToFile', { 'attention.next': 'Cmd+Shift+P' })).toBe('Cmd+P'); // the control
     expect(effectiveChord('files.goToFile', over('files.goToFile', 'Cmd+Alt+P'))).toBe('Cmd+P'); // a stored value is never read
+  });
+  // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M3; Interfaces §A; B13, B14):
+  // Back and Forward lead Go, before the palette, at ⌘[ and ⌘]; build F knows neither, so neither takes a rebinding
+  it('carries go.back and go.forward leading Go at ⌘[ and ⌘], before palette.open, neither taking a rebinding', () => {
+    expect(ACTIONS['go.back']).toEqual({ title: 'Back', chord: 'Cmd+[', sink: 'menu', menu: 'go', scope: 'app' });
+    expect(ACTIONS['go.forward']).toEqual({ title: 'Forward', chord: 'Cmd+]', sink: 'menu', menu: 'go', scope: 'app' });
+    const go = ACTION_IDS.filter((id) => ACTIONS[id].menu === 'go');
+    expect(go.slice(0, 3)).toEqual(['go.back', 'go.forward', 'palette.open']);
+    for (const id of ['go.back', 'go.forward'] as const) {
+      expect(BUILD_F_ACTION_IDS as readonly string[], id).not.toContain(id);
+      expect(isRebindable(id), id).toBe(false);
+      expect(effectiveChord(id, over(id, 'Cmd+Alt+Y')), id).toBe(ACTIONS[id].chord); // a stored value is never read
+    }
   });
 });
 

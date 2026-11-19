@@ -119,9 +119,20 @@ describe('the keymap table', () => {
   // shows unbound while a stored rebinding of another row holds ⌘P
   it('lists Go to file under Go after Command palette at ⌘P, not rebindable, and unbound while another row’s rebinding holds ⌘P', () => {
     const go = (overrides: KeymapOverrides) => keymapGroups(overrides).find((g) => g.label === 'Go')!.rows;
-    expect(go({}).slice(0, 2).map((r) => r.id)).toEqual(['palette.open', 'files.goToFile']);
-    expect(go({})[1]).toMatchObject({ title: 'Go to file', chord: 'Cmd+P', display: '⌘P', overridden: false, rebindable: false });
-    expect(go({ 'attention.next': 'Cmd+P' })[1]).toMatchObject({ chord: null, display: 'Unbound', rebindable: false });
+    const goToFile = (overrides: KeymapOverrides) => go(overrides).find((r) => r.id === 'files.goToFile');
+    expect(go({}).map((r) => r.id).slice(2, 4)).toEqual(['palette.open', 'files.goToFile']); // U6b-5a: after Back and Forward
+    expect(goToFile({})).toMatchObject({ title: 'Go to file', chord: 'Cmd+P', display: '⌘P', overridden: false, rebindable: false });
+    expect(goToFile({ 'attention.next': 'Cmd+P' })).toMatchObject({ chord: null, display: 'Unbound', rebindable: false });
+  });
+
+  // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M3; B13, B14): Back and Forward
+  // lead Go at ⌘[ and ⌘], with no control to change them
+  it('lists Back and Forward first under Go at ⌘[ and ⌘], not rebindable', () => {
+    const go = keymapGroups({}).find((g) => g.label === 'Go')!.rows;
+    expect(go.slice(0, 2)).toMatchObject([
+      { id: 'go.back', title: 'Back', chord: 'Cmd+[', display: '⌘[', overridden: false, rebindable: false },
+      { id: 'go.forward', title: 'Forward', chord: 'Cmd+]', display: '⌘]', overridden: false, rebindable: false },
+    ]);
   });
 
   // A9: the sheet and Settings list every row once, under the group the menus draw it in
@@ -147,7 +158,7 @@ describe('the keymap table', () => {
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
     for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U11a M5's channel.open, U1a's two)
-    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U11a M5's one; U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'go.back', 'go.forward', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U11a M5's one; U6b-5a's Back and Forward (M3); U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {
