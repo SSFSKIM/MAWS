@@ -4,7 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_STRIP, type Destination, type TabRef } from '@shared/ipc/schema/layout';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { isActionEnabled, runAction } from './actions-runtime';
 import { frontOf, quietly, useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -267,6 +268,56 @@ describe('the reader', () => {
     await turn();
     await visit('a');
     expect(useVisits.getState().opened).toEqual([opened('a'), { kind: 'artifact', artifactId: 'doc-1', machine: TEST_MACHINE }]);
+  });
+});
+
+// UX wave U6b-5a M4 (decision 18; Decision Log 11 (iii)): the opened list's second source, an artifact shown beside the
+// chat, read from the Artifacts tool's `{ target, machine }` under its side tab's `panelParams` after hydration.
+describe('an artifact shown beside the chat', () => {
+  const SIDE = 'panel-artifacts-a';
+  const artifact = (id: string, machine = TEST_MACHINE): Opened => ({ kind: 'artifact', artifactId: id, machine });
+  const sideTabs = (...tabs: { id: string; toolId: string }[]) =>
+    useLayout.setState({ panelBySession: new Map([[S('a'), { tabs: tabs.map((t) => ({ ...t, pinned: false })), activeTabId: tabs[0]?.id ?? null }]]) });
+
+  it('is not an opening when its side tab is restored at hydration; the same tab shown a second artifact after hydration is', async () => {
+    off();
+    useVisits.setState({ record: EMPTY_RECORD, opened: [] });
+    useLayout.setState({ hydrated: false });
+    off = connectVisits();
+    // stored before a record named its machine: the restored tool writes it back with this Mac's
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a')], activeTabId: tabOf('a') }], focusedPane: 0 } });
+    sideTabs({ id: SIDE, toolId: ARTIFACTS_TOOL_ID });
+    useLayout.setState({ panelParams: { [SIDE]: { target: 'doc-1' } }, hydrated: true });
+    await turn();
+    layout().setPanelParams(SIDE, { target: 'doc-1', machine: TEST_MACHINE });
+    await turn();
+    expect(useVisits.getState().opened).toEqual([]);
+    layout().setPanelParams(SIDE, { target: 'doc-2', machine: TEST_MACHINE }); // the control
+    await turn();
+    expect(useVisits.getState().opened).toEqual([artifact('doc-2')]);
+  });
+
+  it('lists each artifact a side tab comes to show, newest first beside the main tabs; the list, and another tool’s params, open nothing', async () => {
+    await visit('a');
+    sideTabs({ id: SIDE, toolId: ARTIFACTS_TOOL_ID }, { id: 'panel-files-a', toolId: 'files' });
+    await turn();
+    layout().setPanelParams(SIDE, { target: 'doc-1', machine: TEST_MACHINE });
+    await turn();
+    expect(useVisits.getState().opened).toEqual([artifact('doc-1'), opened('a')]);
+    layout().setPanelParams(SIDE, null); // back to the list
+    await turn();
+    layout().setPanelParams('panel-files-a', { target: 'doc-9', machine: TEST_MACHINE });
+    await turn();
+    expect(useVisits.getState().opened).toEqual([artifact('doc-1'), opened('a')]);
+    layout().setPanelParams(SIDE, { target: 'doc-9', machine: TEST_MACHINE }); // the control: the same value on the Artifacts tab
+    await turn();
+    expect(useVisits.getState().opened).toEqual([artifact('doc-9'), artifact('doc-1'), opened('a')]);
+    layout().setPanelParams(SIDE, { target: 'doc-1', machine: OTHER_MACHINE }); // another machine's artifact of the same id
+    await turn();
+    layout().setPanelParams(SIDE, { target: 'doc-1', machine: TEST_MACHINE });
+    await turn();
+    expect(useVisits.getState().opened).toEqual([artifact('doc-1'), artifact('doc-1', OTHER_MACHINE), artifact('doc-9'), opened('a')]);
+    expect(record()).toEqual({ entries: [T('a')], at: 0 }); // a side tab is no place
   });
 });
 

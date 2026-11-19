@@ -75,6 +75,8 @@ export function paletteEntries(
   };
 }
 
+export const listable = (_id: ActionId, _table: ActionTable): boolean => true; // UX wave U6b-5a M4: stub before the build
+
 // What an action without a handler waits for. The request and composer keys belong to the element holding focus
 // (`useKeyChord`), so the palette, which holds focus itself, can never run them.
 const UNAVAILABLE: Partial<Record<ActionId, string>> = {
