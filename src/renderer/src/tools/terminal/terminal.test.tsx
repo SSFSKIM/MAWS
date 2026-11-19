@@ -972,7 +972,7 @@ describe('terminal view', () => {
     expect(registry.renderer.clear).toHaveBeenCalled();
     open();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Attach selection to chat' }));
-    expect(attachFromTerminal).toHaveBeenCalledWith(state.terminalId, 'menu');
+    await vi.waitFor(() => expect(attachFromTerminal).toHaveBeenCalledWith(state.terminalId, 'menu')); // the attach's module is loaded at the press
     expect(screen.queryByRole('menu', { name: 'terminal' })).toBeNull();
   });
 

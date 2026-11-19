@@ -15,7 +15,6 @@ import { machineName } from '../../stores/org-projects';
 import { useTerminals } from '../../stores/terminals';
 import { terminalMachine } from '../../terminal/machine';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
-import { attachFromTerminal } from './attach'; // UX wave U6b-5a
 import { ATTACH, TERMINAL } from './copy';
 import { ensureTerminal, hostReadyOf, takeFocusRequest, type TerminalTabState } from './index';
 
@@ -223,7 +222,9 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
     { label: 'Paste', enabled: !!renderer, run: () => void navigator.clipboard.readText().then((text) => renderer!.paste(text)) },
     { label: 'Select all', enabled: !!renderer, run: () => renderer!.selectAll() },
     { label: 'Clear', enabled: !!renderer, run: () => renderer!.clear() },
-    { label: ATTACH.menuItem, enabled: !!renderer?.hasSelection(), run: () => void attachFromTerminal(state.terminalId!, 'menu'), separated: true },
+    // the attach's module is loaded at the press, so the terminal's view imports nothing of the composer's hand-over (a
+    // static import, joined to this module's cycle with `./index`, left a transcript row's imports unset under vitest)
+    { label: ATTACH.menuItem, enabled: !!renderer?.hasSelection(), run: () => void import('./attach').then(({ attachFromTerminal }) => attachFromTerminal(state.terminalId!, 'menu')), separated: true },
   ];
   return (
     <div
