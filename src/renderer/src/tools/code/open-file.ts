@@ -21,7 +21,7 @@
 // refusal says so. No other session's folder is consulted. An open kept for the layout with its path still relative is
 // resolved again when it is made, with the record known then.
 import type { AppSessionId } from '@shared/graph/ids';
-import { normalizeLexically } from '@shared/files/named';
+import { normalizeLexically, resolveRelative } from '@shared/files/named';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { machineFor } from '../../ipc/machine';
 import { panelHost, shownSession } from '../../panel/host';
@@ -33,9 +33,10 @@ import { dropSideViews, holdSideViews } from '../../shell/transfer'; // M4: ⌘-
 import { fileKey, fileOfTab, FILES_TOOL_ID, placeOpen, sideFileOf, type FilesTabParams } from './files/tabs';
 import { useViewer } from './viewer/viewer-store';
 
-// `normalizeLexically` lives in the rule of a file the transcript names (UX wave U6c, `src/shared/files/named.ts`), so the
-// daemon's check reads a path as the click does; exported here as before.
-export { normalizeLexically };
+// `normalizeLexically` and `resolveRelative` live in the rule of a file the transcript names (UX wave U6c, U6b-4c:
+// `src/shared/files/named.ts`), so the daemon's check reads a path, and resolves a Markdown file's relative link, as the
+// click does; exported here as before.
+export { normalizeLexically, resolveRelative };
 
 export interface OpenFileOptions {
   main?: boolean; // ⌘-click: a main tab, every side tab of the file dropped (rule 3)
@@ -44,10 +45,6 @@ export interface OpenFileOptions {
   base?: string | null; // an absolute folder a relative path is resolved against; absent, the session's working folder; null, no resolution
 }
 
-/** `path` when it begins with `/`, or when `base` is not an absolute path; else `base`, `/` and `path`, lexically normal. Reads no disk. */
-export function resolveRelative(base: string | null, path: string): string {
-  return path.startsWith('/') || base === null || !base.startsWith('/') ? path : normalizeLexically(`${base}/${path}`);
-}
 export type Opened = { surface: 'main' | 'side'; tabId: string };
 // The two ends of an open kept for the layout that open no tab: its session is not one the read keeps, or the layout was
 // not read within the wait.
