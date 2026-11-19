@@ -13,6 +13,8 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { project, status } from '../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { registerSessionCreator } from '../keymap/actions-runtime';
+import { useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mountCustomize } from '../test-support/customize-page';
@@ -219,14 +221,14 @@ describe('the head', () => {
   it('draws the tools of each view and Show: the search, then the actions as one group', async () => {
     servers = [];
     const table: [view: 'mine' | 'discover', show: 'all' | 'plugins' | 'skills' | 'connectors', search: string, present: string[], absent: string[]][] = [
-      ['mine', 'all', 'Search my items', ['Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
-      ['mine', 'plugins', 'Search plugins', ['Filter', 'Sort by', 'Add'], ['Add custom connector…', 'Refresh', 'Sources']],
-      ['mine', 'skills', 'Search skills', ['Refresh'], ['Filter', 'Add', 'Add custom connector…', 'Sources']],
-      ['mine', 'connectors', 'Search connectors', ['Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
-      ['discover', 'plugins', 'Search all sources', ['Refresh', 'Sources', 'Add'], ['Filter', 'Add custom connector…']],
-      ['discover', 'skills', 'Search all sources', ['Refresh', 'Sources'], ['Add', 'Add custom connector…']],
-      ['discover', 'connectors', 'Search all sources', ['Refresh', 'Sources'], ['Add', 'Add custom connector…']],
-      ['discover', 'all', 'Search all sources', ['Refresh', 'Sources'], ['Add', 'Add custom connector…', 'Filter']],
+      ['mine', 'all', 'Search my items', ['New skill…', 'Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
+      ['mine', 'plugins', 'Search plugins', ['Filter', 'Sort by', 'Add'], ['New skill…', 'Add custom connector…', 'Refresh', 'Sources']],
+      ['mine', 'skills', 'Search skills', ['New skill…', 'Refresh'], ['Filter', 'Add', 'Add custom connector…', 'Sources']],
+      ['mine', 'connectors', 'Search connectors', ['Add custom connector…', 'Refresh'], ['New skill…', 'Filter', 'Sort by', 'Add', 'Sources']],
+      ['discover', 'plugins', 'Search all sources', ['Refresh', 'Sources', 'Add'], ['New skill…', 'Filter', 'Add custom connector…']],
+      ['discover', 'skills', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
+      ['discover', 'connectors', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
+      ['discover', 'all', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Filter']],
     ];
     mountCustomize({ view: 'mine', show: 'all' });
     for (const [view, show, search, present, absent] of table) {
@@ -588,4 +590,52 @@ describe('the keyboard when the detailed plugin leaves the list', () => {
       fireEvent.keyDown(document.activeElement!, { key: '/' });
       expect(document.activeElement).toBe(within(tools()!).getByRole('searchbox', { name: search }));
     });
+});
+
+// UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 3 to 5): "New
+// skill…" opens a chat in the page's place whose composer holds the first message, not sent; a plugin's skill's detail
+// says that the plugin's updates replace its file.
+describe('a skill’s actions', () => {
+  const made: (ProjectId | null)[] = [];
+  let off: () => void;
+  beforeEach(() => {
+    made.length = 0;
+    off = registerSessionCreator(async (projectId) => (made.push(projectId), at(`app-new-${made.length}` as AppSessionId)));
+  });
+  afterEach(() => {
+    off();
+    useComposerStore.setState({ prefills: new Map() });
+  });
+  const prefill = (n: number) => useComposerStore.getState().prefills.get(at(`app-new-${n}` as AppSessionId))?.text;
+
+  it('on a project’s page, New skill… offers this project and the person’s own, each a chat in the project with its folder named', async () => {
+    mountCustomize({ view: 'mine', show: 'skills' });
+    const press = async () => fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
+    await press();
+    const rows = await screen.findAllByRole('menuitem');
+    expect(rows.map((row) => row.textContent)).toEqual(['In this project', 'Created by you']);
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
+    await press();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Created by you' }));
+    await waitFor(() => expect(prefill(2)).toBe(`Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`));
+    expect(made).toEqual([A, A]);
+    expect(invoked('session.send')).toEqual([]); // filled, never sent
+  });
+
+  it('on the user configuration’s page, New skill… is one button that makes the person’s own, in a chat with no project', async () => {
+    useCustomizeProject.setState({ projectId: null }, true);
+    mountCustomize({ view: 'mine', show: 'all' });
+    fireEvent.click(await within(tools()!).findByRole('button', { name: 'New skill…' }));
+    await waitFor(() => expect(prefill(1)).toBe(`Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`));
+    expect(screen.queryByRole('menuitem')).toBeNull();
+    expect(made).toEqual([null]);
+  });
+
+  it('a project’s skill’s detail has no plugin line', async () => {
+    mountCustomize({ view: 'mine', show: 'skills' });
+    fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
+    await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-note]')).toBeNull();
+  });
 });

@@ -51,6 +51,7 @@
   "browser.view.copyScreenshot",
   "browser.view.cover",
   "browser.view.place",
+  "customization.skillFile",
   "engine.hostState",
   "host.openLog",
   "host.restart",

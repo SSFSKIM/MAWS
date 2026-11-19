@@ -105,6 +105,7 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P5 O3-C: appInterest
 import { revealPath } from './settings/reveal';
+import { skillFile } from './customization/skill-file'; // UX wave U11: a skill's Reveal
 import { knownSessionDirectories } from '@shared/sessions/directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { ipcError } from '@shared/ipc/errors'; // P5 O7 M5a: remote.openCopy's refusal
@@ -806,6 +807,17 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   const sessionDirectories = () => knownSessionDirectories(view); // P5 O3-C (reader R11)
   registerMainHandler('settings.reveal', ({ path }, { client }) =>
     revealPath(path, client, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, port: clientPort }),
+  );
+  // UX wave U11 (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 2): a skill's file is shown
+  // only when main's own read of that place's inventory lists it; this Mac's inventory, as Customize's page is this Mac's
+  registerMainHandler('customization.skillFile', (input, { client }) =>
+    skillFile(input, client, {
+      inventory: async (cwd) => {
+        const answer = (await invokeOwn('customization.inventory', { cwd }, { client: mainClient, target: local })) as CommandResult<'customization.inventory'>;
+        return answer.ok ? { ok: true, skillPaths: answer.value.skills.map((skill) => skill.path) } : { ok: false, message: answer.error.message };
+      },
+      port: clientPort,
+    }),
   );
   registerMainHandler('layout.captureChords', captureChords); // the Settings tab's chord capture sets the menu aside (M5 fix wave)
   // P3-G (§D4.1): Mark-up's still of a region the sender's window draws

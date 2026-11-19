@@ -101,7 +101,8 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
 }
 
 // `backTo`: the list Back returns to (Customize's All: My items)
-export function SkillDetail({ row, onBack, onUse, backTo = S.list }: { row: SkillRow; onBack(): void; onUse?(name: string): void; backTo?: string }) {
+// UX wave U11's skill actions: `note`, a line under the facts (Customize's: a plugin's skill is replaced by its updates)
+export function SkillDetail({ row, onBack, onUse, backTo = S.list, note = null }: { row: SkillRow; onBack(): void; onUse?(name: string): void; backTo?: string; note?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => root.current?.focus(), []);
   const invocation = invocationOf(row);
@@ -132,6 +133,7 @@ export function SkillDetail({ row, onBack, onUse, backTo = S.list }: { row: Skil
           </div>
         ))}
       </dl>
+      {note !== null && <p data-skill-note className="m-0 max-w-[640px] text-ui-sm text-fg-muted">{note}</p>}
     </div>
   );
 }
@@ -143,7 +145,7 @@ export function SkillDetail({ row, onBack, onUse, backTo = S.list }: { row: Skil
 // UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): on Customize's page, `onReset` clears
 // the page's search in place of the library store's, and each new `toList` (the page's view or a Show value pressed)
 // returns the detail to the list.
-export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void; onReset?(): void; toList?: number }) {
+export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList, noteOf }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void; onReset?(): void; toList?: number; noteOf?(row: SkillRow): ReactNode }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [listed, setListed] = useState(toList);
   if (listed !== toList) {
@@ -201,7 +203,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList 
 
   return (
     <>
-      {selected !== null && <SkillDetail row={selected} onBack={back} onUse={onUse} />}
+      {selected !== null && <SkillDetail row={selected} onBack={back} onUse={onUse} note={noteOf?.(selected) ?? null} />}
       <div ref={pane} data-skills-list className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${selected !== null ? 'hidden' : ''}`}>
         {body}
       </div>
