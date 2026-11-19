@@ -262,6 +262,28 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`x \`y\n2. a\n  b\n| x | y | [r](${at}r.md) |`), 'the control: no delimiter row, the code span stays open').toEqual(['/x/r.md']);
   });
 
+  // The branch review's four (UX wave U6b-4b): in each the rule named a link the window draws as code or does not draw.
+  // ux-wave ruled that the scanner is not brought nearer to GFM case by case (board ticket 776): where a line meets a
+  // container the pass does not follow, it names nothing from that paragraph to the next blank line. Each case comes with
+  // neighbours of the same structure, and its control, a link after the next blank line, is named again.
+  it.each(['/s', 'file:///s'])('where a line meets a container the pass does not follow, nothing is named to the next blank line (%s)', (destination) => {
+    const cases: [string, string][] = [
+      ['> a `x\n2. > `[r](@)`', 'a quote after a list marker the paragraph cannot continue (the review’s first)'],
+      ['- > a `x\n> `[r](@)`', 'a quote after a list marker, then a line of that depth outside the item'],
+      ['> - a `x\n> T | u\n> -|-\n[r](@) `', 'a table candidate in a quoted list item, then a line out of the quote (the second)'],
+      ['- a | b\n    --|--\n    x | y | [r](@)', 'a delimiter row in a list item four columns in (the third)'],
+      ['- a\n    T | u\n    -|-\n    x | y | [r](@)', 'the head on a continuation line four columns in'],
+      ['a\n+\n>     [r](@)', 'an indented line that opens a deeper quote, after prose and a lone `+` (the fourth)'],
+      ['a\n>     [r](@)', 'the same after prose alone'],
+      ['- a\n>     [r](@)', 'the same after a list item'],
+    ];
+    for (const [shape, what] of cases) {
+      const text = shape.replace('@', destination);
+      expect(linkPaths(text), what).toEqual([]);
+      expect(linkPaths(`${text}\n\n[c](/c)`), `${what}: the control`).toEqual(['/c']);
+    }
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

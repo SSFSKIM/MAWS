@@ -329,6 +329,25 @@ describe('the rule reads the blocks the window draws', () => {
       agree(`see [s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
     }
   });
+
+  // The branch review's four (UX wave U6b-4b), each drawn by the window: no chip, and the rule names nothing up to the
+  // next blank line, after which the control's link is both (ux-wave's ruling; the cases are board ticket 776's)
+  it.each(['/s', 'file:///s'])('where a line meets a container the pass does not follow: no chip, nothing named, to the next blank line (%s)', (destination) => {
+    for (const shape of [
+      '> a `x\n2. > `[r](@)`',
+      '- > a `x\n> `[r](@)`',
+      '> - a `x\n> T | u\n> -|-\n[r](@) `',
+      '- a | b\n    --|--\n    x | y | [r](@)',
+      '- a\n    T | u\n    -|-\n    x | y | [r](@)',
+      'a\n+\n>     [r](@)',
+      'a\n>     [r](@)',
+      '- a\n>     [r](@)',
+    ]) {
+      const markdown = shape.replace('@', destination);
+      agree(markdown, []);
+      agree(`${markdown}\n\n[c](/c)`, ['/c']);
+    }
+  });
 });
 
 // UX wave U6b-4b (R1): an inline `file:` link with an empty host is the path chip of its rest, and the rule names that
