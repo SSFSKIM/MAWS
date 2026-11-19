@@ -66,13 +66,13 @@ type BoxAnswer = Awaited<ReturnType<NonNullable<FocusTarget['attachPasted']>>>;
  * press, where the box can take the keyboard (its element available, no card holding it), at the caret with the
  * keyboard; otherwise, and always by a hand-over, at the end and saved at once.
  */
-export async function takeIntoBox(editor: EditorHandle | null, block: AttachedBlock, by: 'press' | 'hand-over', box: { element: HTMLElement | null; covered: boolean }): Promise<BoxAnswer> {
+export async function takeIntoBox(editor: EditorHandle | null, block: AttachedBlock, by: 'press' | 'hand-over', box: { element: HTMLElement | null; covered: boolean }, signal?: AbortSignal): Promise<BoxAnswer> {
   if (editor === null) return 'gone';
   if (by === 'press' && !box.covered && box.element !== null && available(box.element)) {
-    const answer = await editor.attachPasted(block, { at: 'caret', save: false });
+    const answer = await editor.attachPasted(block, { at: 'caret', save: false, ...(signal && { signal }) });
     return answer === 'taken' ? 'shown' : answer;
   }
-  const answer = await editor.attachPasted(block, { at: 'end', save: true });
+  const answer = await editor.attachPasted(block, { at: 'end', save: true, ...(signal && { signal }) });
   return answer === 'taken' ? 'kept' : answer;
 }
 
@@ -125,6 +125,7 @@ class HandOver {
   private unaccountedClaim = false; // a write in the claim form whose answer was not definite: for the rest of the hand-over
   private unaccountedLanded = false; // a write accepted in a round not believed: until a believed read
   private sentWithMessage = false; // an accepted send's document held the block
+  private readonly over = new AbortController(); // aborted as the hand-over ends: a composer still waiting gives up
   private expiry: Promise<typeof EXPIRED> = new Promise(() => {});
   private timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -154,6 +155,7 @@ class HandOver {
     } finally {
       off();
       unwatch();
+      this.over.abort();
       if (this.timer !== null) clearTimeout(this.timer);
     }
   }
@@ -164,7 +166,7 @@ class HandOver {
 
   // The deadline passed: an answer that comes later is not read.
   private expired(): AttachOutcome {
-    if (this.sent || this.asking) return { kind: 'unconfirmed' };
+    if (this.sent || this.asking || this.unaccounted()) return { kind: 'unconfirmed' };
     return { kind: 'refused', why: this.waitingOnSend ? 'busy' : 'failed' };
   }
 
@@ -203,7 +205,7 @@ class HandOver {
       if (target !== null) {
         this.asking = true;
         const comings = this.comings;
-        const asked = target.attachPasted?.(this.block, target === pressed ? 'press' : 'hand-over') ?? Promise.resolve<BoxAnswer>('closed');
+        const asked = target.attachPasted?.(this.block, target === pressed ? 'press' : 'hand-over', this.over.signal) ?? Promise.resolve<BoxAnswer>('closed');
         // an ask whose promise rejects may or may not have put the block in the box
         const answer = await this.within(asked.catch(() => 'rejected' as const));
         if (answer === EXPIRED) return this.expired();
@@ -214,8 +216,10 @@ class HandOver {
           case 'shown':
             return { kind: 'taken' };
           case 'kept':
-            // a save across which the authority changed may be overwritten by the one after it: ask that one
+            // a save across which the authority changed may be overwritten by the one after it: ask that one, the
+            // save unaccounted for until a believed read, as a store write in a round not believed (Decision Log 17 (i))
             if (this.comings === comings && composerOf(this.session) === target) return { kind: 'added' };
+            this.unaccountedLanded = true;
             continue;
           case 'present':
             return { kind: 'added' };

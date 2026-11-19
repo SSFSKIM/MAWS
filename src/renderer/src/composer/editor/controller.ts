@@ -2,7 +2,7 @@
 // draft's restore and debounced write, history navigation, pasted and dropped files, the prefill intake, submission,
 // and the imperative handle the Composer drives. One controller per mounted Editor, created once; the component hands
 // it the latest props after every render, so the handlers Tiptap captured at creation always act on the current ones.
-import { Selection, type Transaction } from '@tiptap/pm/state';
+import { AllSelection, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 import type { HistoryEntry } from '@shared/composer/history-entry';
@@ -91,7 +91,8 @@ export interface EditorHandle {
   // never over a selection (Decision Log 14 (iv)). 'busy': a submission is in flight. 'closed':
   // the editor takes no typing. 'gone': it unmounted meanwhile. Nothing changes in those three. With `save`, the pending
   // write is dropped and the draft saved now through the port: 'taken' when the port answered true, 'unsaved' when not.
-  attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean }): Promise<EditorAttach>;
+  // `signal`: its asker gave up (the hand-over ended); a wait on the restore then ends 'gone', as an unmount ends it.
+  attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean; signal?: AbortSignal }): Promise<EditorAttach>;
 }
 
 export type EditorAttach = 'taken' | 'present' | 'unsaved' | 'busy' | 'closed' | 'gone';
@@ -223,6 +224,7 @@ export class EditorController {
   private revision = 0; // local edits and submission invalidate pending restoration
   private lifetime = 0;
   private live = false;
+  private readonly leaving = new Set<() => void>(); // UX wave U6b-5a: the waits on a restore that an unmount ends
   private attachmentEpoch = 0;
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
@@ -428,6 +430,7 @@ export class EditorController {
     return () => {
       this.endDictation('remove'); // E9: before the flush, so the draft keeps no provisional words
       this.live = false;
+      this.leaving.forEach((left) => left());
       this.attachmentEpoch += 1;
       off();
       this.writer.flush();
@@ -764,8 +767,10 @@ export class EditorController {
   // is waited for in its turn, as files from outside are (`attachFromOutside`). A document that holds the block answers
   // `present` first, even while it is being sent: the block then goes with the message, once; so does a send of the
   // session that held it, accepted while this waited (Decision Log 17).
-  private async attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean }): Promise<EditorAttach> {
-    // Decision Log 17: a send of the session accepted while this waits on its restore, holding the block, took it
+  private async attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean; signal?: AbortSignal }): Promise<EditorAttach> {
+    const { signal } = options;
+    // Decision Log 17: a send of the session accepted while this waits on its restore, holding the block, took it. The
+    // watch lasts no longer than the wait, which an unmount or the asker's giving up ends.
     let sent = false;
     const unwatch = watchAcceptedSends(this.inputs.appSessionId, (doc) => {
       if (holdsBlock(doc, block.id)) sent = true;
@@ -773,8 +778,9 @@ export class EditorController {
     try {
       for (;;) {
         const lifetime = this.lifetime;
-        await this.restoring;
-        if (!this.live) return 'gone';
+        if (signal?.aborted) return 'gone';
+        await this.restoredOrLeft(signal);
+        if (signal?.aborted || !this.live) return 'gone';
         if (this.lifetime === lifetime) break;
       }
     } finally {
@@ -802,11 +808,27 @@ export class EditorController {
       const atom = state.schema.nodeFromJSON(node);
       const empty = last !== null && last.type.name === 'paragraph' && last.content.size === 0;
       const tr = empty ? state.tr.insert(state.doc.content.size - 1, atom) : state.tr.insert(state.doc.content.size, state.schema.nodes.paragraph.create(null, atom));
-      editor.view.dispatch(tr.setSelection(Selection.fromJSON(tr.doc, state.selection.toJSON())));
+      // Select All is kept as a selection of the old content, which never comes to cover the block
+      const kept = state.selection instanceof AllSelection ? TextSelection.between(tr.doc.resolve(Selection.atStart(state.doc).from), tr.doc.resolve(Selection.atEnd(state.doc).to)) : Selection.fromJSON(tr.doc, state.selection.toJSON());
+      editor.view.dispatch(tr.setSelection(kept));
     }
     if (!options.save) return 'taken';
     this.writer.cancel(); // the insertion's own pending write: this save is it
     return (await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()))) ? 'taken' : 'unsaved';
+  }
+
+  // This mount's restore, or its unmount, or the signal's abort, whichever comes first.
+  private restoredOrLeft(signal: AbortSignal | undefined): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        this.leaving.delete(done);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      this.leaving.add(done);
+      signal?.addEventListener('abort', done);
+      void this.restoring.then(done, done);
+    });
   }
 
   private insertMention(path: string): string | null {
