@@ -151,6 +151,43 @@ describe('the editor takes an attached block', () => {
     expect(content.contains(document.activeElement)).toBe(true);
   });
 
+  // The re-review: Select All before an append at the end does not come to cover the block, so what is typed over the
+  // selection keeps it. The control: a caret at the end, the same typing.
+  it.each(['all selected', 'a caret at the end'] as const)('at the end with %s, then typing: the block survives', async (before) => {
+    const { port } = heldPort(STORED);
+    const { handle, content } = mount(port);
+    await act(async () => handle.current!.restored());
+    act(() => {
+      content.focus();
+      if (before === 'all selected') tiptapOf(content).commands.selectAll();
+      else tiptapOf(content).commands.setTextSelection(17); // after `kept from before`
+    });
+    await act(async () => void (await handle.current!.attachPasted({ id: 'attach-v', text: 'x' }, { at: 'end', save: false })));
+    act(() => void tiptapOf(content).commands.insertContent('typed'));
+    expect(ofId(handle.current!.doc(), 'attach-v')).toHaveLength(1);
+    expect(tiptapOf(content).getText()).toContain('typed');
+  });
+
+  it('a wait on its restore ends gone when its asker gives up, and nothing is put in after', async () => {
+    const { port, release, saved } = heldPort(null, { holdLoad: true });
+    const { handle } = mount(port);
+    const giveUp = new AbortController();
+    const asked = handle.current!.attachPasted({ id: 'attach-w', text: 'x' }, { at: 'end', save: true, signal: giveUp.signal });
+    giveUp.abort();
+    expect(await asked).toBe('gone');
+    await release();
+    expect(ofId(handle.current!.doc(), 'attach-w')).toHaveLength(0);
+    expect(saved).toEqual([]);
+  });
+
+  it('a wait on a restore that never comes ends gone when it unmounts', async () => {
+    const { port } = heldPort(null, { holdLoad: true });
+    const { handle, view } = mount(port);
+    const asked = handle.current!.attachPasted({ id: 'attach-x', text: 'x' }, { at: 'end', save: true });
+    view.unmount();
+    expect(await asked).toBe('gone');
+  });
+
   it('at the end, with words selected: the selection stays as it was', async () => {
     const { port } = heldPort(STORED);
     const { handle, content } = mount(port);

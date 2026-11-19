@@ -671,6 +671,44 @@ describe('the task review’s findings (Decision Log 14)', () => {
     a.holds(store.doc(), TYPED);
   });
 
+  // The re-review: a departed composer's save that was kept, with no composer after it, is unaccounted for until a
+  // believed read, as an accepted store write in a round not believed is (Decision Log 17 (i)).
+  it('(i) a departed composer’s kept save with none in its place: a failed read after it is unconfirmed', async () => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const first = mountComposer(S, store.client, { covered: true });
+    await first.restored();
+    store.hold(SET);
+    const a = attach(store);
+    const save = await heldWrite(store);
+    first.unmount();
+    store.failReads({ ok: false, error: { code: 'internal', message: 'the index could not be read' } });
+    await save.answer(); // kept: the draft holds the block
+    expect(await a.done).toEqual(unconfirmed);
+    a.holds(store.doc(), 'earlier words');
+    expect(a.lines()).toHaveLength(1);
+  });
+
+  it('(i) a departed composer’s kept save with none in its place: the deadline during the read after it is unconfirmed', async () => {
+    vi.useFakeTimers();
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const first = mountComposer(S, store.client, { covered: true });
+    await first.restored();
+    store.hold(SET);
+    const a = attach(store);
+    await settle();
+    const save = store.held(SET)[0]!;
+    first.unmount();
+    store.hold(GET); // the read after it never answers
+    await save.answer();
+    await settle();
+    expect(store.held(GET)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(attachDeadlineMs(false));
+    expect(a.said).toEqual(unconfirmed);
+    a.holds(store.doc(), 'earlier words');
+  });
+
   it.each(['answered late', 'lost'] as const)('(ii) a send that carried the block ends added, and the block is not put in again (the write’s reply %s)', async (reply) => {
     const store = draftStore(S);
     store.put(EARLIER);
