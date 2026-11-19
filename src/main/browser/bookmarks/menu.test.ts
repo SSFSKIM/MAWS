@@ -157,6 +157,27 @@ describe('NativeMenus: the presenter and its e2e seam', () => {
     expect(native.seam.at()).toBeNull(); // the control above: the same read finds the point under the e2e
   });
 
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 3): the anchor arrives in the
+  // window's CSS pixels and the menu is popped in window points. The Mac's numbers: the bookmarks folder's chip corner and
+  // an extension action's press, each handed as it came at every factor today, and where it should have been handed.
+  it.each([
+    [0.5, { x: 332, y: 136 }, { x: 166, y: 68 }],
+    [0.8, { x: 332, y: 136 }, { x: 266, y: 109 }],
+    [1.25, { x: 332, y: 136 }, { x: 415, y: 170 }],
+    [2, { x: 332, y: 136 }, { x: 664, y: 272 }],
+    [0.5, { x: 4651, y: 92 }, { x: 2326, y: 46 }],
+    [2, { x: 811, y: 92 }, { x: 1622, y: 184 }],
+  ])('at %s hands the point %o to the presenter as %o in window points, which the e2e records', (factor, point, points) => {
+    const { menu } = built();
+    const window = { id: 1 } as never;
+    const popup = vi.fn();
+    new NativeMenus({ e2e: false, popup, zoomOf: (win) => (win === window ? factor : 1) }).present(menu, { window, ...point });
+    expect(popup.mock.calls[0]![1]).toEqual({ window, ...points });
+    const recorded = new NativeMenus({ e2e: true, zoomOf: () => factor });
+    recorded.present(menu, { window, ...point });
+    expect(recorded.seam.at()).toEqual(points);
+  });
+
   it('pick refuses a path that names no item, a submenu, a separator or a disabled line', () => {
     const { tree, menu } = built();
     const menus = new NativeMenus({ e2e: true });

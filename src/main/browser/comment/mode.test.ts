@@ -432,6 +432,27 @@ describe('the report gate (Design §8, §9)', () => {
     expect(picked(send)).toMatchObject([{ tabId: A, position: { x: 444, y: 513 } }]);
   });
 
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 4): the pin is drawn by the window
+  // in its CSS pixels, so the tab's points are divided by the app window's factor. The Mac's pick at 200 %: the button
+  // read in the tab (CSS px, the tab at its own 100 %) in a viewport of 612 × 513, whose pin went out at (81, 272), the
+  // point undivided
+  it('sends the position in the window’s CSS pixels at the app window’s zoom: the tab’s zoom over the app’s', async () => {
+    mode.dispose();
+    const factors = new Map<unknown, number>();
+    mode = new CommentMode({ store: store as never, emit: () => {}, capture, discard, now: () => now, zoomOf: (win) => factors.get(win) ?? 1 });
+    const { wc, win, send } = store.add(A);
+    factors.set(win, 2);
+    arm(A);
+    const button = { rect: { x: 37, y: 240.9921875, width: 87.2734375, height: 31.5 }, viewport: { width: 612, height: 513 } };
+    await mode.receive(wc as never, report(button));
+    expect(picked(send)).toMatchObject([{ tabId: A, position: { x: 40, y: 136 } }]);
+    factors.set(win, 0.5);
+    wc.zoom = 1.25; // and a tab zoomed of its own: 1.25 over 0.5
+    arm(A);
+    await mode.receive(wc as never, report({ ...button, epoch: mode.state(A)!.epoch }));
+    expect(picked(send).at(-1)).toMatchObject({ position: { x: 202, y: 681 } });
+  });
+
   it('drops, counts and disarms nothing for a report that is not the person\'s pick', async () => {
     const { wc, send } = store.add(A);
     const stranger = new FakeContents();

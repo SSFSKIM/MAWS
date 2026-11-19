@@ -97,7 +97,8 @@ const probeAction: LoadedAction = {
 const otherAction: LoadedAction = { ...probeAction, extensionId: OTHER, name: 'Other', popupUrl: `chrome-extension://${OTHER}/p.html` };
 const inert: LoadedAction = { ...probeAction, extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', hasPopup: false, popupUrl: null };
 
-function harness({ linkTarget = 'in-app' as LinkTarget, backgroundFailed = false } = {}) {
+// U6b-5b (placement 2): `zoom` is the app window's factor (main's `zoomOf`), read at each placement
+function harness({ linkTarget = 'in-app' as LinkTarget, backgroundFailed = false, zoom = undefined as { factor: number } | undefined } = {}) {
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
   let tabViews = 0;
@@ -138,6 +139,7 @@ function harness({ linkTarget = 'in-app' as LinkTarget, backgroundFailed = false
     seam: { openExternal: (url) => void external.push(url) },
     log: (event) => void logged.push(event),
     now: () => clock,
+    ...(zoom && { zoomOf: () => zoom.factor }),
   });
   const states: unknown[] = [];
   popups.state$((windowId, state) => states.push([windowId, state]));
@@ -190,6 +192,41 @@ describe('popupBounds', () => {
   it('flips above the anchor when it would not fit below, and stays in the window when neither fits', () => {
     expect(popupBounds({ x: 600, y: 600, width: 24, height: 24 }, { width: 300, height: 200 }, content)).toEqual({ x: 324, y: 400, width: 300, height: 200 });
     expect(popupBounds({ x: 600, y: 300, width: 24, height: 24 }, { width: 300, height: 500 }, content)).toEqual({ x: 324, y: 200, width: 300, height: 500 });
+  });
+});
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 2): the action's anchor arrives in
+// the window's CSS pixels and the popup is placed in window points. The Mac's numbers: the icon's rect as main received it
+// in a window of 2560 × 1358 points, and where the popup should have stood (its corner times the factor), where today it
+// stood at the CSS corner, or at 0.5 and 0.8 held at the content's edge.
+describe('ExtensionPopups: the app window’s zoom (U6b-5b, placement 2)', () => {
+  const MAC = [2560, 1358];
+  it.each([
+    [0.5, { x: 4639, y: 80, width: 24, height: 24 }, { x: 2307, y: 52, width: 25, height: 25 }],
+    [0.8, { x: 2720, y: 80, width: 24, height: 24 }, { x: 2170, y: 83, width: 25, height: 25 }],
+    [1.25, { x: 1567, y: 80, width: 24, height: 24 }, { x: 1964, y: 130, width: 25, height: 25 }],
+    [2, { x: 799, y: 80, width: 24, height: 24 }, { x: 1621, y: 208, width: 25, height: 25 }],
+  ])('at %s opens the popup under the icon times the factor', (factor, icon, bounds) => {
+    const h = harness({ zoom: { factor } });
+    h.w.getContentSize = () => MAC;
+    h.popups.open(h.placedTab(), PROBE, icon);
+    expect(h.views[0]!.bounds).toEqual(bounds);
+  });
+
+  it('keeps the anchor in CSS pixels: a layout and a change of factor place it again from it', () => {
+    const zoom = { factor: 2 };
+    const h = harness({ zoom });
+    h.w.getContentSize = () => MAC;
+    h.popups.open(h.placedTab(), PROBE, ANCHOR);
+    const [view] = h.views;
+    sized(view!, 344, 179);
+    expect(view!.bounds).toEqual({ x: 904, y: 128, width: 344, height: 179 }); // the anchor (1200, 80, 48 × 48) in points
+    zoom.factor = 1;
+    h.popups.placeAgain(h.w.id);
+    expect(view!.bounds).toEqual({ x: 280, y: 64, width: 344, height: 179 }); // as at 100 %, its size kept
+    h.popups.close(h.w.id, 'toggle');
+    h.popups.placeAgain(h.w.id); // no popup: nothing to place
+    expect(view!.bounds).toEqual({ x: 280, y: 64, width: 344, height: 179 });
   });
 });
 

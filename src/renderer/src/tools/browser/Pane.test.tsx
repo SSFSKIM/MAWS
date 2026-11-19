@@ -9,6 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
+import { useZoom } from '../../stores/zoom'; // UX wave U6b-5b
 import { browserTab, T1, T2 } from '../../test-support/browser';
 import { installFakeMain, ok } from '../../test-support/code';
 import { mainShowing } from '../../test-support/panel';
@@ -546,6 +547,22 @@ describe('a device size (U12a)', () => {
     await frames();
     expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['', '']);
     expect(places().at(-1)).toMatchObject({ rect: { x: 0, y: 40, width: 1000, height: 1100 } });
+  });
+
+  // UX wave U6b-5b (decision 35): the element is in the window's CSS pixels, so the app window's factor divides it; a change
+  // of the factor alone redraws it and reports the new rect
+  it('at the app window’s 200 % draws Mobile 188 CSS pixels wide, redrawn by the factor alone', async () => {
+    try {
+      const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+      await frames();
+      expect(pageOf(container).style.width).toBe('375px'); // the control: at 100 % the size itself
+      act(() => useZoom.setState({ factor: 2 }));
+      await frames();
+      expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['188px', '406px']);
+      expect(places().at(-1)).toMatchObject({ rect: { x: 406, y: 40, width: 188, height: 406 } });
+    } finally {
+      useZoom.setState({ factor: 1 });
+    }
   });
 
   it('a pane made narrower narrows the page, and widening it restores the size', async () => {

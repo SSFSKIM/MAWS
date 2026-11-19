@@ -16,6 +16,7 @@ import { at } from '../../../../../../test/support/machine';
 import { useFloatingCard } from '../../../shell/floating';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
+import { useZoom } from '../../../stores/zoom'; // UX wave U6b-5b
 import { browserTab, T1, T2 } from '../../../test-support/browser';
 import { deferred, installFakeMain, ok, type Handler } from '../../../test-support/code';
 import { mainShowing } from '../../../test-support/panel';
@@ -752,6 +753,25 @@ describe('device sizes and Copy screenshot (U12a)', () => {
     expect(read(items).map(({ viewport, checked }) => [viewport, checked])).toEqual([['responsive', 'false'], ['mobile', 'true'], ['tablet', 'false']]);
     await user.click(items[0]!);
     expect(calls('browser.tabs.setViewport')).toEqual([{ tabId: T1, viewport: null }]);
+  });
+
+  // UX wave U6b-5b (decision 35; finding 8): the room is in the window's CSS pixels, so at the app window's 200 % Mobile
+  // needs 188 of it, and the page then reads 376; a change of the factor alone redraws the chip and the choices
+  it('at the app window’s 200 % offers Mobile in a room of 300, and the chip says what the page reads: 376', async () => {
+    const user = userEvent.setup();
+    onTestFinished(() => useZoom.setState({ factor: 1 }));
+    const { rerender } = show({ tab: tab(), owns: true, room: { width: 300, height: 900 } });
+    expect(read(await options(user)).map(({ disabled }) => disabled)).toEqual([false, true, true]); // the control, at 100 %
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    act(() => useZoom.setState({ factor: 2 }));
+    expect(read(await options(user)).map(({ disabled }) => disabled)).toEqual([false, false, true]);
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={{ width: 1000, height: 600 }} />);
+    expect(chip()!.textContent).toBe('376 × 812');
+    act(() => useZoom.setState({ factor: 1 }));
+    expect(chip()!.textContent).toBe('375 × 600');
   });
 
   it('Copy screenshot asks main for the tab, and says what came of it once main answers', async () => {
