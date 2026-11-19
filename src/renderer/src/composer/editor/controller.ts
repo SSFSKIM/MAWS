@@ -817,17 +817,24 @@ export class EditorController {
     return (await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()))) ? 'taken' : 'unsaved';
   }
 
-  // This mount's restore, or its unmount, or the signal's abort, whichever comes first.
+  // This mount's restore, or its unmount, or the signal's abort, whichever comes first. A restore that fails fails the
+  // wait: an editor whose draft never came is not an empty box to put the block in and save over that draft.
   private restoredOrLeft(signal: AbortSignal | undefined): Promise<void> {
-    return new Promise((resolve) => {
-      const done = () => {
-        this.leaving.delete(done);
-        signal?.removeEventListener('abort', done);
+    return new Promise((resolve, reject) => {
+      const off = () => {
+        this.leaving.delete(left);
+        signal?.removeEventListener('abort', left);
+      };
+      const left = () => {
+        off();
         resolve();
       };
-      this.leaving.add(done);
-      signal?.addEventListener('abort', done);
-      void this.restoring.then(done, done);
+      this.leaving.add(left);
+      signal?.addEventListener('abort', left);
+      this.restoring.then(left, (error: unknown) => {
+        off();
+        reject(error);
+      });
     });
   }
 
