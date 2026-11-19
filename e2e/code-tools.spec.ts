@@ -792,8 +792,9 @@ test.describe('the product in stub mode over a scratch repository', () => {
         writeFileSync(scratch.path('web/unlabelled.html'), `<!doctype html><html><head><title>Unlabelled</title></head><body><p id="words">${UNLABELLED_WORDS}</p></body></html>`);
         writeFileSync(scratch.path('web/labelled.html'), Buffer.from('<!doctype html><html><head><meta charset="windows-1252"><title>Labelled</title></head><body><p id="words">Café naïve</p></body></html>', 'latin1'));
       },
-      // the page's own console: the stylesheet and the script beside it, each refused by the frame's CSP; nothing else
-      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the stylesheet '[^']*\/style\.css' because it violates the following Content Security Policy directive: "style-src /, /^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the script '[^']*\/app\.js' because it violates the following Content Security Policy directive: "script-src /] },
+      // the page's own console: the stylesheet and the script beside it, each refused by the frame's CSP; nothing else (in
+      // the pinned Electron's wording, "Loading the … '<url>' violates", which replaced Chromium's "Refused to load the …")
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Loading the stylesheet '[^']*\/style\.css' violates the following Content Security Policy directive: "style-src /, /^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Loading the script '[^']*\/app\.js' violates the following Content Security Policy directive: "script-src /] },
     );
   });
 

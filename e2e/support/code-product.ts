@@ -107,8 +107,10 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     const own: string[] = expected ? maws.consoleErrors() : [];
     if (expected) {
       const theFrames = (location: string, text: string) => FRAME_LOCATION.test(location) && expected.some((pattern) => pattern.test(`${location} ${text}`));
+      // a frame's error is listed with its location, as the patterns read it, so a failure shows which frame logged it
       page.on('console', (message) => {
-        if (message.type() === 'error' && !theFrames(message.location().url, message.text())) own.push(message.text());
+        const location = message.location().url;
+        if (message.type() === 'error' && !theFrames(location, message.text())) own.push(FRAME_LOCATION.test(location) ? `${location} ${message.text()}` : message.text());
       });
       page.on('pageerror', (error) => {
         if (!theFrames(thrownAt(error), error.message)) own.push(`uncaught: ${error.message}`);
