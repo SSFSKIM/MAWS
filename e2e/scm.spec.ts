@@ -547,7 +547,10 @@ test.describe('source control over a scratch repository', () => {
       await pr.getByRole('button', { name: 'Refresh PR state' }).click();
       await expect(pr.locator('[data-scm-checks]'), 'nothing listed: the folded line stands alone').toHaveCount(0, { timeout: 20_000 });
       await expect.poll(() => words(pr.locator('[data-scm-fold-line]'))).toBe('Checks › 3 passed');
+      // The card's line, read where it is drawn: Session cards in the side column, where the page stood
+      await showEnvironment(p);
       await expect(line).toHaveText('PR #7 Open · 3 passed');
+      await openPage(p);
 
       scratch.gh('checks.json', JSON.stringify([CHECKS_PASSED[0], { ...CHECKS_PASSED[2], bucket: 'fail', state: 'FAILURE' }, CHECKS_PASSED[1]]));
       scratch.gh('checks.exit', '1');
