@@ -266,15 +266,15 @@ function Palette({ run }: { run(id: ActionId): void }) {
     ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
     : [];
   const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
-  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-reviews; the branch panel's scalpel-4#1, #2): one
-  // effective selection, cmdk's controlled value, always a row that is drawn. In the All scope, until the person moves it,
-  // it is the first row and follows the first row as answers arrive; a move is the person's key or pointer making cmdk
-  // report another row, and is forgotten at every change of the text or the scope, and when its row goes. The
-  // Conversations scope keeps cmdk's selection by value while its row is drawn. Following sends no event: an answer that
-  // changes the first row must never look like a key to the rest of the app (the window's key dispatcher, Back and
-  // Forward's hand-off). cmdk 1.1.1 neither moves its active descendant nor scrolls when its controlled value changes, so
-  // the input's `aria-activedescendant` is kept on the effective row here, and a row the palette selected by itself is
-  // scrolled into view.
+  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-reviews; the branch panel's scalpel-4#1, #2; the
+  // delta review's H6): one effective selection, cmdk's controlled value, always a row that is drawn, and none while no
+  // row is. In the All scope, until the person moves it, it is the first row and follows the first row as answers
+  // arrive; a move is the person's key or pointer making cmdk report another row, and is forgotten at every change of the
+  // text or the scope, and when its row goes. The Conversations scope keeps cmdk's selection by value while its row is
+  // drawn. Following sends no event: an answer that changes the first row must never look like a key to the rest of the
+  // app (the window's key dispatcher, Back and Forward's hand-off). cmdk 1.1.1 neither moves its active descendant nor
+  // scrolls when its controlled value changes, so the input's `aria-activedescendant` is kept on the effective row here,
+  // and a row the palette selected by itself is scrolled into view.
   const rowValues = [
     ...recent.map((row) => (row.kind === 'session' ? ROW.session(row.record.appId) : ROW.artifact(row.machine, row.artifactId))),
     ...(scope === 'all' && typed ? entries.sessions.slice(0, RESULT_LIMIT).map((record) => ROW.session(record.appId)) : []),
@@ -298,7 +298,8 @@ function Palette({ run }: { run(id: ActionId): void }) {
   }
   const drawn = rowValues.includes(selected);
   if (moved && !drawn) setMoved(false); // the moved row went: the selection follows the first row again
-  const value = (scope === 'sessions' || moved) && drawn ? selected : (rowValues[0] ?? selected);
+  // no row drawn, no selection (the delta review's H6): cmdk leaves its value behind when several rows go at once
+  const value = (scope === 'sessions' || moved) && drawn ? selected : (rowValues[0] ?? '');
   // the row the palette selected by itself is the selection held from now on (cmdk reports none for its controlled value)
   if (value !== selected) setSelected(value);
   const root = useRef<HTMLDivElement>(null);
@@ -349,10 +350,10 @@ function Palette({ run }: { run(id: ActionId): void }) {
     setLibraryView({ view: 'all', query: query.trim(), kind: null, spaceId: null, machine: null });
     openArtifacts();
   };
-  // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
+  // ⌘⏎ on a session opens it in the split, only while its row is drawn; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
     if (movesSelection(event)) personActs();
-    if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:')) return;
+    if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:') || !rowValues.includes(value)) return;
     event.preventDefault();
     openSession(value.slice('session:'.length) as AppSessionId, true);
   };
