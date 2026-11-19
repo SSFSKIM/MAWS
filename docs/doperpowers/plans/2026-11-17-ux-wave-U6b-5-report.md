@@ -57,3 +57,23 @@ Each is also a row in `docs/tech-debt-tracker.md` (dated 2026-11-18) unless note
 - **`ipc/client.ts` passes a rejected `bridge().invoke` through** to callers that must say an outcome (DL 17 (vi)); the hand-over catches it, others do not.
 - **An attached block's label** is a paste's ("Pasted text #1"); naming its terminal waits for ticket 733's design. **A block's text in a `/btw` question** is unframed; the rule is ticket 733b's.
 - **Five unit files time out under load and pass alone**, not on the build brief's list (`json-wire`, `stack-place`, `DesignWorkbench.dom`, `comments.dom`, `DocumentEditor.dom`): for the brief's list, not a tracker row.
+
+## The branch panel's fix wave (2026-11-19)
+
+The coordinator's xhigh panel (`6ee3382a7..93b14470e`) returned "incorrect" with 21 findings. Ruled into six groups by mechanism. Each group was built red first, by the executor of its milestone. G3, G4 and G5 were built on branches of their own and merged at `a80e44303`, `92b747d2b` and `489ebfd93`. The rules are Decision Log 21 of the document.
+
+- **G1, the draft's integrity** (`e0310f01d`, `5f7847a6f`, `1d3d4a847`). A draft read that fails is `UNREAD`, not "no draft", so an attach writes nothing into a box that could not read its draft. A failed immediate save leaves the pending write to the writer. Over the link, "Added" waits for the machine to take the save. A box that left after a refused save is not said to hold the block. The take-back hold is read at once.
+- **G2, the keyboard after the restore wait.** The box checks again whether it can take the keyboard. If it cannot, the block is saved at the end and the line is shown.
+- **G3, a surface's keyboard** (`99575b7b7`..`9d3ffb10d`). There is one hand-over at a time in `SurfaceRow.tsx`. A newer key act, any newer host request, or the person's press ends it, and nothing it scheduled runs afterwards. The side column's menus keep it while it lasts.
+- **G4, history and the Overview** (`b7a16206f`..`5fd7abd52`). A change is classified before closed tabs are pruned. A step names its tab as the Overview's opener, and a step to a tab reveals the main area. One insertion is made in U13's `OverviewPanel.tsx`: `returnOverviewFocusTo`.
+- **G5, the palette** (`a32814b6f`..`939107180`). `surface.*` rows run after the palette closes. The selection is always a drawn row, with a fallback to the first. A row the palette picks by itself is scrolled into view.
+- **G6, the screen's text** (in `e0310f01d`). xterm's padding cell before a wrapped wide character is dropped, so `abcd界ef` reads `abcd界ef`. The cases include Hangul.
+- **Not fixed here.** scalpel-4#5 and scalpel-5#3 are tracker rows (`3cd603bb8`). scalpel-5#2 is board ticket 783 (`f18093691`): artifacts are keyed by id alone in U10's files, the same cause as Decision Log 16 (iv).
+
+Evidence:
+- On the build VM at `489ebfd93`, the merged head: the web and e2e typechecks and eslint on every changed file exit 0. vitest over `panel`, `tools/code/files`, `keymap`, `overview`, `palette`, `composer`, `terminal`, `tools/terminal`, `lane-b`, `stores`, `app`, `transcript/view/rows` and the tokens guard: 295 files, 5,224 tests passed.
+- At `1d3d4a847`, the whole `pnpm typecheck` exits 0. `test/lane-b`, `lane-b` and `composer` pass: 101 files, 1,797 tests.
+- Class 1a, label `u6b5a-fix`. Run 44509654976 at `632dcbf43` was a failure: `pnpm typecheck` stopped on `tsconfig.node.json` not listing the new `unread.ts`, and on a test type, both fixed in `1d3d4a847`. Run **44513116221** at `1d3d4a847` was a **success**: static, unit 1 to 4, probes and e2e:cross-build.
+- Desk-web, label `u6b5a-fix-dw`: run **44509682501** at `632dcbf43` was a **success**. `1d3d4a847` changes only `tsconfig.node.json` and `test/lane-b/drafts-enumerated.test.ts`, neither in desk-web's closure, so it was not run again.
+
+New load timeouts seen in the group runs, which pass alone: `CommandPalette.test.tsx` "bounds mounted results for 3,279 sessions" (5.4 s), and desk-web's `hub/project-client.test.ts` once (it is on the brief's list).
