@@ -131,13 +131,15 @@ const holdRead = (path: string) => {
   return gate;
 };
 
-// ⌘P from the composer, `query` typed, and Enter on its one result (`path`) once it is listed.
-async function findAndEnter(query = 'app', path = APP): Promise<void> {
+// ⌘P from the composer, `query` typed, and Enter on its one result (`path`) once it is listed; `beforeEnter` runs just
+// before the Enter.
+async function findAndEnter(query = 'app', path = APP, beforeEnter?: () => void): Promise<void> {
   act(() => composer().focus());
   act(() => runAction('files.goToFile'));
   await waitFor(() => expect(document.activeElement).toBe(field()));
   fireEvent.change(field()!, { target: { value: query } });
   await waitFor(() => expect([...document.querySelectorAll('[data-files-result]')].map((row) => row.getAttribute('data-path'))).toEqual([path]));
+  beforeEnter?.();
   fireEvent.keyDown(field()!, { key: 'Enter' });
 }
 
@@ -255,6 +257,77 @@ describe('Enter puts the keyboard in the file (S3; B5)', { timeout: 20_000 }, ()
     await settle();
     expect(document.activeElement).toBe(waiting); // the same element: the body is not drawn again
     expect(document.activeElement).toBe(body(APP, 'main'));
+  });
+});
+
+// A take the page refuses (Decision Log 17). Chromium does not move the keyboard to an element under an inert or hidden
+// ancestor, nor at a moment the page will not take it; happy-dom moves it anywhere. These cases model both refusals on
+// the prototype, for their own run: `refusing` is a moment with no change to the page that would tell anyone it ended.
+// The request holds until the keyboard is in the file's view, and is dropped only by the person's own press.
+describe('a take the page refuses (Decision Log 17)', { timeout: 20_000 }, () => {
+  const focus = HTMLElement.prototype.focus;
+  let refusing = false;
+  beforeEach(() => {
+    refusing = false;
+    HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions) {
+      if (refusing || this.closest('[inert], [hidden]') !== null) return;
+      focus.call(this, options);
+    };
+  });
+  afterEach(() => {
+    HTMLElement.prototype.focus = focus;
+  });
+  const panel = () => document.querySelector<HTMLElement>('[data-region="panel"]')!;
+
+  it('beside the chat, the body under an inert ancestor as it mounts: the request holds, the body takes the keyboard once the ancestor lets it, and the text when the read lands', async () => {
+    const read = holdRead(APP);
+    render(<Page />);
+    await findAndEnter('app', APP, () => panel().setAttribute('inert', ''));
+    await waitFor(() => expect(body(APP, 'panel')).not.toBeNull());
+    await settle();
+    expect(document.activeElement, 'the take refused').not.toBe(body(APP, 'panel'));
+    act(() => panel().removeAttribute('inert'));
+    await waitFor(() => expect(document.activeElement).toBe(body(APP, 'panel')));
+    act(() => read.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(textOf(APP, 'panel')), { timeout: 5000 });
+  });
+
+  it('beside the chat, a moment that refuses the body’s take: the request holds, and the editor takes the keyboard when it is drawn', async () => {
+    const read = holdRead(APP);
+    render(<Page />);
+    await findAndEnter('app', APP, () => (refusing = true));
+    await waitFor(() => expect(body(APP, 'panel')).not.toBeNull());
+    await settle();
+    expect(document.activeElement, 'the take refused').not.toBe(body(APP, 'panel'));
+    refusing = false; // nothing in the page changes: only the editor's drawing can try again
+    act(() => read.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(textOf(APP, 'panel')), { timeout: 5000 });
+  });
+
+  it('a refused take, then the person’s press in the composer: the held request is dropped, and neither the page’s change nor the editor takes the keyboard from there', async () => {
+    const read = holdRead(APP);
+    render(<Page />);
+    await findAndEnter('app', APP, () => (refusing = true));
+    await waitFor(() => expect(body(APP, 'panel')).not.toBeNull());
+    await settle();
+    refusing = false;
+    fireEvent.pointerDown(composer());
+    act(() => composer().focus());
+    act(() => {
+      panel().setAttribute('inert', '');
+      panel().removeAttribute('inert');
+    });
+    act(() => read.resolve());
+    await waitFor(() => expect(textOf(APP, 'panel')).not.toBeNull(), { timeout: 5000 });
+    await settle();
+    expect(document.activeElement).toBe(composer());
+    const control = holdRead(TIDES); // the control: the same refused take with no press between
+    await findAndEnter('tides', TIDES, () => (refusing = true));
+    await waitFor(() => expect(body(TIDES, 'panel')).not.toBeNull());
+    await settle();
+    refusing = false;
+    act(() => control.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(textOf(TIDES, 'panel')), { timeout: 5000 });
   });
 });
 
