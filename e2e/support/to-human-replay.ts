@@ -317,3 +317,37 @@ export function summaryJournal(dir: string, startAt: number): string {
 
   return write(dir, 'u2b-summary');
 }
+
+// UX wave U2b (the cross-build scenes' fix, 2026-11-19 (UTC)): the resume journal of e2e/cross-build.spec.ts's to-human
+// scenes, so that the live launch carries what the window draws. A live session's history is its stream (session.events
+// answers a running session from its journal, with no `earlier` cursor), so a seeded transcript alone draws nothing while
+// the launch runs. After the handshake, one human turn: the prompt the scene sends, a Bash call and its result, then a
+// message to the person; then a second prompt no one sends, at which the replay holds, so the launch stays up. `cwd`: the
+// scene's repository, which the init names as the session's folder.
+export function exchangeJournal(dir: string, startAt: number, turn: { cwd: string; prompt: string; call: string; line: string; said: string }): string {
+  const { frame, push, now, id, lifecycle, running, prompt, echo, text, result, prelude, write } = scribe(startAt);
+  push('meta', { event: 'provenance', charter: 'docs/charter.md', child: 'UX wave U2b', spec: 'docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md', source: 'test/fixtures/engine/p2c-report-marks.jsonl', note: 'Synthetic (UX wave U2b), built by e2e/support/to-human-replay.ts for e2e/cross-build.spec.ts.' });
+  prelude();
+  const u1 = id(1);
+  prompt(u1, turn.prompt);
+  running('running');
+  lifecycle(u1, 'queued');
+  lifecycle(u1, 'started');
+  push('in', { ...frame(8), cwd: turn.cwd, permissionMode: 'default', output_style: TO_HUMAN.style });
+  echo(u1, turn.prompt);
+  const tool = frame(10);
+  Object.assign(tool, { uuid: id(2), user_message_uuid: u1, user_message_uuids: [u1] });
+  Object.assign(tool.message as Record<string, unknown>, { id: 'msg_01U2bXbTree', content: [{ type: 'tool_use', id: turn.call, name: 'Bash', input: { command: 'git status --short', description: turn.line } }] });
+  push('in', tool);
+  const toolResult = frame(11);
+  Object.assign(toolResult, { uuid: id(3), timestamp: now(), tool_use_result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
+  Object.assign(toolResult.message as Record<string, unknown>, { content: [{ tool_use_id: turn.call, type: 'tool_result', content: '', is_error: false }] });
+  push('in', toolResult);
+  const said = `<message>\n${turn.said}\n</message>`;
+  text('msg_01U2bXbSaid', id(4), said, u1);
+  result(u1, said);
+  lifecycle(u1, 'completed');
+  running('idle');
+  prompt(id(5), 'A prompt no one sends: the replay holds here.');
+  return write(dir, 'u2b-exchange');
+}
