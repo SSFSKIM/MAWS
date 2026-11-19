@@ -1064,7 +1064,8 @@ function oneAtATime(): { enter(deadline: number, signal?: AbortSignal): Promise<
         };
         const turn = () => done(true);
         const give = () => {
-          line.splice(line.indexOf(turn), 1);
+          const place = line.indexOf(turn);
+          if (place >= 0) line.splice(place, 1);
           done(false);
         };
         const timer = setTimeout(give, Math.max(0, deadline - Date.now()));
