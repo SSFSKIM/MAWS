@@ -130,6 +130,18 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await expect(next.locator('kbd')).toHaveText('⌘⇧J');
       await expect.poll(() => accelerator(app, 'attention.next')).toBe('Cmd+Shift+J');
 
+      // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B14): the three rows this
+      // half adds are listed with their chords and no control to change them, while build F may still be gone back to;
+      // the control, in this test: Next Needs-you's row, read the same way, has its Change. settings.json holds none of
+      // their ids.
+      await expect(next.getByRole('button', { name: 'Change Next Needs-you' })).toHaveCount(1);
+      for (const [title, chord] of [['Attach selection to chat', '⌘⇧L'], ['Back', '⌘['], ['Forward', '⌘]']] as const) {
+        const row = keyRow(page, title);
+        await expect(row.locator('kbd'), title).toHaveText(chord);
+        await expect(row.getByRole('button'), `${title} has no control`).toHaveCount(0);
+      }
+      expect(Object.keys(readSettings(userData).keymap).filter((id) => ['terminal.attachSelection', 'go.back', 'go.forward'].includes(id)), 'no stored rebinding of the three').toEqual([]);
+
       // The default route and the relay-unreachable policy, one field each.
       const gateway = panel(page).getByRole('region', { name: 'Gateway' });
       await gateway.getByRole('radio', { name: 'Direct' }).check();

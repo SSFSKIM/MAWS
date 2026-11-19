@@ -304,6 +304,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.heartbeat();
     await reported('Manual')();
     await expect(info).toContainText(/Manual · Reported (now|1 minute ago)/);
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B9 and Decision Log 10 (ix)):
+    // ⇧Tab in this composer asks nothing, since the chip takes no change here, so its live region says nothing; the
+    // region is mounted as on the composer's route, whose scene in e2e/composer.spec.ts ("⇧Tab says the mode") is this
+    // one's control: there the same region reads the sentence after the same press.
+    const said = main(page).locator('[data-mode-announcement]');
+    await expect(said, 'the composer’s live region, mounted').toHaveCount(1);
+    await editor(page).click();
+    await page.keyboard.press('Shift+Tab');
+    await reported('Manual')();
+    await expect(said, 'nothing said on a terminal session').toHaveText('');
     // the menu still sets nothing: the reported mode checked, each choice closed with why
     await chip.click();
     await expect(page.getByRole('menuitemradio', { name: /^Manual/ })).toHaveAttribute('aria-checked', 'true');

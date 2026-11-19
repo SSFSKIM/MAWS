@@ -143,6 +143,31 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
+  // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B8 and decision 17): ⌘[ and
+  // ⌘] are Go ▸ Back and Forward, so the editor's keymap holds no binding for them and they change nothing in the text;
+  // Tab and ⇧Tab still indent. The keys pressed in the editor on an indented line (src/app.ts's second, "  const v2 = 2;"),
+  // read after two frames; ⇧Tab then un-indents the same line and Tab indents it again, read by the same reader (the
+  // control). Playwright's keys reach the page and not the menu (support/menu.ts), so no step is taken here.
+  test('⌘[ and ⌘] change nothing in a file; Tab and ⇧Tab indent', async () => {
+    await withProduct(async (p) => {
+      const viewer = await openEditor(p, APP);
+      const second = viewer.locator('.cm-content .cm-line').nth(1);
+      await expect(second).toHaveText('  const v2 = 2;');
+      await second.click();
+      await p.page.keyboard.press('End');
+      await p.page.keyboard.press('Meta+BracketLeft');
+      await p.page.keyboard.press('Meta+BracketRight');
+      await frames(p.page);
+      expect((await lineTexts(viewer))[1], '⌘[ and ⌘] leave the line as it was').toBe('  const v2 = 2;');
+      await expect(viewer).toHaveAttribute('data-dirty', 'false');
+
+      await p.page.keyboard.press('Shift+Tab');
+      await expect.poll(async () => (await lineTexts(viewer))[1], { message: '⇧Tab un-indents the line' }).toBe('const v2 = 2;');
+      await p.page.keyboard.press('Tab');
+      await expect.poll(async () => (await lineTexts(viewer))[1], { message: 'Tab indents it again' }).toBe('  const v2 = 2;');
+    });
+  });
+
   test('asks before closing a dirty tab: Cancel keeps it, Don’t save closes it and leaves the disk alone', async () => {
     await withProduct(async (p) => {
       const original = read(p, APP);

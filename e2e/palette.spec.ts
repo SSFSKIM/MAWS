@@ -8,6 +8,7 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
+import { scene, show } from './support/maws-tools'; // UX wave U6b-5a
 
 const SHELL_ENV = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' };
 const PROJECTS = ['codex_somersault', 'claude-usage-menubar', 'MAWS'];
@@ -23,7 +24,10 @@ const focused = (page: Page) =>
   page.evaluate(() => ({ kind: document.activeElement?.getAttribute('data-kind') ?? null, row: document.activeElement?.getAttribute('aria-label') ?? null }));
 
 // Focus a sidebar row (a focused element for the dialog to return to), then reveal the project from the palette with
-// the keyboard: its name, End (the last option: Projects follows Sessions, and no action title holds a project name), ⏎.
+// the keyboard: its name, the arrows down to the project's row, ⏎. UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-
+// ux-wave-U6b-5-rest-of-keyboard.md, §I; Decision Logs 15 and 19): End no longer lands on the project, since the last row
+// is "Search the Library for …", and the selection follows the first row until a key moves it; the row is picked by its
+// value (`project:<id>`, read from the drawn option) and reached by ArrowDown, each press waited on the selection moving.
 async function reveal(page: Page, app: ElectronApplication, project: string): Promise<void> {
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   await page.locator('[data-region="sidebar"] [role="treeitem"]').first().focus();
@@ -32,9 +36,18 @@ async function reveal(page: Page, app: ElectronApplication, project: string): Pr
   // Under load the first keystrokes can land before the input takes focus; type only once it holds it.
   await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
   await page.keyboard.type(project);
-  await expect(palette.getByRole('group', { name: 'Projects' }).getByRole('option', { name: project })).toBeVisible();
-  await page.keyboard.press('End');
-  await expect(palette.getByRole('group', { name: 'Projects' }).getByRole('option', { name: project })).toHaveAttribute('aria-selected', 'true');
+  const row = palette.getByRole('group', { name: 'Projects' }).getByRole('option', { name: project });
+  await expect(row).toBeVisible();
+  const value = await row.getAttribute('data-value');
+  expect(value, `${project}'s row is a project's`).toMatch(/^project:/);
+  const selected = palette.locator('[cmdk-item][aria-selected="true"]');
+  for (let presses = 0; (await selected.getAttribute('data-value')) !== value; presses++) {
+    if (presses > 50) throw new Error(`${project}'s row was not reached by ArrowDown`);
+    const from = await selected.getAttribute('data-value');
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(() => selected.getAttribute('data-value'), { message: 'ArrowDown moves the selection' }).not.toBe(from);
+  }
+  await expect(palette.locator(`[cmdk-item][data-value="${value}"]`)).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
   await expect(palette).toHaveCount(0);
 }
@@ -71,4 +84,34 @@ test('palette reveal project: the row keeps focus when a frame runs before the d
     await expectRowKeepsFocus(page, project);
     await page.waitForTimeout(300); // the frame patch expires before the next round
   }
+});
+
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B6): an artifact found by its
+// title in ⌘K opens beside the chat of the session on screen. The product over an indexed session (replay transport, its
+// own launch), an HTML artifact made through the bridge with an invented title. The scene waits on the Artifacts group's
+// option for the typed title, which is drawn only once this Mac's `library.list` has answered, and on it being the
+// selected row (the selection follows the first row until a key moves it); then on the side column's Artifacts tab
+// showing the artifact.
+test('an artifact found by its title opens beside the chat', async () => {
+  await scene({ titles: ['Harbour survey'], label: 'u6b5-palette' }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id!);
+    const made = await s.page.evaluate(
+      ([title, html]) => window.maws.invoke('artifacts.create', { kind: 'html', title, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } }),
+      ['Quarterly lighthouse notes', '<!doctype html><title>Quarterly lighthouse notes</title><p>Invented notes on a lighthouse.</p>'] as const,
+    );
+    if (!made.ok) throw new Error(`artifacts.create: ${made.error.code} ${made.error.message}`);
+    const artifactId = made.value.artifact.id;
+
+    const palette = s.page.getByRole('dialog', { name: 'Command palette' });
+    await menu(s.maws.app, 'palette.open');
+    await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+    await s.page.keyboard.type('lighthouse');
+    const row = palette.getByRole('group', { name: 'Artifacts' }).getByRole('option', { name: /Quarterly lighthouse notes/ });
+    await expect(row, 'the artifact listed under Artifacts once this Mac answered').toBeVisible({ timeout: 15_000 });
+    await expect(row, 'the first row, selected').toHaveAttribute('aria-selected', 'true');
+    await s.page.keyboard.press('Enter');
+    await expect(palette).toHaveCount(0);
+    await expect(s.panel.locator(`[data-surface="artifacts"] [data-artifact-record="${artifactId}"]`), 'the artifact beside the chat').toBeVisible({ timeout: 15_000 });
+  });
 });

@@ -1551,8 +1551,21 @@ test.describe('plugin management (E8)', () => {
     expect(scrolled).toBeGreaterThan(0);
     const detail = await openDetail(w, 'eli5@claude-community');
     await expect(w.getByRole('searchbox', { name: 'Search plugins' })).toHaveCount(0);
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B8): ⌘[ is also Go ▸ Back,
+    // a menu accelerator, which a page's keydown reaches first and keeps from the menu by taking it: the detail takes
+    // it (its keydown's default prevented), so the place in front does not change. This page has no strip, so what is
+    // read is what keeps the place: the chord's keydown as the window last hears it, defaulted or not. The window's
+    // listener sits after the page's own handlers, so it reads what they decided.
+    await page.evaluate(() => {
+      const w = window as unknown as { __chordTaken?: boolean | null };
+      w.__chordTaken = null;
+      window.addEventListener('keydown', (event) => {
+        if (event.key === '[' && event.metaKey) w.__chordTaken = event.defaultPrevented;
+      });
+    });
     await page.keyboard.press('Meta+BracketLeft');
     await expect(detail).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __chordTaken?: boolean | null }).__chordTaken), 'the detail took ⌘[, so the menu’s Back does not run').toBe(true);
     await expect.poll(() => pane.evaluate((el) => el.scrollTop)).toBe(scrolled);
     await expect(eli5.getByRole('button', { name: /^View / })).toBeFocused();
 
