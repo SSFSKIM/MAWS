@@ -289,11 +289,28 @@ function Refused({ entry }: { entry: ViewerEntry }) {
   );
 }
 
-// The notice's Copy path: a small quiet button after the path (UX wave U6b-4b, "The look"; row 1 only).
+// The notice's Copy path: a small quiet button after the path (UX wave U6b-4b, "The look"; row 1 only). Fix wave 1: for a
+// moment after a press its words say what the copy did, a clipboard that refused (or none at all) included, as the agents'
+// log's Copy path says it.
+const COPY_FEEDBACK_MS = 1500;
 function CopyPath({ path }: { path: string }) {
+  const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (copied === 'idle') return;
+    const timer = setTimeout(() => setCopied('idle'), COPY_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = () => {
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(path))
+      .then(
+        () => setCopied('copied'),
+        () => setCopied('failed'),
+      );
+  };
   return (
-    <button type="button" data-notice-copy="" className="shrink-0 rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={() => void navigator.clipboard?.writeText(path).catch(() => undefined)}>
-      {NOTICE_COPY.copyPath}
+    <button type="button" data-notice-copy="" className="shrink-0 rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={copy}>
+      {copied === 'copied' ? NOTICE_COPY.copied : copied === 'failed' ? NOTICE_COPY.copyFailed : NOTICE_COPY.copyPath}
     </button>
   );
 }

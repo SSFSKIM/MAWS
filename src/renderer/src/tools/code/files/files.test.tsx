@@ -499,7 +499,7 @@ describe('files tool', () => {
     const row = document.querySelector('[data-notice="refused"]')!;
     expect(row.textContent).toBe('This folder is outside the folders this session works in./docs');
     expect(row.getAttribute('data-notice-cause')).toBe('outside');
-    expect(row.getAttribute('title')).toBe("path outside the session's directories");
+    expect(row.getAttribute('title')).toBe("This folder is outside the folders this session works in.\npath outside the session's directories"); // the whole headline, then the command's words
     fireEvent.click(item('docs'));
     fireEvent.click(item('docs'));
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === '/docs')).toHaveLength(2));
@@ -516,7 +516,7 @@ describe('files tool', () => {
     const row = document.querySelector('[data-notice="error"]')!;
     expect(row.textContent).toBe('No folder at this path.');
     expect(row.getAttribute('data-notice-cause')).toBe('not-found');
-    expect(row.getAttribute('title')).toBe('not found: /r/src');
+    expect(row.getAttribute('title')).toBe('No folder at this path.\nnot found: /r/src');
   });
 
   it('roots that could not be listed read the folder’s sentences and the command’s words, and Retry lists them again', async () => {
@@ -532,6 +532,7 @@ describe('files tool', () => {
     openTool();
     const alert = await screen.findByRole('alert');
     expect(alert.getAttribute('data-notice-cause')).toBe('unreachable');
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull(); // Retry is the one control that lists them again
     expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(["MAWS's service on this Mac is not answering.", 'files.list: the files service is not running']);
     for (const p of alert.querySelectorAll('p:not([data-notice-detail])')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.)/); // the sentences; the command's words are the small line's
     up = true;
@@ -547,6 +548,7 @@ describe('files tool', () => {
     const alert = await screen.findByRole('alert');
     expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['This folder is outside the folders this session works in.', "path outside the session's directories"]);
     expect(within(alert).queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy(); // with no Retry, Refresh stands beside it as before
   });
 
   // UX wave U6b-1 (Decision 8): the reveal of `params.path`, which nothing in the window asked for, is gone

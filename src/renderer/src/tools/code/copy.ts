@@ -107,6 +107,8 @@ export const NOTICE_COPY = {
   other: { file: 'This file could not be opened.', folder: 'This folder could not be listed.' },
   retry: 'Retry',
   copyPath: 'Copy path',
+  copied: 'Copied', // the Copy path button's words for a moment after it copied (fix wave 1)
+  copyFailed: "Couldn't copy the path", // … after the clipboard refused, or with none (as the agents' log says it)
 } as const;
 
 // A count as Review prints it, with the thousands separator (UX wave U5b, §I); English throughout, as the app's other counts.

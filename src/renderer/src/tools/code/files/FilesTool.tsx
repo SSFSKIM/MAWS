@@ -471,7 +471,7 @@ function SessionTree({ appSessionId, session, marked, chosen, searching }: { app
   return (
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
-        {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} failure={roots.failure} appSessionId={appSessionId} refresh={refresh} /><RefreshButton refresh={refresh} /></div> : null}
+        {roots?.status === 'error' ? <RootsFailure message={roots.message} failure={roots.failure} appSessionId={appSessionId} refresh={refresh} /> : null}
         <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} />
       </div>
     </FilesMenu>
@@ -740,27 +740,34 @@ function RefreshButton({ refresh }: { refresh(): void }) {
 }
 
 // UX wave U6b-4b: the notice's sentences for a folder, the command's own words under them, and Retry (the list's refresh).
+// Fix wave 1 (review, Minor a): one control lists the roots again: Retry where the notice offers it, else Refresh beside.
 function RootsFailure({ message, failure, appSessionId, refresh }: { message: string; failure: FileFailure; appSessionId: AppSessionId; refresh(): void }) {
   const place = useNoticePlace(appSessionId);
-  if (message.startsWith(UNKNOWN_SESSION)) return <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>;
-  const notice = classifyFailure(failure, { ...place, subject: 'folder' });
+  const notice = message.startsWith(UNKNOWN_SESSION) ? null : classifyFailure(failure, { ...place, subject: 'folder' });
   return (
-    <div role="alert" data-notice-cause={notice.cause} className="flex min-w-0 flex-col items-start gap-1 px-3 py-2 text-ui-sm">
-      {notice.lines.map((line) => (
-        <p key={line} className="text-danger">
-          {line}
-        </p>
-      ))}
-      {notice.retry ? (
-        <button type="button" data-notice-retry="" className="rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={refresh}>
-          {NOTICE_COPY.retry}
-        </button>
-      ) : null}
-      {notice.detail !== '' ? (
-        <p data-notice-detail="" className="text-fg-muted break-all">
-          {notice.detail}
-        </p>
-      ) : null}
+    <div className="flex items-center justify-between pr-1">
+      {notice === null ? (
+        <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>
+      ) : (
+        <div role="alert" data-notice-cause={notice.cause} className="flex min-w-0 flex-col items-start gap-1 px-3 py-2 text-ui-sm">
+          {notice.lines.map((line) => (
+            <p key={line} className="text-danger">
+              {line}
+            </p>
+          ))}
+          {notice.retry ? (
+            <button type="button" data-notice-retry="" className="rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={refresh}>
+              {NOTICE_COPY.retry}
+            </button>
+          ) : null}
+          {notice.detail !== '' ? (
+            <p data-notice-detail="" className="text-fg-muted break-all">
+              {notice.detail}
+            </p>
+          ) : null}
+        </div>
+      )}
+      {notice?.retry === true ? null : <RefreshButton refresh={refresh} />}
     </div>
   );
 }
@@ -873,11 +880,12 @@ function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed:
 
 function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRow; marks: Marks; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void; place: NoticePlace }) {
   if (row.kind === 'notice') {
-    // UX wave U6b-4b: a failed listing's row reads its notice's first sentence, the command's own words as its title
+    // UX wave U6b-4b: a failed listing's row reads its notice's first sentence; its title holds that sentence whole (a narrow
+    // row cuts it) and the command's own words (fix wave 1)
     const failed = row.failure === null ? null : classifyFailure(row.failure, { ...place, subject: 'folder' });
     const text = row.notice === 'empty' ? FILES_COPY.empty : row.notice === 'truncated' ? FILES_COPY.truncated : (failed?.lines[0] ?? NOTICE_COPY.other.folder);
     return (
-      <div data-notice={row.notice} data-notice-cause={failed?.cause} title={failed !== null && failed.detail !== '' ? failed.detail : undefined} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
+      <div data-notice={row.notice} data-notice-cause={failed?.cause} title={failed === null ? undefined : [failed.lines[0], failed.detail].filter((part) => part !== '').join('\n')} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
         <span className={row.notice === 'refused' || row.notice === 'error' ? 'text-danger' : ''}>{text}</span>
         {row.notice === 'refused' ? <span className="truncate font-mono text-fg-faint">{row.path}</span> : null}
       </div>

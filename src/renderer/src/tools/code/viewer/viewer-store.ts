@@ -828,13 +828,14 @@ export function createViewerStore(client: MawsBridge) {
     // and the Files store installs a refused watch again only for a new holder. The new hold is taken before the old one
     // goes, so a watch that stands is not dropped; the read follows once the watch has answered, as at the first mount.
     // UX wave U6b-4b (S1): settled once that read has (or once the watch answered, when a newer hold took its place).
-    const readAgain = (tabId: string, entry: ViewerEntry, cause: LoadCause): Promise<void> => {
+    // `still`, asked once the watch has answered, right before the read: false starts nothing (Retry's, fix wave 1).
+    const readAgain = (tabId: string, entry: ViewerEntry, cause: LoadCause, still: () => boolean = () => true): Promise<void> => {
       const reason = reasonOf(entry);
       if (entry.status !== 'error' || entry.appSessionId === null) return load(tabId, reason, cause);
       const hold = useFiles.getState().watch(entry.appSessionId, dirname(entry.path));
       holds.get(tabId)?.release();
       holds.set(tabId, hold);
-      return hold.ready.then(() => (holds.get(tabId) === hold ? load(tabId, reason, cause) : undefined));
+      return hold.ready.then(() => (holds.get(tabId) === hold && still() ? load(tabId, reason, cause) : undefined));
     };
 
     // UX wave U6b-4b (decision 7; S1 (a), (f)): whether the notice's Retry would start a read now.
@@ -1249,7 +1250,14 @@ export function createViewerStore(client: MawsBridge) {
         if (!entry || !canRetry(entry)) return;
         const incarnation = incarnations.get(tabId);
         patch(tabId, { retrying: true });
-        void readAgain(tabId, entry, 'revisit').then(() => {
+        // Fix wave 1 (review, Important 1): what the press found is asked again once the watch has answered, right before
+        // the read: a save started meanwhile (its conflict read takes the generation) or a load begun since starts nothing,
+        // and the guard clears
+        const still = () => {
+          const now = get().entries.get(tabId);
+          return now !== undefined && incarnations.get(tabId) === incarnation && now.status === 'error' && now.pending === 0 && !now.saving;
+        };
+        void readAgain(tabId, entry, 'revisit', still).then(() => {
           if (incarnations.get(tabId) === incarnation) patch(tabId, { retrying: false });
         });
       },

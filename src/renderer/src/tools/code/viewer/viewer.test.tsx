@@ -2682,9 +2682,31 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       expect(block()!.querySelector('[data-notice-detail]')!.textContent).toBe(OUTSIDE_REFUSAL);
       for (const line of noticeLines()) expect(line).not.toMatch(/^(Refused|files\.)/);
       expect(retry()).toBeNull();
-      fireEvent.click(within(block()!).getByRole('button', { name: 'Copy path' }));
+      await act(async () => void fireEvent.click(within(block()!).getByRole('button', { name: 'Copy path' })));
       expect(writeText).toHaveBeenCalledExactlyOnceWith(OUT);
+      expect(block()!.querySelector('[data-notice-copy]')!.textContent).toBe('Copied');
       expect(document.body.textContent).not.toContain('secret\n');
+    } finally {
+      if (before) Object.defineProperty(navigator, 'clipboard', before);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('Copy path says when the clipboard refused the path, and when there is no clipboard', async () => {
+    disk({ [OUT]: 'secret\n' });
+    const before = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const copy = () => block()!.querySelector<HTMLButtonElement>('[data-notice-copy]')!;
+    try {
+      for (const clipboard of [undefined, { writeText: async () => Promise.reject(new Error('denied')) }]) {
+        Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+        cleanup();
+        useViewer.getState().reset();
+        show(OUT);
+        await waitFor(() => expect(block()).not.toBeNull());
+        expect(copy().textContent).toBe('Copy path');
+        await act(async () => void fireEvent.click(copy()));
+        await waitFor(() => expect(copy().textContent).toBe("Couldn't copy the path"));
+      }
     } finally {
       if (before) Object.defineProperty(navigator, 'clipboard', before);
       else Reflect.deleteProperty(navigator, 'clipboard');
@@ -2822,12 +2844,16 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     expect(shown(CODE)).toMatchObject({ status: 'ready', dirty: true, sourceView: false, failure: null });
     await waitFor(() => expect(codeText()).toBe('mine one'));
 
-    // answered with a failure: the notice again, the edit still held
+    // answered with a failure: the notice again, the edit still held; Retry's own read answers a failure of its own words
     main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
     act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
     await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    const before = reads(main, CODE).length;
+    main.answers.by = (name) => (name === 'files.read' ? fail('files.read: no answer within 10 s', 'timeout') : null);
     fireEvent.click(retry()!);
+    await waitFor(() => expect(document.querySelector('[data-notice-detail]')?.textContent).toBe('files.read: no answer within 10 s'));
     await waitFor(() => expect(retry()!.disabled).toBe(false));
+    expect(reads(main, CODE)).toHaveLength(before + 1);
     expect(noticeCause()).toBe('unreachable');
     expect(shown(CODE)).toMatchObject({ status: 'error', dirty: true });
     expect(existingViewState(tabOf(CODE).id)?.docOf?.()).toBe('mine one\n');
@@ -2877,6 +2903,36 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     write.release();
     await act(() => saved);
     await waitFor(() => expect(retry()?.disabled).toBe(false));
+  });
+
+  it('S1 (f), the other order: Retry pressed while the watch is held, then a save whose conflict read is out when the watch answers: Retry reads nothing, and the conflict view stands', async () => {
+    const main = disk({ [CODE]: 'one\n' });
+    let watches = 0; // the first watch is refused, so Retry takes the watch again and waits for it
+    main.answers.by = (name) => (name === 'files.watch' && ++watches === 1 ? fail('files.watch: the files service is not running', 'host_unavailable') : null);
+    show(CODE);
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('mine ');
+    await waitFor(() => expect(shown(CODE)!.dirty).toBe(true));
+    main.files[CODE] = 'theirs\n'; // changed on disk: the save will conflict
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null;
+    const watch = main.hold('files.watch');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(main.callsOf('files.watch')).toHaveLength(2));
+    const before = reads(main, CODE).length;
+    const conflictRead = main.hold('files.read');
+    let saved: Promise<unknown> = Promise.resolve();
+    act(() => void (saved = useViewer.getState().save(tabOf(CODE).id)));
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(before + 1)); // the save's conflict read, out
+    watch.release();
+    await settle();
+    conflictRead.release();
+    expect(await act(() => saved)).toBe('conflict');
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(before + 1); // Retry read nothing
+    expect(shown(CODE)).toMatchObject({ saving: false, retrying: false, dirty: true, theirs: { view: 'merge', text: 'theirs\n' } });
   });
 
   describe('a session on another machine', () => {
