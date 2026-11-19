@@ -587,6 +587,18 @@ describe('clickPath and hrefOf', () => {
   });
 });
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, N2.1): the window resolves a relative
+// link before it reads; the rule reads the string the transcript wrote, which never names an absolute path
+describe('a relative link names no absolute path (U6b-4b)', () => {
+  it('linkPaths of a relative destination holds no path that begins with `/`; the control, an absolute one, does', () => {
+    for (const text of ['[x](../../outside/secret.md)', '[x](notes/a.md)', '[x](./a.md) and [y](~/a.md)', '[x](file:../../outside/secret.md)']) {
+      expect(linkPaths(text).filter((path) => path.startsWith('/')), text).toEqual([]);
+    }
+    expect(linkPaths('[x](../../outside/secret.md) [y](/outside/secret.md)')).toEqual(['/outside/secret.md']);
+    expect(clickPath('../../outside/secret.md')).toBe('../../outside/secret.md');
+  });
+});
+
 describe('normalizeLexically (moved from the window, unchanged)', () => {
   it('collapses `.`, `..` and repeated separators without touching the disk', () => {
     expect(normalizeLexically('/r/src/../README.md')).toBe('/r/README.md');

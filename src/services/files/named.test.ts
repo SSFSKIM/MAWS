@@ -290,6 +290,18 @@ describe('names: what the transcript names', () => {
     expect(await paths().names(S, P)).toBe('result');
   });
 
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, L14): a subagent's own transcript adds no
+  // evidence; the search reads the session's transcript alone
+  it('a path written only in a subagent’s transcript file is not named; written in the session’s own, it is', async () => {
+    await writeTranscript([...filler(4), assistant(text('Started a subagent.')), ...filler(4)]);
+    const subagent = join(dirname(file!), 'engine-session-1', 'subagents', 'agent-a1.jsonl');
+    await mkdir(dirname(subagent), { recursive: true });
+    await writeFile(subagent, [...filler(2), linkTo(P), ...filler(2)].map((record) => `${lineOf(record)}\n`).join(''));
+    expect(await paths().names(S, P)).toBe(false);
+    await append([linkTo(P)]); // the control: the session's own transcript writes the same link
+    expect(await paths().names(S, P)).toBe('counted');
+  });
+
   it('a hit before a compaction boundary still names the path', async () => {
     await writeTranscript([linkTo(P), ...filler(4), { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }, user('Summary of the conversation so far', { isCompactSummary: true }), ...filler(4)]);
     expect(await paths().names(S, P)).toBe('counted');

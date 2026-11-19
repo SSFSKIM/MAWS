@@ -17,7 +17,8 @@ import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import type { TranscriptEntry } from '../../../stores/transcript';
-import { useTranscriptStore, type TurnId } from '../../../transcript';
+import { Markdown, useTranscriptStore, type TurnId } from '../../../transcript';
+import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../../../transcript/view/context'; // UX wave U6b-4b
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { openChosen } from '../files/open-chosen';
 import { useFiles } from '../files/store';
@@ -2047,5 +2048,86 @@ describe('open file', () => {
     holding(`${A}x`); // no ':': no shorter key is tried
     expect(sessionOfTurn(turn)).toBeNull();
     useTranscriptStore.setState({ entries: {} });
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, decision 4, L14): a shown Markdown file
+// resolves a relative link against the folder of the path its tab holds; a link there, or in a subagent's transcript,
+// asks for the file as any chip does and adds no evidence of its own.
+describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b-4b)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    offs.push(registerPanelTool(filesTool));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  // `/elsewhere` is outside the folders; `named` the paths session A's transcript names there
+  function disk(files: Record<string, string>, named: string[] = []) {
+    const names = new Set(named);
+    return { ...installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path) }), names };
+  }
+  const sideFiles = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  const mainFile = (path: string) => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).find((tab): tab is Extract<TabRef, { kind: 'file' }> => tab.kind === 'file' && tab.path === path);
+  const asked = (path: string) => ({ appSessionId: MAIN_A, path, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true });
+  const shownFile = (path: string) => {
+    act(() => void openFile(A, path, null, { main: true }));
+    return render(<FileViewer tab={fileTab(path)} />);
+  };
+
+  it('a relative link opens against the shown file’s folder beside the chat, and on ⌘ in the main area (L4)', async () => {
+    disk({ '/r/docs/guide.md': '[setup](setup.md) and [the app](../app.ts#L3)', '/r/docs/setup.md': 's\n', '/r/app.ts': 'a\n' });
+    shownFile('/r/docs/guide.md');
+    const setup = await screen.findByTitle('setup.md');
+    act(() => void fireEvent.click(setup));
+    expect(sideFiles()).toEqual([{ file: '/r/docs/setup.md', line: null, preview: true }]);
+    act(() => void fireEvent.click(screen.getByTitle('../app.ts'), { metaKey: true }));
+    expect(mainFile('/r/app.ts')).toMatchObject({ line: 3, appSessionId: A });
+  });
+
+  it('a relative link in a shown file outside the folders asks for its sibling by name for the tab’s session: one read of exactly that path (N2.3)', async () => {
+    const main = disk({ '/elsewhere/docs/guide.md': '[setup](setup.md)', '/elsewhere/docs/setup.md': 'not named\n' }, ['/elsewhere/docs/guide.md']);
+    shownFile('/elsewhere/docs/guide.md');
+    const setup = await screen.findByTitle('setup.md');
+    act(() => void fireEvent.click(setup, { metaKey: true }));
+    const tab = mainFile('/elsewhere/docs/setup.md')!;
+    expect(tab).toMatchObject({ appSessionId: A });
+    render(<FileViewer tab={tab} />);
+    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}/elsewhere/docs/setup.md`));
+    expect(main.callsOf('files.read').filter((input) => input.path === '/elsewhere/docs/setup.md')).toEqual([asked('/elsewhere/docs/setup.md')]);
+  });
+
+  it('a path link in a subagent’s transcript and in a shown Markdown file asks by name alone: refused with no evidence, opened once the transcript names it (L14)', async () => {
+    const main = disk({ '/elsewhere/guide.md': `[the notes](${OUT})`, [OUT]: 'the notes\n' }, ['/elsewhere/guide.md']);
+    // a subagent's transcript is keyed `<session>:<agent>`; its rows act on the session (useRowSession)
+    const subagent = { storeKey: `${A}:agent-1`, variant: 'child', actions: { ...NO_ACTIONS, openFile: codeTranscriptActions.openFile }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'agent' } as const;
+    render(
+      <TranscriptProvider value={subagent}>
+        <Markdown markdown={`Wrote [the notes](${OUT}).`} live={false} />
+      </TranscriptProvider>,
+    );
+    shownFile('/elsewhere/guide.md');
+    await waitFor(() => expect(screen.getAllByTitle(OUT)).toHaveLength(2));
+    const [inSubagent, inFile] = screen.getAllByTitle(OUT);
+    const reads = () => main.callsOf('files.read').filter((input) => input.path === OUT);
+    act(() => void fireEvent.click(inSubagent, { metaKey: true }));
+    render(<FileViewer tab={mainFile(OUT)!} />);
+    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}${OUT}`));
+    expect(reads()).toEqual([asked(OUT)]);
+    act(() => void fireEvent.click(inFile, { metaKey: true })); // the same tab, read again: its last read failed
+    await waitFor(() => expect(reads()).toEqual([asked(OUT), asked(OUT)]));
+    await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull());
+    main.names.add(OUT); // the control: the session's own transcript now writes the path
+    act(() => void fireEvent.click(inSubagent, { metaKey: true }));
+    await waitFor(() => expect(useViewer.getState().entries.get(FILE(OUT))).toMatchObject({ status: 'ready', text: 'the notes\n', named: true }));
+    expect(reads()).toEqual([asked(OUT), asked(OUT), asked(OUT)]);
+    expect(mainFile(OUT)).toMatchObject({ appSessionId: A });
   });
 });

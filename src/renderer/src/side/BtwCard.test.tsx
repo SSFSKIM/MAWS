@@ -26,6 +26,12 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, mainShowing, panelOf, resetPanelStores } from '../test-support/panel';
+import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files'; // UX wave U6b-4b
+import { registerPanelTool } from '../panel/host';
+import { allTabs } from '../stores/layout-model';
+import { filesTool } from '../tools/code/files/FilesTool';
+import { FileViewer } from '../tools/code/viewer/FileViewer';
+import { useViewer } from '../tools/code/viewer/viewer-store';
 import { preloadOf } from '../test-support/preload-of';
 import { SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
@@ -551,5 +557,49 @@ describe('the /btw card for a terminal session', () => {
     await screen.findByText('Because.');
     expect(waiting(card()!)).toEqual([]);
     expect(fake.invoked('side.question.list')).toEqual([]);
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4, L6): a path in the card's answer opens the
+// file for the card's session, as a transcript's chip does; the answer adds no evidence, so a file outside the folders is
+// read as any chip asks for it, by name for that session alone.
+describe('a path in the card’s answer (U6b-4b)', () => {
+  const filesBeside = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  const mainFiles = () => allTabs(useLayout.getState().main).filter((tab): tab is Extract<typeof tab, { kind: 'file' }> => tab.kind === 'file');
+  let unregister: () => void;
+  beforeEach(() => {
+    unregister = registerPanelTool(filesTool);
+    useViewer.getState().reset();
+    withProcess(A, 'ready');
+    useLayout.setState({ main: mainShowing(B) }); // another session in front
+  });
+  afterEach(() => unregister());
+
+  it('opens for the card’s session beside its chat at the line, and on ⌘ in the main area', async () => {
+    listing([exchange({ response: 'See [a](/work/a.ts#L12).' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    const chip = await within(card()!).findByTitle('/work/a.ts');
+    act(() => void fireEvent.click(chip));
+    expect(filesBeside(A)).toEqual([{ file: '/work/a.ts', line: 12, preview: true }]);
+    act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(mainFiles()).toEqual([expect.objectContaining({ path: '/work/a.ts', line: 12, appSessionId: A })]);
+    expect(filesBeside(A)).toEqual([]);
+    expect(filesBeside(B)).toEqual([]);
+  });
+
+  it('a path outside the folders makes one read, by name, for the card’s session, refused as today', async () => {
+    listing([exchange({ response: 'See [o](/elsewhere/o.md).' })], { 'files.watch': undefined, 'files.unwatch': undefined });
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    const chip = await within(card()!).findByTitle('/elsewhere/o.md');
+    act(() => void fireEvent.click(chip, { metaKey: true }));
+    const [tab] = mainFiles();
+    expect(tab).toMatchObject({ path: '/elsewhere/o.md', appSessionId: A });
+    render(<FileViewer tab={tab} />);
+    await settle();
+    expect(fake.invoked('files.read')).toEqual([{ appSessionId: A_ID, path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
+    await act(() => fake.fail('files.read', "path outside the session's directories"));
+    expect(document.querySelector('[data-refusal]')?.textContent).toBe("Refused: path outside the session's directories/elsewhere/o.md");
   });
 });

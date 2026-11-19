@@ -1,12 +1,22 @@
 // R2: each element of the desktop surface's table as SurfaceTree draws it, and what each sends the engine, over a fake
 // X2 bridge (the trees as 2.1.287 answered them in pass3/mods-surface-*).
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { DEFAULT_ACTIONS, registerTranscriptActions } from '../transcript';
-import { setHostActions } from '../transcript/view/context';
+import { Disclosures, NO_ACTIONS, setHostActions, TranscriptProvider, type TranscriptContextValue } from '../transcript/view/context';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout'; // UX wave U6b-4b
+import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
+import { at } from '../../../../test/support/machine';
+import { useLayout } from '../stores/layout';
+import { allTabs } from '../stores/layout-model';
+import { codeTranscriptActions } from '../tools/code/open-file';
+import { FileViewer } from '../tools/code/viewer/FileViewer';
+import { useViewer } from '../tools/code/viewer/viewer-store';
 import type { Site } from './actions';
 import { fenced, SurfaceTree } from './SurfaceTree';
 import { parseTree, type SurfaceNode } from './tree';
@@ -304,5 +314,65 @@ describe('accepted tree safety (FX1)', () => {
     expect(screen.getByRole('alert')).toBeTruthy();
     fireEvent.keyDown(field, { key: 'Enter' });
     expect(fake.invoked('session.ui.input')).toHaveLength(0);
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4, L6): a path chip in a plugin's Markdown
+// opens the file through the registered opener for the surface's own session, outside a transcript and inside a row of
+// another session's; the surface's capture handler is not given the chip, and nothing is pressed in the plugin.
+describe('a path in a surface’s Markdown (U6b-4b)', () => {
+  const ROW = 'app-row' as AppSessionId;
+  const transcriptOf = (rowOpenFile: () => void): TranscriptContextValue => ({
+    storeKey: ROW, variant: 'session', actions: { ...NO_ACTIONS, openFile: rowOpenFile }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'row',
+  });
+  const draw = (text: string, inRow: TranscriptContextValue | null = null, appSessionId: AppSessionId = ID) => {
+    const fake = fakeClient({ 'session.ui.press': { handled: true, element: null }, 'layout.openExternal': undefined, 'files.watch': undefined, 'files.unwatch': undefined });
+    const site: Site = { appSessionId, component: 'Pane', instanceId: 'mods-probe-pane', client: fake.client };
+    const tree = <SurfaceTree tree={parseTree({ type: 'Box', children: [{ type: 'Markdown', props: { text, key: 'md' }, press }, { type: 'Code', props: { source: 'const probe = 1', language: 'ts' } }] }) as SurfaceNode} site={site} />;
+    render(inRow ? <TranscriptProvider value={inRow}>{tree}</TranscriptProvider> : tree);
+    return fake;
+  };
+
+  it('a click opens the file at its line for the site’s session, ⌘ in the main area; nothing pressed, nothing opened externally', async () => {
+    const openFile = vi.fn();
+    offs.push(registerTranscriptActions({ openFile }));
+    const fake = draw('See [a](/work/a.ts#L12).');
+    const chip = await screen.findByTitle('/work/a.ts');
+    fireEvent.click(chip);
+    fireEvent.click(chip, { metaKey: true });
+    expect(openFile.mock.calls).toEqual([
+      ['/work/a.ts', 12, ID, { main: false }],
+      ['/work/a.ts', 12, ID, { main: true }],
+    ]);
+    expect(fake.invoked('session.ui.press')).toEqual([]);
+    expect(fake.invoked('layout.openExternal')).toEqual([]);
+  });
+
+  it('inside a transcript row of another session, the chip still opens for the site’s session, and the row’s opener is not asked', async () => {
+    const openFile = vi.fn();
+    const rowOpenFile = vi.fn();
+    offs.push(registerTranscriptActions({ openFile }));
+    draw('See [a](/work/a.ts#L12).', transcriptOf(rowOpenFile));
+    fireEvent.click(await screen.findByTitle('/work/a.ts'), { metaKey: true });
+    expect(openFile.mock.calls).toEqual([['/work/a.ts', 12, ID, { main: true }]]);
+    expect(rowOpenFile).not.toHaveBeenCalled();
+  });
+
+  it('a path outside the folders makes one read, by name, for the site’s session, refused as today', async () => {
+    const SESSION = at('app-r2' as AppSessionId);
+    offs.push(registerTranscriptActions(codeTranscriptActions));
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    useViewer.getState().reset();
+    const fake = draw('See [o](/elsewhere/o.md).', null, SESSION);
+    window.maws = fake.client as unknown as PreloadBridge;
+    offs.push(() => delete (window as { maws?: unknown }).maws);
+    fireEvent.click(await screen.findByTitle('/elsewhere/o.md'), { metaKey: true });
+    const tab = allTabs(useLayout.getState().main).find((t): t is Extract<typeof t, { kind: 'file' }> => t.kind === 'file');
+    expect(tab).toMatchObject({ path: '/elsewhere/o.md', appSessionId: SESSION });
+    render(<FileViewer tab={tab!} />);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fake.invoked('files.read')).toEqual([{ appSessionId: bareOf(SESSION), path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
+    await act(() => fake.fail('files.read', "path outside the session's directories"));
+    expect(document.querySelector('[data-refusal]')?.textContent).toBe("Refused: path outside the session's directories/elsewhere/o.md");
   });
 });

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import fs, { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -18,6 +18,7 @@ import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { askSteerText } from '@shared/maws/ask';
 import { linkedReadBlock } from '@shared/maws/linked-read';
+import { normalizeLexically } from '@shared/files/named'; // UX wave U6b-4b
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
 import { openFileGrants, type FileGrants } from './grants';
@@ -1927,6 +1928,23 @@ describe('files saves outside the folders', () => {
       expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: true } });
       expect(await saveShown(files, A, out('result.txt'), 'pwned\n')).toEqual({ status: 'ok', hash: sha('pwned\n') });
       expect(readFileSync(out('result.txt'), 'utf8')).toBe('pwned\n');
+    });
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, N2.2): the window resolves a relative
+  // link against the working folder before it reads; the transcript wrote the relative string, which names nothing
+  describe('a relative link', () => {
+    it('names no file outside the folders: the absolute path the window resolves it to is refused; the person’s choice opens it (N2.2)', async () => {
+      const path = out('unnamed.txt');
+      const written = relative(root, path); // `../outside/unnamed.txt`, as an agent working in the root would write it
+      expect(written.startsWith('..')).toBe(true);
+      expect(normalizeLexically(`${root}/${written}`)).toBe(path); // what the window asks for (open-file.ts, resolveRelative)
+      await transcriptOf(A, [said(`See [the file](${written}) and [the other](./${written}).`)]);
+      const files = outsideService();
+      await expect(shown(files, A, path)).rejects.toThrow(new Error(OUT));
+      expect(asked.transcript).toEqual([A]); // the search ran and found nothing
+      expect(await files.grant(A, path)).toEqual({ status: 'granted', path });
+      expect(await shown(files, A, path)).toMatchObject({ named: true, outside: { real: path, writable: true } });
     });
   });
 
