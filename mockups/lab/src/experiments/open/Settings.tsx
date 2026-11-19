@@ -58,7 +58,7 @@ function Segmented({ options, value, label }: { options: string[]; value: string
   );
 }
 
-/** A list of on/off things stays on the page, each one a pill (the owner found the "5 of 6" fold too folded). */
+/** A list of on/off things stays on the page, each one a pill (the owner found the "5 of 6" fold hid too much). */
 function Pills({ items }: { items: { label: string; on: boolean }[] }) {
   const [on, setOn] = useState(() => items.map((i) => i.on));
   return (

@@ -22,14 +22,14 @@ own is Warm paper's (`#f0dfd1`, `#1c150f`), and the readings of sections 2.13 an
 
 Not a design. After two rounds the owner chose Layers as the style and Paper as its colouring, and judged the large
 parts: the pane, the tabs, the composer as a whole, the tool-run summary, the approval, settings. The smaller parts
-of the session view were never put in front of them ("sessions just have so many components that I may not have
-covered"). This is a board where each of those parts stands in two to four variants, so the owner can answer with
+of the session view were never put in front of them (the owner noted that a session has so many components that
+some were likely missed). This is a board where each of those parts stands in two to four variants, so the owner can answer with
 a letter per part.
 
 A is always the part as Layers has it today: Layers' markup on Layers' classes, drawn by Layers' stylesheet. The
-other letters answer the owner's direction for the next wave: "just too many word that overwhelms users, most of
-which isn't even necessary"; "nothing unnecessarily adds stuffs to screen"; what is stiff and gauge-like made round
-and soft; "less descriptive, but more intuitive"; progressive disclosure and graphical meaning over labels. So the
+other letters answer the owner's direction for the next wave: far too many words on screen, most of them unnecessary;
+nothing added to the screen without need; what is stiff and gauge-like made round
+and soft; less description and more intuition; progressive disclosure and graphical meaning over labels. So the
 variants of a part differ in what they treat as necessary, never in a radius or a number, and at least one per part
 is plainly simpler than A.
 
@@ -122,7 +122,7 @@ what a person supervising wants to see, and drops everything around it that is n
 | **B One line** | A running command is the latest caption, with a breathing dot before it; the clock waits for the pointer; the output opens in place. | Nothing marks it as the one live thing but a 7 px dot; in a page of grey captions it is easy to miss. |
 | **C Capsule** | What is live earns one small round object: dot, command, clock. It opens into A's card, travelling between its two measured widths. | Still a surface per running command. The tail is a click away when a test hangs. |
 
-**Pick: C.** It is the owner's "round and soft" taken literally, and it keeps the one distinction worth an object
+**Pick: C.** It is the owner's wish for round, soft things taken literally, and it keeps the one distinction worth an object
 (this is happening now) while dropping the output nobody reads until it matters.
 
 ### 2.5 Agents started (found; not on the list)
@@ -133,7 +133,7 @@ what a person supervising wants to see, and drops everything around it that is n
 | **B Live chips** | One chip per agent, with its own breathing dot; what it is doing waits for the pointer (and is the check mark's place when it is done). No verb. | Two filled shapes in the transcript where A had one grey line; the side column's Agents module says the same. |
 | **C A count** | A glyph, a number and a dot; the names and their lines open from it. | The names are the useful part, and they are hidden. |
 
-**Pick: B.** It replaces a sentence with state, which is the owner's "graphical meaning over labels" in one line.
+**Pick: B.** It replaces a sentence with state, which is the owner's preference for graphical meaning over labels in one line.
 If the side column's module is always open in practice, C is enough.
 
 ### 2.6 Queued message
@@ -167,7 +167,7 @@ If the side column's module is always open in practice, C is enough.
 | **C On the chip** | The ring takes the chevron's place on the model chip: one control for "the model and how full it is". | Still a gauge at rest; and it goes with 2.7 A or C only. |
 | **D Number** | "41%" as text, for people who think in numbers. | A number is more to read than a ring, and it is one more word. |
 
-**Pick: B.** It is "nothing unnecessarily adds stuff to screen" stated as a rule.
+**Pick: B.** It is the owner's wish that nothing be added to the screen without need, stated as a rule.
 
 ### 2.9 Send and stop
 

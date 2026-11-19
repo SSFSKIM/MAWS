@@ -47,7 +47,7 @@ Corners knob shows the same design at the persona's home radii.
 
 **Glass inventory.** None. The persona's mechanical subset bans `backdrop-filter` and any simulated material, and
 the decision function agrees: nothing in this window floats over content that changes beneath it except a menu and
-a card, which are opaque so their text keeps its contrast. This bends the owner's "glass on top of the colours".
+a card, which are opaque so their text keeps its contrast. This bends the owner's wish for glass over the colours.
 
 **Signature.** The mark. One 16 px circle says every state in the app:
 

@@ -191,8 +191,8 @@ is cut to 1 ms and all state changes still happen.
 
 ## What the experiment found
 
-Roundness, room and subtraction carry most of "refined, simple, intuitive" without any material, and the serif plus
-the orange carry most of "warm". What does not arrive is "modern-futuristic": with no depth, no light and no
+Roundness, room and subtraction carry most of the brief's refinement, simplicity and intuitiveness without any material, and the serif plus
+the orange carry most of its warmth. What does not arrive is the modern, futuristic quality: with no depth, no light and no
 translucency the result reads as calm and well made rather than new. On `#ffffff` and `#000000` the sidebar has only
 its hairline to stand on and the window starts to look unstructured; the warm and `#191919` grounds hold up better
 only because the eye reads their slight tint as a surface. Hover-only help depends on a pointer and on the empty

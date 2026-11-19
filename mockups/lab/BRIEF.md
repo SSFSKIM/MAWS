@@ -7,19 +7,18 @@ experiment is one complete idea of what the redesign should treat as central, sh
 that the owner's reaction to each tells us what they value. An experiment that hedges between ideas teaches nothing;
 one that commits and turns out wrong is useful.
 
-## What the owner asked for (their words)
+## What the owner asked for (paraphrased)
 
-- "Make a design that is both warm and humanitarian and feels modern-futuristic, refined, intuitive. Sort of
-  refined-simple-premium"
-- "glass material on top of the colors", "rounder geometry and smoother animations", "sidebars to glass"
+- A design that is warm and humane yet modern, even futuristic: refined, intuitive, simple and premium at once.
+- Glass material laid over the colours, rounder geometry, smoother animation, and sidebars made of glass.
 - Dark ground candidates: `#191919`, `#191c19`, `#000000`, or the lighter `#1f1f1f`. Light ground: `#faf9f5` or
   `#FFFFFF`. Theme orange: `#FD780F`.
-- "Perhaps use Vitrea" (their own Liquid Glass library, installed here as `@vitreajs/vitrea-react` 0.29.0).
-- On words: "just too many word that overwhelms users, most of which isn't even necessary"; "nothing unnecessarily
-  adds stuffs to screen"; things that are "hard and gauge-like" should become "round, soft and user-friendly";
+- Possibly the Vitrea Liquid Glass library (installed here as `@vitreajs/vitrea-react` 0.29.0).
+- On words: there are far too many words on screen today, most of them unnecessary, and nothing should add to the
+  screen without need; elements that look hard and gauge-like should become round, soft and friendly;
   information should survive through progressive disclosure (text that appears on expanding or on hover) and through
   graphical meaning (geometry, ground and object, finish and colour) instead of dense description. Claude Desktop is
-  their reference for "less descriptive, but more intuitive".
+  the owner's reference for being less descriptive and more intuitive.
 
 These are a proposal with an intent, not a specification. Where an experiment's idea needs to bend one of them (a
 different orange for text contrast, no glass at all), bend it and say so in the record.

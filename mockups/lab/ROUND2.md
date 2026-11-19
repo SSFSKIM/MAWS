@@ -11,35 +11,34 @@ from a description. Look at the source experiment's captures in `shots/<id>/` be
 
 ## What the owner chose
 
-Out: Windows, Essential and Signal as wholes. Kept, in the owner's words where they gave them:
+Out: Windows, Essential and Signal as wholes. Kept, paraphrasing what the owner said of each:
 
-- **Left sidebar: Field's pane, Quiet's content.** "I like the left side panel style, like the size, material and
-  texture, the side component itself the most for Field, but for the content style, like for everything else, Quiet
-  good. Just make Quiet's sidebar live within the component style of Field: all of its shorter session, motions,
-  simpler session component, and more." "Making left sidebar component with Liquid Glass works well."
-- **Tabs: Instrument's.** "For tab space, Instrument has best: making it a separate component with Liquid Glass was
-  good move."
-- **Composer: Liquid Glass.** "Composer를 Liquid Glass로 쓰는건 아주 좋아보임" (using Liquid Glass for the composer
-  looks very good), said of Windows, whose composer sits outside the reading surface over the coloured environment.
+- **Left sidebar: Field's pane, Quiet's content.** The owner liked Field's side panel best as a component (its
+  size, material and texture), and Quiet's for everything about the content: put Quiet's sidebar inside Field's
+  component style, with its shorter sessions, motion, simpler session rows and the rest. A Liquid Glass left sidebar
+  component works well.
+- **Tabs: Instrument's.** Instrument's tab space was the best; making it a separate Liquid Glass component was a
+  good move.
+- **Composer: Liquid Glass.** The owner found a Liquid Glass composer very good-looking, said of Windows, whose
+  composer sits outside the reading surface over the coloured environment.
 - **Tool-run summary and its opened block: Quiet's** (the pill caption with its chevron and duration, and the
   rounded card listing the calls). The transcript's other content also follows Quiet.
-- **No serif.** Quiet's serif prose is rejected: "I won't use its formal typography."
-- **Right column: a glass component, with more in it.** "Making right sidebar a Liquid Glass component also works
-  very well, kind of how Windows does but not exactly. We don't like its style, just the way it makes sidebar
-  components through Liquid Glass and round geometry. All else is quite too simple. Sort of mix Desktop into it."
+- **No serif.** Quiet's serif prose is rejected: the owner will not use its formal typography.
+- **Right column: a glass component, with more in it.** A Liquid Glass right sidebar also works very well, somewhat
+  as Windows does it but not exactly: not Windows' style, only its way of building sidebar components from Liquid
+  Glass and round geometry. Everything else there is too simple; blend in Desktop.
   Reading taken: Windows' construction (a rounded glass pane), Desktop's content and level of detail.
-- **New chat: Quiet's**, and "new chat에 liquid glass가 아주 잘 듣는듯함" (Liquid Glass suits new chat very well):
-  Quiet's layout with the composer as glass.
-- **Settings: Quiet's geometry, Instrument's motion and glass**, Instrument slightly ahead. Quiet's page is "too
-  folded". Reading taken: lists (plugins, notify-for) stay visible as pills as in Instrument; a help sentence waits
+- **New chat: Quiet's**, and Liquid Glass suits new chat very well: Quiet's layout with the composer as glass.
+- **Settings: Quiet's geometry, Instrument's motion and glass**, Instrument slightly ahead. Quiet's page folds away
+  too much. Reading taken: lists (plugins, notify-for) stay visible as pills as in Instrument; a help sentence waits
   beside its row for hover or focus.
-- **A suggestion to try:** "use tool use parts, tool use blocks and more, to liquid glass too."
+- **A suggestion to try:** carry Liquid Glass into the tool-use parts and blocks too, and beyond.
 
 Answers the owner gave after this brief was first written (2026-11-14): the settings reading above is confirmed;
 a waiting approval is answered Quiet's way in all three syntheses (a capsule of glyphs at the top right, a card from
-the waiting sidebar row); the owner uses both colour schemes equally; and of the right column: "don't worry too
-much because what's on main after ux-wave is what we'll use anyway. Only note is to make it have sort of separate
-Liquid Glass component floating feeling", so its content is plain and only its container is judged.
+the waiting sidebar row); the owner uses both colour schemes equally; and of the right column, not to worry much,
+since what lands on main after ux-wave will be used anyway; the only note is that it should feel like a separate,
+floating Liquid Glass component, so its content is plain and only its container is judged.
 
 Not judged by the owner, so yours to decide and to make easy to compare: where a waiting approval is answered, the
 user's message, diff and running-command blocks, the usage mark, what the composer carries, the dark scheme's

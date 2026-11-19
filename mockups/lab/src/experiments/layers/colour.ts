@@ -142,7 +142,7 @@ const paper: Colouring = {
 };
 
 // ---- warmer Papers (DESIGN.md §14) -------------------------------------------------------------------------------
-// The owner's answer to Paper: "I'd make color more warmer perhaps by mixing older orange". Four positions that put
+// The owner's answer to Paper: make the colour warmer, perhaps by mixing in the older orange. Four positions that put
 // the warmth in different places. Each keeps Paper's picture and Paper's lightness, value for value, and changes
 // what has a hue: the readings of every line of text are then Paper's own, and the room is the same room.
 // At night the sheet's lit face is 0.36 in lightness and its edge 0.66, in all four as in Paper since DESIGN.md §15.2:
@@ -305,7 +305,7 @@ const underside: Colouring = {
 };
 
 // The same idea as Warm paper with the warmth taken from the terracotta of today's app (#c9663f, #d97757; hue 39 to
-// 41) instead of the orange (hue 49), in case that is the "older orange" the owner meant. It is named for the clay
+// 41) instead of the orange (hue 49), in case that is the older orange the owner meant. It is named for the clay
 // so it cannot be mistaken for the other three.
 const claypaper: Colouring = {
   id: 'claypaper',

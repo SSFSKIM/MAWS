@@ -1,8 +1,8 @@
 # Orange
 
-Round 2 synthesis `orange` (order 4), asked for by the owner after the other three were dispatched: "using #FD780F
-(with no other claude-desktop style orange colors) for background, and making all main transcript, right panel, left
-panel, tabspace with floating components with Liquid glass". Values live in `tokens.module.css` (per scheme),
+Round 2 synthesis `orange` (order 4), asked for by the owner after the other three were dispatched: `#FD780F` as the
+background (and no other orange of the Claude Desktop kind), with the main transcript, the right panel, the left
+panel and the tab space all made floating Liquid Glass components. Values live in `tokens.module.css` (per scheme),
 `world.ts` (per scheme and per position of the Orange knob) and `paint.ts` (the ground); this file says what each is
 for, where each part came from, what was measured, and what the idea costs.
 
@@ -20,7 +20,7 @@ used for its craft rules, its QA and the glass guideline's laws; section 7 lists
 
 ## 1. One hue
 
-The owner's orange is `#FD780F`: HSL hue 26.5, OKLCH hue 49.4. "No other claude-desktop style orange" is read as a
+The owner's orange is `#FD780F`: HSL hue 26.5, OKLCH hue 49.4. The exclusion of any other Claude Desktop style orange is read as a
 rule about hue: terracotta and clay (`#c9663f`, `#d97757`, `#c6613f`) sit at HSL 15 to 17, OKLCH 39 to 41, redder
 and greyer. So nothing in this synthesis is redder than the owner's orange, anywhere:
 

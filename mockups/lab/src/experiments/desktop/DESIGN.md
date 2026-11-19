@@ -28,7 +28,7 @@ Axis position:
 - ground temperature: the owner's candidates, warm `#faf9f5` and `#191919` by default; neutrals are the ink at an alpha.
 
 Rejected vector: lively / characterful display face / glass over an app-owned colour field / committed colour /
-atmospheric accent. That is the modal answer to "glass on top of the colours" and other experiments draw it; it lost
+atmospheric accent. That is the modal answer to the wish for glass over the colours and other experiments draw it; it lost
 here because the assignment is that the colours under the glass are the user's.
 
 Rejected values: the accent `systemBlue` (most native, but a second colour that is not the owner's) and a darkened
@@ -184,9 +184,9 @@ Ledger:
 
 | brief evidence | constraint | forbidden |
 |---|---|---|
-| "sidebars to glass"; the native reading | exactly one translucent pane | a second translucent region, a tinted toolbar |
-| "nothing unnecessarily adds stuff to screen" | a row is its title; the reason shows only where the person is waited on | status words, ages and branches at rest |
-| "hard and gauge-like" things | shares are rings (usage, context); working is the Mac's spokes | bars, percentages at rest |
+| sidebars made of glass; the native reading | exactly one translucent pane | a second translucent region, a tinted toolbar |
+| nothing added to the screen without need | a row is its title; the reason shows only where the person is waited on | status words, ages and branches at rest |
+| things that look hard and gauge-like | shares are rings (usage, context); working is the Mac's spokes | bars, percentages at rest |
 | the waiting approval made findable | orange dot in the list and the tab, an orange capsule on the title line that opens the approval | a banner over the transcript |
 | settings called crowded | label and control; help behind a "?" shown when the row is pointed at or focused | printed help under a setting |
 

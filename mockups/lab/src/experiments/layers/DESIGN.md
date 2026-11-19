@@ -20,7 +20,7 @@ the switch's last position (Orange); where they name the orange, read "the colou
 
 ## 0. Thesis
 
-The owner's suggestion taken all the way: "use tool use parts, tool use blocks and more, to liquid glass too." One
+The owner's suggestion taken all the way: make the tool-use parts, the tool-use blocks and more into Liquid Glass too. One
 colour field runs under the whole window. Prose is read directly on it. Every block of the transcript (an opened
 tool run, a diff, a running command, the person's own message) is a piece of glass standing over the field, and so
 is every control around it: the pane, the tab capsule, the composer, the waiting capsule, and four separate modules
@@ -67,7 +67,7 @@ Code was lifted from the source experiment's folder and adapted, not redrawn.
 | Diff, running command, the person's message | Quiet's layouts | Each stands on glass. Quiet's ring and well are gone. |
 | Assistant prose | Quiet's sans variant, 15/24 | Set directly on the field, never on glass. |
 | Waiting approval | Quiet (the owner's answer, received while building): a capsule of glyphs at the top right, one per waiting session, and a card with the command and Approve that opens from the waiting row | The capsule is the page's one tinted piece of glass, with authored dark ink on the tint. It stands above the side column. |
-| Side column | Windows for the idea (round glass, floating); the owner's note: plain content, "separate Liquid Glass component floating feeling" | Four modules, one per section (changes, agents, to do, background), 12 px apart, each its own surface with its own shadow. Content is Quiet's lists, unchanged. |
+| Side column | Windows for the idea (round glass, floating); the owner's note: plain content, and it should feel like a separate, floating Liquid Glass component | Four modules, one per section (changes, agents, to do, background), 12 px apart, each its own surface with its own shadow. Content is Quiet's lists, unchanged. |
 | New chat | Quiet's layout (one line, the composer, two chips under it) | The line is the sans at 27/34, weight 560. The composer is glass. |
 | Settings: geometry | Quiet: one 620 px column, 54 px rows parted by hairlines, 20/28 titles, the right margin kept for a row's sentence, a long path replaced by its version | Read directly on the field. |
 | Settings: controls and motion | Instrument: lists stay visible as pills, a switch and a segmented thumb on a light spring, a select whose list is a glass platter, Settings as a tab in the capsule | The help sentence appears beside its row on hover or focus (both experiments agreed on that). |
@@ -352,8 +352,8 @@ holds), `line=35` (a line pointed at), `x=end`; `wait=<id>` also names the open 
 
 ## 12. Colour
 
-Added 2026-11-14, after the owner chose Layers as the style and dropped its colour ("for color I'll actually abandon
-the strong orange #FD780F"). Colour is now the first knob. Sections 0 to 11 describe the experiment as it was built,
+Added 2026-11-14, after the owner chose Layers as the style and dropped its colour (the owner chose to abandon
+the strong orange `#FD780F` as the colour). Colour is now the first knob. Sections 0 to 11 describe the experiment as it was built,
 under what is now the last position, Orange; where they name a hue, read "the colouring's".
 
 ### 12.1 What a colouring is
@@ -375,9 +375,9 @@ a 15 px stroke: the ink itself, which would be one more grey mark among the row'
 goes back to a plain glyph, since the capsule is already the filled thing. In every form the state is a shape first
 (a hand, a question mark, a list); no colouring says it by hue alone.
 
-The owner's answers, in order, shaped the list: "Show me a range", "Softer warm", "A different hue"; then "also want
-to try using full white and full black and other charecteristic color. if that could work"; then a picture, with
-"How about using imagery a bit like this? To answer about colour". The picture is the answer, so it is the first
+The owner's answers, in order, shaped the list: "Show me a range", "Softer warm", "A different hue"; then a wish to
+try full white and full black and other characteristic colours, if that could work; then a picture, offered
+as imagery of the kind they meant, as their answer about colour. The picture is the answer, so it is the first
 and default position and the others are the comparison set behind it.
 
 | position | in a sentence | mark |
@@ -511,7 +511,7 @@ the stroke colour a step lighter where it cannot (Peach, Honey, Blue hour).
 
 ### 12.4 Full white and full black: does it work?
 
-The owner's question was honest ("if that could work"), so here is a plain answer for the best version found.
+The owner asked genuinely whether it could work, so here is a plain answer for the best version found.
 
 **What a field cannot do on a pure ground, the colour has to do.** On `#ffffff` light glass (0.92 to 1.00) has
 nothing to differ from, so a room-wide wash would have to be strong to show a pane, and then it is no longer full
@@ -532,7 +532,7 @@ held at `rgb(243 244 247)`, not white, for that reason); a product that is no lo
 control competing with every link and selection convention.
 
 **The warm answer on pure grounds is not a field at all.** A yellow was built and dropped (12.5): as light under
-glass on white it is sallow. The warm version of "full white and full black" is marks only, and the switch already
+glass on white it is sallow. The warm version of full white and full black is marks only, and the switch already
 has it: Paper's picture is hueless, so the idea carries over; the Ground knob at `#ffffff · #000000` under any of
 the four warm colourings shows the rest.
 
@@ -752,7 +752,7 @@ line of the picture is behind a word in the second and third, and that is seen, 
 - **Sans**: the same words in the interface face (it follows the Typeface knob), at 420, 33/42, tracking −0.024em.
   The other colourings set this line at 560, 27/34; under Paper that weight reads as a label on a photograph, so
   Paper's sans is lighter and larger, near the serif's colour on the page. It argues one voice everywhere and the
-  owner's "no serif" taken without exception. It costs the page its one moment of contrast in type: the line
+  owner's ruling against serif taken without exception. It costs the page its one moment of contrast in type: the line
   becomes the largest piece of interface text and nothing more.
 
 **What I would choose: the serif.** One line, in the one place with nothing else to read, is what a display face
@@ -843,8 +843,8 @@ column and no longer lays its shadow on the Changes module, so the lowest light 
 
 ### 13.5 The right column's container
 
-Its content is plain and will come from the app; the owner's note is that it should have a "sort of separate
-Liquid Glass component floating feeling". The content and its order are the same in all three.
+Its content is plain and will come from the app; the owner's note is that it should feel like a separate,
+floating Liquid Glass component. The content and its order are the same in all three.
 
 - **Four modules** (as it is). Four surfaces 12 px apart, each with its own shadow. The most literal "separate
   components", and the busiest: four rims, four shadows, the field's lines showing in three gaps, and thirteen
@@ -940,11 +940,11 @@ at its sheet, because here there is no sheet to stop at.
 
 ## 14. Warmer Papers
 
-Added 2026-11-14, on the owner's reaction to Paper: "two that survies is open and layer. but I'd make color more
-warmer perhaps by mixing older orange?" Paper reads too neutral to them. Paper itself is unchanged and is still
+Added 2026-11-14, on the owner's reaction to Paper: the two survivors are Open and Layers, and the colour should
+perhaps be warmer, by mixing in the older orange. Paper reads too neutral to them. Paper itself is unchanged and is still
 the default; four warmer Papers stand beside it in the Colour switch, so the owner chooses by looking.
 
-"Older orange" is read as `#fd780f`, the strong orange they used and dropped as a ground (OKLCH 0.72 0.19 49).
+The older orange is read as `#fd780f`, the strong orange they used and dropped as a ground (OKLCH 0.72 0.19 49).
 Three positions are built on it. It could also mean the terracotta of today's app (`#c9663f`, `#d97757`; hue 39
 to 41), which they earlier asked to keep out, so a fourth takes its warmth from that and is named for it.
 
@@ -1067,7 +1067,7 @@ rest. The switches stay, with every earlier position still reachable; what chang
 | Painted form | "Blurred behind text" | Out of focus where you work (`form=recede`) | Everywhere |
 | Alignment | "Yes, line up" | On the reading column (`align=column`) | As it was (`align=layers`) |
 | Right column | "Button that opens" | Grows from a button (`side=button`) | Four modules |
-| New chat line | "i'd use from Quiet. the one that's used for layer is too round", with a picture of Quiet's message bubble | Sans (`line=sans`), and the Typeface default is System (`face=system`) | Serif; Figtree |
+| New chat line | Quiet's typeface; Layers' was too round (with a picture of Quiet's message bubble) | Sans (`line=sans`), and the Typeface default is System (`face=system`) | Serif; Figtree |
 | "Needs you" mark | open; it waits for the colour | Ink badge (unchanged) | |
 
 The fourth answer is wider than the question. Quiet's face is the system face, so what was refused is Figtree, for
@@ -1102,7 +1102,7 @@ caption "Key migration check and Load profile started working" crossed the sheet
 lightness where the quietest text needs 0.38 or darker behind it (14.1), and its icon crossed the sheet's bright
 edge. It was Paper's, not the new defaults'. The four warmer Papers were built with the night face at 0.36 and the
 edge at 0.66; on the owner's side the ruling was that a line under its floor in the default design is a defect
-and that "Paper stays as it is" meant its character, so Paper's night light now carries the same two values
+and that keeping Paper as it was meant its character, so Paper's night light now carries the same two values
 (`paper.ts`, `NIGHT`: face `rgb(67 60 51)` where it was `rgb(104 95 84)`, edge `rgb(154 143 128)` where it was
 `rgb(196 184 168)`). The sheet's face is still the lightest broad thing in the night room, at 0.36 on a
 floor of 0.20; it is a step dimmer than section 12.2 describes.
@@ -1690,8 +1690,8 @@ measured: both pages in the receded pose, on the CSS tier, under Paper and under
 
 ### 18.10 The owner's correction: the file is a card
 
-Added 2026-11-14, after the owner saw 18.4. Their words: "good -- for file editor, let's just make it look more
-like a file -- currently it's only floating texts. perhaps put the on the glass so that it's clear file card".
+Added 2026-11-14, after the owner saw 18.4. They approved it, but asked that the file editor look more
+like a file: as drawn it was only floating text, and putting it on glass would make it a clear file card.
 They were looking at the file read on the field: a caption, then code lying on the warm ground with a green bar
 beside it and the drawing showing through under its last lines. 18.4 argued that a file needs no edge because it
 has nothing to be told apart from. The owner's eye says otherwise, and it is right about what was lost: with no

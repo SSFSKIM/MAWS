@@ -301,9 +301,9 @@ Added 2026-11-14, and revised the same day when the owner chose among the warmer
 paper** and the mark is the **orange disc** (`#FD780F` with a dark glyph). Warm paper is Open's default colouring.
 
 Before that: the owner dropped `#FD780F` as a ground, chose Paper from Layers' Colour switch, and kept two finalists,
-Open and Layers, to be compared in the same colour. Their words on what to keep of Open: the plain ground ("no
-drawing in the background, only light gathered under the glass controls"). And on colour: "I'd make color more
-warmer perhaps by mixing older orange?"
+Open and Layers, to be compared in the same colour. What they wanted to keep of Open: the plain ground (no
+drawing in the background, only light gathered under the glass controls). And on colour: perhaps make it warmer
+by mixing in the older orange.
 
 ### 10.1 What Open takes from a colouring, and what it leaves
 
@@ -396,7 +396,7 @@ tab capsule and the composer are the lighter thing at rest, with no light needed
 
 ### 10.3 The typeface
 
-The owner: "i'd use from Quiet. the one that's used for layer is too round". Quiet's face is the system face, so
+The owner preferred Quiet's typeface and found the one used in Layers too round. Quiet's face is the system face, so
 System is now the default of the Typeface knob; Figtree and Geist stay reachable. Section 2's conflict 10 is
 settled the other way round.
 
@@ -571,6 +571,6 @@ schemes.
 
 ## 11. Retired (2026-11-14)
 
-The owner retired Open ("retire it"). Layers is the one design that gets further work. What Layers took from Open:
+The owner retired Open. Layers is the one design that gets further work. What Layers took from Open:
 the alignment on the reading column and the round button that opens into one panel. Open's plain ground was not
 taken: the owner chose the blurred drawing. This folder stays as a record and is not maintained.
