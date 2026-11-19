@@ -2706,6 +2706,7 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     click(chip, false);
     expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
     expect(sideFiles()).toEqual([{ file: OUT, line: null, preview: true }]); // nothing of the source on the tab
+    await settle(); // that follow answered
     click(chip);
     expect(main.callsOf('files.follow')).toHaveLength(2); // the first had settled, so this is a follow of its own
     render(<FileViewer tab={fileTab(OUT)} />);

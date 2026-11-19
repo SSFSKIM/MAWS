@@ -166,8 +166,8 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     let why: 'linked' | 'result' | null;
     if ('file' in link.from) {
       const source = link.from.file;
-      const mark = isOutside(source) ? markOf(appSessionId, source, { agent: false, save: false }) : 'inside';
-      if (mark === null || textOf(source) === undefined) return ok({ status: 'not-linked' });
+      const mark = isOutside(source) ? markOf(appSessionId, source, { agent: false, save: false }) : null; // inside: admitted as such
+      if ((isOutside(source) && mark === null) || textOf(source) === undefined) return ok({ status: 'not-linked' });
       why = readOnlyMark(mark) || under(own, realOf(source)) ? 'linked' : null;
     } else why = link.from.why ?? null;
     const key = `${appSessionId}\0${realOf(path)}`;
