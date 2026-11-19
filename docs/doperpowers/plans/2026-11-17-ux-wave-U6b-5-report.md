@@ -133,3 +133,22 @@ Evidence:
 - Desk-web, label `u6b5a-fix3-dw`, at `6a0eeefc9`: run **44613806181**, **success**.
 
 A load flake seen: `terminal/ime-trace.test.ts` once failed to load at `fd3a73ef0`, with "Data error" in `@xterm/addon-unicode-graphemes`' `tiny-inflate`. It is untouched by this wave and passed on the next run.
+
+## The chain merge (2026-11-19)
+
+`origin/ux-wave/b5-union` at `c87dfc8a9` was merged at `8504440eb`. The union holds master `1aa375a04`, U2b-2, U10b-3, U6b-3b's fix head, U6f, U6b-4a and U11's skill actions, at wire minor 59. Three files conflicted:
+- `docs/tech-debt-tracker.md`: both sides' rows are kept.
+- `tools/code/files/FilesTool.tsx`: takes the union's `openChosenFor` and keeps U6b-5a's `finder` imports beside it.
+- `tools/code/files/files.test.tsx`: keeps both sides' imports (U6b-5a's case still uses `probeTool`) and both new describe blocks.
+
+`FileViewer.tsx` and `finder.ts` carry the union's U6b-3b side, and `finder.ts` keeps U6b-5a's tree request on top of it. U6b-5a adds no wire minor and no e2e spec, so neither the minor nor the bare set's pin moves. The scan of the lines this branch adds over the union for emails and `/Users/` found nothing.
+
+Evidence (VM9 at `8504440eb`):
+- the whole `pnpm typecheck` exits 0;
+- eslint on the conflict files plus `finder.ts` and `FileViewer.tsx` exits 0;
+- vitest over every directory the milestones touched, plus `tools/code` (the conflict files' tests) and the tokens guard: 390 files, 8,098 tests passed;
+- vitest over `src/main/menu.test.ts`, `src/shared/keymap`, `settings-tab`, `statusline` and `test-support`: 58 files, 812 tests passed.
+
+Gates:
+- Class 1a, `u6b5a-chain`: run **44626162450**, **success**.
+- Desk-web, `u6b5a-chain-dw`: run **44626146466**, **success**.
