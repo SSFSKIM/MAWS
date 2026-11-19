@@ -207,6 +207,22 @@ describe('the reader', () => {
     }
   });
 
+  it('reads a page closed onto the tab before it as a step back, so Forward opens the page again (card K2: Esc was a step back)', async () => {
+    await visit('x', 'a');
+    layout().openDestination(CUSTOMIZE);
+    await turn();
+    layout().closeDestination(); // Esc, or the page's own Back
+    await turn();
+    expect(record()).toEqual({ entries: [T('x'), T('a'), P], at: 1 });
+    expect(isActionEnabled('go.forward')).toBe(true);
+    runAction('go.forward');
+    expect(shown()).toMatchObject({ front: tabOf('a'), page: CUSTOMIZE });
+    runAction('go.back');
+    await turn();
+    runAction('go.back');
+    expect(frontOf(layout())).toBe(tabOf('x')); // ⌘[ then shows what was looked at before a
+  });
+
   it('records a tab brought forward quietly behind a page when the page closes', async () => {
     await visit('a');
     layout().openDestination(CUSTOMIZE);
