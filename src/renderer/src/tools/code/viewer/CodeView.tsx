@@ -36,6 +36,7 @@ import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme'
 import { jumpTarget } from './kinds';
 import { languageFor, languageNameFor } from './languages';
 import { existingViewState, readOnlyWords, useViewer, viewState, type ViewerEntry } from './viewer-store';
+import { registerShownLine } from './shown-line'; // UX wave U6b-4a
 
 export const FLASH_MS = 2000;
 export const FLASH_CLASS = 'cm-flash-line';
@@ -163,7 +164,16 @@ export default function CodeView({ entry, wrap, onEditor }: { entry: ViewerEntry
     });
     // E11 (W-C): "Comment on this line" comments on the cursor's line, as the gutter's mark on its own
     const offCursor = registerCursorComment(tabId, () => onComment(tabId)(view.state.doc.lineAt(view.state.selection.main.head).number));
+    // UX wave U6b-4a: the cursor's line and whether it is in the part shown, and the first line shown, for "Open in"
+    const offLine = registerShownLine(tabId, () => {
+      const box = view.scrollDOM.getBoundingClientRect();
+      const head = view.state.selection.main.head;
+      const at = view.coordsAtPos(head);
+      const top = view.state.doc.lineAt(view.lineBlockAtHeight(Math.max(0, box.top - view.documentTop)).from).number;
+      return { cursor: { line: view.state.doc.lineAt(head).number, shown: at !== null && at.top >= box.top && at.bottom <= box.bottom }, top };
+    });
     return () => {
+      offLine();
       offCursor();
       detach();
       themes.disconnect();

@@ -52,6 +52,8 @@ import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
 import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
+import { OpenInButton } from '../../../open-in/OpenInMenu'; // UX wave U6b-4a
+import { shownLine } from './shown-line'; // UX wave U6b-4a
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -166,7 +168,8 @@ function ReadOnlyLabel({ reason, sentence, appSessionId }: { reason: LabelledRea
 // what it puts at the bar's end (Move to main area). UX wave U6e: "Read-only" between the two (K2), drawn from the entry
 // as it is drawn (K11); `agent`, the tab holds the mark of an open the agent asked for (decision 19).
 // UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent. (Decision Log 29) `inView`,
-// whether the mounted body is in view; in view when absent.
+// whether the mounted body is in view; in view when absent. UX wave U6b-4a: "Open in" at the head of the controls,
+// handing the file at the line shown to an app.
 export function FileViewer({ tab, start, end, host, inView = true, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean; agent?: boolean }) {
   const mainOnScreen = useMainAreaOnScreen();
   // UX wave U6f (§E): a session that takes the remote route, and its machine's standing as it moves (W1, R9)
@@ -198,7 +201,13 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
       line={tab.line}
       agent={agent}
       lead={lead}
-      controls={(entry) => <EditorControls entry={entry} />}
+      controls={(entry) => (
+        <>
+          {/* UX wave U6b-4a: Open in, the file at the line shown */}
+          <OpenInButton appSessionId={appSessionId} path={tab.path} line={() => shownLine(tab.id)} outside={entry.named} />
+          <EditorControls entry={entry} />
+        </>
+      )}
       below={(entry) => <SaveFailure entry={entry} />}
       end={end}
       host={host}

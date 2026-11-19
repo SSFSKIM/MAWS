@@ -34,8 +34,8 @@ export function isAppPage(client: ClientRef, appUrl: string): boolean {
   return page !== null && appWindows().some((win) => win.webContents === page) && atAppOrigin(page.mainFrame.url, appUrl);
 }
 
-/** The commands the guard answers only for a live page of an app window: U6e's save and Open File…, and U6f's three acts. */
-export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile'];
+/** The commands the guard answers only for a live page of an app window: U6e's save and Open File…, U6f's three acts, and U6b-4a's Open in. */
+export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile', 'layout.openIn' /* UX wave U6b-4a: Open in */];
 
 export const appPageOnly =
   (appUrl: string): CommandGuard =>

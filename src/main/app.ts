@@ -87,6 +87,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C7 start
 import { pickFiles } from './files/pick';
 import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile, OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly } from './files/open-file'; // UX wave U6e; U6f's frame's open
+import { createOpenIn } from './open-in/open-in'; // UX wave U6b-4a
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -573,7 +574,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
   // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding;
   // U6f: and the open, the listing and the pick of a file outside a session's folders on another machine
-  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl));
+  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl)); // UX wave U6b-4a: and Open in
   guardCommand(OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly(appUrl)); // UX wave U6f (Decision Log 26): a frame's open
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
@@ -800,6 +801,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   registerMainHandler('layout.openFile', (input, ctx) =>
     openChosenFile(input, ctx, { port: clientPort, isAppPage: (client) => isAppPage(client, appUrl), grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
   );
+  // UX wave U6b-4a: Open in, the apps this Mac has and the hand-off with the path this Mac's daemon admits (main's own call)
+  const openIn = createOpenIn({ run: execRunner, admit: (input) => invokeOwn('files.admit', input, { client: mainClient, target: local }) as Promise<CommandResult<'files.admit'>>, env: process.env });
+  registerMainHandler('layout.openInApps', async () => ({ apps: await openIn.apps() }));
+  registerMainHandler('layout.openIn', (input) => openIn.open(input));
   shutdown.add('usage', () => usage.stop());
   // C7 end
   // C11 start: the plumbing of settings v3 (C11 execution document, M1): ClaudeUsage's hand-off and status; the reveal

@@ -1069,7 +1069,8 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 
 // The product app over nine-sessions.json copied with *Charter + research* pointed at a scratch repository.
 // A Files case may point one more session at that real root instead of a recorded, nonexistent probe directory.
-async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<void>, { filesFor }: { filesFor?: string } = {}): Promise<void> {
+// UX wave U6b-4a: `env`, more of the launch's environment; the body is told the scratch repository's real path.
+async function withScenario(body: (maws: MawsLaunch, panel: Locator, repo: string) => Promise<void>, { filesFor, env = {} }: { filesFor?: string; env?: Record<string, string> } = {}): Promise<void> {
   const repo = scratchRepository();
   const dir = mkdtempSync(join(tmpdir(), 'maws-panel-scenario-'));
   let maws: MawsLaunch | null = null;
@@ -1082,8 +1083,8 @@ async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<
       session.directory = repo.dir;
       writeFileSync(scenario, JSON.stringify(fixture, null, 2));
     }
-    maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0' } });
-    await body(maws, maws.page.locator('[data-region="panel"]'));
+    maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0', ...env } });
+    await body(maws, maws.page.locator('[data-region="panel"]'), realpathSync(repo.dir));
   } finally {
     await maws?.cleanup();
     repo.cleanup();
@@ -1159,6 +1160,41 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
+  });
+
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, A1, A2): "Open in" in the title bar's
+  // Session actions and in the session row's menu lists the apps found (the seam's Zed and VS Code), then Terminal and
+  // Finder; a row hands the session's working folder, by the real path the daemon admits, to the app (the open log's line).
+  test('Open in, in the title bar and in a session row’s menu, hands the working folder to the app chosen', async () => {
+    const logs = mkdtempSync(join(tmpdir(), 'maws-open-in-'));
+    const log = join(logs, 'open.log');
+    const logged = () => readFileSync(log, { encoding: 'utf8', flag: 'a+' });
+    try {
+      await withScenario(
+        async (maws, _panel, repo) => {
+          const { page } = maws;
+          const row = await sidebarRow(page, CHARTER);
+          await row.click();
+          await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Session actions', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Open in', exact: true }).click();
+          const apps = page.getByRole('menu').filter({ has: page.getByRole('menuitem', { name: 'Finder', exact: true }) });
+          await expect(apps.getByRole('menuitem')).toHaveText(['VS Code', 'Zed', 'Terminal', 'Finder']);
+          await apps.getByRole('menuitem', { name: 'VS Code', exact: true }).click();
+          await expect.poll(logged).toBe(`open-in vscode ${repo}\n`);
+          await expect(page.getByRole('menu')).toHaveCount(0);
+
+          await row.click({ button: 'right' });
+          await page.getByRole('menuitem', { name: 'Open in', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Finder', exact: true }).click();
+          await expect.poll(logged).toBe(`open-in vscode ${repo}\nopen-in finder ${repo}\n`);
+          expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+        },
+        { filesFor: CHARTER, env: { MAWS_E2E_OPEN_LOG: log, MAWS_E2E_OPEN_IN_APPS: 'zed,vscode' } },
+      );
+    } finally {
+      rmSync(logs, { recursive: true, force: true });
+    }
   });
 
   // UX wave U8b, A3 (O-05): Artifacts is no card. The title bar's three-dot menu lists it; it opens the session's artifact

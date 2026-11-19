@@ -227,6 +227,15 @@ export const FilesGrantOutputSchema = z.discriminatedUnion('status', [
 ]);
 export type FilesGrantOutput = z.infer<typeof FilesGrantOutputSchema>;
 
+// UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission, which
+// main sends before it hands a path to another app (main-only). Without `path`, the session's working folder as U8c-2
+// admits it (`admittedFolder`, UC-4); with `path`, a file or folder the session's directories hold, or one file outside
+// them that `files.writeOutside` would save. Answered with the real path main launches with, never the window's string.
+export const FilesAdmitInputSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().optional() });
+export type FilesAdmitInput = z.infer<typeof FilesAdmitInputSchema>;
+export const FilesAdmitOutputSchema = z.strictObject({ path: z.string(), kind: z.enum(['file', 'folder']) });
+export type FilesAdmitOutput = z.infer<typeof FilesAdmitOutputSchema>;
+
 // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach to a File artifact's stored bytes, a path main resolved itself
 // (the artifact's admission), read with `files.read`'s rules (no link on the path, a regular file, the same answer).
 // Main-only: a page could otherwise read any absolute path outside every session's allowlist. `path` must be absolute,
@@ -342,6 +351,7 @@ export const commands = {
   'files.readOutside': { input: FilesReadOutsideInputSchema, output: FilesReadOutputSchema, owner: 'machine' },
   'files.listOutside': { input: FilesListOutsideInputSchema, output: FilesListOutsideOutputSchema, owner: 'machine' },
   'files.chooseOutside': { input: FilesChooseOutsideInputSchema, output: FilesChooseOutsideOutputSchema, owner: 'machine' },
+  'files.admit': { input: FilesAdmitInputSchema, output: FilesAdmitOutputSchema, owner: 'machine' }, // UX wave U6b-4a: main-only
   'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'machine' }, // E1
   'files.readResolved': { input: FilesReadResolvedInputSchema, output: FilesReadOutputSchema, owner: 'machine' }, // P5 O3-E: main-only
   'files.upload': { input: FilesUploadInputSchema, output: FilesUploadOutputSchema, owner: 'machine' }, // P5 O3-E
