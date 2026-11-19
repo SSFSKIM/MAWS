@@ -1581,13 +1581,28 @@ test('zoom probe: the pin', async () => {
   await commentScene({ titles: ['U6b-5b: zoom probe, the pin'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
     const t = await openCommentPage(s, id);
+    // the window as large as its display allows: today's view does not grow with the factor (placement 1), so at 200 %
+    // the tab's page is half the pane's height in points and a target below its fold is out of the page's viewport
+    // (the Mac run of 2026-11-19: no hover outline at 200 %, the button at 275 CSS pixels in a page about 200 tall)
+    await s.maws.app.evaluate(({ BrowserWindow, screen }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+      win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+    });
     let picks = 0;
     for (const f of PROBE_FACTORS) {
       await setAppZoom(s.maws.app, s.page, f);
       const fullPane = await placedOn(s, t.tabId, paneIn(t.panel)); // main has the rect the pane now measures
       const view = (await viewOf(s, t.tabId))!;
+      // the target in the page's viewport, scrolled there where it is not; one the page cannot show is recorded as such
+      const target = t.page.locator('#increment');
+      await target.evaluate((el) => el.scrollIntoView({ block: 'center', inline: 'center' }));
+      const viewport = await t.page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+      const button = await rectOf(target);
+      if (button.x < 0 || button.y < 0 || button.x + button.width > viewport.width || button.y + button.height > viewport.height) {
+        record([{ probe: 'pin', placement: 4, factor: f, established: false, why: 'the target does not fit the tab page’s viewport at this factor', viewport, button, viewBounds: view.bounds }]);
+        continue;
+      }
       await arm(s, t);
-      const button = await rectOf(t.page.locator('#increment'));
       await t.page.mouse.move(centre(button).x, centre(button).y);
       await expect(t.page.locator('maws-comment-overlay')).toBeVisible();
       await t.page.mouse.down();
@@ -1607,7 +1622,7 @@ test('zoom probe: the pin', async () => {
       const undivided = picked.position ? { x: fullPane.x + picked.position.x, y: fullPane.y + picked.position.y } : null;
       record([
         {
-          probe: 'pin', placement: 4, factor: f, pane: fullPane, viewBounds: bounds, button, position: picked.position ?? null,
+          probe: 'pin', placement: 4, factor: f, pane: fullPane, viewBounds: bounds, viewport, button, position: picked.position ?? null,
           caretCentreX: caretX, caretTopY: caretBox.y, caretAttr, drawnAt, undivided,
           off: undivided !== null && Math.abs(caretX - undivided.x) <= 1.5 && Math.abs(caretX - drawnAt.x) > 1.5,
         },

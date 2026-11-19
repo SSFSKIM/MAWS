@@ -1400,31 +1400,39 @@ test('(zoom probe) the factor a build opens at, on a profile this build left at 
         const zoomed = await appZoomOf(first);
 
         let established: boolean | null = null; // the write control, for the kill after it
+        let held = false; // the app was held out of App Nap while the control waited
         if (exit === 'quit') await s.quit(first);
         else if (exit === 'kill at once (an extra)') await s.killApp(first);
         else {
           const control = join(s.root, ZOOM_CONTROL_FILE);
           writeFileSync(control, '<!doctype html><html><head><meta charset="utf-8"><title>Zoom write control</title></head><body>The write control</body></html>');
-          await first.maws.app.evaluate(({ BrowserWindow }, file) =>
-            new Promise<void>((resolve) => {
+          // The Mac run of 2026-11-19 (f1852de3a, in the guest): nothing reached Preferences within 60 s, the app's own
+          // default-mode key included, where the harness's visible windows had theirs on disk within 15 s. Chromium
+          // commits Preferences on a delayed timer, and a quiet e2e window is transparent and never key, which leaves the
+          // app open to App Nap's timer throttling; so the app is held out of App Nap while the control waits
+          // (`powerSaveBlocker`'s prevent-app-suspension), up to 120 s, and the line says it was.
+          const blocker = await first.maws.app.evaluate(({ BrowserWindow, powerSaveBlocker }, file) =>
+            new Promise<number>((resolve) => {
+              const id = powerSaveBlocker.start('prevent-app-suspension');
               const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
               win.webContents.once('did-finish-load', () => {
                 win.webContents.setZoomFactor(1.25);
-                resolve();
+                resolve(id);
               });
               void win.loadFile(file);
             }), control);
           try {
-            await expect.poll(() => JSON.stringify(zoomPrefsOf(s.userData) ?? []).includes(ZOOM_CONTROL_FILE), { timeout: 60_000, message: 'the write control’s key in Preferences' }).toBe(true);
+            await expect.poll(() => JSON.stringify(zoomPrefsOf(s.userData) ?? []).includes(ZOOM_CONTROL_FILE), { timeout: 120_000, message: 'the write control’s key in Preferences' }).toBe(true);
             established = true;
           } catch {
             established = false;
           }
+          held = await first.maws.app.evaluate(({ powerSaveBlocker }, id) => powerSaveBlocker.isStarted(id), blocker);
           await s.killApp(first);
         }
         const prefsAfter = zoomPrefsOf(s.userData);
         if (established === false) {
-          say(`(zoom probe) ${mode} mode, ${exit}: not established: the write control's key never reached Preferences within 60 s, so the kill's timing shows nothing; Preferences' zoom keys: ${JSON.stringify(prefsAfter)}`);
+          say(`(zoom probe) ${mode} mode, ${exit}: not established: the write control's key never reached Preferences within 120 s (the app held out of App Nap: ${held}), so the kill's timing shows nothing; Preferences' zoom keys: ${JSON.stringify(prefsAfter)}`);
           return;
         }
 
@@ -1445,7 +1453,7 @@ test('(zoom probe) the factor a build opens at, on a profile this build left at 
             ? `the control (a kept default-mode zoom shows here): ${ours.factor === 1.5 ? 'established' : 'NOT established'}`
             : 'P7’s same-URL observation';
         say(
-          `(zoom probe) ${mode} mode, ${exit}${established === true ? ' (the write control’s key was in Preferences)' : ''}: ${here.label} was at ${JSON.stringify({ factor: zoomed.factor, mode: zoomed.mode })} on ${zoomed.url}` +
+          `(zoom probe) ${mode} mode, ${exit}${established === true ? ` (the write control’s key was in Preferences; the app held out of App Nap: ${held})` : ''}: ${here.label} was at ${JSON.stringify({ factor: zoomed.factor, mode: zoomed.mode })} on ${zoomed.url}` +
             `; ${peer.label} (wire ${wireOf(peer)}) opened at ${theirs.factor} on ${theirs.url}, ${peerMatches ? 'the same zoom key' : 'another zoom key: not P7 evidence'}` +
             `; ${here.label} relaunched opened at ${ours.factor} on ${sameUrl ? 'the same zoom key' : ours.url}, ${sameReading}` +
             `; Preferences' zoom keys after ${here.label}'s run: ${JSON.stringify(prefsAfter)}`,

@@ -42,7 +42,7 @@
 // naming the extension, and lists no action.
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
-import { mainTabById, mainTabs as chromeTabs, settingsDialog } from './support/shell';
+import { hideSurface, mainTabById, mainTabs as chromeTabs, settingsDialog } from './support/shell';
 import { addressed } from './support/address';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -965,51 +965,64 @@ test('zoom probe: the popup and the menu', async () => {
       const main = browserIn(s, 'main');
       const probe = actionIn(main, probeId);
       const folder = chipNamed(main, 'F');
-      await expect(probe).toBeVisible();
-      await expect(folder).toBeVisible();
+      // The room the main tab's chrome needs for its icons inline: with the panel's Browser beside it, the chrome folds
+      // its actions into the puzzle button (ActionBar folds under 160 px of address slot; the Mac run of 2026-11-19
+      // found only the puzzle there, at 100 %). So the panel's surface is hidden and the window takes its display's
+      // work area. A factor at which the chrome still folds them, or hides the folder chip, is recorded as such.
+      await hideSurface(s.page, 'Browser');
+      await s.maws.app.evaluate(({ BrowserWindow, screen }) => {
+        const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+        win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+      });
+      await expect(probe.or(puzzleIn(main)), 'the extension actions are drawn, inline or folded').toBeVisible();
+      await expect(folder.or(moreIn(main)), 'the bookmarks bar is drawn').toBeVisible();
       for (const f of PROBE_FACTORS) {
         await setAppZoom(s.maws.app, s.page, f);
-        await expect(probe).toBeVisible();
-        const icon = (await probe.boundingBox())!;
-        // placement 2: the popup, under its icon (its top on the icon's bottom, its right edge on the icon's)
-        await probe.click();
-        await expect.poll(async () => (await popupOf(s))?.url, { message: 'the seam answers the open popup' }).toBe(popupUrl);
-        const popup = (await popupOf(s))!;
-        // the two predictions, each through popupBounds' own clamp (popupPlace) with the popup's real size and the
-        // window's content size in points: the anchor as the window sends it (the icon's box rounded, ActionBar.tsx),
-        // and that anchor times the factor. "Off": the popup stands at the first and not at the second
-        const { content } = await appWindowState(s.maws.app);
-        const anchor = { x: Math.round(icon.x), y: Math.round(icon.y), width: Math.round(icon.width), height: Math.round(icon.height) };
-        const unscaled = popupPlace(anchor, popup.bounds, content);
-        const scaled = popupPlace(timesFactor(anchor, f), popup.bounds, content);
-        record([
-          {
-            probe: 'popup', placement: 2, factor: f, icon, anchor, content, bounds: popup.bounds, predictedUnscaled: unscaled, predictedScaled: scaled,
-            unscaledClamped: !sameRect(unscaled, { ...anchor, x: anchor.x + anchor.width - unscaled.width, y: anchor.y + anchor.height, width: unscaled.width, height: unscaled.height }),
-            off: sameRect(popup.bounds, unscaled) && !sameRect(popup.bounds, scaled),
-          },
-        ]);
-        await holdForLook(s.page, `the popup at ${f}`);
-        await probe.click();
-        await expect.poll(() => popupOf(s)).toBeNull();
+        await expect(probe.or(puzzleIn(main))).toBeVisible();
+        const icon = (await probe.isVisible()) ? (await probe.boundingBox())! : null;
+        if (!icon) record([{ probe: 'popup', placement: 2, factor: f, established: false, why: 'the actions are folded into the puzzle at this factor: no icon to anchor on' }]);
+        else {
+          // placement 2: the popup, under its icon (its top on the icon's bottom, its right edge on the icon's)
+          await probe.click();
+          await expect.poll(async () => (await popupOf(s))?.url, { message: 'the seam answers the open popup' }).toBe(popupUrl);
+          const popup = (await popupOf(s))!;
+          // the two predictions, each through popupBounds' own clamp (popupPlace) with the popup's real size and the
+          // window's content size in points: the anchor as the window sends it (the icon's box rounded, ActionBar.tsx),
+          // and that anchor times the factor. "Off": the popup stands at the first and not at the second
+          const { content } = await appWindowState(s.maws.app);
+          const anchor = { x: Math.round(icon.x), y: Math.round(icon.y), width: Math.round(icon.width), height: Math.round(icon.height) };
+          const unscaled = popupPlace(anchor, popup.bounds, content);
+          const scaled = popupPlace(timesFactor(anchor, f), popup.bounds, content);
+          record([
+            {
+              probe: 'popup', placement: 2, factor: f, icon, anchor, content, bounds: popup.bounds, predictedUnscaled: unscaled, predictedScaled: scaled,
+              unscaledClamped: !sameRect(unscaled, { ...anchor, x: anchor.x + anchor.width - unscaled.width, y: anchor.y + anchor.height, width: unscaled.width, height: unscaled.height }),
+              off: sameRect(popup.bounds, unscaled) && !sameRect(popup.bounds, scaled),
+            },
+          ]);
+          await holdForLook(s.page, `the popup at ${f}`);
+          await probe.click();
+          await expect.poll(() => popupOf(s)).toBeNull();
+        }
 
         // placement 3: the bookmarks menu at the chip's bottom-left corner; the action's menu at the press
-        await expect(folder).toBeVisible();
-        const chipBox = (await folder.boundingBox())!;
-        await menuAfter(s.maws.app, () => folder.click());
-        const folderAt = await menuAt(s.maws.app);
-        const corner = { x: Math.round(chipBox.x), y: Math.round(chipBox.y + chipBox.height) };
-        const iconNow = (await probe.boundingBox())!;
-        await menuAfter(s.maws.app, () => probe.click({ button: 'right' }));
-        const actionAt = await menuAt(s.maws.app);
-        const press = { x: Math.round(iconNow.x + iconNow.width / 2), y: Math.round(iconNow.y + iconNow.height / 2) };
         const times = (p: { x: number; y: number }) => ({ x: Math.round(p.x * f), y: Math.round(p.y * f) });
         const isOff = (at: { x: number; y: number } | null, css: { x: number; y: number }) =>
           at !== null && Math.abs(at.x - css.x) <= 1 && Math.abs(at.y - css.y) <= 1 && (Math.abs(at.x - times(css).x) > 1 || Math.abs(at.y - times(css).y) > 1);
-        record([
-          { probe: 'menu: bookmarks folder', placement: 3, factor: f, chip: chipBox, at: folderAt, corner, cornerTimesFactor: times(corner), off: isOff(folderAt, corner) },
-          { probe: 'menu: extension action', placement: 3, factor: f, icon: iconNow, at: actionAt, press, pressTimesFactor: times(press), off: isOff(actionAt, press) },
-        ]);
+        if (await folder.isVisible()) {
+          const chipBox = (await folder.boundingBox())!;
+          await menuAfter(s.maws.app, () => folder.click());
+          const folderAt = await menuAt(s.maws.app);
+          const corner = { x: Math.round(chipBox.x), y: Math.round(chipBox.y + chipBox.height) };
+          record([{ probe: 'menu: bookmarks folder', placement: 3, factor: f, chip: chipBox, at: folderAt, corner, cornerTimesFactor: times(corner), off: isOff(folderAt, corner) }]);
+        } else record([{ probe: 'menu: bookmarks folder', placement: 3, factor: f, established: false, why: 'the folder chip is in the » menu at this factor' }]);
+        if (await probe.isVisible()) {
+          const iconNow = (await probe.boundingBox())!;
+          await menuAfter(s.maws.app, () => probe.click({ button: 'right' }));
+          const actionAt = await menuAt(s.maws.app);
+          const press = { x: Math.round(iconNow.x + iconNow.width / 2), y: Math.round(iconNow.y + iconNow.height / 2) };
+          record([{ probe: 'menu: extension action', placement: 3, factor: f, icon: iconNow, at: actionAt, press, pressTimesFactor: times(press), off: isOff(actionAt, press) }]);
+        } else record([{ probe: 'menu: extension action', placement: 3, factor: f, established: false, why: 'the actions are folded into the puzzle at this factor' }]);
       }
       await setAppZoom(s.maws.app, s.page, 1);
     } catch (error) {

@@ -117,6 +117,97 @@ Earlier runs: at `e641ef3e7` the lines' labels were overwritten by a bug in `run
 `d78e60abf` every row read as here, except f3 at 2, which passed. At `ca7d21a89` the rows gained their controls: f3's
 and h's `stood`, and g's propagation control.
 
-### Mac
+### Mac (the run of record for rows 2 and 3; 2026-11-19, at `76d0bbc9d`)
 
-Pending the architect's run ("Proof that an executor does not run", rows 2 to 4).
+**Row 2, the harness** (manual gate `76d0bbc9de40-20261119T113742Z`, on the Mac mini's host: darwin arm64, one display at
+scale 2, Electron 44.4.5, exit 0). The verdicts match the VM's run of record; f3 passed at 2 here.
+
+    RECORD a RECORD [{"end":"quit","valid":true,"standin":1.5,"prefs":{"Preferences":[{"key":"partition.per_host_zoom_levels","value":{"14321395447377900560":{"<harness>/page/index.html":2.223901085741545}}}]}}]
+    RECORD b RECORD [{"end":"kill-now","valid":true,"standin":1,"prefs":{}},{"end":"kill-15s","valid":true,"standin":1.5,"prefs":{"Preferences":[{"key":"partition.per_host_zoom_levels","value":{"1121364126665634805":{"<harness>/page/index.html":2.223901085741545}}}]}}]
+    RECORD c PASS [{"end":"quit","valid":true,"standin":1,"prefs":{"Preferences":[]}}]
+    RECORD d PASS [{"end":"kill-now","valid":true,"standin":1,"prefs":{}},{"end":"kill-15s","valid":true,"standin":1,"prefs":{"Preferences":[]}}]
+    RECORD e RECORD [{"at":"factor 0.5","afterReload":0.5,"afterLoad":0.5},{"at":"factor 2","afterReload":2,"afterLoad":2}]
+    RECORD f PASS {"openAt":"f1","ways":[{"way":"f0 (the control, at 1)","stood":true,"atDomReady":1,"atShow":1},{"way":"f1 at 0.5","stood":true,"atDomReady":0.5,"atShow":0.5,"inkRatio":0.482,"ok":true},{"way":"f1 at 2","stood":true,"atDomReady":2,"atShow":2,"inkRatio":1.964,"ok":true},{"way":"f2 at 0.5","stood":true,"atDomReady":0.5,"atShow":0.5,"inkRatio":0.482,"ok":true},{"way":"f2 at 2","stood":true,"atDomReady":2,"atShow":2,"inkRatio":1.964,"ok":true},{"way":"f3 at 0.5","stood":true,"atDomReady":1,"atShow":0.5,"inkRatio":0.482,"ok":true},{"way":"f3 at 2","stood":true,"atDomReady":1,"atShow":2,"inkRatio":1.964,"ok":true}]}
+    RECORD g RECORD [{"mode":"default","established":true,"control":{"by":"first, at its own URL","took":true,"factor":1.5},"first":1.5,"openBefore":{"present":1,"repair":1},"openedAfter":{"present":1,"repair":1}},{"mode":"isolated","established":true,"control":{"by":"a twin at a third file","took":true,"factor":1.5},"first":1.5,"openBefore":{"present":1,"repair":1},"openedAfter":{"present":1,"repair":1}}]
+    RECORD h PASS [{"at":"factor 0.5","viewFactor":1,"want":{"x":20,"y":60,"width":200,"height":120},"bounds":{"x":20,"y":60,"width":200,"height":120},"inner":{"width":200,"height":120}},{"at":"factor 2","viewFactor":1,"want":{"x":80,"y":240,"width":800,"height":480},"bounds":{"x":80,"y":240,"width":800,"height":480},"inner":{"width":800,"height":480}}]
+    RECORD i PASS {"part":"api","setZoomMode":"function","getZoomMode":"function","mode":"isolated","electron":"44.4.5"}
+    RECORD j NOT RUN {"part":"move","notRun":true,"displays":[{"id":5,"scale":2}]}
+
+**Row 3, the placement probes** (manual gate `76d0bbc9de40-20261119T121210Z`).
+
+`e2e:browser` (host), "zoom probe: the view, the lights, the device box", passed, with 20 lines:
+
+    {"probe":"view","placement":1,"factor":0.5,"appFactor":0.5,"pane":{"x":1173,"y":141,"width":1380,"height":1492},"bounds":{"x":1173,"y":141,"width":1380,"height":1492},"paneTimesFactor":{"x":587,"y":71,"width":690,"height":746},"placed":{"rect":{"x":1173,"y":141,"width":1380,"height":1492},"count":2},"off":true}
+    {"probe":"pointer","factor":0.5,"frameNotView":444436,"viewNotFrame":1988656,"edges":{"left":586,"top":70,"right":1276,"bottom":816},"off":true}
+    {"probe":"lights","placement":5,"factor":0.5,"lights":{"x":16,"y":15},"assumed":{"diameter":14,"span":54},"toolbarPt":22,"lightsCentrePt":22,"toolbarCentrePt":11,"lightsRightPt":70,"clearPt":39,"off":true}
+    {"probe":"look: the cells pressed","factor":0.5,"cells":[]}
+    {"probe":"view","placement":1,"factor":0.8,"appFactor":0.8,"pane":{"x":789,"y":140,"width":804,"height":878},"bounds":{"x":789,"y":140,"width":804,"height":878},"paneTimesFactor":{"x":631,"y":112,"width":643,"height":702},"placed":{"rect":{"x":789,"y":140,"width":804,"height":878},"count":3},"off":true}
+    {"probe":"pointer","factor":0.8,"frameNotView":124496,"viewNotFrame":379022,"edges":{"left":158,"top":28,"right":319,"bottom":204},"off":true}
+    {"probe":"lights","placement":5,"factor":0.8,"lights":{"x":16,"y":15},"assumed":{"diameter":14,"span":54},"toolbarPt":35.1953125,"lightsCentrePt":22,"toolbarCentrePt":17.59765625,"lightsRightPt":70,"clearPt":62.400000000000006,"off":true}
+    {"probe":"look: the cells pressed","factor":0.8,"cells":[]}
+    {"probe":"view","placement":1,"factor":1.25,"appFactor":1.25,"pane":{"x":415,"y":158,"width":602,"height":491},"bounds":{"x":415,"y":158,"width":602,"height":491},"paneTimesFactor":{"x":519,"y":198,"width":752,"height":613},"placed":{"rect":{"x":415,"y":158,"width":602,"height":491},"count":4},"off":true}
+    {"probe":"pointer","factor":1.25,"frameNotView":236378,"viewNotFrame":70984,"edges":{"left":-104,"top":-40,"right":-254,"bottom":-162},"off":true}
+    {"probe":"lights","placement":5,"factor":1.25,"lights":{"x":16,"y":15},"assumed":{"diameter":14,"span":54},"toolbarPt":55,"lightsCentrePt":22,"toolbarCentrePt":27.5,"lightsRightPt":70,"clearPt":97.5,"off":true}
+    {"probe":"look: the cells pressed","factor":1.25,"cells":[]}
+    {"probe":"view","placement":1,"factor":2,"appFactor":2,"pane":{"x":29,"y":203,"width":604,"height":200},"bounds":{"x":29,"y":203,"width":604,"height":200},"paneTimesFactor":{"x":58,"y":406,"width":1208,"height":400},"placed":{"rect":{"x":29,"y":203,"width":604,"height":200},"count":5},"off":true}
+    {"probe":"pointer","factor":2,"frameNotView":483200,"viewNotFrame":120800,"edges":{"left":-29,"top":-203,"right":-633,"bottom":-403},"off":true}
+    {"probe":"lights","placement":5,"factor":2,"lights":{"x":16,"y":15},"assumed":{"diameter":14,"span":54},"toolbarPt":88,"lightsCentrePt":22,"toolbarCentrePt":44,"lightsRightPt":70,"clearPt":156,"off":true}
+    {"probe":"look: the cells pressed","factor":2,"cells":[]}
+    {"probe":"device box","placement":6,"factor":0.5,"workArea":{"x":0,"y":30,"width":2560,"height":1358},"sheet":false,"sheetRoom":null,"ampleBy":"the separator","room":440,"ample":true,"straddles":true,"placed":{"x":4706,"y":159,"width":375,"height":812},"element":{"read":375,"predicted":375},"frameDrawnPt":{"read":187.5,"predicted":187.5},"view":{"read":375,"predicted":375},"innerWidth":{"read":375,"predicted":375},"chip":{"read":"375 × 812","predicted":"375 × …"},"offers":[{"room":370,"offered":false,"predicted":false},{"room":380,"offered":true,"predicted":true}],"off":{"viewNotItsFrame":true,"offerIgnoresFactor":true}}
+    {"probe":"device box","placement":6,"factor":0.8,"workArea":{"x":0,"y":30,"width":2560,"height":1358},"sheet":false,"sheetRoom":null,"ampleBy":"the separator","room":439.755859375,"ample":true,"straddles":true,"placed":{"x":2786,"y":158,"width":375,"height":812},"element":{"read":375,"predicted":375},"frameDrawnPt":{"read":300,"predicted":300},"view":{"read":375,"predicted":375},"innerWidth":{"read":375,"predicted":375},"chip":{"read":"375 × 812","predicted":"375 × …"},"offers":[{"room":369.755859375,"offered":false,"predicted":false},{"room":379.755859375,"offered":true,"predicted":true}],"off":{"viewNotItsFrame":true,"offerIgnoresFactor":true}}
+    {"probe":"device box","placement":6,"factor":1.25,"workArea":{"x":0,"y":30,"width":2560,"height":1358},"sheet":false,"sheetRoom":null,"ampleBy":"the separator","room":440.4000244140625,"ample":true,"straddles":true,"placed":{"x":1634,"y":158,"width":375,"height":812},"element":{"read":375,"predicted":375},"frameDrawnPt":{"read":468.75,"predicted":468.75},"view":{"read":375,"predicted":375},"innerWidth":{"read":375,"predicted":375},"chip":{"read":"375 × 812","predicted":"375 × …"},"offers":[{"room":370.4000244140625,"offered":false,"predicted":false},{"room":380.4000244140625,"offered":true,"predicted":true}],"off":{"viewNotItsFrame":true,"offerIgnoresFactor":true}}
+    {"probe":"device box","placement":6,"factor":2,"workArea":{"x":0,"y":30,"width":2560,"height":1358},"sheet":false,"sheetRoom":null,"ampleBy":"the separator","room":440,"ample":true,"straddles":true,"placed":{"x":866,"y":159,"width":375,"height":513},"element":{"read":375,"predicted":375},"frameDrawnPt":{"read":750,"predicted":750},"view":{"read":375,"predicted":375},"innerWidth":{"read":375,"predicted":375},"chip":{"read":"375 × 513","predicted":"375 × …"},"offers":[{"room":370,"offered":false,"predicted":false},{"room":380,"offered":true,"predicted":true}],"off":{"viewNotItsFrame":true,"offerIgnoresFactor":true}}
+
+`e2e:browser-comment` (host), "zoom probe: the pin", failed at 200 %, after its lines at 0.5, 0.8 and 1.25. The hover
+outline never showed (`expect(maws-comment-overlay).toBeVisible()`, "hidden" for 5 s). This was a probe fault: the
+view did not grow with the factor (placement 1), so the tab's page at 200 % was too short for the button at 275 CSS
+pixels, and the hover landed outside the page's viewport. Fixed after this run (Decision Log 13).
+
+    {"probe":"pin","placement":4,"factor":0.5,"pane":{"x":1173,"y":141,"width":1380,"height":1492},"viewBounds":{"x":1173,"y":141,"width":1380,"height":1492},"button":{"x":37,"y":275.4921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":307},"caretCentreX":1254,"caretTopY":1409.1397705078125,"caretAttr":"81","drawnAt":{"x":2507.2734375,"y":895.984375},"undivided":{"x":1254,"y":448},"off":true}
+    {"probe":"pin","placement":4,"factor":0.8,"pane":{"x":789,"y":140,"width":804,"height":878},"viewBounds":{"x":789,"y":140,"width":804,"height":878},"button":{"x":37,"y":275.4921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":307},"caretCentreX":869.619140625,"caretTopY":798.336669921875,"caretAttr":"81","drawnAt":{"x":1087.0458984375,"y":558.740234375},"undivided":{"x":870,"y":447},"off":true}
+    {"probe":"pin","placement":4,"factor":1.25,"pane":{"x":415,"y":158,"width":602,"height":491},"viewBounds":{"x":415,"y":158,"width":602,"height":491},"button":{"x":37,"y":275.4921875,"width":87.2734375,"height":31.5},"position":{"x":81,"y":307},"caretCentreX":495.8000030517578,"caretTopY":427.3396911621094,"caretAttr":"81","drawnAt":{"x":396.509375,"y":371.99375},"undivided":{"x":496,"y":465},"off":true}
+
+`e2e:browser-chrome` (guest; again on the host, `76d0bbc9de40-20261119T200651Z`), "zoom probe: the popup and the
+menu", failed before any factor was set: no `[data-extension-action]` in the main tab's chrome, which showed only the
+puzzle ("Extensions"). This was a probe fault: with the panel's Browser beside the main tab, the chrome folded its
+actions. Fixed after this run (Decision Log 13). No popup or menu line exists yet.
+
+**Row 3, the peers' probe** (manual gate `76d0bbc9de40-20261119T121640Z`, in the guest, `--peer-exact f1852de3a`;
+passed, six lines). The peer at `2c7044231` has not run.
+
+    [cross-build] (zoom probe) isolated mode, quit: this build was at {"factor":1.5,"mode":"isolated"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1 on the same zoom key, P7’s same-URL observation; Preferences' zoom keys after this build's run: []
+    [cross-build] (zoom probe) isolated mode, kill after the control wrote: not established: the write control's key never reached Preferences within 60 s, so the kill's timing shows nothing; Preferences' zoom keys: []
+    [cross-build] (zoom probe) isolated mode, kill at once (an extra): this build was at {"factor":1.5,"mode":"isolated"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1 on the same zoom key, P7’s same-URL observation; Preferences' zoom keys after this build's run: null
+    [cross-build] (zoom probe) default mode, quit: this build was at {"factor":1.5,"mode":"default"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1.5 on the same zoom key, the control (a kept default-mode zoom shows here): established; Preferences' zoom keys after this build's run: [{"key":"partition.per_host_zoom_levels","value":{"15030877753294440317":{"<this build>/out/renderer/index.html?e2e=1":2.223901085741545}}}]
+    [cross-build] (zoom probe) default mode, kill after the control wrote: not established: the write control's key never reached Preferences within 60 s, so the kill's timing shows nothing; Preferences' zoom keys: []
+    [cross-build] (zoom probe) default mode, kill at once (an extra): this build was at {"factor":1.5,"mode":"default"} on <this build>/out/renderer/index.html?e2e=1; the peer (wire 3.33) opened at 1 on <the peer>/out/renderer/index.html?e2e=1, another zoom key: not P7 evidence; this build relaunched opened at 1 on the same zoom key, the control (a kept default-mode zoom shows here): NOT established; Preferences' zoom keys after this build's run: null
+
+What the Mac says:
+
+- **P7 stands.** In isolated mode, nothing of the zoom was kept after a quit or after a forced exit: in the harness
+  (rows c and d, including the SIGKILL 15 s after the call, when the default-mode control of row b had its key on
+  disk), and in the real app (this build relaunched at 1 on its own page's zoom key, after a quit and after a kill at
+  once).
+- **Neither peer read speaks to P7.** Build F loads its own renderer file, a different zoom key from this build's, so
+  its reading of 1 is recorded as "another zoom key: not P7 evidence". The same-URL reading is this build relaunched.
+- **The default-mode control was established on a quit:** this build relaunched at 1.5, its key under
+  `partition.per_host_zoom_levels` for `<this build>/out/renderer/index.html?e2e=1`. After a kill at once it read 1,
+  with no Preferences file, as row b predicts.
+- **"Kill after the control wrote" was not established in either mode.** Nothing reached Preferences within 60 s, not
+  even the app's own default-mode key. The control was right to refuse. The likely cause is Chromium's delayed commit
+  of Preferences in a quiet (transparent, never key) e2e window open to App Nap, against the harness's visible
+  windows, whose key was on disk within 15 s. The probe now holds the app out of App Nap during the wait, up to
+  120 s (Decision Log 13). The cause is not verified.
+- **Placement 1 (the view) is off at every factor, as Interfaces §G predicts:** its bounds equal the pane's CSS
+  rectangle, not that rectangle times the factor. The pointer's mismatch is the same fault.
+- **Placement 5 (the lights) is off at every factor:** they stay at `{ x: 16, y: 15 }`, centred at 22 points, while
+  the toolbar's centre is 11, 17.6, 27.5 and 44 points, and at 0.5 and 0.8 they pass the clear width.
+- **Placement 6 (the device box) matches what the pin's code predicts at every factor.** The element, the view and
+  `innerWidth` read 375, and the frame as drawn is 375 times the factor. The menu offers Mobile from 375 CSS pixels at
+  every factor, so its offer does not follow the factor. At 200 % the chip read `375 × 513`, because the room's height
+  was short.
+- **Placement 4 (the pin) is off at 0.5, 0.8 and 1.25:** the caret stands at the pick's position undivided. At 200 %
+  it is not yet measured (the probe fault above).
+- **Placements 2 and 3 are not yet measured.**
+- **Row j and the look have not run.**
+
