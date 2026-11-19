@@ -299,6 +299,8 @@ function Palette({ run }: { run(id: ActionId): void }) {
   const drawn = rowValues.includes(selected);
   if (moved && !drawn) setMoved(false); // the moved row went: the selection follows the first row again
   const value = (scope === 'sessions' || moved) && drawn ? selected : (rowValues[0] ?? selected);
+  // the row the palette selected by itself is the selection held from now on (cmdk reports none for its controlled value)
+  if (value !== selected) setSelected(value);
   const root = useRef<HTMLDivElement>(null);
   const acting = useRef(false); // the person's key or pointer is being handled (one task)
   const personActs = () => {
