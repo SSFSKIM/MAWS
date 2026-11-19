@@ -14,6 +14,7 @@ import type { Action } from 'org-protocol';
 import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { gradeOf } from '@shared/ipc/grades';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable'; // UX wave U6b-4c
 import { KEPT_WITHOUT_ACTION } from '../../src/endpoint/actions';
 import { OFFERS, type Offers } from '../../src/endpoint/offers';
 import { registerFilesHandlers } from '../../src/services/files/register';
@@ -145,6 +146,7 @@ describe('the checkout’s offer rows (M4)', () => {
     for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'files.grant', 'files.follow' /* UX wave U6b-4c: a link followed for this Mac's own page alone */, 'session.create', 'session.launch']) {
       expect([name, Object.hasOwn(OFFERS.commands, name)]).toEqual([name, false]);
     }
+    expect(REMOTE_UNAVAILABLE['files.follow']).toBe('Not on another machine yet: following a link to a file outside that session’s folders');
   });
 
   it('take inputs the registry’s schemas hold (so what follows is about the grade and the target alone)', () => {
