@@ -195,14 +195,21 @@ function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabI
   const treeId = `files-tree-${tabId}`;
   // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`shownByItsKey`, by the counter's value the key
   // made) is answered once, by U6b-3b's request for the keyboard (`finder.ts`), whose taker takes it when it is drawn,
-  // which the person's next key or pointer press drops and which this tab withdraws when its showing ends: the file's view while the tab holds a file not covered by the tree (it hands the keyboard to its
-  // editor once one is drawn), else the tree (`TreeList`: its selected row, else its first row, else itself). Go to file's
-  // field is not where it lands. The host's other requests (an open of a file from a link or the tree, the agent's show)
-  // are used up and answered with nothing, as before this landing: the keyboard stays where the person has it.
+  // which the person's next key or pointer press drops, and which this tab withdraws when its showing ends (hidden,
+  // unmounted, or a later request of the host's): the file's view while the tab holds a file not covered by the tree (it
+  // hands the keyboard to its editor once one is drawn), else the tree (`TreeList`: its selected row, else its first row,
+  // else itself). Go to file's field is not where it lands. The host's other requests (an open of a file from a link or
+  // the tree, the agent's show) are used up and answered with nothing, as before this landing: the keyboard stays where
+  // the person has it.
   useEffect(() => {
     if (focus.request <= (focusSeen.get(focus.of) ?? 0)) return;
     focusSeen.set(focus.of, focus.request);
-    if (!shownByItsKey(tabId, focus.request)) return; // the request of an open, made after the key's
+    if (!shownByItsKey(tabId, focus.request)) {
+      // the request of an open (or another show) made after the key's: what the key asked and is still waiting ends
+      const asked = keyboardAsked.get(focus.of);
+      if (asked !== undefined) withdrawKeyboard(asked);
+      return;
+    }
     keyboardAsked.set(focus.of, requestKeyboard(key !== null && place !== 'instead' ? { into: 'file', key } : { into: 'tree', tabId }));
   }, [focus.request, focus.of, key, place, tabId]);
   useEffect(() => {
