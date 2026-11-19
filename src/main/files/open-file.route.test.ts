@@ -229,8 +229,8 @@ describe('the sender’s guard: files.readOutside, files.listOutside and files.c
     ['files.chooseOutside', { appSessionId: 'app-1', path: '/srv/elsewhere/notes.txt' }],
   ];
 
-  it('are the guard’s, with U6e’s two, as the app registers it', () => {
-    expect([...m.openFile.APP_PAGE_ONLY].sort()).toEqual(['files.chooseOutside', 'files.listOutside', 'files.readOutside', 'files.writeOutside', 'layout.openFile']);
+  it('are the guard’s, with U6e’s two, U6b-4a’s Open in and U11’s skill file, as the app registers it', () => {
+    expect([...m.openFile.APP_PAGE_ONLY].sort()).toEqual(['customization.skillFile' /* UX wave U11 */, 'files.chooseOutside', 'files.listOutside', 'files.readOutside', 'files.writeOutside', 'layout.openFile', 'layout.openIn' /* UX wave U6b-4a */]);
     expect(readFileSync(join(import.meta.dirname, '../app.ts'), 'utf8')).toContain('guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl))');
   });
 
