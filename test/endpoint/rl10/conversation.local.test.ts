@@ -202,6 +202,9 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
         return held !== undefined && isListingGone(held.record.body) === (step.scene === 'withdrawn') ? held : null;
       }, `${step.scene} ${String(step.session)}`, (step.within as number | undefined) ?? 10_000);
       await until(() => toHub.some((f) => f.t === 'listing' && JSON.stringify(f.record) === JSON.stringify(entry.record)), 'the listing sent the hub');
+      // `held`: the member frame the endpoint still holds for the session, which a withdrawn listing alone can't tell
+      // from a member the endpoint refused or dropped.
+      if (step.held !== undefined) expect(endpoint.rl10.members.get(step.session as string)).toMatchObject(step.held as object);
       return;
     }
     case 'hub-holds': {
