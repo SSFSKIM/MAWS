@@ -63,18 +63,20 @@ export function connectTerminalAttach(): () => void {
     if (id !== null) off = registerAction('terminal.attachSelection', () => attachFromTerminal(id, 'chord'));
   };
   let pending = false;
+  let connected = true;
   const later = () => {
     if (pending) return;
     pending = true;
     queueMicrotask(() => {
       pending = false;
-      sync();
+      if (connected) sync(); // a read queued before the teardown registers nothing after it
     });
   };
   window.addEventListener('focusin', sync);
   window.addEventListener('focusout', later);
   sync();
   return () => {
+    connected = false;
     window.removeEventListener('focusin', sync);
     window.removeEventListener('focusout', later);
     off?.();

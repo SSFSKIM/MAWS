@@ -126,7 +126,7 @@ describe('the editor takes an attached block', () => {
     const { handle, content, elsewhere } = mount(port);
     await act(async () => handle.current!.restored());
     act(() => {
-      tiptapOf(content).commands.focus();
+      content.focus();
       tiptapOf(content).commands.setTextSelection({ from: 6, to: 11 }); // `these` (the paragraph opens at 1)
     });
     act(() => elsewhere.focus()); // the keyboard goes to the terminal
@@ -141,7 +141,7 @@ describe('the editor takes an attached block', () => {
     const { handle, content } = mount(port);
     await act(async () => handle.current!.restored());
     act(() => {
-      tiptapOf(content).commands.focus();
+      content.focus();
       tiptapOf(content).commands.setTextSelection(13); // the empty last paragraph (it opens at 12)
     });
     await act(async () => void (await handle.current!.attachPasted({ id: 'attach-t', text: 'x' }, { at: 'end', save: false })));
@@ -156,7 +156,7 @@ describe('the editor takes an attached block', () => {
     const { handle, content } = mount(port);
     await act(async () => handle.current!.restored());
     act(() => {
-      tiptapOf(content).commands.focus();
+      content.focus();
       tiptapOf(content).commands.setTextSelection({ from: 1, to: 5 }); // `kept`
     });
     await act(async () => void (await handle.current!.attachPasted({ id: 'attach-u', text: 'x' }, { at: 'end', save: false })));

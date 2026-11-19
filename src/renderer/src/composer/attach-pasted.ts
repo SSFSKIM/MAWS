@@ -2,21 +2,26 @@
 // keyboard.md, sequence S1, decisions 8 and 30 to 33, Interfaces §C): one attach's block, with an id of its own, goes to
 // whoever is the authority over the session's draft, and the hand-over ends only when that authority holds it, once.
 //
-// - A composer mounted for the session is the authority: it takes the block itself (`FocusTarget.attachPasted`). A
-//   send of the session in flight is a writer too, with or without its composer: nothing is asked while one is, and the
-//   loop waits for it (`submissionOf`).
+// - A composer mounted for the session is the authority: it takes the block itself (`FocusTarget.attachPasted`); its
+//   save is believed only if no composer came or went across it and it is still mounted (Decision Log 14 (i)). A send of
+//   the session in flight is a writer too, with or without its composer: nothing is asked while one is, and the loop
+//   waits for it (`submissionOf`); so it does for a spawned session's automatic first send still to go, which sends its
+//   box with no press (`firstSendPending`; (v)). An accepted send whose document held the block took it: the end is
+//   `added`, and the block is not put in again ((ii); `watchAcceptedSends`).
 // - With none mounted, the store is: a round reads the draft, and writes it with the block appended unless the block is
 //   there, naming the revision that read answered (`replacesOf`). A round a composer came or went under, or a send was
 //   in flight under, is not believed: the loop turns again and asks the authority of the moment.
 // - Three rounds, then one last read that writes nothing. A write whose answer is not definite (`timeout`, a failure of
-//   the route) is settled by a later read, or stays unaccounted for; while one is, no end is a refusal: the person reads
-//   that MAWS could not confirm (`unconfirmed`), never "not added". A write in the claim form is never accounted for
-//   again: the claim can come true again after a clear.
+//   the route, a promise that rejects), and an accepted one in a round not believed ((iii)), is settled by a later
+//   believed read, or stays unaccounted for; while one is, no end is a refusal: the person reads that MAWS could not
+//   confirm (`unconfirmed`), never "not added". A write in the claim form is never accounted for again: the claim can
+//   come true again after a clear. A read whose promise rejects is a failed read ((vi)).
 // - The whole hand-over has a deadline (`attachDeadlineMs`): the store's work at its worst and one bound for a wait.
 //
 // `added` is said at an end where the authority holds the block, and at no earlier point; the line itself is the
 // caller's (tools/terminal/attach.ts).
 import type { AppSessionId } from '@shared/graph/ids';
+import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { DRAFT_CLAIM, DRAFT_KEPT_WORDS, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
@@ -26,10 +31,11 @@ import { available } from '../keymap/shell-navigation';
 import { isNotOffered, readerRowsOf } from '../lane-b/reader-rows';
 import { readRemoteDraft, saveRemoteDraftOnce, unsavedRemoteDraft } from '../lane-b/remote-drafts';
 import { isRemoteLaneB } from '../lane-b/remote-session';
+import { firstSendPending } from '../sessions/remote-spawn';
 import { useSetup } from '../sessions/store';
 import { useComposerStore, type FocusTarget } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
-import { submissionOf, type EditorHandle } from './editor/controller';
+import { submissionOf, watchAcceptedSends, type EditorHandle } from './editor/controller';
 import type { ComposerDoc } from './editor/doc';
 import { docOfDraft, draftOf } from './editor/drafts';
 import { appendPasted, holdsBlock, type AttachedBlock } from './editor/pasted-block';
@@ -44,6 +50,8 @@ export const ATTACH_DEADLINE_COMMANDS = 2 * ATTACH_ROUNDS + 2;
  * transport; attach-pasted.test.tsx pins the two equal).
  */
 export const COMMAND_BOUND_HERE_MS = 10_000;
+/** How often a hand-over looks again at a spawned session's first send still to go, which tells no one when it goes. */
+export const FIRST_SEND_LOOK_MS = 100;
 export function attachDeadlineMs(overLink: boolean): number {
   return ATTACH_DEADLINE_COMMANDS * (overLink ? REMOTE_ACT_PENDING_MS : COMMAND_BOUND_HERE_MS);
 }
@@ -81,6 +89,9 @@ function notStarted(appSessionId: AppSessionId): boolean {
 const composerOf = (appSessionId: AppSessionId): FocusTarget | null => useComposerStore.getState().focusTargets.get(appSessionId) ?? null;
 
 const EXPIRED = Symbol('expired');
+// A route whose promise rejected, as a result: a failure, with words no answer of the store's carries.
+const rejected = (): CommandResult<CommandName> => ({ ok: false, error: ipcError('internal', 'the route to the draft store failed') });
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const said = (result: CommandResult<CommandName>, words: string): boolean => !result.ok && result.error.message.includes(words);
 const unknownSession = (result: CommandResult<CommandName>): boolean => said(result, 'unknown app session');
 
@@ -111,6 +122,7 @@ class HandOver {
   private sent = false; // a write of the block sent to the store
   private unaccountedRevision = false; // a write naming a revision (or none, over the link) whose answer was not definite
   private unaccountedClaim = false; // a write in the claim form whose answer was not definite: for the rest of the hand-over
+  private sentWithMessage = false; // an accepted send's document held the block
   private expiry: Promise<typeof EXPIRED> = new Promise(() => {});
   private timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -130,10 +142,16 @@ class HandOver {
     const off = useComposerStore.subscribe((state, before) => {
       if (state.focusTargets.get(this.session) !== before.focusTargets.get(this.session)) this.comings += 1;
     });
+    const unwatch = watchAcceptedSends(this.session, (doc) => {
+      if (holdsBlock(doc, this.block.id)) this.sentWithMessage = true;
+    });
     try {
-      return await this.loop(pressed);
+      const end = await this.loop(pressed);
+      // the block went with a message, once: whatever the store or a box answered after
+      return this.sentWithMessage && (end.kind === 'refused' || end.kind === 'unconfirmed') ? { kind: 'added' } : end;
     } finally {
       off();
+      unwatch();
       if (this.timer !== null) clearTimeout(this.timer);
     }
   }
@@ -164,6 +182,14 @@ class HandOver {
   private async loop(pressed: FocusTarget | null): Promise<AttachOutcome> {
     let rounds = 0;
     for (;;) {
+      if (this.sentWithMessage) return { kind: 'added' }; // never put in again
+      if (firstSendPending(this.session)) {
+        // its box sends what it holds with no press: nothing is put anywhere until that send has gone
+        this.waitingOnSend = true;
+        if ((await this.within(pause(FIRST_SEND_LOOK_MS))) === EXPIRED) return this.expired();
+        this.waitingOnSend = false;
+        continue;
+      }
       const sending = submissionOf(this.session);
       if (sending !== null) {
         this.waitingOnSend = true;
@@ -174,13 +200,21 @@ class HandOver {
       const target = composerOf(this.session);
       if (target !== null) {
         this.asking = true;
-        const answer = await this.within(target.attachPasted?.(this.block, target === pressed ? 'press' : 'hand-over') ?? Promise.resolve<BoxAnswer>('closed'));
+        const comings = this.comings;
+        const asked = target.attachPasted?.(this.block, target === pressed ? 'press' : 'hand-over') ?? Promise.resolve<BoxAnswer>('closed');
+        // an ask whose promise rejects may or may not have put the block in the box
+        const answer = await this.within(asked.catch(() => 'rejected' as const));
         if (answer === EXPIRED) return this.expired();
         this.asking = false;
         switch (answer) {
+          case 'rejected':
+            return { kind: 'unconfirmed' };
           case 'shown':
             return { kind: 'taken' };
           case 'kept':
+            // a save across which the authority changed may be overwritten by the one after it: ask that one
+            if (this.comings === comings && composerOf(this.session) === target) return { kind: 'added' };
+            continue;
           case 'present':
             return { kind: 'added' };
           case 'unsaved':
@@ -212,8 +246,8 @@ class HandOver {
     const read = await this.within(this.read());
     if (read === EXPIRED) return this.expired();
     if (!read.ok) return this.refuse(readRefusal(read.result));
-    if (holdsBlock(read.kept, this.block.id)) this.unaccountedRevision = false; // a write of it landed
     if (!this.believed(comings)) return null; // a composer or a send may have written over the store: ask again
+    if (holdsBlock(read.kept, this.block.id)) this.unaccountedRevision = false; // a write of it landed, and nothing since
     if (holdsBlock(read.keep, this.block.id)) return { kind: 'added' };
     const replaces = this.overLink ? read.revision : (read.revision ?? DRAFT_CLAIM);
     const draft = draftOf(appendPasted(read.keep, this.block), stamp());
@@ -223,16 +257,22 @@ class HandOver {
     if ('withheld' in result) return this.refuse('failed'); // only a take-back's stage is withheld: never this draft
     if (result.ok) {
       this.unaccountedRevision = false; // what an earlier write named is no longer kept, and never will be again
-      return this.believed(comings) ? { kind: 'added' } : null;
+      if (this.believed(comings)) return { kind: 'added' };
+      this.unaccountedFor(replaces); // kept, and a writer may have written over it since: a believed read settles it
+      return null;
     }
     if (said(result, STALE_DRAFT_WORDS) || said(result, DRAFT_KEPT_WORDS)) return null;
     if (said(result, STAGED_DRAFT_WORDS)) return this.refuse('taking-back');
     if (unknownSession(result)) return this.refuse('unknown');
     if (isNotOffered(result)) return this.refuse('no-store');
     // not definite: it may still land
+    this.unaccountedFor(replaces);
+    return null;
+  }
+
+  private unaccountedFor(replaces: string | null): void {
     if (replaces === DRAFT_CLAIM) this.unaccountedClaim = true;
     else this.unaccountedRevision = true;
-    return null;
   }
 
   // The rounds spent: one read more, and no write. Over the link only the machine's own answer, with no save of the
@@ -251,7 +291,11 @@ class HandOver {
   // On this Mac the window's read, which answers a cleared draft as none; over the link the machine's, every time
   // (never this window's memory of its revision), and the document to keep the newest this window holds that the
   // machine has not taken (a clear still out counts as a document with no block), else what the machine answered.
-  private async read(): Promise<Read> {
+  private read(): Promise<Read> {
+    return this.readOnce().catch((): Read => ({ ok: false, result: rejected() }));
+  }
+
+  private async readOnce(): Promise<Read> {
     if (!this.overLink) {
       const result = await this.client.invoke('session.drafts.get', { appSessionId: this.session });
       if (!result.ok) return { ok: false, result };
@@ -265,8 +309,9 @@ class HandOver {
     return { ok: true, kept, keep: unsaved !== undefined ? docOfDraft(unsaved) : kept, revision: result.value?.updatedAt ?? null };
   }
 
+  // A write whose promise rejects is not definite: it may have landed.
   private write(draft: Draft | null, replaces: string | null): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
-    if (this.overLink) return saveRemoteDraftOnce(this.client, this.session, draft, replaces);
-    return this.client.invoke('session.drafts.set', { appSessionId: this.session, draft, ...(replaces !== null && { replaces }) });
+    const written = this.overLink ? saveRemoteDraftOnce(this.client, this.session, draft, replaces) : this.client.invoke('session.drafts.set', { appSessionId: this.session, draft, ...(replaces !== null && { replaces }) });
+    return written.catch(() => rejected() as CommandResult<'session.drafts.set'>);
   }
 }

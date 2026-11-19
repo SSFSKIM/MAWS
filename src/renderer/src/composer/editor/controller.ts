@@ -86,7 +86,8 @@ export interface EditorHandle {
   settleDictation(): void; // the interim words become ordinary text where they stand and the sink ends (a card covered the box)
   // UX wave U6b-5a (decisions 8 and 30; Interfaces §C): an attached block, once this mount's draft is restored. 'present'
   // when the document holds a block of its id (nothing changes); else one block, at the caret the editor left (the
-  // keyboard with it) or at the end (the caret and the keyboard untouched). 'busy': a submission is in flight. 'closed':
+  // keyboard with it, the caret after the block) or at the end (the caret, any selection and the keyboard untouched),
+  // never over a selection (Decision Log 14 (iv)). 'busy': a submission is in flight. 'closed':
   // the editor takes no typing. 'gone': it unmounted meanwhile. Nothing changes in those three. With `save`, the pending
   // write is dropped and the draft saved now through the port: 'taken' when the port answered true, 'unsaved' when not.
   attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean }): Promise<EditorAttach>;
@@ -192,6 +193,20 @@ export const forgetSubmissions = (): void => submissions.clear();
  * accepted, the text back when it was refused), true when it was accepted. Null: none.
  */
 export const submissionOf = (appSessionId: AppSessionId): Promise<boolean> | null => submissions.get(appSessionId)?.done ?? null;
+// UX wave U6b-5a (S1; Decision Log 14 (ii)): who hears each accepted send's document, by session
+const sendWatchers = new Map<AppSessionId, Set<(doc: ComposerDoc) => void>>();
+/**
+ * UX wave U6b-5a (S1; Decision Log 14 (ii)): `heard` is told the document of each send of the session accepted from now
+ * on, before its submission settles, so a hand-over knows a block it handed went with a message. Returns the unwatch.
+ */
+export function watchAcceptedSends(appSessionId: AppSessionId, heard: (doc: ComposerDoc) => void): () => void {
+  const watchers = sendWatchers.get(appSessionId) ?? new Set();
+  sendWatchers.set(appSessionId, watchers.add(heard));
+  return () => {
+    watchers.delete(heard);
+    if (watchers.size === 0 && sendWatchers.get(appSessionId) === watchers) sendWatchers.delete(appSessionId);
+  };
+}
 
 // E9: the open dictation sink's bookkeeping.
 interface Dictation { ended: boolean; onEnded(): void }
@@ -543,6 +558,7 @@ export class EditorController {
       warn(error instanceof Error ? error.message : String(error));
     }
     if (accepted) {
+      sendWatchers.get(appSessionId)?.forEach((heard) => heard(doc));
       if (this.drafts.clearsOnSend?.() ?? true) void this.saveDraft(null);
     } else {
       this.writer.change(doc);
@@ -759,16 +775,23 @@ export class EditorController {
     if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId)) return 'busy';
     if (this.inputs.disabled !== null || !editor.isEditable) return 'closed';
     const node = pastedBlock(block.text, block.id);
+    const { state } = editor;
+    // Decision Log 14 (iv): at a collapsed position, never over a selection, which keeps the words it holds
     if (options.at === 'caret') {
-      (editor.isFocused ? editor.chain() : editor.chain().focus(this.caretLeft ? null : 'end')).insertContent(node).run(); // `null`: the kept selection
+      // the caret the person left (a range's head; one in no text, as ⌘A leaves it, at the nearest text before), else the end
+      const { $head } = state.selection;
+      const at = editor.isFocused || this.caretLeft ? ($head.parent.inlineContent ? $head.pos : Selection.near($head, -1).head) : Selection.atEnd(state.doc).head;
+      editor.chain().insertContentAt(at, node).run(); // the caret after the block
       editor.view.focus();
     } else {
-      // as `appendPasted` places it in a stored draft: into an empty last paragraph, else a paragraph of its own
-      const { state } = editor;
+      // as `appendPasted` places it in a stored draft: into an empty last paragraph, else a paragraph of its own. Every
+      // position before the end keeps its number, so the person's caret and selection are set back as they were (mapped,
+      // a caret in that empty paragraph would move past the block).
       const last = state.doc.lastChild;
       const atom = state.schema.nodeFromJSON(node);
       const empty = last !== null && last.type.name === 'paragraph' && last.content.size === 0;
-      editor.view.dispatch(empty ? state.tr.insert(state.doc.content.size - 1, atom) : state.tr.insert(state.doc.content.size, state.schema.nodes.paragraph.create(null, atom)));
+      const tr = empty ? state.tr.insert(state.doc.content.size - 1, atom) : state.tr.insert(state.doc.content.size, state.schema.nodes.paragraph.create(null, atom));
+      editor.view.dispatch(tr.setSelection(Selection.fromJSON(tr.doc, state.selection.toJSON())));
     }
     if (!options.save) return 'taken';
     this.writer.cancel(); // the insertion's own pending write: this save is it
