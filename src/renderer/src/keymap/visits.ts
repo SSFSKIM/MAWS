@@ -14,6 +14,7 @@ import { ipc } from '../ipc/client';
 import { useLayout, type LayoutState } from '../stores/layout';
 import { allTabs, currentSet } from '../stores/layout-model';
 import { focusPaneElement } from '../main/pane-dom';
+import { returnOverviewFocusTo } from '../overview/OverviewPanel';
 import { registerAction } from './actions-runtime';
 import { available } from './shell-navigation';
 import { EMPTY_RECORD, gone, PLACES_MAX, placeOf, projectionOf, refocused, samePlace, seen, target, type Place, type PlaceRecord, type Projection } from './places';
@@ -127,17 +128,18 @@ function heldByStep(next: Projection): Projection {
   }
   if (next.focusedPane === pane) return next;
   const region = document.getElementById('region-main');
-  if (region && available(region)) focusPaneElement(pane as 0 | 1);
+  if (region && available(region)) focusTabOrPane(meant.fronts[pane] ?? '', pane);
   if (currentSet(useLayout.getState().main).focusedPane !== pane) useLayout.getState().focusPane(pane as 0 | 1);
   return meant;
 }
 
-// One read (Interfaces §D, the reader's four steps): tabs that left take their entries; a change of the focused pane
-// alone points the entry at the tab now in front; any other change of the projection is `seen`.
+// One read (Interfaces §D, the reader's four steps): a change of the focused pane alone points the entry at the tab now
+// in front; any other change of the projection is `seen`; then tabs that left take their entries. The change is
+// classified against the record as it stood (the branch panel, scalpel-2#2): a close of the tab in front is a new visit
+// to what the strip then shows, never a step back from a page that pruning would have left the record standing on.
 function read(last: Projection, next: Projection): void {
   let { record, opened } = useVisits.getState();
   const left = new Set([...last.tabs].filter((id) => !next.tabs.has(id)));
-  if (left.size > 0) record = gone(record, left);
   const place = placeOf(next);
   if (sameView(last, next)) {
     if (last.focusedPane !== next.focusedPane && place !== null) record = refocused(record, place);
@@ -147,15 +149,18 @@ function read(last: Projection, next: Projection): void {
     const came = place.kind === 'tab' && !(before !== null && samePlace(before, place)) ? openedOf(place.id) : null;
     if (came !== null) opened = [came, ...opened.filter((o) => !sameOpened(o, came))].slice(0, OPENED_MAX);
   }
+  if (left.size > 0) record = gone(record, left);
   if (record !== useVisits.getState().record || opened !== useVisits.getState().opened) useVisits.setState({ record, opened });
 }
 
 // A step (decision 15), in one synchronous run: the position first, then the layout written whole through the store's
 // own acts, so the reader's next read finds the projection equal to the entry it stands at and records nothing. The
-// Settings dialog closes; the Overview is set both ways (finding 5). The pane in front takes the keyboard: after a step
-// to a tab, on the next frame, as after ⌥⌘] (`stepMainTab`), unless the hand-off ended before it; before the Overview
-// opens over a tab, at once, so the element the Overview gives the keyboard back to when it closes is in the pane of the
-// place it is over. The hand-off starts from the projection the step's writes left.
+// Settings dialog closes; the Overview is set both ways (finding 5); a step to a tab brings the main area back from a
+// maximized or floating side column, as attention navigation does (`revealMain`; the branch panel, scalpel-2#4). The
+// keyboard goes to the tab the step put in front: on the next frame after a step to a tab, as after ⌥⌘]
+// (`stepMainTab`), unless the hand-off ended before it; and wherever an Overview the step closes, opens or keeps
+// gives it back when it closes, that tab is named as its opener (the branch panel, sweep#6 and scalpel-2#3), never the
+// tab the strip still draws as selected. The hand-off starts from the projection the step's writes left.
 function step(delta: 1 | -1): void {
   const { record } = useVisits.getState();
   const to = target(record, delta);
@@ -169,22 +174,40 @@ function step(delta: 1 | -1): void {
   layout().closeSettings();
   // From one Overview entry to another the Overview stays open, the same panel with the keyboard: only what it is over
   // changes (showing a tab or a page leaves it open). Closed and opened again in one run it would stay mounted, its focus
-  // on opening would not run again, and the pane primed for it would keep the keyboard behind it.
+  // on opening would not run again, and the keyboard would stay behind it.
   const keepsOverview = to.place.kind === 'overview' && layout().overviewOpen;
-  if (layout().overviewOpen && !keepsOverview) layout().setOverviewOpen(false);
-  if (under.kind === 'tab') layout().activateTab(under.id);
-  else layout().openDestination(under.destination);
-  if (to.place.kind === 'overview' && !keepsOverview) {
-    if (under.kind === 'tab') focusPaneNow();
-    layout().setOverviewOpen(true);
+  if (under.kind === 'tab') {
+    layout().activateTab(under.id);
+    layout().revealMain();
+    const element = tabElement(under.id, currentSet(layout().main).focusedPane);
+    if (element !== null && (layout().overviewOpen || to.place.kind === 'overview')) returnOverviewFocusTo(element);
   }
+  if (layout().overviewOpen && !keepsOverview) layout().setOverviewOpen(false);
+  if (under.kind === 'page') layout().openDestination(under.destination);
+  if (to.place.kind === 'overview' && !keepsOverview) layout().setOverviewOpen(true);
   if (under.kind === 'tab') startHandoff(projectionOf(layout()), to.place.kind === 'tab');
   else endHandoff();
 }
 
+// A main tab's element in its pane's strip (`main/Tab.tsx`: the strip portaled into the chrome, else inside the pane).
+function tabElement(tabId: string, pane: number): HTMLElement | null {
+  const id = tabId.replace(/["\\]/g, '\\$&');
+  return document.querySelector<HTMLElement>(`[data-chrome-pane="${pane}"] [role="tab"][data-tab-id="${id}"]`)
+    ?? document.getElementById(`pane-${pane}`)?.querySelector<HTMLElement>(`[data-pane-strip] [role="tab"][data-tab-id="${id}"]`)
+    ?? null;
+}
+
+function focusTabOrPane(tabId: string, pane: number): void {
+  const element = tabId === '' ? null : tabElement(tabId, pane);
+  if (element !== null) element.focus();
+  else focusPaneElement(pane as 0 | 1);
+}
+
 function focusPaneNow(): void {
   const region = document.getElementById('region-main');
-  if (region && available(region)) focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
+  if (!region || !available(region)) return;
+  const { focusedPane } = currentSet(useLayout.getState().main);
+  focusTabOrPane(projectionOf(useLayout.getState()).fronts[focusedPane] ?? '', focusedPane);
 }
 
 // The ends by registration (decision 16): `go.back` has a handler while there is an entry before, `go.forward` while

@@ -69,6 +69,16 @@ export function OverviewLayer() {
 
 type Gesture = { kind: 'move' | 'resize'; pointerX: number; pointerY: number; start: OverviewRect };
 
+// UX wave U6b-5a (the branch panel's fix wave, sweep#6 and scalpel-2#3): Back and Forward name the element the
+// Overview gives the keyboard back to when it closes, the tab of the place a step put under it (`keymap/visits.ts`).
+// Named while it is open, it replaces the opener; named before it opens, it is the opener of that opening.
+let openerOfMounted: { current: Element | null } | null = null;
+let openerNamed: Element | null = null;
+export function returnOverviewFocusTo(element: Element): void {
+  if (openerOfMounted !== null) openerOfMounted.current = element;
+  else openerNamed = element;
+}
+
 function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }) {
   const stored = useLayout((s) => s.regions.overview);
   const paneIndex = useLayout((s) => currentSet(s.main).focusedPane);
@@ -81,9 +91,12 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
   const opener = useRef<Element | null>(null);
   const restoreFocus = useRef(true);
   useEffect(() => {
-    opener.current = document.activeElement;
+    opener.current = openerNamed ?? document.activeElement;
+    openerNamed = null;
+    openerOfMounted = opener;
     focusOverview();
     return () => {
+      if (openerOfMounted === opener) openerOfMounted = null;
       if (!restoreFocus.current) return;
       const back = opener.current;
       const usable = back instanceof HTMLElement && back.isConnected && back !== document.body;
