@@ -4,17 +4,18 @@
 // UX wave U6b-5a (M1, decisions 2 and 3): a tool shown by its key has the keyboard, by its own answer to the focus
 // request or else at F6's stop two frames later; hidden by its key, the keyboard goes back to the composer when it was in
 // the column or nowhere.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useEffect, useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { A, panelOf, probeTool, resetPanelStores, TestHost, type ProbeState } from '../test-support/panel';
 import { useLayout } from '../stores/layout';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
-import { registerPanelTool, usePanelHost } from './host';
+import { panelHost, registerPanelTool, usePanelHost } from './host';
 import type { PanelToolContext } from './tool';
 import { surfaceTabs } from './surface-model';
-import { toggleSurface } from './SurfaceRow';
+import { SurfaceRow, toggleSurface } from './SurfaceRow';
 
 beforeEach(() => resetPanelStores());
 afterEach(() => resetPanelStores());
@@ -237,5 +238,84 @@ describe('the keyboard on show and hide', () => {
     act(() => field().focus()); // the person, before the hide is drawn
     frame();
     expect(document.activeElement).toBe(field());
+  });
+
+  // The branch panel's fix wave (G3): one hand-over of the keyboard at a time. A newer act of the keys, a newer request of
+  // the host for any tab, or (for a show) a press ends the one before, and nothing it scheduled moves the keyboard after.
+  it('a show’s fallback does nothing once the host has asked another tab for the keyboard; the control: alone, it lands', () => {
+    offs.push(registerPanelTool(probeTool('session-info', { title: 'Session info' }).tool)); // answers nothing either
+    render(<Window />);
+    act(() => toggleSurface('background')); // the upper group
+    let terminal = '';
+    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A, group: 'lower' }))); // the lower group
+    act(() => void panelHost.addTool('session-info', { appSessionId: A })); // in the upper group's place: Background out of view
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['session-info', 'terminal']);
+    frame();
+    frame();
+    act(() => box().focus());
+    act(() => toggleSurface('background')); // shown by its key in the upper group; it answers nothing
+    act(() => panelHost.selectTab(terminal)); // a native menu's act asks for Terminal: no key or pointer press here
+    expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
+    frame();
+    frame();
+    expect(document.activeElement, 'the background tool’s fallback is stale').toBe(screen.getByLabelText('Shell input'));
+
+    act(() => box().focus()); // the control, in this test: the same show with no newer request
+    act(() => toggleSurface('session-info'));
+    frame();
+    frame();
+    expect(document.activeElement).toBe(upperContent());
+  });
+
+  it('a hide’s return to the composer does nothing once the column is shown again before its frame; the control: alone, it returns', () => {
+    render(<Window />);
+    composerOfA();
+    act(() => toggleSurface('terminal'));
+    expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
+    act(() => toggleSurface('terminal')); // hidden: the return waits for the next frame
+    act(() => toggleSurface('terminal')); // shown again first: the shell takes the keyboard
+    expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
+    frame();
+    frame();
+    expect(document.activeElement, 'the hide’s return is stale').toBe(screen.getByLabelText('Shell input'));
+
+    const terminal = tabOf('terminal'); // by the host this time: a reopen that is no key's
+    act(() => toggleSurface('terminal'));
+    act(() => panelHost.selectTab(terminal));
+    frame();
+    expect(document.activeElement, 'stale under the host’s reopen too').toBe(screen.getByLabelText('Shell input'));
+
+    act(() => toggleSurface('terminal')); // the control, in this test: the same hide with nothing after it
+    frame();
+    expect(document.activeElement).toBe(box());
+  });
+
+  it('a tool chosen in More surfaces keeps the keyboard it took; the menu’s close does not take it back to its trigger', async () => {
+    const answered = new WeakMap<ProbeState, number>();
+    function Shell({ state, ctx }: { state: ProbeState; ctx: PanelToolContext }) {
+      const field = useRef<HTMLInputElement>(null);
+      useEffect(() => {
+        if (ctx.focusRequest <= (answered.get(state) ?? 0)) return;
+        answered.set(state, ctx.focusRequest);
+        field.current?.focus();
+      }, [ctx.focusRequest, state]);
+      return <><button type="button">New terminal here</button><input ref={field} aria-label="Extra shell" /></>;
+    }
+    offs.push(registerPanelTool(probeTool('extra', { title: 'Extra', render: Shell }).tool));
+    render(<><SurfaceRow /><Window /></>);
+    const user = userEvent.setup();
+    const trigger = screen.getByRole('button', { name: 'More surfaces' });
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitem', { name: 'Extra' }));
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the menu's close focus, a task after it unmounts
+    frame();
+    frame();
+    expect(document.activeElement).toBe(screen.getByLabelText('Extra shell'));
+
+    await user.click(trigger); // the control, in this test: a menu closed with no act keeps its own return
+    await screen.findByRole('menu');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });
