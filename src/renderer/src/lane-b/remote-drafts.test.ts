@@ -634,4 +634,3 @@ describe('one queue for each session’s saves', () => {
     expect(unsavedRemoteDraft(REMOTE)).toBeUndefined();
   });
 });
-});
