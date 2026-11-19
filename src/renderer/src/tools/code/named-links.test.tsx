@@ -417,4 +417,23 @@ describe('the differential: every path the rule names is a chip the window draws
     expect(faults.slice(0, 10).map(({ markdown, path }) => `${JSON.stringify(path)} in ${JSON.stringify(markdown.slice(0, 200))}`)).toEqual([]);
     expect(faults).toHaveLength(0);
   });
+
+  // M1's review, finding 1: strings of whole lines, a table's beside a list item's, a quote's, an indented one's and a
+  // code span's that runs from one line to the next, so the class a table in a container belongs to is met often
+  it('over seeded lines of tables, containers and code spans', { timeout: 300_000 }, () => {
+    const seed = 0x7461626c;
+    const count = 1500;
+    const LINES = [
+      '- T', '1. T', '> p', '> p `x', '> - T', 'T', 'T | u', '| a | b |', '  | a | b |', ':---', '  :---', '-|-', '|---|---|', '  |---|---|', '> |---|---|',
+      '`a', 'x `y', '[r](/secret)`', '[r](/secret) `', '| [r](/secret) | x |', '| x | y | [r](/secret) |', '  [r](/secret)', '> [r](/secret)', '- [r](/secret)', '',
+    ];
+    const random = mulberry32(seed);
+    const faults: string[] = [];
+    for (let k = 0; k < count; k += 1) {
+      const markdown = Array.from({ length: 2 + Math.floor(random() * 6) }, () => LINES[Math.floor(random() * LINES.length)]!).join('\n');
+      const chips = chipPaths(markdown);
+      for (const path of linkPaths(markdown)) if (!chips.includes(path)) faults.push(`${JSON.stringify(path)} in ${JSON.stringify(markdown)}`);
+    }
+    expect(faults.slice(0, 10)).toEqual([]);
+  });
 });

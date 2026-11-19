@@ -650,12 +650,18 @@ interface Context {
 // link; a blank line, or a line of a quote's markers alone, ends a paragraph; a list item or a deeper quote starts a new
 // one; a line that only continues a paragraph (a lazy one too) stays in it. Raw HTML is no block here, as in the window
 // (its parser has HTML switched off). Where the pass cannot tell (a list item's own indentation, an ordered item that
-// cannot interrupt a paragraph, a table under a paragraph), it takes the side that reads fewer links. A refusal here
+// cannot interrupt a paragraph, a table under a paragraph, a table in a list item), it takes the side that reads fewer
+// links. A refusal here
 // (a cap, the budget) refuses the whole text: its definitions, which every context reads, are not all known.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
   let fence: { marker: number; length: number; quote: number; column: number } | null = null;
   let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean } | null = null;
-  let table: { quote: number; cells: number } | null = null; // `cells`: the head's, as many as the window draws in a row
+  // `cells`: the head's, as many as the window draws in a row. `dropped`: a table in a container, of which nothing is read
+  let table: { quote: number; cells: number; dropped: boolean } | null = null;
+  // Whether a list item may be open (UX wave U6b-4b, the review's finding 1). The pass does not follow a list item's
+  // extent, so this is the side that reads fewer links: set by a line that opens one, and cleared only by a line that
+  // stands at the very start of its line (no quote marker, no indentation) after a blank one, which no list item holds.
+  let listOpen = false;
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
   // draws it only where a call names it, so nothing in it is read as a link.
   let footnote = false;
@@ -688,8 +694,8 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
   // A table's row: a context for each of its first `cells` cells and for no other. The window draws as many cells as the
   // head has (mdast-util-to-hast's `tableRow` renders `align.length` of them), so a link in a cell past them is never
   // drawn, and names nothing (UX wave U6b-4b, R1).
-  const row = (line: Line, cells: number) => {
-    if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end, m).slice(0, cells)) contexts.push({ start, end });
+  const row = (line: Line, cells: number, dropped: boolean) => {
+    if (!footnote && !dropped) for (const [start, end] of cellsOf(text, line.content, line.end, m).slice(0, cells)) contexts.push({ start, end });
   };
   // A leading byte order mark is passed over, as the window's parser drops it (micromark's `preprocess`)
   for (let start = text.charCodeAt(0) === 0xfeff ? 1 : 0; start < text.length; ) {
@@ -700,6 +706,8 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     const blank = blankFrom(text, line.content, line.end, m);
     if (line.footnote) footnote = true;
     else if (footnote && !blank && afterBlank && line.indent < 4) footnote = false;
+    if (line.opens) listOpen = true;
+    else if (listOpen && !blank && afterBlank && fence === null && line.content === line.start) listOpen = false;
     afterBlank = blank;
     if (fence !== null) {
       // Inside a fence a line is read for the fence's own quote markers and nothing else (a list marker there is code).
@@ -731,9 +739,11 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     const opened = line.indent < 4 ? fenceAt(text, line.content, line.end, m) : null;
     const heading = line.indent < 4 ? headingAt(text, line.content, line.end, m) : -1;
     const blockStarts = opened !== null || heading >= 0 || line.thematic;
-    if (table !== null && (line.quote < table.quote || line.opens || blockStarts)) table = null;
+    // A line of another quote's depth ends the table: a shallower one is no body row (never a lazy line), and a deeper one
+    // opens a quote whose paragraph the next lines may continue lazily
+    if (table !== null && (line.quote !== table.quote || line.opens || blockStarts)) table = null;
     if (table !== null) {
-      row(line, table.cells);
+      row(line, table.cells, table.dropped);
       start = next;
       continue;
     }
@@ -758,9 +768,15 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
       ahead = next < text.length ? yield* lineFrom(next) : null;
       const cells = ahead !== null ? tableHeadCells(text, line, ahead, m) : 0;
       if (ahead !== null && cells > 0) {
+        // A table in a list item, or under a quote's paragraph whose next line this head would continue lazily: the window
+        // reads its delimiter row as a lazy line (no table), or ends the table at a line the item does not hold, and either
+        // way reads the lines round it as this pass cannot tell. Nothing of it is read, nor of the paragraph it interrupts;
+        // the next blank line, block or quote ends it (the review's finding 1).
+        const dropped = listOpen || (paragraph !== null && line.quote < paragraph.quote);
+        if (dropped && paragraph !== null) paragraph.dropped = true;
         yield* closeParagraph();
-        table = { quote: line.quote, cells };
-        row(line, cells);
+        table = { quote: line.quote, cells, dropped };
+        row(line, cells, dropped);
         start = ahead.end + 1; // the delimiter row holds no link
         ahead = null;
         continue;
