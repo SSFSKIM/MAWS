@@ -226,6 +226,8 @@ export const EDITOR_COPY = {
     maws: 'Read-only: MAWS does not edit its own files',
     added: 'Read-only: this file is in the Library, not in this session’s folders. Choose it with File ▸ Open File… to edit it',
     result: 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it',
+    // UX wave U6b-4c (Q2, R4): a file opened through a link in a Markdown file that is itself read-only for the session
+    linked: 'Read-only: the file that links this one is read-only in this conversation. Choose it with File ▸ Open File… to edit it',
     head: 'Read-only: the file is larger than the editor’s cap',
     encoding: 'Read-only: the file is not UTF-8',
     loading: 'Read-only until the file has loaded',

@@ -800,10 +800,15 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   );
 
   // Every row reads this context: it changes only with the props, never with the rows.
-  const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor],
-  );
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, decision 9): a subagent's rows open a
+  // file with the agent's id, which the window's follow names as the link's source; given here, so every click source of
+  // the mount carries it and none has to (a path link, a read's chip, an edit's chip, an anchored comment's chip).
+  const childAgent = variant === 'child' && typeof source.agentId === 'string' ? source.agentId : null;
+  const context = useMemo<TranscriptContextValue>(() => {
+    const merged: TranscriptActions = { ...DEFAULT_ACTIONS, ...actions };
+    const acts: TranscriptActions = childAgent === null ? merged : { ...merged, openFile: (path, line, appSessionId, options) => merged.openFile(path, line, appSessionId, { ...options, agent: childAgent }) };
+    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
+  }, [storeKey, variant, actions, childAgent, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor]);
 
   return (
     <TranscriptProvider value={context}>

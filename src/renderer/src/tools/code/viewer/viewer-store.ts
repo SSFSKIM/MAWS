@@ -55,6 +55,16 @@
 // its baseline standing); one guard of its own (`retrying`) holds from the press until the read it started has settled,
 // the wait for the file's watch included, and it does not start while a load is out or a save (or its conflict read) is.
 //
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §F; W1): a read of a
+// session's file waits while a follow of a link to it is under way (`following`), so the first read through a link is
+// answered by what the daemon recorded, and notes how many follows of it had answered `linked` when it was sent
+// (`linkedCount`). A read sent before the click can land refused, or read-only, after a follow found the link: once no
+// follow is under way, such an answer whose count has moved is read once more, as a shown tab is read again (`readAgain`,
+// or at the next mount), never over unsaved edits, and only for the entry and generation it landed in. That read again
+// holds the guard the notice's Retry holds (`retrying`), each read of the two taking it in turn, so neither starts while
+// the other's read is on its way. A file opened read-only because the Markdown file that links it is read-only for the
+// session is locked `linked` (`outside.linked`), with its own sentence.
+//
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
 //
@@ -87,6 +97,7 @@ import { dirname, sameFile } from '../files/tree';
 import { EDITOR_COPY, REFUSAL, VIEWER_COPY } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
 import { failureOf, type FileFailure } from './notice'; // UX wave U6b-4b
+import { following, linkedCount } from '../follow'; // UX wave U6b-4c
 
 export const VIEWER_ENTRIES_MAX = 20;
 
@@ -141,7 +152,9 @@ export interface ViewerEntry {
   readOnly: boolean; // E2: mounted read-only (the File artifact viewer; E2's Decision Log 7): never editable, whatever the file
   named: boolean; // U6c: the last load's answer carried `named`: the file is outside the session's folders, admitted by the transcript
   // UX wave U6e (§D; decision 6)
-  locked: 'maws' | 'added' | 'result' | null; // the latest answered read: `own` → 'maws'; else `outside.writable === false` → its `why`
+  // the latest answered read: `own` → 'maws'; else `outside.writable === false` → 'linked' with `outside.linked` (UX wave
+  // U6b-4c), else its `why`
+  locked: 'maws' | 'added' | 'result' | 'linked' | null;
   pin: string | null; // the real path of the document the entry holds; null for a document read with no `outside`
   agent: boolean; // the entry's reads carry `agent` (the tab's mark, decision 19)
   textEditable: boolean; // the baseline is a text the editor takes losslessly (`isEditable` where it landed); with the admission it decides `editable`
@@ -302,7 +315,7 @@ export const isEditable = (file: Pick<ViewerEntry, 'kind' | 'complete' | 'encodi
 type Admission = Pick<ViewerEntry, 'named' | 'locked'> & { real: string | null };
 const admissionOf = (read: FilesReadOutput): Admission => ({
   named: read.named === true,
-  locked: read.own === true ? 'maws' : read.outside?.writable === false ? (read.outside.why ?? 'added') : null,
+  locked: read.own === true ? 'maws' : read.outside?.writable === false ? (read.outside.linked === true ? 'linked' : (read.outside.why ?? 'added')) : null,
   real: read.outside?.real ?? null,
 });
 // Whether the admission and the pin let a text the editor takes be edited: not mounted read-only, not locked, and outside
@@ -339,7 +352,7 @@ function refusedSaveThere(entry: Pick<ViewerEntry, 'appSessionId' | 'locked' | '
 // first what locks it, then a file outside the folders with no pin (W6); a savable outside file has no reason. U6f: on
 // another machine, after MAWS's own, the standing's sentence for a save there (`elsewhereWords`); `standing`, the one a
 // render follows, else the one now.
-export type ReadOnlyReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'outside' | 'head' | 'encoding' | 'loading';
+export type ReadOnlyReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'linked' | 'outside' | 'head' | 'encoding' | 'loading';
 export function readOnlyReason(entry: ViewerEntry, standing?: RemoteStanding | null): ReadOnlyReason | null {
   if (entry.locked === 'maws') return 'maws';
   if (elsewhereWords(entry, standing) !== null) return 'elsewhere';
@@ -407,6 +420,15 @@ type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'te
 // `revisit`, or showing a failed or named tab again).
 type LoadCause = 'event' | 'revisit';
 
+// UX wave U6b-4c (W1 g): a read's answer that landed refused, or as an outside file that may not be saved: for whom and for
+// which path it was sent, the generation it landed in, and the follows it noted as linked when it was sent.
+interface Landed {
+  appSessionId: AppSessionId | null;
+  path: string;
+  generation: number;
+  noted: number;
+}
+
 // UX wave U6b-2: the token a frame holds: the one drawn, or the one kept drawn while a newer one is asked.
 const heldToken = (frame: EntryFrame | null): string | null =>
   frame?.status === 'ready' ? frame.token : frame?.status === 'asking' ? (frame.shown?.token ?? null) : null;
@@ -461,6 +483,8 @@ export function createViewerStore(client: MawsBridge) {
   let unsubscribe: (() => void) | null = null;
   let unfollowStanding: (() => void) | null = null; // UX wave U6f: the machines' standing, for `editable` there
   const pressedOpen = new Set<string>(); // UX wave U6f (W3): tabs whose Open it asked for a load not started yet
+  const guards = new Map<string, number>(); // UX wave U6b-4c: each tab's latest turn of the read again's guard (`retrying`)
+  let lastGuard = 0;
 
   return create<ViewerStore>()((set, get) => {
     const patch = (tabId: string, next: Partial<ViewerEntry>) =>
@@ -476,8 +500,13 @@ export function createViewerStore(client: MawsBridge) {
     // another machine is asked as today, to the byte (decision 10). U6e (decision 19): and `agent` beside it while the
     // entry holds the agent's mark. U6f (decision 11; Decision Log 16): `named` and `agent` also for a session that takes
     // the remote route, and `open` there for a path the person opened (`opensThere`).
-    const readChunk = (entry: Pick<ViewerEntry, 'appSessionId' | 'artifact' | 'path' | 'agent'>, offset: number, length: number, hash: boolean): Promise<CommandResult<'files.read'>> => {
+    // UX wave U6b-4c (W1 a, g): a session's read waits until no follow of a link to the path is under way, asking again after
+    // each wait; `sent` hears, as the read is sent, how many follows of it have answered `linked` (an artifact's read, 0).
+    const readChunk = (entry: Pick<ViewerEntry, 'appSessionId' | 'artifact' | 'path' | 'agent'>, offset: number, length: number, hash: boolean, sent?: (linked: number) => void): Promise<CommandResult<'files.read'>> => {
       const chunk = { offset, length, ...(hash ? { hash: true } : {}) };
+      const under = entry.artifact ? null : following(entry.appSessionId, entry.path);
+      if (under !== null) return under.then(() => readChunk(entry, offset, length, hash, sent));
+      sent?.(entry.artifact ? 0 : linkedCount(entry.appSessionId, entry.path));
       if (entry.artifact) return settled(client.invoke('library.read', { ...entry.artifact, ...chunk }));
       const { appSessionId } = entry;
       const local = appSessionId !== null && machineOf(appSessionId) === client.localMachine;
@@ -515,6 +544,7 @@ export function createViewerStore(client: MawsBridge) {
       used.delete(tabId);
       held.delete(tabId);
       pressedOpen.delete(tabId);
+      guards.delete(tabId); // UX wave U6b-4c
       mounted.delete(tabId);
       views.delete(tabId);
       set((s) => {
@@ -717,9 +747,9 @@ export function createViewerStore(client: MawsBridge) {
     // E5: every read of a text the editor could take asks for the file's hash; a continuation answering another hash
     // than the first chunk's means the file changed mid-load, and the load ends there (an open load shows what it has,
     // read-only; a change load lands nothing): the change's own `files.changed` re-reads it.
-    const loadOnce = async (tabId: string, reason: 'open' | 'change', cause: LoadCause) => {
+    const loadOnce = async (tabId: string, reason: 'open' | 'change', cause: LoadCause): Promise<Landed | null> => {
       const entry = get().entries.get(tabId);
-      if (!entry) return;
+      if (!entry) return null;
       const generation = ++lastGeneration;
       generations.set(tabId, generation);
       const live = () => generations.get(tabId) === generation;
@@ -727,13 +757,23 @@ export function createViewerStore(client: MawsBridge) {
       const extent = reason === 'change' && entry.kind === 'head' ? Math.min(CODE_CAP, entry.loaded) : 0;
       const { path } = entry;
       const pressed = pressedOpen.delete(tabId); // U6f (W3): the load an Open it press asked for
-      // The reads are sent one after another, each awaited: `asked` is the number of the one last sent (U6e: `admit`).
+      // The reads are sent one after another, each awaited: `asked` is the number of the one last sent (U6e: `admit`), drawn
+      // as it is sent (U6b-4c: after any wait for a follow), with the follows it found linked (`noted`).
       let asked = 0;
       let carried = false; // U6f (fix wave, finding 6): whether the read last sent carried `open`
-      const read = (offset: number, length: number, hash: boolean) => {
-        asked = ++lastAsk;
-        carried = opensThere(entry); // the test `readChunk` applies, at the same moment
-        return readChunk(entry, offset, length, hash);
+      let noted = 0;
+      const read = (offset: number, length: number, hash: boolean) =>
+        readChunk(entry, offset, length, hash, (linked) => {
+          asked = ++lastAsk;
+          carried = opensThere(entry); // the test `readChunk` applies, at the same moment
+          noted = linked;
+        });
+      // U6b-4c (W1 g): what the load's last answer leaves for the read again after the follows: a refusal, or a file outside
+      // the folders that may not be saved; null when it landed otherwise, or nowhere
+      const landed = (): Landed => ({ appSessionId: entry.appSessionId, path, generation, noted });
+      const failed = (error: Failure): Landed => {
+        fail(tabId, error, reason, pressed, carried);
+        return landed();
       };
 
       // The hash is asked for only where it can be used: the kind still undecided (an open load, an entry with none) or
@@ -742,12 +782,12 @@ export function createViewerStore(client: MawsBridge) {
       const editableKind = (candidate: ViewerKind | null) => candidate === null || candidate === 'code' || candidate === 'markdown';
       const hashed = reason === 'open' || editableKind(entry.kind);
       let first = await read(0, FILES_READ_DEFAULT_LENGTH, hashed);
-      if (!live()) return;
-      if (!first.ok) return fail(tabId, first.error, reason, pressed, carried);
+      if (!live()) return null;
+      if (!first.ok) return failed(first.error);
       if (!hashed && editableKind(kindOf({ name: path, mime: first.value.mime, bytes: first.value.bytes, encoding: first.value.encoding }))) {
         first = await read(0, FILES_READ_DEFAULT_LENGTH, true);
-        if (!live()) return;
-        if (!first.ok) return fail(tabId, first.error, reason, pressed, carried);
+        if (!live()) return null;
+        if (!first.ok) return failed(first.error);
       }
       const head = first.value;
       // U6e (decision 6): each answer's admission lands as the answer does, before the load's content commits; the head's is
@@ -757,29 +797,31 @@ export function createViewerStore(client: MawsBridge) {
       const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };
       const opened = { status: 'ready' as const, error: null, failure: null, said: false, needsOpen: false, offersOpenFile: false, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
       // An open load puts the document on the entry, so the pin is the real path it read (decision 6).
-      const commit = ({ utf8, real, ...loaded }: LoadedFile) => {
+      // U6b-4c: `answer`, the read whose admission the commit draws (the last that landed)
+      const commit = ({ utf8, real, ...loaded }: LoadedFile, answer: FilesReadOutput): Landed | null => {
         if (reason === 'change') commitChange(tabId, { ...loaded, utf8, real }, cause);
         else {
           const textEditable = isEditable({ ...loaded, utf8 });
           patch(tabId, { ...opened, ...loaded, pin: real, textEditable, editable: editableWith(get().entries.get(tabId) ?? entry, real, textEditable) });
         }
         settleFrame(tabId); // UX wave U6b-2
+        return answer.outside?.writable === false ? landed() : null;
       };
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
-      if (kind === 'external' || kind === 'frame') return commit({ ...file, real: admissionOf(head).real, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null });
+      if (kind === 'external' || kind === 'frame') return commit({ ...file, real: admissionOf(head).real, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null }, head);
       if (kind === 'image') {
         let whole = head;
         if (head.truncated) {
           const all = await read(0, head.bytes, false);
-          if (!live()) return;
-          if (!all.ok) return fail(tabId, all.error, reason, pressed, carried);
+          if (!live()) return null;
+          if (!all.ok) return failed(all.error);
           whole = all.value;
           admit(tabId, asked, whole);
         }
         const utf8 = whole.encoding === 'utf8';
-        return commit({ ...file, real: admissionOf(whole).real, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
+        return commit({ ...file, real: admissionOf(whole).real, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null }, whole);
       }
 
       const hash = kind === 'head' ? null : head.hash;
@@ -789,27 +831,29 @@ export function createViewerStore(client: MawsBridge) {
       let { real } = admissionOf(head);
       const wanted = () => kind !== 'head' || loaded < extent;
       let more = head.truncated && wanted();
+      let last = head; // U6b-4c: the last answer that landed
       if (reason === 'open') patch(tabId, { ...opened, ...file, pin: real, text, base64: null, loaded, complete: !head.truncated, hash: null, editable: false, textEditable: false, ...(sourceView ? { sourceView } : {}) });
       while (more && loaded < CODE_CAP) {
         const next = await read(loaded, kind === 'head' ? Math.min(FILES_READ_DEFAULT_LENGTH, extent - loaded) : FILES_READ_DEFAULT_LENGTH, hash !== null);
-        if (!live()) return;
+        if (!live()) return null;
         // Mid-file: nothing of either version stays, except that a file gone during a re-read keeps its last content.
-        if (!next.ok) return fail(tabId, next.error, reason, pressed, carried);
+        if (!next.ok) return failed(next.error);
         // Changed mid-load, whatever the chunk's length (a shrunk file answers zero bytes with its new hash): the load ends
         // here, an open one read-only with `hash: null`; its files.changed re-reads it. Checked before the shrink exit,
         // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
         // U6e (decision 6): each answer's admission is the latest from the moment it lands, from itself alone, also where its
         // content is not taken (a chunk of another version, or none at all), the pin standing until the content commits.
         admit(tabId, asked, next.value);
-        if (hash !== null && next.value.hash !== hash) return;
+        if (hash !== null && next.value.hash !== hash) return null;
         real = admissionOf(next.value).real;
+        last = next.value;
         if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
-      commit({ ...file, real, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
+      return commit({ ...file, real, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 }, last);
     };
 
     // E5: a load is `pending` from its issue and counted in `loads` once it is over, however it ended (it replaced the
@@ -822,9 +866,10 @@ export function createViewerStore(client: MawsBridge) {
       const issued = get().entries.get(tabId);
       if (!issued) return;
       patch(tabId, { pending: issued.pending + 1 });
-      await loadOnce(tabId, reason, cause);
+      const landed = await loadOnce(tabId, reason, cause);
       const entry = get().entries.get(tabId);
       if (entry && incarnations.get(tabId) === incarnation) patch(tabId, { loads: entry.loads + 1, pending: entry.pending - 1 });
+      if (landed !== null) void readAfterFollows(tabId, landed); // U6b-4c (W1 g): outside the load, which has left `pending`
     };
 
     // U6c (decision 15; the branch review's finding 4): an entry asked for again is read again; one whose last read
@@ -852,6 +897,46 @@ export function createViewerStore(client: MawsBridge) {
 
     // UX wave U6b-4b (decision 7; S1 (a), (f)): whether the notice's Retry would start a read now.
     const canRetry = (entry: ViewerEntry) => entry.status === 'error' && !entry.retrying && entry.pending === 0 && !entry.saving;
+
+    // UX wave U6b-4b (decision 7; S1), U6b-4c (W1 g): an entry read again under the guard (`retrying`) from now until that read
+    // has settled, the wait for the file's watch included. Retry's and the store's own read again after a follow take it in
+    // turn: each drawing a turn of its own (`guards`), only the last clears it, so the guard holds while either's read is on
+    // its way. What started it is asked again once the watch has answered, right before the read (Retry's fix wave 1): a
+    // save started meanwhile, or a load begun since, starts nothing, and the guard clears.
+    const readAgainGuarded = (tabId: string, entry: ViewerEntry): Promise<void> => {
+      const incarnation = incarnations.get(tabId);
+      const turn = ++lastGuard;
+      guards.set(tabId, turn);
+      patch(tabId, { retrying: true });
+      const still = () => {
+        const now = get().entries.get(tabId);
+        return now !== undefined && incarnations.get(tabId) === incarnation && now.status === 'error' && now.pending === 0 && !now.saving;
+      };
+      return readAgain(tabId, entry, 'revisit', still).then(() => {
+        if (incarnations.get(tabId) !== incarnation || guards.get(tabId) !== turn) return;
+        guards.delete(tabId);
+        patch(tabId, { retrying: false });
+      });
+    };
+    // A read again waiting on the file's watch (`readAgain`'s hold), which is no load yet
+    const waitingOnWatch = (tabId: string) => {
+      const hold = holds.get(tabId);
+      return hold !== undefined && readsAfter.has(hold);
+    };
+
+    // UX wave U6b-4c (W1 g): an answer that landed refused, or as an outside file that may not be saved, compared once no
+    // follow of its session and path is under way (at once when none is). When a follow has answered `linked` since its read
+    // was sent, and the entry is still that session's, that path's and of the generation it landed in, with no read since
+    // and no edits unsaved, it is read once more: now when its view is mounted, else at its next mount. The new read notes
+    // the new count, so it starts no further one.
+    const readAfterFollows = async (tabId: string, { appSessionId, path, generation, noted }: Landed) => {
+      for (let under = following(appSessionId, path); under !== null; under = following(appSessionId, path)) await under;
+      const entry = get().entries.get(tabId);
+      if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || generations.get(tabId) !== generation) return;
+      if (linkedCount(appSessionId, path) <= noted || unsaved(entry) || entry.pending > 0 || waitingOnWatch(tabId)) return;
+      if (mounted.get(tabId)) void readAgainGuarded(tabId, entry);
+      else if (!stale.has(tabId)) stale.set(tabId, 'revisit');
+    };
 
     // U6e (decision 19): the entry's mark has just changed (the tab's own, or a person's open taking the agent's back): a
     // read in flight under the other mark is superseded, since its admission differs (one still opening is opened again),
@@ -895,8 +980,9 @@ export function createViewerStore(client: MawsBridge) {
     const conflicted = async (tabId: string, entry: ViewerEntry, current: () => boolean): Promise<boolean> => {
       const generation = ++lastGeneration;
       generations.set(tabId, generation);
-      const asked = ++lastAsk;
-      const answer = await readChunk(entry, 0, FILES_READ_MAX_LENGTH, true);
+      let asked = 0;
+      // U6b-4c: the number drawn as the read is sent, after any wait for a follow
+      const answer = await readChunk(entry, 0, FILES_READ_MAX_LENGTH, true, () => void (asked = ++lastAsk));
       if (!current()) return false;
       if (generations.get(tabId) !== generation) {
         patch(tabId, { saving: false });
@@ -1026,12 +1112,22 @@ export function createViewerStore(client: MawsBridge) {
         const generation = generations.get(tabId);
         patch(tabId, { loadingMore: true });
         const length = Math.min(FILES_READ_DEFAULT_LENGTH, CODE_CAP - entry.loaded);
-        const asked = ++lastAsk;
-        const carried = opensThere(entry); // U6f (fix wave, finding 6)
-        void readChunk(entry, entry.loaded, length, false).then((next) => {
+        let asked = 0;
+        let carried = false; // U6f (fix wave, finding 6)
+        let noted = 0; // U6b-4c (W1 g)
+        const sent = (linked: number) => {
+          asked = ++lastAsk;
+          carried = opensThere(entry);
+          noted = linked;
+        };
+        void readChunk(entry, entry.loaded, length, false, sent).then((next) => {
           // A newer load, or one that replaced the text this read continues, superseded it and cleared `loadingMore`.
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
-          if (!next.ok) return fail(tabId, next.error, 'open', false, carried);
+          if (!next.ok) {
+            fail(tabId, next.error, 'open', false, carried);
+            if (generation !== undefined) void readAfterFollows(tabId, { appSessionId: entry.appSessionId, path: entry.path, generation, noted }); // U6b-4c
+            return;
+          }
           // U6e (decision 6): the answer's admission by the order; the pin moves by the document and dirty rule
           admit(tabId, asked, next.value);
           const current = get().entries.get(tabId)!;
@@ -1200,8 +1296,8 @@ export function createViewerStore(client: MawsBridge) {
           // It lands only on the entry it was asked for (its incarnation, its loads' generation, its session, path, pin and
           // mark as they were), and there by the order of `admit`: an answer of a read sent later wins, whenever it lands.
           const target = { incarnation: incarnations.get(tabId), generation: generations.get(tabId) };
-          const asked = ++lastAsk;
-          void readChunk(entry, 0, 1, false).then((answer) => {
+          let asked = 0; // U6b-4c: drawn as the read is sent, after any wait for a follow
+          void readChunk(entry, 0, 1, false, () => void (asked = ++lastAsk)).then((answer) => {
             const now = get().entries.get(tabId);
             const same =
               now !== undefined && incarnations.get(tabId) === target.incarnation && generations.get(tabId) === target.generation &&
@@ -1264,18 +1360,7 @@ export function createViewerStore(client: MawsBridge) {
       retry(tabId) {
         const entry = get().entries.get(tabId);
         if (!entry || !canRetry(entry)) return;
-        const incarnation = incarnations.get(tabId);
-        patch(tabId, { retrying: true });
-        // Fix wave 1 (review, Important 1): what the press found is asked again once the watch has answered, right before
-        // the read: a save started meanwhile (its conflict read takes the generation) or a load begun since starts nothing,
-        // and the guard clears
-        const still = () => {
-          const now = get().entries.get(tabId);
-          return now !== undefined && incarnations.get(tabId) === incarnation && now.status === 'error' && now.pending === 0 && !now.saving;
-        };
-        void readAgain(tabId, entry, 'revisit', still).then(() => {
-          if (incarnations.get(tabId) === incarnation) patch(tabId, { retrying: false });
-        });
+        void readAgainGuarded(tabId, entry); // the guard, and what the press found asked again before the read
       },
 
       reset() {
@@ -1294,6 +1379,7 @@ export function createViewerStore(client: MawsBridge) {
         held.clear();
         views.clear();
         pressedOpen.clear();
+        guards.clear(); // UX wave U6b-4c
         unsubscribe?.();
         unsubscribe = null;
         unfollowStanding?.();
