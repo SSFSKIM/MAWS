@@ -17,6 +17,7 @@ import { focusPaneElement } from '../main/pane-dom';
 import { returnOverviewFocusTo } from '../overview/OverviewPanel';
 import { registerAction } from './actions-runtime';
 import { available } from './shell-navigation';
+import { shellGeometryOf } from '../app/shell-view';
 import { EMPTY_RECORD, gone, PLACES_MAX, placeOf, projectionOf, refocused, samePlace, seen, target, type Place, type PlaceRecord, type Projection } from './places';
 
 export type Opened = { kind: 'session'; appSessionId: AppSessionId } | { kind: 'artifact'; artifactId: string; machine: MachineRef };
@@ -156,11 +157,12 @@ function read(last: Projection, next: Projection): void {
 // A step (decision 15), in one synchronous run: the position first, then the layout written whole through the store's
 // own acts, so the reader's next read finds the projection equal to the entry it stands at and records nothing. The
 // Settings dialog closes; the Overview is set both ways (finding 5); a step to a tab brings the main area back from a
-// maximized or floating side column, as attention navigation does (`revealMain`; the branch panel, scalpel-2#4). The
-// keyboard goes to the tab the step put in front: on the next frame after a step to a tab, as after ⌥⌘]
-// (`stepMainTab`), unless the hand-off ended before it; and wherever an Overview the step closes, opens or keeps
-// gives it back when it closes, that tab is named as its opener (the branch panel, sweep#6 and scalpel-2#3), never the
-// tab the strip still draws as selected. The hand-off starts from the projection the step's writes left.
+// maximized or floating side column, as attention navigation does (`revealMain`; the branch panel, scalpel-2#4), and
+// folds the narrow window's side sheet over it (the delta review, H5). The keyboard goes to the tab the step put in
+// front: on the next frame after a step to a tab, as after ⌥⌘] (`stepMainTab`), unless the hand-off ended before it;
+// and wherever an Overview the step closes, opens or keeps gives it back when it closes, that tab is named as its opener
+// (the branch panel, sweep#6 and scalpel-2#3), never the tab the strip still draws as selected. The hand-off starts
+// from the projection the step's writes left.
 function step(delta: 1 | -1): void {
   const { record } = useVisits.getState();
   const to = target(record, delta);
@@ -179,6 +181,10 @@ function step(delta: 1 | -1): void {
   if (under.kind === 'tab') {
     layout().activateTab(under.id);
     layout().revealMain();
+    // Below 700 px the side column is a sheet over the main area: it folds as the sheet's own dismissal folds it
+    // (`dismissSheet`'s act, `panel/PanelRegion.tsx`), its tabs kept, so the tab shown is on screen and the step's
+    // frame gives it the keyboard once the main area has left inert (the delta review, H5).
+    if (shellGeometryOf(layout(), window.innerWidth).sheet) layout().setPanel({ collapsed: true });
     const element = tabElement(under.id, currentSet(layout().main).focusedPane);
     if (element !== null && (layout().overviewOpen || to.place.kind === 'overview')) returnOverviewFocusTo(element);
   }
