@@ -318,3 +318,42 @@ describe('a member whose project is a declared channel’s id', () => {
     expect([...m.listed.keys()]).toEqual([S2]);
   });
 });
+
+// A sminos thread outlives its process (Interfaces §G): a lane A session whose process ended is still restated, as an
+// ordinary member frame whose state word is `stopped`, or `gone` when it has no transcript to reopen. `gone` in a
+// listing is RL6's withdrawal, so that member is held with its listing withdrawn; `stopped` is a state like any other.
+describe('a lane A member whose process ended', () => {
+  it('is held with its listing withdrawn while its state word is gone, and listed again at its next state', async () => {
+    const m = machine();
+    await m.members.member(memberFrame(S1, 'A'));
+    await m.members.member(memberFrame(S1, 'A', { state: 'gone' }));
+    expect(m.members.sessions()).toEqual([S1]);
+    expect(m.withdrawn).toEqual([S1]);
+    expect(m.forgotten).toEqual([]);
+    expect(m.reports.map((report) => report.state)).toEqual(['idle']);
+    await m.members.member(memberFrame(S1, 'A', { state: 'gone' }));
+    expect(m.withdrawn).toEqual([S1]);
+    await m.members.member(memberFrame(S1, 'A', { state: 'idle' }));
+    expect([...m.listed.keys()]).toEqual([S1]);
+  });
+
+  it('restated with the state word gone after a restart, is held, and its listing from before is withdrawn once', async () => {
+    const m = machine({}, { before: [S1, S2] });
+    m.members.welcome();
+    await m.members.member(memberFrame(S1, 'A', { state: 'gone' }));
+    await m.members.member(memberFrame(S2, 'A', { state: 'stopped' }));
+    await m.members.restated();
+    expect(m.members.sessions().sort()).toEqual([S1, S2].sort());
+    expect(m.withdrawn).toEqual([S1]);
+    expect([...m.listed.keys()]).toEqual([S2]);
+    expect(m.listed.get(S2)?.state).toBe('stopped');
+  });
+
+  it('keeps a lane B member’s listing whatever its state word, as before', async () => {
+    const m = machine({ [S1]: APP });
+    await m.members.member(memberFrame(S1, 'B'));
+    await m.members.member(memberFrame(S1, 'B', { state: 'gone' }));
+    expect(m.withdrawn).toEqual([]);
+    expect(m.listed.get(APP)?.state).toBe('gone');
+  });
+});

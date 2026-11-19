@@ -51,7 +51,7 @@
 // `session.changed` the spine says of it (`recordChanged`), so it holds alike for the listing the hub keeps and for the
 // one a channel's `endpoint.listings` signs afresh (`recordSays`). No listing field is added. Each read runs inside an
 // operation's hold, so the daemon does not collect over it.
-import { isChannelId } from 'org-protocol';
+import { isChannelId, LISTING_GONE } from 'org-protocol';
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -621,6 +621,10 @@ export class Members implements RecordSource, CheckoutSource {
     // U9: a lane B session's listing follows its record: withdrawn while archived, under the record's title
     const says = member.lane === 'B' ? await this.#recordOf(session) : null;
     if (says?.archived === true) return this.#ctx.listings.gone(session);
+    // A sminos thread whose process ended stays a member (the plan of 2026-11-18, Interfaces §G). With no transcript to
+    // reopen, its state word is `gone`, which in a listing is RL6's withdrawal: the member is held and its listing
+    // withdrawn by the one path that withdraws, not signed as a listing in that state. `stopped` is listed like any state.
+    if (member.lane === 'A' && member.state === LISTING_GONE) return this.#ctx.listings.gone(session);
     await this.#ctx.listings.report({
       session,
       project: member.project,
