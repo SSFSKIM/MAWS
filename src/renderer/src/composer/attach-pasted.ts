@@ -12,10 +12,11 @@
 //   there, naming the revision that read answered (`replacesOf`). A round a composer came or went under, or a send was
 //   in flight under, is not believed: the loop turns again and asks the authority of the moment.
 // - Three rounds, then one last read that writes nothing. A write whose answer is not definite (`timeout`, a failure of
-//   the route, a promise that rejects), and an accepted one in a round not believed ((iii)), is settled by a later
-//   believed read, or stays unaccounted for; while one is, no end is a refusal: the person reads that MAWS could not
-//   confirm (`unconfirmed`), never "not added". A write in the claim form is never accounted for again: the claim can
-//   come true again after a clear. A read whose promise rejects is a failed read ((vi)).
+//   the route, a promise that rejects) is settled by a later read, or stays unaccounted for; so is an accepted one in a
+//   round not believed ((iii)), until a believed read answers (it landed, so a read that shows it gone shows it
+//   overwritten, not still to land). While one is, no end is a refusal: the person reads that MAWS could not confirm
+//   (`unconfirmed`), never "not added". A write in the claim form is never accounted for again: the claim can come true
+//   again after a clear. A read whose promise rejects is a failed read ((vi)).
 // - The whole hand-over has a deadline (`attachDeadlineMs`): the store's work at its worst and one bound for a wait.
 //
 // `added` is said at an end where the authority holds the block, and at no earlier point; the line itself is the
@@ -122,6 +123,7 @@ class HandOver {
   private sent = false; // a write of the block sent to the store
   private unaccountedRevision = false; // a write naming a revision (or none, over the link) whose answer was not definite
   private unaccountedClaim = false; // a write in the claim form whose answer was not definite: for the rest of the hand-over
+  private unaccountedLanded = false; // a write accepted in a round not believed: until a believed read
   private sentWithMessage = false; // an accepted send's document held the block
   private expiry: Promise<typeof EXPIRED> = new Promise(() => {});
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -167,7 +169,7 @@ class HandOver {
   }
 
   private unaccounted(): boolean {
-    return this.unaccountedRevision || this.unaccountedClaim;
+    return this.unaccountedRevision || this.unaccountedClaim || this.unaccountedLanded;
   }
 
   // "Not added" only where no write of the block can still land.
@@ -247,6 +249,7 @@ class HandOver {
     if (read === EXPIRED) return this.expired();
     if (!read.ok) return this.refuse(readRefusal(read.result));
     if (!this.believed(comings)) return null; // a composer or a send may have written over the store: ask again
+    this.unaccountedLanded = false; // shown kept, or overwritten
     if (holdsBlock(read.kept, this.block.id)) this.unaccountedRevision = false; // a write of it landed, and nothing since
     if (holdsBlock(read.keep, this.block.id)) return { kind: 'added' };
     const replaces = this.overLink ? read.revision : (read.revision ?? DRAFT_CLAIM);
@@ -258,7 +261,7 @@ class HandOver {
     if (result.ok) {
       this.unaccountedRevision = false; // what an earlier write named is no longer kept, and never will be again
       if (this.believed(comings)) return { kind: 'added' };
-      this.unaccountedFor(replaces); // kept, and a writer may have written over it since: a believed read settles it
+      this.unaccountedLanded = true; // kept, and a writer may have written over it since: a believed read settles it
       return null;
     }
     if (said(result, STALE_DRAFT_WORDS) || said(result, DRAFT_KEPT_WORDS)) return null;
@@ -266,13 +269,9 @@ class HandOver {
     if (unknownSession(result)) return this.refuse('unknown');
     if (isNotOffered(result)) return this.refuse('no-store');
     // not definite: it may still land
-    this.unaccountedFor(replaces);
-    return null;
-  }
-
-  private unaccountedFor(replaces: string | null): void {
     if (replaces === DRAFT_CLAIM) this.unaccountedClaim = true;
     else this.unaccountedRevision = true;
+    return null;
   }
 
   // The rounds spent: one read more, and no write. Over the link only the machine's own answer, with no save of the
@@ -285,6 +284,7 @@ class HandOver {
     if (!read.ok || !this.believed(comings)) return { kind: 'unconfirmed' };
     if (this.overLink && unsavedRemoteDraft(this.session) !== undefined) return { kind: 'unconfirmed' };
     if (holdsBlock(read.kept, this.block.id)) return { kind: 'added' };
+    this.unaccountedLanded = false; // it landed, and was written over since
     return this.unaccounted() ? { kind: 'unconfirmed' } : { kind: 'refused', why: 'changed' };
   }
 
