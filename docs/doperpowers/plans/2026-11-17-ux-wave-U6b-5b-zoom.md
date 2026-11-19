@@ -597,6 +597,8 @@ Found while this document was written and reviewed; each changed a decision abov
     - None of this changes a verdict. P7's evidence on the Mac is the harness's rows c and d and this build's same-URL relaunch.
     - The view, the lights and the device box were measured and are recorded in FINDINGS.md.
 
+14. **2026-11-19 (UTC) · M1: the chrome probe's premise names one element.** The rerun at `ef018d192` (manual gate `ef018d1921f2-20261119T210723Z`) stopped at the premise "the bookmarks bar is drawn" before any line was recorded. `folder.or(moreIn(main))` matched the chip F and » together, which is a strict-mode violation. The premise is now the bar itself (`[data-bookmarks-bar]`). The actions' premise takes `.first()`, because an inline action and the puzzle can also be drawn together. The extension's id still comes from the fixture (`chrome.extensions.probe.id`), which differs with each unpacked path.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.

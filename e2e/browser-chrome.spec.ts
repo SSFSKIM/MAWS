@@ -974,11 +974,12 @@ test('zoom probe: the popup and the menu', async () => {
         const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
         win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
       });
-      await expect(probe.or(puzzleIn(main)), 'the extension actions are drawn, inline or folded').toBeVisible();
-      await expect(folder.or(moreIn(main)), 'the bookmarks bar is drawn').toBeVisible();
+      // each witness names one element: an inline action and the puzzle, or a chip and », can be drawn at once
+      await expect(probe.or(puzzleIn(main)).first(), 'the extension actions are drawn, inline or folded').toBeVisible();
+      await expect(barIn(main), 'the bookmarks bar is drawn').toBeVisible();
       for (const f of PROBE_FACTORS) {
         await setAppZoom(s.maws.app, s.page, f);
-        await expect(probe.or(puzzleIn(main))).toBeVisible();
+        await expect(probe.or(puzzleIn(main)).first()).toBeVisible();
         const icon = (await probe.isVisible()) ? (await probe.boundingBox())! : null;
         if (!icon) record([{ probe: 'popup', placement: 2, factor: f, established: false, why: 'the actions are folded into the puzzle at this factor: no icon to anchor on' }]);
         else {
