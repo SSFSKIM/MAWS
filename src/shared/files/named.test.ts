@@ -213,6 +213,21 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(across)).toEqual(['/work/s.md']);
   });
 
+  // M1's review, finding 1: a table in a list item, or under a paragraph it would continue lazily, is read by the window
+  // apart from the lines round it (a delimiter row or a body row is never a lazy line); the rule names nothing of it, and
+  // a table at the top level stays as it was
+  it.each(['/example/report.md', 'file:///example/report.md'])('a table in a container names nothing of it or round it; at the top level it names its cell (%s)', (destination) => {
+    const path = '/example/report.md';
+    const after = `\`a\n[r](${destination})\``;
+    expect(linkPaths(`- Title\n:---\n${after}`), 'the delimiter row lazy').toEqual([]);
+    expect(linkPaths(`- Title\n  :---\n${after}`), 'a table in the item, then a line out of it').toEqual([]);
+    expect(linkPaths(`- item\n\n  | a | b |\n  |---|---|\n${after}`), 'a table in the item after a blank line').toEqual([]);
+    expect(linkPaths(`> para \`x\nT | u\n|-|-|\n[r](${destination}) \``), 'a head lazy in a quote').toEqual([]);
+    expect(linkPaths(`T | u\n-|-\n> \`x\n[r](${destination})\``), 'a quote after the table, its next line lazy').toEqual([]);
+    expect(linkPaths(`Title\n:---\n${after}`), 'the control: at the top level').toEqual([path]);
+    expect(linkPaths(`- item\n\n| a | b |\n|---|---|\n| [r](${destination}) | x |`), 'the control: the list ended by a blank line').toEqual([path]);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

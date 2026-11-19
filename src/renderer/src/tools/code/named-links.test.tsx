@@ -258,6 +258,20 @@ describe('the rule reads the blocks the window draws', () => {
     }
   });
 
+  // M1's review, finding 1: the window reads a table in a list item, or one whose head a quote's paragraph would continue
+  // lazily, apart from the lines round it (a delimiter row or a body row is never a lazy line); a top-level table is the
+  // control. Both forms of destination.
+  it.each(['/example/report.md', 'file:///example/report.md'])('a table in a container, and the lines after it (%s)', (destination) => {
+    const after = `\`a\n[r](${destination})\``;
+    agree(`- Title\n:---\n${after}`, []);
+    agree(`- Title\n  :---\n${after}`, []);
+    agree(`- item\n\n  | a | b |\n  |---|---|\n${after}`, []);
+    agree(`> para \`x\nT | u\n|-|-|\n[r](${destination}) \``, []);
+    agree(`T | u\n-|-\n> \`x\n[r](${destination})\``, []);
+    agree(`Title\n:---\n${after}`, ['/example/report.md']);
+    agree(`- item\n\n| a | b |\n|---|---|\n| [r](${destination}) | x |`, ['/example/report.md']);
+  });
+
   // N1.16: the window ends a line at a carriage return alone; the rule names nothing of such a text
   it('lone carriage returns round a fence: the rule names nothing, the window draws no chip in the fence (N1.16)', () => {
     for (const fence of ['```', '~~~']) {
@@ -357,6 +371,8 @@ const FRAGMENTS = [
   // UX wave U6b-4b (R1): the `file:` form beside the scheme-less one, the marks the window's parser reads apart, and a
   // table whose rows can run past its head
   'file://', 'file:///', 'FILE:///', '<file:///', 'file://h/', '\uFEFF', '\r', '~~~\n', '| a | b |\n', '|---|---|\n', ':---\n', '| x | y | z |\n',
+  // M1's review, finding 1: a table's lines beside a list item's, a quote's and a lazy line's
+  '- T\n', '\n- ', '  :---\n', '  |---|---|\n', '> p\n', '\n`', '`\n',
 ];
 const LONG_TAIL = 'a'.repeat(17_000); // past the 16 KiB bound; few, for the time
 function generated(seed: number, count: number): string[] {
