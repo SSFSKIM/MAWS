@@ -19,6 +19,7 @@ import { attachedIn, attachOf, draftStore, heldSends, holdsOnce, mountComposer, 
 import { ATTACH_ROUNDS, type AttachOutcome } from './attach-pasted';
 import { forgetSubmissions, ipcDrafts } from './editor/controller';
 import { docOf, paragraph, textNode, type ComposerDoc } from './editor/doc';
+import type { Serialized } from './editor/serialize';
 import { DRAFT_DELAY_MS, rememberingRemoteDrafts, resetRemoteDrafts } from './editor/drafts';
 
 const R = addressOf(OTHER_MACHINE, 'app-attach-there' as AppSessionId);
@@ -261,7 +262,7 @@ describe('a box over the link whose saves the machine refuses', () => {
 // overtaken; "Added" is said on a read-back that holds the block. Each case starts with a write ahead of the box's in the
 // session's order (a take-back's, here), held, so the box's saves queue behind it.
 describe('one queue for a box over the link', () => {
-  async function boxBehindAWrite(store: DraftStoreFake, options: { onSubmit?: (s: never) => Promise<boolean> } = {}) {
+  async function boxBehindAWrite(store: DraftStoreFake, options: { onSubmit?: (s: Serialized) => Promise<boolean> } = {}) {
     fakeClock();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     store.put(EARLIER);
@@ -280,7 +281,7 @@ describe('one queue for a box over the link', () => {
   it('a send’s clear is the last word: an attach’s save handed before it never lands after it', async () => {
     const store = over();
     const sends = heldSends();
-    const box = await boxBehindAWrite(store, { onSubmit: sends.onSubmit as never });
+    const box = await boxBehindAWrite(store, { onSubmit: sends.onSubmit });
     await box.type(TYPED);
     await vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS); // the typing's save, queued
     const a = attach(store);
