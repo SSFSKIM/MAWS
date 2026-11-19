@@ -42,7 +42,15 @@
 //            `fx-own-2`), each against an engine-mode fixture, no file-configured server beside them. Before a session
 //            runs, Customize's row of MAWS's own list says to open one; then the session's Connectors dialog signs the
 //            plugin's connector and `fx-own` in (Connected with its tool count), and Customize signs `fx-own-2` in
-//            through that session.
+//            through that session. The UX wave's U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md,
+//            H3 and H5, ruling F) adds two steps. A second plugin of its own (`fx-row@fx-market`, server `fx-row-oauth` at
+//            a third fixture), signed in by no earlier step: its row in My items reads "Send a message in that session,
+//            then sign in." until the session's local command `/cost` (no model) has made the engine report its plugins,
+//            then offers Sign in, which opens the consent page at that fixture alone and ends "Signed in · connected
+//            here". Then a third plugin of the second's manifest and server names (`fx-twin@fx-other`, its server at a
+//            fourth fixture): both rows read the collision's line with no Sign in, with no session and in a new one that
+//            loaded both; the second turned off reads "Plugin turned off", and in a new session the third's row offers
+//            Sign in again. That step signs nothing in.
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -568,8 +576,13 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
 
 test('dynamic: a plugin’s connector and one of MAWS’s own list signed in from the Connectors dialog, a second of the list from Customize', async () => {
   test.skip(process.platform !== 'darwin', 'engine sign-in runs on the Mac lane alone (Decision Log 13)');
-  test.setTimeout(900_000);
+  test.setTimeout(1_500_000); // U11h's two steps: two installs, a disable, two more sessions
   const PLUGIN = 'plugin:fx-plugin:fx-oauth';
+  // U11h: the second plugin (the row's sign-in) and the third (the collision), of one manifest name and one server name
+  const ROW_PLUGIN = 'fx-row@fx-market';
+  const TWIN_PLUGIN = 'fx-twin@fx-other';
+  const ROW_SERVER = 'fx-row-oauth';
+  const ROW_NAME = `plugin:fx-row:${ROW_SERVER}`; // the engine's name: the manifest's name, never the key's
   const openLog = join(root, 'open.log');
   writeFileSync(openLog, '');
   maws = await launchMaws({ realEngine: { projects: 1, home: 'runner' }, env: { MAWS_E2E_OPEN_LOG: openLog } });
@@ -582,6 +595,7 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
   for (const custody of custodies) custody.claim();
   const pids = new Set<number>();
   let pluginFixture: OAuthFixture | null = null;
+  const rowFixtures: OAuthFixture[] = []; // U11h: the second plugin's and the third's, each at its own address
   let released: unknown[];
   let closing: unknown = null;
   try {
@@ -589,17 +603,35 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
     fixture = ownFixture;
     const pluginServer = await startOAuthFixture({ root, id: 'plugin', mode: 'engine' }); // its own address: nothing names it twice
     pluginFixture = pluginServer;
+    const rowServer = await startOAuthFixture({ root, id: 'row', mode: 'engine' });
+    rowFixtures.push(rowServer);
+    const twinServer = await startOAuthFixture({ root, id: 'twin', mode: 'engine' });
+    rowFixtures.push(twinServer);
 
     // the plugin, from a scratch folder marketplace, installed at user scope by the engine's own CLI
     const market = join(root, 'market');
     const plugin = join(market, 'plugins', 'fx-plugin');
     mkdirSync(join(market, '.claude-plugin'), { recursive: true });
     mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
-    writeFileSync(join(market, '.claude-plugin', 'marketplace.json'), `${JSON.stringify({ name: 'fx-market', owner: { name: 'Fixture' }, description: 'A scratch marketplace for the dynamic sign-in scene', plugins: [{ name: 'fx-plugin', source: './plugins/fx-plugin', description: 'One HTTP server, the OAuth fixture' }] }, null, 2)}\n`);
+    writeFileSync(join(market, '.claude-plugin', 'marketplace.json'), `${JSON.stringify({ name: 'fx-market', owner: { name: 'Fixture' }, description: 'A scratch marketplace for the dynamic sign-in scene', plugins: [{ name: 'fx-plugin', source: './plugins/fx-plugin', description: 'One HTTP server, the OAuth fixture' }, { name: 'fx-row', source: './plugins/fx-row', description: 'One HTTP server, signed in from its row' }] }, null, 2)}\n`);
     writeFileSync(join(plugin, '.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: 'fx-plugin', version: '0.0.1', description: 'One HTTP server, the OAuth fixture' }, null, 2)}\n`);
     writeFileSync(join(plugin, '.mcp.json'), `${JSON.stringify({ mcpServers: { 'fx-oauth': { type: 'http', url: pluginServer.resourceUrl } } }, null, 2)}\n`);
+    // U11h: the second plugin in the same marketplace; the third in a marketplace of its own (as the probe's twin-c was),
+    // under another key with the second's manifest name and server name, at its own address
+    const scratchPlugin = (folder: string, manifestName: string, url: string) => {
+      mkdirSync(join(folder, '.claude-plugin'), { recursive: true });
+      writeFileSync(join(folder, '.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: manifestName, version: '0.0.1', description: 'One HTTP server, an OAuth fixture' }, null, 2)}\n`);
+      writeFileSync(join(folder, '.mcp.json'), `${JSON.stringify({ mcpServers: { [ROW_SERVER]: { type: 'http', url } } }, null, 2)}\n`);
+    };
+    scratchPlugin(join(market, 'plugins', 'fx-row'), 'fx-row', rowServer.resourceUrl);
+    const other = join(root, 'market-other');
+    mkdirSync(join(other, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(other, '.claude-plugin', 'marketplace.json'), `${JSON.stringify({ name: 'fx-other', owner: { name: 'Fixture' }, description: 'A second scratch marketplace for the collision step', plugins: [{ name: 'fx-twin', source: './plugins/fx-twin', description: 'The same manifest and server names as fx-row' }] }, null, 2)}\n`);
+    scratchPlugin(join(other, 'plugins', 'fx-twin'), 'fx-row', twinServer.resourceUrl);
     await engineCli(maws!, ['plugin', 'marketplace', 'add', market]);
+    await engineCli(maws!, ['plugin', 'marketplace', 'add', other]);
     await engineCli(maws!, ['plugin', 'install', 'fx-plugin@fx-market', '--scope', 'user']);
+    await engineCli(maws!, ['plugin', 'install', ROW_PLUGIN, '--scope', 'user']);
     // MAWS's own list, which every session MAWS runs is given at launch (--mcp-config)
     value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'fx-own', type: 'http', url: ownFixture.resourceUrl }, { name: 'fx-own-2', type: 'http', url: ownFixture.resourceUrl }] } }));
 
@@ -636,17 +668,22 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       await expect(row(page, 'fx-own-2').getByRole('button', { name: 'Sign in to fx-own-2' })).toHaveCount(0);
     });
 
-    const created = value(await invoke(page, 'session.create', { projectId: project.id, location: { kind: 'directory', path: directory } }));
-    const session = created.appSessionId;
-    let start = value(await invoke(page, 'session.start', { appSessionId: session, message: null, options: { requireEmptyMessage: true } }));
-    if (start.status === 'needs_trust') start = value(await invoke(page, 'session.start', { appSessionId: session, message: null, options: { requireEmptyMessage: true, trust: 'accepted' } }));
-    expect(start, 'the session starts with no message').toMatchObject({ status: 'starting' });
-    await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === session)?.process, { timeout: 90_000 }).toBe('ready');
-    const pid = value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === session)?.pid;
-    if (pid) {
-      pids.add(pid);
-      assertEngineProcessKeychainEnv(pid, engine.scratch.configDir);
-    }
+    // a session started with no message, ready, its engine checked for its scratch Keychain items; U11h starts two more
+    const engineSession = async (appSessionId: string) => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === appSessionId);
+    const startSession = async () => {
+      const created = value(await invoke(page, 'session.create', { projectId: project.id, location: { kind: 'directory', path: directory } }));
+      let start = value(await invoke(page, 'session.start', { appSessionId: created.appSessionId, message: null, options: { requireEmptyMessage: true } }));
+      if (start.status === 'needs_trust') start = value(await invoke(page, 'session.start', { appSessionId: created.appSessionId, message: null, options: { requireEmptyMessage: true, trust: 'accepted' } }));
+      expect(start, 'the session starts with no message').toMatchObject({ status: 'starting' });
+      await expect.poll(async () => (await engineSession(created.appSessionId))?.process, { timeout: 90_000 }).toBe('ready');
+      const pid = (await engineSession(created.appSessionId))?.pid;
+      if (pid) {
+        pids.add(pid);
+        assertEngineProcessKeychainEnv(pid, engine.scratch.configDir);
+      }
+      return created.appSessionId;
+    };
+    const session = await startSession();
     for (const name of [PLUGIN, 'fx-own', 'fx-own-2']) await expect.poll(() => statusIn(session, name), { timeout: 60_000, message: `${name} in the session’s status` }).toBe('needs-auth');
 
     await test.step('the Connectors dialog signs the plugin’s connector and one of MAWS’s own list in: Connected, with its tool count', async () => {
@@ -691,12 +728,89 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       await expect(own.locator('[data-sign-in-state]')).toHaveText('Signed in · connected here', { timeout: 60_000 });
       expect(await statusIn(session, 'fx-own-2')).toBe('connected');
     });
+
+    // ---- UX wave U11h: a plugin's row in My items ----------------------------------------------------------------------
+    // A plugin's row, by its server name and its key: the collision's two rows share the server name.
+    const pluginRow = (key: string) => customizePage(page).locator(`[data-connector="${ROW_SERVER}"][data-connector-plugin="${key}"]`);
+    const signInOn = (key: string) => pluginRow(key).getByRole('button', { name: `Sign in to ${ROW_SERVER}` });
+    const lineOf = (key: string) => pluginRow(key).locator('[data-sign-in-state]');
+    // the local command the probe used: the engine sends system/init with its plugin list, and no model is called
+    const reportPlugins = async (appSessionId: string) => {
+      value(await invoke(page, 'session.send', { appSessionId: appSessionId as never, content: '/cost' }));
+      await expect.poll(async () => (await engineSession(appSessionId))?.pluginsObservedAt ?? null, { timeout: 60_000, message: 'the session reports its plugins' }).not.toBeNull();
+    };
+    const stopSession = async (appSessionId: string) => {
+      value(await invoke(page, 'session.stop', { appSessionId: appSessionId as never, reason: 'stop' }));
+      await expect.poll(async () => (await engineSession(appSessionId))?.process ?? 'exited', { timeout: 60_000 }).toBe('exited');
+    };
+    // a change the engine's CLI made outside MAWS sends no plugins.changed: All's Refresh reads the inventory and the
+    // plugin list again, then back to Connectors
+    const readAgain = async () => {
+      await chooseCustomize(page, { show: 'All' });
+      await customizePage(page).getByRole('button', { name: 'Refresh', exact: true }).click();
+      await chooseCustomize(page, { show: 'Connectors' });
+    };
+
+    await test.step('U11h: a plugin’s row signs in through the session once it has reported its plugins', async () => {
+      await expect.poll(() => statusIn(session, ROW_NAME), { timeout: 60_000, message: `${ROW_NAME} in the session’s status` }).toBe('needs-auth');
+      await customizeProject();
+      // no message yet, so no plugin list: the session lists the name and is not admitted
+      expect((await engineSession(session))?.pluginsObservedAt ?? null, 'the session has reported no plugin list').toBeNull();
+      await expect(lineOf(ROW_PLUGIN)).toHaveText('Send a message in that session, then sign in.', { timeout: 30_000 });
+      await expect(signInOn(ROW_PLUGIN)).toHaveCount(0);
+      await reportPlugins(session);
+      await expect(signInOn(ROW_PLUGIN), 'offered once the session has reported this row’s plugin alone').toBeVisible({ timeout: 30_000 });
+      await expect(pluginRow(ROW_PLUGIN).locator('[data-connector-from]')).toHaveText('from Fx row');
+      // the browser hand-off is recorded (press), then the consent and the code's exchange are made at this row's own
+      // fixture, and only then is the row's success read
+      const authUrl = await press(pluginRow(ROW_PLUGIN), ROW_SERVER);
+      await consent(authUrl);
+      await expect.poll(() => { const { authorizations, codeExchanges } = summarizeOAuthLog(readOAuthLog(rowServer)).oauth; return { authorizations, codeExchanges }; }, { timeout: 30_000, message: 'the consent and the exchange at the row’s own fixture' }).toEqual({ authorizations: 1, codeExchanges: 1 });
+      await expect(lineOf(ROW_PLUGIN)).toHaveText('Signed in · connected here', { timeout: 60_000 });
+      expect(await statusIn(session, ROW_NAME)).toBe('connected');
+      expect(summarizeOAuthLog(readOAuthLog(twinServer)).oauth.authorizations, 'the third plugin’s fixture saw no consent').toBe(0);
+      await test.info().attach('u11h-row-signed-in.png', { body: await page.screenshot(), contentType: 'image/png' });
+    });
+
+    await test.step('U11h: a third plugin of the same manifest and server names: the collision on both rows, no Sign in; one turned off gives Sign in back on the other', async () => {
+      const collision = 'More than one plugin supplies a connector with this name (Fx row, Fx twin). Claude Code keeps only one. Turn the others off to sign in.';
+      const bothRefused = async () => {
+        for (const key of [ROW_PLUGIN, TWIN_PLUGIN]) {
+          await expect(lineOf(key)).toHaveText(collision, { timeout: 30_000 });
+          await expect(signInOn(key)).toHaveCount(0);
+        }
+      };
+      await stopSession(session);
+      await engineCli(maws!, ['plugin', 'install', TWIN_PLUGIN, '--scope', 'user']);
+      await customizeProject();
+      await readAgain();
+      await bothRefused(); // no session: the page's own reads tell it (the inventory's plugins the plugin list says are enabled)
+      const both = await startSession();
+      await reportPlugins(both);
+      expect((await engineSession(both))?.plugins.map((p) => p.source), 'the new session loaded both').toEqual(expect.arrayContaining([ROW_PLUGIN, TWIN_PLUGIN]));
+      await bothRefused();
+      await test.info().attach('u11h-collision.png', { body: await page.screenshot(), contentType: 'image/png' });
+      // The second is turned off. The third's row is the one that can offer Sign in again: its address holds no credential,
+      // where the second's, signed in above, would connect at once and read connected.
+      await stopSession(both);
+      await engineCli(maws!, ['plugin', 'disable', ROW_PLUGIN, '--scope', 'user']);
+      await readAgain();
+      await expect(lineOf(ROW_PLUGIN)).toHaveText('Plugin turned off', { timeout: 30_000 });
+      const after = await startSession();
+      await expect.poll(() => statusIn(after, ROW_NAME), { timeout: 60_000, message: `${ROW_NAME} in the new session’s status` }).toBe('needs-auth');
+      await reportPlugins(after);
+      await expect(signInOn(TWIN_PLUGIN), 'offered on the third’s row after a new session').toBeVisible({ timeout: 30_000 });
+      await expect(lineOf(ROW_PLUGIN)).toHaveText('Plugin turned off');
+      await expect(signInOn(ROW_PLUGIN)).toHaveCount(0);
+      expect(summarizeOAuthLog(readOAuthLog(twinServer)).oauth.authorizations, 'this step signs nothing in').toBe(0);
+    });
   } finally {
     await maws?.cleanup().catch((error: unknown) => (closing = error));
     maws = null;
     await fixture?.close();
     fixture = null;
     await pluginFixture?.close();
+    for (const rowFixture of rowFixtures) await rowFixture.close();
     released = custodies.map((custody) => custody.release({ enginePids: [...pids] }));
   }
   if (closing) throw closing;

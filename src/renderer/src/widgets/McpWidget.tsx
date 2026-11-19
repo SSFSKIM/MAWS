@@ -25,6 +25,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { CONNECTORS } from '../customize/connectors/copy';
+import { keyNameOf, pluginConnectorsBeforeStart, pluginRowKey } from '../customize/connectors/plugin-row';
 import { serverKey, signInViewOf, usedEntries } from '../customize/connectors/present';
 import { useCustomizationInventory } from '../customize/inventory';
 import { InventoryState } from '../customize/InventoryState';
@@ -35,6 +36,7 @@ import { useSessions } from '../stores/sessions';
 import { useCommand } from '../ipc/query';
 import { machineFor, pathTarget } from '../ipc/machine';
 import { homeAbbreviated } from '../tools/session-info/model';
+import { usePluginsOff } from './connector-menu';
 import { connectorStatusWords } from './connector-status';
 import { McpDriven } from './McpDriven'; // P5 O9 M5
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
@@ -344,10 +346,14 @@ export function McpWidget(props: { appSessionId: AppSessionId; args: string; clo
 // Customize's words, so the opened part holds the transport and the file that configures it.
 const configuredView = (server: CustomizationServer): McpServerView => ({ name: server.name, status: '', transport: server.transport === 'unknown' ? null : server.transport, command: null, scope: null, source: null, error: null, tools: [] });
 
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M3): after them, the folder's
+// plugins' connectors the chat may load, each "from <plugin>" on its line and its declaring file in its opened part.
 function McpBeforeStart({ appSessionId, place, close }: { appSessionId: AppSessionId; place: Exclude<TabPlace, { kind: 'started' }>; close(): void }) {
   const local = place.kind === 'local';
   const inventory = useCustomizationInventory(local ? place.folder : null, { enabled: local });
+  const pluginsOff = usePluginsOff();
   const servers = inventory.data ? usedEntries(inventory.data.servers) : null;
+  const pluginServers = inventory.data ? pluginConnectorsBeforeStart(inventory.data.pluginServers, pluginsOff) : [];
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} subtitle={MCP.subtitle} command="mcp" state="ready" error={null} close={close}>
       {place.kind === 'remote' ? (
@@ -357,14 +363,17 @@ function McpBeforeStart({ appSessionId, place, close }: { appSessionId: AppSessi
           <p data-before-start className="m-0 mb-1 text-ui-sm text-fg-muted">
             {BEFORE_START.connectors(place.place)}
           </p>
-          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
+          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
           {servers !== null &&
-            (servers.length === 0 ? (
+            (servers.length + pluginServers.length === 0 ? (
               <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>
             ) : (
               <Rows label={MCP.list}>
                 {servers.map((server) => (
                   <ConnectorRow key={serverKey(server)} server={configuredView(server)} words={CONNECTORS.scopeOf(server.scope)} opened={<span title={server.path}>{homeAbbreviated(server.path)}</span>} />
+                ))}
+                {pluginServers.map((server) => (
+                  <ConnectorRow key={pluginRowKey(server)} server={configuredView({ name: server.server, scope: server.installScope, path: server.path, transport: server.transport })} words={CONNECTORS.fromPlugin(keyNameOf(server.plugin))} opened={<span title={server.path}>{homeAbbreviated(server.path)}</span>} />
                 ))}
               </Rows>
             ))}

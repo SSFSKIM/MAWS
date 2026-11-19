@@ -1737,7 +1737,11 @@ test.describe('plugin management (E8)', () => {
   // Connectors dialog the project's `.mcp.json` server with its scope, `/skills` the project's and the person's skills
   // with Use in chat inserting `/<name> `, `/plugins` the CLI's installed plugin under "Not observed yet" alone; none says
   // "Available once the session starts", and nothing starts the chat. In launch mode index (`chatBackend`): the New chat
-  // is `session.create`'s, a setup intent on the scratch project.
+  // is `session.create`'s, a setup intent on the scratch project. UX wave U11h
+  // (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, H8): a plugin installed in the config home
+  // (`installed_plugins.json`, its folder with a manifest and a `.mcp.json`) brings a remote connector, which the submenu
+  // and the dialog list after the configured one "from <plugin>" (the key's own name: the "+" menu runs no plugin CLI),
+  // and the dialog's line no longer says that connectors from plugins show only once the chat starts.
   test('a New chat lists its folder’s connectors, skills and plugins before the first message, and Use in chat inserts the skill', async ({ chatBackend: backend }) => {
     const { page, project } = backend;
     const write = (path: string, text: string) => {
@@ -1747,6 +1751,10 @@ test.describe('plugin management (E8)', () => {
     write(join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'fx-docs': { type: 'http', url: 'https://docs.example.test/mcp' } } }));
     write(join(project, '.claude', 'skills', 'fx-review', 'SKILL.md'), '---\nname: fx-review\ndescription: Review the change\n---\nReply with one word.\n');
     write(join(configHome(backend), 'skills', 'fx-mine', 'SKILL.md'), '---\nname: fx-mine\ndescription: A skill of your own\n---\nReply with one word.\n');
+    const relay = join(configHome(backend), 'plugins', 'cache', 'fx-shelf', 'fx-relay', '0.1.0');
+    write(join(relay, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'fx-relay', version: '0.1.0', description: 'One remote connector' }));
+    write(join(relay, '.mcp.json'), JSON.stringify({ mcpServers: { 'fx-notes': { type: 'http', url: 'https://notes.example.com/mcp' } } }));
+    write(join(configHome(backend), 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'fx-relay@fx-shelf': [{ scope: 'user', installPath: relay, version: '0.1.0' }] } }));
     await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
     const { name } = value(await invoke(page, 'session.projects.add', { directory: project }));
     await openProject(page, name);
@@ -1756,14 +1764,17 @@ test.describe('plugin management (E8)', () => {
     const main = page.locator('[data-region="main"]');
     const notYet = 'Available once the session starts';
 
-    // "+" › Connectors: the configured connector with its scope; then the dialog, one row with no switch
+    // "+" › Connectors: the configured connector with its scope, then the plugin's from its plugin; then the dialog, one
+    // row each with no switch
     await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
     await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
     await expect(page.getByRole('menuitem').filter({ hasText: 'fx-docs' })).toContainText('project scope');
+    await expect(page.getByRole('menuitem').filter({ hasText: 'fx-notes' })).toContainText('from fx-relay');
     await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
     const connectors = widget(page, 'mcp');
-    await expect(connectors.locator('[data-before-start]')).toHaveText(`Configured for ${name}. Connection state, and connectors from plugins, show once the chat starts.`);
+    await expect(connectors.locator('[data-before-start]')).toHaveText(`Configured for ${name}. Connection state shows once the chat starts.`);
     await expect(connectors.locator('[data-mcp-server="fx-docs"] [data-connector-state]')).toHaveText('project scope');
+    await expect(connectors.locator('[data-mcp-server="fx-notes"] [data-connector-state]')).toHaveText('from fx-relay');
     await expect(connectors.getByRole('switch')).toHaveCount(0);
     await expect(connectors).not.toContainText(notYet);
     await page.keyboard.press('Escape');

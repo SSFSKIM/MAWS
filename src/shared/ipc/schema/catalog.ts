@@ -148,7 +148,16 @@ export const commands = {
   // the entry is in (the inventory's own), so two project files configuring one name are told apart
   'catalog.postures': main(
     z.strictObject({ cwd: CwdSchema }),
-    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable(), revision: z.string().max(64).nullable() /* UX wave U11a M8: the engine host's, null when it answered none */, iconUrl: z.string().max(2048).nullable() /* UX wave U11c M1: the icon of the one directory record the address matches, on one of the icon routes; null for none or several */ })) }),
+    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable(), revision: z.string().max(64).nullable() /* UX wave U11a M8: the engine host's, null when it answered none */, iconUrl: z.string().max(2048).nullable() /* UX wave U11c M1: the icon of the one directory record the address matches, on one of the icon routes; null for none or several */ })),
+      // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §A): the same for each plugin's
+      // connector, row for row with the engine host's `pluginServers` (none from an earlier host's); required, since main
+      // and the window are one build
+      plugins: z.array(z.strictObject({
+        plugin: z.string(), server: z.string(), path: z.string().max(4096),
+        authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable(), revision: z.string().max(64).nullable(),
+        iconUrl: z.string().max(2048).nullable(),
+      })),
+    }),
   ),
   // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): each installed plugin's directory
   // icon, by its `<name>@<marketplace>` and that marketplace's locator as the engine lists it (null where the window knows

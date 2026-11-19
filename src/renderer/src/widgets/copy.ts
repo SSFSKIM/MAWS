@@ -168,7 +168,7 @@ export const MCP = {
 // UX wave U11a (§D, l8-settings-03): an unstarted tab's Connectors and Skills dialogs, what the three dialogs and the
 // "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
 export const BEFORE_START = {
-  connectors: (place: string) => `Configured for ${place}. Connection state, and connectors from plugins, show once the chat starts.`,
+  connectors: (place: string) => `Configured for ${place}. Connection state shows once the chat starts.`, // UX wave U11h: a plugin's connectors are listed now
   skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
   remote: (machine: string) => `Shown once the chat starts on ${machine}`,
   userConfiguration: 'your user configuration',
