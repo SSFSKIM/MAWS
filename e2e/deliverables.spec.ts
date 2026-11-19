@@ -1279,10 +1279,11 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
     expect(stun.received(), 'the STUN listener received no datagram of the page by the end of gathering').toBe(1); // the control's alone
     await stun.close();
     // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
-    // the barrier is the sandbox's own refusal, which Chromium logs in the frame as it declines to start the download
-    const refusedDownload = s.page.waitForEvent('console', { predicate: (message) => message.text().startsWith('Download is disallowed. The frame initiating or instantiating the download is sandboxed'), timeout: 15_000 });
+    // Chromium declines it silently (the pinned Electron logs nothing for a sandboxed `download` link), so no event says
+    // that a download is not coming: an observation window as B15's, bounded and no barrier, as the delivered files'
+    // scene observes the same link, after which neither main's download filter nor the disk has seen one
     await page.locator('#save').click();
-    await refusedDownload;
+    await s.page.waitForTimeout(2_000);
     expect(seamLines(s).filter((l) => l.startsWith('blocked-download')), 'no download reached main').toEqual([]);
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(s.maws.userData, (name) => name === 'e2-download.txt' || name.endsWith('.crdownload'))).toEqual([]);
