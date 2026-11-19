@@ -436,6 +436,9 @@ describe('the differential: every path the rule names is a chip the window draws
     const LINES = [
       '- T', '1. T', '> p', '> p `x', '> - T', 'T', 'T | u', '| a | b |', '  | a | b |', ':---', '  :---', '-|-', '|---|---|', '  |---|---|', '> |---|---|',
       '`a', 'x `y', '[r](/secret)`', '[r](/secret) `', '| [r](/secret) | x |', '| x | y | [r](/secret) |', '  [r](/secret)', '> [r](/secret)', '- [r](/secret)', '',
+      // lines whose interrupting a paragraph the two readings may judge apart: an ordered item that does not start at
+      // one, an item with nothing after its marker, indented code, a setext underline and a thematic break
+      '2. [r](/secret) `', '2) [r](/secret)`', '2. x `y', '1.', '1. ', '-', '*', '+', '- ', '    [r](/secret)`', '    `a', '---', '===', '***', '- - -',
     ];
     const random = mulberry32(seed);
     const faults: string[] = [];
