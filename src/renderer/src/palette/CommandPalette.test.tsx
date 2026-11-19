@@ -536,9 +536,10 @@ describe('Recent', () => {
     const before = (a: string, b: string) => Boolean(group(a)!.compareDocumentPosition(group(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(before('Recent', 'Projects')).toBe(true);
     expect(before('Projects', 'Actions')).toBe(true);
-    // the list is selected by value (S5): the row selected as the palette opened stays so when an artifact's row comes above it
+    // S5 (Decision Log 15 (viii)): until the person moves it, the selection follows the first row, so once the artifact's
+    // answer is drawn above the session that was first, the artifact is selected and no session stays selected above it
     const selected = within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
-    expect(selected.dataset.value).toBe(`session:${idOf('Quota reset recovery')}`);
+    expect(selected.dataset.value).toBe(`artifact:${TEST_MACHINE}/${notes.id}`);
   });
 
   it('opens a recent session’s tab on ⏎, and a recent artifact by the artifact link’s rule', async () => {
@@ -623,6 +624,32 @@ describe('Artifacts in the palette', () => {
     expect(selected()).toBe(quota);
     enter();
     expect(activeTab(useLayout.getState().main)?.id).toBe(quota);
+  });
+
+  // S5 (Decision Log 15 (viii)): the selection follows the first row until the person moves it
+  it('selects the first row as answers arrive: a title typed with nothing else matching selects the artifact once it is drawn, and Enter opens it', async () => {
+    await typed('launch');
+    expect(selected()).toBe('library:search'); // the only row before the answer
+    await answer(0, [libraryRow(1, { title: 'Launch notes' })]);
+    expect(selected()).toBe(`artifact:${TEST_MACHINE}/${artifactId(1)}`);
+    enter();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${artifactId(1)}`);
+    expect(useLayout.getState().destination).toBeNull(); // not the Library
+  });
+
+  it('keeps a selection the person moved by value when a later answer comes above it', async () => {
+    await typed('quota');
+    const quota = `session:${idOf('Quota reset recovery')}`;
+    expect(selected()).toBe(quota);
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'ArrowDown' });
+    const moved = selected();
+    expect(moved).not.toBe(quota);
+    await answer(0, [libraryRow(1, { title: 'Quota notes' })]);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Quota notes')]);
+    expect(selected()).toBe(moved);
+    act(() => usePalette.setState({ query: 'quota ' })); // the control: new text gives the selection back to the first row
+    expect(selected()).toBe(quota);
   });
 
   it('runs on Enter the row selected when it is pressed; an answer released afterwards changes nothing', async () => {
