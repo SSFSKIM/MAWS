@@ -286,7 +286,8 @@ describe('listed rows in the project list', () => {
     expect(read('busy')).toEqual(['●', 'accent', 'Working', true]);
     expect(read('waiting')).toEqual(['◐', 'warning', 'Needs you', false]);
     expect(read('failed')).toEqual(['✕', 'danger', 'Failed', false]);
-    for (const state of ['done', 'stopped', 'retired']) expect(read(state)).toEqual(['✓', 'faint', 'Done', false]);
+    for (const state of ['done', 'retired']) expect(read(state)).toEqual(['✓', 'faint', 'Done', false]);
+    expect(read('stopped'), 'the owner’s decision (2026-11-19): only the word differs').toEqual(['✓', 'faint', 'Stopped', false]);
     for (const state of ['idle', 'unknown-word', '']) expect(read(state)).toEqual(['○', 'faint', 'Idle', false]);
     expect(listedTitle({ title: '  ' })).toBe('New chat');
   });
@@ -489,6 +490,43 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     const listed = [{ ...lst('asks', 2), state: 'waiting' }, { ...lst('runs', 6), state: 'busy' }, lst('rests', 9), fed];
     expect(ids(projectItems({ now: NOW, sorted: [unread, working, rec('r5', 5), asking], listed, digests, rows: rowsFor, sort: 'priority' })), 'a waiting word with no feed row is the rest’s, either way').toEqual(['@fed', 'u', '@runs', 'w', '@rests', 'r5', 'wr', '@asks']);
     expect(ids(projectItems({ now: NOW, sorted: [rec('r5', 5)], listed, digests: new Map(), rows: rowsFor, sort: 'recency' })), 'recency: the issue alone').toEqual(['@rests', '@runs', 'r5', '@asks', '@fed']);
+  });
+
+  // The owner's decision (2026-11-19): a terminal session another machine keeps listed as `stopped` after its process
+  // ended fills only the slots left over, after every live listed row and every record, newest first, under either sort.
+  // A Needs-you row keeps its rank; the spawned-here lead does not hold (a stopped session ends no turn to end it).
+  const stopped = (id: string, m: number): ListedSession => ({ ...lst(id, m), state: 'stopped' });
+  const SORTS = ['priority', 'recency'] as const;
+
+  it('a stopped listed row ranks after an older idle record and an older idle listed row, under either sort', () => {
+    for (const sort of SORTS) expect(ids(items([rec('r1', 1)], [stopped('s9', 9), lst('l0', 0)], sort)), sort).toEqual(['r1', '@l0', '@s9']);
+  });
+
+  it('stopped listed rows among themselves go newest first, under either sort', () => {
+    for (const sort of SORTS) expect(ids(items([rec('r1', 1)], [stopped('s2', 2), stopped('s9', 9), stopped('s5', 5)], sort)), sort).toEqual(['r1', '@s9', '@s5', '@s2']);
+  });
+
+  it('a stopped listed row with a Needs-you row keeps its rank: first under priority, by its issue under recency', () => {
+    const fed = stopped('fed', 4);
+    const rows = needsYou(new Map([[fed.appId, [item(fed.appId, 'error', minute(4))]]]), new Map(), { listed: new Map([[fed.appId, fed]]) });
+    expect(ids(items([rec('r5', 5), rec('r1', 1)], [fed, lst('l3', 3)], 'priority', { rows })), 'priority').toEqual(['@fed', 'r5', '@l3', 'r1']);
+    expect(ids(items([rec('r5', 5), rec('r1', 1)], [fed, lst('l3', 3)], 'recency', { rows })), 'recency').toEqual(['r5', '@fed', '@l3', 'r1']);
+  });
+
+  it('a stopped listed row spawned from here ranks in the stopped tier and is cut by the caps, while a live one that leads still leads, under either sort', () => {
+    const live = { ...lst('live', 0), state: 'idle' };
+    const lead = new Set([there('spawned') as AppSessionId, live.appId]);
+    for (const sort of SORTS) {
+      const merged = projectItems({ now: NOW, sorted: busy({}), listed: [spawned('stopped'), live], digests: new Map(), rows: [], sort, spawned: lead });
+      expect(ids(merged)[0], sort).toBe('@live');
+      expect(ids(merged).at(-1), sort).toBe('@spawned');
+      for (const more of [false, true]) expect(shownTrees(nestItems(merged), more, lead).shown.map((t) => sidebarSessionId(t.root)), `${sort}, Show more ${more}`).not.toContain(there('spawned'));
+    }
+  });
+
+  it('a stopped listed row that kept the keyboard stays drawn past the caps', () => {
+    const merged = projectItems({ now: NOW, sorted: busy({}), listed: [stopped('s', 0)], digests: new Map(), rows: [], sort: 'priority' });
+    expect(shownTrees(nestItems(merged), false, new Set(), there('s') as AppSessionId).shown.map((t) => sidebarSessionId(t.root))).toContain(there('s'));
   });
 });
 

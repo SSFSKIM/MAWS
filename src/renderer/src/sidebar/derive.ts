@@ -324,7 +324,8 @@ export function lineageCaption(record: SessionRecord, nested: boolean, parentTit
 // listed row's from its machine's attention feed, in the rows' order: a waiting word with no feed row is the rest's,
 // a record's digest and a listing's alike), unread records, the working (a record by its turn start, a listed row `busy` by its listing's issue: sminos re-issues
 // a listing at each change of its state), then the rest by last activity (a record's `lastActivity`, a listed row's
-// `issued`); under `recency`, all by last activity. Lineage nests records only; a listed row is a tree of one.
+// `issued`); under `recency`, all by last activity. Under either, a stopped listed row with no Needs-you row comes last,
+// newest first (`isStopped`). Lineage nests records only; a listed row is a tree of one.
 export type SidebarSession = { kind: 'record'; record: SessionRecord } | { kind: 'listed'; listed: ListedSession };
 export interface ListedTreeRow {
   listed: ListedSession;
@@ -352,11 +353,19 @@ export interface ProjectItemsInput {
 }
 
 // An item's place: its tier (-2 pinned, -1 the spawned lead, then `priorityRank`'s groups), its key within a ranked
-// group, and its last activity, which orders the pinned, the lead and the rest.
+// group, and its last activity, which orders the pinned, the lead, the rest and the stopped.
 interface Rank { tier: number; key: number; at: number }
 const PINNED_TIER = -2;
 const SPAWNED_TIER = -1;
-const byRank = (a: Rank, b: Rank): number => a.tier - b.tier || (a.tier < 0 || a.tier === RANK_REST ? b.at - a.at : a.key - b.key);
+const STOPPED_TIER = RANK_REST + 1;
+const byRank = (a: Rank, b: Rank): number => a.tier - b.tier || (a.tier < 0 || a.tier >= RANK_REST ? b.at - a.at : a.key - b.key);
+
+// The owner's decision (2026-11-19): a listed row whose machine keeps it as `stopped` (its process ended; it can be
+// reopened) takes only the slots left over, after every record and every live listed row, under either sort; one with
+// a Needs-you row keeps that rank. It never leads as spawned (nor as unhidden): a stopped session ends no turn, so the
+// lead would hold it above every live row until a restart.
+const isStopped = (l: ListedSession): boolean => l.state === 'stopped';
+const leadsListed = (l: ListedSession, spawned: ReadonlySet<AppSessionId> | undefined): boolean => !isStopped(l) && leadsAsSpawned(l.appId, spawned);
 
 export function projectItems({ sorted, listed, digests, rows, sort, spawned, seen, listings, now }: ProjectItemsInput): SidebarSession[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
@@ -370,9 +379,10 @@ export function projectItems({ sorted, listed, digests, rows, sort, spawned, see
   };
   const listedRank = (l: ListedSession): Rank => {
     const at = issuedAt(l);
-    if (leadsAsSpawned(l.appId, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
-    if (sort !== 'priority') return { tier: RANK_REST, key: 0, at };
+    if (leadsListed(l, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
     const row = rowIndex.get(l.appId);
+    if (isStopped(l) && row === undefined) return { tier: STOPPED_TIER, key: 0, at };
+    if (sort !== 'priority') return { tier: RANK_REST, key: 0, at };
     if (row !== undefined) return { tier: 0, key: row, at };
     if (l.state === 'busy') return { tier: 2, key: -at, at };
     return { tier: RANK_REST, key: 0, at };
@@ -393,10 +403,11 @@ export function projectItems({ sorted, listed, digests, rows, sort, spawned, see
 // The trees an expanded project draws (search aside): the first `shownCount`, then any tree holding a row that still
 // leads as spawned here past them, its root or a row nested under it (a side thread's child under an older parent)
 // (P5 O7 M8, the architect's ruling: the lead is never cut, the cap grows by one), and how many more "Show more" would
-// draw.
-export function shownTrees(trees: readonly SidebarTree[], more: boolean, spawned: ReadonlySet<AppSessionId> | undefined): { shown: SidebarTree[]; more: number } {
+// draw. `kept`, a row that kept the keyboard (UX wave U7, O-16), is drawn past them too, a stopped listed row included.
+export function shownTrees(trees: readonly SidebarTree[], more: boolean, spawned: ReadonlySet<AppSessionId> | undefined, kept: AppSessionId | null = null): { shown: SidebarTree[]; more: number } {
   const count = shownCount(trees.length, more);
-  const leads = (tree: SidebarTree) => tree.rows.some((row) => leadsAsSpawned(isListedRow(row) ? row.listed.appId : row.record.appId, spawned));
+  const leadsRow = (row: SidebarTreeRow) => (isListedRow(row) ? row.listed.appId === kept || leadsListed(row.listed, spawned) : row.record.appId === kept || leadsAsSpawned(row.record.appId, spawned));
+  const leads = (tree: SidebarTree) => tree.rows.some(leadsRow);
   const past = trees.slice(count).filter(leads);
   const shown = [...trees.slice(0, count), ...past];
   const withinCap = trees.slice(count, SESSIONS_CAP).filter((tree) => !leads(tree)).length;
