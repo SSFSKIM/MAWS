@@ -940,7 +940,9 @@ export function createViewerStore(client: MawsBridge) {
     // when its view is mounted, else at its next mount. The new read notes the new count, so it starts no further one.
     const readAfterFollows = async (tabId: string, landed: Landed) => {
       for (let under = following(landed.appSessionId, landed.path); under !== null; under = following(landed.appSessionId, landed.path)) await under;
-      if (linkedCount(landed.appSessionId, landed.path) <= landed.noted) return;
+      // a comparison obsolete by now (the entry another session's, path's or generation's) owes nothing, and takes no place
+      // of a read again the entry owes for itself
+      if (linkedCount(landed.appSessionId, landed.path) <= landed.noted || !stillOwed(tabId, landed)) return;
       owed.set(tabId, landed);
       readOwed(tabId);
     };
