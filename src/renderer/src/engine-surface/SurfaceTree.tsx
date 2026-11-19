@@ -6,10 +6,14 @@
 // fenced block, so the transcript's highlighter draws it); an Svg is a `data:` image, or a frame with `sandbox=""` when
 // it asks to be interactive; `engine` draws MAWS's own drawing of the site (`engine`, given by the site). A Client
 // element requires client JavaScript, deferred in R3: it draws MAWS native instead.
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4): a path chip in Code and Markdown
+// opens the file through the registered opener for this surface's session (`SiteFiles`), in a composer site and a pane as
+// inside a transcript row; the chip's own click carries the line, ⌘ and the keyboard, so the capture handler is not given it.
 import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
 import { parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
 import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
 import { endsSelection, Markdown, openArtifactMention, registeredActions } from '../transcript';
+import { TranscriptActionsProvider } from '../transcript/view/context';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
 import { boxStyle, textStyle } from './style';
 import { firstEngineNode, type SurfaceNode } from './tree';
@@ -294,12 +298,20 @@ export function fenced(source: string, language: string): string {
   return `${fence}${language}\n${source}\n${fence}`;
 }
 
+// UX wave U6b-4b (R4): the file action of the surface's Markdown, for the site's session.
+function SiteFiles({ children }: { children: ReactNode }) {
+  const { site } = useSurface();
+  return <TranscriptActionsProvider actions={{ openFile: (path, line, _session, options) => registeredActions().openFile(path, line, site.appSessionId, options) }}>{children}</TranscriptActionsProvider>;
+}
+
 function CodeNode({ node }: { node: Extract<SurfaceNode, { type: 'Code' }> }) {
   const { source, language, path, format } = node.props;
   const lang = format === 'diff' ? 'diff' : (language ?? path?.split('.').pop() ?? '');
   return (
     <div data-surface="code" className="min-w-0">
-      <Markdown markdown={fenced(source, lang)} live={false} />
+      <SiteFiles>
+        <Markdown markdown={fenced(source, lang)} live={false} />
+      </SiteFiles>
     </div>
   );
 }
@@ -332,7 +344,9 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
   };
   return (
     <div data-surface="markdown" data-plugin={node.press?.plugin} data-key={key} className={`min-w-0${dimColor ? ' text-fg-muted' : ''}`} onClickCapture={onClickCapture}>
-      <Markdown markdown={text} live={false} />
+      <SiteFiles>
+        <Markdown markdown={text} live={false} />
+      </SiteFiles>
     </div>
   );
 }

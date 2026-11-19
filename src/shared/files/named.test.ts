@@ -594,7 +594,8 @@ describe('a relative link names no absolute path (U6b-4b)', () => {
     for (const text of ['[x](../../outside/secret.md)', '[x](notes/a.md)', '[x](./a.md) and [y](~/a.md)', '[x](file:../../outside/secret.md)']) {
       expect(linkPaths(text).filter((path) => path.startsWith('/')), text).toEqual([]);
     }
-    expect(linkPaths('[x](../../outside/secret.md) [y](/outside/secret.md)')).toEqual(['/outside/secret.md']);
+    // the control: the same reading finds the absolute form beside it; the relative one it reads as written, relative
+    expect(linkPaths('[x](../../outside/secret.md) [y](/outside/secret.md)')).toEqual(['../../outside/secret.md', '/outside/secret.md']);
     expect(clickPath('../../outside/secret.md')).toBe('../../outside/secret.md');
   });
 });

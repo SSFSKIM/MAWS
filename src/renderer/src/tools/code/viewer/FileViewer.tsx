@@ -226,9 +226,10 @@ interface FileBodyProps {
   host?: 'side' | 'main'; // UX wave U6b-2: where the tab is drawn; the main area when absent
   inView?: boolean; // UX wave U6b-2 (Decision Log 29): false while the mounted body is not in view
   agent?: boolean; // UX wave U6e (decision 19): the tab holds the agent's mark, and its reads say so
+  artifactView?: boolean; // UX wave U6b-4b (decision 4): an artifact's view, whose Markdown resolves no relative link
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false }: FileBodyProps) {
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, artifactView = false }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -267,7 +268,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {end}
         {entry ? below?.(entry) : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} artifactView={artifactView} /> : <Loading />}</div>
     </div>
   );
 }
@@ -290,7 +291,7 @@ const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom, host, inView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean }) {
+function Body({ entry, wrap, zoom, host, inView, artifactView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; artifactView: boolean }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
   if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
@@ -301,7 +302,7 @@ function Body({ entry, wrap, zoom, host, inView }: { entry: ViewerEntry; wrap: b
       </Suspense>
     );
   }
-  if (entry.kind === 'markdown') return <MarkdownView entry={entry} />;
+  if (entry.kind === 'markdown') return <MarkdownView entry={entry} artifactView={artifactView} />;
   if (showsImage(entry)) return <ImageView entry={entry} zoom={zoom} />;
   return <ExternalRow entry={entry} />;
 }
