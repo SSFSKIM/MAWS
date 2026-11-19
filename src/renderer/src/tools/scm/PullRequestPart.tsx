@@ -181,11 +181,15 @@ function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreA
           ))}
           {checks.foldWords !== null && (
             <div data-scm-fold-line className="flex min-w-0 items-center gap-x-1 text-ui-sm">
-              {!checks.countsLine && <ChecksLabel />}
+              {!checks.countsLine && (
+                <>
+                  <ChecksLabel />{' '}
+                </>
+              )}
               <button type="button" aria-expanded={open} onClick={() => ui.setState({ passedOpen: !open })} className="-mx-1 inline-flex h-6 items-center gap-1.5 rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
                 <span aria-hidden className="w-2 text-center">
                   {open ? '⌄' : '›'}
-                </span>
+                </span>{' '}
                 {checks.foldWords}
               </button>
             </div>
