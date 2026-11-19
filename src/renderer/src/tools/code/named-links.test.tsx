@@ -241,6 +241,26 @@ describe('the rule reads the blocks the window draws', () => {
     agree('|\n|-|\n[r](/work/x.md) | [s](/work/y.md)', ['/work/x.md', '/work/y.md']);
     agree('`a\n|\n|-|\n[r](/work/x.md)`', []);
   });
+
+  // N1.15: the window's parser drops a leading byte order mark; one that does not lead the text is a character
+  it('a byte order mark before a fence’s opening: a fence to both (N1.15)', () => {
+    for (const fence of ['```', '~~~']) {
+      agree(`﻿${fence}\n[r](/work/x.md)\n${fence}`, []);
+      agree(`﻿[s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+      // the mark after a first line of prose opens no fence for either: the link is prose, and the closing run opens one
+      agree(`prose\n﻿${fence}\n[r](/work/x.md)\n${fence}`, ['/work/x.md']);
+    }
+  });
+
+  // N1.16: the window ends a line at a carriage return alone; the rule names nothing of such a text
+  it('lone carriage returns round a fence: the rule names nothing, the window draws no chip in the fence (N1.16)', () => {
+    for (const fence of ['```', '~~~']) {
+      const lone = `see [s](/work/s.md)\r${fence}\r[r](/work/x.md)\r${fence}`;
+      expect(chipPaths(lone), fence).toEqual(['/work/s.md']);
+      expect(linkPaths(lone), fence).toEqual([]);
+      agree(`see [s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+    }
+  });
 });
 
 // The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own

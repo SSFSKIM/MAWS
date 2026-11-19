@@ -167,12 +167,20 @@ const isControl = (code: number) => code < 32 || code === 127;
 const isDigit = (code: number) => code >= 48 && code <= 57;
 const escapes = (text: string, at: number, limit: number) => text.charCodeAt(at) === 92 && at + 1 < limit && ASCII_PUNCTUATION.test(text[at + 1]!);
 
-// The end of the line that starts at `start` (its line ending, or the text's end), found a pause's worth at a time.
+// The end of the line that starts at `start` (its line ending, or the text's end), found a pause's worth at a time. A
+// carriage return not followed by a line feed refuses the text (UX wave U6b-4b, R1): the window's parser ends a line
+// there, and this pass, which ends one at a line feed alone, would read a fence the window sees as prose.
 function* lineEndFrom(text: string, start: number, m: Meter): Generator<typeof PAUSE, number, void> {
   for (let at = start; ; ) {
     const limit = Math.min(text.length, at + SCAN_STEP_CHARS);
-    const found = text.slice(at, limit).indexOf('\n');
+    const stretch = text.slice(at, limit);
+    const found = stretch.indexOf('\n');
     charge(m, (found < 0 ? limit - at : found) + 1);
+    // Only a return directly before the line feed is part of a line ending; one at the stretch's end is checked again
+    // against the character after it
+    const read = found < 0 ? stretch : stretch.slice(0, found);
+    const lone = read.indexOf('\r');
+    if (lone >= 0 && (lone < read.length - 1 || (found < 0 && text.charCodeAt(limit) !== 10))) throw new ScanRefused();
     if (found >= 0) return at + found;
     if (limit >= text.length) return text.length;
     at = limit;
@@ -676,7 +684,8 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
   const row = (line: Line, cells: number) => {
     if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end, m).slice(0, cells)) contexts.push({ start, end });
   };
-  for (let start = 0; start < text.length; ) {
+  // A leading byte order mark is passed over, as the window's parser drops it (micromark's `preprocess`)
+  for (let start = text.charCodeAt(0) === 0xfeff ? 1 : 0; start < text.length; ) {
     if (m.work >= m.pause) yield pauseAt(m);
     const line: Line = ahead !== null && ahead.start === start ? ahead : yield* lineFrom(start);
     ahead = null;
