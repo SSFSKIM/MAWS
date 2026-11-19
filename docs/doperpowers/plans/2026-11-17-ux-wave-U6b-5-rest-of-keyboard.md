@@ -893,6 +893,7 @@ Found while this document was written and reviewed; each changed a decision abov
    - **G5, the palette.** Every `surface.*` row joins the rows the palette runs after its close (`modalHandoff`, Decision Log 9). The selection is always a drawn row: one that goes falls back to the first row and clears the move, and a row the palette picks by itself is held and scrolled into view with its group's heading. The row's machine is passed as before; carrying it through reads and edits is ticket 783's.
    - **G6, the screen's text.** xterm's unwritten padding cell before a wrapped wide character is not text: `abcd界ef` at five columns reads `abcd界ef`; cases with Hangul (`가나다라마`, `abc 한글`).
    A delta review on the medium rung follows; there is no second panel.
+   **The delta review's rule for a remote save (H1, the coordinator, 2026-11-19).** "Added" is said only when a snapshot the machine accepted holds the block: a successful write's own answer, or a read that confirms it. The window's queued draft is the document a round keeps and appends to, never proof that it was saved, and each attach follows the acknowledgment of its own snapshot, not the answer of the queue's last write.
 
 ## Outcomes & Retrospective
 
