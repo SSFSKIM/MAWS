@@ -10,12 +10,21 @@
 // daemon, and it gives the event loop back after every read, every parsed line and every few steps of the rule on a
 // line, so a search of the whole bound does not hold the daemon's other work. It never throws, puts no path in a
 // message, and writes nothing.
+//
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §E, decision 8, W3):
+// `namesInAgent` is the same search over one subagent's transcript, for a follow that names the agent. Its file is found
+// under the session's own transcript folder by reading directories alone, opened with no link anywhere on its way (only
+// where an open can be confirmed to have followed none, `OPENS_CONFIRMED`), and read by the subagent's rule
+// (`agentRowClaimSteps`: no `user` record of it counts). It takes the same slot, queue, patience and memory, keyed apart
+// by the agent's id, and `names` never reads a subagent's file.
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open as openFile, type FileHandle } from 'node:fs/promises';
+import { lstat, open as openFile, readdir, realpath, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { callClass, needlesOf, PAUSE, rowClaimSteps, type PendingCall, type RowClaim } from '@shared/files/named';
+import { agentRowClaimSteps, callClass, needlesOf, PAUSE, rowClaimSteps, type PendingCall, type RowClaim } from '@shared/files/named';
 import type { AppSessionId } from '@shared/graph/ids';
+import { confirmOpened, NO_LINK, OPENS_CONFIRMED, walk, WALKED } from '../fs/no-link';
 
 export const NAMED_SCAN_BYTES = 1024 ** 3; // read back from the transcript's end, at most: completeness, not cost
 export const NAMED_CHUNK_BYTES = 1024 * 1024; // one read
@@ -27,6 +36,14 @@ export const NAMED_FINGERPRINT_BYTES = 4096; // as the engine host's search (`fi
 export const NAMED_PENDING_MAX = 256; // results waiting for their calls in one search; an older one past it is not waited for
 export const NAMED_PATH_MAX = 4096; // bytes of an asked path at most (the largest PATH_MAX of the platforms); a longer one is not named
 export const NAMED_CLAIM_STEPS = 64; // steps of the rule on one row between two turns of the event loop (the branch review's finding 2)
+export const NAMED_AGENT_DIRS_MAX = 4096; // U6b-4c: directories read to find one agent's file; past it, not named
+// U6b-4c: where a subagent's file is, as the engine host's walk reads it (src/engine-host/fs/subagents.ts: `MAX_DEPTH`
+// and `AGENT_TRANSCRIPT`): `agent-<agentId>.jsonl` in `<session>/subagents/` or up to three directories below it (a
+// workflow run's are under `subagents/workflows/<runId>/`). A suite holds the two readings together.
+const AGENT_DEPTH_MAX = 3;
+const agentFileName = (agentId: string) => `agent-${agentId}.jsonl`;
+const TRANSCRIPT_EXTENSION = '.jsonl';
+const isTranscriptName = (path: string) => path.endsWith(TRANSCRIPT_EXTENSION) && basename(path).length > TRANSCRIPT_EXTENSION.length;
 
 // How a transcript is opened: read-only and without blocking (`O_RDONLY | O_NONBLOCK`), so a FIFO with no writer, or any
 // other special file, opens at once and is refused on its descriptor's type before anything is read (the branch
@@ -37,8 +54,11 @@ const TRANSCRIPT_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK;
 export interface NamedPathsOptions {
   transcript: (appSessionId: AppSessionId) => Promise<string | null>; // decision 13; null: the session has no transcript
   open?: OpenTranscript; // tests: the suite counts the bytes read
-  bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number; pending?: number }; // tests
-  hooks?: { at?(point: 'opened' | 'searched', appSessionId: AppSessionId): Promise<void> }; // tests: after a job has opened the file and read its size; after a search, before its answer is proven and remembered
+  bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number; pending?: number; dirs?: number }; // tests
+  // tests: after a job has opened the file and read its size; after a search, before its answer is proven and remembered;
+  // U6b-4c: after the walk found a subagent's file, before it is opened; where the open walks first (Linux), between its
+  // walk of the file's folders and the open
+  hooks?: { at?(point: 'opened' | 'searched' | 'found' | 'walked', appSessionId: AppSessionId): Promise<void> };
 }
 // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 22): which kind of form
 // names the path: a counted one (the person's message, the agent's own text, a tool call's input), only a result one
@@ -46,6 +66,10 @@ export interface NamedPathsOptions {
 export type Naming = 'counted' | 'result' | false;
 export interface NamedPaths {
   names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<Naming>;
+  // U6b-4c (Interfaces §E): the search over the one transcript of the session's subagent `agentId`. `located` is called
+  // exactly once, when the request's call of the transcript locator has settled (answered, thrown, or never made), also
+  // after the request itself was answered: a follow keeps its place until then (decision 7).
+  namesInAgent(appSessionId: AppSessionId, agentId: string, path: string, signal?: AbortSignal, located?: () => void): Promise<Naming>;
 }
 
 const NEWLINE = 0x0a;
@@ -79,13 +103,15 @@ interface Waiter {
   answer(value: Naming): void;
 }
 interface Job {
-  key: string; // the session, the transcript it was bound to when asked, and the path: who may join
-  entry: string; // the session and the path: what is remembered (an entry rests on the file's identity, not its name)
+  key: string; // the session, the transcript it was bound to when asked, (U6b-4c) the agent, and the path: who may join
+  entry: string; // the session, (U6b-4c) the agent, and the path: what is remembered (an entry rests on the file's identity, not its name)
   appSessionId: AppSessionId;
   transcript: string;
+  agentId: string | null; // U6b-4c: the subagent whose transcript, under the session's transcript folder, is searched; null: the session's own
   path: string;
   waiters: Set<Waiter>;
 }
+type Rule = typeof rowClaimSteps; // how one record names the path: the session's rule, or (U6b-4c) a subagent's
 type Read = (position: number, length: number) => Promise<Buffer>;
 
 class Left extends Error {} // every waiter of the running job left: it stops at its next read
@@ -107,8 +133,8 @@ async function parse(line: Buffer): Promise<unknown> {
 // The rule on one parsed row, given the event loop back at every pause of its scan (each 64 KiB of the scan's metered
 // work, Decision Log 24) and every NAMED_CLAIM_STEPS of its other steps (a value looked at, a link met): a row under the
 // row bound may hold a great many links. It stops at the first that names the path.
-async function claimOf(row: unknown, path: string): Promise<RowClaim> {
-  const steps = rowClaimSteps(row, path);
+async function claimOf(row: unknown, path: string, rule: Rule): Promise<RowClaim> {
+  const steps = rule(row, path);
   for (let n = 1; ; n += 1) {
     const step = steps.next();
     if (step.done) return step.value;
@@ -125,6 +151,7 @@ async function fingerprint(read: Read, offset: number, span: number): Promise<st
 }
 
 export function createNamedPaths({ transcript, open = openFile, bounds = {}, hooks }: NamedPathsOptions): NamedPaths {
+  const dirsMax = bounds.dirs ?? NAMED_AGENT_DIRS_MAX;
   const scanBytes = bounds.scan ?? NAMED_SCAN_BYTES;
   const chunkBytes = bounds.chunk ?? NAMED_CHUNK_BYTES;
   const rowBytes = bounds.row ?? NAMED_ROW_BYTES;
@@ -161,8 +188,8 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   // A remembered or just-found name, read again from its record (and its call's): does it still name the path, by the
   // same kind of form?
-  async function proves(read: Read, found: Found, path: string, kind: 'counted' | 'result'): Promise<boolean> {
-    const claim = await claimOf(await lineAt(read, found.record), path);
+  async function proves(read: Read, found: Found, path: string, kind: 'counted' | 'result', rule: Rule): Promise<boolean> {
+    const claim = await claimOf(await lineAt(read, found.record), path, rule);
     if (claim.names) return kind === 'counted';
     if (kind === 'counted') return false;
     const { call } = found;
@@ -173,7 +200,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   // The newest record of a region that names the path by a counted form (`found`), the newest result form whose call
   // resolves (`result`), and the calls the results it met wait for, newest first.
-  function scanner(read: Read, path: string) {
+  function scanner(read: Read, path: string, rule: Rule) {
     const needles = needlesOf(path).map((needle) => Buffer.from(needle));
     const pending = new Map<string, { when: PendingCall['when']; record: Span }[]>(); // per call id, the newest results waiting for it
     const state = { found: null as Found | null, result: null as Found | null, pending };
@@ -205,7 +232,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       const row = await parse(line);
       const span = { offset: base + start, length };
       if (candidate) {
-        const claim = await claimOf(row, path);
+        const claim = await claimOf(row, path, rule);
         if (claim.names) {
           state.found = { record: span, call: null };
           return;
@@ -274,6 +301,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   }
 
   async function decide(job: Job, handle: FileHandle): Promise<Naming> {
+    const rule: Rule = job.agentId === null ? rowClaimSteps : agentRowClaimSteps;
     const stat = await handle.stat({ bigint: true });
     if (!stat.isFile()) return false; // judged on the descriptor, before any read
     await hooks?.at?.('opened', job.appSessionId);
@@ -289,7 +317,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
     const entry = entries.get(job.entry);
     if (entry?.kind === 'hit') {
-      if (sameFile(entry, identity) && (await proves(read, entry, job.path, 'counted'))) {
+      if (sameFile(entry, identity) && (await proves(read, entry, job.path, 'counted', rule))) {
         remember(job, entry);
         return 'counted';
       }
@@ -298,7 +326,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     // a remembered result form stands while its records prove it and its checkpoint holds
     let known: Found | null = null;
     if (entry?.kind === 'result') {
-      if (sameFile(entry, identity) && (await proves(read, entry.found, job.path, 'result'))) known = entry.found;
+      if (sameFile(entry, identity) && (await proves(read, entry.found, job.path, 'result', rule))) known = entry.found;
       else entries.delete(job.entry);
     }
 
@@ -322,7 +350,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
     let searchedTo: number | null = fromIsLine ? from : null;
     let began: string | null = verified; // the fingerprint before `searchedTo`, as the search began
-    const { state, region } = scanner(read, job.path);
+    const { state, region } = scanner(read, job.path, rule);
     await region(from, fromIsLine, size, true, true, async (end) => {
       searchedTo = end;
       began = await fingerprint(read, end, NAMED_FINGERPRINT_BYTES);
@@ -332,12 +360,12 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     await hooks?.at?.('searched', job.appSessionId);
 
     if (state.found !== null) {
-      if (!(await proves(read, state.found, job.path, 'counted'))) return false;
+      if (!(await proves(read, state.found, job.path, 'counted', rule))) return false;
       remember(job, { kind: 'hit', ...state.found, ...identity });
       return 'counted';
     }
     const result = state.result ?? known;
-    if (state.result !== null && !(await proves(read, state.result, job.path, 'result'))) return false;
+    if (state.result !== null && !(await proves(read, state.result, job.path, 'result', rule))) return false;
     // the checkpoint up to which no counted form stands, if the file is still the one searched
     let reached: Checkpoint | null = null;
     if (searchedTo !== null && began !== null) {
@@ -361,13 +389,64 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   async function run(job: Job): Promise<Naming> {
     let handle: FileHandle | null = null;
     try {
-      handle = await open(job.transcript, TRANSCRIPT_FLAGS);
+      handle = job.agentId === null ? await open(job.transcript, TRANSCRIPT_FLAGS) : await openAgent(job, job.agentId);
+      if (handle === null) return false;
       return await decide(job, handle);
     } catch {
       return false;
     } finally {
       await handle?.close().catch(() => {});
     }
+  }
+
+  // U6b-4c (Interfaces §E): the transcript of the session's subagent `agentId`, opened inside the job's slot, or null. The
+  // folder that holds the session's transcript `T` is taken by its real path `P`; the session's folder `S` is `P` and `T`'s
+  // name without `.jsonl`, resolved no further, and `S` and `S/subagents` must each be a directory itself. The walk finds
+  // the one file of that name; it does not prove the way to it, since a folder can be replaced by a link between two of
+  // its reads. The open does: by its path under `P`, with no link anywhere on its way (../fs/no-link.ts; on Linux its
+  // folders walked first and the descriptor's own path confirmed), so `S` and everything below it is inside the check.
+  async function openAgent(job: Job, agentId: string): Promise<FileHandle | null> {
+    const folder = join(await realpath(dirname(job.transcript)), basename(job.transcript).slice(0, -TRANSCRIPT_EXTENSION.length));
+    const subagents = join(folder, 'subagents');
+    if (!(await lstat(folder)).isDirectory() || !(await lstat(subagents)).isDirectory()) return null;
+    const found = await agentFileIn(subagents, agentFileName(agentId), job);
+    if (found === null) return null;
+    await hooks?.at?.('found', job.appSessionId);
+    if (WALKED) {
+      await walk(dirname(found));
+      await hooks?.at?.('walked', job.appSessionId);
+    }
+    const handle = await open(found, TRANSCRIPT_FLAGS | NO_LINK);
+    try {
+      await confirmOpened(handle.fd, found);
+    } catch {
+      await handle.close().catch(() => {});
+      return null;
+    }
+    return handle; // a regular file is judged on its descriptor, as the session's own transcript is (`decide`)
+  }
+
+  // The one regular file `name` in `top` or at most AGENT_DEPTH_MAX directories below it, by `readdir` with file types:
+  // a folder is an entry that is a directory itself, the file an entry that is a regular file itself, and an entry seen
+  // as a link is neither. Null for none, for two, or past `dirsMax` directories read; a directory that cannot be read
+  // throws, which is not named. It stops once nobody waits for its job.
+  async function agentFileIn(top: string, name: string, job: Job): Promise<string | null> {
+    const unread: [dir: string, depth: number][] = [[top, 0]];
+    let found: string | null = null;
+    for (let read = 1; unread.length > 0; read += 1) {
+      if (read > dirsMax) return null;
+      if (job.waiters.size === 0) throw new Left();
+      const [dir, depth] = unread.pop()!;
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (depth < AGENT_DEPTH_MAX) unread.push([join(dir, entry.name), depth + 1]);
+        } else if (entry.isFile() && entry.name === name) {
+          if (found !== null) return null;
+          found = join(dir, entry.name);
+        }
+      }
+    }
+    return found;
   }
 
   function pump(): void {
@@ -384,64 +463,98 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     });
   }
 
-  // The job a request joins once its session's transcript is known: the job of the same session, transcript and path,
-  // running or waiting, or a new waiting one; null when the queue is full.
-  function jobFor(appSessionId: AppSessionId, located: string, path: string): Job | null {
-    const key = `${appSessionId}\u0000${located}\u0000${path}`;
+  // The job a request joins once its session's transcript is known: the job of the same session, transcript, agent and
+  // path, running or waiting, or a new waiting one; null when the queue is full. A subagent's job is keyed apart, by a
+  // JSON array, which holds no raw NUL as every key of the session's own does, so the two never meet (decision 8).
+  function jobFor(appSessionId: AppSessionId, located: string, path: string, agentId: string | null): Job | null {
+    const key = agentId === null ? `${appSessionId}\u0000${located}\u0000${path}` : JSON.stringify(['agent', appSessionId, located, agentId, path]);
     const job = running !== null && running.key === key && running.waiters.size > 0 ? running : waiting.get(key);
     if (job !== undefined) return job;
     if (waiting.size >= waitingMax) return null; // the queue is full: the refusal at once
-    const created: Job = { key, entry: `${appSessionId}\u0000${path}`, appSessionId, transcript: located, path, waiters: new Set() };
+    const entry = agentId === null ? `${appSessionId}\u0000${path}` : JSON.stringify(['agent', appSessionId, agentId, path]);
+    const created: Job = { key, entry, appSessionId, transcript: located, agentId, path, waiters: new Set() };
     waiting.set(key, created);
     return created;
   }
 
-  return {
-    // A request's patience and its client's signal run from the moment it is made, the locator's wait included (fix
-    // round 1, item 3): it finds its session's transcript itself, before it looks for a job (decision 13; the branch
-    // review's finding 5: `/clear` keeps the app session id and binds it to a new transcript, and a request never joins
-    // a job that reads another transcript than the one its session is bound to when it is made), and then waits in the
-    // queue only for what is left of its patience. A request that ended while the locator was asked queues nothing. No
-    // transcript, a locator that throws, a full queue, a waiter that leaves: not named.
-    names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<Naming> {
-      if (signal?.aborted) return Promise.resolve(false);
-      // `files.read` asks for a missing file's path too, which no `realpath` has bounded: past the bound, not named at
-      // once, and no transcript looked for (the work meter's fix pass, item 2; the needles' pattern runs on the path)
-      if (Buffer.byteLength(path) > NAMED_PATH_MAX) return Promise.resolve(false);
-      return new Promise<Naming>((resolve) => {
-        let joined: Job | null = null;
-        let answered = false;
-        const waiter: Waiter = {
-          answer(value) {
-            if (answered) return;
-            answered = true;
-            joined?.waiters.delete(waiter);
-            clearTimeout(timer);
-            signal?.removeEventListener('abort', leave);
-            resolve(value);
-          },
-        };
-        // A waiter that leaves (its client ended, or its patience ran out) is answered not named; a waiting job left with
-        // no waiter is dropped, and a running one stops at its next read.
-        const leave = () => {
-          const job = joined;
+  // A request's patience and its client's signal run from the moment it is made, the locator's wait included (fix
+  // round 1, item 3): it finds its session's transcript itself, before it looks for a job (decision 13; the branch
+  // review's finding 5: `/clear` keeps the app session id and binds it to a new transcript, and a request never joins
+  // a job that reads another transcript than the one its session is bound to when it is made), and then waits in the
+  // queue only for what is left of its patience. A request that ended while the locator was asked queues nothing. No
+  // transcript, a locator that throws, a full queue, a waiter that leaves: not named. U6b-4c: `located` is called once,
+  // when the locator's call has settled, or at once when none is made, whatever the request has answered by then.
+  function ask(appSessionId: AppSessionId, path: string, signal: AbortSignal | undefined, agentId: string | null, located: () => void): Promise<Naming> {
+    let settled = false;
+    const locatorSettled = () => {
+      if (settled) return;
+      settled = true;
+      located();
+    };
+    // `files.read` asks for a missing file's path too, which no `realpath` has bounded: past the bound, not named at
+    // once, and no transcript looked for (the work meter's fix pass, item 2; the needles' pattern runs on the path)
+    if (signal?.aborted || Buffer.byteLength(path) > NAMED_PATH_MAX) {
+      locatorSettled();
+      return Promise.resolve(false);
+    }
+    return new Promise<Naming>((resolve) => {
+      let joined: Job | null = null;
+      let answered = false;
+      const waiter: Waiter = {
+        answer(value) {
+          if (answered) return;
+          answered = true;
+          joined?.waiters.delete(waiter);
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', leave);
+          resolve(value);
+        },
+      };
+      // A waiter that leaves (its client ended, or its patience ran out) is answered not named; a waiting job left with
+      // no waiter is dropped, and a running one stops at its next read.
+      const leave = () => {
+        const job = joined;
+        waiter.answer(false);
+        if (job !== null && job.waiters.size === 0 && waiting.get(job.key) === job) waiting.delete(job.key);
+      };
+      const timer = setTimeout(leave, waitMs);
+      signal?.addEventListener('abort', leave, { once: true });
+      let locating: Promise<string | null>;
+      try {
+        locating = transcript(appSessionId);
+      } catch (error) {
+        locating = Promise.reject(error);
+      }
+      locating.then(
+        (found) => {
+          locatorSettled();
+          if (answered) return; // it ended while the locator was asked
+          // U6b-4c: a subagent's folder is named as the session's transcript without `.jsonl`, which it must end in
+          const job = found === null || (agentId !== null && !isTranscriptName(found)) ? null : jobFor(appSessionId, found, path, agentId);
+          if (job === null) return waiter.answer(false);
+          joined = job;
+          job.waiters.add(waiter);
+          pump();
+        },
+        () => {
+          locatorSettled();
           waiter.answer(false);
-          if (job !== null && job.waiters.size === 0 && waiting.get(job.key) === job) waiting.delete(job.key);
-        };
-        const timer = setTimeout(leave, waitMs);
-        signal?.addEventListener('abort', leave, { once: true });
-        transcript(appSessionId).then(
-          (located) => {
-            if (answered) return; // it ended while the locator was asked
-            const job = located === null ? null : jobFor(appSessionId, located, path);
-            if (job === null) return waiter.answer(false);
-            joined = job;
-            job.waiters.add(waiter);
-            pump();
-          },
-          () => waiter.answer(false),
-        );
-      });
+        },
+      );
+    });
+  }
+
+  const unlocated = () => {};
+  return {
+    names: (appSessionId, path, signal) => ask(appSessionId, path, signal, null, unlocated),
+    // U6b-4c (Interfaces §E): where an open cannot be confirmed to have followed no link, no subagent's file is a source:
+    // not named, nothing opened, and no locator asked
+    namesInAgent: (appSessionId, agentId, path, signal, located = unlocated) => {
+      if (!OPENS_CONFIRMED) {
+        located();
+        return Promise.resolve(false);
+      }
+      return ask(appSessionId, path, signal, agentId, located);
     },
   };
 }

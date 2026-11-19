@@ -78,20 +78,24 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
   // session's own transcript links, read-only, for this machine's callers that ask by name: one search and its queue for
   // the daemon (./files/named.ts). UX wave U6f: each save and choice another machine makes outside a session's folders
   // is a line of the same `[files]` log, in mawsd's log of this machine. UX wave U6b-4c: a link the person clicked in a
-  // Markdown file the session may read, recorded for the session once the daemon found it there, each record a line of
-  // that log
+  // Markdown file the session may read or in one of its subagents' transcripts, recorded for the session once the daemon
+  // found it there, each record a line of that log
   const filesLog = (line: string) => console.warn(`[files] ${line}`);
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): which entries of
   // a listing git ignores, one bounded check per listing, at most four at once; its runs end at the stop, before files'
   const ignore = createIgnoreCheck();
+  // one search for the daemon: the session's own transcript (`names`) and, UX wave U6b-4c (Interfaces §E), one of its
+  // subagents' for a follow that names the agent (`namesInAgent`), sharing its slot, its queue and its memory
+  const named = createNamedPaths({ transcript });
   const files = registerFilesHandlers(allowlistOf(view), {
     bus,
     emit: (payload) => void bus.emit('files.changed', payload),
     port: clientPort, // files.openExternal; E1: files.reveal
     admitted: fileAdmission(view),
-    named: createNamedPaths({ transcript }).names,
+    named: named.names,
     ...(grants === null ? {} : { grants }), // U6e
-    ...(links === null ? {} : { links }), // U6b-4c: a link followed; its subagent source answers not-linked until M3 hands the search
+    ...(links === null ? {} : { links }), // U6b-4c: a link followed, from a Markdown file or a subagent's transcript
+    agentNames: named.namesInAgent, // U6b-4c
     log: filesLog, // U6b-4c: one line per link recorded, the session and the time
     sent,
     own,
