@@ -51,6 +51,7 @@ let servers: { name: string; scope: string; path: string; transport: string }[];
 let opSeq: number;
 let extraSkills: object[]; // UX wave U11's skill actions
 let skillFileAnswer: unknown;
+let envAnswer: Promise<unknown> | null; // plugins.env's answer, when a test holds it
 
 const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
 const emit = (name: EventName, payload: unknown) => {
@@ -66,7 +67,7 @@ const ACTION_OF: Partial<Record<CommandName, string>> = { 'plugins.install': 'in
 function answer(name: CommandName, input: unknown): unknown {
   switch (name) {
     case 'plugins.env':
-      return { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: `${HOME}/.claude.json` };
+      return envAnswer ?? { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: `${HOME}/.claude.json` };
     case 'plugins.list':
       return listAnswer ?? { plugins: installed };
     case 'marketplaces.list':
@@ -80,7 +81,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'layout.openInApps': // UX wave U11's skill actions: the rows this Mac has
       return { apps: [{ id: 'zed', name: 'Zed' }, { id: 'terminal', name: 'Terminal' }, { id: 'finder', name: 'Finder' }] };
     case 'customization.skillFile':
-      return skillFileAnswer;
+      return typeof skillFileAnswer === 'function' ? (skillFileAnswer as () => unknown)() : skillFileAnswer;
     case 'catalog.home':
       return home();
     case 'catalog.query':
@@ -131,6 +132,7 @@ beforeEach(() => {
   opSeq = 0;
   extraSkills = [];
   skillFileAnswer = { status: 'opened' };
+  envAnswer = null;
   shelf = [ledger, berth];
   const bridge: PreloadBridge = {
     localMachine: TEST_MACHINE,
@@ -683,6 +685,36 @@ describe('a skill’s actions', () => {
     fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
     await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  it('until the configuration home is known, Created by you waits, disabled, and In this project works', async () => {
+    envAnswer = new Promise(() => {});
+    mountCustomize({ view: 'mine', show: 'skills' });
+    fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
+    expect((await screen.findByRole('menuitem', { name: 'Created by you' })).getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'In this project' }));
+    await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
+  });
+
+  it('a reply that arrives after its detail closed, or after a later choice, writes no refusal', async () => {
+    const replies: ((value: unknown) => void)[] = [];
+    skillFileAnswer = () => new Promise((resolve) => replies.push(resolve));
+    const MISSING = { status: 'refused', reason: 'missing', message: null };
+    let detail = await openDetail('skills');
+    await choose(detail, 'Finder');
+    await waitFor(() => expect(replies).toHaveLength(1));
+    fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
+    await act(async () => replies[0]!(MISSING));
+    fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
+    detail = await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+    // two choices: the first's late refusal does not stand over the second's success
+    await choose(detail, 'Zed');
+    await choose(detail, 'Finder');
+    await waitFor(() => expect(replies).toHaveLength(3));
+    await act(async () => replies[2]!({ status: 'opened' }));
+    await act(async () => replies[1]!(MISSING));
     expect(document.querySelector('[data-skill-refusal]')).toBeNull();
   });
 

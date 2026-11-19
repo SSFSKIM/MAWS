@@ -107,6 +107,7 @@ import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P5 O3-C: appInterest
 import { revealPath } from './settings/reveal';
 import { skillFile } from './customization/skill-file'; // UX wave U11: a skill's Open in
+import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { knownSessionDirectories } from '@shared/sessions/directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { ipcError } from '@shared/ipc/errors'; // P5 O7 M5a: remote.openCopy's refusal
@@ -775,7 +776,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     skillFile(input, {
       inventory: async (cwd) => {
         const answer = (await invokeOwn('customization.inventory', { cwd }, { client: mainClient, target: local })) as CommandResult<'customization.inventory'>;
-        return answer.ok ? { ok: true, skillPaths: answer.value.skills.map((skill) => skill.path) } : { ok: false, message: answer.error.message };
+        if (!answer.ok) return { ok: false, message: answer.error.message };
+        const { skills, skillsRead, warnings } = answer.value;
+        return { ok: true, skills, complete: skillsRead === true, problem: [...warnings].reverse().find((warning) => warning !== CUSTOMIZATION_INVENTORY_COVERAGE) ?? null }; // the latest: a stop, the environment, a folder
       },
       launcher: openIn,
     }),

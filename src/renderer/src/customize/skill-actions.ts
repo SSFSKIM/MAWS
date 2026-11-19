@@ -14,7 +14,6 @@ import { createSession } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
 import { placeOf, useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
-import { homeAbbreviated } from '../tools/session-info/model';
 import { diskSkillGroups, type SkillRow } from '../widgets/skills/skills';
 import { SKILL_ACTIONS } from './copy';
 
@@ -36,15 +35,19 @@ export const isSkillFileApp = (id: OpenInAppId): id is SkillFileApp => (SKILL_FI
 
 const CREATOR = 'skill-creator'; // the official plugin's manifest name and its skill's name (claude-plugins-official)
 
-/** skill-creator's invocation, when its plugin's skill is listed with one and is not off for the chats MAWS starts. */
-export function creatorInvocation(skills: readonly CustomizationSkill[], pluginsOff: ReadonlySet<string> | null): string | null {
+/** skill-creator's invocation, when its plugin's skill is listed with one, its plugin is enabled for this place as the
+ * engine's own listing says (`enabledHere`, the ids the plugin library counts as in effect; null while unread), and it is
+ * not off for the chats MAWS starts (`pluginsOff`, the launch profile's; null while unread). Else null: the plain sentence. */
+export function creatorInvocation(skills: readonly CustomizationSkill[], pluginsOff: ReadonlySet<string> | null, enabledHere: ReadonlySet<string> | null): string | null {
+  if (enabledHere === null) return null;
   const rows = diskSkillGroups(skills, { invocable: true, pluginsOff }).flatMap((group) => group.rows);
-  const row = rows.find((r) => r.source === 'plugin' && r.invocation === `${CREATOR}:${CREATOR}` && r.unavailable == null);
+  const row = rows.find((r) => r.source === 'plugin' && r.invocation === `${CREATOR}:${CREATOR}` && r.unavailable == null && r.plugin !== null && enabledHere.has(r.plugin));
   return row?.invocation ?? null;
 }
 
-/** The person's skills folder as the first message names it: the configuration home's, else the engine's default. */
-export const skillsHomeOf = (configHome: string | null): string => `${configHome === null ? '~/.claude' : homeAbbreviated(configHome)}/skills/`;
+/** The person's skills folder as the first message names it: under the configuration home the engine reports, whole (its
+ * home folder is the engine's, not known here, so no part of it is written as `~`). */
+export const skillsHomeOf = (configHome: string): string => `${configHome.replace(/\/+$/, '')}/skills/`;
 
 /** A new chat in the page's project (none on the user's page, or a folder no project has: that folder is added first,
  * as the Library's "Ask Claude" adds a Space's), its composer filled with `text`. */

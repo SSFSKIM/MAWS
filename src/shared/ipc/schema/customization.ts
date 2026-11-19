@@ -13,6 +13,11 @@ export const CustomizationSkillSchema = z.strictObject({
   // .claude-plugin/plugin.json, which `/<pluginName>:<name> ` runs; null when that name could not be read; absent on a
   // person's or a project's skill, and from an engine host of an earlier build
   pluginName: z.string().max(256).nullable().optional(),
+  // UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 12): the file
+  // the inventory read, by its real path and its identity (`<device>:<inode>`), which main holds a skill's Open in to;
+  // absent from an engine host of an earlier build, whose skills main opens nothing for
+  realPath: AbsolutePath.optional(),
+  fileId: z.string().max(64).optional(),
 });
 export const CustomizationServerSchema = z.strictObject({
   name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: z.enum(['stdio', 'http', 'sse', 'ws', 'unknown']),
@@ -28,6 +33,9 @@ export const CustomizationInventorySchema = z.strictObject({
   // P4-AGG M4: every MCP configuration file that applies (app, user, local, each project `.mcp.json`) read without a
   // warning, so `servers` is the whole set; Connectors' duplicate refusal needs it before it lets Add run
   serversRead: z.boolean(),
+  // UX wave U11's skill actions (decision 12): every skill folder that applies was read without a warning (the coverage note
+  // aside) and the read ran to its end, so a skill not listed is not there; absent from an engine host of an earlier build
+  skillsRead: z.boolean().optional(),
 });
 export type CustomizationInventory = z.infer<typeof CustomizationInventorySchema>;
 export type CustomizationSkill = z.infer<typeof CustomizationSkillSchema>;

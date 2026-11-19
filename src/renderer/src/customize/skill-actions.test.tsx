@@ -20,19 +20,22 @@ describe('New skill…’s first message', () => {
     expect(SKILL_ACTIONS.firstMessage('yours', '~/.claude/skills/', 'skill-creator:skill-creator')).toBe("/skill-creator:skill-creator Let's create a new skill in ~/.claude/skills/, for all my projects. First ask me what it should do.");
   });
 
-  it('names the configuration home under the home folder with ~, and the engine’s default while it is unknown', () => {
-    expect(skillsHomeOf('/Users/someone/.claude')).toBe('~/.claude/skills/');
-    expect(skillsHomeOf('/opt/claude-config')).toBe('/opt/claude-config/skills/');
-    expect(skillsHomeOf(null)).toBe('~/.claude/skills/');
+  it('names the configuration home the engine reports whole, never shortening a folder under /Users to ~', () => {
+    expect(skillsHomeOf('/Users/someone/.claude')).toBe('/Users/someone/.claude/skills/');
+    expect(skillsHomeOf('/Users/Shared/claude')).toBe('/Users/Shared/claude/skills/');
+    expect(skillsHomeOf('/opt/claude-config/')).toBe('/opt/claude-config/skills/');
   });
 
-  it('calls skill-creator when its plugin’s skill is listed by its manifest name and its plugin is not off for the chats MAWS starts', () => {
-    expect(creatorInvocation([notes, creator], new Set())).toBe('skill-creator:skill-creator');
-    expect(creatorInvocation([notes, creator], new Set(['skill-creator@official']))).toBeNull(); // off in Settings › Sessions
-    expect(creatorInvocation([notes, creator], null)).toBeNull(); // which plugins are off is not read yet
-    expect(creatorInvocation([notes, { ...creator, pluginName: null }], new Set())).toBeNull(); // the manifest's name unread
-    expect(creatorInvocation([notes, { ...creator, source: 'user', plugin: null, pluginName: undefined }], new Set())).toBeNull(); // a person's own skill of that name is no plugin's
-    expect(creatorInvocation([notes], new Set())).toBeNull();
+  it('calls skill-creator only when its plugin’s skill is listed by its manifest name, its plugin is enabled here, and it is not off for the chats MAWS starts', () => {
+    const here = new Set(['skill-creator@official']);
+    expect(creatorInvocation([notes, creator], new Set(), here)).toBe('skill-creator:skill-creator');
+    expect(creatorInvocation([notes, creator], new Set(), new Set())).toBeNull(); // installed, but disabled for this place
+    expect(creatorInvocation([notes, creator], new Set(), null)).toBeNull(); // the plugin list not read yet
+    expect(creatorInvocation([notes, creator], new Set(['skill-creator@official']), here)).toBeNull(); // off in Settings › Sessions
+    expect(creatorInvocation([notes, creator], null, here)).toBeNull(); // which plugins are off is not read yet
+    expect(creatorInvocation([notes, { ...creator, pluginName: null }], new Set(), here)).toBeNull(); // the manifest's name unread
+    expect(creatorInvocation([notes, { ...creator, source: 'user', plugin: null, pluginName: undefined }], new Set(), here)).toBeNull(); // a person's own skill of that name is no plugin's
+    expect(creatorInvocation([notes], new Set(), here)).toBeNull();
   });
 });
 

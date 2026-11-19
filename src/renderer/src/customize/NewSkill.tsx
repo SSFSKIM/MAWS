@@ -5,27 +5,34 @@
 import { DropdownMenu } from 'radix-ui';
 import { useMemo } from 'react';
 import { useSettings } from '../stores/settings';
-import { usePluginsEnv } from '../widgets/plugins/read';
+import { usePluginsEnv, usePluginsRead } from '../widgets/plugins/read';
 import { SKILL_ACTIONS as A } from './copy';
 import { usePlace } from './place';
 import { creatorInvocation, skillsHomeOf, startNewSkill, type SkillPlace } from './skill-actions';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
-const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover';
+const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 export function NewSkill() {
-  const { cwd, projectId, inventory } = usePlace();
+  const { cwd, projectId, directory, inventory } = usePlace();
+  // the folder a person's skill goes in: the engine's configuration home, once plugins.env has answered; until then
+  // "Created by you" waits, disabled, rather than guess it
   const configHome = usePluginsEnv().data?.configHome ?? null;
   // the plugins a chat started here goes without, as the session's Skills dialog reads them (widgets/SkillsWidget.tsx)
   const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
   const pluginsOff = useMemo(() => (off === undefined ? null : new Set(off)), [off]);
+  // the plugins in effect for this place, as the plugin library counts them (widgets/plugins/library.ts, `enabledHere`)
+  const installed = usePluginsRead('plugins.list', directory).data?.plugins;
+  const enabledHere = useMemo(() => (installed === undefined ? null : new Set(installed.filter((p) => p.enabled).map((p) => p.id))), [installed]);
   const start = (where: SkillPlace) => {
-    const creator = inventory.data ? creatorInvocation(inventory.data.skills, pluginsOff) : null;
-    void startNewSkill({ projectId, cwd }, A.firstMessage(where, skillsHomeOf(configHome), creator));
+    if (where === 'yours' && configHome === null) return;
+    const creator = inventory.data ? creatorInvocation(inventory.data.skills, pluginsOff, enabledHere) : null;
+    void startNewSkill({ projectId, cwd }, A.firstMessage(where, configHome === null ? '' : skillsHomeOf(configHome), creator));
   };
+  const waiting = configHome === null;
   if (cwd === null) {
     return (
-      <button type="button" data-new-skill className={BUTTON} onClick={() => start('yours')}>
+      <button type="button" data-new-skill className={BUTTON} disabled={waiting} onClick={() => start('yours')}>
         {A.newSkill}
       </button>
     );
@@ -42,7 +49,7 @@ export function NewSkill() {
           <DropdownMenu.Item className={ITEM} onSelect={() => start('project')}>
             {A.inProject}
           </DropdownMenu.Item>
-          <DropdownMenu.Item className={ITEM} onSelect={() => start('yours')}>
+          <DropdownMenu.Item className={ITEM} disabled={waiting} onSelect={() => start('yours')}>
             {A.yours}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
