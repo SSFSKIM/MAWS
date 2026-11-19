@@ -38,6 +38,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { Resizer } from '../../../app/Resizer';
 import { panelHost } from '../../../panel/host';
+import { shownByItsKey } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { ipc } from '../../../ipc/client';
 import { checkoutKey, machineFor } from '../../../ipc/machine';
@@ -189,13 +190,16 @@ function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabI
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
-  // UX wave U6b-5a (M1, decision 4): a focus request (a surface's key shows the tab) is answered once: the file's view
-  // while the tab holds a file not covered by the tree (the view takes it under the file's key and hands it to its editor
-  // once drawn), else the tree: its selected row, else its first row, else the tree itself. Go to file's field is not
-  // where it lands. A tree not drawn yet takes nothing, and the side column's own step puts the keyboard in the tab.
+  // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`shownByItsKey`) is answered once: the file's
+  // view while the tab holds a file not covered by the tree (the view takes it under the file's key and hands it to its
+  // editor once drawn), else the tree: its selected row, else its first row, else the tree itself. Go to file's field is
+  // not where it lands. A tree not drawn yet takes nothing, and the side column's own step puts the keyboard in the tab.
+  // The host's other requests (an open of a file from a link or the tree, the agent's show) are used up and answered with
+  // nothing, as before this landing: the keyboard stays where the person has it.
   useEffect(() => {
     if (focus.request <= (focusSeen.get(focus.of) ?? 0)) return;
     focusSeen.set(focus.of, focus.request);
+    if (!shownByItsKey(tabId)) return;
     if (key !== null && place !== 'instead') {
       requestKeyboard({ into: 'file', key });
       return;
@@ -204,7 +208,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabI
     const row = tree?.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]') ?? tree?.querySelector<HTMLElement>('[role="treeitem"]') ?? null;
     if (row === null && tree !== null) tree.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
     (row ?? tree)?.focus({ preventScroll: true });
-  }, [focus.request, focus.of, key, place, treeId]);
+  }, [focus.request, focus.of, key, place, tabId, treeId]);
   // U6b-3b: the field above the tree, outside its menu, and while it holds text the list in the tree's place
   const column = (
     <FinderColumn

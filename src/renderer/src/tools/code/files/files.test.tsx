@@ -13,7 +13,8 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { record } from '../../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
-import { panelHost, registerPanelTool, requestFocus } from '../../../panel/host';
+import { panelHost, registerPanelTool, usePanelHost } from '../../../panel/host';
+import { toggleSurface } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
@@ -1052,27 +1053,23 @@ describe('the tree at the file’s left', () => {
     expect(marked()).toEqual([STAGED]);
   });
 
-  // UX wave U6b-5a (M1, decision 4): Files answers a focus request in its own file (the side column asks on a surface's
-  // key): a tab with no file, its tree's selected row, else its first; a tab whose tree stands in its file's place, the tree
-  it('answers a focus request: a tab with no file on its tree’s first row; the tree in a file’s place on its selected row', async () => {
+  // UX wave U6b-5a (M1, decision 4): Files answers the focus request of a surface's key in its own file: a tab with no
+  // file, its tree's selected row, else its first; an open of a file in the tree's tab asks nothing of the keyboard
+  it('shown by its key, a tab with no file puts the keyboard on its tree’s selected row, else on its first', async () => {
     render(<TestHost />);
-    let tab = '';
-    act(() => void (tab = panelHost.addTool('files', { appSessionId: A })));
+    act(() => toggleSurface('files'));
     await shown('/r/src');
-    act(() => requestFocus(tab));
-    expect(document.activeElement).toBe(document.querySelector('[role="treeitem"]'));
-    expect(document.activeElement).toBe(row('/r'));
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+    expect(document.activeElement).toBe(document.querySelector('[role="treeitem"]')); // the first row
 
-    act(() => (document.activeElement as HTMLElement).blur());
-    await openBeside(APP);
-    widen(TREE_WIDTH_DEFAULT + FILE_WIDTH_MIN - 1);
-    fireEvent.click(toggle()!); // the tree in the file's place
-    fireEvent.click(row('/r/src')!);
-    await shown(APP);
-    expect(marked()).toEqual([APP]);
-    act(() => (document.activeElement as HTMLElement).blur());
-    act(() => requestFocus(sideTabs()[0].id));
-    expect(document.activeElement).toBe(row(APP));
+    fireEvent.click(row('/r/src')!); // the row last activated is the tree's selected row
+    expect(marked()).toEqual(['/r/src']);
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(document.activeElement).toBe(row('/r/src')));
   });
 
   it('in a tab too narrow for both the tree folds, and its button shows the tree in the file’s place until a file is chosen or it is pressed again', async () => {
@@ -1360,13 +1357,15 @@ describe('a file beside the chat as an editor', () => {
     await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(path));
   }
 
-  // UX wave U6b-5a (M1, decision 4): a tab that holds a file answers a focus request with its file's editor
-  it('answers a focus request with the file’s editor', async () => {
+  // UX wave U6b-5a (M1, decision 4): a tab that holds a file, shown by a surface's key, gives its file's editor the
+  // keyboard; the open that put the file there asked the host for the keyboard and Files left it where it was
+  it('shown by its key, a tab that holds a file gives the keyboard to its editor; the open that put the file there gave none', async () => {
     render(<TestHost />);
     await openBeside(APP);
-    act(() => (document.activeElement as HTMLElement | null)?.blur());
-    expect(document.activeElement).toBe(document.body);
-    act(() => requestFocus(sideTabs(A)[0].id));
+    expect(usePanelHost.getState().focus[sideTabs(A)[0].id]).toBeGreaterThan(0); // the open asked
+    expect(editor()!.hasFocus, 'the open moved no keyboard').toBe(false);
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files'));
     await waitFor(() => expect(editor()!.hasFocus).toBe(true));
   });
 

@@ -59,18 +59,26 @@ export function toggleSurface(toolId: string) {
 // tab's surface already. Nothing moves when the person pressed a key or a pointer in between (the press that ran this
 // one was dispatched before it began), or when by then the tab is out of view or a dialog holds the keyboard.
 function focusShown(tabId: string): void {
+  showing.add(tabId);
   requestFocus(tabId);
   let pressed = false;
   const heard = () => void (pressed = true);
   window.addEventListener('keydown', heard, true);
   window.addEventListener('pointerdown', heard, true);
   requestAnimationFrame(() => requestAnimationFrame(() => {
+    showing.delete(tabId);
     window.removeEventListener('keydown', heard, true);
     window.removeEventListener('pointerdown', heard, true);
     if (pressed || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
     focusSurfaceStop(tabId);
   }));
 }
+
+// The tabs a surface's key has shown whose second frame has not come. The host also asks a tab for the keyboard when it
+// opens something in it (a link's file, the agent's show); a tool that answers only the person's show by a surface's
+// key (Files) reads this, so those opens leave the keyboard where it was.
+const showing = new Set<string>();
+export const shownByItsKey = (tabId: string): boolean => showing.has(tabId);
 
 // Decision 3: with the keyboard in the side column, or held by nothing, the composer of the session on screen takes it,
 // else the pane in front; anywhere else (the sidebar, the main area) it stays.
