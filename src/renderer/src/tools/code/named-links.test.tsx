@@ -3,18 +3,23 @@
 // transcript's own Markdown, every path chip is clicked, and what the click asks for (through `normalizeLexically`, as
 // `openFile` does) must be among `linkPaths` of the string, while the string's counter-example must not. The chip's and
 // the anchor's readers are held to the rule's copies the same way. The daemon's rule is specified from remark's and
-// micromark's code; this file is what shows the two agree.
+// micromark's code; this file is what shows the two agree. UX wave U6b-4c
+// (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, X3.4's M1 half): a shown Markdown file draws
+// with the same Markdown and resolves a chip against its own folder (`MarkdownView`, `resolveRelative`), so every case
+// also holds `fileLinkTargets` of the string, in the folder BASE, to the chips resolved there.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchorPaths, chipPath, EDIT_TOOLS, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
+import { anchorPaths, chipPath, EDIT_TOOLS, fileLinkTargets, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
 import { Markdown } from '../../transcript';
 import { filePathOf } from '../../transcript/model/cells';
 import { userTextOf } from '../../transcript/model/user-text';
 import { MCP_TOOL } from '../../transcript/model/classify';
 import { TranscriptActionsProvider, turnFileLinks } from '../../transcript/view/context';
-import { normalizeLexically } from './open-file';
+import { installFakeMain, ok } from '../../test-support/code';
+import { normalizeLexically, resolveRelative } from './open-file';
+import { MarkdownView } from './viewer/MarkdownView';
 
 afterEach(cleanup);
 
@@ -29,8 +34,8 @@ beforeAll(async () => {
   cleanup();
 });
 
-// What the window's path chips in `markdown` ask for, each through `normalizeLexically` as `openFile` does.
-function clickedPaths(markdown: string): string[] {
+// What the window's path chips in `markdown` ask for, as the click hands them to `openFile`.
+function clickedRaw(markdown: string): string[] {
   const openFile = vi.fn();
   const { container } = render(
     <TranscriptActionsProvider actions={{ openFile }}>
@@ -39,10 +44,15 @@ function clickedPaths(markdown: string): string[] {
   );
   expect(container.textContent).not.toBe('');
   for (const chip of container.querySelectorAll('[data-chip="path"]')) fireEvent.click(chip);
-  return openFile.mock.calls.map(([path]) => normalizeLexically(path as string));
+  return openFile.mock.calls.map(([path]) => path as string);
 }
+// Each through `normalizeLexically`, as `openFile` reads a chip of the transcript.
+const clickedPaths = (markdown: string): string[] => clickedRaw(markdown).map(normalizeLexically);
 
 const P = '/work/out/report.md';
+// The folder of a shown Markdown file (U6b-4c), and a chip's path as `openFile` resolves it there (its `resolvedPath`).
+const BASE = '/base/dir';
+const inBase = (path: string): string => normalizeLexically(resolveRelative(BASE, path));
 
 describe('a path chip asks for a path the rule names', () => {
   // [the string, the path its chip asks for, a path the rule must not name for it]
@@ -77,12 +87,23 @@ describe('a path chip asks for a path the rule names', () => {
     ['[r](/a/%2e%2e/b)', '/b', '/a/%2e%2e/b'],
     ['[r](//work/out/report.md)', P, '//work/out/report.md'],
     ['[r](/work/notes#1.md)', '/work/notes#1.md', '/work/notes'],
+    // UX wave U6b-4c: relative forms, as a Markdown file writes them
+    ['[a](a.md)', 'a.md', '/a.md'],
+    ['[a](./a.md)', 'a.md', './a.md'],
+    ['[a](../a.md)', '../a.md', 'a.md'],
+    ['[a](<sub/a b.md>)', 'sub/a b.md', 'sub/a'],
+    ['[a](a.md#L3)', 'a.md', 'a.md#L3'],
   ])('%j', (markdown, path, counter) => {
-    const clicked = clickedPaths(markdown);
+    const raw = clickedRaw(markdown);
+    const clicked = raw.map(normalizeLexically);
     expect(clicked).toContain(path);
     const named = linkPaths(markdown);
     for (const asked of clicked) expect(named).toContain(asked);
     expect(named).not.toContain(counter);
+    // in a Markdown file at BASE: each chip, resolved as the click resolves it, is among the file's targets
+    const targets = fileLinkTargets(markdown, BASE);
+    expect(raw.map(inBase)).toContain(inBase(path));
+    for (const asked of raw) expect(targets).toContain(inBase(asked));
   });
 });
 
@@ -331,6 +352,39 @@ describe('the rule reads the blocks the window draws', () => {
   });
 });
 
+// UX wave U6b-4c (X3.7): a file's text as a shown Markdown file draws it (`MarkdownView`, for a file at BASE): a link in
+// a block the window draws as code is no chip, and the rule names nothing of it, each beside its control.
+describe('a Markdown file’s text, drawn by MarkdownView (U6b-4c)', () => {
+  beforeAll(() => void installFakeMain(() => ok()));
+  // the paths of the chips drawn, as each chip holds it
+  function drawn(text: string): string[] {
+    const { container } = render(<MarkdownView entry={{ tabId: 'u6b4c-doc', appSessionId: null, path: `${BASE}/doc.md`, text } as never} />);
+    const paths = [...container.querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'));
+    cleanup();
+    return paths as string[];
+  }
+
+  it('lone carriage returns: no chip for the fence’s link, and the rule names nothing of the file; with line feeds, the prose’s link is both', () => {
+    for (const fence of ['```', '~~~']) {
+      const lone = `see [s](s.md)\r${fence}\r[r](r.md)\r${fence}\r`;
+      expect(drawn(lone), fence).toEqual(['s.md']);
+      expect(fileLinkTargets(lone, BASE), fence).toEqual([]);
+      const fed = lone.replaceAll('\r', '\n');
+      expect(drawn(fed), fence).toEqual(['s.md']);
+      expect(fileLinkTargets(fed, BASE), fence).toEqual([`${BASE}/s.md`]);
+    }
+  });
+
+  it('a byte order mark, then indented code: no chip and no name for its link; the mark before prose: both', () => {
+    const coded = '\uFEFF    [r](r.md)\n\n[s](s.md)';
+    expect(drawn(coded)).toEqual(['s.md']);
+    expect(fileLinkTargets(coded, BASE)).toEqual([`${BASE}/s.md`]);
+    const prose = '\uFEFF[r](r.md)\n\n[s](s.md)';
+    expect(drawn(prose)).toEqual(['r.md', 's.md']);
+    expect(fileLinkTargets(prose, BASE)).toEqual([`${BASE}/r.md`, `${BASE}/s.md`]);
+  });
+});
+
 // UX wave U6b-4b (R1): an inline `file:` link with an empty host is the path chip of its rest, and the rule names that
 // rest; every other `file:` form is text and names nothing. The fixed rows are drawn finished and while still arriving
 // (`live`); the seeded differential below draws finished text only.
@@ -421,6 +475,8 @@ const FRAGMENTS = [
   'file://', 'file:///', 'FILE:///', '<file:///', 'file://h/', '\uFEFF', '\r', '~~~\n', '| a | b |\n', '|---|---|\n', ':---\n', '| x | y | z |\n',
   // M1's review, finding 1: a table's lines beside a list item's, a quote's and a lazy line's
   '- T\n', '\n- ', '  :---\n', '  |---|---|\n', '> p\n', '\n`', '`\n',
+  // UX wave U6b-4c (X3.4): relative destinations, a fragment and a query, and two relative links whole
+  './', '../', 'a/', '#u', '?q', '[r](a/b.md)', '[r](../up.md)',
 ];
 const LONG_TAIL = 'a'.repeat(17_000); // past the 16 KiB bound; few, for the time
 function generated(seed: number, count: number): string[] {
@@ -433,7 +489,7 @@ function generated(seed: number, count: number): string[] {
 }
 // What the window's path chips in `markdown` ask for, as `clickedPaths`, for a string that may draw nothing; drawn
 // finished unless `live` says it is still arriving.
-function chipPaths(markdown: string, live = false): string[] {
+function chipRaw(markdown: string, live = false): string[] {
   const openFile = vi.fn();
   const { container } = render(
     <TranscriptActionsProvider actions={{ openFile }}>
@@ -442,8 +498,9 @@ function chipPaths(markdown: string, live = false): string[] {
   );
   for (const chip of container.querySelectorAll('[data-chip="path"]')) fireEvent.click(chip);
   cleanup();
-  return openFile.mock.calls.map(([path]) => normalizeLexically(path as string));
+  return openFile.mock.calls.map(([path]) => path as string);
 }
+const chipPaths = (markdown: string, live = false): string[] => chipRaw(markdown, live).map(normalizeLexically);
 
 describe('the differential: every path the rule names is a chip the window draws', () => {
   it('over seeded strings of link-shaped fragments', { timeout: 300_000 }, () => {
@@ -451,16 +508,22 @@ describe('the differential: every path the rule names is a chip the window draws
     const count = 2000;
     const started = performance.now();
     let checked = 0;
+    let relative = 0;
     const faults: { markdown: string; path: string }[] = [];
     const windowOnly: { markdown: string; path: string }[] = [];
     for (const markdown of generated(seed, count)) {
-      const chips = chipPaths(markdown);
+      const raw = chipRaw(markdown);
+      const chips = raw.map(normalizeLexically);
       const named = linkPaths(markdown);
       checked += named.length;
+      relative += named.filter((path) => !path.startsWith('/')).length;
       for (const path of named) if (!chips.includes(path)) faults.push({ markdown, path });
       for (const path of chips) if (!named.includes(path)) windowOnly.push({ markdown, path });
+      // U6b-4c: the same string as a Markdown file at BASE, each chip resolved as the click resolves it there
+      const resolved = raw.map(inBase);
+      for (const path of fileLinkTargets(markdown, BASE)) if (!resolved.includes(path)) faults.push({ markdown, path: `${path} (in ${BASE})` });
     }
-    console.log(`named-links differential: seed ${seed}, ${count} strings, ${checked} named paths checked, ${windowOnly.length} window-only chips, ${Math.round(performance.now() - started)} ms`);
+    console.log(`named-links differential: seed ${seed}, ${count} strings, ${checked} named paths checked (${relative} relative), ${windowOnly.length} window-only chips, ${Math.round(performance.now() - started)} ms`);
     for (const only of windowOnly.slice(0, 5)) console.log(`window-only chip ${JSON.stringify(only.path)} in ${JSON.stringify(only.markdown.slice(0, 200))}`);
     expect(faults.slice(0, 10).map(({ markdown, path }) => `${JSON.stringify(path)} in ${JSON.stringify(markdown.slice(0, 200))}`)).toEqual([]);
     expect(faults).toHaveLength(0);
@@ -487,8 +550,11 @@ describe('the differential: every path the rule names is a chip the window draws
     const faults: string[] = [];
     for (let k = 0; k < count; k += 1) {
       const markdown = Array.from({ length: 2 + Math.floor(random() * 6) }, () => LINES[Math.floor(random() * LINES.length)]!).join('\n');
-      const chips = chipPaths(markdown);
+      const raw = chipRaw(markdown);
+      const chips = raw.map(normalizeLexically);
       for (const path of linkPaths(markdown)) if (!chips.includes(path)) faults.push(`${JSON.stringify(path)} in ${JSON.stringify(markdown)}`);
+      const resolved = raw.map(inBase);
+      for (const path of fileLinkTargets(markdown, BASE)) if (!resolved.includes(path)) faults.push(`${JSON.stringify(path)} (in ${BASE}) in ${JSON.stringify(markdown)}`);
     }
     expect(faults.slice(0, 10)).toEqual([]);
   });

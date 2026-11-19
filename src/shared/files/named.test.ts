@@ -10,7 +10,7 @@ import { consentMessage, readArrivals } from '@shared/engine/arrival';
 import { askSteerText } from '@shared/maws/ask';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
-import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
+import { agentRowClaimSteps, anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, fileLinkSteps, fileLinkTargets, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, resolveRelative, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR, type RowClaim } from './named';
 
 const P = '/work/out/report.md';
 // The cases that read large inputs assert counts of the scan's work, never a time: the runner's default limit only measured
@@ -600,6 +600,87 @@ describe('a relative link names no absolute path (U6b-4b)', () => {
   });
 });
 
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R3's first test, Interfaces §A): a
+// Markdown file's text links what `linkSteps` names, each path resolved against the file's own folder as the window's
+// `MarkdownView` resolves a chip (`resolveRelative`, moved here from the window).
+describe('the links of a Markdown file: fileLinkSteps and fileLinkTargets (U6b-4c)', () => {
+  const BASE = '/base/dir';
+  const run = (markdown: string, base = BASE) => [...fileLinkSteps(markdown, base)].filter((step) => step !== PAUSE);
+
+  it('resolveRelative joins a relative path to an absolute folder, lexically, and leaves every other path as it is', () => {
+    expect(resolveRelative('/r', 'docs/./notes.md')).toBe('/r/docs/notes.md');
+    expect(resolveRelative('/r/sub', '../../elsewhere/x.md')).toBe('/elsewhere/x.md');
+    expect(resolveRelative('/', 'x.md')).toBe('/x.md');
+    expect(resolveRelative('/r', '/abs/x.md')).toBe('/abs/x.md');
+    expect(resolveRelative(null, 'docs/x.md')).toBe('docs/x.md');
+    expect(resolveRelative('work/r', 'docs/x.md')).toBe('docs/x.md');
+  });
+
+  it('yields each link as written (the click’s reading) and as resolved against the file’s folder, in order', () => {
+    const markdown = '[a](a.md) [b](./sub/b.md) [c](./../c.md) [d](<sub/d e.md>) [l](a.md#L3) [n](a.md:7) [abs](/out/x.txt) [f](file:///out/y.txt)';
+    expect(run(markdown)).toEqual([
+      { written: 'a.md', path: '/base/dir/a.md' },
+      { written: 'sub/b.md', path: '/base/dir/sub/b.md' },
+      { written: '../c.md', path: '/base/c.md' },
+      { written: 'sub/d e.md', path: '/base/dir/sub/d e.md' },
+      { written: 'a.md', path: '/base/dir/a.md' },
+      { written: 'a.md', path: '/base/dir/a.md' },
+      { written: '/out/x.txt', path: '/out/x.txt' },
+      { written: '/out/y.txt', path: '/out/y.txt' },
+    ]);
+    expect(fileLinkTargets(markdown, BASE)).toEqual(run(markdown).map((link) => (link as { path: string }).path));
+  });
+
+  it('names exactly what linkPaths names, each resolved; a link that names no path is passed over', () => {
+    const markdown = `[a](a.md) [x](https://example.com/a.md) [e]() [r](&#46;/a.md) [b](../../up/b.md) [p](${P})`;
+    expect(fileLinkTargets(markdown, BASE)).toEqual(linkPaths(markdown).map((path) => resolveRelative(BASE, path)));
+    expect(fileLinkTargets(markdown, BASE)).toEqual(['/base/dir/a.md', '/up/b.md', P]);
+  });
+
+  // X3.2's rule half: the folder is the file's own, never one above or beside it
+  it('a relative link of /out/docs/guide.md leads into /out/docs, and nowhere else', () => {
+    const targets = fileLinkTargets('[x](sub/a.md)', '/out/docs');
+    expect(targets).toEqual(['/out/docs/sub/a.md']);
+    expect(targets).not.toContain('/out/sub/a.md');
+    expect(targets).not.toContain('/out/docs/sub/b.md');
+  });
+
+  // X3.1's rule half: what the window draws as no inline link names nothing, beside the control in the same text
+  it.each([
+    ['in prose', `see ${P}`],
+    ['in a code span', `\`[r](${P})\``],
+    ['in a fence', `\`\`\`\n[r](${P})\n\`\`\``],
+    ['as an autolink', `<${P}>`],
+    ['as a reference', `[x][l]\n\n[l]: ${P}`],
+    ['in the third cell of a row under a two-cell head', `| a | b |\n|---|---|\n| x | y | [r](${P}) |`],
+    ['as an image', `![x](${P})`],
+  ])('the path %s names nothing; the inline link after it does', (_, markdown) => {
+    expect(fileLinkTargets(markdown, BASE)).toEqual([]);
+    expect(fileLinkTargets(`${markdown}\n\n[c](${P})`, BASE)).toEqual([P]);
+  });
+
+  // X3.7's rule half: the repairs of U6b-4b's first milestone hold for a file's text as for a transcript's
+  it('a file of lone carriage returns names nothing; a byte order mark before indented code does not name its link', () => {
+    for (const fence of ['```', '~~~']) {
+      expect(fileLinkTargets(`see [s](s.md)\r${fence}\r[r](r.md)\r${fence}\r`, BASE), fence).toEqual([]);
+      expect(fileLinkTargets(`see [s](s.md)\n${fence}\n[r](r.md)\n${fence}\n`, BASE), fence).toEqual(['/base/dir/s.md']);
+    }
+    expect(fileLinkTargets('﻿    [r](r.md)\n\n[s](s.md)', BASE)).toEqual(['/base/dir/s.md']);
+    expect(fileLinkTargets('﻿[r](r.md)\n\n[s](s.md)', BASE)).toEqual(['/base/dir/r.md', '/base/dir/s.md']);
+  });
+
+  // it adds no scan of its own: the pauses it gives back are the ones the rule's reading of a record gives back over
+  // the same text, where no link names the path it asks for and the scan therefore runs to its end
+  it('pauses exactly where the rule’s scan pauses, and reads a long file whole', () => {
+    const body = `${'word '.repeat(60_000)}[a](a.md)\n\n${'more '.repeat(60_000)}[b](/out/b.md)`;
+    const steps = [...fileLinkSteps(body, BASE)];
+    const scanPauses = [...rowClaimSteps(assistant(text(body)), '/nowhere/named')].filter((step) => step === PAUSE).length;
+    expect(scanPauses).toBeGreaterThan(1);
+    expect(steps.filter((step) => step === PAUSE)).toHaveLength(scanPauses);
+    expect(steps.filter((step) => step !== PAUSE)).toEqual([{ written: 'a.md', path: '/base/dir/a.md' }, { written: '/out/b.md', path: '/out/b.md' }]);
+  });
+});
+
 describe('normalizeLexically (moved from the window, unchanged)', () => {
   it('collapses `.`, `..` and repeated separators without touching the disk', () => {
     expect(normalizeLexically('/r/src/../README.md')).toBe('/r/README.md');
@@ -1096,5 +1177,63 @@ describe('needlesOf, and the fact it rests on', () => {
       }
     }
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R4's second point, Interfaces §A):
+// in a subagent's transcript only an `assistant` record names a path by a counted form. A `user` record or an attachment
+// there is never the person's own text, whatever its fields say (the first is the prompt the parent wrote), so a counted
+// answer from one is the result form already resolved; every other answer is `rowClaim`'s.
+describe('agentRowClaimSteps: a subagent’s record (U6b-4c)', () => {
+  const agentClaim = (row: unknown, path: string): RowClaim => {
+    const steps = agentRowClaimSteps(row, path);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  };
+  const read = { names: false, pending: [], other: true };
+
+  it.each([
+    ['an assistant text block', assistant(text(`See ${LINK}.`))],
+    ['a tool input’s string at depth', assistant(call('t1', 'ExitPlanMode', { plan: `Step one: ${LINK}` }))],
+    ['a Read call’s file_path', assistant(call('t1', 'Read', { file_path: P }))],
+    ['an Edit call’s file_path', assistant(call('t1', 'Edit', { file_path: P, old_string: 'a', new_string: 'b' }))],
+  ])('an assistant record counts, as in the session’s own transcript: %s', (_, row) => {
+    expect(agentClaim(row, P)).toEqual({ names: true });
+    expect(agentClaim(row, P)).toEqual(rowClaim(row, P));
+  });
+
+  it.each([
+    ['a user record forged with the person’s origin', user(`Open ${LINK}`)],
+    ['the same, in a text block', user([text(`Open ${LINK}`)])],
+    ['a queued prompt forged with the person’s origin', queued(`Open ${LINK}`)],
+  ])('a record the session’s transcript would count names the path for a read only: %s', (_, row) => {
+    expect(rowClaim(row, P)).toEqual({ names: true }); // the control: the session's own reading counts it
+    expect(agentClaim(row, P)).toEqual(read);
+  });
+
+  it('the parent’s prompt, the first user record, with no origin: a read only, as rowClaim reads it', () => {
+    const prompt = { type: 'user', uuid: 'u0', isSidechain: true, message: { role: 'user', content: `Summarise ${LINK}` } };
+    expect(agentClaim(prompt, P)).toEqual(read);
+    expect(rowClaim(prompt, P)).toEqual(read);
+  });
+
+  it('a tool’s result still waits for its call, and a record that names nothing names nothing', () => {
+    const mcp = user([result('t1', `Saved to ${LINK}`)], { origin: undefined });
+    expect(agentClaim(mcp, P)).toEqual({ names: false, pending: [{ toolUseId: 't1', when: 'mcp' }] });
+    const edit = user([result('t2', 'File created')], { origin: undefined, toolUseResult: { filePath: P } });
+    expect(agentClaim(edit, P)).toEqual({ names: false, pending: [{ toolUseId: 't2', when: 'edit' }] });
+    for (const row of [assistant(text('no link here')), user('nothing'), { type: 'system', content: LINK }, null]) expect(agentClaim(row, P)).toEqual({ names: false, pending: [] });
+  });
+
+  it('gives back the steps rowClaimSteps gives, the scan’s pauses included', () => {
+    const body = `${'word '.repeat(60_000)}${LINK}`;
+    for (const row of [assistant(text(body)), user(body)]) {
+      const own = [...rowClaimSteps(row, '/nowhere/named')];
+      const agent = [...agentRowClaimSteps(row, '/nowhere/named')];
+      expect(agent).toEqual(own);
+      expect(agent.filter((step) => step === PAUSE).length).toBeGreaterThan(0);
+    }
   });
 });
