@@ -132,10 +132,14 @@ function step(delta: 1 | -1): void {
   if (under.kind === 'tab' && !allTabs(layout().main).some((tab) => tab.id === under.id)) return;
   useVisits.setState({ record: { ...record, at: to.at } });
   layout().closeSettings();
-  if (layout().overviewOpen) layout().setOverviewOpen(false);
+  // From one Overview entry to another the Overview stays open, the same panel with the keyboard: only what it is over
+  // changes (showing a tab or a page leaves it open). Closed and opened again in one run it would stay mounted, its focus
+  // on opening would not run again, and the pane primed for it would keep the keyboard behind it.
+  const keepsOverview = to.place.kind === 'overview' && layout().overviewOpen;
+  if (layout().overviewOpen && !keepsOverview) layout().setOverviewOpen(false);
   if (under.kind === 'tab') layout().activateTab(under.id);
   else layout().openDestination(under.destination);
-  if (to.place.kind === 'overview') {
+  if (to.place.kind === 'overview' && !keepsOverview) {
     if (under.kind === 'tab') focusPaneNow();
     layout().setOverviewOpen(true);
   }
