@@ -522,14 +522,16 @@ it.each([
   useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which a split would open
   const quota = idOf('Quota reset recovery');
   const invoke = vi.spyOn(ipc, 'invoke')
-    .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }], indexing: false, incomplete: false } } as never)
+    // two hits: cmdk 1.1.1 clears its value when its selected row unmounts alone, but of several rows unmounting together
+    // only the last one's removal is looked at, so the first row's value is left behind
+    .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }, { appSessionId: idOf('Charter + research'), snippet: 'another needle' }], indexing: false, incomplete: false } } as never)
     .mockImplementation(second as never);
   try {
     render(<CommandPalette />);
     act(() => openConversationSearch('needle'));
     await act(() => vi.advanceTimersByTimeAsync(150));
     const input = within(dialog()).getByRole('combobox');
-    expect(input.getAttribute('aria-activedescendant')).toBeTruthy(); // the control: the hit is selected
+    expect(within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value).toBe(`session:${quota}`); // the control
     fireEvent.change(input, { target: { value: 'needles' } });
     await act(() => vi.advanceTimersByTimeAsync(150));
     expect(within(dialog()).queryAllByRole('option')).toEqual([]);
