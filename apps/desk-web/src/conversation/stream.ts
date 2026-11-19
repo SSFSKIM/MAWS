@@ -11,7 +11,8 @@
 // `status` lines are drawn as set. `state` events are the daemon's record of a session's liveness and recur as it
 // moves between busy, idle, and waiting, so only a change between running (busy, idle, waiting) and not running
 // (stopped, gone, vacant, retired) is drawn — a session that stopped, or runs again — and the sidebar's presence says
-// the rest. A session is taken as running from its `joined` (and before any event says otherwise).
+// the rest. A session is taken as running from the `joined` that starts its membership (and before any event says
+// otherwise).
 //
 // A live session's channel ends with a fold after its last item: its working record goes on.
 import { writerMachine, type JsonObject, type LogEvent, type Raised, type Recipient } from 'desk-hub/protocol';
@@ -131,12 +132,13 @@ export function byWhom(by: string, member: string | null): string {
  * the one line whose subject is the alias as it stood before (`before`), so it reads "old is now new"; a rename to
  * the name the session already had says nothing.
  */
-function systemLine(event: LogEvent, alias: (id: unknown) => string, member: string | null, projectName: (id: string) => string, before: string | null): { subject: string; rest: string } | null {
+function systemLine(event: LogEvent, alias: (id: unknown) => string, member: string | null, projectName: (id: string) => string, before: string | null, rejoined: boolean): { subject: string; rest: string } | null {
   const subject = alias(event.session);
   switch (event.kind) {
     case 'joined':
-      // A relocated `joined` refreshes where a member works (the engine moved it within the project): no one joined.
-      return event.relocated === true ? null : { subject, rest: `joined on ${str(event.machine)}` };
+      // A relocated `joined` refreshes where a member works (the engine moved it within the project), and a member's
+      // `joined` again (`rejoined`: its owners changed, a thread recorded) refreshes what it carries: no one joined.
+      return event.relocated === true || rejoined ? null : { subject, rest: `joined on ${str(event.machine)}` };
     case 'retired':
       if (event.reason === 'moved') return { subject, rest: `moved${str(event.project) ? ` to ${projectName(str(event.project))}` : ''}` };
       return { subject, rest: `${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${byWhom(str(event.by), member)}` : ''}` };
@@ -239,6 +241,9 @@ export function buildStream(
   const running = new Map<string, boolean>();
   /** Each session's alias as the log stood at this point, for a rename's "old is now new". */
   const named = new Map<string, string>();
+  /** The sessions that are members as the log stood at this point (their latest `joined` / `retired` a `joined`), as the
+   * sidebar's projection reads membership: a member's `joined` again starts no membership. */
+  const members = new Set<string>();
 
   for (const entry of shown) {
     const { offset, event } = entry;
@@ -290,8 +295,12 @@ export function buildStream(
       }
       default: {
         const session = str(event.session) || null;
-        if (event.kind === 'joined') running.set(str(event.session), true);
-        const line = systemLine(event, alias, options.member ?? null, options.projectName ?? ((id) => id.slice(0, 8)), named.get(str(event.session)) ?? null);
+        // A member's `joined` again says nothing of its process either: its running record stays its `state`'s.
+        const rejoined = event.kind === 'joined' && members.has(str(event.session));
+        if (event.kind === 'joined' && !rejoined) running.set(str(event.session), true);
+        if (event.kind === 'joined') members.add(str(event.session));
+        if (event.kind === 'retired') members.delete(str(event.session));
+        const line = systemLine(event, alias, options.member ?? null, options.projectName ?? ((id) => id.slice(0, 8)), named.get(str(event.session)) ?? null, rejoined);
         if ((event.kind === 'joined' || event.kind === 'renamed') && str(event.alias)) named.set(str(event.session), str(event.alias));
         if (line !== null) system(key, offset, event, session, line);
       }

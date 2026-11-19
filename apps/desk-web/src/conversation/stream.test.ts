@@ -267,6 +267,31 @@ describe('across projects', () => {
     ];
     expect(shape(buildStream({ kind: 'group' }, entries, aliases, []))).toEqual(['system:1']);
   });
+
+  it("draws no line for a member's joined again (its owners changed, a thread recorded), and a line for a joined after its retired", () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '', owners: ['a'] }), // 2: still a member
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '', thread: 't1' }), // 3: still a member
+      ev(`mini/${S1}`, 'retired', { session: S1, by: '', reason: 'ended' }), // 4
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 5: a new membership
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '', thread: 't1' }), // 6: still a member
+    ];
+    expect(shape(buildStream({ kind: 'group' }, entries, aliases, []))).toEqual(['system:1', 'system:4', 'system:5']);
+    expect(shape(buildStream({ kind: 'session', session: S1 }, entries, aliases, []))).toEqual(['system:1', 'system:4', 'system:5']);
+  });
+
+  it("leaves a stopped member's running record to its state: a joined again says nothing of its process", () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'stopped', machine: 'mini' }), // 2
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '', owners: ['a'] }), // 3
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'busy', machine: 'mini' }), // 4: running again
+    ];
+    expect(shape(buildStream({ kind: 'group' }, entries, aliases, []))).toEqual(['system:1', 'system:2', 'system:4']);
+  });
 });
 
 // sminos 1.2.0's scoped broadcast (the org directory's §5a): each project's event carries its selector as `scope`, which

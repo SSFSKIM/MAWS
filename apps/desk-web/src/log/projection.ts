@@ -114,6 +114,9 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         d.cwd = str(event.cwd);
         d.worktree = str(event.worktree) || null;
         d.seat = str(event.seat) ?? '';
+        // A member's `joined` again (sminos republishes it when the session's owners change, and records a thread in
+        // one) refreshes what it carries and starts no membership either; one after a `retired` starts a new one.
+        if (d.member) break;
         d.member = true;
         d.ended = null;
         d.joinedAt = offset;
