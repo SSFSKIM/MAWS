@@ -26,8 +26,10 @@ export interface TranscriptActions {
   // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
   openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
-  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
-  openExternal(url: string, appSessionId?: AppSessionId | null): void;
+  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block).
+  // UX wave U6b-4b (R3, decision 13): `external`, a ⌘-click, asks for the system browser where the mount would open the
+  // link in the app (a loopback link of a session on this Mac: tools/browser/local-link.ts); a mount may ignore it.
+  openExternal(url: string, appSessionId?: AppSessionId | null, options?: { external?: boolean }): void;
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
   // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts). P5 O6 M4: `appSessionId` is the session

@@ -5,7 +5,9 @@
 // `file:` link with an empty host, whose rest it names (UX wave U6b-4b: sanitize.ts, `remarkTranscriptSources`);
 // `maws-image:` is an image chip naming its source, loading nothing (§4.1); `maws-artifact:` (P3-F wave S, F14) is an
 // artifact mention; a link whose href the gates removed is its text. P5 O7 M3: a web link carries its row's session, whose
-// machine decides whether a loopback link is a forward (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md).
+// machine decides whether a loopback link is a forward (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md). UX
+// wave U6b-4b (R3): its ⌘-click carries `{ external: true }`, so a loopback link of a session on this Mac, which opens in
+// the in-app browser, opens in the system browser instead; Enter on a focused link is the browser's own click, ⌘ included.
 // UX wave U6d (O-44; docs/doperpowers/plans/2026-11-14-ux-wave-U6d-artifact-link.md, Interfaces §E and §F): a mention
 // and a path link are link text, not a box: a span with the role of a button (a <button> is an inline-block box, so a
 // long title could not wrap with the prose), activated by a click, Enter and Space; the attribute `data-chip` keeps its
@@ -148,7 +150,8 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
       title={href}
       onClick={(event) => {
         event.preventDefault();
-        actions.openExternal(href, session);
+        if (event.metaKey) actions.openExternal(href, session, { external: true });
+        else actions.openExternal(href, session);
       }}
     >
       {children}
