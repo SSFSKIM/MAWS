@@ -970,12 +970,13 @@ jobs:
           fi
       # DC5: the desk's browser suites drive Playwright's own Chromium on Linux, the only place the gate runs them
       # (POOL_E2E; a Mac would drive its installed Chrome). The phone's layout cases run again in Playwright's WebKit, on
-      # Linux only (apps/desk-web/playwright.config.ts). On the pool, --with-deps installs their system libraries through
-      # the runner's passwordless sudo, as on a hosted runner.
+      # Linux only (apps/desk-web/playwright.config.ts). Their system libraries come from ci-kit.yml's apt list, which the
+      # pool's image carries and setup checks: --with-deps here ran apt-get update and installed 211 packages each run,
+      # 30 s from a fast mirror and 30 min when archive.ubuntu.com slowed (run 44472434480, cancelled at the timeout).
       # The install uses desk-web's own Playwright, the copy its suite runs, so the browsers match it whatever the root
       # package pins.
       - if: matrix.group == 'desk-web' && runner.os == 'Linux'
-        run: pnpm --filter desk-web exec playwright install --with-deps chromium webkit
+        run: pnpm --filter desk-web exec playwright install chromium webkit
       # A measured group's out/, built (or restored from this Mac's disk, where the command below finds it again) before a
       # second guard: the first released the job before the setup and the build, whose load then landed in the measured
       # window (O2's idle-bound runs, 2026-10-28: released at a 1-minute load of 2.33 and 3.32, ended at 7.11 and 9.87).
