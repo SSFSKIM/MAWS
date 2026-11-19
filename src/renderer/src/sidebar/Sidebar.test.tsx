@@ -2337,7 +2337,7 @@ describe('listed rows from another machine', () => {
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
     await user.keyboard('{Escape}');
     await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']);
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Open in']); // UX wave U6b-4a: a terminal session on this Mac has Open in
   });
 
   it('Hide from its three dots takes a listed row under Hidden, opening nothing; Unhide brings it back', async () => {
