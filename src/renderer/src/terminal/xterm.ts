@@ -174,7 +174,13 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
       return screenTextOf(
         Array.from({ length: terminal.rows }, (_, i) => {
           const line = buffer.getLine(buffer.viewportY + i);
-          return { text: line?.translateToString(false) ?? '', wrapped: line?.isWrapped ?? false };
+          const text = line?.translateToString(false) ?? '';
+          // a wide character that did not fit at the row's end went to the next row, leaving its last cell unwritten:
+          // that cell is no text of the line (a written space reads as ' ', an unwritten cell as ''; the second half of a
+          // wide character that fits is a cell of width 0, and reads as nothing)
+          const last = line?.getCell(terminal.cols - 1);
+          const padded = last !== undefined && last.getChars() === '' && last.getWidth() === 1 && buffer.getLine(buffer.viewportY + i + 1)?.isWrapped === true;
+          return { text: padded ? text.slice(0, -1) : text, wrapped: line?.isWrapped ?? false };
         }),
       );
     },

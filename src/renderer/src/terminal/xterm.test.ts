@@ -127,6 +127,7 @@ describe('xterm adapter', () => {
       ['abcd界ef', 'abcd界ef'],
       ['가나다라마', '가나다라마'],
       ['abc 한글', 'abc 한글'],
+      ['abc界ef', 'abc界ef'], // the wide character fits at the row's end: nothing to drop
     ]) {
       const wide = createXtermRenderer(options);
       wide.resize(5, 5);

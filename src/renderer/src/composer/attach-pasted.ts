@@ -63,16 +63,28 @@ type BoxAnswer = Awaited<ReturnType<NonNullable<FocusTarget['attachPasted']>>>;
 
 /**
  * The Composer's side of `FocusTarget.attachPasted`: where its box stands is the composer's to say (decision 8). By a
- * press, where the box can take the keyboard (its element available, no card holding it), at the caret with the
- * keyboard; otherwise, and always by a hand-over, at the end and saved at once.
+ * press, where the box can take the keyboard (its element available, no card holding it, and the keyboard where the
+ * press left it or in the box), at the caret with the keyboard; otherwise, and always by a hand-over, at the end and
+ * saved at once. Whether it still can is asked again once the box's draft is restored (the branch panel's fix wave, G2):
+ * a pane covered meanwhile, or a keyboard the person moved, takes the block at the end, saved and said. `covered` and
+ * `held` (a take-back in hand) are read when asked, not from a render.
  */
-export async function takeIntoBox(editor: EditorHandle | null, block: AttachedBlock, by: 'press' | 'hand-over', box: { element: HTMLElement | null; covered: boolean }, signal?: AbortSignal): Promise<BoxAnswer> {
+export async function takeIntoBox(editor: EditorHandle | null, block: AttachedBlock, by: 'press' | 'hand-over', box: { element: HTMLElement | null; covered(): boolean; held(): boolean }, signal?: AbortSignal): Promise<BoxAnswer> {
   if (editor === null) return 'gone';
-  if (by === 'press' && !box.covered && box.element !== null && available(box.element)) {
-    const answer = await editor.attachPasted(block, { at: 'caret', save: false, ...(signal && { signal }) });
-    return answer === 'taken' ? 'shown' : answer;
+  const atPress = document.activeElement;
+  const element = box.element;
+  const canTake = () => by === 'press' && !box.covered() && element !== null && available(element) && (document.activeElement === atPress || element.contains(document.activeElement));
+  const options = { held: box.held, ...(signal && { signal }) };
+  if (canTake()) {
+    let moved = false;
+    const keyboard = () => {
+      moved = !canTake();
+      return !moved;
+    };
+    const answer = await editor.attachPasted(block, { ...options, at: 'caret', save: false, keyboard });
+    return answer === 'taken' ? (moved ? 'kept' : 'shown') : answer;
   }
-  const answer = await editor.attachPasted(block, { at: 'end', save: true, ...(signal && { signal }) });
+  const answer = await editor.attachPasted(block, { ...options, at: 'end', save: true });
   return answer === 'taken' ? 'kept' : answer;
 }
 
@@ -224,6 +236,15 @@ class HandOver {
           case 'present':
             return { kind: 'added' };
           case 'unsaved':
+            // a box that left meanwhile may yet keep the block (its writer still holds it, and its unmount flushes it):
+            // the chat is asked again, the save unaccounted for until a believed read (the branch panel's fix wave)
+            if (this.comings === comings && composerOf(this.session) === target) return this.refuse('unsaved');
+            this.unaccountedLanded = true;
+            continue;
+          case 'unread':
+            return this.refuse('failed'); // the box could not read the draft: nothing was put in
+          case 'held':
+            return this.refuse('taking-back');
           case 'closed':
             return this.refuse(answer);
           case 'busy':

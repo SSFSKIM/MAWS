@@ -332,7 +332,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         draftShown: () => !promptState.current.docked, // UX wave U4a M5: the menu chords ask for nothing under a card
         empty: () => handle.current?.serialize().empty ?? true, // UX wave U1b (§F): a prompt's ⌘↩ yields to a draft
         // UX wave U6b-5a (decision 8): an attached block, where this composer's box stands (a card over it, its pane covered)
-        attachPasted: (block, by, signal) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: promptState.current.docked }, signal),
+        attachPasted: (block, by, signal) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: () => promptState.current.docked, held: () => takingBack(appSessionId) }, signal),
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {
           read: () => handle.current?.promptBox() ?? { text: '', cursor: 0 },

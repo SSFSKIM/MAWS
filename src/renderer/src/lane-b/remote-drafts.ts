@@ -36,6 +36,7 @@ import { fitDraft, nameWithheld, takeWithheld, type Withheld } from '@shared/ses
 import { useMachines } from '../stores/machines';
 import { toast } from '../stores/notices';
 import { machineName } from '../stores/org-projects';
+import { UNREAD, type Unread } from '../composer/editor/unread';
 import { heardReaderRows, isNotOffered } from './reader-rows';
 
 export const REMOTE_DRAFT_WORDS = {
@@ -47,7 +48,7 @@ export const REMOTE_DRAFT_WORDS = {
  * A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, whether one waits, and the
  * newest's sending again after a `timeout` (how many times since it was handed, and the one due).
  */
-type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null; handed: number };
+type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null; handed: number; answers: ((taken: boolean) => void)[] };
 const saves = new Map<AppSessionId, Saves>();
 /** The draft kept there as this run last knew it, by its `updatedAt` (null: none); absent while not known. */
 const bases = new Map<AppSessionId, string | null>();
@@ -72,6 +73,7 @@ function say(client: MawsBridge, appSessionId: AppSessionId, names: readonly str
 }
 
 export function resetRemoteDraftSaves(): void {
+  for (const queue of saves.values()) answer(queue, false);
   saves.clear();
   bases.clear();
   leftThere.clear();
@@ -88,6 +90,8 @@ export function unsavedRemoteDraft(appSessionId: AppSessionId): Draft | null | u
 
 /** The session's saves here end, unanswered ones included: a newer save went to the caller's fallback. */
 export function dropRemoteDraftSaves(appSessionId: AppSessionId): void {
+  const queue = saves.get(appSessionId);
+  if (queue !== undefined) answer(queue, false);
   saves.delete(appSessionId);
   wholeHere.delete(appSessionId);
 }
@@ -108,7 +112,7 @@ async function readKept(client: MawsBridge, appSessionId: AppSessionId): Promise
 }
 
 /** The member's draft there, or the one still being saved; `refused`, the fallback's, if the machine offers none. */
-export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, refused: () => Draft | null): Promise<Draft | null> {
+export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, refused: () => Draft | null): Promise<Draft | null | Unread> {
   const unsaved = unsavedRemoteDraft(appSessionId);
   if (unsaved !== undefined) return unsaved;
   const result = await readKept(client, appSessionId);
@@ -120,13 +124,18 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
   }
   if (isNotOffered(result)) return refused();
   console.warn('[composer] the draft could not be read from its machine', result.error.message);
-  return null;
+  return UNREAD; // UX wave U6b-5a: not read, which is not none
 }
 
-/** The draft saved there after the session's saves before it; `refused` takes the newest if the machine offers none. */
-export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, refused: (draft: Draft | null) => void): void {
+/**
+ * The draft saved there after the session's saves before it; `refused` takes the newest if the machine offers none. UX
+ * wave U6b-5a (the branch panel's fix wave, G1): the answer is whether the store took it, once the session's queue has
+ * gone as far as this draft or a newer one (true where the fallback keeps it), false where it ends without that.
+ */
+export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, refused: (draft: Draft | null) => void): Promise<boolean> {
   const held = saves.get(appSessionId);
-  const queue = held ?? { latest: draft, out: false, waiting: false, refused, resent: 0, resend: null, handed: 0 };
+  const queue = held ?? { latest: draft, out: false, waiting: false, refused, resent: 0, resend: null, handed: 0, answers: [] };
+  const taken = new Promise<boolean>((resolve) => queue.answers.push(resolve));
   if (held === undefined) saves.set(appSessionId, queue);
   queue.latest = draft;
   queue.waiting = true;
@@ -134,6 +143,12 @@ export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, 
   queue.resent = 0;
   queue.handed = ++tickets; // in the session's order: a take-back's save taken after it supersedes it
   if (!queue.out) startPump(client, appSessionId, queue);
+  return taken;
+}
+
+// The answers owed for the drafts a queue was handed, given once it has gone as far as the newest of them.
+function answer(queue: Saves, taken: boolean): void {
+  for (const answered of queue.answers.splice(0)) answered(taken);
 }
 
 /** One draft saved on top of what is kept there: read first when that isn't known, and again after a stale refusal. */
@@ -188,17 +203,22 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
     queue.waiting = false;
     sentOne = true;
     const result = await saveOnce(client, appSessionId, queue.latest, current);
-    if (result === null) return void (queue.out = false);
+    if (result === null) {
+      queue.out = false;
+      return answer(queue, false);
+    }
     if (isNotOffered(result)) {
       queue.out = false;
       saves.delete(appSessionId);
-      return queue.refused(queue.latest);
+      queue.refused(queue.latest);
+      return answer(queue, true); // the fallback keeps it
     }
     taken = result.ok;
     timedOut = !result.ok && result.error.code === 'timeout';
     if (!result.ok) console.warn('[composer] the draft was not kept on its machine', result.error.message);
   }
   queue.out = false;
+  answer(queue, taken && current());
   if (!current()) return;
   if (taken) return void saves.delete(appSessionId);
   // A save past main's bound may land later, after a newer one it then makes stale there: nobody would send the newest

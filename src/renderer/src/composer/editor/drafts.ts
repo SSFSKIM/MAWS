@@ -10,6 +10,7 @@ import type { Draft } from '@shared/ipc/schema/session';
 import { readerRowsOf } from '../../lane-b/reader-rows';
 import { dropRemoteDraftSaves, loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft, saveRemoteDraftOnce, unsavedRemoteDraft } from '../../lane-b/remote-drafts';
 import { markPersisted } from './attachments';
+import type { Unread } from './unread';
 import { attachmentsOf, MENTION, type ComposerDoc, type MentionAttrs } from './doc';
 
 export const DRAFT_DELAY_MS = 750;
@@ -94,7 +95,7 @@ export const resetRemoteDrafts = (): void => {
 export function rememberRemoteDraft(appSessionId: AppSessionId, doc: ComposerDoc): void {
   remoteDrafts.set(appSessionId, { doc, attachments: [], updatedAt: new Date().toISOString() });
 }
-export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null, replaces?: string | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
+export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null | Unread>; save(draft: Draft | null, replaces?: string | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
   const remember = (draft: Draft | null) => {
     if (draft === null) remoteDrafts.delete(appSessionId);
     else remoteDrafts.set(appSessionId, draft);
@@ -123,8 +124,9 @@ export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null
         const result = await saveRemoteDraftOnce(client, appSessionId, draft, replaces);
         return !('withheld' in result) && result.ok;
       }
-      saveRemoteDraft(client, appSessionId, draft, remember);
-      return true; // taken in hand: the session's saves go one after another, again where refused stale
+      // the session's saves go one after another, again where refused stale; the answer once the machine took it (UX
+      // wave U6b-5a: an attach says its block is kept only then)
+      return saveRemoteDraft(client, appSessionId, draft, remember);
     },
   };
 }
