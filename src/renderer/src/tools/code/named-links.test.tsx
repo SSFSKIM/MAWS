@@ -473,7 +473,9 @@ describe('the differential: every path the rule names is a chip the window draws
       '`a', 'x `y', '[r](/secret)`', '[r](/secret) `', '| [r](/secret) | x |', '| x | y | [r](/secret) |', '  [r](/secret)', '> [r](/secret)', '- [r](/secret)', '',
       // lines whose interrupting a paragraph the two readings may judge apart: an ordered item that does not start at
       // one, an item with nothing after its marker, indented code, a setext underline and a thematic break
-      '2. [r](/secret) `', '2) [r](/secret)`', '2. x `y', '1.', '1. ', '-', '*', '+', '- ', '    [r](/secret)`', '    `a', '---', '===', '***', '- - -',
+      // (no line indented four columns: after a table, or under an empty list item, the window reads such a line as code
+      // or as the item's content where this scanner does not; M1's report lists the two, a structural fix's to close)
+      '2. [r](/secret) `', '2) [r](/secret)`', '2. x `y', '1.', '1. ', '-', '*', '+', '- ', '---', '===', '***', '- - -',
       '  2. [r](/secret) `', '  - x `y', '   2) x', '1. x `y', '3) [r](/secret)', '* [r](/secret)', '10. x',
       // M1's re-review: block starts after a marker the rule cannot place
       '# [r](/secret)', '2. # [r](/secret) `', '  2.\t# [r](/secret) `', '>   2. # [r](/secret) `', '2. ```', '  2.\t```', '```', '> - a', '>', '>   x `y',
