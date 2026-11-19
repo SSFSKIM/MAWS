@@ -197,7 +197,11 @@ export class Rl10 {
   #told: { revoked: string; org: string } | null = null;
   /** The last restatement queued (`#restate`). */
   #restating: Promise<void> = Promise.resolve();
-  #welcomed = false;
+  /**
+   * The connection last welcomed, until the link closes. It is the link's only while it is still the server's current
+   * one (`#live`): a replacement is current from its hello, and welcomed only at its turn (`#inTurn`).
+   */
+  #welcomed: Rl10Connection | null = null;
   #wanted = false;
   #changing: Promise<void> = Promise.resolve();
   /** The last connection's hello or frame taken (`#inTurn`). */
@@ -331,7 +335,13 @@ export class Rl10 {
 
   /** Whether a sminos is connected and welcomed. */
   get connected(): boolean {
-    return this.#server.current !== null && this.#welcomed;
+    return this.#live !== null;
+  }
+
+  /** The welcomed connection while it is still the current one; null while none is, or a replacement awaits its turn. */
+  get #live(): Rl10Connection | null {
+    const welcomed = this.#welcomed;
+    return welcomed !== null && welcomed === this.#server.current ? welcomed : null;
   }
 
   /** Serves RL10 (the machine is enrolled and listed); a failure is logged and leaves it unserved. */
@@ -362,9 +372,9 @@ export class Rl10 {
     return this.#changing;
   }
 
-  /** A frame down to sminos; dropped while none is connected. */
+  /** A frame down to sminos; dropped while none is connected, and while a replacement awaits its welcome. */
   send(frame: object): void {
-    if (this.#welcomed) this.#server.current?.send(frame);
+    this.#live?.send(frame);
   }
 
   /**
@@ -372,7 +382,7 @@ export class Rl10 {
    * revocation reaches sminos before what the new head lets through), then the arriving events held for it judged again.
    */
   async adopted(): Promise<void> {
-    if (!this.#welcomed) return;
+    if (this.#live === null) return; // a replacement awaiting its turn is told the head by its welcome's restatement
     await this.#restate(false);
     // A head moves what `@machine` resolves to, so every local audience is stated again where it moved.
     for (const session of this.members.sessions()) await this.#recordMoved(session);
@@ -409,7 +419,7 @@ export class Rl10 {
    * sminos holds no member list; absent when it withdrew none.
    */
   #tellAudience(session: string, policy: { owners: string[]; members: string[] | null; policyRev: number; withdrawn?: string[] }): void {
-    if (!this.#welcomed || !this.#streams) return;
+    if (this.#live === null || !this.#streams) return;
     const withdrawn = policy.withdrawn !== undefined && policy.withdrawn.length > 0 ? { withdrawn: policy.withdrawn } : {};
     const frame = { t: 'audience', session, owners: policy.owners, members: policy.members, digest: digestOf(policy.members), policyRev: policy.policyRev, ...withdrawn };
     const text = JSON.stringify(frame);
@@ -479,7 +489,7 @@ export class Rl10 {
 
   /** The org frame stated again where it changed (the registry moved: this machine's locations, the records, `complete`). */
   restate(): Promise<void> {
-    if (!this.#welcomed) return Promise.resolve();
+    if (this.#live === null) return Promise.resolve();
     return this.#restate(false);
   }
 
@@ -682,7 +692,7 @@ export class Rl10 {
     // A connection replaced: what the last one held open on RL1 closes, and is opened again by this one's hellos.
     this.relay.closeAll();
     this.#rebuild.ended();
-    if (this.#welcomed) this.#link(false);
+    if (this.#welcomed !== null) this.#link(false);
     this.#told = null;
     this.#sminos = Array.isArray(hello.capabilities) ? hello.capabilities.filter((c): c is string => typeof c === 'string').slice(0, 32) : [];
     this.#audienceSent.clear();
@@ -701,7 +711,7 @@ export class Rl10 {
       policy: { read_only: current.read_only, ceiling: current.ceiling },
       stateVersion: head.state.version,
     });
-    this.#welcomed = true;
+    this.#welcomed = connection;
     // The restatement is open before the link's listeners hear of the connection: the registry's publication they queue
     // reads `known` from the sessions held, which only a closed restatement answers for (panel 1, scalpel-3#1).
     this.members.welcome();
@@ -713,8 +723,8 @@ export class Rl10 {
   }
 
   #closed(): void {
-    if (this.#welcomed) this.#link(false);
-    this.#welcomed = false;
+    if (this.#welcomed !== null) this.#link(false);
+    this.#welcomed = null;
     this.#sentGen = 0;
     this.#keptGen = 0;
     this.members.stop();
@@ -762,7 +772,7 @@ export class Rl10 {
   }
 
   async #frame(connection: Rl10Connection, frame: Frame): Promise<void> {
-    if (!this.#welcomed || connection !== this.#server.current) return;
+    if (connection !== this.#live) return;
     switch (frame.t) {
       case 'hello':
         this.relay.hello(frame);

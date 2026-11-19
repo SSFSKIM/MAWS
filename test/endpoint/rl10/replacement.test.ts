@@ -82,11 +82,11 @@ async function endpoint() {
   await rl10.serve();
   closers.push(() => rl10.unserve());
   /** sminos connected: its hello sent, its welcome not waited for (a replacement's waits for the last one's handler). */
-  const connect = async () => {
+  const connect = async (capabilities: string[]) => {
     const info = JSON.parse(fs.readFileSync(join(dir, 'rl10.json'), 'utf8')) as { socket: string; token: string };
     const sminos = await FakeSminos.open(info.socket);
     closers.push(() => sminos.close());
-    sminos.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: ['channels'], token: info.token, sminos: { version: 'replacement' }, policy: { read_only: false, ceiling: 'settings' } });
+    sminos.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities, token: info.token, sminos: { version: 'replacement' }, policy: { read_only: false, ceiling: 'settings' } });
     return sminos;
   };
   const gate = () => {
@@ -97,25 +97,32 @@ async function endpoint() {
   return { rl10, connect, gate, listed, withdrawing: () => withdrawing };
 }
 
-/** S1 held in lane A and listed on a first connection, then its update to lane B sent and paused at the withdrawal. */
-async function paused() {
+/**
+ * S1 held in lane A and listed on a first connection whose hello listed `capabilities`, then its update to lane B (with
+ * `update`'s fields) sent and paused at the withdrawal; `links`: what the link's listeners hear from then on.
+ */
+async function paused(capabilities = ['channels'], update: Record<string, unknown> = {}) {
   const e = await endpoint();
-  const first = await e.connect();
+  const first = await e.connect(capabilities);
   await first.next((f) => f.t === 'welcome', 'the first welcome');
   first.send(memberFrame(S1, 'A'));
   await until(() => e.listed.has(S1), 'S1 listed');
   const open = e.gate();
-  first.send(memberFrame(S1, 'B'));
+  first.send(memberFrame(S1, 'B', update));
   await until(() => e.withdrawing() === 1, 'the lane change’s withdrawal begun');
-  return { e, open, first };
+  const links: boolean[] = [];
+  e.rl10.onLink((connected) => void links.push(connected));
+  return { e, open, first, links };
 }
 
 /**
- * The replacement's frames sent, then `open()`; done once the replacement's welcome came and a sentinel lane A member
- * sent after them (S2) is listed, and a continuation that would write late has had its turn.
+ * Once the endpoint took the replacement (the replaced connection closed by its hello), with nothing of it announced to
+ * the link's listeners, `open()`; done once the replacement's welcome came and a sentinel lane A member sent after its
+ * frames (S2) is listed, and a continuation that would write late has had its turn.
  */
-async function released(e: Awaited<ReturnType<typeof endpoint>>, second: FakeSminos, open: () => void) {
-  await sleep(50); // what the endpoint takes of the replacement before the release, it has taken
+async function released({ e, open, first, links }: Awaited<ReturnType<typeof paused>>, second: FakeSminos) {
+  await until(() => first.closed, 'the replaced connection closed by the replacement’s hello');
+  expect(links).not.toContain(true);
   open();
   await second.next((f) => f.t === 'welcome', 'the replacement’s welcome');
   second.send(memberFrame(S2, 'A'));
@@ -125,10 +132,11 @@ async function released(e: Awaited<ReturnType<typeof endpoint>>, second: FakeSmi
 
 describe('a replacement connection while the replaced one’s handler waits', () => {
   it('a refusal of the same session on the replacement leaves it not held, not joined, unlisted, and with no owner to authorize', async () => {
-    const { e, open } = await paused();
-    const second = await e.connect();
+    const at = await paused();
+    const { e } = at;
+    const second = await e.connect(['channels']);
     second.send(memberFrame(S1, 'B', { project: C }));
-    await released(e, second, open);
+    await released(at, second);
     const target = { lane: 'B' as const, session: S1, appSessionId: APP };
     expect(e.rl10.members.get(S1)).toBeNull();
     expect(e.rl10.members.appSessionId(S1)).toBeNull();
@@ -141,10 +149,11 @@ describe('a replacement connection while the replaced one’s handler waits', ()
   });
 
   it('an empty restatement on the replacement leaves the session not held and not listed', async () => {
-    const { e, open } = await paused();
-    const second = await e.connect();
+    const at = await paused();
+    const { e } = at;
+    const second = await e.connect(['channels']);
     second.send({ t: 'restated' });
-    await released(e, second, open);
+    await released(at, second);
     expect(e.rl10.members.get(S1)).toBeNull();
     expect(e.rl10.members.sessions()).toEqual([S2]);
     expect([...e.listed.keys()]).toEqual([S2]);
@@ -152,10 +161,8 @@ describe('a replacement connection while the replaced one’s handler waits', ()
   });
 
   it('a replacement that closed while it waited is not welcomed: the link stays down, with no restatement open', async () => {
-    const { e, open, first } = await paused();
-    const links: boolean[] = [];
-    e.rl10.onLink((connected) => void links.push(connected));
-    const second = await e.connect();
+    const { e, open, first, links } = await paused();
+    const second = await e.connect(['channels']);
     await until(() => first.closed, 'the replaced connection closed by the replacement’s hello');
     second.close();
     await until(() => links.includes(false), 'the link down');
@@ -164,5 +171,14 @@ describe('a replacement connection while the replaced one’s handler waits', ()
     expect(links).toEqual([false]);
     expect(e.rl10.connected).toBe(false);
     expect(e.rl10.members.restating).toBe(false);
+  });
+
+  it('the replacement’s first frame is its welcome, though the replaced handler’s audience frame goes out while it waits', async () => {
+    // sminos's handshake (sminos_rl10.py) closes a connection whose first frame is not `welcome`. The paused update moves
+    // S1's policyRev, so the replaced connection's handler states its audience again once it is released.
+    const at = await paused(['channels', 'audience'], { policyRev: 1 });
+    const second = await at.e.connect(['channels', 'audience']);
+    await released(at, second);
+    expect(second.received[0]?.t).toBe('welcome');
   });
 });
