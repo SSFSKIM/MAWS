@@ -174,21 +174,23 @@ const isControl = (code: number) => code < 32 || code === 127;
 const isDigit = (code: number) => code >= 48 && code <= 57;
 const escapes = (text: string, at: number, limit: number) => text.charCodeAt(at) === 92 && at + 1 < limit && ASCII_PUNCTUATION.test(text[at + 1]!);
 
-// The end of the line that starts at `start` (its line ending, or the text's end), found a pause's worth at a time. A
+const LINE_ENDING = /[\n\r]/;
+// The end of the line that starts at `start` (its line feed, or the text's end), found a pause's worth at a time. A
 // carriage return not followed by a line feed refuses the text (UX wave U6b-4b, R1): the window's parser ends a line
-// there, and this pass, which ends one at a line feed alone, would read a fence the window sees as prose.
+// there, and this pass, which ends one at a line feed alone, would read a fence the window sees as prose. One search per
+// stretch finds either character, so the meter's charge is the search's whole visit (M1's review, finding 2); a return
+// at the stretch's end is checked against the character after it.
 function* lineEndFrom(text: string, start: number, m: Meter): Generator<typeof PAUSE, number, void> {
   for (let at = start; ; ) {
     const limit = Math.min(text.length, at + SCAN_STEP_CHARS);
-    const stretch = text.slice(at, limit);
-    const found = stretch.indexOf('\n');
-    charge(m, (found < 0 ? limit - at : found) + 1);
-    // Only a return directly before the line feed is part of a line ending; one at the stretch's end is checked again
-    // against the character after it
-    const read = found < 0 ? stretch : stretch.slice(0, found);
-    const lone = read.indexOf('\r');
-    if (lone >= 0 && (lone < read.length - 1 || (found < 0 && text.charCodeAt(limit) !== 10))) throw new ScanRefused();
-    if (found >= 0) return at + found;
+    const found = LINE_ENDING.exec(text.slice(at, limit))?.index ?? -1;
+    charge(m, (found < 0 ? limit - at : found) + 2); // what was searched, and the character after a return
+    if (found >= 0) {
+      const ending = at + found;
+      if (text.charCodeAt(ending) === 10) return ending;
+      if (text.charCodeAt(ending + 1) !== 10) throw new ScanRefused(); // a return alone
+      return ending + 1;
+    }
     if (limit >= text.length) return text.length;
     at = limit;
     if (m.work >= m.pause) yield pauseAt(m);
