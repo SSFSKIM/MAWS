@@ -173,19 +173,18 @@ describe('listed refusals: what the click asks for, and the rule names nothing',
     ['[r](//a:b:c@x/y)', ['/a:b%3Ac@x/y']],
     ['[r](//u@@h/x)', ['/u%40@h/x']],
     ['[r](maws-path:/work/out/report.md)', [P]],
-    // UX wave U6b-4b (N1.6): U6c's refusals hold for the `file:` form, whatever the window draws
-    ['[r](file:///work/%41.md)', ['/work/A.md']],
-    ['[r](file&colon;///work/x.md)', ['/work/x.md']],
   ])('%j', (markdown, asked) => {
     expect(clickedPaths(markdown)).toEqual(asked);
     expect(linkPaths(markdown)).toEqual([]);
   });
 
-  // M1's review, finding 3: N1.6's control through the rule's own reader, a form of the same path that it names
+  // UX wave U6b-4b (N1.6): U6c's refusals hold for the `file:` form, whatever the window draws; each beside its control,
+  // a form of the same path that the rule's own reader names
   it.each([
     ['[r](file:///work/%41.md)', '[r](file:///work/A.md)', '/work/A.md'],
     ['[r](file&colon;///work/x.md)', '[r](file:///work/x.md)', '/work/x.md'],
-  ])('%j names nothing; %j names %j', (refused, named, path) => {
+  ])('%j: the click asks for the path and the rule names nothing; %j names %j', (refused, named, path) => {
+    expect(clickedPaths(refused)).toEqual([path]);
     expect(linkPaths(refused)).toEqual([]);
     expect(linkPaths(named)).toEqual([path]);
     expect(clickedPaths(named)).toEqual([path]);
@@ -302,6 +301,16 @@ describe('the rule reads the blocks the window draws', () => {
     agree(`1. a \`x\n2) [r](${at}r.md) \``, ['/x/r.md']);
     agree(`- a\n  - b \`x\n  2. [r](${at}r.md) \``, ['/x/r.md']);
     agree(`- a\n  1. b \`x\n     2) [r](${at}r.md) \``, []);
+    // M1's re-review: a marker the rule cannot place hides nothing it then reads as a block (a heading after a quoted or
+    // tabbed `2.`); the control, `1.`, interrupts and its heading stands
+    agree(`> - a\n>\n>   x \`y\n>   2. # [r](${at}r.md) \``, []);
+    agree(`> - a\n>\n>   x \`y\n>   1. # [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`- a\n\n  x \`y\n  2.\t# [r](${at}r.md) \``, []);
+    agree(`- a\n\n  x \`y\n  1.\t# [r](${at}r.md) \``, ['/x/r.md']);
+    // a fence such a marker may open has no end the rule can find: the text names nothing
+    const fenced = `- a\n\n  x \`y\n  2.\t\`\`\`\n  [r](${at}r.md)\n\n[s](${at}s.md)`;
+    expect(linkPaths(fenced)).toEqual([]);
+    expect(chipPaths(fenced)).toContain('/x/s.md');
     // what still drops: a paragraph that does not open its item, and a weak line less indented than its text
     const uncertain = `- a\n\n  x \`y\n2. [r](${at}r.md) \``;
     expect(chipPaths(uncertain)).toEqual(['/x/r.md']);
@@ -466,6 +475,8 @@ describe('the differential: every path the rule names is a chip the window draws
       // one, an item with nothing after its marker, indented code, a setext underline and a thematic break
       '2. [r](/secret) `', '2) [r](/secret)`', '2. x `y', '1.', '1. ', '-', '*', '+', '- ', '    [r](/secret)`', '    `a', '---', '===', '***', '- - -',
       '  2. [r](/secret) `', '  - x `y', '   2) x', '1. x `y', '3) [r](/secret)', '* [r](/secret)', '10. x',
+      // M1's re-review: block starts after a marker the rule cannot place
+      '# [r](/secret)', '2. # [r](/secret) `', '  2.\t# [r](/secret) `', '>   2. # [r](/secret) `', '2. ```', '  2.\t```', '```', '> - a', '>', '>   x `y',
     ];
     const random = mulberry32(seed);
     const faults: string[] = [];

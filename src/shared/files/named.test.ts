@@ -252,6 +252,12 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`- a\n  - b \`x\n  2. [r](${at}r.md) \``), 'nested: out of the inner item, in the outer').toEqual(['/x/r.md']);
     expect(linkPaths(`- a\n  1. b \`x\n     2) [r](${at}r.md) \``), 'nested: inside the inner item, text').toEqual([]);
     expect(linkPaths(`- a\n\n  x \`y\n2. [r](${at}r.md) \``), 'a paragraph not opening its item, the line less indented: not read').toEqual([]);
+    // M1's re-review: nothing after a marker the rule cannot place is read as a block; the control, `1.`, is a heading
+    expect(linkPaths(`> - a\n>\n>   x \`y\n>   2. # [r](${at}r.md) \``), 'quoted').toEqual([]);
+    expect(linkPaths(`> - a\n>\n>   x \`y\n>   1. # [r](${at}r.md) \``), 'quoted, the control').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n\n  x \`y\n  2.\t# [r](${at}r.md) \``), 'a tab after the marker').toEqual([]);
+    expect(linkPaths(`- a\n\n  x \`y\n  1.\t# [r](${at}r.md) \``), 'a tab after the marker, the control').toEqual(['/x/r.md']);
+    expect(linkPaths(`- a\n\n  x \`y\n  2.\t\`\`\`\n  [r](${at}r.md)\n\n[s](${at}s.md)`), 'a fence it may open: the text is refused').toEqual([]);
   });
 
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
