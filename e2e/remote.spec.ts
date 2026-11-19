@@ -1022,11 +1022,12 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(tab.url, 'the page loads from A’s listener').toBe(`http://127.0.0.1:${localPort}/`);
 
       // The page is the directory listing B's server sent for the checkout.
-      const pageText = () =>
+      const pageAt = (origin: string) =>
         a!.app.evaluate(async ({ webContents }, origin) => {
           const view = webContents.getAllWebContents().find((w) => w.getURL().startsWith(origin));
           return view ? ((await view.executeJavaScript('document.body ? document.body.innerText : ""')) as string) : null;
-        }, `http://127.0.0.1:${localPort}/`);
+        }, origin);
+      const pageText = () => pageAt(`http://127.0.0.1:${localPort}/`);
       await expect.poll(pageText, { timeout: 60_000, message: 'the forwarded page shows B’s checkout' }).toContain('Directory listing for /');
       const listed = (await pageText())!;
       for (const name of [NOTES, ON_B, WHILE_CUT]) expect(listed, `the listing names ${name}`).toContain(name);
@@ -1035,9 +1036,15 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // loopback. The forwarded tab is closed first, so the ⌘-click is seen opening one again.
       await invoke(page, 'browser.tabs.close', { tabId: tab.tabId });
       await expect.poll(async () => (await forwardedTab()) === undefined, { timeout: 30_000, message: 'the forwarded tab closed' }).toBe(true);
+      await expect.poll(pageText, { timeout: 30_000, message: 'the first page went with its tab' }).toBeNull();
       await link.click({ modifiers: ['Meta'] });
       await quoting(expect.poll(async () => (await forwardedTab()) !== undefined, { timeout: 60_000, message: '⌘-click forwards B’s link again' }).toBe(true), () => `${mainSaid(page)}\nB's log:\n${bPtyLines()}`);
-      expect((await forwardedTab())!.forward!.machine, 'forwarded from B').toBe(b.ref);
+      const reopened = (await forwardedTab())!;
+      expect(reopened.tabId, 'a new tab').not.toBe(tab.tabId);
+      expect(reopened.forward!.machine, 'forwarded from B').toBe(b.ref);
+      expect(reopened.url, 'loading from A’s listener').toBe(`http://127.0.0.1:${reopened.forward!.localPort}/`);
+      // the page loads again, from the new tab's own address: B's listing, read from the page now open there
+      await expect.poll(() => pageAt(reopened.url), { timeout: 60_000, message: 'the forwarded page shows B’s checkout again' }).toContain('Directory listing for /');
       const handedOut = (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line === `openExternal ${devServerUrl(devPort)}`);
       expect(handedOut, 'nothing handed to A’s system browser').toEqual([]);
       // Back in the Terminal tool (the browser may have taken its place): B's server logged the page's request, and ⌃C

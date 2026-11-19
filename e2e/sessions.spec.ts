@@ -1345,9 +1345,11 @@ test.describe('sessions', () => {
   // Mac whose transcript links a page on this Mac's loopback, which the scene serves itself (e2e/support/browser-server.ts,
   // on 127.0.0.1). The Browser e2e harness registers its own openExternal, so the scene runs in the app. A click on
   // `http://localhost:<port>/…` opens a Browser tab at that address beside the chat and writes no `openExternal` line to
-  // main's open seam (MAWS_E2E_OPEN_LOG); ⌘-click writes the line and opens no second tab; `app.localhost` opens as
-  // `localhost` does; a link off this Mac writes the line and opens no tab. Waits on the session's tabs as main lists
-  // them and on the seam's lines.
+  // main's open seam (MAWS_E2E_OPEN_LOG), and the page loads from the scene's server; ⌘-click on a loopback address not
+  // yet open writes the line and opens no tab; `app.localhost` opens and loads as `localhost` does; a link off this Mac
+  // writes the line and opens no tab. Waits on the session's tabs as main lists them for it, the server's requests and
+  // the seam's lines. The last plain click is the barrier for the absences before it: the window's commands reach main
+  // in order, so once its tab is listed, a tab the ⌘-click or the outside link had opened would be listed too.
   const loopbackLaunch = async (opts: { sid: string; reply: string }) => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -1368,8 +1370,10 @@ test.describe('sessions', () => {
     await (await sidebarRow(page, { appSessionId: id! })).click();
     // main's open seam: one line per URL main would hand the system browser
     const handedOut = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n').filter((line) => line.startsWith('openExternal ')) : []);
-    const tabsAt = async (url: string) => value(await invoke(page, 'browser.tabs.list', {})).tabs.filter((tab) => tab.url === url);
-    return { page, handedOut, tabsAt };
+    // the session's own tabs, as main lists them for it (fix wave 1: scoped to the session)
+    const sessionTabs = async () => value(await invoke(page, 'browser.tabs.list', { appSessionId: id! as never })).tabs.map((tab) => tab.url);
+    const tabsAt = async (url: string) => (await sessionTabs()).filter((at) => at === url);
+    return { page, handedOut, tabsAt, sessionTabs };
   };
 
   test('a loopback link of a session on this Mac opens in its in-app browser beside the chat; ⌘-click opens it in the system browser', async () => {
@@ -1377,34 +1381,40 @@ test.describe('sessions', () => {
     try {
       const port = new URL(server.origin).port;
       const APP = `http://localhost:${port}/marker.html`;
+      const STATUS = `http://localhost:${port}/c.html`; // ⌘-clicked only, never open in the app
       const ADMIN = `http://app.localhost:${port}/b.html`;
       const DOCS = 'https://example.test/docs';
-      const { page, handedOut, tabsAt } = await loopbackLaunch({
+      const { page, handedOut, tabsAt, sessionTabs } = await loopbackLaunch({
         sid: '5e551011-0000-4000-8000-0000000000f1',
-        reply: `It runs at [the app](${APP}), with [the admin](${ADMIN}); [the docs](${DOCS}) are elsewhere.`,
+        reply: `It runs at [the app](${APP}), with [the status](${STATUS}) and [the admin](${ADMIN}); [the docs](${DOCS}) are elsewhere.`,
       });
       const main = page.locator('[data-region="main"]');
       const link = (name: string) => main.getByRole('link', { name, exact: true });
       await expect(link('the app')).toBeVisible({ timeout: 20_000 });
 
-      // a click: a tab of the session's browser at the address, beside the chat, and nothing handed to the system browser
+      // a click: a tab of the session's browser at the address, beside the chat, whose page loads from the scene's server;
+      // nothing handed to the system browser
       await link('the app').click();
       await expect.poll(async () => (await tabsAt(APP)).length, { timeout: 20_000, message: 'a Browser tab at the link’s address' }).toBe(1);
       await expect(sideColumn(page).locator('[data-surface="browser"]'), 'the Browser surface beside the chat').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => server.hits('/marker.html'), { timeout: 20_000, message: 'the page loaded in the tab' }).toBeGreaterThan(0);
       expect(handedOut(), 'nothing reached the system browser').toEqual([]);
+      const before = await sessionTabs();
 
-      // ⌘-click: the system browser, and no second tab
-      await link('the app').click({ modifiers: ['Meta'] });
-      await expect.poll(handedOut, { timeout: 20_000, message: '⌘-click hands the link to the system browser' }).toEqual([`openExternal ${APP}`]);
-      expect(await tabsAt(APP), 'no second tab').toHaveLength(1);
+      // ⌘-click on a loopback address not open: the system browser; then a link off this Mac: the system browser too
+      await link('the status').click({ modifiers: ['Meta'] });
+      await expect.poll(handedOut, { timeout: 20_000, message: '⌘-click hands the link to the system browser' }).toEqual([`openExternal ${STATUS}`]);
+      await link('the docs').click();
+      await expect.poll(handedOut, { timeout: 20_000, message: 'a link off this Mac reaches the system browser' }).toEqual([`openExternal ${STATUS}`, `openExternal ${DOCS}`]);
 
-      // `app.localhost` is this Mac's loopback too; a link off this Mac goes to the system browser as before
+      // `app.localhost` is this Mac's loopback too: its tab, its page loaded; and the session's tabs are what they were
+      // and that one, so neither the ⌘-click nor the outside link opened a tab
       await link('the admin').click();
       await expect.poll(async () => (await tabsAt(ADMIN)).length, { timeout: 20_000, message: 'a Browser tab at app.localhost' }).toBe(1);
-      await link('the docs').click();
-      await expect.poll(handedOut, { timeout: 20_000, message: 'a link off this Mac reaches the system browser' }).toEqual([`openExternal ${APP}`, `openExternal ${DOCS}`]);
-      expect(await tabsAt(DOCS), 'and opens no tab').toEqual([]);
-      expect(await tabsAt(ADMIN), 'nor a second app.localhost tab').toHaveLength(1);
+      await expect.poll(() => server.hits('/b.html'), { timeout: 20_000, message: 'its page loaded' }).toBeGreaterThan(0);
+      expect((await sessionTabs()).sort(), 'the session’s tabs: those before, and app.localhost’s').toEqual([...before, ADMIN].sort());
+      expect(server.hits('/c.html'), 'the ⌘-clicked page was never asked for here').toBe(0);
+      expect(handedOut(), 'and nothing more handed out').toEqual([`openExternal ${STATUS}`, `openExternal ${DOCS}`]);
     } finally {
       await server.close();
     }
@@ -1424,7 +1434,7 @@ test.describe('sessions', () => {
       const LOCAL = `http://127.0.0.1:${port}/marker.html`;
       const ELSEWHERE = 'https://example.org';
       const [LOCAL_ROW, ELSEWHERE_ROW, COLUMN] = [6, 9, 4]; // where the shell prints each, one-based as the cursor moves are
-      const { page, handedOut, tabsAt } = await loopbackLaunch({ sid: '5e551011-0000-4000-8000-0000000000f2', reply: 'The app runs in the terminal.' });
+      const { page, handedOut, tabsAt, sessionTabs } = await loopbackLaunch({ sid: '5e551011-0000-4000-8000-0000000000f2', reply: 'The app runs in the terminal.' });
       await expect(page.locator('[data-region="main"]').getByText('The app runs in the terminal.')).toBeVisible({ timeout: 20_000 });
       await openSurface(page, 'Terminal');
       const shown = surface(page, 'terminal').locator('[data-terminal-id]:visible');
@@ -1432,27 +1442,42 @@ test.describe('sessions', () => {
       const id = (await shown.getAttribute('data-terminal-id'))!;
       await expect(surface(page, 'terminal').getByText('Starting shell…', { exact: true }), 'the shell has started').toHaveCount(0, { timeout: 20_000 });
       const lines = () => page.evaluate((tid) => (window as unknown as { __maws_terminals?: { lines(id: string): string[] | null } }).__maws_terminals?.lines(tid) ?? [], id);
-      const size = (rows: string[]) => rows.map((line) => /^(\d+) (\d+)$/.exec(line.trim())).find((match) => match !== null) ?? null;
-      // the screen cleared first, so the typed line is gone before the addresses are placed
-      const command = `printf '\\033[2J\\033[${LOCAL_ROW};${COLUMN}H%s\\033[${ELSEWHERE_ROW};${COLUMN}H%s\\033[12;1H' '${LOCAL}' '${ELSEWHERE}'; stty size`;
+      // The screen cleared first, so the typed line is gone before the addresses are placed; then the size, on a line marked
+      // with the try's own number, so a line an earlier try left is never read as this one's (fix wave 1). A try is
+      // accepted once its marked line and both addresses at their rows are on the screen together, read in one reading.
+      type Placed = { rows: number; cols: number; viewport: string[] };
+      const placed = (written: string[], attempt: number): Placed | null => {
+        const marked = written.map((line) => new RegExp(`^U6B4B-SIZE-${attempt} (\\d+) (\\d+)$`).exec(line.trim())).find((match) => match !== null);
+        if (!marked) return null;
+        const [rows, cols] = [Number(marked[1]), Number(marked[2])];
+        const viewport = written.slice(-rows); // the buffer's last `rows` lines are the screen
+        const at = (row: number) => viewport[row - 1]?.slice(COLUMN - 1);
+        return at(LOCAL_ROW) === LOCAL && at(ELSEWHERE_ROW) === ELSEWHERE ? { rows, cols, viewport } : null;
+      };
+      let attempt = 0;
+      let screen: Placed | null = null;
       await expect(async () => {
+        attempt += 1;
+        const command = `printf '\\033[2J\\033[${LOCAL_ROW};${COLUMN}H%s\\033[${ELSEWHERE_ROW};${COLUMN}H%s\\033[12;1H' '${LOCAL}' '${ELSEWHERE}'; printf 'U6B4B-SIZE-${attempt} %s\\n' "$(stty size)"`;
         await surface(page, 'terminal').locator('[data-testid="terminal-surface"]').filter({ visible: true }).click();
         await page.keyboard.type(command);
         await page.keyboard.press('Enter');
-        await expect.poll(async () => size(await lines()) !== null, { timeout: 5_000 }).toBe(true);
+        const tried = attempt;
+        await expect.poll(async () => (screen = placed(await lines(), tried)) !== null, { timeout: 5_000 }).toBe(true);
       }).toPass({ timeout: 30_000 });
-      const written = await lines();
-      const [rows, cols] = size(written)!.slice(1).map(Number) as [number, number];
-      const viewport = written.slice(-rows); // the buffer's last `rows` lines are the screen
-      expect(viewport[LOCAL_ROW - 1]?.slice(COLUMN - 1), `the loopback address at its row:\n${viewport.join('\n')}`).toBe(LOCAL);
-      expect(viewport[ELSEWHERE_ROW - 1]?.slice(COLUMN - 1), `the other address at its row:\n${viewport.join('\n')}`).toBe(ELSEWHERE);
-      // a ⌘-click a few cells into the address, after the hover the link provider needs
+      const { rows, cols } = screen!;
+      // A ⌘-click a few cells into the address, once the link under the pointer is hovered: xterm marks its screen
+      // `xterm-cursor-pointer` while a link is hovered (@xterm/xterm 6.0.0, the linkifier's hover), so the click waits on
+      // that state rather than on a time. A hover that has not taken is moved again.
       const commandClick = async (row: number) => {
-        const box = (await surface(page, 'terminal').locator(`[data-terminal-id="${id}"] .xterm-screen`).boundingBox())!;
+        const screenOf = surface(page, 'terminal').locator(`[data-terminal-id="${id}"] .xterm-screen`);
+        const box = (await screenOf.boundingBox())!;
         const [x, y] = [box.x + (COLUMN - 1 + 6.5) * (box.width / cols), box.y + (row - 0.5) * (box.height / rows)];
-        await page.mouse.move(x - 3, y);
-        await page.mouse.move(x, y);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await expect(async () => {
+          await page.mouse.move(x - 3, y);
+          await page.mouse.move(x, y);
+          await expect(screenOf, 'the link under the pointer hovered').toHaveClass(/\bxterm-cursor-pointer\b/, { timeout: 2_000 });
+        }).toPass({ timeout: 20_000 });
         await page.keyboard.down('Meta');
         await page.mouse.click(x, y);
         await page.keyboard.up('Meta');
@@ -1462,12 +1487,14 @@ test.describe('sessions', () => {
       await expect.poll(async () => (await tabsAt(LOCAL)).length, { timeout: 20_000, message: 'a Browser tab at the printed loopback address' }).toBe(1);
       await expect.poll(() => server.hits('/marker.html'), { timeout: 20_000, message: 'the page loaded in it' }).toBeGreaterThan(0);
       expect(handedOut(), 'nothing reached the system browser').toEqual([]);
+      const tabsBefore = await sessionTabs();
 
       await openSurface(page, 'Terminal'); // the Browser took the side column's place
       await expect(surface(page, 'terminal').locator(`[data-terminal-id="${id}"]`)).toBeVisible();
       await commandClick(ELSEWHERE_ROW);
       await expect.poll(handedOut, { timeout: 20_000, message: 'the other link reaches the system browser' }).toEqual([`openExternal ${ELSEWHERE}`]);
-      expect(await tabsAt(LOCAL), 'the loopback tab is still the one').toHaveLength(1);
+      expect(await sessionTabs(), 'the session’s tabs as they were: the other link opened none').toEqual(tabsBefore);
+      expect(tabsBefore.filter((url) => url === LOCAL), 'and the loopback one is there once').toHaveLength(1);
     } finally {
       await server.close();
     }
