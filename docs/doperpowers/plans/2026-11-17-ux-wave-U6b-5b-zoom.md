@@ -27,7 +27,8 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-17) The owner's answer to K3; revision 4.
 - [ ] (2026-11-17) M1 built on `ux-wave/U6b-5b` (`366e995bf` to the head): the seam's two additions, `placedOn`, the harness and the four probe scenes. On the build VM the node and e2e typechecks, `src/main/browser`, eslint and the gate's script tests are green, and the harness's rows a to i have run (j: not run, one display). The task review's fix wave is `d78e60abf`; the independent review's nine findings, as ruled, are `c9343eb08` and `ca7d21a89`, with the harness's run of record at `ca7d21a89`. The architect's review and the Mac runs are still to come.
 - [ ] (2026-11-19) M1's Mac rows 2 and 3 ran at `76d0bbc9d`. The harness and `e2e:browser` measured; the pin probe failed at 200 % and the chrome probe failed before any factor, both probe faults, fixed (Decision Log 13). The peers' probe passed against build F; build M is still to run. FINDINGS.md holds the run of record. The reruns at `ef018d192` and `e458d10c1` measured the pin, the popup and the menus, and the peers' probe established its default-mode control against build F. Every placement is now measured on the Mac (Decision Log 15, 16).
-- [ ] M1 — Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
+- [x] (2026-11-19 22:30Z) M1 — reviewed clean (the task review, and the architect's acceptance at `76d0bbc9d`); Mac rows 2 and 3 in FINDINGS.md; its verdict is Decision Log 17. Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
+- [ ] (2026-11-19) U6b-5a's merged head (`06f265e4a` on `ux-wave/U6b-5`) merged into the branch (`e4af0692e`); the statements to check again hold on it (Decision Log 17).
 - [ ] M2 — Zoom (on the architect's word after M1's verdict; on a head that holds U6b-5a).
 - [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
 
@@ -558,6 +559,8 @@ Found while this document was written and reviewed; each changed a decision abov
   Evidence: `spikes/zoom-probe/FINDINGS.md`, "Build VM".
 - Observation (M1, the VM run; the Mac decides): an isolated zoom is kept nowhere after a quit or a forced exit (rows c and d PASS), so P7 stands on Linux. A default-mode zoom is kept under `partition.per_host_zoom_levels`, keyed by the page's whole `file:` URL, and written on a quit or within 15 s. `webPreferences.zoomFactor` (f1) has the factor in force at the first show. A call at `ready-to-show` (f3) failed at 2 in two of three runs, with a frame painted before the show. Row g's propagation control was established in both modes, and no other window took the zoom.
   Evidence: `spikes/zoom-probe/FINDINGS.md`, "Build VM", the RECORD lines.
+- Observation (M1's verdict, 2026-11-19): every placement of Interfaces §G is off on the Mac in the direction §G gives, each by the RECORD lines in `spikes/zoom-probe/FINDINGS.md`; placement 6's five numbers match the pin's code; an isolated zoom is kept nowhere (P7); the first show at the factor is `webPreferences.zoomFactor` (row f, f1); the factor survives a reload (row e); no other window takes it (row g).
+  Evidence: FINDINGS.md, "Mac" and its reruns; Decision Log 13 to 16.
 
 ## Decision Log
 
@@ -612,6 +615,26 @@ Found while this document was written and reviewed; each changed a decision abov
     - Ruled: the peers' probe against `2c7044231` is dropped.
     - Ruled: rows 4 (the look) and j (a second display) are owed to the owner.
     - M2 waits for U6b-5a's merged head.
+
+17. **2026-11-19 (UTC) · M1's verdict, read against "Promote or discard", and what M2 builds from it** (the architect's word to start M2, on the head that merges U6b-5a's `06f265e4a`).
+    - **P7 stands; M2 is built as written.** The window's page is made with `zoomMode: 'isolated'`, and nothing resets at quit: no `leaveAtActualSize`. On the Mac, rows c and d and this build's relaunch on its own page's zoom key read 1. The peer's reading is on another key, and the run against `2c7044231` was dropped by the architect (Decision Log 16).
+    - **`openAt` is f1**, the factor given as `webPreferences.zoomFactor` when the window is made. It passed on the Mac and on Linux. f3 was unreliable on Linux.
+    - **No `applyAfterLoad`:** row e kept the factor across a reload and across another load.
+    - **`present.ts` and `repair/index.ts` are not edited:** row g found that no other window takes the zoom.
+    - **Placement 6:** decision 35's formula is built with placement 1, and its unit cases are its proof.
+    - **Row j was not run.** B11's sentence about a second display is not proven, and M3's tracker gains its row.
+    - **The pointer** needs no fix of its own: it is placement 1's fault, and placement 1's fix closes it.
+    - **The menu's offer** is placement 6's `fits`.
+    - **The architect's direction for every correction:** pin each one red-first with a unit case built from the numbers FINDINGS.md recorded on the Mac. The case fails on today's code with the recorded reading, and passes with the corrected one. For example:
+      - the bookmarks menu at 2: the CSS corner (332, 136) is handed as (664, 272);
+      - the popup at 2: anchor (799, 80, 24×24), corner times the factor;
+      - the view at 1.25: pane (415, 158, 602×491) placed at decision 27's rounding of it;
+      - the lights at 0.5 to 2 against the toolbar's 44 CSS pixels;
+      - the pin at 2: position (81, 272) drawn at its division;
+      - the device box at 2: 375 reading 376.
+    - **The popup's clamp** is extracted per Decision Log 12, and the e2e's `popupPlace` goes.
+    - **The wire:** this landing still moves no wire minor (`layout.*` is outside the manifest). If the routes' snapshot or a guard shows otherwise, the minor it takes is 61, since U6b-4c holds 60 at the chain merge, and the architect hears of it first.
+    - **The statements to check again hold on the merged head.** Statement 1: the three zoom rows go between `artifact.moveToTab` and `comments.expand`, where nothing new stands, and `listable` is exported by `palette/CommandPalette.tsx`. Statements 2 to 6 and 8: since M1, nothing changed in `src/main/browser`, `tools/browser`, `src/main/layout` or `window.ts`. Statement 10: Electron is still 44.4.5. The lights' clear width is still `pl-[78px]` in `Toolbar.tsx`.
 
 ## Outcomes & Retrospective
 

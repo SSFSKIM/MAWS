@@ -1569,6 +1569,7 @@ test('zoom probe: the view, the lights, the device box', async () => {
     await server.close();
     rmSync(scratch.root, { recursive: true, force: true });
   }
+});
 
 // ---- UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G6; acceptance B4) --------
 // Go ▸ Go to file is one of the menu's actions that take the keyboard from a page of the in-app browser (main's
