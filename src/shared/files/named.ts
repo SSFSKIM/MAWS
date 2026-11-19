@@ -765,20 +765,25 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     // list's (micromark closes the paragraph before it tries the item), and is read as any opening line. Where the pass
     // cannot place it (a quote marker, a tab, a paragraph that did not open its item and a line less indented than its
     // text), the paragraph and what follows it up to a blank line or a block start are not read.
+    // M1's re-review: a line the pass cannot place is read for nothing past its marker, since in one reading all of it is
+    // the paragraph's text. It joins the paragraph, now not read, and `doubtful` stays until a blank line or a line whose
+    // own reading needs no such marker. A fence it may open would run past any blank line: the text is refused. While a
+    // line is doubtful, no later weak line is placed either.
     if (line.weak && paragraph !== null && line.quote >= paragraph.quote) {
-      const known = line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
+      const known = !doubtful && line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
       const inside = known && (!listWasOpen || line.lead >= paragraph.column);
-      if (inside) {
-        if (!listWasOpen) listOpen = false; // no list item: the line is the paragraph's text
+      if (!inside && (!known || !paragraph.opened)) {
+        if (fenceAt(text, line.content, line.end, m) !== null) throw new ScanRefused();
+        paragraph.dropped = true;
+        doubtful = true;
+      }
+      if (inside || doubtful) {
+        if (inside && !listWasOpen) listOpen = false; // no list item: the line is the paragraph's text
         paragraph.lines.push(line.content);
         paragraph.end = line.end;
         afterBlank = false;
         start = next;
         continue;
-      }
-      if (!known || !paragraph.opened) {
-        paragraph.dropped = true;
-        doubtful = true;
       }
     }
     if (blank) {
