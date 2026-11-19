@@ -770,7 +770,12 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     // own reading needs no such marker. A fence it may open would run past any blank line: the text is refused. While a
     // line is doubtful, no later weak line is placed either.
     if (line.weak && paragraph !== null && line.quote >= paragraph.quote) {
-      const known = !doubtful && line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
+      // a weak line over a delimiter row may be a table's head to the window, read from the line's first character: the
+      // pass does not place it either
+      if (m.work >= m.pause) yield pauseAt(m);
+      ahead = next < text.length ? yield* lineFrom(next) : null;
+      const overDelimiter = ahead !== null && ahead.quote === line.quote && !ahead.opens && ahead.indent < 4 && isDelimiterRow(text, ahead.content, ahead.end, m);
+      const known = !doubtful && !overDelimiter && line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
       const inside = known && (!listWasOpen || line.lead >= paragraph.column);
       if (!inside && (!known || !paragraph.opened)) {
         if (fenceAt(text, line.content, line.end, m) !== null) throw new ScanRefused();
