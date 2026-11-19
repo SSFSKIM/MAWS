@@ -512,35 +512,50 @@ it('keeps the Conversations selection by value when an indexing retry adds an ea
   } finally { invoke.mockRestore(); vi.useRealTimers(); }
 });
 
-// UX wave U6b-5a, the delta review's H6: with no row drawn there is no selection, so ⌘⏎ splits nothing, neither while a
-// new text's search is pending nor when it found nothing
-it.each([
-  ['while the new text is searched', () => new Promise<never>(() => {})],
-  ['when the new text finds nothing', () => Promise.resolve({ ok: true, value: { hits: [], indexing: false, incomplete: false } })],
-])('selects nothing and splits nothing on ⌘⏎ %s', async (_, second) => {
-  vi.useFakeTimers();
-  useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which a split would open
-  const quota = idOf('Quota reset recovery');
-  const invoke = vi.spyOn(ipc, 'invoke')
-    // two hits: cmdk 1.1.1 clears its value when its selected row unmounts alone, but of several rows unmounting together
-    // only the last one's removal is looked at, so the first row's value is left behind
-    .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }, { appSessionId: idOf('Charter + research'), snippet: 'another needle' }], indexing: false, incomplete: false } } as never)
-    .mockImplementation(second as never);
-  try {
-    render(<CommandPalette />);
-    act(() => openConversationSearch('needle'));
-    await act(() => vi.advanceTimersByTimeAsync(150));
+// UX wave U6b-5a, the delta review's H6: with no row drawn there is no selection, so ⌘⏎ splits nothing. The rows here go
+// without a change of the text: cmdk 1.1.1 clears its value on a new search, and when its selected row unmounts alone,
+// but of several rows unmounting together it looks only at the last one's removal, so the selected value is left behind
+describe('with no row drawn', () => {
+  const selectedValue = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+  const expectNothingSelectedAndNoSplit = (quota: AppSessionId) => {
     const input = within(dialog()).getByRole('combobox');
-    expect(within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value).toBe(`session:${quota}`); // the control
-    fireEvent.change(input, { target: { value: 'needles' } });
-    await act(() => vi.advanceTimersByTimeAsync(150));
     expect(within(dialog()).queryAllByRole('option')).toEqual([]);
     expect(input.getAttribute('aria-activedescendant')).toBeNull();
     fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
     expect(currentSet(useLayout.getState().main).panes).toHaveLength(1);
     expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).not.toContain(`session:${quota}`);
     expect(screen.queryByRole('dialog')).not.toBeNull();
-  } finally { invoke.mockRestore(); vi.useRealTimers(); }
+  };
+
+  it('selects nothing and splits nothing on ⌘⏎ after a switch to Conversations, while its search is pending', async () => {
+    useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which a split would open
+    const quota = idOf('Quota reset recovery');
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(() => new Promise<never>(() => {}));
+    try {
+      await openAndType('quota');
+      expect(selectedValue()).toBe(`session:${quota}`); // the control
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Conversations' }));
+      expectNothingSelectedAndNoSplit(quota);
+    } finally { invoke.mockRestore(); }
+  });
+
+  it('selects nothing and splits nothing on ⌘⏎ when an indexing retry finds no hits', async () => {
+    vi.useFakeTimers();
+    useLayout.getState().openSession(idOf('Charter + research'));
+    const quota = idOf('Quota reset recovery');
+    const invoke = vi.spyOn(ipc, 'invoke')
+      .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }, { appSessionId: idOf('Charter + research'), snippet: 'another needle' }], indexing: true, incomplete: false } } as never)
+      .mockResolvedValue({ ok: true, value: { hits: [], indexing: false, incomplete: false } } as never);
+    try {
+      render(<CommandPalette />);
+      act(() => openConversationSearch('needle'));
+      await act(() => vi.advanceTimersByTimeAsync(150));
+      expect(selectedValue()).toBe(`session:${quota}`); // the control
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expectNothingSelectedAndNoSplit(quota);
+    } finally { invoke.mockRestore(); vi.useRealTimers(); }
+  });
 });
 
 it('shows terminal incomplete indexing without polling forever or hiding available results', async () => {
