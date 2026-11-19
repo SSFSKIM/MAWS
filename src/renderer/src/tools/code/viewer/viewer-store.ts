@@ -430,6 +430,10 @@ const sameUnhashed = (entry: ViewerEntry, read: LoadedFile, cause: LoadCause) =>
 
 export function createViewerStore(client: MawsBridge) {
   const holds = new Map<string, WatchHold>();
+  // UX wave U6b-4b, the branch review: a hold a read again waits on, whose answer that read follows. An invalidation of the
+  // folder's watch met meanwhile is read by that read, not by one of its own (which would supersede it), and is read by a
+  // refresh only when that read starts nothing.
+  const readsAfter = new WeakMap<WatchHold, { invalidated: boolean }>();
   // The latest load of each tab, from one counter that only grows (never reset, not even by `reset`), so a load of a
   // removed entry can never match the entry that replaced it.
   const generations = new Map<string, number>();
@@ -835,7 +839,15 @@ export function createViewerStore(client: MawsBridge) {
       const hold = useFiles.getState().watch(entry.appSessionId, dirname(entry.path));
       holds.get(tabId)?.release();
       holds.set(tabId, hold);
-      return hold.ready.then(() => (holds.get(tabId) === hold && still() ? load(tabId, reason, cause) : undefined));
+      const waiting = { invalidated: false };
+      readsAfter.set(hold, waiting);
+      return hold.ready.then(() => {
+        readsAfter.delete(hold);
+        if (holds.get(tabId) !== hold) return undefined;
+        if (still()) return load(tabId, reason, cause);
+        if (waiting.invalidated) refresh(tabId); // the invalidation's own read, which this one would have been
+        return undefined;
+      });
     };
 
     // UX wave U6b-4b (decision 7; S1 (a), (f)): whether the notice's Retry would start a read now.
@@ -1044,9 +1056,13 @@ export function createViewerStore(client: MawsBridge) {
           if (entry.appSessionId !== event.appSessionId) continue;
           const directory = dirname(entry.path);
           if (event.kind === 'invalidated') {
-            // The Files store re-watches the directory (the boundary runs again); the file is re-read once that answered.
+            // The Files store re-watches the directory (the boundary runs again); the file is re-read once that answered, by
+            // the read again already waiting on the watch when there is one (the branch review: one read, not two)
             const hold = holds.get(tabId);
-            if (hold && sameFile(event.path, directory)) void hold.ready.then(() => holds.get(tabId) === hold && refresh(tabId));
+            if (!hold || !sameFile(event.path, directory)) continue;
+            const waiting = readsAfter.get(hold);
+            if (waiting) waiting.invalidated = true;
+            else void hold.ready.then(() => holds.get(tabId) === hold && refresh(tabId));
           } else if (sameFile(event.path, entry.path) || (event.kind === 'changed' && sameFile(event.path, directory))) {
             refresh(tabId); // an event naming only the directory may be the file's, coalesced; a re-read absorbs a spurious one
           }

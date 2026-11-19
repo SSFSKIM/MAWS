@@ -1,9 +1,11 @@
 // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3): what the notice's classifier is handed
 // about a session (`notice.ts` asks no store itself): its machine's display name as the roster gives it, null for a
 // session of this Mac (and for no session), and whether the session's listing says it is the person's own (`listed.mine`),
-// null with no listing. Followed, so a roster or a listing that arrives draws the notice again.
+// null with no listing. Followed, so a roster or a listing that arrives draws the notice again. The branch review: a file
+// read by its artifact alone (no session the window knows) is read on the artifact's machine, which the place then names.
 import type { AppSessionId } from '@shared/graph/ids';
 import { isAddress, machineOf } from '@shared/machine/address';
+import { useArtifactMachine } from '../../../artifacts/use-artifact-machine';
 import { ipc } from '../../../ipc/client';
 import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
@@ -17,8 +19,11 @@ export interface NoticePlace {
 const elsewhere = (appSessionId: AppSessionId | null): appSessionId is AppSessionId =>
   appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
 
-export function useNoticePlace(appSessionId: AppSessionId | null): NoticePlace {
-  const machine = useMachines((s) => (elsewhere(appSessionId) ? machineName(s.machines, machineOf(appSessionId), ipc.localMachine) : null));
+export function useNoticePlace(appSessionId: AppSessionId | null, artifactId: string | null = null): NoticePlace {
+  const artifactMachine = useArtifactMachine(appSessionId === null ? artifactId : null); // another machine's artifact, else null
+  const machine = useMachines((s) =>
+    elsewhere(appSessionId) ? machineName(s.machines, machineOf(appSessionId), ipc.localMachine) : artifactMachine !== null ? machineName(s.machines, artifactMachine, ipc.localMachine) : null,
+  );
   const mine = useSessions((s) => (appSessionId === null ? null : (s.listed.get(appSessionId)?.mine ?? null)));
   return { machine, mine };
 }

@@ -9,6 +9,7 @@
 // with "Not opened: " before the machine's own sentence (the act ran and failed) or before UC-7's sentence (the act was
 // refused, `issues.refusal` set): the act's answer is told by that lead, taken from the function that writes it.
 import type { IpcErrorCode } from '@shared/ipc/errors';
+import { NOT_KEPT_REFUSAL } from '@shared/files/outside';
 import { failureWords } from '@shared/ipc/remote-unavailable';
 import { NOTICE_COPY, REFUSAL } from '../copy';
 
@@ -60,6 +61,9 @@ export function classifyFailure(failure: FileFailure, where: { machine: string |
     return notice('outside', lines, false);
   }
   if (said.startsWith('not found:')) return notice('not-found', [NOTICE_COPY.notFound(subject, machine)], false);
+  // The branch review: the machine's ledger kept no answer for the act, and main's one ask again met the same (U6f,
+  // decision 4): told by main's own refusal word, it is worth asking again
+  if (refusal === NOT_KEPT_REFUSAL) return notice('other', [NOTICE_COPY.other[subject]], true);
   // UC-7's sentence for a refusal of the act, as U6f draws it: the headline as it is, with nothing added
   if (viaAct && refusal !== null) return { cause: 'said', lines: [message], retry: false, copyPath: false, detail: '' };
   return notice('other', [NOTICE_COPY.other[subject]], false);

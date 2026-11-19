@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { failureWords, refusalWords } from '@shared/ipc/remote-unavailable';
 import { FILES_MOVED } from '@shared/ipc/schema/files';
+import { NOT_KEPT_REFUSAL } from '@shared/files/outside';
 import { classifyFailure, failureOf, type FileFailure, type NoticeCause } from './notice';
 
 const OUTSIDE = "path outside the session's directories";
@@ -18,6 +19,10 @@ const refusedBy = (code: string, machine = 'studio'): FileFailure => ({ code: 'i
 const act = (sentence: string): FileFailure => failureOf({ code: 'internal', message: failureWords('files.readOutside', sentence) });
 const actRefused = (refusal: string, code: 'internal' | 'host_unavailable' = 'internal'): FileFailure =>
   failureOf({ code, message: refusalWords('files.readOutside', 'studio', refusal), issues: { refusal } });
+
+// what main answers when the other machine's ledger kept no answer for the outside act, asked again once (U6f, decision 4):
+// the services' words, under main's refusal word (src/main/lane-b/remote-outcomes.ts)
+const notKept = failureOf({ code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: NOT_KEPT_REFUSAL } });
 
 const mac = { machine: null, mine: null } as const;
 const studio = (mine: boolean | null) => ({ machine: 'studio', mine });
@@ -67,6 +72,9 @@ const ROWS: Row[] = [
   ['the act refused: the confirmation cancelled', actRefused('step-up'), studio(true), 'file', 'said', ['Not opened: the confirmation was cancelled'], false],
   ['the act refused at grade is the act’s sentence, not the read’s', actRefused('grade'), studio(true), 'file', 'said', [refusalWords('files.readOutside', 'studio', 'grade')], false],
   ['the act not sent, the machine offline', actRefused('offline', 'host_unavailable'), studio(true), 'file', 'unreachable', ['studio is not reachable.'], true],
+  // the branch review: an answer the machine did not keep, twice, is asked for again by Retry
+  ['the act’s answer not kept', notKept, studio(true), 'file', 'other', [OTHER_FILE], true],
+  ['the listing’s answer not kept', notKept, studio(true), 'folder', 'other', [OTHER_FOLDER], true],
 ];
 
 describe('classifyFailure', () => {

@@ -262,6 +262,61 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`x \`y\n2. a\n  b\n| x | y | [r](${at}r.md) |`), 'the control: no delimiter row, the code span stays open').toEqual(['/x/r.md']);
   });
 
+  // The branch review's four (UX wave U6b-4b): in each the rule named a link the window draws as code or does not draw.
+  // ux-wave ruled that the scanner is not brought nearer to GFM case by case (board ticket 776): where a line meets a
+  // container the pass does not follow, it names nothing from that paragraph to the next blank line. Each case comes with
+  // neighbours of the same structure, and its control, a link after the next blank line, is named again.
+  it.each(['/s', 'file:///s'])('where a line meets a container the pass does not follow, nothing is named to the next blank line (%s)', (destination) => {
+    const cases: [string, string][] = [
+      ['> a `x\n2. > `[r](@)`', 'a quote after a list marker the paragraph cannot continue (the review’s first)'],
+      ['- > a `x\n> `[r](@)`', 'a quote after a list marker, then a line of that depth outside the item'],
+      ['> - a `x\n> T | u\n> -|-\n[r](@) `', 'a table candidate in a quoted list item, then a line out of the quote (the second)'],
+      ['- a | b\n    --|--\n    x | y | [r](@)', 'a delimiter row in a list item four columns in (the third)'],
+      ['- a\n    T | u\n    -|-\n    x | y | [r](@)', 'the head on a continuation line four columns in'],
+      ['a\n+\n>     [r](@)', 'an indented line that opens a deeper quote, after prose and a lone `+` (the fourth)'],
+      ['a\n>     [r](@)', 'the same after prose alone'],
+      ['- a\n>     [r](@)', 'the same after a list item'],
+    ];
+    for (const [shape, what] of cases) {
+      const text = shape.replace('@', destination);
+      expect(linkPaths(text), what).toEqual([]);
+      expect(linkPaths(`${text}\n\n[c](/c)`), `${what}: the control`).toEqual(['/c']);
+    }
+  });
+
+  // The branch's delta review (fix wave 2): a fail-closed discard keeps what the window's parse keeps. A table candidate the
+  // pass does not read is no block boundary, so a weak line after it starts no block of its own; and a head line it drops
+  // may be a reference definition, which the text cannot lose, so the text names nothing.
+  it.each(['/s', 'file:///s'])('a table candidate the pass does not read ends no paragraph and loses no definition (%s)', (destination) => {
+    const cases: [string, string][] = [
+      ['- a `x\n  T | u\n        -|-\n  2. # [r](@) `', 'a weak marker’s heading after the candidate (the delta review’s first)'],
+      ['- a `x\n  T | u\n        -|-\n  2) # [r](@) `', 'the same with `2)`'],
+      ['- a `x\n  T | u\n        -|-\n  10. # [r](@) `', 'the same with `10.`'],
+      ['> - a `x\n>   T | u\n>         -|-\n>   2. # [r](@) `', 'the same in a quote'],
+      ['- a `x\n  T | u\n        -|-\n  2. ***\n[r](@) `', 'a weak marker’s thematic break, then a lazy line'],
+      ['- [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)', 'a definition dropped as the candidate’s head (the delta review’s second)'],
+      ['- [a]: /x\n  [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)', 'the second of two definitions dropped as the head'],
+      ['> - [ref]: https://example.com/\n>         :---\n\n[outer [ref]](@)', 'a definition dropped as the head, in a quote'],
+    ];
+    for (const [shape, what] of cases) expect(linkPaths(shape.replace('@', destination)), what).toEqual([]);
+    // the control: after a blank line the weak line's heading is read
+    expect(linkPaths(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`)).toEqual(['/s']);
+  });
+
+  // The delta review again (fix wave 3): a line a discard took may have been part of a reference definition, which every
+  // context reads. Where the scan discarded anything and the text holds `]:`, the text names nothing.
+  it.each(['/s', 'file:///s'])('a text the scan discarded anything of names nothing when it may hold a definition (%s)', (destination) => {
+    const cases: [string, string][] = [
+      ['- > a\n2. [ref]: https://example.com\n\n[outer [ref]](@)', 'a definition taken into a dropped paragraph (the review’s input)'],
+      ['- T | u\n  -|-\n[ref]:\n  https://example.com\n\n[outer [ref]](@)', 'a definition over two lines read as a dropped table’s rows'],
+      ['- T | u\n  -|-\n[ref]: https://example.com\n  "title"\n\n[outer [ref]](@)', 'its title on the next line'],
+    ];
+    for (const [shape, what] of cases) expect(linkPaths(shape.replace('@', destination)), what).toEqual([]);
+    // the controls: a discard with no `]:` in the text ends at the blank line; a definition with no discard is read as before
+    expect(linkPaths(`- > a\n2. x\n\n[c](${destination})`)).toEqual(['/s']);
+    expect(linkPaths(`[ref]: /x\n\n[c](${destination})`)).toEqual(['/s']);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

@@ -359,6 +359,55 @@ describe('the rule reads the blocks the window draws', () => {
       agree(`see [s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
     }
   });
+
+  // The branch review's four (UX wave U6b-4b), each drawn by the window: no chip, and the rule names nothing up to the
+  // next blank line, after which the control's link is both (ux-wave's ruling; the cases are board ticket 776's)
+  it.each(['/s', 'file:///s'])('where a line meets a container the pass does not follow: no chip, nothing named, to the next blank line (%s)', (destination) => {
+    for (const shape of [
+      '> a `x\n2. > `[r](@)`',
+      '- > a `x\n> `[r](@)`',
+      '> - a `x\n> T | u\n> -|-\n[r](@) `',
+      '- a | b\n    --|--\n    x | y | [r](@)',
+      '- a\n    T | u\n    -|-\n    x | y | [r](@)',
+      'a\n+\n>     [r](@)',
+      'a\n>     [r](@)',
+      '- a\n>     [r](@)',
+    ]) {
+      const markdown = shape.replace('@', destination);
+      agree(markdown, []);
+      agree(`${markdown}\n\n[c](/c)`, ['/c']);
+    }
+  });
+
+  // The delta review (fix wave 2): a table candidate the pass does not read ends no paragraph and loses no definition
+  it.each(['/s', 'file:///s'])('a table candidate the pass does not read ends no paragraph and loses no definition (%s)', (destination) => {
+    for (const shape of [
+      '- a `x\n  T | u\n        -|-\n  2. # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  2) # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  10. # [r](@) `',
+      '> - a `x\n>   T | u\n>         -|-\n>   2. # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  2. ***\n[r](@) `',
+      '- [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)',
+      '- [a]: /x\n  [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)',
+      '> - [ref]: https://example.com/\n>         :---\n\n[outer [ref]](@)',
+    ]) {
+      agree(shape.replace('@', destination), []);
+    }
+    agree(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`, ['/s']);
+  });
+
+  // The delta review again (fix wave 3): where the scan discarded anything and the text may hold a definition, nothing
+  it.each(['/s', 'file:///s'])('a text the scan discarded anything of names nothing when it may hold a definition (%s)', (destination) => {
+    for (const shape of [
+      '- > a\n2. [ref]: https://example.com\n\n[outer [ref]](@)',
+      '- T | u\n  -|-\n[ref]:\n  https://example.com\n\n[outer [ref]](@)',
+      '- T | u\n  -|-\n[ref]: https://example.com\n  "title"\n\n[outer [ref]](@)',
+    ]) {
+      agree(shape.replace('@', destination), []);
+    }
+    agree(`- > a\n2. x\n\n[c](${destination})`, ['/s']);
+    agree(`[ref]: /x\n\n[c](${destination})`, ['/s']);
+  });
 });
 
 // UX wave U6b-4c (X3.7): a file's text as a shown Markdown file draws it (`MarkdownView`, for a file at BASE): a link in

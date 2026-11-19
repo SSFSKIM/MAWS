@@ -416,6 +416,9 @@ interface Line {
   // marker other than `1` alone, or a `*`, a `+` or an ordered marker with nothing after it. A `-` with nothing after it
   // is not counted: under a paragraph it is a setext underline, which this pass already reads as the paragraph's end.
   weak: boolean;
+  // A quote marker stands after a list item's marker on the line (`2. > x`, `- > x`): the quote's depth changes across the
+  // item, which the pass does not follow (the branch review's first; the rule of "Containers the pass does not follow")
+  quoteInItem: boolean;
   // Columns, where the line has no quote marker and no tab before its content (else -1): `lead`, where its first list
   // marker stands (-1 when it opens none); `column`, where the content of its innermost item begins when it opens one,
   // else where its content begins
@@ -448,6 +451,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
   let opens = false;
   let footnote = false;
   let weak = false;
+  let quoteInItem = false;
   let lead = -1;
   let markers = 0;
   // the thematic-break test, against the line's tail read once; the markers before `j` counted as `j` moves on
@@ -475,6 +479,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
     if (code === 62) {
       if (++markers > BLOCK_MARKERS_MAX) refuseAfter(m, j - start + 16);
       quote += 1;
+      if (opens) quoteInItem = true;
       i = j + 1;
       if (isSpaceOrTab(text.charCodeAt(i))) i += 1;
       continue;
@@ -520,7 +525,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
   for (let k = start; k < content && !tab; k += 1) tab = text.charCodeAt(k) === 9;
   charge(m, content - start + 1);
   const plain = quote === 0 && !tab;
-  return { start, end, quote, opens, footnote, content, indent, thematic, weak, lead: plain && opens ? lead : -1, column: plain ? (opens ? i : content) - start : -1 };
+  return { start, end, quote, opens, footnote, content, indent, thematic, weak, quoteInItem, lead: plain && opens ? lead : -1, column: plain ? (opens ? i : content) - start : -1 };
 }
 
 // After at most `max` of a quote's `>` markers at the start of a line: how many stood there, and the index after them.
@@ -665,9 +670,11 @@ function onePipe(text: string, line: Line, m: Meter): boolean {
   return text.charCodeAt(line.content) === 124 && blankFrom(text, line.content + 1, line.end, m);
 }
 // A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells, and that is not one pipe
-// alone. How many cells the head has, or 0 when the row is no head.
-function tableHeadCells(text: string, line: Line, below: Line, m: Meter): number {
-  if (below.quote !== line.quote || below.opens || below.indent >= 4 || onePipe(text, line, m) || !isDelimiterRow(text, below.content, below.end, m)) return 0;
+// alone. How many cells the head has, or 0 when the row is no head. `anyIndent`: the delimiter row at any indentation, as
+// a list item's lines are measured from the line's start and not from the item's content (a candidate the pass does not
+// place, the branch review's third).
+function tableHeadCells(text: string, line: Line, below: Line, m: Meter, anyIndent = false): number {
+  if (below.quote !== line.quote || below.opens || (below.indent >= 4 && !anyIndent) || onePipe(text, line, m) || !isDelimiterRow(text, below.content, below.end, m)) return 0;
   const cells = cellsOf(text, line.content, line.end, m).length;
   return cellsOf(text, below.content, below.end, m).length === cells ? cells : 0;
 }
@@ -684,8 +691,16 @@ interface Context {
 // one; a line that only continues a paragraph (a lazy one too) stays in it. Raw HTML is no block here, as in the window
 // (its parser has HTML switched off). Where the pass cannot tell (a list item's own indentation, an ordered item that
 // cannot interrupt a paragraph, a table under a paragraph, a table in a list item), it takes the side that reads fewer
-// links. A refusal here
-// (a cap, the budget) refuses the whole text: its definitions, which every context reads, are not all known.
+// links. Containers the pass does not follow (UX wave U6b-4b, the branch review; ux-wave's ruling: the scanner is not
+// brought nearer to GFM case by case, board ticket 776 is the structural fix): where a line meets one, a quote marker
+// after a list marker, a table candidate in a list item (its delimiter row at any indentation) or under a deeper quote's
+// paragraph, or an indented line that opens a deeper quote under a paragraph, nothing is read from the paragraph that
+// line meets or opens to the next blank line (`doubtful`), and a fence such a line could open refuses the text. Such a
+// discard never resets what the window's parse keeps (fix wave 2): only a blank line ends `doubtful`, or a block start read
+// from a line's own prefix with no marker stripped that might not interrupt; and where any line was not read, a text that
+// holds `]:` (a reference definition may be among the lines not read) names nothing (fix wave 3).
+// A refusal here (a cap, the budget) refuses the whole text: its definitions, which every context reads, are not all
+// known.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
   let fence: { marker: number; length: number; quote: number; column: number } | null = null;
   // `column`: its first line's (`Line.column`); `opened`: whether that line opened the item that holds the paragraph
@@ -697,8 +712,15 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
   // stands at the very start of its line (no quote marker, no indentation) after a blank one, which no list item holds.
   let listOpen = false;
   // Set where the pass cannot tell whether a paragraph goes on (a list item that could not interrupt one, inside a list
-  // item): every paragraph is dropped until a blank line or a block start ends what the window may read as one
+  // item; a container the pass does not follow): every paragraph and table is dropped until a blank line or a block start
+  // ends what the window may read as one
   let doubtful = false;
+  // Whether `doubtful` was ever set, so some line was not read: see the guard at the pass's end (fix wave 3)
+  let discarded = false;
+  const doubt = () => {
+    doubtful = true;
+    discarded = true;
+  };
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
   // draws it only where a call names it, so nothing in it is read as a link.
   let footnote = false;
@@ -779,18 +801,35 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     // the paragraph's text. It joins the paragraph, now not read, and `doubtful` stays until a blank line or a line whose
     // own reading needs no such marker. A fence it may open would run past any blank line: the text is refused. While a
     // line is doubtful, no later weak line is placed either.
+    // Fix wave 2 (the delta review's first): a fail-closed discard keeps what the window's parse keeps. While nothing is
+    // read, a weak line starts no block of its own, also where the pass holds no paragraph for it (a table candidate it
+    // did not read closed one the window may still hold): it is that paragraph's text, not read, and `doubtful` stays; a
+    // fence it may open refuses the text, as below
+    if (line.weak && doubtful && (paragraph === null || line.quote < paragraph.quote)) {
+      if (fenceAt(text, line.content, line.end, m) !== null) throw new ScanRefused();
+      if (paragraph === null) paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: true, column: line.column, opened: line.opens };
+      else {
+        paragraph.dropped = true;
+        paragraph.lines.push(line.content);
+        paragraph.end = line.end;
+      }
+      afterBlank = false;
+      start = next;
+      continue;
+    }
     if (line.weak && paragraph !== null && line.quote >= paragraph.quote) {
       // a weak line over a delimiter row may be a table's head to the window, read from the line's first character: the
       // pass does not place it either
       if (m.work >= m.pause) yield pauseAt(m);
       ahead = next < text.length ? yield* lineFrom(next) : null;
       const overDelimiter = ahead !== null && ahead.quote === line.quote && !ahead.opens && ahead.indent < 4 && isDelimiterRow(text, ahead.content, ahead.end, m);
-      const known = !doubtful && !overDelimiter && line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
+      // a quote after the line's marker is not the paragraph's quote continued: the pass does not place it (the review's first)
+      const known = !doubtful && !overDelimiter && !line.quoteInItem && line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
       const inside = known && (!listWasOpen || line.lead >= paragraph.column);
       if (!inside && (!known || !paragraph.opened)) {
         if (fenceAt(text, line.content, line.end, m) !== null) throw new ScanRefused();
         paragraph.dropped = true;
-        doubtful = true;
+        doubt();
       }
       if (inside || doubtful) {
         if (inside && !listWasOpen) listOpen = false; // no list item: the line is the paragraph's text
@@ -811,6 +850,12 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     const opened = line.indent < 4 ? fenceAt(text, line.content, line.end, m) : null;
     const heading = line.indent < 4 ? headingAt(text, line.content, line.end, m) : -1;
     const blockStarts = opened !== null || heading >= 0 || line.thematic;
+    // A quote after a list marker: the quote's paragraph, and what the next lines continue of it, is not read (a container
+    // the pass does not follow); a fence it opens may run past any blank line, and refuses the text
+    if (line.quoteInItem) {
+      if (opened !== null) throw new ScanRefused();
+      doubt();
+    }
     if (blockStarts) doubtful = false;
     // A line of another quote's depth ends the table: a shallower one is no body row (never a lazy line), and a deeper one
     // opens a quote whose paragraph the next lines may continue lazily
@@ -822,6 +867,19 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     }
     if (line.indent >= 4) {
       if (paragraph !== null && !line.opens) {
+        // A container the pass does not follow: a deeper quote under the paragraph, whose content four columns in is
+        // indented code to the window (the review's fourth); or, in a list item, a head over a delimiter row, a table the
+        // item's own indentation may make (the review's third)
+        let unplaced = line.quote > paragraph.quote;
+        if (!unplaced && listOpen) {
+          if (m.work >= m.pause) yield pauseAt(m);
+          ahead = next < text.length ? yield* lineFrom(next) : null;
+          unplaced = ahead !== null && tableHeadCells(text, line, ahead, m, true) > 0;
+        }
+        if (unplaced) {
+          paragraph.dropped = true;
+          doubt();
+        }
         paragraph.lines.push(line.content);
         paragraph.end = line.end;
       } else yield* closeParagraph(); // indented code
@@ -839,14 +897,19 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     } else {
       if (m.work >= m.pause) yield pauseAt(m);
       ahead = next < text.length ? yield* lineFrom(next) : null;
-      const cells = ahead !== null ? tableHeadCells(text, line, ahead, m) : 0;
+      const cells = ahead !== null ? tableHeadCells(text, line, ahead, m, listOpen) : 0;
       if (ahead !== null && cells > 0) {
         // A table in a list item, or under a quote's paragraph whose next line this head would continue lazily: the window
         // reads its delimiter row as a lazy line (no table), or ends the table at a line the item does not hold, and either
         // way reads the lines round it as this pass cannot tell. Nothing of it is read, nor of the paragraph it interrupts;
-        // the next blank line, block or quote ends it (the review's finding 1).
-        const dropped: boolean = listOpen || (paragraph !== null && line.quote < paragraph.quote);
-        if (dropped && paragraph !== null) paragraph.dropped = true;
+        // the next blank line, block or quote ends it (the review's finding 1). The branch review's second: nor is anything
+        // up to the next blank line, since the window's paragraph may run on past the table's end lazily (`doubtful`); a
+        // table met where nothing is read is not read either.
+        const dropped: boolean = doubtful || listOpen || (paragraph !== null && line.quote < paragraph.quote);
+        if (dropped) {
+          if (paragraph !== null) paragraph.dropped = true;
+          doubt();
+        }
         yield* closeParagraph();
         table = { quote: line.quote, cells, dropped };
         row(line, cells, dropped);
@@ -865,6 +928,18 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     start = next;
   }
   yield* closeParagraph();
+  // Fix wave 3 (the delta review's ruling): a line a discard took may have been part of a reference definition, which the
+  // window registers and every context reads (a link around its label is no link). Where any line was not read and the
+  // text holds `]:` anywhere, under any prefix, the text names nothing: one guard for every discard path, read in the
+  // meter's stretches.
+  if (discarded) {
+    for (let at = 0; at < text.length; at += SCAN_STEP_CHARS) {
+      if (m.work >= m.pause) yield pauseAt(m);
+      const stretch = Math.min(text.length, at + SCAN_STEP_CHARS + 1); // one more, so a `]:` across two stretches is seen
+      charge(m, stretch - at);
+      if (text.slice(at, stretch).includes(']:')) throw new ScanRefused();
+    }
+  }
 }
 
 // A context's runs of backticks and of dollars, indexed in one pass from the first one met (a code span's or inline

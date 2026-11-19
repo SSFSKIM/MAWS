@@ -13,6 +13,7 @@ import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { addressOf, bareOf, machineOf } from '@shared/machine/address';
 import { failureWords } from '@shared/ipc/remote-unavailable'; // UX wave U6f
 import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
+import { recordArtifactMachine, resetArtifactMachines } from '../../../artifacts/machines'; // UX wave U6b-4b, the branch review
 import { forgetOpenedThere, openedThere } from '../files/elsewhere'; // UX wave U6f
 import { chooserCalls, createRemoteChooser, forgetStarts } from '../files/remote-chooser'; // UX wave U6f
 import { record } from '../../../../../../test/support/builders';
@@ -2933,6 +2934,69 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     await settle();
     expect(reads(main, CODE)).toHaveLength(before + 1); // Retry read nothing
     expect(shown(CODE)).toMatchObject({ saving: false, retrying: false, dirty: true, theirs: { view: 'merge', text: 'theirs\n' } });
+  });
+
+  // The branch review: the folder's watch invalidated while Retry waits for it is read by Retry's own read, once the watch
+  // installed again has answered: one read, whose file is shown
+  it('S1 (a): an invalidation while Retry waits for the watch starts no second read; Retry’s read shows the file', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    let watches = 0; // the first watch is refused, so Retry takes the watch again and waits for it
+    main.answers.by = (name) => (name === 'files.watch' && ++watches === 1 ? fail('files.watch: the files service is not running', 'host_unavailable') : name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null; // the daemon answers again
+    const watch = main.hold('files.watch');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(main.callsOf('files.watch')).toHaveLength(2));
+    const before = reads(main, CODE).length;
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r', kind: 'invalidated' }));
+    watch.release();
+    await waitFor(() => expect(codeText()).toBe('a'));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(before + 1);
+    expect(shown(CODE)).toMatchObject({ status: 'ready', error: null, failure: null, retrying: false, pending: 0 });
+    expect(block()).toBeNull();
+  });
+
+  // The branch review: in a short split pane the notice is its own scroll box, its column centred only within at least the
+  // box's height, so a notice taller than the pane starts at its headline and scrolls, nothing above the scroll origin
+  it('the notice scrolls from its top: the block is the scroll box, and its column is centred within at least its height', async () => {
+    disk({ [OUT]: 'secret\n' });
+    show(OUT);
+    await waitFor(() => expect(block()).not.toBeNull());
+    const classes = (element: Element) => element.className.split(/\s+/);
+    expect(classes(block()!)).toEqual(expect.arrayContaining(['h-full', 'overflow-y-auto']));
+    expect(classes(block()!)).not.toContain('justify-center');
+    const column = block()!.firstElementChild!;
+    expect(classes(column)).toEqual(expect.arrayContaining(['flex', 'min-h-full', 'flex-col', 'justify-center']));
+    expect(classes(column)).not.toContain('h-full');
+    expect(column.querySelector('p')!.textContent).toBe('This file is outside the folders this session works in.');
+  });
+
+  // The branch review: a File artifact of another machine, read by the artifact alone (its session not in the window),
+  // names the artifact's machine when the read fails, not this Mac's service
+  it('a Library File artifact of another machine whose session the window does not know names that machine', async () => {
+    const ARTIFACT = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
+    const main = disk({});
+    overRl2(T); // the roster names the other machine studio
+    main.answers.by = (name) => (name === 'library.read' ? unreachable('library.read: machine studio is not reachable') : null);
+    const artifactView = (tabId: string) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, revision: 3 }} />);
+    try {
+      recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+      artifactView(`artifact:${ARTIFACT}:3`);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      expect(noticeLines()[0]).toBe('studio is not reachable.');
+      expect(retry()).not.toBeNull();
+      // the control: the same artifact of this Mac
+      cleanup();
+      useViewer.getState().reset();
+      resetArtifactMachines();
+      artifactView(`artifact:${ARTIFACT}:3:r1`);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      expect(noticeLines()[0]).toBe("MAWS's service on this Mac is not answering.");
+    } finally {
+      resetArtifactMachines();
+    }
   });
 
   describe('a session on another machine', () => {
