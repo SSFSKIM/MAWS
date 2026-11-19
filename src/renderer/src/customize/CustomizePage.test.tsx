@@ -607,9 +607,15 @@ describe('a skill’s actions', () => {
     useComposerStore.setState({ prefills: new Map() });
   });
   const prefill = (n: number) => useComposerStore.getState().prefills.get(at(`app-new-${n}` as AppSessionId))?.text;
+  // the configuration home the first message names is plugins.env's, read with the page
+  const envRead = async () => {
+    await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
+    await act(async () => undefined);
+  };
 
   it('on a project’s page, New skill… offers this project and the person’s own, each a chat in the project with its folder named', async () => {
     mountCustomize({ view: 'mine', show: 'skills' });
+    await envRead();
     const press = async () => fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
     await press();
     const rows = await screen.findAllByRole('menuitem');
@@ -626,6 +632,7 @@ describe('a skill’s actions', () => {
   it('on the user configuration’s page, New skill… is one button that makes the person’s own, in a chat with no project', async () => {
     useCustomizeProject.setState({ projectId: null }, true);
     mountCustomize({ view: 'mine', show: 'all' });
+    await envRead();
     fireEvent.click(await within(tools()!).findByRole('button', { name: 'New skill…' }));
     await waitFor(() => expect(prefill(1)).toBe(`Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`));
     expect(screen.queryByRole('menuitem')).toBeNull();
