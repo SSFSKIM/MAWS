@@ -19,6 +19,7 @@ import { NARROW_AUTOMATIC_WIDTH } from '../app/shell-geometry';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/floating'; // P3-F L129; FLOAT_COPY: wave S (F6); cardHost: P4-B3
+import { ShowChat } from '../shell/ShowChat'; // UX wave U10b (O-43): Show chat, before the float control
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
 import { SAVED_COPY, useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
@@ -208,6 +209,7 @@ export function RegionControls({ hide }: { hide: () => void }) {
   const nothing = useLayout((s) => !s.regions.panel.floating && cardHost(s) === null && shownSession(s.main) === null);
   return (
     <>
+      <ShowChat host="panel" />
       <IconButton
         label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float conversation over surface' : pill ? 'Open session card' : 'Dock session'}
         action="panel.float"

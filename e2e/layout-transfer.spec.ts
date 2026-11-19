@@ -297,7 +297,7 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   await openSurface(page, 'Session info');
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const card = mainRegion(page).getByRole('region', { name: 'Session card' });
-  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Chat' }); // UX wave U10b (O-43): the bar
   const panelBefore = await regionWidth(page, 'panel');
   expect(panelBefore, 'the panel open beside the split').toBeGreaterThan(0);
 
@@ -314,7 +314,7 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   const editorBox = (await inMain(page, id).boundingBox())!;
   expect(Math.round(editorBox.width), 'the editor spans the main area').toBeGreaterThanOrEqual(Math.round(area.width) - 2);
 
-  await compact.getByRole('button', { name: 'Show session card' }).click();
+  await compact.getByRole('button', { name: 'Open conversation' }).click();
   await expect(card).toBeVisible();
   await expect(card.getByRole('textbox', { name: 'Message' })).toContainText('Keep this draft through reopening and restore');
   await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
@@ -341,7 +341,7 @@ test('a split of a session and a document: the card column stays through a focus
   await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click(); // focus on the session's pane
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const expand = header.getByRole('button', { name: 'Expand pane' });
-  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Chat' });
   await expect(sessionCards(page), 'the column is placed beside the split').toBeVisible();
   await expect(compact).toHaveCount(0);
   const before = (await expand.boundingBox())!;
@@ -523,7 +523,7 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
   const split = await settled(() => marginOf(inMain(page, id)), '(b) split settled');
   await test.info().attach(`before-expand-${width}x${height}`, { body: await page.screenshot(), contentType: 'image/png' });
   await header.getByRole('button', { name: 'Expand pane' }).click();
-  await expect(mainRegion(page).getByRole('region', { name: 'Compact session composer' })).toBeVisible();
+  await expect(mainRegion(page).getByRole('region', { name: 'Chat' })).toBeVisible(); // UX wave U10b (O-43): the bar
   await expect.poll(async () => (await widths()).panel, 'Expand folds the right panel').toBeLessThanOrEqual(0);
   // Expand releases the conversation reservation; record both dimensions and screenshots for acceptance.
   const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
