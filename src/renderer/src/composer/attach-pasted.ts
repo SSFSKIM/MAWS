@@ -69,9 +69,8 @@ type BoxAnswer = Awaited<ReturnType<NonNullable<FocusTarget['attachPasted']>>>;
  * a pane covered meanwhile, or a keyboard the person moved, takes the block at the end, saved and said. `covered` and
  * `held` (a take-back in hand) are read when asked, not from a render.
  */
-export async function takeIntoBox(editor: EditorHandle | null, block: AttachedBlock, by: 'press' | 'hand-over', box: { element: HTMLElement | null; covered(): boolean; held(): boolean }, signal?: AbortSignal): Promise<BoxAnswer> {
+export async function takeIntoBox(editor: EditorHandle | null, block: AttachedBlock, by: 'press' | 'hand-over', box: { element: HTMLElement | null; covered(): boolean; held(): boolean }, signal?: AbortSignal, atPress: Element | null = document.activeElement): Promise<BoxAnswer> {
   if (editor === null) return 'gone';
-  const atPress = document.activeElement;
   const element = box.element;
   const canTake = () => by === 'press' && !box.covered() && element !== null && available(element) && (document.activeElement === atPress || element.contains(document.activeElement));
   const options = { held: box.held, ...(signal && { signal }) };
@@ -138,6 +137,7 @@ class HandOver {
   private unaccountedLanded = false; // a write accepted in a round not believed: until a believed read
   private sentWithMessage = false; // an accepted send's document held the block
   private readonly over = new AbortController(); // aborted as the hand-over ends: a composer still waiting gives up
+  private readonly atPress = document.activeElement; // where the keyboard was as the attach began, before any wait
   private expiry: Promise<typeof EXPIRED> = new Promise(() => {});
   private timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -217,7 +217,7 @@ class HandOver {
       if (target !== null) {
         this.asking = true;
         const comings = this.comings;
-        const asked = target.attachPasted?.(this.block, target === pressed ? 'press' : 'hand-over', this.over.signal) ?? Promise.resolve<BoxAnswer>('closed');
+        const asked = target.attachPasted?.(this.block, target === pressed ? 'press' : 'hand-over', this.over.signal, this.atPress) ?? Promise.resolve<BoxAnswer>('closed');
         // an ask whose promise rejects may or may not have put the block in the box
         const answer = await this.within(asked.catch(() => 'rejected' as const));
         if (answer === EXPIRED) return this.expired();
@@ -276,9 +276,13 @@ class HandOver {
     if (!this.believed(comings)) return null; // a composer or a send may have written over the store: ask again
     this.unaccountedLanded = false; // shown kept, or overwritten
     if (holdsBlock(read.kept, this.block.id)) this.unaccountedRevision = false; // a write of it landed, and nothing since
-    if (holdsBlock(read.keep, this.block.id)) return { kind: 'added' };
+    // "Added" only where a document the store took holds it (the delta review's fix wave, H1): the window's own queued
+    // draft over the link is the document to keep, never proof that it was kept, so one holding the block is written
+    // as it is, and one the machine's newest save will replace must hold it too
+    const keeps = holdsBlock(read.keep, this.block.id);
+    if (keeps && holdsBlock(read.kept, this.block.id)) return { kind: 'added' };
     const replaces = this.overLink ? read.revision : (read.revision ?? DRAFT_CLAIM);
-    const draft = draftOf(appendPasted(read.keep, this.block), stamp());
+    const draft = draftOf(keeps ? (read.keep as ComposerDoc) : appendPasted(read.keep, this.block), stamp());
     this.sent = true;
     const result = await this.within(this.write(draft, replaces));
     if (result === EXPIRED) return this.expired();

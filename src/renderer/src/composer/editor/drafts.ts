@@ -8,7 +8,8 @@ import type { JSONContent } from '@tiptap/core';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { readerRowsOf } from '../../lane-b/reader-rows';
-import { dropRemoteDraftSaves, loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft, saveRemoteDraftOnce, unsavedRemoteDraft } from '../../lane-b/remote-drafts';
+import { isNotOffered } from '../../lane-b/reader-rows';
+import { dropRemoteDraftSaves, loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft, saveRemoteDraftNow, saveRemoteDraftOnce, unsavedRemoteDraft } from '../../lane-b/remote-drafts';
 import { markPersisted } from './attachments';
 import type { Unread } from './unread';
 import { attachmentsOf, MENTION, type ComposerDoc, type MentionAttrs } from './doc';
@@ -95,7 +96,7 @@ export const resetRemoteDrafts = (): void => {
 export function rememberRemoteDraft(appSessionId: AppSessionId, doc: ComposerDoc): void {
   remoteDrafts.set(appSessionId, { doc, attachments: [], updatedAt: new Date().toISOString() });
 }
-export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null | Unread>; save(draft: Draft | null, replaces?: string | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
+export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null | Unread>; save(draft: Draft | null, replaces?: string | null): Promise<boolean>; saveNow?(draft: Draft | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
   const remember = (draft: Draft | null) => {
     if (draft === null) remoteDrafts.delete(appSessionId);
     else remoteDrafts.set(appSessionId, draft);
@@ -124,9 +125,26 @@ export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null
         const result = await saveRemoteDraftOnce(client, appSessionId, draft, replaces);
         return !('withheld' in result) && result.ok;
       }
-      // the session's saves go one after another, again where refused stale; the answer once the machine took it (UX
-      // wave U6b-5a: an attach says its block is kept only then)
+      // the session's saves go one after another, again where refused stale; the answer, whether the machine took this
+      // very draft (UX wave U6b-5a)
       return saveRemoteDraft(client, appSessionId, draft, remember);
+    },
+    // UX wave U6b-5a (the delta review's fix wave, H1): a save answered by its own write, never merged with another
+    saveNow: async (draft: Draft | null) => {
+      if (!remote()) return port.saveNow ? port.saveNow(draft) : port.save(draft);
+      if (readerRowsOf(appSessionId) === 'refused') {
+        dropRemoteDraftSaves(appSessionId);
+        remember(draft);
+        return true;
+      }
+      remoteDrafts.delete(appSessionId);
+      const result = await saveRemoteDraftNow(client, appSessionId, draft);
+      if (result !== null && isNotOffered(result)) {
+        dropRemoteDraftSaves(appSessionId);
+        remember(draft); // the machine keeps no drafts: this run does, as for any save
+        return true;
+      }
+      return result !== null && result.ok;
     },
   };
 }

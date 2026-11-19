@@ -226,7 +226,7 @@ export function mountComposer(appSessionId: AppSessionId, client: MawsBridge, op
           focusEditor: () => handle.current?.focus(),
           focusFrame: () => handle.current?.focus(),
           insertText: (text) => handle.current?.insertText(text),
-          attachPasted: (block, by, signal) => takeIntoBox(handle.current, block, by, { element: root.current, covered: () => options.covered ?? false, held: () => options.takingBack?.() ?? false }, signal),
+          attachPasted: (block, by, signal, atPress) => takeIntoBox(handle.current, block, by, { element: root.current, covered: () => options.covered ?? false, held: () => options.takingBack?.() ?? false }, signal, atPress),
         }),
       [],
     );

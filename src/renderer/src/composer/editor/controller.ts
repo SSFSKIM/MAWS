@@ -38,6 +38,9 @@ export interface DraftPort {
   // UX wave U4a (decision 13; Interfaces D): `replaces`, when given, names what the save replaces (a take-back's settle
   // form, which the writer names until one save is acknowledged); the answer is whether the store took it
   save(draft: Draft | null, replaces?: string | null): Promise<boolean>;
+  // UX wave U6b-5a (the delta review's fix wave, H1): a save answered by its own write, in the session's order, never
+  // merged with another (an attach's, which says "Added" only on that answer); a port with none saves with `save`
+  saveNow?(draft: Draft | null): Promise<boolean>;
   // Whether an accepted submission clears the stored draft (C4's drafts: yes). C10's intent while unstarted: no, the
   // accepted first message is C10's to hold and the intent refuses a patch while its start runs (M4).
   clearsOnSend?(): boolean;
@@ -232,6 +235,7 @@ export class EditorController {
   private lifetime = 0;
   private live = false;
   private unread = false; // UX wave U6b-5a: this mount's restore could not read the store, and no save of its has been taken since
+  private savedIn = -1; // UX wave U6b-5a: the last mount (its lifetime) one of whose saves was taken
   private readonly leaving = new Set<() => void>(); // UX wave U6b-5a: the waits on a restore that an unmount ends
   private attachmentEpoch = 0;
   private nav: HistoryNav = { index: null, draft: null };
@@ -263,9 +267,10 @@ export class EditorController {
 
   // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged. The
   // answer is whether the port took it (UX wave U6b-5a: an attach that saves at once says so).
-  private saveDraft(draft: Draft | null): Promise<boolean> {
+  private saveDraft(draft: Draft | null, now = false): Promise<boolean> {
     const form = this.settleForm;
-    const saved = form === null ? this.drafts.save(draft) : this.drafts.save(draft, form.replaces).then((taken) => {
+    const plain = () => (now && this.drafts.saveNow ? this.drafts.saveNow(draft) : this.drafts.save(draft));
+    const saved = form === null ? plain() : this.drafts.save(draft, form.replaces).then((taken) => {
       if (taken && this.settleForm === form) {
         this.settleForm = null;
         form.taken();
@@ -274,7 +279,10 @@ export class EditorController {
     });
     // a port of the suites may answer nothing at all
     return Promise.resolve(saved).then((taken) => {
-      if (taken) this.unread = false; // what is kept is this mount's now
+      if (taken) {
+        this.unread = false; // what is kept is this mount's now
+        this.savedIn = this.lifetime;
+      }
       return taken;
     });
   }
@@ -426,7 +434,8 @@ export class EditorController {
     }
     this.restoring = this.drafts.load().then((loaded) => {
       if (!this.live || this.lifetime !== lifetime) return;
-      this.unread = loaded === UNREAD; // UX wave U6b-5a: restored as none, but not known to be none
+      // UX wave U6b-5a: restored as none, but not known to be none, unless a save of this mount's was taken meanwhile
+      this.unread = loaded === UNREAD && this.savedIn !== lifetime;
       const draft = loaded === UNREAD ? null : loaded;
       // UX wave U4a M3 (decision 13, step 5): a stage is the take-back's to carry forward, never a draft to load
       if (draft !== null && (draft.doc as ComposerDoc | null)?.attrs?.takeBack !== undefined) {
@@ -837,7 +846,7 @@ export class EditorController {
     // the insertion's pending write is this save's only once it is taken: a save that fails leaves it to the writer, so
     // what the box holds is still saved at its pause or its unmount (the branch panel's fix wave)
     const revision = this.revision;
-    const taken = await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()));
+    const taken = await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()), true);
     if (taken && this.revision === revision) this.writer.cancel();
     return taken ? 'taken' : 'unsaved';
   }

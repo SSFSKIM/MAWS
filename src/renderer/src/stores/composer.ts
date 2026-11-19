@@ -77,7 +77,8 @@ export interface FocusTarget {
   // it stands. By 'press' (mounted at the press), where its box can take the keyboard, the block at the caret and the
   // keyboard with it: 'shown'. Where it cannot, and always by 'hand-over' (it mounted while an attach was on its way),
   // the block at the end, saved at once: 'kept'. The rest are its editor's own answers. `signal`: the hand-over ended.
-  attachPasted?(block: AttachedBlock, by: 'press' | 'hand-over', signal?: AbortSignal): Promise<'shown' | 'kept' | 'present' | 'unsaved' | 'unread' | 'held' | 'busy' | 'closed' | 'gone'>;
+  // `atPress`: where the keyboard was as the attach began.
+  attachPasted?(block: AttachedBlock, by: 'press' | 'hand-over', signal?: AbortSignal, atPress?: Element | null): Promise<'shown' | 'kept' | 'present' | 'unsaved' | 'unread' | 'held' | 'busy' | 'closed' | 'gone'>;
 }
 
 // Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it from

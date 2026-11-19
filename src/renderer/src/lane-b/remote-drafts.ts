@@ -48,7 +48,9 @@ export const REMOTE_DRAFT_WORDS = {
  * A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, whether one waits, and the
  * newest's sending again after a `timeout` (how many times since it was handed, and the one due).
  */
-type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null; handed: number; answers: ((taken: boolean) => void)[] };
+type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null; handed: number; answers: Answer[] };
+/** UX wave U6b-5a: a save's answer owed, by the ticket it was handed with (`handed` while it was the newest). */
+type Answer = { handed: number; answer(taken: boolean): void };
 const saves = new Map<AppSessionId, Saves>();
 /** The draft kept there as this run last knew it, by its `updatedAt` (null: none); absent while not known. */
 const bases = new Map<AppSessionId, string | null>();
@@ -129,27 +131,41 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
 
 /**
  * The draft saved there after the session's saves before it; `refused` takes the newest if the machine offers none. UX
- * wave U6b-5a (the branch panel's fix wave, G1): the answer is whether the store took it, once the session's queue has
- * gone as far as this draft or a newer one (true where the fallback keeps it), false where it ends without that.
+ * wave U6b-5a: the answer is whether the machine took this very draft (the delta review's fix wave, H1): true once a
+ * write of it is taken, or the fallback keeps it; false once a write of it fails, or a newer draft is sent in its place,
+ * or the queue is dropped. A later write's answer never changes an earlier one's.
  */
 export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, refused: (draft: Draft | null) => void): Promise<boolean> {
   const held = saves.get(appSessionId);
   const queue = held ?? { latest: draft, out: false, waiting: false, refused, resent: 0, resend: null, handed: 0, answers: [] };
-  const taken = new Promise<boolean>((resolve) => queue.answers.push(resolve));
   if (held === undefined) saves.set(appSessionId, queue);
   queue.latest = draft;
   queue.waiting = true;
   queue.refused = refused;
   queue.resent = 0;
   queue.handed = ++tickets; // in the session's order: a take-back's save taken after it supersedes it
+  const handed = queue.handed;
+  const taken = new Promise<boolean>((answer) => queue.answers.push({ handed, answer }));
   if (!queue.out) startPump(client, appSessionId, queue);
   return taken;
 }
 
-// The answers owed for the drafts a queue was handed, given once it has gone as far as the newest of them.
+// Every answer still owed by a queue that ends: `taken` where the fallback keeps its newest, else false.
 function answer(queue: Saves, taken: boolean): void {
-  for (const answered of queue.answers.splice(0)) answered(taken);
+  for (const owed of queue.answers.splice(0)) owed.answer(taken);
 }
+// A write of the draft handed as `sent` is answered: its own save gets that answer, and those it was sent in place of
+// (handed before it, never sent) were not taken.
+function answerSent(queue: Saves, sent: number, taken: boolean): void {
+  const owed = queue.answers.filter((save) => save.handed <= sent);
+  queue.answers = queue.answers.filter((save) => save.handed > sent);
+  for (const save of owed) save.answer(taken && save.handed === sent);
+}
+// A write whose route threw instead of answering: a failure, which leaves what is kept there to be read again.
+const threw = (appSessionId: AppSessionId): CommandResult<CommandName> => {
+  bases.delete(appSessionId);
+  return { ok: false, error: { code: 'internal', message: 'the route to the machine failed' } };
+};
 
 /** One draft saved on top of what is kept there: read first when that isn't known, and again after a stale refusal. */
 async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, current: () => boolean): Promise<CommandResult<CommandName> | null> {
@@ -202,7 +218,9 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
     if (sentOne && handedAfter(appSessionId, ticket)) return void inOrder(appSessionId, (next) => pump(client, appSessionId, queue, next));
     queue.waiting = false;
     sentOne = true;
-    const result = await saveOnce(client, appSessionId, queue.latest, current);
+    const sent = queue.handed;
+    // the delta review's fix wave, H2: a bridge that throws is a failed write, and the queue goes on
+    const result = await saveOnce(client, appSessionId, queue.latest, current).catch(() => threw(appSessionId));
     if (result === null) {
       queue.out = false;
       return answer(queue, false);
@@ -215,11 +233,11 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
     }
     taken = result.ok;
     timedOut = !result.ok && result.error.code === 'timeout';
+    answerSent(queue, sent, taken);
     if (!result.ok) console.warn('[composer] the draft was not kept on its machine', result.error.message);
   }
   queue.out = false;
-  answer(queue, taken && current());
-  if (!current()) return;
+  if (!current()) return answer(queue, false);
   if (taken) return void saves.delete(appSessionId);
   // A save past main's bound may land later, after a newer one it then makes stale there: nobody would send the newest
   // again, so it goes again itself, on top of what is kept by then (M6a's re-review, the enumerated draft path).
@@ -292,6 +310,21 @@ function retireOlderSaves(appSessionId: AppSessionId, ticket: number): void {
   if (queue.resend !== null) clearTimeout(queue.resend);
   queue.resend = null;
   saves.delete(appSessionId);
+  answer(queue, false); // superseded, never taken themselves
+}
+
+/**
+ * UX wave U6b-5a (the delta review's fix wave, H1): one draft saved now, answered by its own write and by no other: it
+ * goes in the session's order, on top of what is kept there (read first when that is not known, and again after a stale
+ * refusal, as an ordinary save goes), and an ordinary save handed before it is retired once it is taken, since it would
+ * land over it. Null: the write never reached the machine's answer (its route threw).
+ */
+export function saveRemoteDraftNow(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null): Promise<CommandResult<CommandName> | null> {
+  return inOrder(appSessionId, async (ticket) => {
+    const result = await saveOnce(client, appSessionId, draft, () => true).catch(() => threw(appSessionId));
+    if (result !== null && result.ok) retireOlderSaves(appSessionId, ticket);
+    return result;
+  });
 }
 const isStage = (draft: Draft): boolean => typeof (draft.doc as { attrs?: { takeBack?: unknown } } | null)?.attrs?.takeBack === 'object';
 

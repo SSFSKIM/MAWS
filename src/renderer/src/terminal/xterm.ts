@@ -179,7 +179,9 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
           // that cell is no text of the line (a written space reads as ' ', an unwritten cell as ''; the second half of a
           // wide character that fits is a cell of width 0, and reads as nothing)
           const last = line?.getCell(terminal.cols - 1);
-          const padded = last !== undefined && last.getChars() === '' && last.getWidth() === 1 && buffer.getLine(buffer.viewportY + i + 1)?.isWrapped === true;
+          // only before a continuation that starts with a wide character: a blank before a narrow one is a blank
+          const next = buffer.getLine(buffer.viewportY + i + 1);
+          const padded = last !== undefined && last.getChars() === '' && last.getWidth() === 1 && next?.isWrapped === true && next.getCell(0)?.getWidth() === 2;
           return { text: padded ? text.slice(0, -1) : text, wrapped: line?.isWrapped ?? false };
         }),
       );

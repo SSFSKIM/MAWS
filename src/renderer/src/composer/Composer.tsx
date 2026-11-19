@@ -119,6 +119,11 @@ function useSessionStatus(appSessionId: AppSessionId, client: MawsBridge) {
 // Where the draft lives: C10's intent while the session is unstarted (C4's drafts table has no row for it), C4's drafts
 // otherwise. The port is created once per editor and reads the current hook, so a session that starts while its tab is
 // open moves to C4's drafts without a remount.
+async function intentSave(intent: SetupIntentHook, draft: Draft | null): Promise<boolean> {
+  const result = await intent.patch({ draft });
+  if (!result.ok) console.warn('[composer] the unstarted session kept no draft', result.error);
+  return result.ok;
+}
 function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, client: MawsBridge): DraftPort {
   const current = useRef(hook);
   useLayoutEffect(() => void (current.current = hook));
@@ -131,9 +136,12 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
       save: async (draft: Draft | null, replaces?: string | null) => {
         const intent = current.current;
         if (!intent) return drafts.save(draft, replaces);
-        const result = await intent.patch({ draft });
-        if (!result.ok) console.warn('[composer] the unstarted session kept no draft', result.error);
-        return result.ok;
+        return intentSave(intent, draft);
+      },
+      // UX wave U6b-5a (the delta review's fix wave, H1): an attach's save, answered by its own write
+      saveNow: async (draft: Draft | null) => {
+        const intent = current.current;
+        return intent ? intentSave(intent, draft) : drafts.saveNow(draft);
       },
     };
   }, [appSessionId, client]);
@@ -332,7 +340,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         draftShown: () => !promptState.current.docked, // UX wave U4a M5: the menu chords ask for nothing under a card
         empty: () => handle.current?.serialize().empty ?? true, // UX wave U1b (§F): a prompt's ⌘↩ yields to a draft
         // UX wave U6b-5a (decision 8): an attached block, where this composer's box stands (a card over it, its pane covered)
-        attachPasted: (block, by, signal) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: () => promptState.current.docked, held: () => takingBack(appSessionId) }, signal),
+        attachPasted: (block, by, signal, atPress) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: () => promptState.current.docked, held: () => takingBack(appSessionId) }, signal, atPress),
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {
           read: () => handle.current?.promptBox() ?? { text: '', cursor: 0 },
