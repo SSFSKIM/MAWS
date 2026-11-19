@@ -77,3 +77,28 @@ Evidence:
 - Desk-web, label `u6b5a-fix-dw`: run **44509682501** at `632dcbf43` was a **success**. `1d3d4a847` changes only `tsconfig.node.json` and `test/lane-b/drafts-enumerated.test.ts`, neither in desk-web's closure, so it was not run again.
 
 New load timeouts seen in the group runs, which pass alone: `CommandPalette.test.tsx` "bounds mounted results for 3,279 sessions" (5.4 s), and desk-web's `hub/project-client.test.ts` once (it is on the brief's list).
+
+## The delta review's fix wave (2026-11-19)
+
+The coordinator's delta review (`93b14470e..6f2184934`) returned "incorrect", with 1 P1 and 8 P2. The coordinator ruled eight into one wave, red first, and sent one to the tracker. H1 to H4 and H7 were built by M2's executor on this branch (`b82bd375c`, `df8909643`, `26699a062`). H5 was built by M3's executor and H6 by M4's, each on a branch of its own; both were merged at `2fec3e141`. The rules are in Decision Log 21 of the document (`4833759ef` for H1's rule, `b7aa90334` for the rest).
+
+- **H1, the remote save's acknowledgment** (P1 and P2). A round says `added` only when the store's own document holds the block. Over the link, the window's newest queued draft must hold it too. The queued draft is the document to keep, not proof that it was saved. Each ordinary queued save is answered by a write of its own draft, and a save passed over by a newer one answers false. An attach's immediate save no longer goes through the merging queue. It goes through the new `saveRemoteDraftNow` (`DraftPort.saveNow?`), which is answered by its own write alone.
+- **H2.** A bridge that throws is a failed write. The save answers false, `out` is cleared, and the queue goes on.
+- **H3.** The controller records per mount that one of its own saves was taken. A restore that answers `UNREAD` afterwards does not set the box unread again.
+- **H4.** Where the keyboard was is sampled as the attach begins, before any wait for a first send. The check after the restore uses that sample (`FocusTarget.attachPasted` gains `atPress`).
+- **H5.** Below 700 px, a step to a tab also folds a side sheet that covers the main area. It uses the store act under `dismissSheet` and keeps the sheet's tabs. `dismissSheet` itself is not called, because its frame would hand the keyboard back to its opener and compete with the step.
+- **H6.** The palette's selection is always a drawn row, and there is no selection when no row is drawn. ⌘⏎ splits only on a drawn row.
+- **H7.** xterm's blank last cell is dropped only before a wide continuation, so `abcdeX` with `e` erased reads `abcd X`.
+- **Finding 6 is not fixed here.** It is a tracker row (`4833759ef`): SurfaceRow's cancel does not reach a tool's own consumers of focus.
+
+**An edit in U4's file.** `useDraftPort` in `Composer.tsx` gains one forwarding member, `saveNow`, so that H1's attach save can reach the machine by its own write. Decision 9 kept `useDraftPort` unedited for the sake of `load`, which is untouched. Even so, this is an insertion in U4's file.
+
+Evidence:
+- Red, at `b82bd375c` for H1 to H4 and H7: 7 failed and 131 passed, one failure per finding as the cases expected. Red at `9e506f613` for H5: the sheet stayed open after Back at 600 px. Red at `5931034aa` for H6: both cases split the stale session, so two panes opened where one was expected.
+- On the build VM at the merged head (`2fec3e141`, with `b7aa90334` as docs only): the whole `pnpm typecheck` (node, web, e2e, desk-hub, desk-web, org-protocol) exits 0. eslint on every `.ts`/`.tsx` changed since `6f2184934` exits 0.
+- vitest over `keymap`, `panel`, `palette`, `composer`, `lane-b`, `test/lane-b`, `terminal`, `tools/terminal`, `app`, `overview`, `src/main` and the tokens guard ran 496 files: 8,001 tests passed, 58 were skipped and 1 failed. The failure was `src/main/org/rows.test.ts` "the marks > drop only when…", at the 5 s default. That file is unchanged on this branch. Run alone it passes 36/36, with the VM's load at 19.
+- Earlier, at `26699a062`, desk-web's build passed and its tests passed 801/801.
+- Class 1a, label `u6b5a-fix2`, at `b7aa90334`: run **44605466327**, **success**.
+- Desk-web, label `u6b5a-fix2-dw`, at `b7aa90334`: run **44605459608**, **success**. The composer is in desk-web's import closure.
+
+New load timeouts seen: `src/main/org/rows.test.ts` (above). H5's executor also saw six timeouts at the 5 s default while the VM's load was 17 to 50. None of those six takes a step, four of the files pass alone, and `session-navigation.test.ts`'s ⌘⇧T case passes in 7.8 s with a 60 s timeout.
