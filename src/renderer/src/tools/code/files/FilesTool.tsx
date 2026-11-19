@@ -55,7 +55,7 @@ import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; //
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, reviewEntry, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
 import { FinderColumn } from './FinderView';
-import { requestKeyboard } from './finder'; // UX wave U6b-5a
+import { requestKeyboard, takeKeyboard, useKeyboardRequest } from './finder'; // UX wave U6b-5a
 import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
 import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
@@ -190,25 +190,18 @@ function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabI
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
-  // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`shownByItsKey`) is answered once: the file's
-  // view while the tab holds a file not covered by the tree (the view takes it under the file's key and hands it to its
-  // editor once drawn), else the tree: its selected row, else its first row, else the tree itself. Go to file's field is
-  // not where it lands. A tree not drawn yet takes nothing, and the side column's own step puts the keyboard in the tab.
-  // The host's other requests (an open of a file from a link or the tree, the agent's show) are used up and answered with
-  // nothing, as before this landing: the keyboard stays where the person has it.
+  // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`shownByItsKey`) is answered once, by U6b-3b's
+  // request for the keyboard (`finder.ts`), whose taker takes it when it is drawn and which the person's next key or
+  // pointer press drops: the file's view while the tab holds a file not covered by the tree (it hands the keyboard to its
+  // editor once one is drawn), else the tree (`TreeList`: its selected row, else its first row, else itself). Go to file's
+  // field is not where it lands. The host's other requests (an open of a file from a link or the tree, the agent's show)
+  // are used up and answered with nothing, as before this landing: the keyboard stays where the person has it.
   useEffect(() => {
     if (focus.request <= (focusSeen.get(focus.of) ?? 0)) return;
     focusSeen.set(focus.of, focus.request);
     if (!shownByItsKey(tabId)) return;
-    if (key !== null && place !== 'instead') {
-      requestKeyboard({ into: 'file', key });
-      return;
-    }
-    const tree = document.getElementById(treeId)?.querySelector<HTMLElement>('[role="tree"]') ?? null;
-    const row = tree?.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]') ?? tree?.querySelector<HTMLElement>('[role="treeitem"]') ?? null;
-    if (row === null && tree !== null) tree.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
-    (row ?? tree)?.focus({ preventScroll: true });
-  }, [focus.request, focus.of, key, place, tabId, treeId]);
+    requestKeyboard(key !== null && place !== 'instead' ? { into: 'file', key } : { into: 'tree', tabId });
+  }, [focus.request, focus.of, key, place, tabId]);
   // U6b-3b: the field above the tree, outside its menu, and while it holds text the list in the tree's place
   const column = (
     <FinderColumn
@@ -216,7 +209,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabI
       tabId={tabId}
       visible={visible}
       clicked={chosenFile}
-      tree={(searching) => (loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} searching={searching} /> : null)}
+      tree={(searching) => (loaded ? <SessionTree key={appSessionId} tabId={tabId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} searching={searching} /> : null)}
     />
   );
   return (
@@ -335,7 +328,7 @@ function firstToRelist(status: GitStatus, appSessionId: AppSessionId): boolean {
 // The session's tree. `marked`: the file the tab holds, whose row is marked when it is listed (Decision 8: the tree marks
 // and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it. U6b-3b:
 // `searching`, Go to file's list stands in its place: it keeps its holds and draws nothing.
-function SessionTree({ appSessionId, session, marked, chosen, searching }: { appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void; searching: boolean }) {
+function SessionTree({ tabId, appSessionId, session, marked, chosen, searching }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void; searching: boolean }) {
   const view = useTreeState((s) => treeOf(s, appSessionId));
   const listings = useFiles((s) => s.listings);
   const roots = listings.get(listingKey(appSessionId, null));
@@ -490,7 +483,7 @@ function SessionTree({ appSessionId, session, marked, chosen, searching }: { app
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
         {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
-        <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} />
+        <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} tabId={tabId} />
       </div>
     </FilesMenu>
   );
@@ -623,6 +616,7 @@ function TreeList({
   appSessionId,
   refresh,
   changed,
+  tabId,
 }: {
   rows: TreeRow[];
   selected: string | null;
@@ -631,8 +625,10 @@ function TreeList({
   appSessionId: AppSessionId;
   refresh(): void;
   changed: ChangedProps;
+  tabId: string; // UX wave U6b-5a: the tab whose tree this is, for the keyboard a surface's key asks of it
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const tree = useRef<HTMLDivElement>(null);
   // UX wave U6b-3a (M2 decision 8; Decision Log 6, note 1): Refresh and its room are the first root's row's, wherever in
   // the list it stands, with or without a Changed group above it.
   const rootAt = rows.findIndex((row) => row.kind === 'root');
@@ -705,11 +701,23 @@ function TreeList({
     pending.current = null;
     useTreeState.getState().revealed(appSessionId);
   };
+  // UX wave U6b-5a (M1, decision 4): the keyboard a surface's key asked of this tab's tree, taken once rows are drawn (the
+  // first listing may still be out, and the list draws its rows only after it has measured itself): the selected row,
+  // else the first, else the tree itself (rows that are all notices).
+  const asked = useKeyboardRequest({ into: 'tree', tabId });
+  const drawn = virtualizer.getVirtualItems().length;
+  useLayoutEffect(() => {
+    const element = tree.current;
+    if (asked === 0 || element === null || drawn === 0 || !takeKeyboard({ into: 'tree', tabId })) return;
+    const row = element.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]') ?? element.querySelector<HTMLElement>('[role="treeitem"]');
+    if (row === null) element.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
+    (row ?? element).focus({ preventScroll: true });
+  }, [asked, drawn, tabId]);
   return (
     <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
       <KeepTreeInView scroller={scroller} length={sectionLength} folded={folded} restoring={() => pending.current !== null} />
       <div ref={measureWidth} className="relative w-full">
-        <div role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
+        <div ref={tree} role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (
