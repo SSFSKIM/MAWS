@@ -88,6 +88,11 @@ export function keyboardWaits(request: KeyboardRequest): boolean {
   return pending?.taker === takerOf(request);
 }
 
+/** Ends the waiting request when it names this taker, which gives it up (the keyboard put elsewhere, or the bound passed). */
+export function releaseKeyboard(request: KeyboardRequest): void {
+  if (keyboardWaits(request)) end();
+}
+
 /** True once, for the taker the waiting request names; false for any other, and while none waits. */
 export function takeKeyboard(request: KeyboardRequest): boolean {
   if (pending?.taker !== takerOf(request)) return false;

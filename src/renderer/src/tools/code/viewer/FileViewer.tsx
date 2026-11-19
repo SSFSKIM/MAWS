@@ -41,7 +41,7 @@ import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 
 import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
-import { keyboardWaits, takeKeyboard, useKeyboardRequest } from '../files/finder';
+import { FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, takeKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosen } from '../files/open-chosen';
 import { ExternalRow, OpenExternally } from './ExternalRow';
 import { FrameBody } from './FrameBody';
@@ -256,9 +256,13 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
   // drawn in it, is told through `editorFocus`. Decision Log 17: the page can refuse the focus (an inert or hidden
   // ancestor while the view mounts), so the request is ended only once the keyboard is inside the body, its text
   // included; until then it is tried again when the editor is drawn and when an attribute that can hide or free an
-  // element changes in the page. The person's own key or pointer press still drops it (`files/finder.ts`).
+  // element changes in the page. The person's own key or pointer press still drops it (`files/finder.ts`). Decision Log
+  // 18: so does the keyboard landing anywhere outside this view but the document's body, by any means (a native menu's
+  // command makes no press in the page), and the bound: a request still not taken `FILE_TAKE_BOUND_MS` after the view is
+  // ready (in view, its read settled, its editor drawn where it draws one) is given up, and the page no longer watched.
   const body = useRef<HTMLDivElement>(null);
   const editorFocus = useRef<(() => void) | null>(null);
+  const [editorDrawn, setEditorDrawn] = useState(false);
   const shown = useRef(inView);
   const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
   const take = useCallback(() => {
@@ -288,9 +292,20 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       cancelAnimationFrame(frame);
     };
   }, [asked, inView, take]);
+  // Decision Log 18: the keyboard landing outside this view (the document's body aside) gives the request up
+  useEffect(() => {
+    if (asked === 0 || takesKeyboard === undefined) return;
+    const elsewhere = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof Node && target !== document.body && !(body.current?.contains(target) ?? false)) releaseKeyboard({ into: 'file', key: takesKeyboard });
+    };
+    document.addEventListener('focusin', elsewhere, true);
+    return () => document.removeEventListener('focusin', elsewhere, true);
+  }, [asked, takesKeyboard]);
   const onEditor = useCallback(
     (focus: (() => void) | null) => {
       editorFocus.current = focus;
+      setEditorDrawn(focus !== null);
       if (focus === null) return;
       if (body.current !== null && document.activeElement === body.current) focus(); // the body still has it
       else take(); // a request still waiting, its take refused so far
@@ -307,6 +322,14 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     [tabId, appSessionId, path, line, readOnly, agent, artifactId, revision],
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
+  // Decision Log 18: the bound on a request not taken, from the moment the view is ready
+  const needsEditor = entry !== null && entry.status === 'ready' && entry.kind !== 'frame' && showsCode(entry);
+  const ready = entry !== null && entry.status !== 'loading' && (!needsEditor || editorDrawn);
+  useEffect(() => {
+    if (asked === 0 || !inView || !ready || takesKeyboard === undefined) return;
+    const bound = setTimeout(() => releaseKeyboard({ into: 'file', key: takesKeyboard }), FILE_TAKE_BOUND_MS);
+    return () => clearTimeout(bound);
+  }, [asked, inView, ready, takesKeyboard]);
 
   // The keyboard's place is the same element whatever the body draws, a failed read's notice among them, so a request
   // taken while the read is on its way stays on the view when it fails, and one made after is taken (S3; B5).
