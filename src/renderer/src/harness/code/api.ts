@@ -6,7 +6,7 @@ import type { TabTarget } from '@shared/ipc/schema/layout';
 
 // Review's scopes (`tools/code/review/review-model.ts`), restated: that module reaches the transcript's components,
 // which the e2e project does not compile.
-export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged';
+export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged' | 'commit'; // UX wave U5b-2: `commit`
 
 export type ReviewSurface = 'panel' | 'tab'; // the panel's Review tool, or a diff tab in the page's left column
 

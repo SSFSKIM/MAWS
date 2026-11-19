@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from '@shared/composer/sha256';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useEditorDialog } from '../editor/EditorDialogs';
-import { fileLineAnchor, openCommentComposer, prLineAnchor, registerCommentComposer } from './anchor';
+import { AnchorSchema } from '@shared/anchor/anchor';
+import { commitLineAnchor, fileLineAnchor, openCommentComposer, prLineAnchor, registerCommentComposer } from './anchor';
 
 const A = 'app-a' as AppSessionId;
 
@@ -64,6 +65,27 @@ describe('pr-line anchor', () => {
     expect(label.length).toBeLessThanOrEqual(200);
     expect(label.endsWith(tail)).toBe(true);
     expect(label.slice(1, -tail.length)).toBe('😀'.repeat((label.length - 1 - tail.length) / 2));
+  });
+});
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §A): a line of one
+// commit's diff, its path the commit's, its side always given and the commit's whole id.
+describe('commit-line anchor (UX wave U5b-2)', () => {
+  const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+
+  it('names the file by its path in the commit, the line, the side and the whole hash; the label ends with the short hash', () => {
+    expect(commitLineAnchor('src/berth-csv.ts', 32, 'old', SHA)).toEqual({
+      kind: 'file-line', locator: `src/berth-csv.ts#L32@${SHA}`, label: 'berth-csv.ts:32 · 3f9a1c2', path: 'src/berth-csv.ts', line: 32, side: 'old', commit: SHA,
+    });
+    expect(commitLineAnchor('README.md', 1, 'new', SHA)).toMatchObject({ label: 'README.md:1 · 3f9a1c2', side: 'new' });
+    expect(AnchorSchema.safeParse(commitLineAnchor('src/berth-csv.ts', 32, 'new', SHA)).success).toBe(true);
+  });
+
+  it('fits a long file name to the label rule, keeping its end, the line and the short hash', () => {
+    const anchor = commitLineAnchor(`src/${'n'.repeat(300)}.ts`, 9, 'new', SHA);
+    expect(anchor.label.length).toBeLessThanOrEqual(200);
+    expect(anchor.label.endsWith('n.ts:9 · 3f9a1c2')).toBe(true);
+    expect(AnchorSchema.safeParse(anchor).success).toBe(true);
   });
 });
 

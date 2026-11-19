@@ -1040,20 +1040,24 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const review = await openReview(p);
       const sum = numstat(p.scratch);
       expect(sum).toEqual({ files: 2, added: 4, removed: 0 });
-      await expect(review.locator('[data-review-header]')).toHaveText(`5 files changed · +${sum.added} −${sum.removed}`); // the scope is the pressed chip's (card 1)
+      // UX wave U5b-2 (§I; Decision Log 29, 4): the new files' lines are counted (scratch.txt's one line and link-out's
+      // target, one line), and big.log, past the per-file cap, is named after the totals; the scope is the pressed chip's
+      await expect(review.locator('[data-review-header]')).toHaveText(`5 files changed · +${sum.added + 2} −${sum.removed}, and 1 untracked file not counted`);
       // over the product's stack, the View menu opens against its button inside the window (measured)
       await expectViewMenuPlaced(review);
       await p.page.keyboard.press('Escape');
       await expect(p.page.getByRole('menu')).toHaveCount(0);
-      // every file a section, in the list's order: its kind, and its counts (a new file +N alone; an untracked one none until
-      // U5b-2 counts it)
+      // every file a section, in the list's order: its kind, and its counts (a new file +N alone, an untracked one too once
+      // counted; big.log, not counted, none)
       const rows = await review.locator('[data-review-stack] > [data-review-file]').evaluateAll((sections) =>
         sections.map((s) => ({ path: s.getAttribute('data-review-file'), kind: s.getAttribute('data-kind'), counts: s.querySelector('[data-review-counts]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null })),
       );
       expect(rows).toEqual([
         { path: 'src/app.ts', kind: 'modified', counts: '+3 −0' },
         { path: 'src/staged.ts', kind: 'added', counts: '+1' },
-        ...['big.log', 'link-out', 'scratch.txt'].map((path) => ({ path, kind: 'untracked', counts: null })),
+        { path: 'big.log', kind: 'untracked', counts: null },
+        { path: 'link-out', kind: 'untracked', counts: '+1' },
+        { path: 'scratch.txt', kind: 'untracked', counts: '+1' },
       ]);
       // the counter across the stack: src/app.ts's three hunks (the TypeScript and Open file scenes land on its first and
       // third), then one each for src/staged.ts, link-out and scratch.txt
@@ -1090,7 +1094,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const reset = Date.now();
       await expect.poll(() => staged.count(), { timeout: MEASURED_WAIT_MS, intervals: [25] }).toBe(0);
       within('Staged gone after git reset', Date.now() - reset, 1_000, 'Staged gone within a second of the reset');
-      await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +3 −0');
+      // src/staged.ts, untracked now, keeps its one line in the totals (UX wave U5b-2: a new file's lines are counted)
+      await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +6 −0, and 1 untracked file not counted');
       await expect(reviewSection(review, 'src/staged.ts')).toHaveAttribute('data-kind', 'untracked');
     });
   });
@@ -1135,7 +1140,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       // a change above the place: README.md's section is drawn before src/app.ts's
       writeFileSync(p.scratch.path('README.md'), `${readFileSync(p.scratch.path('README.md'), 'utf8')}One more line.\n`);
       await expect(reviewSection(review, 'README.md')).toHaveCount(1, { timeout: 5_000 });
-      await expect(review.locator('[data-review-header]')).toHaveText('6 files changed · +5 −0');
+      await expect(review.locator('[data-review-header]')).toHaveText('6 files changed · +7 −0, and 1 untracked file not counted');
       expect((await sectionPaths(review))[0], 'the new section stands above the place').toBe('README.md');
       await expectPlaceAtTop(review, before, 'the same file and line at the top after the refresh');
     });
@@ -1378,6 +1383,11 @@ test.describe('the product over a session discovered from its transcript', () =>
     try {
       const sid = '5e551011-0000-4000-8000-0000000000d1';
       const worktree = await repo.addManagedWorktree('w1');
+      // The repository as the engine leaves one it makes a managed worktree in: its runtime-exclude block (which MAWS
+      // writes too, RUNTIME_EXCLUDE_BLOCK in src/services/git/worktrees.ts) excludes `.claude/worktrees/`, so the main
+      // checkout does not read the worktree's folder as an untracked `.claude/`
+      mkdirSync(repo.path('.git/info'), { recursive: true });
+      appendFileSync(repo.path('.git/info/exclude'), '**/.claude/worktrees/\n');
       const sub = join(worktree, 'sub');
       mkdirSync(sub);
       // One change in each checkout, so Review and Source control say which checkout they read.
@@ -1440,7 +1450,10 @@ test.describe('the product over a session discovered from its transcript', () =>
         await openSurface(page, 'Source control');
         return surface(page, 'source-control');
       };
-      const scmActs = (tool: Locator) => tool.locator('[data-scm-action], [data-scm-remote-action="push"], [data-scm-remote-action="pr"]');
+      // UX wave U5b-2: Source control is a page that reads only; its Where line names the checkout (the session's folder as
+      // its title, "· worktree" for a linked one) and its Uncommitted line counts that checkout's changed files.
+      const where = (tool: Locator) => tool.locator('[data-scm-where]');
+      const uncommittedCount = (tool: Locator) => tool.locator('[data-scm-uncommitted] [data-scm-count]');
       // The terminals: a tab of the side column's strip by its id, its worktree warning when in view.
       const shownTab = () => sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip] [data-tab-id]:has([role="tab"][aria-selected="true"])');
       const showTerminal = async (tabId: string) => {
@@ -1493,10 +1506,10 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(root).toHaveAttribute('data-path', worktree, { timeout: 20_000 });
       await expect(root).toContainText('working folder');
       let scm = await sourceControl();
-      await expect(scm.locator('[data-scm-row][data-path="worktree-note.txt"]')).toBeVisible({ timeout: 20_000 });
-      await expect(scm.locator('[data-scm-row][data-path="README.md"]')).toHaveCount(0);
-      await expect(scmActs(scm), 'no Push, no Open PR, no button on a row or a group').toHaveCount(0);
-      await expect(scm.getByRole('textbox', { name: 'Commit message' }), 'no commit form').toHaveCount(0);
+      await expect(where(scm), 'the page reads the worktree').toHaveAttribute('title', worktree, { timeout: 20_000 });
+      await expect(where(scm).locator('[data-scm-where-branch]')).toHaveText('⎇ worktree-w1');
+      await expect(where(scm).locator('[data-scm-where-worktree]')).toHaveText('· worktree');
+      await expect(uncommittedCount(scm), 'its one change, worktree-note.txt, and not the repository’s').toHaveText('1');
       await expect(await showTerminal(before), 'the terminal opened before stays in the repository').toContainText(`This terminal is in ${repo.root}; the session now runs in ${worktree}.`);
       expect(await shellAnswer(), 'and its shell is still there').toBe(repo.root);
       await sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip]').getByRole('button', { name: 'Add a tool', exact: true }).click();
@@ -1536,9 +1549,10 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(root).toHaveAttribute('data-path', repo.root, { timeout: 20_000 });
       await expect(root).toContainText('directory');
       scm = await sourceControl();
-      await expect(scm.locator('[data-scm-row][data-path="README.md"]')).toBeVisible({ timeout: 20_000 });
-      await expect(scmActs(scm).first(), 'every act is back').toBeVisible();
-      await expect(scm.getByRole('textbox', { name: 'Commit message' })).toBeVisible();
+      await expect(where(scm), 'the page reads the repository again').toHaveAttribute('title', repo.root, { timeout: 20_000 });
+      await expect(where(scm).locator('[data-scm-where-branch]')).toHaveText('⎇ main');
+      await expect(where(scm).locator('[data-scm-where-worktree]'), 'no worktree word').toHaveCount(0);
+      await expect(uncommittedCount(scm), 'its one change, README.md').toHaveText('1');
       await expect(await showTerminal(before), 'the first terminal is where the session is again').toHaveCount(0);
       await expect(await showTerminal(after), 'the second says it is in the worktree').toContainText(`This terminal is in ${worktree}; the session now runs in ${repo.root}.`);
       expect(await shellAnswer(), 'where its shell still is').toBe(worktree);

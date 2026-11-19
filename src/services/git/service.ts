@@ -1,14 +1,21 @@
 // Main's read-only git service (C4 execution document, Interfaces "Git service" and M6; charter §4.5): status,
 // branches, diff and log for any directory inside a repository or linked worktree, and the ref-counted repository
 // watcher. Only these subcommands ever run: `rev-parse`, `status`, `stash list`, `remote get-url`, `config --get-regexp`
-// (remote URLs only), `for-each-ref`, `diff`, `log`, and for the watcher's prune on Linux `ls-files` and `check-ignore`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
+// (remote URLs only), `for-each-ref`, `diff`, `log`, for the watcher's prune on Linux `ls-files` and `check-ignore`, and
+// for UX wave U5b-2's three reads (`branchCommits`, `commitDiff`, `changesSince`) `merge-base`, `rev-list` and
+// `symbolic-ref`, all three reads too. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
 // mutation; E6's `refresh` only asks the watcher to read again); worktrees under `<repo>/.claude/worktrees/` need no special case, `rev-parse` reports them as linked.
 // Paths in answers are relative to the repository root, and a `path` argument is read the same way.
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import type { GitBranches, GitChanged, GitDiff, GitDiffFile, GitDiffInput, GitLog, GitLogInput, GitStatus } from '@shared/ipc/schema/git';
+import {
+  UNTRACKED_COUNT_BYTES, UNTRACKED_COUNT_FILES, type GitBranchCommits, type GitBranchCommitsInput, type GitBranches, type GitChanged, type GitChangesSince,
+  type GitChangesSinceInput, type GitCommitDiff, type GitCommitDiffInput, type GitDiff, type GitDiffFile, type GitDiffInput, type GitLog, type GitLogInput, type GitStatus,
+} from '@shared/ipc/schema/git';
+import { countAddedLines, type CountHooks } from '../fs/count-lines';
+import { commitNamed, defaultBaseRef, headCommit, mergeBaseWithHead } from './default-base';
 import { gitIgnored } from './ignored';
-import { parseBranches, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
+import { parseBranches, parseCurrentUpstream, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
 import { createGitReader, createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRead, type GitRun } from './runner';
 import { GitWatcher, type WatchFn, type WatchOwner } from './watcher';
 
@@ -21,16 +28,19 @@ export interface GitServiceOptions {
   execFile?: ExecFileFn;
   watch?: WatchFn;
   log?: (line: string) => void; // P5 O3-E: the watcher's root lines (GitWatcherDeps.log)
+  countHooks?: CountHooks; // test-only: `changesSince`'s count of a new file, between its listing and its open (../fs/count-lines.ts)
 }
 
 export class GitService {
   private readonly run: GitRun;
   private readonly read: GitRead; // the prune's listings, streamed (D21)
   private readonly watcher: GitWatcher;
+  private readonly countHooks: CountHooks | undefined;
 
   constructor(options: GitServiceOptions = {}) {
     this.run = createGitRunner({ env: options.env, execFile: options.execFile });
     this.read = createGitReader({ env: options.env });
+    this.countHooks = options.countHooks;
     // P5 O3-E M1: the watcher's prune on Linux reads what git ignores through this runner (`ls-files`, `check-ignore`).
     this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root, this.read), log: options.log });
   }
@@ -77,14 +87,15 @@ export class GitService {
     }
     if (scope === 'untracked') return this.untrackedDiff(directory, path, context);
     const range = base !== undefined ? [`${base}...HEAD`] : scope === 'staged' ? ['--cached'] : scope === 'all' ? ['HEAD'] : [];
-    // `git diff` refreshes a stale stat cache and rewrites the index through `index.lock` whatever GIT_OPTIONAL_LOCKS
-    // says (probed on Apple Git 2.50.1; `git status` honours it); `diff.autoRefreshIndex=false` turns that write off.
-    // E11: the prefixes are pinned as the untracked scope pins them, so the owner's diff.noprefix, mnemonicPrefix or
-    // srcPrefix/dstPrefix never reshape the headers the renderer's patch reader expects
-    const common = ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-relative', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/'];
+    return this.diffOf(directory, range, path, context);
+  }
+
+  // The patch and the counts of one `git diff` range, as every scope reads them. `ended`: the range is closed with `--`
+  // even with no path (U5b-2's reads, whose revisions are whole ids a file could be named like).
+  private async diffOf(directory: string, range: string[], path: string | undefined, context: number | undefined, ended = false): Promise<GitDiff> {
     const [patch, numstat] = await Promise.all([
-      this.run(directory, [...common, `-U${context ?? 3}`, ...range, ...pathspec(path)]),
-      this.run(directory, [...common, '--numstat', '-z', ...range, ...pathspec(path)]),
+      this.run(directory, [...DIFF, `-U${context ?? 3}`, ...range, ...pathspec(path, ended)]),
+      this.run(directory, [...DIFF, '--numstat', '-z', ...range, ...pathspec(path, ended)]),
     ]);
     return { patch, files: parseNumstat(numstat) };
   }
@@ -92,12 +103,83 @@ export class GitService {
   async log({ directory, limit, path }: GitLogInput): Promise<GitLog> {
     requireAbsolute(directory);
     try {
-      const out = await this.run(directory, ['log', '--no-show-signature', '--format=%H%x00%h%x00%an%x00%aI%x00%s%x00%P', '-z', '-n', String(limit), ...pathspec(path)]);
+      const out = await this.run(directory, ['log', '--no-show-signature', LOG_FORMAT, '-z', '-n', String(limit), ...pathspec(path)]);
       return { commits: parseLog(out) };
     } catch (error) {
       if (error instanceof GitCommandError && /does not have any commits yet/.test(error.stderr)) return { commits: [] };
       throw error;
     }
+  }
+
+  // UX wave U5b-2 (Interfaces §C): the branch read. The base is the default-branch rule's (./default-base.ts); the
+  // commits are `<merge base>..HEAD`, newest first, at most `limit`, and with no base the newest of HEAD. A row is pushed
+  // when the upstream holds it: false for every row with no upstream, null for every row (and null halves in `counts`)
+  // when the upstream is configured and git cannot resolve it. `counts` and `behind` are of the whole range.
+  // One snapshot (the branch's max panel, the document's Decision Log 52): HEAD, the base ref and the upstream are each
+  // resolved to a commit once, and every later step names those ids, never a ref, so a history that moves while the read
+  // runs cannot make one step disagree with another (more not pushed than in all, a negative pushed count).
+  async branchCommits({ directory, limit }: GitBranchCommitsInput): Promise<GitBranchCommits> {
+    requireAbsolute(directory);
+    const [ref, upstream, head] = await Promise.all([defaultBaseRef(this.run, directory), this.currentUpstream(directory), headCommit(this.run, directory)]);
+    if (head === null) return { base: null, upstream: upstream.name, commits: [], counts: null, behind: null };
+    // the merge base beside `behind`: each walks the history, seconds apiece in a large repository with no commit-graph (P5)
+    const [mergeBase, behindRef, upstreamCommit] = await Promise.all([
+      ref === null ? null : mergeBaseWithHead(this.run, directory, ref.commit, head),
+      ref === null ? null : this.run(directory, ['rev-list', '--count', ref.commit, `^${head}`, '--']).then(Number),
+      upstream.ref === null || upstream.gone ? null : commitNamed(this.run, directory, upstream.ref),
+    ]);
+    const base = ref === null || mergeBase === null ? null : { ...ref, mergeBase };
+    const range = base === null ? [head] : [head, `^${base.mergeBase}`];
+    const [rows, notPushed, all] = await Promise.all([
+      this.run(directory, ['log', '--no-show-signature', LOG_FORMAT, '-z', '-n', String(limit), ...range, '--']).then(parseLog),
+      // the range's commits the upstream does not hold: few on a branch, and never more than the range
+      upstreamCommit === null ? null : this.run(directory, ['rev-list', ...range, `^${upstreamCommit}`, '--']).then(shas),
+      base === null ? null : this.run(directory, ['rev-list', '--count', ...range, '--']).then(Number),
+    ]);
+    const behind = base === null ? null : behindRef;
+    const pushedOf = (sha: string) => (upstream.ref === null ? false : notPushed === null ? null : !notPushed.has(sha));
+    return {
+      base: base === null ? null : { ref: base.ref, mergeBase: base.mergeBase },
+      upstream: upstream.name,
+      commits: rows.map((commit) => ({ ...commit, pushed: pushedOf(commit.sha) })),
+      counts: all === null ? null : {
+        all,
+        notPushed: upstream.ref === null ? all : notPushed === null ? null : notPushed.size,
+        pushed: upstream.ref === null ? 0 : notPushed === null ? null : all - notPushed.size,
+      },
+      behind,
+    };
+  }
+
+  // UX wave U5b-2 (Interfaces §C): the commit read. The commit against its first parent (a merge commit so too, never a
+  // combined diff), a root commit with every line added; `onHead` is whether HEAD holds it. `patch: false` reads no diff.
+  async commitDiff({ directory, commit, path, context, patch = true }: GitCommitDiffInput): Promise<GitCommitDiff> {
+    requireAbsolute(directory);
+    const read = await this.commitOf(directory, commit); // first: a hash that names no commit is refused as that
+    if (!patch) return { commit: read, onHead: await this.holdsCommit(directory, commit), patch: '', files: [] };
+    // a root commit has no parent to diff against; `log --root` shows it as created, which needs no empty tree's id
+    // (that id differs between a SHA-1 and a SHA-256 repository)
+    const [onHead, diff] = await Promise.all([
+      this.holdsCommit(directory, commit),
+      read.parents.length > 0 ? this.diffOf(directory, [read.parents[0], commit], path, context, true) : this.rootDiff(directory, commit, path, context),
+    ]);
+    return { commit: read, onHead, ...diff };
+  }
+
+  // UX wave U5b-2 (Interfaces §C, R1): the working-tree read. The working tree against `against` with `git.diff`'s
+  // arguments and prefixes; without `path`, the first UNTRACKED_COUNT_FILES untracked files the fresh status lists (in
+  // its order, a `dir/` entry not one), each with its added lines read through an opened descriptor by the service
+  // itself (decision 15), never by a git run a file.
+  // `HEAD` is resolved to its commit once, so the patch and the counts name the same one (Decision Log 52); before the
+  // first commit it stays `HEAD`, which git refuses in both alike.
+  async changesSince({ directory, against, path, context }: GitChangesSinceInput): Promise<GitChangesSince> {
+    requireAbsolute(directory);
+    const since = against === 'HEAD' ? ((await headCommit(this.run, directory)) ?? against) : against;
+    const [diff, untracked] = await Promise.all([
+      this.diffOf(directory, [since], path, context, true),
+      path === undefined ? this.untrackedCounts(directory) : [],
+    ]);
+    return { ...diff, untracked };
   }
 
   // Ref-counted per repository root and per owner (the requesting window); answers the directory's status.
@@ -156,6 +238,64 @@ export class GitService {
     );
     if (!patchNames(patch, path)) throw refused();
     return { patch, files: [addedFileFacts(path, patch)] };
+  }
+
+  // The current branch's upstream: its name as the status names it, its full ref, and whether git can resolve it (a
+  // deleted remote-tracking ref is `[gone]`). All null for a detached HEAD or a branch with no upstream.
+  private async currentUpstream(directory: string): Promise<{ name: string | null; ref: string | null; gone: boolean }> {
+    return parseCurrentUpstream(await this.run(directory, ['for-each-ref', '--format=%(HEAD)%00%(upstream)%00%(upstream:short)%00%(upstream:track)', 'refs/heads']));
+  }
+
+  // One commit by its whole id: a hash that names no commit (or names another object) is an error that says so.
+  private async commitOf(directory: string, commit: string): Promise<GitLog['commits'][number]> {
+    const missing = () => new Error(`no commit ${commit} in this repository`);
+    let out: string;
+    try {
+      out = await this.run(directory, ['log', '--no-show-signature', LOG_FORMAT, '-z', '-n', '1', commit, '--']);
+    } catch (error) {
+      if (error instanceof GitCommandError) throw missing();
+      throw error;
+    }
+    const [read] = parseLog(out);
+    if (read?.sha !== commit) throw missing(); // a tag's id peels to its commit, which is not the object asked for
+    return read;
+  }
+
+  // Whether HEAD holds the commit (`merge-base --is-ancestor` exits 1 when it does not); false before HEAD has a commit
+  // (an orphan branch's).
+  private async holdsCommit(directory: string, commit: string): Promise<boolean> {
+    try {
+      await this.run(directory, ['merge-base', '--is-ancestor', commit, 'HEAD']);
+      return true;
+    } catch (error) {
+      if (error instanceof GitCommandError && (error.exitCode === 1 || /not a valid object name HEAD/i.test(error.stderr))) return false;
+      throw error;
+    }
+  }
+
+  // A root commit as created: `log -p --root` for the one commit, with the diff's own arguments (`log` refreshes no
+  // index and runs no external diff here either).
+  private async rootDiff(directory: string, commit: string, path: string | undefined, context: number | undefined): Promise<GitDiff> {
+    const log = ['log', '--no-show-signature', '-n', '1', '--root', '--format=', '--no-relative', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/'];
+    const [patch, numstat] = await Promise.all([
+      this.run(directory, [...log, '-p', `-U${context ?? 3}`, commit, ...pathspec(path, true)]),
+      this.run(directory, [...log, '--numstat', '-z', commit, ...pathspec(path, true)]),
+    ]);
+    return { patch, files: parseNumstat(numstat) };
+  }
+
+  // The new files' counts: the first UNTRACKED_COUNT_FILES untracked files a fresh status lists, read under the
+  // repository's real root (an open with no link on the way takes no other spelling of it).
+  private async untrackedCounts(directory: string): Promise<GitChangesSince['untracked']> {
+    const { repoRoot } = parseRevParse(await this.run(directory, REV_PARSE));
+    const [realRoot, porcelain] = await Promise.all([realpath(repoRoot), this.run(repoRoot, ['status', '--porcelain=v2', '-z', '--untracked-files=normal'])]);
+    const listed = parseStatus(porcelain).files.filter((file) => file.untracked && !file.path.endsWith('/')).slice(0, UNTRACKED_COUNT_FILES);
+    const counts: GitChangesSince['untracked'] = [];
+    for (const { path } of listed) {
+      const { insertions, binary } = await countAddedLines(realRoot, path, UNTRACKED_COUNT_BYTES, this.countHooks);
+      counts.push({ path, insertions, binary });
+    }
+    return counts;
   }
 
   // The remote's URL as configured, without user-info: the upstream's remote, or with no upstream `origin` (else the sole
@@ -259,11 +399,24 @@ function unquoteC(text: string): string {
   return Buffer.from(bytes).toString('utf8');
 }
 
+// `git diff` refreshes a stale stat cache and rewrites the index through `index.lock` whatever GIT_OPTIONAL_LOCKS says
+// (probed on Apple Git 2.50.1; `git status` honours it); `diff.autoRefreshIndex=false` turns that write off. E11: the
+// prefixes are pinned as the untracked scope pins them, so the owner's diff.noprefix, mnemonicPrefix or
+// srcPrefix/dstPrefix never reshape the headers the renderer's patch reader expects
+const DIFF = ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-relative', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/'];
+const LOG_FORMAT = '--format=%H%x00%h%x00%an%x00%aI%x00%s%x00%P';
+
 function requireAbsolute(directory: string): void {
   if (!isAbsolute(directory)) throw new Error(`directory must be absolute: ${directory}`);
 }
 
 // A repository-relative path, taken literally (no globbing) whichever directory inside the repository git runs in.
-function pathspec(path: string | undefined): string[] {
-  return path === undefined ? [] : ['--', `:(top,literal)${path}`];
+// `ended`: the revisions before it are closed with `--` even with no path.
+function pathspec(path: string | undefined, ended = false): string[] {
+  return path === undefined ? (ended ? ['--'] : []) : ['--', `:(top,literal)${path}`];
+}
+
+// `rev-list`'s one id a line, as a set.
+function shas(out: string): Set<string> {
+  return new Set(out.split('\n').filter((line) => line !== ''));
 }

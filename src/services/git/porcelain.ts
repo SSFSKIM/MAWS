@@ -81,6 +81,15 @@ export function upstreamRemote(upstream: string | null): string | null {
   return slash > 0 ? upstream.slice(0, slash) : null;
 }
 
+// `for-each-ref --format=%(HEAD)%00%(upstream)%00%(upstream:short)%00%(upstream:track) refs/heads`: the current branch's
+// upstream (UX wave U5b-2's branch read), its short name as the status's `branch.upstream` names it, its full ref, and
+// whether git can resolve it (`[gone]` once the ref is deleted). All null for a detached HEAD or no upstream.
+export function parseCurrentUpstream(out: string): { name: string | null; ref: string | null; gone: boolean } {
+  const current = out.split('\n').find((line) => line.startsWith('*\0'));
+  const [, ref = '', name = '', track = ''] = current?.split('\0') ?? [];
+  return ref === '' ? { name: null, ref: null, gone: false } : { name, ref, gone: track === '[gone]' };
+}
+
 // `for-each-ref --format=%(refname:short)%00%(upstream:short)%00%(HEAD) refs/heads`: one line per branch.
 export function parseBranches(out: string): GitBranches {
   const branches = out

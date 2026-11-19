@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
+import type { GitCommit, GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
 import { loadSyntheticJournal } from '../../../../../../test/support/fixtures';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -23,6 +23,7 @@ import { FloatingSummary } from '../../../panel/summary/Summary';
 import { queryClient } from '../../../ipc/query';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
+import { useMachines } from '../../../stores/machines'; // UX wave U5b-2: a machine that serves the reads
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { installResizeObserver } from '../../../test-support/resize';
 import { fakeStackLayout } from '../../../test-support/review-layout';
@@ -35,8 +36,9 @@ import { codeTranscriptActions } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
 import { reviewLayout, SPLIT_MIN_WIDTH } from './measure';
-import { baseOf, createReviewStore, diffOf, fileDiffOf, REVIEW_REFRESH_MS, useReview, useReviewData } from './review-store';
+import { createReviewStore, diffOf, fileDiffOf, onHeadOf, REVIEW_REFRESH_MS, useReview, useReviewData, type DiffTarget } from './review-store';
 import { reviewTool } from './ReviewTool';
+import { useBranchReads } from './branch-read';
 import type { ReviewParams } from './review-model';
 import {
   REVIEW_SCOPE_BYTES_CAP,
@@ -56,6 +58,7 @@ import {
   totals,
   turnScopeFiles,
   latestTurnWithFiles,
+  uncountedFiles,
   unmerged,
   type ChangedFile,
 } from './review-model';
@@ -194,12 +197,23 @@ describe('review model', () => {
   it('formats and parses refs, a TurnId being its own scope word and a path free to hold " @ "', () => {
     expect(formatRef('uncommitted')).toBe('uncommitted');
     expect(formatRef('uncommitted', 'src/app.ts')).toBe('uncommitted @ src/app.ts');
-    expect(parseRef('uncommitted @ src/app.ts')).toEqual({ scope: 'uncommitted', turnId: null, path: 'src/app.ts' });
-    expect(parseRef('staged')).toEqual({ scope: 'staged', turnId: null, path: null });
-    expect(parseRef(formatRef('branch'))).toEqual({ scope: 'branch', turnId: null, path: null });
-    expect(parseRef(formatRef(T, 'a @ b.ts'))).toEqual({ scope: 'turn', turnId: T, path: 'a @ b.ts' });
-    expect(parseRef(formatRef(T))).toEqual({ scope: 'turn', turnId: T, path: null });
+    expect(parseRef('uncommitted @ src/app.ts')).toEqual({ scope: 'uncommitted', turnId: null, commit: null, path: 'src/app.ts' });
+    expect(parseRef('staged')).toEqual({ scope: 'staged', turnId: null, commit: null, path: null });
+    expect(parseRef(formatRef('branch'))).toEqual({ scope: 'branch', turnId: null, commit: null, path: null });
+    expect(parseRef(formatRef(T, 'a @ b.ts'))).toEqual({ scope: 'turn', turnId: T, commit: null, path: 'a @ b.ts' });
+    expect(parseRef(formatRef(T))).toEqual({ scope: 'turn', turnId: T, commit: null, path: null });
     for (const bad of ['', 'turn', 'turn:', 'everything', 'uncommitted @ ', 'Uncommitted']) expect(parseRef(bad), bad).toBeNull();
+  });
+
+  // UX wave U5b-2 (S20's grammar): `commit:<whole hash>`, with ` @ <path>` as for the others; a hash that is not whole is refused
+  it('reads commit:<full hash> and commit:<full hash> @ <path>, and refuses a short, upper-case or missing hash', () => {
+    const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+    const SHA256 = `${SHA}${'0'.repeat(24)}`;
+    expect(formatRef(`commit:${SHA}`, 'src/app.ts')).toBe(`commit:${SHA} @ src/app.ts`);
+    expect(parseRef(`commit:${SHA}`)).toEqual({ scope: 'commit', turnId: null, commit: SHA, path: null });
+    expect(parseRef(formatRef(`commit:${SHA}`, 'a @ b.ts'))).toEqual({ scope: 'commit', turnId: null, commit: SHA, path: 'a @ b.ts' });
+    expect(parseRef(`commit:${SHA256}`)).toEqual({ scope: 'commit', turnId: null, commit: SHA256, path: null });
+    for (const bad of ['commit', 'commit:', `commit:${SHA.slice(0, 7)}`, `commit:${SHA.slice(1)}`, `commit:${SHA.toUpperCase()}`, `commit:${SHA} @ `]) expect(parseRef(bad), bad).toBeNull();
   });
 
   it('opens a hunk at its first added line in the new file, a pure deletion at its new start', () => {
@@ -261,7 +275,53 @@ describe('review model', () => {
     expect(totals(rows)).toEqual({ files: 4, added: 11, removed: 10 });
     expect(gitScopeFiles({ scope: 'staged', repoRoot: '/repo', files, patch, status }).map((r) => r.path)).not.toContain('scratch.txt');
     // past the scope cap: the list without hunks until each file is fetched
-    expect(gitScopeFiles({ scope: 'branch', repoRoot: '/repo', files, patch: null, status }).map((r) => r.hunks)).toEqual([null, null, null]);
+    expect(gitScopeFiles({ scope: 'staged', repoRoot: '/repo', files, patch: null, status }).map((r) => r.hunks)).toEqual([null, null, null]);
+  });
+
+  // The branch's max panel, ruling 3 (Decision Log 51): a commit's file kind comes from the commit alone; the working
+  // tree's unmerged paths mark a file Conflict only in the scopes read from the index and the working tree
+  it('marks a file Conflict from the status’s unmerged entry in Uncommitted, This branch and Staged, and never in a commit', () => {
+    const conflicted = splitPatch(KINDS.patch).find((file) => file.path === 'src/conflict.ts')!;
+    const files = [{ path: 'src/conflict.ts', oldPath: null, insertions: 1, deletions: 1, binary: false }];
+    const kindIn = (scope: 'uncommitted' | 'branch' | 'staged' | 'commit', patch: ReadonlyMap<string, typeof conflicted> | null) =>
+      gitScopeFiles({ scope, repoRoot: '/repo', files, patch, status: KINDS_STATUS }).find((row) => row.path === 'src/conflict.ts')!.kind;
+    for (const patch of [new Map([[conflicted.path, conflicted]]), null]) {
+      for (const scope of ['uncommitted', 'branch', 'staged'] as const) expect(kindIn(scope, patch), scope).toBe('conflict');
+      expect(kindIn('commit', patch)).toBe('modified'); // the commit changed the file; that the working tree is in a merge now is not the commit's
+    }
+  });
+
+  // UX wave U5b-2 (l5-code-03, -04; §E): This branch lists the new files too, and a new file's lines are its count from
+  // the working-tree read; one it did not count, or every one where it was not asked, is uncounted
+  it('counts a new file’s lines from the working-tree read, in Uncommitted and in This branch, and none in a commit or Staged', () => {
+    const status = statusOf({
+      dirty: true,
+      files: [
+        { path: 'notes/berths.md', oldPath: null, index: '?', worktree: '?', untracked: true },
+        { path: 'logo.png', oldPath: null, index: '?', worktree: '?', untracked: true },
+        { path: 'later.md', oldPath: null, index: '?', worktree: '?', untracked: true },
+        { path: 'drafts/', oldPath: null, index: '?', worktree: '?', untracked: true },
+      ],
+    });
+    const untracked = new Map([
+      ['notes/berths.md', { path: 'notes/berths.md', insertions: 12, binary: false }],
+      ['logo.png', { path: 'logo.png', insertions: null, binary: true }],
+    ]);
+    for (const scope of ['uncommitted', 'branch'] as const) {
+      const rows = gitScopeFiles({ scope, repoRoot: '/repo', files: APP_FILES, patch: null, status, untracked });
+      expect(rows.map((r) => [r.path, r.kind, r.added, r.uncounted ?? false])).toEqual([
+        ['src/app.ts', 'modified', 2, false],
+        ['notes/berths.md', 'untracked', 12, false],
+        ['logo.png', 'untracked', 0, true], // binary: no count
+        ['later.md', 'untracked', 0, true], // past the count's files
+        ['drafts/', 'untracked', 0, true], // a new folder is listed, not counted
+      ]);
+      expect(totals(rows)).toEqual({ files: 5, added: 14, removed: 0 });
+      expect(uncountedFiles(rows)).toBe(2); // the folder is not a file
+    }
+    expect(uncountedFiles(gitScopeFiles({ scope: 'uncommitted', repoRoot: '/repo', files: [], patch: null, status, untracked: null }))).toBe(3); // not asked: every new file
+    expect(gitScopeFiles({ scope: 'commit', repoRoot: '/repo', files: APP_FILES, patch: null, status, untracked }).map((r) => r.path)).toEqual(['src/app.ts']);
+    expect(gitScopeFiles({ scope: 'staged', repoRoot: '/repo', files: APP_FILES, patch: null, status, untracked }).map((r) => r.path)).toEqual(['src/app.ts']);
   });
 
   it('lists Last turn from changed files, each file’s hunks from its edited entries joined on the edit’s own path', () => {
@@ -368,22 +428,20 @@ describe('review store', () => {
     const main = diffMain();
     const store = createReviewStore(createClient(() => main.bridge));
     const offs = [
-      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null }),
-      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null }),
-      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'staged', base: null }),
-      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'branch', base: 'main' }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'staged', read: 'git.diff', against: null }),
     ];
     await tick();
     expect(main.callsOf('git.diff')).toEqual([
       { directory: DIR, scope: 'all' },
       { directory: DIR, scope: 'staged' },
-      { directory: DIR, scope: 'all', base: 'main' },
     ]);
-    const slice = diffOf(store.getState(), { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null });
+    const slice = diffOf(store.getState(), { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null });
     expect(slice?.status).toBe('ok');
     expect(slice?.status === 'ok' && [...slice.patch!.keys()]).toEqual(['src/app.ts']);
     offs.forEach((off) => off());
-    expect(diffOf(store.getState(), { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null })).toBeUndefined();
+    expect(diffOf(store.getState(), { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null })).toBeUndefined();
   });
 
   it('re-reads a held scope once, 250 ms after the last new status for its directory, and once more for a change during a read', async () => {
@@ -395,7 +453,7 @@ describe('review store', () => {
       return ok({ patch: APP_PATCH, files: APP_FILES });
     });
     const store = createReviewStore(createClient(() => main.bridge));
-    const off = store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null });
+    const off = store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(main.callsOf('git.diff')).toHaveLength(1);
     store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
@@ -423,7 +481,7 @@ describe('review store', () => {
     let fails = false;
     const main = installFakeMain((name) => (name === 'git.diff' ? (fails ? fail('unknown revision') : ok({ patch: APP_PATCH, files: APP_FILES })) : ok()));
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null } as const;
+    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null } as const;
     const off = store.getState().hold(target);
     await tick();
     store.getState().refresh(target);
@@ -445,7 +503,7 @@ describe('review store', () => {
       return ok({ patch, files: APP_FILES });
     });
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null } as const;
+    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null } as const;
     const off = store.getState().hold(target);
     await tick();
     store.getState().loadFile(target, 'src/app.ts');
@@ -466,7 +524,7 @@ describe('review store', () => {
     const big = APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP);
     const main = diffMain((input) => (input.path ? { patch: APP_PATCH, files: APP_FILES } : { patch: big, files: APP_FILES }));
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null } as const;
+    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.diff', against: null } as const;
     const off = store.getState().hold(target);
     await tick();
     const slice = diffOf(store.getState(), target);
@@ -490,7 +548,7 @@ describe('review store', () => {
       return ok(input.scope === 'untracked' ? { patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 100644', '--- /dev/null', '+++ b/scratch.txt', '@@ -0,0 +1 @@', '+hi', ''].join('\n'), files: [] } : { patch: APP_PATCH, files: APP_FILES });
     });
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { machine: OTHER_MACHINE, directory: '/work', scope: 'uncommitted', base: null, session: addressOf(OTHER_MACHINE, 'app-r' as AppSessionId) } as const;
+    const target = { machine: OTHER_MACHINE, directory: '/work', scope: 'uncommitted', read: 'git.diff', against: null, session: addressOf(OTHER_MACHINE, 'app-r' as AppSessionId) } as const;
     const off = store.getState().hold(target);
     await tick();
     store.getState().loadFile(target, 'scratch.txt', true);
@@ -500,52 +558,366 @@ describe('review store', () => {
     off();
   });
 
-  it('says why This branch is unavailable when C10 answers no branch (null) or a detached main worktree (HEAD)', async () => {
-    const main = installFakeMain((name, input) =>
-      name === 'git.worktree.branch'
-        ? ok(input.branch === 'unborn' ? null : { repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'HEAD', ahead: 0, merged: true })
-        : ok(),
-    );
+  // The branch's max panel, ruling 2's sibling (Decision Log 50): one scope held by two sessions' surfaces is read for a
+  // session still holding it once the first lets go (another machine reads a checkout only for a session of it)
+  it('reads a scope two sessions hold for the one still holding it once the first lets go', async () => {
+    const asked: unknown[] = [];
+    const main = installFakeMain((name, _input, machine) => {
+      if (name !== 'git.diff') return ok();
+      asked.push(machine);
+      return ok({ patch: APP_PATCH, files: APP_FILES });
+    });
     const store = createReviewStore(createClient(() => main.bridge));
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'unborn'); // HEAD's branch with no commits: `rev-parse --verify refs/heads/unborn` fails
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
+    const of = (id: string): DiffTarget => ({ machine: OTHER_MACHINE, directory: '/work', scope: 'uncommitted', read: 'git.diff', against: null, session: addressOf(OTHER_MACHINE, id as AppSessionId) });
+    const first = store.getState().hold(of('app-1'));
+    const second = store.getState().hold(of('app-2'));
     await tick();
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'unborn')).toEqual({ status: 'unavailable', reason: 'No commits on unborn yet' });
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'The main worktree has no branch' });
+    first();
+    store.getState().refresh(of('app-2'));
+    await tick();
+    expect(asked).toEqual([{ machine: OTHER_MACHINE, session: 'app-1' }, { machine: OTHER_MACHINE, session: 'app-2' }]);
+    expect(diffOf(store.getState(), of('app-2'))?.status).toBe('ok');
+    second();
   });
 
-  it('asks git.worktree.branch again after a failed lookup, rather than keeping the failure', async () => {
-    let fails = true;
-    const main = installFakeMain((name, input) =>
-      name === 'git.worktree.branch' ? (fails ? fail('git busy') : ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 1, merged: false })) : ok(),
-    );
-    const store = createReviewStore(createClient(() => main.bridge));
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
-    await tick();
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'git busy', failed: true });
-    fails = false;
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
-    await tick();
-    expect(main.calls).toHaveLength(2);
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
-  });
+  // UX wave U5b-2 (§E, §G): the working-tree read and a commit's diff, each a target of its own
+  const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+  const MERGE_BASE = '9d0c1b2a39485766a5b4c3d2e1f0a9b8c7d6e5f4';
+  const COMMIT: GitCommit = { sha: SHA, shortSha: '3f9a1c2', author: 'Ada', authoredAt: '2026-11-14T10:00:00.000Z', subject: 'Quote the berth names', parents: ['0000000000000000000000000000000000000001'] };
+  const commitTarget = (sha = SHA): DiffTarget => ({ machine: TEST_MACHINE, directory: DIR, scope: 'commit', read: 'git.commitDiff', against: sha });
 
-  it('asks git.worktree.branch for the base once the command exists, and refuses the main worktree’s own branch', async () => {
-    const main = installFakeMain((name, input) =>
-      name === 'git.worktree.branch' ? ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 2, merged: false }) : ok(),
-    );
+  it('reads the working tree against HEAD or a merge base with git.changesSince, a new file’s count kept by its path, each against its own target', async () => {
+    const main = installFakeMain((name) => (name === 'git.changesSince' ? ok({ patch: APP_PATCH, files: APP_FILES, untracked: [{ path: 'notes.md', insertions: 12, binary: false }] }) : ok()));
     const store = createReviewStore(createClient(() => main.bridge));
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
-    store.getState().lookupBase(TEST_MACHINE, '/repo', 'main');
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'loading' });
+    const head: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD' };
+    const since: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'branch', read: 'git.changesSince', against: MERGE_BASE };
+    const offs = [store.getState().hold(head), store.getState().hold(since)];
     await tick();
-    expect(main.calls.map((c) => [c.name, c.input])).toEqual([
-      ['git.worktree.branch', { repoRoot: '/repo', branch: 'feature' }],
-      ['git.worktree.branch', { repoRoot: '/repo', branch: 'main' }],
+    expect(main.callsOf('git.changesSince')).toEqual([
+      { directory: DIR, against: 'HEAD' },
+      { directory: DIR, against: MERGE_BASE },
     ]);
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
-    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'main')).toEqual({ status: 'unavailable', reason: "Session runs on main, the main worktree's branch" });
+    const answered = diffOf(store.getState(), since);
+    expect(answered?.status === 'ok' && answered.untracked?.get('notes.md')).toEqual({ path: 'notes.md', insertions: 12, binary: false });
+    store.getState().loadFile(since, 'src/app.ts');
+    await tick();
+    expect(main.callsOf('git.changesSince').at(-1)).toEqual({ directory: DIR, against: MERGE_BASE, path: 'src/app.ts' });
+    offs.forEach((off) => off());
+  });
+
+  it('keeps a commit’s diff once read: neither a new status nor a refresh reads it again, while This branch re-reads as before (S16)', async () => {
+    vi.useFakeTimers();
+    const main = installFakeMain((name) =>
+      name === 'git.commitDiff' ? ok({ commit: COMMIT, onHead: true, patch: APP_PATCH, files: APP_FILES }) : name === 'git.changesSince' ? ok({ patch: APP_PATCH, files: APP_FILES, untracked: [] }) : ok(),
+    );
+    const store = createReviewStore(createClient(() => main.bridge));
+    const since: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'branch', read: 'git.changesSince', against: MERGE_BASE };
+    const offs = [store.getState().hold(commitTarget()), store.getState().hold(since)];
+    await vi.advanceTimersByTimeAsync(0);
+    expect(main.callsOf('git.commitDiff')).toEqual([{ directory: DIR, commit: SHA }]);
+    expect(diffOf(store.getState(), commitTarget())).toMatchObject({ status: 'ok', commit: { commit: COMMIT, onHead: true } });
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
+    await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS * 2);
+    store.getState().refresh(commitTarget());
+    store.getState().retryFailed(commitTarget());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(main.callsOf('git.commitDiff')).toHaveLength(1);
+    expect(main.callsOf('git.changesSince')).toHaveLength(2); // This branch, re-read 250 ms after the new status
+    offs.forEach((off) => off());
+  });
+
+  it('asks a failed commit’s diff again by retryFailed and a refresh, and by no new status; one that answered, by none (S22)', async () => {
+    vi.useFakeTimers();
+    let fails = true;
+    const main = installFakeMain((name) =>
+      name === 'git.commitDiff' ? (fails ? { ok: false, error: { code: 'host_unavailable', message: 'the link dropped' } } : ok({ commit: COMMIT, onHead: true, patch: APP_PATCH, files: APP_FILES })) : ok(),
+    );
+    const store = createReviewStore(createClient(() => main.bridge));
+    const off = store.getState().hold(commitTarget());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diffOf(store.getState(), commitTarget())).toEqual({ status: 'error', message: 'the link dropped', code: 'host_unavailable' });
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
+    await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS * 2);
+    expect(main.callsOf('git.commitDiff')).toHaveLength(1); // a new status is not one of the three
+    store.getState().retryFailed(commitTarget()); // Retry, or the machine heard again
+    await vi.advanceTimersByTimeAsync(0);
+    expect(main.callsOf('git.commitDiff')).toHaveLength(2);
+    store.getState().refresh(commitTarget()); // Review shown again
+    await vi.advanceTimersByTimeAsync(0);
+    expect(main.callsOf('git.commitDiff')).toHaveLength(3);
+    fails = false;
+    store.getState().retryFailed(commitTarget());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diffOf(store.getState(), commitTarget())?.status).toBe('ok');
+    store.getState().retryFailed(commitTarget());
+    store.getState().refresh(commitTarget());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(main.callsOf('git.commitDiff')).toHaveLength(4);
+    off();
+  });
+
+  it('past the cap, asks a commit’s failed file again by retryFailed and leaves the files already read (S22)', async () => {
+    const failing = new Set(['src/b.ts']);
+    const fileOf = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-x\n+y\n`;
+    const main = installFakeMain((name, input) => {
+      if (name !== 'git.commitDiff') return ok();
+      if (typeof input.path !== 'string') return ok({ commit: COMMIT, onHead: true, patch: 'x'.repeat(REVIEW_SCOPE_BYTES_CAP + 1), files: [] });
+      return failing.has(input.path) ? fail('the disk is busy') : ok({ commit: COMMIT, onHead: true, patch: fileOf(input.path), files: [] });
+    });
+    const store = createReviewStore(createClient(() => main.bridge));
+    const off = store.getState().hold(commitTarget());
+    await tick();
+    store.getState().loadFile(commitTarget(), 'src/a.ts');
+    store.getState().loadFile(commitTarget(), 'src/b.ts');
+    await tick();
+    expect(fileDiffOf(store.getState(), commitTarget(), 'src/b.ts')).toEqual({ status: 'error', message: 'the disk is busy' });
+    failing.clear();
+    store.getState().retryFailed(commitTarget());
+    await tick();
+    expect(main.callsOf('git.commitDiff').filter((input) => input.path !== undefined).map((input) => input.path)).toEqual(['src/a.ts', 'src/b.ts', 'src/b.ts']);
+    expect(fileDiffOf(store.getState(), commitTarget(), 'src/b.ts')?.status).toBe('ok');
+    off();
+  });
+
+  // The branch's max panel, ruling 1 (Decision Log 49): a lost capability stops new reads of the three only. What they
+  // answered stays; a read owed meanwhile (a new status, a membership check) is asked once they are listed again;
+  // `git.diff` is asked as before
+  it('asks none of the three reads while the machine does not list them, keeps their answers, and asks what was owed once it does', async () => {
+    vi.useFakeTimers();
+    const roster = (capabilities?: string[]) => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-16T10:00:00.000Z', generation: 0, ...(capabilities ? { capabilities } : {}) }]);
+    roster(['rl2.git-reads']);
+    try {
+      const main = installFakeMain((name) => {
+        if (name === 'git.changesSince') return ok({ patch: APP_PATCH, files: APP_FILES, untracked: [] });
+        if (name === 'git.diff') return ok({ patch: APP_PATCH, files: APP_FILES });
+        if (name === 'git.commitDiff') return ok({ commit: COMMIT, onHead: true, patch: APP_PATCH, files: APP_FILES });
+        return ok();
+      });
+      const store = createReviewStore(createClient(() => main.bridge), { machines: useMachines });
+      const since: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD' };
+      const staged: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'staged', read: 'git.diff', against: null };
+      const offs = [store.getState().hold(since), store.getState().hold(staged), store.getState().hold(commitTarget())];
+      await vi.advanceTimersByTimeAsync(0);
+      const asked = () => (['git.changesSince', 'git.diff', 'git.commitDiff'] as const).map((name) => main.callsOf(name).length);
+      expect(asked()).toEqual([1, 1, 1]);
+
+      for (const lost of [undefined, ['rl2.project-acts']]) {
+        roster(lost);
+        store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
+        store.getState().checkMembership(commitTarget());
+        store.getState().refresh(since);
+        store.getState().loadFile(since, 'src/app.ts');
+        await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS * 2);
+        const [sinceReads, diffReads, commitReads] = asked();
+        expect([sinceReads, commitReads]).toEqual([1, 1]); // none of the three, a file of one included
+        expect(diffReads).toBeGreaterThan(1); // git.diff as before
+        expect(diffOf(store.getState(), since)?.status).toBe('ok');
+        expect(diffOf(store.getState(), commitTarget())?.status).toBe('ok');
+      }
+      roster(['rl2.git-reads']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(main.callsOf('git.changesSince').filter((input) => input.path === undefined)).toHaveLength(2); // the owed re-read, once
+      expect(main.callsOf('git.commitDiff')).toEqual([{ directory: DIR, commit: SHA }, { directory: DIR, commit: SHA, patch: false }]); // the owed check, and no read of what it has
+      offs.forEach((off) => off());
+    } finally {
+      useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+    }
+  });
+
+  // ---- who a read names (the fix wave's review, Decision Log 54) ------------------------------------------------------------
+  // Every read the store asks, now, later or again, is addressed by a holder that is there when it is asked; what a tab
+  // keeps goes when the tab closes, its selection changes or its session is gone; a session changed with the commit kept
+  // rebinds the hold. Two sessions of another machine share one checkout here, so the session each read names is seen.
+  describe('who a read names (Decision Log 54)', () => {
+    const ONE = addressOf(OTHER_MACHINE, 'app-one' as AppSessionId);
+    const TWO = addressOf(OTHER_MACHINE, 'app-two' as AppSessionId);
+    const named = { [ONE]: { machine: OTHER_MACHINE, session: 'app-one' }, [TWO]: { machine: OTHER_MACHINE, session: 'app-two' } };
+    const on = (session: AppSessionId, over: Partial<DiffTarget> = {}): DiffTarget => ({ machine: OTHER_MACHINE, directory: '/work', scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD', session, ...over });
+    const commitOn = (session: AppSessionId) => on(session, { scope: 'commit', read: 'git.commitDiff', against: SHA });
+    const roster = (capabilities?: string[]) =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'berth-mini', local: false, state: 'up', since: '2026-11-16T10:00:00.000Z', generation: 0, ...(capabilities ? { capabilities } : {}) }]);
+    let fileFails = false;
+    const setup = () => {
+      const main = installFakeMain((name, input) => {
+        if (typeof input.path === 'string' && fileFails) return fail('the disk is busy');
+        if (name === 'git.changesSince') return ok({ patch: typeof input.path === 'string' ? APP_PATCH : 'x'.repeat(REVIEW_SCOPE_BYTES_CAP + 1), files: APP_FILES, untracked: [] });
+        if (name === 'git.commitDiff') return ok({ commit: COMMIT, onHead: input.patch !== false, patch: input.patch === false ? '' : APP_PATCH, files: input.patch === false ? [] : APP_FILES });
+        return ok();
+      });
+      const store = createReviewStore(createClient(() => main.bridge), { machines: useMachines, sessions: useSessions });
+      return { main, store };
+    };
+    beforeEach(() => {
+      fileFails = false;
+      roster(['rl2.git-reads']);
+      useSessions.setState((s) => ({ records: new Map(s.records).set(ONE, record(ONE, { directory: '/work' })).set(TWO, record(TWO, { directory: '/work' })) }));
+    });
+    afterEach(() => {
+      useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(ONE);
+        records.delete(TWO);
+        return { records };
+      });
+    });
+    const drop = (session: AppSessionId) =>
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(session);
+        return { records };
+      });
+
+    it('a held scope’s read, a file’s read and their retries name the earliest holder still holding it once another lets go', async () => {
+      const { main, store } = setup();
+      const first = store.getState().hold(on(ONE));
+      const second = store.getState().hold(on(TWO));
+      await tick();
+      first();
+      store.getState().refresh(on(ONE)); // asked by a surface that left: addressed by the one still there
+      await tick();
+      fileFails = true;
+      store.getState().loadFile(on(ONE), 'src/app.ts');
+      await tick();
+      fileFails = false;
+      store.getState().retryFile(on(TWO), 'src/app.ts');
+      await tick();
+      expect(main.targetsOf('git.changesSince')).toEqual([named[ONE], named[TWO], named[TWO], named[TWO]]);
+      expect(fileDiffOf(store.getState(), on(TWO), 'src/app.ts')?.status).toBe('ok');
+      second();
+    });
+
+    it('a read owed while the reads were lost, the scope’s or a file’s, is asked through the holder there when they return', async () => {
+      vi.useFakeTimers();
+      const { main, store } = setup();
+      const first = store.getState().hold(on(ONE));
+      const second = store.getState().hold(on(TWO));
+      await vi.advanceTimersByTimeAsync(0);
+      roster();
+      store.getState().statusChanged(checkoutKey(OTHER_MACHINE, '/work'));
+      store.getState().loadFile(on(ONE), 'src/app.ts');
+      await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS * 2);
+      expect(main.targetsOf('git.changesSince')).toHaveLength(1);
+      first();
+      roster(['rl2.git-reads']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(main.targetsOf('git.changesSince')).toEqual([named[ONE], named[TWO], named[TWO]]);
+      second();
+    });
+
+    it('an owed membership check is asked through a holder still there when the reads return, and not at all once none is (finding c)', async () => {
+      const { main, store } = setup();
+      const first = store.getState().hold(commitOn(ONE));
+      const second = store.getState().hold(commitOn(TWO));
+      await tick();
+      roster();
+      store.getState().checkMembership(commitOn(ONE));
+      first();
+      roster(['rl2.git-reads']);
+      await tick();
+      expect(main.callsOf('git.commitDiff').filter((input) => input.patch === false)).toHaveLength(1);
+      expect(main.targetsOf('git.commitDiff').at(-1)).toEqual(named[TWO]);
+      roster();
+      store.getState().checkMembership(commitOn(TWO));
+      second();
+      roster(['rl2.git-reads']);
+      await tick();
+      expect(main.callsOf('git.commitDiff').filter((input) => input.patch === false)).toHaveLength(1); // none holds it: nothing asked
+    });
+
+    it('a tab retargeted to another session on the same commit keeps its answer and names the new session from then on (finding b)', async () => {
+      const { main, store } = setup();
+      const tab = {};
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      store.getState().keepCommit(tab, commitOn(TWO), true);
+      await tick();
+      expect(main.callsOf('git.commitDiff')).toHaveLength(1); // the loaded answer kept
+      expect(diffOf(store.getState(), commitOn(TWO))?.status).toBe('ok');
+      fileFails = true;
+      store.getState().loadFile(commitOn(TWO), 'src/app.ts');
+      await tick();
+      fileFails = false;
+      store.getState().retryFailed(commitOn(TWO));
+      store.getState().checkMembership(commitOn(TWO));
+      await tick();
+      expect(main.targetsOf('git.commitDiff')).toEqual([named[ONE], named[TWO], named[TWO], named[TWO]]);
+      act(() => drop(ONE)); // the first session gone: the tab holds the commit for the second
+      expect(diffOf(store.getState(), commitOn(TWO))?.status).toBe('ok');
+      store.getState().releaseTab(tab);
+      expect(diffOf(store.getState(), commitOn(TWO))).toBeUndefined();
+    });
+
+    it('a tab whose session is gone lets go of its commit, and nothing is asked for it after (finding a)', async () => {
+      const { main, store } = setup();
+      const tab = {};
+      const other = {};
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      roster();
+      store.getState().checkMembership(commitOn(ONE)); // owed
+      act(() => drop(ONE));
+      expect(diffOf(store.getState(), commitOn(ONE))).toBeUndefined();
+      roster(['rl2.git-reads']);
+      store.getState().checkMembership(commitOn(ONE));
+      store.getState().retryFailed(commitOn(ONE));
+      store.getState().keepCommit(other, commitOn(ONE), true); // a tab for a session that is gone keeps nothing
+      await tick();
+      expect(main.callsOf('git.commitDiff')).toHaveLength(1);
+      expect(diffOf(store.getState(), commitOn(ONE))).toBeUndefined();
+    });
+
+    it('a release that arrives after a reset deletes no newer hold, a tab’s and a commit’s membership included', async () => {
+      const { store } = setup();
+      const late = store.getState().hold(on(ONE));
+      const lateCommit = store.getState().hold(commitOn(ONE));
+      const tab = {};
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      store.getState().reset();
+      const newer = store.getState().hold(on(ONE));
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      store.getState().checkMembership(commitOn(ONE));
+      await tick();
+      expect(onHeadOf(store.getState(), commitOn(ONE))).toBe(false);
+      late();
+      lateCommit();
+      expect(diffOf(store.getState(), on(ONE))?.status).toBe('ok');
+      expect(diffOf(store.getState(), commitOn(ONE))?.status).toBe('ok');
+      expect(onHeadOf(store.getState(), commitOn(ONE))).toBe(false); // the newer hold's membership stands
+      newer();
+      store.getState().releaseTab(tab);
+    });
+  });
+
+  it('checks a commit’s membership with patch: false, one more when HEAD moves twice during a check (async 3)', async () => {
+    const answers: ((onHead: boolean) => void)[] = [];
+    const main = installFakeMain(async (name, input) => {
+      if (name !== 'git.commitDiff') return ok();
+      if (input.patch !== false) return ok({ commit: COMMIT, onHead: true, patch: APP_PATCH, files: APP_FILES });
+      const onHead = await new Promise<boolean>((resolve) => answers.push(resolve));
+      return ok({ commit: COMMIT, onHead, patch: '', files: [] });
+    });
+    const store = createReviewStore(createClient(() => main.bridge));
+    const off = store.getState().hold(commitTarget());
+    await tick();
+    store.getState().checkMembership(commitTarget());
+    store.getState().checkMembership(commitTarget());
+    store.getState().checkMembership(commitTarget());
+    await tick();
+    expect(main.callsOf('git.commitDiff').filter((input) => input.patch === false)).toHaveLength(1);
+    answers[0](true);
+    await tick();
+    expect(main.callsOf('git.commitDiff').filter((input) => input.patch === false)).toEqual([
+      { directory: DIR, commit: SHA, patch: false },
+      { directory: DIR, commit: SHA, patch: false },
+    ]);
+    answers[1](false);
+    await tick();
+    expect(onHeadOf(store.getState(), commitTarget())).toBe(false);
+    expect(main.callsOf('git.commitDiff').filter((input) => input.patch !== false)).toHaveLength(1); // the patch is not read again
+    off();
   });
 });
 
@@ -572,7 +944,16 @@ interface ReviewMainOptions {
 }
 function reviewMain(options: ReviewMainOptions = {}) {
   // `diff`: a test's own answer to a `git.diff` (a held one), else undefined for the scripted answers below
-  const state: { status: GitStatus; uncommitted: DiffAnswer; perFile: Record<string, DiffAnswer>; diff?: (input: Record<string, unknown>) => Promise<ReturnType<typeof ok>> | undefined } = {
+  // UX wave U5b-2: the three reads, answered where a case scripts them (`branch`, `since`, `commits`)
+  const state: {
+    status: GitStatus;
+    uncommitted: DiffAnswer;
+    perFile: Record<string, DiffAnswer>;
+    diff?: (input: Record<string, unknown>) => Promise<ReturnType<typeof ok>> | undefined;
+    branch?: () => ReturnType<typeof ok> | Promise<ReturnType<typeof ok>>;
+    since?: (input: Record<string, unknown>) => ReturnType<typeof ok> | Promise<ReturnType<typeof ok>>;
+    commits?: (input: Record<string, unknown>) => ReturnType<typeof ok> | Promise<ReturnType<typeof ok>>;
+  } = {
     perFile: {},
     status: options.status ?? DIRTY,
     uncommitted: options.uncommitted ?? {
@@ -594,6 +975,12 @@ function reviewMain(options: ReviewMainOptions = {}) {
         return ok({ value: null });
       case 'fs.workflows':
         return ok({ runs: [] });
+      case 'git.branchCommits':
+        return state.branch?.() ?? ok();
+      case 'git.changesSince':
+        return state.since?.(input) ?? ok();
+      case 'git.commitDiff':
+        return state.commits?.(input) ?? ok();
       case 'git.worktree.branch': // C10: the main worktree is on main
         return ok({ repoRoot: input.repoRoot, branch: input.branch, head: state.status.head, checkedOutAt: input.branch === 'main' ? '/repo' : null, base: 'main', ahead: 0, merged: true });
       default:
@@ -725,7 +1112,7 @@ describe('review tool', () => {
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
     expect(chips()).toEqual([
       ['uncommitted', false, 'true', ''],
-      ['branch', true, 'false', "Session runs on main, the main worktree's branch"],
+      ['branch', true, 'false', ''], // UX wave U5b-2: no roster here, so whether the machine serves the reads is not known
       ['turn', true, 'false', 'No turn has changed files yet'],
       ['staged', false, 'false', ''],
     ]);
@@ -740,7 +1127,7 @@ describe('review tool', () => {
     ]);
   });
 
-  it('shows Staged only while the index differs, and says why This branch is unavailable on a detached head', async () => {
+  it('shows Staged only while the index differs, and leaves This branch unsettled, with no reason, where the window cannot tell whether the machine serves the reads', async () => {
     main().state.status = statusOf({ dirty: false, branch: null, head: 'fedcba9876543210' });
     main().state.uncommitted = { patch: '', files: [] };
     render(<TestHost />);
@@ -748,7 +1135,7 @@ describe('review tool', () => {
     await waitFor(() => expect(chipOf('uncommitted')?.getAttribute('aria-pressed')).toBe('true'));
     expect(chips()).toEqual([
       ['uncommitted', false, 'true', ''],
-      ['branch', true, 'false', 'Detached HEAD'],
+      ['branch', true, 'false', ''],
       ['turn', true, 'false', 'No turn has changed files yet'],
     ]);
     await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No uncommitted changes'));
@@ -1432,7 +1819,8 @@ describe('review tool', () => {
     const events = journalToEvents(loadSyntheticJournal('edit-and-receipt'));
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve(events) }));
     const divider = changedTurn();
-    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: divider.turnId! }));
+    const tab = {};
+    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: divider.turnId!, tab }));
     const before = result.current.list;
     expect(before).toMatchObject({ phase: 'ready', files: [
       { path: '/tmp/maws-synth-edit-and-receipt/src/app.ts', kind: 'modified', added: 1, removed: 1 },
@@ -1535,6 +1923,615 @@ describe('review tool', () => {
     fireEvent.click(line);
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
+  });
+});
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, M9; §E): "This branch" is the
+// working tree against the merge base with the repository's default branch, for every session, and a new file's lines are
+// counted, in its header and in the totals. The machine serves the reads (its `capabilities` list `rl2.git-reads`).
+describe('This branch and the new files counted (UX wave U5b-2)', () => {
+  const offs: (() => void)[] = [];
+  const MERGE_BASE = '9d0c1b2a39485766a5b4c3d2e1f0a9b8c7d6e5f4';
+  const FEATURE = statusOf({
+    branch: 'feature/x',
+    upstream: 'origin/feature/x',
+    dirty: true,
+    files: [
+      { path: 'src/app.ts', oldPath: null, index: '.', worktree: 'M', untracked: false },
+      { path: 'notes/berths.md', oldPath: null, index: '?', worktree: '?', untracked: true },
+    ],
+  });
+  const COMMITTED = ['diff --git a/src/committed.ts b/src/committed.ts', 'index 5..6 100644', '--- a/src/committed.ts', '+++ b/src/committed.ts', '@@ -1,2 +1,3 @@', ' one', '+two', ' three', ''].join('\n');
+  const COMMITTED_FILE = { path: 'src/committed.ts', oldPath: null, insertions: 1, deletions: 0, binary: false };
+  const UNTRACKED = [{ path: 'notes/berths.md', insertions: 12, binary: false }];
+  const branchAnswer = (over: Record<string, unknown> = {}) =>
+    ok({ base: { ref: 'origin/main', mergeBase: MERGE_BASE }, upstream: 'origin/feature/x', commits: [], counts: { all: 1, notPushed: 1, pushed: 0 }, behind: 0, ...over });
+  const serveReads = (capabilities: string[] = ['rl2.git-reads']) =>
+    useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-15T10:00:00.000Z', generation: 0, capabilities }]);
+
+  beforeAll(async () => {
+    await import('./FileBody');
+  });
+  beforeEach(() => {
+    resetPanelStores();
+    useReview.getState().reset();
+    resetDiffTabs();
+    useViewer.getState().reset();
+    useBranchReads.getState().reset();
+    current = reviewMain({ status: FEATURE, uncommitted: { patch: APP_PATCH, files: APP_FILES } }); // git.diff's answer where the reads are not served
+    main().state.branch = () => branchAnswer();
+    main().state.since = (input) =>
+      ok(input.against === 'HEAD' ? { patch: APP_PATCH, files: APP_FILES, untracked: UNTRACKED } : { patch: COMMITTED + APP_PATCH, files: [COMMITTED_FILE, ...APP_FILES], untracked: UNTRACKED });
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo' })) }));
+    offs.push(connectPanelEvents(), registerPanelTool(reviewTool), registerPanelTool(filesTool));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+    useBranchReads.getState().reset();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('shows a new file of twelve lines as "+12" beside "Untracked", and counts it in the totals, in Uncommitted and in This branch', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: 'HEAD' });
+    expect(badgeOf('notes/berths.md')).toBe('Untracked');
+    expect(countsOf('notes/berths.md')).toBe('+12');
+    expect(header()).toBe('2 files changed · +14 −0');
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
+    expect(countsOf('notes/berths.md')).toBe('+12');
+    expect(header()).toBe('3 files changed · +15 −0');
+  });
+
+  it('for a session in the main checkout on a feature branch: This branch is enabled, measured against the merge base with the default branch, and its footer reads "feature/x · Since origin/main"', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(chipOf('branch')?.disabled).toBe(false));
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: MERGE_BASE });
+    expect(main().callsOf('git.worktree.branch')).toEqual([]);
+    expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']); // a committed change, an uncommitted edit and a new file
+  });
+
+  it('measures a worktree session against the same default branch, not what the main checkout has checked out', async () => {
+    main().state.status = statusOf({ ...FEATURE, isWorktree: true, branch: 'feature/y', dirty: false, files: [] });
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(footer()).toBe('feature/y · Since origin/main')); // a clean tree opens on This branch
+    expect(main().callsOf('git.worktree.branch')).toEqual([]);
+  });
+
+  it('reads This branch again when the branch read answers another merge base', async () => {
+    const MOVED = '1111111111111111111111111111111111111111';
+    serveReads();
+    openReview({ scope: 'branch' });
+    render(<TestHost />);
+    await waitFor(() => expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: MERGE_BASE }));
+    main().state.branch = () => branchAnswer({ base: { ref: 'origin/main', mergeBase: MOVED }, behind: 2 });
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await waitFor(() => expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: MOVED }));
+  });
+
+  it('ends the totals with the new files not counted past the caps', async () => {
+    main().state.status = statusOf({ ...FEATURE, files: [...FEATURE.files, { path: 'big.csv', oldPath: null, index: '?', worktree: '?', untracked: true }, { path: 'more.md', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    main().state.since = () => ok({ patch: APP_PATCH, files: APP_FILES, untracked: [...UNTRACKED, { path: 'big.csv', insertions: null, binary: false }] }); // big.csv past its byte cap, more.md past the count's files
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(header()).toBe('4 files changed · +14 −0, and 2 untracked files not counted'));
+    expect(countsOf('big.csv')).toBeNull();
+    expect(countsOf('more.md')).toBeNull();
+  });
+
+  it('where the machine does not serve the reads, reads Uncommitted with git.diff, its new files uncounted and named in the totals, and turns This branch off with its sentence (R2)', async () => {
+    serveReads(['rl2.project-acts']);
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(header()).toBe('2 files changed · +2 −0, and 1 untracked file not counted'));
+    expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', "This branch needs this Mac’s MAWS service to be updated"]);
+    expect(countsOf('notes/berths.md')).toBeNull();
+    expect(reads()).toContainEqual({ directory: '/repo', scope: 'all' });
+    expect(main().callsOf('git.changesSince')).toEqual([]);
+    expect(main().callsOf('git.branchCommits')).toEqual([]);
+  });
+
+  it('while whether the machine serves the reads is not known, asks none of them and reads Uncommitted as today, with no word of uncounted files', async () => {
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(header()).toBe('2 files changed · +2 −0'));
+    expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', '']);
+    for (const name of ['git.changesSince', 'git.branchCommits', 'git.commitDiff'] as const) expect(main().callsOf(name)).toEqual([]);
+  });
+
+  // ---- a commit in Review (S13, S14, S16 to S18, S20, S22) -----------------------------------------------------------------
+  const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+  const OTHER_SHA = 'aa11bb22cc33dd44ee55ff6600778899aabbccdd';
+  const commitOf = (sha: string, over: Record<string, unknown> = {}) => ({ sha, shortSha: sha.slice(0, 7), author: 'Ada', authoredAt: '2026-11-14T10:00:00.000Z', subject: 'Quote the berth names', parents: ['0000000000000000000000000000000000000001'], ...over });
+  const commitAnswer = (sha: string, onHead = true, over: Record<string, unknown> = {}) => ok({ commit: commitOf(sha, over), onHead, patch: COMMITTED + APP_PATCH, files: [COMMITTED_FILE, ...APP_FILES] });
+  const openCommitted = (commit: string, path?: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'commit', commit, ...(path ? { path } : {}) } }));
+
+  it('opens a commit: its chip listed and pressed, its subject the title, the totals without a scope word, its files, and its footer; HEAD moving asks one membership check, whose answer ends the footer (S13, S17)', async () => {
+    serveReads();
+    main().state.commits = (input) => (input.patch === false ? ok({ commit: commitOf(SHA), onHead: false, patch: '', files: [] }) : commitAnswer(SHA));
+    openCommitted(SHA, 'src/app.ts');
+    render(<TestHost />);
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names'));
+    expect(chips().find((c) => c[0] === 'commit')).toEqual(['commit', false, 'true', 'Quote the berth names']);
+    expect(chipOf('commit')!.textContent).toBe('Commit 3f9a1c2');
+    expect(header()).toBe('2 files changed · +3 −0');
+    expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']);
+    expect(main().callsOf('git.commitDiff')).toEqual([{ directory: '/repo', commit: SHA }]);
+    const amended = { ...FEATURE, head: 'fedcba9876543210' };
+    main().state.status = amended;
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: amended, reason: 'head' }));
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    expect(main().callsOf('git.commitDiff')).toEqual([
+      { directory: '/repo', commit: SHA },
+      { directory: '/repo', commit: SHA, patch: false },
+    ]);
+  });
+
+  it('says a merge commit is read against its first parent, and a detached HEAD’s commit is not in HEAD now', async () => {
+    serveReads();
+    main().state.status = statusOf({ ...FEATURE, branch: null });
+    main().state.commits = () => commitAnswer(SHA, false, { parents: ['0000000000000000000000000000000000000001', '0000000000000000000000000000000000000002'] });
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · against its first parent · not in HEAD now'));
+  });
+
+  it('holds the commit’s read open: This branch chosen meanwhile is shown and the chip stays listed; chosen again, the chip reads nothing more; a second commit replaces it, the first answer dropped (async 2, S14)', async () => {
+    serveReads();
+    const first = deferred<ReturnType<typeof ok>>();
+    main().state.commits = (input) => (input.commit === SHA ? first.promise : commitAnswer(OTHER_SHA));
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(1));
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    expect(chipOf('commit')?.getAttribute('aria-pressed')).toBe('false');
+    first.resolve(commitAnswer(SHA));
+    await waitFor(() => expect(chipOf('commit')?.title).toBe('Quote the berth names'));
+    fireEvent.click(chipOf('commit')!);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+    expect(main().callsOf('git.commitDiff')).toHaveLength(1); // one read in all
+
+    const THIRD_SHA = 'cc33dd44ee55ff6600778899aabbccddeeff0011';
+    const late = deferred<ReturnType<typeof ok>>();
+    main().state.commits = (input) => (input.commit === THIRD_SHA ? late.promise : commitAnswer(OTHER_SHA, true, { subject: 'Name the berth columns' }));
+    openCommitted(THIRD_SHA); // its read held open
+    await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(2));
+    openCommitted(OTHER_SHA);
+    await waitFor(() => expect(chipOf('commit')?.textContent).toBe('Commit aa11bb2'));
+    late.resolve(commitAnswer(THIRD_SHA, true, { subject: 'A late answer' }));
+    await waitFor(() => expect(footer()).toBe('Commit aa11bb2 · Name the berth columns'));
+    expect(chips().filter((c) => c[0] === 'commit')).toEqual([['commit', false, 'true', 'Name the berth columns']]);
+  });
+
+  it('keeps a commit’s marks its own: a file marked Viewed in one commit is not marked in another or in This branch (S18)', async () => {
+    serveReads();
+    main().state.commits = (input) => commitAnswer(input.commit as string);
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+    markViewed('src/app.ts');
+    await waitFor(() => expect(viewed('src/app.ts')).toBe(true));
+    openCommitted(OTHER_SHA);
+    await waitFor(() => expect(chipOf('commit')?.textContent).toBe('Commit aa11bb2'));
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+    expect(viewed('src/app.ts')).toBe(false);
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
+    expect(viewed('src/app.ts')).toBe(false);
+  });
+
+  it('a diff tab whose ref names a commit on a machine without the reads says so and sends nothing (S20)', async () => {
+    serveReads([]);
+    const tab = { kind: 'diff' as const, id: 'diff-commit', appSessionId: A, ref: `commit:${SHA}`, pinned: false };
+    render(<DiffTab tab={tab} />);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe("Diff unavailable: this Mac’s MAWS service is older than this window"));
+    expect(main().callsOf('git.commitDiff')).toEqual([]);
+  });
+
+  it('a commit’s read that failed offline says so with Retry, which brings the diff; so does the machine heard again (S22)', async () => {
+    serveReads();
+    let fails = true;
+    main().state.commits = () => (fails ? ({ ok: false, error: { code: 'host_unavailable', message: 'the link dropped' } } as never) : commitAnswer(SHA));
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: This Mac is offlineRetry'));
+    fails = false;
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-review-retry]')!);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+    expect(main().callsOf('git.commitDiff')).toHaveLength(2);
+
+    act(() => useReview.getState().reset());
+    fails = true;
+    openCommitted(OTHER_SHA);
+    await waitFor(() => expect(document.querySelector('[data-review-retry]')).not.toBeNull());
+    const calls = main().callsOf('git.commitDiff').length;
+    fails = false;
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'down', since: '2026-11-15T10:01:00.000Z', generation: 0, capabilities: ['rl2.git-reads'] }]));
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-15T10:02:00.000Z', generation: 1, capabilities: ['rl2.git-reads'] }]));
+    await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(calls + 1));
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+  });
+
+  // M9 fix 2 (Decision Log 38, 2): a commit's membership belongs to the hold that asked it; reopened, the fresh read's stands
+  for (const [first, checked] of [
+    [true, false],
+    [false, true],
+  ] as const)
+    it(`reopened after HEAD moved, shows the fresh read’s membership, not the last check’s (read ${first ? 'in' : 'not in'} HEAD, checked ${checked ? 'in' : 'not in'})`, async () => {
+      serveReads();
+      let full = first;
+      main().state.commits = (input) => (input.patch === false ? ok({ commit: commitOf(SHA), onHead: checked, patch: '', files: [] }) : commitAnswer(SHA, full));
+      const words = (onHead: boolean) => `Commit 3f9a1c2 · Quote the berth names${onHead ? '' : ' · not on feature/x now'}`;
+      openCommitted(SHA);
+      render(<TestHost />);
+      await waitFor(() => expect(footer()).toBe(words(first)));
+      const moved = { ...FEATURE, head: 'fedcba9876543210' };
+      main().state.status = moved;
+      act(() => main().emit('git.changed', { repoRoot: '/repo', status: moved, reason: 'head' }));
+      await waitFor(() => expect(footer()).toBe(words(checked)));
+      await act(() => panelHost.closeTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
+      await waitFor(() => expect(footer()).toBeNull());
+      const back = { ...FEATURE, head: '0123456789abcdef' }; // HEAD moved again while Review was closed
+      main().state.status = back;
+      act(() => main().emit('git.changed', { repoRoot: '/repo', status: back, reason: 'head' }));
+      full = first;
+      openCommitted(SHA);
+      await waitFor(() => expect(main().callsOf('git.commitDiff').filter((input) => input.patch !== false)).toHaveLength(2)); // read afresh
+      await waitFor(() => expect(footer()).toBe(words(first)));
+      await act(tick);
+      expect(footer()).toBe(words(first));
+    });
+
+  // M9 fix 2 (Decision Log 38, 3): a branch read that failed before it ever answered leaves This branch enabled; chosen, it
+  // says the failure in §H's words with Retry, which asks the branch read again and nothing else
+  it('a first branch read that failed: This branch enabled, its failure and Retry in the body; Retry asks one branch read and, answered, shows the branch; a later failure changes nothing seen', async () => {
+    serveReads();
+    let answer: Promise<ReturnType<typeof ok>> | ReturnType<typeof ok> = fail('fatal: no merge base');
+    main().state.branch = () => answer;
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(1));
+    await waitFor(() => expect(chipOf('branch')?.disabled).toBe(false));
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: fatal: no merge baseRetry'));
+    const held = deferred<ReturnType<typeof ok>>();
+    answer = held.promise;
+    const others = () => (['git.changesSince', 'git.diff', 'git.commitDiff'] as const).map((name) => main().callsOf(name).length);
+    const before = others();
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-review-retry]')!);
+    await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(2));
+    await act(tick);
+    expect(main().callsOf('git.branchCommits')).toHaveLength(2);
+    expect(others()).toEqual(before); // only the branch read
+    held.resolve(branchAnswer());
+    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
+    answer = fail('fatal: the remote hung up');
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(3));
+    await act(tick);
+    expect(footer()).toBe('feature/x · Since origin/main');
+    expect(document.querySelector('[data-review-unavailable]')).toBeNull();
+    expect(chipOf('branch')?.disabled).toBe(false);
+  });
+
+  // M9 fix 2 (the review's fifth finding; S22): a commit's file whose own read failed past the cap, asked again by each of
+  // the three triggers; the scope's read and a file that answered are not asked again
+  it('asks a commit’s failed file again by its Retry, by Review shown again and by the machine heard again, and nothing that answered (S22)', async () => {
+    serveReads();
+    let fails = true;
+    main().state.commits = (input) => {
+      if (typeof input.path !== 'string') return ok({ commit: commitOf(SHA), onHead: true, patch: 'x'.repeat(REVIEW_SCOPE_BYTES_CAP + 1), files: [COMMITTED_FILE, ...APP_FILES] });
+      if (input.path === 'src/app.ts' && fails) return fail('the disk is busy');
+      return ok({ commit: commitOf(SHA), onHead: true, patch: input.path === 'src/app.ts' ? APP_PATCH : COMMITTED, files: [] });
+    };
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+    fold('src/committed.ts');
+    fold('src/app.ts');
+    const readsOf = (path?: string) => main().callsOf('git.commitDiff').filter((input) => input.path === path && input.patch !== false).length;
+    const failure = () => sectionOf('src/app.ts')?.querySelector('[role="status"]')?.textContent ?? null;
+    await waitFor(() => expect(failure()).toBe('Diff unavailable: the disk is busyRetry'));
+    await waitFor(() => expect(readsOf('src/committed.ts')).toBe(1));
+    const expectOneMore = async (app: number) => {
+      await waitFor(() => expect(readsOf('src/app.ts')).toBe(app + 1));
+      await act(tick);
+      expect([readsOf(), readsOf('src/committed.ts'), readsOf('src/app.ts')]).toEqual([1, 1, app + 1]);
+    };
+
+    let app = readsOf('src/app.ts');
+    fireEvent.click(within(sectionOf('src/app.ts')!).getByRole('button', { name: 'Retry' }));
+    await expectOneMore(app);
+
+    app = readsOf('src/app.ts');
+    act(() => useLayout.getState().setPanel({ collapsed: true })); // the side column folded: Review mounted, out of view
+    act(() => useLayout.getState().setPanel({ collapsed: false })); // and shown again
+    await expectOneMore(app);
+
+    app = readsOf('src/app.ts');
+    fails = false;
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'down', since: '2026-11-15T10:01:00.000Z', generation: 0, capabilities: ['rl2.git-reads'] }]));
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-15T10:02:00.000Z', generation: 1, capabilities: ['rl2.git-reads'] }]));
+    await expectOneMore(app);
+    await waitFor(() => expect(failure()).toBeNull());
+  });
+
+  // UX wave U5b-2 fix 1 (Decision Log 37): an empty commit's words, where Uncommitted's empty message stands
+  it('says “No changes in this commit” for a commit with no change against its first parent', async () => {
+    serveReads();
+    main().state.commits = () => ok({ commit: commitOf(SHA), onHead: true, patch: '', files: [] });
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes in this commit'));
+    expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+  });
+
+  // ---- what a tab has loaded, it keeps (the branch's max panel, ruling 1; Decision Log 49; §G) ------------------------------
+  // A tab that has loaded a commit's read keeps it until the tab closes or its selection changes; a capability lost stops
+  // new reads only, and they resume when it returns; showing another tab and coming back reads nothing again. Counted in
+  // reads asked, never in time.
+  const roster = (state: 'up' | 'down', capabilities?: readonly string[]) =>
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state, since: '2026-11-16T10:00:00.000Z', generation: 1, ...(capabilities ? { capabilities: [...capabilities] } : {}) }]));
+  const fullReads = () => main().callsOf('git.commitDiff').filter((input) => input.patch !== false).length;
+  const checks = () => main().callsOf('git.commitDiff').filter((input) => input.patch === false).length;
+  const reviewTab = () => panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id;
+  const hideReview = async () => {
+    act(() => void panelHost.addTool('files', { appSessionId: A })); // another tab of the side column shown in Review's place
+    await waitFor(() => expect(document.querySelector('[data-review]')).toBeNull());
+  };
+  const showAgain = () => act(() => panelHost.selectTab(reviewTab()));
+  const keptDiff = (sha: string) => diffOf(useReview.getState(), { machine: TEST_MACHINE, directory: '/repo', scope: 'commit', read: 'git.commitDiff', against: sha });
+  const COMMIT_PATHS = ['src/committed.ts', 'src/app.ts'];
+  const notOnHead = (input: Record<string, unknown>) => (input.patch === false ? ok({ commit: commitOf(SHA), onHead: false, patch: '', files: [] }) : commitAnswer(SHA));
+  const moveHead = () => {
+    const moved = { ...FEATURE, head: 'fedcba9876543210' };
+    main().state.status = moved;
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: moved, reason: 'head' }));
+  };
+
+  for (const [loss, state, capabilities] of [
+    ['a disconnect', 'down', undefined],
+    ['the reads no longer listed', 'up', ['rl2.project-acts']],
+  ] as const)
+    it(`keeps a commit’s diff drawn through ${loss}, asking nothing, and asks nothing it has once the reads return`, async () => {
+      serveReads();
+      main().state.commits = () => commitAnswer(SHA);
+      openCommitted(SHA);
+      render(<TestHost />);
+      await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+      roster(state, capabilities);
+      await act(tick);
+      expect(paths()).toEqual(COMMIT_PATHS);
+      expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+      expect(document.querySelector('[data-review-unavailable]')).toBeNull();
+      roster('up', ['rl2.git-reads']);
+      await act(tick);
+      expect(paths()).toEqual(COMMIT_PATHS);
+      expect(main().callsOf('git.commitDiff')).toHaveLength(1);
+    });
+
+  it('reads nothing again when its tab is hidden and shown again; HEAD moved meanwhile asks one membership check', async () => {
+    serveReads();
+    main().state.commits = notOnHead;
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await hideReview();
+    showAgain();
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await act(tick);
+    expect([fullReads(), checks()]).toEqual([1, 0]);
+    await hideReview();
+    moveHead();
+    showAgain();
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    await act(tick);
+    expect([fullReads(), checks()]).toEqual([1, 1]);
+  });
+
+  // §G's "Review being shown again": a kept commit's read that failed is asked again when its tab is drawn again
+  it('asks a commit’s failed read again when its tab is shown again, once, and nothing once it answered', async () => {
+    serveReads();
+    let fails = true;
+    main().state.commits = () => (fails ? fail('the disk is busy') : commitAnswer(SHA));
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: the disk is busyRetry'));
+    await hideReview();
+    fails = false;
+    showAgain();
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await act(tick);
+    expect(fullReads()).toBe(2);
+    await hideReview();
+    showAgain();
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await act(tick);
+    expect(fullReads()).toBe(2);
+  });
+
+  it('asks a read owed while the reads were lost once they return, and nothing it has', async () => {
+    serveReads();
+    main().state.commits = notOnHead;
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    roster('down');
+    moveHead(); // a membership check is owed, and not asked while the reads are lost
+    await act(tick);
+    expect([fullReads(), checks()]).toEqual([1, 0]);
+    expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+    roster('up', ['rl2.git-reads']);
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    await act(tick);
+    expect([fullReads(), checks()]).toEqual([1, 1]);
+  });
+
+  it('lets go of a commit’s read when its selection changes and when its tab closes, and not while the tab is hidden', async () => {
+    serveReads();
+    main().state.commits = (input) => commitAnswer(input.commit as string);
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(keptDiff(SHA)?.status).toBe('ok'));
+    openCommitted(OTHER_SHA);
+    await waitFor(() => expect(keptDiff(OTHER_SHA)?.status).toBe('ok'));
+    expect(keptDiff(SHA)).toBeUndefined();
+    await hideReview();
+    expect(keptDiff(OTHER_SHA)?.status).toBe('ok');
+    await act(() => panelHost.closeTab(reviewTab()));
+    expect(keptDiff(OTHER_SHA)).toBeUndefined();
+  });
+
+  it('keeps a diff tab’s commit while its body is drawn again, and lets go when the tab closes', async () => {
+    serveReads();
+    main().state.commits = () => commitAnswer(SHA);
+    act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref: `commit:${SHA}` }));
+    const tab = currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'diff') as Parameters<typeof DiffTab>[0]['tab'];
+    const first = render(<DiffTab tab={tab} />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    first.unmount();
+    const second = render(<DiffTab tab={tab} />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await act(tick);
+    expect(main().callsOf('git.commitDiff')).toHaveLength(1);
+    second.unmount();
+    act(() => useLayout.getState().closeTab(tab.id));
+    expect(keptDiff(SHA)).toBeUndefined();
+  });
+
+  // The same rule for the working-tree scopes while Review stays shown: a disconnect keeps what Uncommitted and This branch
+  // read with the reads, and asks nothing in their place (Uncommitted is not read again with git.diff; This branch stays on)
+  it('keeps Uncommitted’s and This branch’s diffs drawn through a disconnect, asking nothing in their place', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    const asked = () => (['git.changesSince', 'git.diff', 'git.branchCommits'] as const).map((name) => main().callsOf(name).length);
+    let before = asked();
+    roster('down');
+    await act(tick);
+    expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']);
+    expect(countsOf('notes/berths.md')).toBe('+12');
+    expect(asked()).toEqual(before);
+    roster('up', ['rl2.git-reads']);
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
+    await act(tick);
+    before = asked();
+    roster('down');
+    await act(tick);
+    expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']);
+    expect(chipOf('branch')?.disabled).toBe(false);
+    expect(footer()).toBe('feature/x · Since origin/main');
+    expect(asked()).toEqual(before);
+  });
+
+  // ---- who a read names, through the mounted surfaces (the fix wave's review, Decision Log 54) ---------------------------
+  const dropRecord = (session: AppSessionId) =>
+    act(() =>
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(session);
+        return { records };
+      }),
+    );
+
+  it('lets go of a commit’s read once its session is gone, and asks nothing for it or for the branch after (finding a)', async () => {
+    serveReads();
+    main().state.commits = notOnHead;
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    const asked = () => [main().callsOf('git.commitDiff').length, main().callsOf('git.branchCommits').length];
+    const before = asked();
+    dropRecord(A);
+    await waitFor(() => expect(keptDiff(SHA)).toBeUndefined());
+    moveHead();
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await act(tick);
+    expect(asked()).toEqual(before);
+  });
+
+  it('a diff tab whose session is gone lets go of its commit (finding a)', async () => {
+    serveReads();
+    main().state.commits = () => commitAnswer(SHA);
+    act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref: `commit:${SHA}` }));
+    const tab = currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'diff') as Parameters<typeof DiffTab>[0]['tab'];
+    render(<DiffTab tab={tab} />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    dropRecord(A);
+    await waitFor(() => expect(keptDiff(SHA)).toBeUndefined());
+    expect(document.querySelector('[data-review]')).toBeNull();
+  });
+
+  it('a pinned Review retargeted to another session on the same commit keeps its diff and names that session from then on (finding b)', async () => {
+    serveReads();
+    useSessions.setState((s) => ({ records: new Map(s.records).set(B, record(B, { directory: '/repo' })) }));
+    main().state.commits = notOnHead;
+    act(() => void panelHost.addTool('review', { appSessionId: A, pin: true, params: { scope: 'commit', commit: SHA } }));
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    act(() => void panelHost.addTool('review', { appSessionId: B, params: { scope: 'commit', commit: SHA } })); // the pin, retargeted
+    await waitFor(() => expect(main().callsOf('git.watch').length).toBeGreaterThanOrEqual(2)); // B's own watch of the same folder
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    expect(fullReads()).toBe(1); // the loaded answer kept
+    dropRecord(A); // the first session gone: the tab holds the commit for B
+    expect(keptDiff(SHA)?.status).toBe('ok');
+    moveHead();
+    await waitFor(() => expect(checks()).toBe(1));
+    expect(main().targetsOf('git.commitDiff').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    expect(main().targetsOf('git.branchCommits').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' })); // HEAD's move asked the branch read too
+  });
+
+  // The scopes' holds are the drawn surface's: no surface is drawn for a session without its record, and a pinned Review
+  // retargeted is drawn again for the new session, so their reads name a session that is there
+  it('a scope’s surface whose session is gone holds nothing, and asks nothing on a new status', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    const uncommitted = { machine: TEST_MACHINE, directory: '/repo', scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD' } as const;
+    expect(diffOf(useReview.getState(), uncommitted)?.status).toBe('ok');
+    const asked = () => (['git.changesSince', 'git.diff', 'git.branchCommits'] as const).map((name) => main().callsOf(name).length);
+    const before = asked();
+    dropRecord(A);
+    await waitFor(() => expect(diffOf(useReview.getState(), uncommitted)).toBeUndefined());
+    act(() => useReview.getState().statusChanged(checkoutKey(TEST_MACHINE, '/repo')));
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await new Promise((resolve) => setTimeout(resolve, REVIEW_REFRESH_MS + 50)); // past the trailing re-read a held scope would make
+    expect(asked()).toEqual(before);
+  });
+
+  it('a pinned Review retargeted to another session reads its scope for that session from then on', async () => {
+    serveReads();
+    useSessions.setState((s) => ({ records: new Map(s.records).set(B, record(B, { directory: '/repo' })) }));
+    act(() => void panelHost.addTool('review', { appSessionId: A, pin: true, params: { scope: 'uncommitted' } }));
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    act(() => void panelHost.addTool('review', { appSessionId: B, params: { scope: 'uncommitted' } }));
+    await waitFor(() => expect(main().callsOf('git.watch').length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    const reads = main().callsOf('git.changesSince').length;
+    act(() => useReview.getState().statusChanged(checkoutKey(TEST_MACHINE, '/repo')));
+    await waitFor(() => expect(main().callsOf('git.changesSince')).toHaveLength(reads + 1));
+    expect(main().targetsOf('git.changesSince').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
+    expect(main().targetsOf('git.branchCommits').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
   });
 });
 

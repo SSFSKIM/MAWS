@@ -85,6 +85,12 @@
 //   back and a pane's answer act on a live launch alone and never resume a session (`LIVE_ONLY`); and a Send now the
 //   endpoint accepted and an earlier engine host refused `unavailable` says so (`host-older`), apart from the endpoint's
 //   own `unavailable`.
+// - The UX wave (U5b-2, M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, decision 14): the
+//   branch read, the commit read and the working-tree read (`GIT_READ_CALLS`) are the adapter's, not the manager's path,
+//   where nothing reads REMOTE_NEEDS and the link holds a call made with no channel for the next one and resends one
+//   whose channel ended. Each goes only on the channel whose capabilities were just read and list `rl2.git-reads`
+//   (`oneChannel`), naming the session it is made for as the checkout's other reads do; while none are known it is
+//   refused `host_unavailable`, and a channel that ends under it fails it, never carried to the next channel's peer.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -294,6 +300,11 @@ const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.p
  * adapter's to send for that reason, a call by name on the channel it was checked on.
  */
 const SESSION_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.list']);
+/**
+ * The UX wave (U5b-2, M8): git's reads behind `rl2.git-reads` (REMOTE_NEEDS), the adapter's to send for the same reason as
+ * the archived read, each on the channel it was checked on and naming its session for the endpoint's checkout rule.
+ */
+const GIT_READ_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['git.branchCommits', 'git.commitDiff', 'git.changesSince']);
 /** The capability an act carries as `requires`: the project registry's, else the one REMOTE_NEEDS names. */
 const requiredBy = (name: CommandName, fields: Fields): string | undefined => (needsProjectActs(name, fields) ? PROJECT_ACTS_CAPABILITY : REMOTE_NEEDS[name]);
 // `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
@@ -915,6 +926,10 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       const peers = link.peerCapabilities();
       if (peers !== null && !peers.includes(needs)) return refusalResult(name, link.name, 'not-offered');
       if (SESSION_CALLS.has(name)) return peers === null ? failure('host_unavailable', `${name}: machine ${link.name} is not reachable`) : callOverLink(link, name, fields, { oneChannel: true });
+      if (GIT_READ_CALLS.has(name)) {
+        if (peers === null) return failure('host_unavailable', `${name}: machine ${link.name} is not reachable`);
+        return callOverLink(link, name, fields, { oneChannel: true, ...(ctx.session !== undefined && { session: { lane: 'B' as const, id: ctx.session } }) });
+      }
     }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
@@ -951,7 +966,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || GIT_READ_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);

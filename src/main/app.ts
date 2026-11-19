@@ -38,6 +38,7 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
+import { joinCapabilitySources, localGitReadsSource } from './machines/git-reads-peer'; // UX wave U5b-2 (M8)
 import { refuseUnservedSideThreads, SIDE_THREAD_COMMANDS } from './machines/side-thread-peer'; // UX wave U5a, Decision Log 52
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
@@ -454,8 +455,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     register: registerMainHandler,
     dispatchLocal,
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
-    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says
-    localCapabilities: localProjectActsSource(hosts),
+    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says; UX wave U5b-2
+    // (M8): and the git reads, so the window asks this Mac what it asks another machine
+    localCapabilities: joinCapabilitySources(localProjectActsSource(hosts), localGitReadsSource(hosts)),
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     wake, // P5 O15 M2b: its wake notices reach every link, its unlocks probe them

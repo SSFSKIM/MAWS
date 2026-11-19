@@ -2,7 +2,7 @@
 // `../schema/git.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`: an entry
 // added there adds its name here.
 export const commands = [
-  'git.status', 'git.branches', 'git.diff', 'git.log', 'git.watch', 'git.unwatch', 'git.lsFiles', 'git.worktree.list',
+  'git.status', 'git.branches', 'git.diff', 'git.log', 'git.branchCommits', 'git.commitDiff', 'git.changesSince', 'git.watch', 'git.unwatch', 'git.lsFiles', 'git.worktree.list',
   'git.worktree.status', 'git.worktree.branch', 'git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch',
 ] as const;
 

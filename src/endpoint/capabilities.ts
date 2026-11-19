@@ -76,4 +76,9 @@ export const ENDPOINT_CAPABILITIES = [
   // offers `session.steer.sendNow`, a message waiting at the next step sent now; a device sends a machine the act only
   // when its `h2` listed it (SEND_NOW_CAPABILITY), since an older one has no row for it and answers `not-offered`.
   'rl2.send-now',
+  // The UX wave (U5b-2, M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D): this endpoint
+  // offers `git.branchCommits`, `git.commitDiff` and `git.changesSince` under the `checkout` rule (GIT_READS_CAPABILITY);
+  // a device sends a machine none of them unless its `h2` listed it, since an older one has no row for them and answers
+  // `not-offered`.
+  'rl2.git-reads',
 ] as const;

@@ -131,6 +131,10 @@
 // other build's window as the row the build that reads the frames makes; its block is at the end of this file.
 // UX wave U6b-2: (file frame, both ways), `files.read`'s `raw` and its answer's `identity` across a daemon of each build;
 // its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
+// UX wave U5b: (reads, on the peer's daemon), (source control, from the peer), (a commit's comment, to the peer) and (a
+// commit's side thread, to the peer), no new stored form: the git reads an older daemon lacks, its acting pane over this
+// build's daemon, and a commit's comment in a message's words and a side thread's lineage; their block is at the end of
+// this file, and their row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -172,7 +176,7 @@ import { REPO_ROOT } from './support/launch';
 import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
 import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
-import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
+import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf; UX wave U5b: a new chat, the parent of a side thread
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
@@ -180,6 +184,10 @@ import { adoptedOf, attentionOf, eventsOf, firstPrompt /* board ticket 711 */, i
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 import { askFixture } from './support/maws-tools'; // board ticket 711: the recorded ask with ids the model chose
 import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
+import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's anchor on a commit's line
+import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
+import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
+import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1838,6 +1846,8 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   |                                               |                                                       | was" and files.test.ts "an answer with identity is |
 //   |                                               |                                                       | read by a reader that does not know it as the      |
 //   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
+//   | UX wave U5b-2: Review's and Source control's  | no new stored form; the reads, lineage and the        | no new stored form; the same block, below          |
+//   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -4315,5 +4325,325 @@ test('(file frame, both ways) this build’s window on the peer’s unit mawsd d
       await s.quit(old);
     }, { MAWS_E2E_OPEN_LOG: openLog });
     record(said);
+  });
+});
+
+// ---- UX wave U5b: the git reads, the acting pane and a commit's comment, the two older builds (UC-14) -----------------
+// U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §K and M11) stores no new form: Review's
+// and Source control's view state stays in the window's memory. What crosses is what it sends: the three git reads
+// (`git.branchCommits`, `git.commitDiff`, `git.changesSince`), which a daemon before them does not serve; the ten
+// `scm.*` commands, which this build's window no longer sends and its daemon still serves; and a comment on a commit's
+// line, whose anchor carries `commit`, a key the older builds' strict anchor schema refuses: whole in a message's words
+// and tag, which every build reads as text, and without `commit` and `path` in a side thread's lineage (`lineageAnchor`),
+// which their daemons hold to that schema. Its peers are build F (`f1852de3a`) and master at its parent pin
+// (`2c7044231`), the runs of record `--peer-exact f1852de3a` and `--peer-exact 2c7044231`; every scene holds against
+// both. Each is guarded by a probe of the peer's source alone, never by its wire, so it runs in the equal-wire mode as
+// well. A scene that puts one build's app on the other's daemon runs that daemon as the profile's unit (`withUnit`: a
+// private daemon of another build is restarted at the app's first status read) and asserts which build serves, by
+// `daemon.status`'s `build.buildId` against that build's out/main/mawsd.js, before anything else.
+//   (reads, on the peer's daemon)          run while the peer's src/shared/ipc/names/git.ts names no
+//                                          `git.branchCommits`. This build's app on the peer's unit: Source control draws
+//                                          Where, Uncommitted and the Pull request part (the folder is not trusted, so the
+//                                          part's sentence stands whatever GitHub CLI the Mac has), and Commits reads
+//                                          "Commits unavailable: this Mac’s MAWS service is older than this window" with
+//                                          no refresh control and no row; Review's Uncommitted lists the repository's two
+//                                          files, the new one "Untracked" with no count, and "This branch" is disabled
+//                                          with its title.
+//   (source control, from the peer)        run while the peer has src/renderer/src/tools/scm/CommitForm.tsx. The peer's
+//                                          app on this build's unit: its acting pane, by its own locators (a group's
+//                                          `data-scm-row`, the row's Stage, the commit form), stages one file and commits
+//                                          it, and the repository's HEAD moved: the commands stay served. The scene that
+//                                          drives build F's pane against this build's daemon, (build F's app, unit
+//                                          mawsd), stays as it is.
+//   (a commit's comment, to the peer)      run while the peer's src/shared/anchor/anchor.ts names no `commit` in its
+//                                          anchor schema: the key its tag reader and its lineage refuse. A session's
+//                                          transcript holds a comment on a commit's line, its text written by this build's
+//                                          `commentsMessage`; the peer, on its own daemon, draws the message's words with
+//                                          the full hash and the quoted line as code, and no chip.
+//   (a commit's side thread, to the peer)  the same probe. This build, on its own daemon, opens a commit from Source
+//                                          control in Review, comments on a line with "Send to main" unticked, and the
+//                                          side thread starts on the replay, its first message the tag with the hash.
+//                                          Then the peer's daemon, the profile's unit, answers `session.list` (the list
+//                                          loads and holds the child) and `session.get` for the child (its lineage as this
+//                                          build stored it, with no `commit` and no `path`), and the peer's app over it
+//                                          opens the parent and draws its side-thread row: the case a transcript alone
+//                                          does not prove.
+const sourceOf = (build: Build, path: string) => {
+  const file = join(build.root ?? REPO_ROOT, path);
+  return existsSync(file) ? readFileSync(file, 'utf8') : null;
+};
+const servesGitReads = (build: Build) => sourceOf(build, 'src/shared/ipc/names/git.ts')?.includes("'git.branchCommits'") ?? false;
+const servesGitReadsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names git.branchCommits in its src/shared/ipc/names/git.ts: its daemon serves the reads; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const hasActingPane = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/scm/CommitForm.tsx'));
+const hasActingPaneWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has no src/renderer/src/tools/scm/CommitForm.tsx: its window sends no scm.* command; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const knowsCommitAnchor = (build: Build) => /^\s*commit:/m.test(sourceOf(build, 'src/shared/anchor/anchor.ts') ?? '');
+const knowsCommitAnchorWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names commit in its src/shared/anchor/anchor.ts: it reads a commit's anchor as this build does; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+// A build's `mawsd` as `daemon.status` names it: 16 hex of the SHA-1 of its out/main/mawsd.js (src/shared/ipc/schema/daemon.ts)
+const mawsdBuildOf = (build: Build) => createHash('sha1').update(readFileSync(join(build.root ?? REPO_ROOT, 'out', 'main', 'mawsd.js'))).digest('hex').slice(0, 16);
+const U5B_APP = 'src/app.ts';
+const U5B_LINES = Array.from({ length: 8 }, (_, i) => `export const v${i + 1} = ${i + 1};`);
+const U5B_CHANGED = 'export const v3 = sumOf([1, 2]);'; // line 3 as the second commit has it
+const U5B_SUBJECT = 'An invented change to v3';
+const U5B_COMMENT = 'Why does v3 call sumOf here?';
+const U5B_PEER_COMMIT = 'An invented commit made by the peer’s pane';
+const U5B_PARENT = 'e5b20000-0000-4000-8000-000000000001'; // the engine ids the replay pins: the parent, its side thread
+const U5B_CHILD = 'e5b20000-0000-4000-8000-000000000002';
+const U5B_FIRST_PROMPT = 'Read src/app.ts and say what v3 holds.';
+const U5B_FIRST_REPLY = 'v3 holds the sum of a short list.';
+const U5B_THREAD_REPLY = 'sumOf keeps v3 in step with the list it names.';
+const COMMITS_OLDER = 'Commits unavailable: this Mac’s MAWS service is older than this window'; // tools/scm/copy.ts, commitsOlder(null)
+const BRANCH_NEEDS_READS = 'This branch needs this Mac’s MAWS service to be updated'; // tools/code/copy.ts, branchNeedsReads(null)
+const PR_UNTRUSTED = 'Trust this folder to see PR state'; // panel/copy.ts, SUMMARY_COPY.prUntrusted
+
+// The scratch's repository made a git repository on `main` with its own identity, no signing and no hooks: src/app.ts
+// and notes.txt in a first commit, line 3 of src/app.ts changed in a second; answers the second's full hash
+function u5bRepo(s: Scratch): string {
+  mkdirSync(join(s.repo, 'src'), { recursive: true });
+  mkdirSync(join(s.root, 'no-hooks'));
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.join('\n')}\n`);
+  writeFileSync(join(s.repo, 'notes.txt'), 'notes\n');
+  gitAt(s.repo, 'init', '-q');
+  const config: [string, string][] = [['user.name', 'MAWS Fixture'], ['user.email', 'fixture@maws.invalid'], ['commit.gpgsign', 'false'], ['core.hooksPath', join(s.root, 'no-hooks')]];
+  for (const [key, value] of config) gitAt(s.repo, 'config', key, value);
+  gitAt(s.repo, 'add', '-A');
+  gitAt(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.map((line, i) => (i === 2 ? U5B_CHANGED : line)).join('\n')}\n`);
+  gitAt(s.repo, 'commit', '-q', '-am', U5B_SUBJECT);
+  return gitAt(s.repo, 'rev-parse', 'HEAD').trim();
+}
+// The anchor Review makes for a new line of a commit's diff (`commitLineAnchor`, src/renderer/src/tools/code/anchor/anchor.ts)
+const commitAnchor = (path: string, line: number, commit: string): Anchor => ({ kind: 'file-line', locator: `${path}#L${line}@${commit}`, label: `${basename(path)}:${line} · ${commit.slice(0, 7)}`, path, line, side: 'new', commit });
+// The add control the diff library draws on a new line of Review while the line is hovered, pressed; answers the card
+async function commentOnCommitLine(review: Locator, path: string, line: number, label: string): Promise<Locator> {
+  const body = review.locator(`[data-review-file="${path}"] [data-review-body]`);
+  const numbered = `[data-line-new-num="${line}"]`;
+  const row = body.locator('tr').filter({ has: review.page().locator(numbered) }).first();
+  await clickRevealed(body.locator(numbered).first(), row.locator('[data-add-widget="new"] button'));
+  const card = review.getByRole('dialog', { name: `Comment on ${label}` });
+  await expect(card).toBeVisible();
+  return card;
+}
+// A new chat in the repository's project, its route direct (the replay's `get_status` answers a direct session, so its
+// side thread is direct too), started with its first prompt; answers once its first turn has ended (e2e/side.spec.ts)
+async function startCommentParent(page: Page, repo: string): Promise<AppSessionId> {
+  const project = value(await invoke(page, 'session.projects.add', { directory: repo }));
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible({ timeout: 20_000 });
+  const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+  value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
+  value(await invoke(page, 'session.start', { appSessionId: id, message: { content: U5B_FIRST_PROMPT, display: U5B_FIRST_PROMPT }, options: {} }));
+  await expect(page.locator('[data-region="main"]').getByText(U5B_FIRST_REPLY)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await statusOf(page, id)).turn, { timeout: 20_000 }).toBeNull();
+  return id;
+}
+// The side thread of `parent`, once its record exists (its setup creates it before the engine runs)
+async function sideThreadOf(page: Page, parent: AppSessionId): Promise<AppSessionId> {
+  let child = '';
+  await expect
+    .poll(async () => (child = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? ''), { timeout: 20_000, message: 'the side thread has a record' })
+    .not.toBe('');
+  return child as AppSessionId;
+}
+
+test('(reads, on the peer’s daemon) this build’s app on the peer’s unit mawsd: Source control draws Where, Uncommitted and the Pull request part, and Commits says this Mac’s service is older; Review lists Uncommitted with the new file uncounted, and This branch is disabled with its title', async () => {
+  const { here, peer } = builds();
+  test.skip(servesGitReads(peer), servesGitReadsWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-reads', async (s) => {
+    u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    writeFileSync(join(s.repo, 'added.txt'), 'a new file\nof two lines\n');
+    await withUnit(s, peer, 'xb-u5b-reads', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${peer.label}'s mawsd`).toBe(mawsdBuildOf(peer));
+      const page = run.page;
+      const id = await s.record(page);
+      await showSession(page, id, `session:${await addressed(page, id)}`);
+
+      // Source control: three parts drawn; Commits the older service's sentence, with nothing asked and nothing to ask again
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-where]'), 'Where').toContainText('⎇ main', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="uncommitted"] [data-scm-count]'), 'Uncommitted, its two files').toHaveText('2', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="pr"]'), 'the Pull request part, its sentence for a folder not trusted').toContainText(PR_UNTRUSTED, { timeout: 20_000 });
+      const commits = scm.locator('[data-scm-part="commits"]');
+      await expect(commits.locator('[data-scm-failure]'), 'Commits: the older service').toHaveText(COMMITS_OLDER, { timeout: 20_000 });
+      await expect(commits.locator('[data-scm-refresh]'), 'no refresh control').toHaveCount(0);
+      await expect(commits.locator('[data-scm-commit]'), 'no row').toHaveCount(0);
+      said.push(`  Source control: Where, Uncommitted 2 and the Pull request part drawn; Commits "${COMMITS_OLDER}"`);
+
+      // Review: Uncommitted read as before the reads, the new file uncounted; This branch disabled with its reason
+      await showTool(page, 'Review');
+      const review = toolBody(page, 'Review');
+      await expect(review.locator('[data-chip="uncommitted"]'), 'Review on Uncommitted').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+      const listed = () => review.locator('[data-review-file]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-review-file') ?? '').sort());
+      await expect.poll(listed, { timeout: 20_000, message: 'the repository’s two changed files' }).toEqual(['added.txt', 'notes.txt']);
+      const added = review.locator('[data-review-file="added.txt"]');
+      await expect(added.locator('[data-review-badge]'), 'the new file’s badge').toHaveText('Untracked');
+      await expect(added.locator('[data-review-counts]'), 'and no count').toHaveCount(0);
+      const branch = review.locator('[data-chip="branch"]');
+      await expect(branch, 'This branch disabled').toBeDisabled();
+      await expect(branch, 'with its title').toHaveAttribute('title', BRANCH_NEEDS_READS);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  Review: added.txt Untracked with no count beside notes.txt; This branch disabled, "${BRANCH_NEEDS_READS}"`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(source control, from the peer) the peer’s app on this build’s unit mawsd: its acting pane stages one file and commits it by its own locators, and the repository’s HEAD moved', async () => {
+  const { here, peer } = builds();
+  test.skip(!hasActingPane(peer), hasActingPaneWhy(peer));
+  test.skip(!appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is an app from before O4, which this build's mawsd refuses`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-acts', async (s) => {
+    const before = u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    trustIn(s, [s.repo]); // the pane commits only in a trusted folder
+    await withUnit(s, here, 'xb-u5b-acts', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      const page = run.page;
+      const id = await s.record(page);
+      await (await sidebarRow(page, { appSessionId: id })).click();
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-header]'), 'the peer’s pane on main').toContainText('⎇ main', { timeout: 20_000 });
+      const row = (group: string) => scm.locator(`section[data-scm-group="${group}"] li[data-scm-row][data-path="notes.txt"]`);
+      await expect(row('unstaged'), 'notes.txt unstaged').toBeVisible({ timeout: 20_000 });
+      await row('unstaged').hover();
+      await row('unstaged').getByRole('button', { name: 'Stage notes.txt', exact: true }).click();
+      await expect(row('staged'), 'notes.txt staged').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => gitAt(s.repo, 'diff', '--cached', '--name-only').trim(), { timeout: 20_000, message: 'the index holds notes.txt' }).toBe('notes.txt');
+      const form = scm.locator('[data-scm-commit]');
+      await form.getByRole('textbox', { name: 'Commit message', exact: true }).fill(U5B_PEER_COMMIT);
+      await form.getByRole('button', { name: 'Commit', exact: true }).click();
+      await expect.poll(() => gitAt(s.repo, 'rev-parse', 'HEAD').trim(), { timeout: 20_000, message: 'HEAD moved' }).not.toBe(before);
+      expect(gitAt(s.repo, 'log', '-1', '--format=%s%n%P').trim().split('\n'), 'the peer’s commit, on the last').toEqual([U5B_PEER_COMMIT, before]);
+      expect(gitAt(s.repo, 'show', '--name-only', '--format=', 'HEAD').trim(), 'holding the staged file').toBe('notes.txt');
+      expect(gitAt(s.repo, 'status', '--porcelain'), 'nothing left uncommitted').toBe('');
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the peer's pane staged notes.txt and committed it: HEAD ${before.slice(0, 7)} → ${gitAt(s.repo, 'rev-parse', '--short', 'HEAD').trim()}`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(a commit’s comment, to the peer) a comment this build wrote on a commit’s line, in a session’s transcript, is drawn by the peer as the message’s words and the quoted line, with no chip', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.setTimeout(180_000);
+  await withScratch('xb-u5b-comment', async (s) => {
+    const sha = u5bRepo(s);
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'main');
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', text);
+    const said = [`${here.label} (wire ${wireOf(here)}) wrote a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) draws the session`];
+
+    const run = await s.launch({}, peer.root);
+    await s.ready(run.page, () => true, 60_000);
+    const id = await s.record(run.page);
+    await (await sidebarRow(run.page, { appSessionId: id })).click();
+    const bubble = run.page.locator('[data-region="main"] [data-bubble]').filter({ hasText: U5B_COMMENT });
+    await expect(bubble, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(bubble, 'its words name the commit by its full hash').toContainText(`commit ${sha}`);
+    await expect(bubble.locator('code'), 'the quoted line, as code').toHaveText([U5B_CHANGED]);
+    await expect(bubble.locator('[data-chip="anchor"]'), 'no chip').toHaveCount(0);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${peer.label}: the words with commit ${sha.slice(0, 7)}…, the quoted line as code, no chip`);
+    await s.quit(run);
+    record(said);
+  });
+});
+
+test('(a commit’s side thread, to the peer) a side thread this build opened from a comment on a commit’s line is listed and read by the peer’s unit mawsd, its lineage with no commit, and the peer draws the parent’s side-thread row', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-u5b-thread', async (s) => {
+    const sha = u5bRepo(s);
+    trustIn(s, [s.repo]);
+    writeFileSync(join(s.userData, 'claude-config', 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the journals' mode, so the host corrects none
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const journals = join(s.root, 'journals');
+    mkdirSync(journals);
+    const parentJournal = new SideJournal(U5B_PARENT, s.repo);
+    parentJournal.turn(U5B_FIRST_REPLY);
+    const threadJournal = new SideJournal(U5B_CHILD, s.repo);
+    const first = threadJournal.prompt();
+    threadJournal.rename(anchor.label); // `finishBinding`'s title: the lineage's label, which keeps the short hash
+    threadJournal.reply(first, U5B_THREAD_REPLY);
+    threadJournal.completed(first);
+    const fixtures = [parentJournal.write(journals, 'parent'), threadJournal.write(journals, 'thread')].join(',');
+    const said = [`${here.label} (wire ${wireOf(here)}) opens a side thread from a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) reads the profile`];
+
+    // this build, on its own daemon: the commit opened from Source control, a comment on its line 3 sent to a side thread
+    const ours = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: fixtures });
+    const own = await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    expect(own.daemon!.build.buildId, `${here.label} on its own mawsd`).toBe(mawsdBuildOf(here));
+    const page = ours.page;
+    const parent = await startCommentParent(page, s.repo);
+    await showTool(page, 'Source control');
+    await toolBody(page, 'Source control').getByRole('button', { name: `Open commit ${sha.slice(0, 7)} in Review`, exact: true }).click({ timeout: 20_000 });
+    const review = toolBody(page, 'Review');
+    await expect(review.locator('[data-chip="commit"]'), 'Review on the commit').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+    await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`);
+    await expect(review.locator(`[data-review-file="${U5B_APP}"] [data-review-body] table`).first(), 'the commit’s diff').toBeVisible({ timeout: 20_000 });
+    const card = await commentOnCommitLine(review, U5B_APP, 3, anchor.label);
+    const toMain = card.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain, 'Review asks for main').toBeChecked();
+    await toMain.uncheck();
+    await card.getByRole('textbox', { name: 'Comment' }).fill(U5B_COMMENT);
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    const child = await sideThreadOf(page, parent);
+    const pane = page.locator('[data-region="panel"]').locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
+    await expect(pane.getByText(U5B_THREAD_REPLY), 'the side thread answered on the replay').toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => (await statusOf(page, child)).turn, { timeout: 20_000, message: 'its turn ended' }).toBeNull();
+    const written = s.journal(child).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => (r.frame.message as { content: unknown }).content);
+    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'thread') }]]);
+    const lineage = value(await invoke(page, 'session.get', { appSessionId: child }))?.lineage;
+    expect(lineage, 'stored without commit and path').toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: U5B_PARENT, anchor: { kind: 'file-line', locator: anchor.locator, label: anchor.label, line: 3, side: 'new' }, openedBy: 'comment' });
+    // what the engine left in its store for the parent's first turn (the replay writes none), for the peer to open
+    const parentTranscript = transcriptRecords({ sessionId: U5B_PARENT, cwd: s.repo, start: Date.UTC(2026, 10, 15, 12, 0, 0) });
+    parentTranscript.user('e5b2e000-0000-4000-8000-000000000001', U5B_FIRST_PROMPT);
+    parentTranscript.text('e5b2e000-0000-4000-8000-000000000002', U5B_FIRST_REPLY);
+    parentTranscript.turnEnd('e5b2e000-0000-4000-8000-000000000003');
+    seedTranscript(join(s.userData, 'claude-config'), s.repo, U5B_PARENT, parentTranscript.records);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's daemon runs next, as the profile's unit
+    said.push(`  ${here.label}: thread ${child} from ${anchor.label}, its first message's tag with the full hash, its lineage with no commit and no path`);
+
+    // the peer's daemon as the profile's unit: the list and the record load; the peer's app draws the parent's row
+    await withUnit(s, peer, 'xb-u5b-thread', async (unit) => {
+      expect((await unit.status()).build.buildId, `${peer.label}'s mawsd serves`).toBe(mawsdBuildOf(peer));
+      type Listed = { sessions: { appId: string; lineage: unknown }[] };
+      const listed = await unit.request<Listed>('session.list', {});
+      expect(listed.sessions.map((r) => r.appId), 'session.list loads and holds the parent and the child').toEqual(expect.arrayContaining([parent, child]));
+      expect(listed.sessions.find((r) => r.appId === child)?.lineage, 'the child listed with its lineage').toEqual(lineage);
+      const got = await unit.request<{ lineage: unknown } | null>('session.get', { appSessionId: child });
+      expect(got?.lineage, 'session.get: the lineage parses, with no commit').toEqual(lineage);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `${peer.label}'s app on its unit`).toBe(mawsdBuildOf(peer));
+      await (await sidebarRow(run.page, { appSessionId: parent })).click();
+      const row = run.page.locator(`[data-region="main"] [data-side-thread$=${JSON.stringify(child)}]`);
+      await expect(row, 'the parent’s side-thread row').toBeVisible({ timeout: 20_000 });
+      await expect(row.locator('.transcript-side-thread-label'), 'named by the lineage’s label').toHaveText(anchor.label);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s unit mawsd (pid ${unit.pid}): session.list holds ${listed.sessions.length} records with the child, session.get its lineage; its app draws the parent's row`);
+      await s.quit(run);
+      record(said);
+    });
   });
 });
