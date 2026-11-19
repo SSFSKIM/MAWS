@@ -26,7 +26,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 // `show` stands for Finder; `asked` records each place whose inventory main read.
-function deps({ answer, show = vi.fn(), asked = [] as (string | null)[] }: { answer?: (cwd: string | null) => InventoryAnswer; show?: ReturnType<typeof vi.fn>; asked?: (string | null)[] } = {}) {
+function deps({ answer, show = vi.fn<(path: string) => void>(), asked = [] as (string | null)[] }: { answer?: (cwd: string | null) => InventoryAnswer; show?: (path: string) => void; asked?: (string | null)[] } = {}) {
   const listed = (cwd: string | null): InventoryAnswer => ({ ok: true, skillPaths: cwd === project ? [projectSkill, mine] : [mine] });
   return {
     inventory: async (cwd: string | null) => (asked.push(cwd), (answer ?? listed)(cwd)),
@@ -36,7 +36,7 @@ function deps({ answer, show = vi.fn(), asked = [] as (string | null)[] }: { ans
 
 describe('customization.skillFile reveals only a skill file the inventory lists', () => {
   it("shows a person's skill from the user page and a project's skill from its page, each read for its own place", async () => {
-    const show = vi.fn();
+    const show = vi.fn<(path: string) => void>();
     const asked: (string | null)[] = [];
     expect(await skillFile({ cwd: null, path: mine, action: 'reveal' }, null, deps({ show, asked }))).toEqual({ status: 'revealed' });
     expect(await skillFile({ cwd: project, path: projectSkill, action: 'reveal' }, null, deps({ show, asked }))).toEqual({ status: 'revealed' });
@@ -45,7 +45,7 @@ describe('customization.skillFile reveals only a skill file the inventory lists'
   });
 
   it("refuses a path the place's inventory does not list, though another place's does, and a file no skill is", async () => {
-    const show = vi.fn();
+    const show = vi.fn<(path: string) => void>();
     for (const path of [projectSkill, unlisted, '/etc/passwd']) {
       expect(await skillFile({ cwd: null, path, action: 'reveal' }, null, deps({ show })), path).toEqual({ status: 'refused', reason: 'missing', message: null });
     }
@@ -59,7 +59,7 @@ describe('customization.skillFile reveals only a skill file the inventory lists'
     const link = join(root, 'config', 'skills', 'linked', 'SKILL.md');
     mkdirSync(join(link, '..'));
     symlinkSync(mine, link);
-    const show = vi.fn();
+    const show = vi.fn<(path: string) => void>();
     const answer = (): InventoryAnswer => ({ ok: true, skillPaths: [folder, gone, link] });
     expect(await skillFile({ cwd: null, path: folder, action: 'reveal' }, null, deps({ answer, show }))).toEqual({ status: 'refused', reason: 'missing', message: null });
     expect(await skillFile({ cwd: null, path: gone, action: 'reveal' }, null, deps({ answer, show }))).toEqual({ status: 'refused', reason: 'missing', message: null });
@@ -68,7 +68,7 @@ describe('customization.skillFile reveals only a skill file the inventory lists'
   });
 
   it("says why when the inventory can't be read, and shows nothing", async () => {
-    const show = vi.fn();
+    const show = vi.fn<(path: string) => void>();
     const answer = (): InventoryAnswer => ({ ok: false, message: 'engine host unavailable' });
     expect(await skillFile({ cwd: null, path: mine, action: 'reveal' }, null, deps({ answer, show }))).toEqual({ status: 'refused', reason: 'unreadable', message: 'engine host unavailable' });
     expect(show).not.toHaveBeenCalled();
