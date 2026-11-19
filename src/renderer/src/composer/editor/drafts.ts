@@ -96,7 +96,7 @@ export const resetRemoteDrafts = (): void => {
 export function rememberRemoteDraft(appSessionId: AppSessionId, doc: ComposerDoc): void {
   remoteDrafts.set(appSessionId, { doc, attachments: [], updatedAt: new Date().toISOString() });
 }
-export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null | Unread>; save(draft: Draft | null, replaces?: string | null): Promise<boolean>; saveNow?(draft: Draft | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
+export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null | Unread>; save(draft: Draft | null, replaces?: string | null): Promise<boolean>; saveNow?(draft: Draft | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P & { saveNow(draft: Draft | null): Promise<boolean> } {
   const remember = (draft: Draft | null) => {
     if (draft === null) remoteDrafts.delete(appSessionId);
     else remoteDrafts.set(appSessionId, draft);
