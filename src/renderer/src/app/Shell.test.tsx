@@ -490,6 +490,21 @@ describe('another machine’s lane B session in the toolbar', () => {
       ['Archive', 'true', 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
     ]);
   });
+
+  // UX wave U6b-4a, review of 785e66161, finding 6: before its record arrives, the session's address alone says where its
+  // folder is; Session actions stays reachable and holds the disabled Open in
+  it('holds Open in, disabled with the machine’s name, before the session’s record arrives', async () => {
+    const user = userEvent.setup();
+    useSessions.setState({ records: new Map(), listed: new Map(), listedMachines: new Set() });
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    expect(actions.getAttribute('aria-disabled')).toBeNull();
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    expect((await screen.findByRole('menuitem', { name: 'Open in (the folder is on Studio)' })).getAttribute('aria-disabled')).toBe('true');
+  });
 });
 
 describe('shell actions', () => {

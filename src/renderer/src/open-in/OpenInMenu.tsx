@@ -20,7 +20,9 @@ type Kit = typeof DropdownMenu | typeof ContextMenu;
 
 // The rows, asked of main again as they are drawn (main keeps its answer for a minute). UX wave U11's skill actions:
 // `only`, the rows a caller offers (a skill's file goes to no terminal), and `choose`, what a row does.
-function Rows({ kit, choose, only }: { kit: Kit; choose(app: OpenInAppId): void; only?(app: OpenInApp): boolean }) {
+// `outside`: the file is outside the session's folders, admitted alone, so no terminal is handed its folder (Decision Log 8)
+const TERMINALS = new Set(['terminal', 'iterm', 'ghostty']);
+function Rows({ kit, choose, only, outside = false }: { kit: Kit; choose(app: OpenInAppId): void; only?(app: OpenInApp): boolean; outside?: boolean }) {
   const all = useOpenInApps((s) => s.apps);
   useEffect(() => void refreshOpenInApps(), []);
   if (all === null) return <kit.Item disabled className={ITEM}>{OPEN_IN_COPY.looking}</kit.Item>;
@@ -28,11 +30,14 @@ function Rows({ kit, choose, only }: { kit: Kit; choose(app: OpenInAppId): void;
   return openInGroups(apps).map((group, i) => (
     <kit.Group key={group[0]!.id}>
       {i > 0 && <kit.Separator className={SEPARATOR} />}
-      {group.map((app) => (
-        <kit.Item key={app.id} data-open-in={app.id} onSelect={() => choose(app.id)} className={ITEM}>
-          {app.name}
-        </kit.Item>
-      ))}
+      {group.map((app) => {
+        const refused = outside && TERMINALS.has(app.id);
+        return (
+          <kit.Item key={app.id} data-open-in={app.id} disabled={refused} title={refused ? OPEN_IN_COPY.terminalOutside : undefined} onSelect={() => choose(app.id)} className={ITEM}>
+            {app.name}
+          </kit.Item>
+        );
+      })}
     </kit.Group>
   ));
 }
@@ -61,7 +66,7 @@ export function OpenInSubmenu({ appSessionId, menu }: { appSessionId: AppSession
 const BUTTON = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
 /** A file's bar: the file, at the line `line` reads when a row is chosen, to an app. */
-export function OpenInButton({ appSessionId, path, line }: { appSessionId: AppSessionId; path: string; line: () => number | null }) {
+export function OpenInButton({ appSessionId, path, line, outside = false }: { appSessionId: AppSessionId; path: string; line: () => number | null; outside?: boolean }) {
   const elsewhere = useOtherMachine(appSessionId);
   if (elsewhere !== null) {
     return <button type="button" disabled data-open-in-elsewhere className={BUTTON}>{OPEN_IN_COPY.elsewhere(elsewhere)}</button>;
@@ -75,7 +80,7 @@ export function OpenInButton({ appSessionId, path, line }: { appSessionId: AppSe
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={CONTENT}>
-          <Rows kit={DropdownMenu} choose={(app) => void openIn(appSessionId, app, { path, line: line() })} />
+          <Rows kit={DropdownMenu} choose={(app) => void openIn(appSessionId, app, { path, line: line() })} outside={outside} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

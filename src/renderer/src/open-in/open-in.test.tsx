@@ -123,6 +123,22 @@ describe('a file’s bar', () => {
     await waitFor(() => expect(main.callsOf('layout.openIn')).toEqual([{ appSessionId: bareOf(S), app: 'terminal', path: '/work/app/notes.md' }]));
   });
 
+  // Review of 785e66161, finding 2: a file outside the session's folders has no folder MAWS hands a terminal, so the
+  // terminal rows are drawn disabled with the reason; Finder and the editors stay
+  it('draws the terminal rows disabled for a file outside the folders, saying why', async () => {
+    const user = userEvent.setup();
+    render(<OpenInButton appSessionId={S} path="/elsewhere/notes.md" line={() => null} outside />);
+    await user.click(screen.getByRole('button', { name: OPEN_IN_COPY.label }));
+    const menu = (await screen.findByRole('menuitem', { name: 'Finder' })).closest<HTMLElement>('[role="menu"]')!;
+    expect(within(menu).getAllByRole('menuitem').map((item) => [item.textContent, item.getAttribute('aria-disabled'), item.getAttribute('title')])).toEqual([
+      ['VS Code', null, null],
+      ['Zed', null, null],
+      ['Terminal', 'true', OPEN_IN_COPY.terminalOutside],
+      ['Ghostty', 'true', OPEN_IN_COPY.terminalOutside],
+      ['Finder', null, null],
+    ]);
+  });
+
   it('is drawn disabled for a session on another machine', () => {
     useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'Studio' } as never]]) });
     render(<OpenInButton appSessionId={R} path="/work/app/notes.md" line={() => null} />);

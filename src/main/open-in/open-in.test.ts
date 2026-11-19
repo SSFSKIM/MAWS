@@ -16,12 +16,12 @@ const failed = (code: 'unknown_command' | 'internal', message: string): Admitted
 
 let runs: [string, string[]][];
 let clock: number;
-function openIn({ installed = ['dev.zed.Zed', 'com.microsoft.VSCode'], admit = async () => ok('/real/app', 'folder'), env = {}, launchFails = false }: { installed?: string[]; admit?: (input: CommandInput<'files.admit'>) => Promise<Admitted>; env?: NodeJS.ProcessEnv; launchFails?: boolean } = {}) {
+function openIn({ installed = ['dev.zed.Zed', 'com.microsoft.VSCode'], admit = async () => ok('/real/app', 'folder'), env = {}, launchFails = false, failing = [] }: { installed?: string[]; admit?: (input: CommandInput<'files.admit'>) => Promise<Admitted>; env?: NodeJS.ProcessEnv; launchFails?: boolean; failing?: string[] } = {}) {
   const admits = vi.fn(admit);
   const run: OpenInDeps['run'] = async (file, args) => {
     runs.push([file, args]);
     if (file === '/usr/bin/mdfind') return { stdout: installed.some((id) => args[0] === `kMDItemCFBundleIdentifier == '${id}'`) ? '/Applications/Some.app\n' : '' };
-    if (launchFails) throw Object.assign(new Error('exit 1'), { code: 1 });
+    if (launchFails || failing.includes(file)) throw Object.assign(new Error('exit 1'), { code: 1 });
     return { stdout: '' };
   };
   return { openIn: createOpenIn({ run, admit: admits, env, now: () => clock }), admits };
@@ -89,6 +89,33 @@ describe('the hand-off', () => {
     expect(launches()).toEqual([]);
   });
 
+  // Review of 785e66161, finding 2: a terminal is handed a folder the daemon admitted, the file's own folder, asked of it
+  // after the file; for a file admitted alone (outside the folders) that folder is refused and nothing opens
+  it('hands a terminal the file’s folder only once the daemon admits that folder too', async () => {
+    const admit = async (input: CommandInput<'files.admit'>): Promise<Admitted> => (input.path === '/link/app/src/main.ts' ? ok('/real/app/src/main.ts', 'file') : input.path === '/real/app/src' ? ok('/real/app/src', 'folder') : failed('internal', FILES_REFUSAL));
+    const { openIn: o, admits } = openIn({ admit });
+    expect(await o.open({ appSessionId: S, app: 'terminal', path: '/link/app/src/main.ts', line: 3 })).toEqual({ opened: true });
+    expect(admits.mock.calls.map(([input]) => input)).toEqual([{ appSessionId: S, path: '/link/app/src/main.ts' }, { appSessionId: S, path: '/real/app/src' }]);
+    expect(launches()).toEqual([['/usr/bin/open', ['-b', 'com.apple.Terminal', '/real/app/src']]]);
+  });
+
+  it('opens no terminal for a file outside the folders, whose folder the daemon refuses', async () => {
+    const admit = async (input: CommandInput<'files.admit'>): Promise<Admitted> => (input.path === '/elsewhere/notes.md' ? ok('/elsewhere/notes.md', 'file') : failed('internal', FILES_REFUSAL));
+    const { openIn: o } = openIn({ admit });
+    expect(await o.open({ appSessionId: S, app: 'terminal', path: '/elsewhere/notes.md' })).toEqual({ opened: false, message: OPEN_IN_WORDS.terminalOutside });
+    expect(launches()).toEqual([]);
+  });
+
+  // Finding 5: with the Command Line Tools selected, xed cannot run; Xcode is then opened on the file with no line
+  it('opens the file in Xcode with no line when xed cannot run', async () => {
+    const { openIn: o } = openIn({ installed: ['com.apple.dt.Xcode'], admit: async () => ok('/real/app/App.swift', 'file'), failing: ['/usr/bin/xed'] });
+    expect(await o.open({ appSessionId: S, app: 'xcode', path: '/real/app/App.swift', line: 9 })).toEqual({ opened: true });
+    expect(launches()).toEqual([
+      ['/usr/bin/xed', ['--line', '9', '/real/app/App.swift']],
+      ['/usr/bin/open', ['-b', 'com.apple.dt.Xcode', '/real/app/App.swift']],
+    ]);
+  });
+
   it('says the app did not open when its launch fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { openIn: o } = openIn({ launchFails: true });
@@ -125,8 +152,7 @@ describe('the e2e seam', () => {
     const { openIn: o } = openIn({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_IN_APPS: 'zed, ghostty', MAWS_E2E_OPEN_LOG: log }, admit: async () => ok('/real/app/src/main.ts', 'file') });
     expect((await o.apps()).map((app) => app.id)).toEqual(['zed', 'terminal', 'ghostty', 'finder']);
     expect(await o.open({ appSessionId: S, app: 'zed', path: '/real/app/src/main.ts', line: 7 })).toEqual({ opened: true });
-    expect(await o.open({ appSessionId: S, app: 'ghostty', path: '/real/app/src/main.ts', line: 7 })).toEqual({ opened: true });
-    expect(readFileSync(log, 'utf8')).toBe('open-in zed /real/app/src/main.ts:7\nopen-in ghostty /real/app/src\n');
+    expect(readFileSync(log, 'utf8')).toBe('open-in zed /real/app/src/main.ts:7\n');
     expect(runs).toEqual([]);
   });
 

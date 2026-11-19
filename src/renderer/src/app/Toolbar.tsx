@@ -44,6 +44,7 @@ import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../session
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { displayTitle } from '../sessions/title';
 import { OpenInSubmenu } from '../open-in/OpenInMenu'; // UX wave U6b-4a
+import { useOtherMachine } from '../open-in/open'; // UX wave U6b-4a
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
 // P3-L end
@@ -235,6 +236,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
   const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
   const mine = useSessions((s) => s.listed.get(appSessionId)?.mine ?? false); // the UX wave, U9: the listing's
+  const elsewhere = useOtherMachine(appSessionId) !== null; // UX wave U6b-4a: by its address, before any record arrives
   if (remote) {
     const takeOver = controls?.capability('take-over') ?? null;
     return <SessionMenu disabled={false}>
@@ -245,9 +247,9 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
     </SessionMenu>;
   }
   const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading, mine }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
-  return <SessionMenu disabled={!record && !shareable}>
+  return <SessionMenu disabled={!record && !shareable && !elsewhere}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
-    {record && <OpenInSubmenu appSessionId={record.appId} menu="dropdown" /> /* UX wave U6b-4a: the session's working folder */}
+    {(record || elsewhere) && <OpenInSubmenu appSessionId={appSessionId} menu="dropdown" /> /* UX wave U6b-4a: the working folder; disabled for another machine */}
     {shareable && <ShareMenuItem appSessionId={appSessionId} />}
     {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
   </SessionMenu>;

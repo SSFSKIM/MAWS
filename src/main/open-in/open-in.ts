@@ -10,6 +10,7 @@
 // ids; Terminal and Finder always), and a launch appends `open-in <row> <path>[:<line>]` to MAWS_E2E_OPEN_LOG and starts
 // nothing (with no log, nothing at all).
 import fs from 'node:fs';
+import { dirname } from 'node:path';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { OPEN_IN_APP_IDS, type OpenInApp, type OpenInAppId, type OpenInOutput } from '@shared/ipc/schema/layout';
 import { appSpec, installedApps, launchCommand, seamLine, type OpenInTarget } from './apps';
@@ -27,6 +28,8 @@ export const OPEN_IN_WORDS = {
   folderRefused: 'Nothing was opened: this folder is not one this session works in',
   fileRefused: 'This file is outside the folders this session works in',
   failed: (app: string) => `${app} did not open`,
+  // a file the daemon admits alone, outside the folders: its folder is not one the session works in (Decision Log 8)
+  terminalOutside: 'A terminal opens a folder this session works in, and this file is outside them',
   refused: (message: string) => `Nothing was opened: ${message}`,
 } as const;
 
@@ -78,6 +81,17 @@ export function createOpenIn(deps: OpenInDeps): OpenIn {
       await deps.run(file, args, LAUNCH_TIMEOUT_MS);
       return true;
     } catch (error) {
+      // Xcode's line goes through xed, which cannot run while the Command Line Tools are the selected developer folder
+      // (or another Xcode is): Xcode is then opened on the file, at no line (Decision Log 9)
+      if (file === '/usr/bin/xed' && target.kind === 'file') {
+        try {
+          await deps.run('/usr/bin/open', ['-b', app.bundleId!, target.path], LAUNCH_TIMEOUT_MS);
+          return true;
+        } catch (fallback) {
+          console.error(`[open-in] ${app.name} did not open`, error, fallback);
+          return false;
+        }
+      }
       console.error(`[open-in] ${app.name} did not open`, error);
       return false;
     }
@@ -90,15 +104,22 @@ export function createOpenIn(deps: OpenInDeps): OpenIn {
     async open({ appSessionId, app, path, line }) {
       const { name } = appSpec(app);
       if (!(await installed()).includes(app)) return { opened: false, message: OPEN_IN_WORDS.notInstalled(name) };
+      const refusal = (error: { code: string; message: string }, refused: string): OpenInOutput => {
+        if (error.code === 'unknown_command') return { opened: false, message: OPEN_IN_WORDS.older };
+        return { opened: false, message: error.message === DAEMON_REFUSAL ? refused : OPEN_IN_WORDS.refused(error.message) };
+      };
       const admitted = await deps.admit(path === undefined ? { appSessionId } : { appSessionId, path });
-      if (!admitted.ok) {
-        const { code, message } = admitted.error;
-        if (code === 'unknown_command') return { opened: false, message: OPEN_IN_WORDS.older };
-        if (message === DAEMON_REFUSAL) return { opened: false, message: path === undefined ? OPEN_IN_WORDS.folderRefused : OPEN_IN_WORDS.fileRefused };
-        return { opened: false, message: OPEN_IN_WORDS.refused(message) };
-      }
+      if (!admitted.ok) return refusal(admitted.error, path === undefined ? OPEN_IN_WORDS.folderRefused : OPEN_IN_WORDS.fileRefused);
       const { path: real, kind } = admitted.value;
-      const target: OpenInTarget = kind === 'file' ? { kind, path: real, line: line ?? null } : { kind, path: real };
+      let target: OpenInTarget = kind === 'file' ? { kind, path: real, line: line ?? null } : { kind, path: real };
+      // A terminal is handed a folder, never a file: for a file, its folder, admitted by the daemon in its own right (a
+      // folder only under the session's roots), so a file admitted alone hands no terminal its folder (Decision Log 8)
+      if (appSpec(app).kind === 'terminal' && target.kind === 'file') {
+        const folder = await deps.admit({ appSessionId, path: dirname(real) });
+        if (!folder.ok) return refusal(folder.error, OPEN_IN_WORDS.terminalOutside);
+        if (folder.value.kind !== 'folder') return { opened: false, message: OPEN_IN_WORDS.terminalOutside };
+        target = { kind: 'folder', path: folder.value.path };
+      }
       return (await launch(app, target)) ? { opened: true } : { opened: false, message: OPEN_IN_WORDS.failed(name) };
     },
     async launchFile(app, realPath) {
