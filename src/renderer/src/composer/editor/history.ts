@@ -5,12 +5,13 @@
 // the owner's), consecutive duplicates collapsed, then `session.history.list` entries not already among them (the same
 // display and the same bodies). UX wave U4a M6 (l3-input-12): the line under the text while recalling or searching, and
 // the search's matching and keys. UX wave U4b (Acceptance 3; the first Mac run; the medium review's form (b), step 1):
-// MAWS's answer envelope is never a prompt to recall. An answer waiting at the next step is a row of the running turn,
-// alone or joined by the engine with the person's own waiting messages: ↑ and the search recall a row's text as the
-// transcript drew it, the person's words without the envelopes, and walk past a row that held nothing else. Pure.
+// MAWS's answer envelope is never a prompt to recall. An answer waiting at the next step is a row of the running turn:
+// ↑ and the search walk past it. A message the engine joined from an envelope and the person's own waiting messages
+// reaches the transcript read apart (ticket 704: the person's message, then the envelope as a message of its own), so a
+// row's text is the person's words and the recall takes it as drawn. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { readAnswerEnvelopes } from '@shared/engine/arrival';
 import { asTyped } from '@shared/engine/grant';
+import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
@@ -70,16 +71,12 @@ const entryKey = (e: HistoryEntry) =>
       .map(([, c]) => c.content),
   );
 
-// A row that is MAWS's answer envelopes alone, its text as the transcript keeps it whole (`userTextOf`), with no
-// attachment; a row with attachments recalls as it draws (an orphan envelope's raw text beside an image, the task
-// review of the fix wave), and so does a row of attachments alone. The transcript read the envelopes once and the row's text is what that read left as
-// the person's words, so this read decides only whether to skip the row: the recall is the row's text as drawn, and
-// never the rest of a second read, where fragments the first read left as text could pair (the architect's review of the
-// joined answer, finding 4).
+// A row that is one of MAWS's answer envelopes, whole, with no attachment (a row of an orphan envelope, whose ask the
+// window does not hold, or one the person typed); a row with attachments recalls as it draws (the task review of U4b's
+// fix wave). The recall is the row's text as drawn, never the rest of a reading of it. Read as the split reads a
+// person's message (`answerEnvelopeOf`; ticket 704), so a text that only opens with the tag is a prompt.
 function allAnswer(row: UserRow): boolean {
-  if (row.attachments.length > 0) return false;
-  const { envelopes, rest } = readAnswerEnvelopes(row.text);
-  return envelopes.length > 0 && rest === '';
+  return row.attachments.length === 0 && answerEnvelopeOf(row.text) !== null;
 }
 
 // The recallable entries, oldest first (navigation starts from the end): earlier history, then this session's prompts.

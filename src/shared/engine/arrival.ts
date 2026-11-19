@@ -17,10 +17,11 @@
 // frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer; (3) one carrier can
 // hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
 // (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
-import { askSteerOpening, parseAskSteer } from '../maws/ask';
+import { ASK_STEER_OPENING, askSteerOpening, parseAskSteer } from '../maws/ask';
 import { keptLines, type ReadingWork } from '../maws/ask-strict';
 import { holdsGrantForm } from './composed-forms';
 import { stripAnsi } from '../wire/ansi';
+import type { ContentBlock } from '../graph/events';
 import type { Arrival, CommandFacts } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
@@ -80,39 +81,81 @@ export function turnOriginOf(arrival: Arrival): 'human' | 'peer' | 'engine' {
   return arrival.class === 'peer' ? 'peer' : 'engine';
 }
 
-/** MAWS's own answer envelope read from a message's text alone, for a message still waiting in MAWS's queue. */
+/**
+ * MAWS's own answer envelope that a whole text is, read as the split reads a person's message (ticket 704; the Decision
+ * Log's ruling of 2026-11-16): one envelope from the writer's whole first line (`askSteerOpening`) to the text's last
+ * byte, by `envelopeSlices`. Null for any other text: one that holds an envelope beside anything else, white space
+ * included, or that opens with the tag and other words. A reader of a person's message asks `answerEnvelopeOf`
+ * (persons-message.ts), which reads its content through this.
+ */
 export function readAnswerEnvelope(text: string): Answer | null {
-  const steer = parseAskSteer(text);
-  return steer === null ? null : { class: 'answer', tool: 'maws', call: steer.askId, summary: text, answers: steer.result.answers, dismissed: false };
+  const { members } = envelopeSlices(text, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
+  const [only] = members;
+  return members.length === 1 && only!.text === text ? { class: 'answer', tool: 'maws', call: only!.read.askId, summary: text, answers: only!.read.result.answers, dismissed: false } : null;
 }
 
 type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
-const TAG_OPENS = '[MAWS ask ';
-const TAGGED_ID = /^\[MAWS ask ([^\]\s]+)\] /; // the tag's id as `parseAskSteer` reads it
-
-// A line that opens an envelope: the whole first line `askSteerText` writes, built by the writer's own function. A line
-// that only begins with the tag (the model's question, header and labels are written verbatim) opens nothing.
-function opensEnvelope(line: string): boolean {
-  const id = TAGGED_ID.exec(line)?.[1];
-  return id !== undefined && line === askSteerOpening(id);
-}
+const TAG_OPENS = ASK_STEER_OPENING; // an envelope's tag, either form
 
 /**
  * MAWS's answer envelopes inside a user text the engine may have joined from several waiting messages (members in order,
  * one newline between, under the last one's uuid; U4a's decision 32 c), and the rest of the text (the UX wave, U4b: the
  * Decision Log's line on the architect's medium review, form (b), and on the architect's review of the joined answer).
- * An envelope opens at the writer's whole first line (`askSteerOpening`), and is the shortest slice from there that
- * `parseAskSteer` reads whole and that ends the text or a line, before the next such line: shortest and bounded, so a
- * later member is never swallowed. A line that opens nothing stays text, as does an opening whose slices never parse.
- * A pasted segment's body is data: none of its lines opens or ends an envelope, so an envelope pasted as a log stays in
- * its segment, whole. The rest is the other members, the newline that separated each envelope gone; a text that is all
- * envelope has an empty rest. A text that would cost more than `MAX_ENVELOPE_CHECKS` whole-slice checks is left whole:
- * no envelope, the rest the text unchanged, so every reader sees one ordinary text. The transcript (its row text, the
- * answers it records, the rows it hides) and the recall all read here, so they agree.
+ * An envelope opens at the writer's whole first line (`opening`, `askSteerOpening`), and is the shortest slice from
+ * there that `read` takes whole and that ends the text or a line, before the next such line: shortest and bounded, so a
+ * later member is never swallowed. A line that opens nothing stays text, as does an opening whose slices are never
+ * read. A pasted segment's body is data (`pasted` marks its lines: `pastedBodies`, the one definition): none of its
+ * lines opens or ends an envelope, so an envelope pasted as a log stays in its segment, whole. The rest is the other
+ * members, the newline that separated each envelope gone; a text that is all envelope has an empty rest. Each member is
+ * the slice's bytes and what `read` made of it. A text that would cost more than `maxChecks` calls of `read` (each a
+ * join and a scan of a slice; `MAX_ENVELOPE_CHECKS`) is left whole: no member, the rest the text unchanged, so every
+ * reader sees one ordinary text, and `over` says so, so a caller that reads again (`takeEnvelopesOut`) tells a reading
+ * that gave up from one that found nothing. It uses its arguments alone: the search text's worker runs its source
+ * (ticket 704, decision 8), so its helpers live inside it.
  */
-export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
-  const { envelopes, rest } = readAnswerEnvelopesWithCost(text);
-  return { envelopes, rest };
+export function envelopeSlices<T>(text: string, opening: (askId: string) => string, pasted: (lines: readonly string[]) => boolean[], read: (slice: string) => T | null, maxChecks: number): { members: { text: string; read: T }[]; rest: string; over: boolean } {
+  const whole = { members: [] as { text: string; read: T }[], rest: text, over: false };
+  if (!text.includes('[MAWS ask ')) return whole; // read on every user text the transcript draws
+  // A line that opens an envelope: the whole first line the writer writes. A line that only begins with the tag (the
+  // model's question, header and labels are written verbatim) opens nothing. The tag's id as `parseAskSteer` reads it.
+  const opens = (line: string): boolean => {
+    const id = /^\[MAWS ask ([^\]\s]+)\] /.exec(line)?.[1];
+    return id !== undefined && line === opening(id);
+  };
+  const lines = text.split('\n');
+  const inPasted = pasted(lines);
+  let checks = 0;
+  // The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does,
+  // and 'over' where finding it would take a check past the cap. A run ends before the next opening line:
+  // `parseAskSteer` pairs the first tag with the last result block, so a malformed member would otherwise run over the
+  // words and the envelope after it (the joined answer's task review).
+  const envelopeAt = (start: number): { member: { text: string; read: T }; next: number } | null | 'over' => {
+    for (let last = start; last < lines.length; last++) {
+      if (inPasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
+      if (last > start && opens(lines[last]!)) return null;
+      if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
+      if (checks === maxChecks) return 'over';
+      checks += 1;
+      const slice = lines.slice(start, last + 1).join('\n');
+      const value = read(slice);
+      if (value !== null) return { member: { text: slice, read: value }, next: last + 1 };
+    }
+    return null;
+  };
+  const members: { text: string; read: T }[] = [];
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    const found = !inPasted[i] && opens(lines[i]!) ? envelopeAt(i) : null;
+    if (found === 'over') return { ...whole, over: true };
+    if (found === null) {
+      kept.push(lines[i]!);
+      i += 1;
+      continue;
+    }
+    members.push(found.member);
+    i = found.next;
+  }
+  return { members, rest: kept.join('\n'), over: false };
 }
 
 /**
@@ -122,6 +165,14 @@ export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest
  * this many slices of it (the architect's ruling of 2026-11-16).
  */
 export const MAX_ENVELOPE_CHECKS = 64;
+
+/** The envelopes inside a text as `parseAskSteer` reads them, and the rest: `envelopeSlices` with the writer's opening
+ *  line, `pastedBodies`, `parseAskSteer` and `MAX_ENVELOPE_CHECKS` (U4b's answer, kept, its shape unchanged). A caller
+ *  that needs a member's bytes calls `envelopeSlices`. */
+export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
+  const { envelopes, rest } = readAnswerEnvelopesWithCost(text);
+  return { envelopes, rest };
+}
 
 /**
  * What one reading of `readAnswerEnvelopes` cost: its whole-slice checks, and the steps of marking the pasted lines
@@ -133,48 +184,18 @@ export interface EnvelopeReadingCost {
   markingSteps: number;
 }
 
-/** `readAnswerEnvelopes`, with what the reading cost, for the tests that pin its bounds. */
+/** `readAnswerEnvelopes`, with what the reading cost, for the tests that pin its bounds: `envelopeSlices` with a
+ *  counting `read` and a counting marking. */
 export function readAnswerEnvelopesWithCost(text: string): { envelopes: AskSteer[]; rest: string; cost: EnvelopeReadingCost } {
   const cost: EnvelopeReadingCost = { checks: 0, markingSteps: 0 };
-  const whole = { envelopes: [], rest: text, cost };
-  if (!text.includes(TAG_OPENS)) return whole; // read on every user text the transcript draws
-  const lines = text.split('\n');
-  const marking: ReadingWork = { lines: 0, blockCharacters: 0, formSteps: 0 };
-  const pasted = pastedBodies(lines, marking);
-  cost.markingSteps = marking.lines;
-  const envelopes: AskSteer[] = [];
-  const kept: string[] = [];
-  for (let i = 0; i < lines.length; ) {
-    const end = !pasted[i] && opensEnvelope(lines[i]!) ? envelopeEnd(lines, pasted, i, cost) : null;
-    if (end === OVER_CAP) return whole;
-    if (end === null) {
-      kept.push(lines[i]!);
-      i += 1;
-      continue;
-    }
-    envelopes.push(end.steer);
-    i = end.next;
-  }
-  return { envelopes, rest: kept.join('\n'), cost };
-}
-
-const OVER_CAP = 'over cap';
-
-// The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does,
-// and `OVER_CAP` where finding it would take a check past the text's cap. A run ends before the next opening line:
-// `parseAskSteer` pairs the first tag with the last result block, so a malformed member would otherwise run over the
-// words and the envelope after it (the joined answer's task review).
-function envelopeEnd(lines: readonly string[], pasted: readonly boolean[], start: number, cost: EnvelopeReadingCost): { steer: AskSteer; next: number } | null | typeof OVER_CAP {
-  for (let last = start; last < lines.length; last++) {
-    if (pasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
-    if (last > start && opensEnvelope(lines[last]!)) return null;
-    if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
-    if (cost.checks === MAX_ENVELOPE_CHECKS) return OVER_CAP;
+  const marking = { lines: 0 };
+  const counted = <T>(read: (slice: string) => T | null) => (slice: string): T | null => {
     cost.checks += 1;
-    const steer = parseAskSteer(lines.slice(start, last + 1).join('\n'));
-    if (steer !== null) return { steer, next: last + 1 };
-  }
-  return null;
+    return read(slice);
+  };
+  const { members, rest } = envelopeSlices(text, askSteerOpening, (lines) => pastedBodies(lines, marking), counted(parseAskSteer), MAX_ENVELOPE_CHECKS);
+  cost.markingSteps = marking.lines;
+  return { envelopes: members.map((member) => member.read), rest, cost };
 }
 
 type Consent = Extract<Arrival, { class: 'consent' }>;
@@ -323,12 +344,14 @@ export function personsLines(text: string, work: ReadingWork = { lines: 0, block
 // `splitPastedSegments` reads it): from a line that ends with an opening tag to the first line, at least two after it,
 // that begins with the closing tag of the same id, both marked; the next segment is looked for from that line. Linear:
 // every line is looked at once in each of the two passes, and each closing line once more as a segment passes it.
-// The one definition: the envelope slicer marks its pasted lines with it too (`readAnswerEnvelopesWithCost`).
-const OPENING_TAG = /^<pasted_content id="([0-9a-f]{4})">$/;
-const CLOSING_TAG = /^<\/pasted_content id="([0-9a-f]{4})">$/;
-const OPENING_TAG_LENGTH = '<pasted_content id="abcd">'.length;
-const CLOSING_TAG_LENGTH = '</pasted_content id="abcd">'.length;
-function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
+// The one definition: the envelope slicer marks its pasted lines with it too (`envelopeSlices`, given it by
+// `readAnswerEnvelopesWithCost`, `readPersonsContent` and the search text's worker, which runs its source), so it uses
+// its arguments alone and holds its tags itself.
+export function pastedBodies(lines: readonly string[], work: { lines: number } = { lines: 0 }): boolean[] {
+  const OPENING_TAG = /^<pasted_content id="([0-9a-f]{4})">$/;
+  const CLOSING_TAG = /^<\/pasted_content id="([0-9a-f]{4})">$/;
+  const OPENING_TAG_LENGTH = '<pasted_content id="abcd">'.length;
+  const CLOSING_TAG_LENGTH = '</pasted_content id="abcd">'.length;
   const closings = new Map<string, number[]>();
   lines.forEach((line, i) => {
     work.lines += 1;
@@ -363,6 +386,70 @@ function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
   }
   return pasted;
 }
+
+/** A person's message's content: a text, or its blocks. */
+export type PersonsContent = string | ContentBlock[];
+
+/**
+ * A person's content with MAWS's answer envelopes taken out: the one reading of a person's message (ticket 704; the
+ * Decision Log's ruling of 2026-11-16), which the split reads it through (`personsParts`, persons-message.ts). No grant
+ * reader reads through it: rule R reads the whole joined text (`personsLines`). Each text block by itself (decision 7):
+ * an envelope spread over two blocks is not read, since the writer makes one text; a block left empty goes, every
+ * other block stays, in place and unchanged. Each text is
+ * read again until a reading takes nothing out (decision 17), within `takeEnvelopesOut`'s 16 readings: where one
+ * envelope's lines stand around another whole envelope, the first reading takes the inner one and leaves the outer one
+ * whole. `own` is null when nothing of the
+ * person's is left, white space beside an envelope counting as nothing (the separating newline the engine appends to
+ * an envelope's text block, or puts between members). The envelopes in the order they were taken, each with what was
+ * read of it.
+ */
+export function readPersonsContent(content: PersonsContent): { own: PersonsContent | null; envelopes: { text: string; read: AskSteer }[] } {
+  if (typeof content === 'string') {
+    const read = readOut(content);
+    return { own: leftOf(read), envelopes: read.envelopes };
+  }
+  const envelopes: { text: string; read: AskSteer }[] = [];
+  const kept: ContentBlock[] = [];
+  for (const block of content) {
+    const read = block.type === 'text' && typeof block.text === 'string' ? readOut(block.text) : null;
+    if (read === null || read.envelopes.length === 0) {
+      kept.push(block);
+      continue;
+    }
+    envelopes.push(...read.envelopes);
+    const own = leftOf(read);
+    if (own !== null) kept.push({ ...block, text: own });
+  }
+  return { own: kept.length === 0 ? null : kept, envelopes };
+}
+
+// One text read with the window's check of a whole slice
+const readOut = (text: string) => takeEnvelopesOut(text, (own) => envelopeSlices(own, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS));
+
+/**
+ * The envelopes `slice` reads in a text, read again until a reading takes nothing out (ticket 704, decision 17): where
+ * one envelope's lines stand around another whole envelope, the first reading takes the inner one and leaves the outer
+ * one whole, and the next takes it. At most 16 readings (the architect's ruling 4 of 2026-11-16), so a text costs at
+ * most 16 of `slice`'s own bound. A text over either bound, a reading that `slice` gave up on (`over`, its cap) or a
+ * 16th reading that still takes an envelope, is left whole, no envelope taken, whichever reading it was and whatever the
+ * readings before it took (the frontier review of ticket 704): it draws as the person's one message, the envelopes'
+ * lines and blocks as its text, and no answer is read from it. The envelopes in the order they were taken, and what is
+ * left. The one loop: `readPersonsContent` reads through it, and the search text's worker runs its source, so it uses
+ * its arguments alone.
+ */
+export function takeEnvelopesOut<T>(text: string, slice: (text: string) => { members: { text: string; read: T }[]; rest: string; over: boolean }): { own: string; envelopes: { text: string; read: T }[] } {
+  const envelopes: { text: string; read: T }[] = [];
+  let own = text;
+  for (let pass = 0; pass < 16; pass += 1) {
+    const { members, rest, over } = slice(own);
+    if (over) break;
+    if (members.length === 0) return { own, envelopes };
+    envelopes.push(...members);
+    own = rest;
+  }
+  return { own: text, envelopes: [] }; // over a bound: the slicer's cap in a reading, or the 16 readings
+}
+const leftOf = (read: { own: string; envelopes: readonly unknown[] }): string | null => (read.own === '' || (read.envelopes.length > 0 && read.own.trim() === '') ? null : read.own);
 
 type Read = { arrivals: Arrival[]; open: OpenArrivals };
 const none = (open: OpenArrivals): Read => ({ arrivals: [], open });
@@ -415,13 +502,16 @@ function personsPrompt(row: Json, text: string): Arrival[] {
     const delivery = framedDelivery(content, 'prompt', false);
     if (delivery !== null) return [delivery];
   }
-  return personsText(text);
+  return personsText(Array.isArray(content) ? content.filter(isBlock) : text); // block by block, as the split reads it (ticket 704)
 }
 
-// MAWS's answer envelope is read on the whole text; a text that is one is never a grant, nor are its lines (U1c).
-function personsText(text: string): Arrival[] {
-  const answer = readAnswerEnvelope(text);
-  return answer === null ? personsGrants(text) : [answer];
+// One answer per envelope the person's content holds, as the split takes them (rule 3; ticket 704, decisions 7, 12 and
+// 17), its summary the envelope's own text, as a lone envelope's is; then the grants rule R reads in the WHOLE joined
+// text of the message (`personsGrants`, the one reader of grants on every route; ticket 704, the architect's ruling 1 of
+// 2026-11-16): which words the split draws as the person's decides no grant.
+function personsText(content: PersonsContent): Arrival[] {
+  const answers = readPersonsContent(content).envelopes.map(({ text: summary, read }): Answer => ({ class: 'answer', tool: 'maws', call: read.askId, summary, answers: read.result.answers, dismissed: false }));
+  return [...answers, ...personsGrants(typeof content === 'string' ? content : messageText(content))];
 }
 
 /** A row or a queued command of the peer origin (or a teammate's, which has none): the engine's inbox. */
@@ -509,11 +599,11 @@ function framedDelivery(text: string, via: 'bridge' | 'prompt' | 'inbox', midTur
  * frame line that names `human`, the words after it, as the `own` class reads them (with its guard for words that read
  * as the interrupt marker); else the text. The rewind's text of a prompt sminos delivered opens with that line.
  * MAWS's answer envelopes are never the person's words, in either form (board ticket 711): a text that holds one is
- * read without it (`readAnswerEnvelopes`'s rest), so an envelope alone reads as no words.
+ * read without it, as the split reads a person's message (`readPersonsContent`, the reader's one loop; ticket 704), so
+ * an envelope alone reads as no words.
  */
 export function ownWordsOf(text: string): string {
-  const { envelopes, rest } = readAnswerEnvelopes(text);
-  const words = envelopes.length > 0 ? rest : text;
+  const words = (readPersonsContent(text).own as string | null) ?? '';
   const { frame, body } = sminosParts(words);
   return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body).words : words;
 }

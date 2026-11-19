@@ -7,8 +7,8 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { askAnswersFromSteer /* board ticket 711 */, parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
-import { readAnswerEnvelopes } from '@shared/engine/arrival'; // UX wave U4b: a join of envelopes alone
+import { askAnswersFromSteer /* board ticket 711 */, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { answerEnvelopeOf } from '@shared/engine/persons-message'; // ticket 704: a steer read as the split reads it
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeleteResultSchema, ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A; UX wave U10b: the delete's answer
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -168,8 +168,9 @@ export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'created
 }
 
 // An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
-// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message.
-export const askSteerOf = (content: string | ContentBlock[]): string | null => parseAskSteer(messageText(content))?.askId ?? null;
+// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message. Read as the split
+// reads it (ticket 704): a content that is one envelope alone, so a message with an attachment is never hidden whole.
+export const askSteerOf = (content: string | ContentBlock[]): string | null => answerEnvelopeOf(content)?.call ?? null;
 
 // Whether such a steer answered a capsule this state holds (the reducer's recordAskSteer): the capsule then reads
 // Answered with the answers, and the envelope is no bubble, neither the steer's own nor (L276) the held one a Stop
@@ -452,25 +453,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
   // an async ask's answer steer whose capsule this state answered is no bubble (askAnsweredHere; the reducer recorded
   // it when the steer arrived, so before this turn derives)
-  // UX wave U4b (the joined answer's task review): a message the engine joined from several envelopes alone, every one
-  // for an ask answered here, is no bubble either; one with an envelope whose ask is not answered here keeps its bubble
-  const envelopesAnsweredHere = (event: Event<'user.message'>): boolean => {
-    if (state === null) return false;
-    const { envelopes, rest } = readAnswerEnvelopes(messageText(event.content));
-    return envelopes.length > 0 && rest === '' && envelopes.every((envelope) => askAnsweredHere(state, envelope.askId));
+  const answersHeldAsk = (event: Event<'user.message'>): boolean => {
+    const askId = state === null ? null : askSteerOf(event.content);
+    return askId !== null && askAnsweredHere(state!, askId);
   };
-  // UX wave U4b (the architect's review of the joined answer, finding 2): no recording shows whether the engine joins a
-  // message holding image or document blocks with a waiting text, so a message with attachments is never hidden; where
-  // its text is envelopes alone, all answered here, its row draws the attachments without the text
-  const attachmentsAlone = (event: Event<'user.message'>): UserText => userTextOf(typeof event.content === 'string' ? [] : event.content.filter((block) => block.type !== 'text'));
-  const answersHeldAsk = (event: Event<'user.message'>): boolean => envelopesAnsweredHere(event) && attachmentsAlone(event).attachments.length === 0;
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
   const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
   // U1c: a row drawn from given content (the words beside a message's grants, an approval's sentence) draws that content
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false, content?: Event<'user.message'>['content']): RowOf<'user'> => {
-    const text = content !== undefined ? userTextOf(content) : envelopesAnsweredHere(event) ? attachmentsAlone(event) : userTextOf(event.content);
+    const text = userTextOf(content ?? event.content);
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),

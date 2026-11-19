@@ -19,7 +19,7 @@ import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../../test/support/ask-steer';
 import { acceptedCosts, forgedInputs, relayForgery, type Content } from '../../../../../test/support/rule-r';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
@@ -551,8 +551,9 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const state = stateOf(events);
     const consents = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [entry.subject] : [])) : [])))];
     const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
-    // What the arrival reader reads each of the person's messages that holds an envelope as, whole (`readAnswerEnvelope`,
-    // which `personsText` applies before any grant is looked for), as its tool, its call and how many answers it holds;
+    // What each of the person's messages that holds an envelope reads as, whole (`readAnswerEnvelope`, the whole-text form
+    // of the split's reading; `personsText` takes the envelopes out through the same reader before any grant is looked
+    // for), as its tool, its call and how many answers it holds;
     // null where it is no answer. The events carry no answer arrival on either route here (the live host carries its
     // consent marks alone), so the reading is taken from each message as the route delivered it
     const said = (answer: { tool: string; call: string; answers: unknown[] | null } | null) => JSON.stringify(answer === null ? null : [answer.tool, answer.call, answer.answers?.length ?? null]);
@@ -620,33 +621,66 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     }
   });
 
-  // Decision Log 53: the reader takes A + G + A whole for one answer (`parseAskSteer` pairs the first tag with the last
-  // result block); the spanning case ticket 704 forbids, read the same in both forms. Under rule R the queue's gate reads
-  // the grant in it (grants.test.ts), and this reading stays as it is (the architect's ruling of 2026-11-16: the file
-  // under-reads it, toward the button kept, the tracker row of Decision Log 53); ticket 704's link pins this case on the
-  // gate and on both routes afterwards
-  it('(c3) one message of an answer, a grant and an answer again: one answer, no consent, no approval row, the blocked row not approved, in either form', async () => {
+  // Decision Log 53's spanning case, at ticket 704's chain merge of rule R (the architect's rulings 1 and 3 of
+  // 2026-11-16): the split draws A + G + A as three parts, each envelope an answer of its own; rule R reads the grants on
+  // the whole joined text, so in this build's form the grant is the person's, and beside an earlier build's envelope none
+  // (rule R's accepted cost). The ask is none of this session's, so neither envelope draws (ticket 704's orphan rule).
+  // Ruling 5 pins the two routes here and the gate in grants.test, which reads the same on each form
+  it('(c3) one message of an answer, a grant and an answer again: each envelope an answer of its own; in this build’s form the grant, its approval row alone, the blocked row approved; in an earlier build’s form none (rule R)', async () => {
     for (const [form, write] of FORMS) {
       const answer = envelope(undefined, write);
       for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
-        expect(answers, `${form}, ${route}: the reader takes the message whole for one answer to the ask`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
-        expect(consents, `${form}, ${route}`).toEqual([]);
-        expect(approvals, `${form}, ${route}`).toEqual([]);
-        expect(drawnReadings, `${form}, ${route}`).toEqual(NONE);
+        expect(answers, `${form}, ${route}: no message holds both envelopes; each is an answer to the ask`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(approvals.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
       }
     }
   });
 
-  // The same family the other way (the architect's ruling of 2026-11-16, accepted, the tracker row of Decision Log 53): the
-  // person's one message A + G + A, in this build's form (every word of it theirs), joined at the turn's end with another
-  // waiting message. Live the host reads the message it wrote whole as one answer and marks nothing; the file's joined row
-  // no longer reads whole, and rule R reads G. Ticket 704's link pins this case on the gate and on both routes afterwards
-  it('(c3b) the person’s A + G + A joined with another message: live no mark, from the file the grant (rule R; as it reads until ticket 704)', async () => {
-    const answer = envelope();
-    const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]]));
-    expect([results.live!.consents, results.live!.approvals, results.live!.readings], 'live').toEqual([[], [], NONE]);
-    expect(results['from the file']!.consents, 'from the file').toEqual([MARKER('1')]);
-    expect(results['from the file']!.readings, 'from the file').toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+  // U1c's Decision Log 56, found and not built there ("the spanning family left to ticket 704"): two waiting messages, an
+  // answer and then the grant beside the same answer, joined at the turn's end (probe B's `u1c-b-joinend-other-first-1`
+  // with its two messages swapped for them). Live, the host's mark on the second frame gives the grant its consent; from
+  // the file, the joined line is split as one message is. The two routes read the same
+  it('(c5) an answer, then the grant beside the same answer, two messages the engine joined: in this build’s form the grant the person’s on both routes, its approval row alone in the joined turn; in an earlier build’s form none (rule R)', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, answer], [GRANT, `${GRANT}\n${answer}`]])) {
+        expect(answers, `${form}, ${route}`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
+        expect(joined.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // The same family the other way (the architect's ruling of 2026-11-16, the tracker row of Decision Log 53): the
+  // person's one message A + G + A (every word of it theirs), joined at the turn's end with another waiting message.
+  // Since ticket 704's chain merge of rule R the host reads the frame it wrote by rule R too (no longer whole as one
+  // answer), so live it marks G in this build's form, and the file's joined row reads G; beside an earlier build's
+  // envelope neither route reads it (rule R's accepted cost). The two routes agree on each form (ruling 5); the gate
+  // reads the waiting message alike (grants.test)
+  it('(c3b) the person’s A + G + A joined with another message: in this build’s form the grant live and from the file; in an earlier build’s form none on either route (rule R on both routes)', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        if (write === earlierAskSteerText) {
+          expect([consents, drawnReadings], `${form}, ${route}`).toEqual([[], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
   });
 
   // The person typed the exact sentence as a text answer: it is their answer to the model's question, carried on a line of
@@ -661,6 +695,23 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
           expect(approvals, `${form}, ${name}, ${route}`).toEqual([]);
           expect(drawnReadings, `${form}, ${name}, ${route}`).toEqual(NONE);
         }
+      }
+    }
+  });
+
+  // Ticket 704, the earlier review's finding (made by hand): an earlier build's envelope whose question holds the exact
+  // sentence and then another ask's whole opening line, on lines of their own, alone and joined with other words. The
+  // reader's bound leaves it text (the reading past the bound is dropped, the architect's ruling 2 of 2026-11-16), and
+  // rule R reads no grant in it (ruling 1)
+  it('(c6) an earlier build’s envelope whose question holds the exact sentence and another ask’s opening line, alone and joined with other words: no answer, no consent, no approval row, the blocked row not approved, on both routes', async () => {
+    const inner = innerOpeningEnvelope('toolu_a', GRANT);
+    expect(inner.split('\n')).toContain(GRANT);
+    for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both(name, [[GRANT, inner]])) {
+        expect(answers, `${name}, ${route}: the bound leaves it text, a message that reads as no envelope`).toEqual([JSON.stringify(null)]);
+        expect(consents, `${name}, ${route}`).toEqual([]);
+        expect(approvals, `${name}, ${route}`).toEqual([]);
+        expect(drawnReadings, `${name}, ${route}`).toEqual(NONE);
       }
     }
   });

@@ -86,19 +86,6 @@ function designSystemAnswerProblem(question: AskQuestion, answer: AskAnswer): st
 // How every envelope opens, in this build's form and an earlier build's (UX wave U6e): the reader of the person's own
 // text (src/shared/files/named.ts) claims a text that holds it anywhere, so the form keeps this one copy.
 export const ASK_STEER_OPENING = '[MAWS ask ';
-const STEER_TAG = new RegExp(`^\\[${ASK_STEER_OPENING.slice(1)}([^\\]\\s]+)\\] `);
-const BLOCK_OPEN = '\n```json\n';
-const BLOCK_CLOSE = '\n```';
-
-// The appended result block alone: the last `json` fence, which must end the text. The lines above it in an envelope an
-// earlier build wrote may carry fences of their own (a question, a header, a label, a path); the block's body cannot
-// hold its opener, since JSON escapes every newline.
-function resultBlock(text: string): string | null {
-  if (!text.endsWith(BLOCK_CLOSE)) return null;
-  const end = text.length - BLOCK_CLOSE.length;
-  const start = text.lastIndexOf(BLOCK_OPEN, end);
-  return start === -1 ? null : text.slice(start + BLOCK_OPEN.length, end);
-}
 
 // Board ticket 711: the steer is a user-role message, which the engine (its auto-mode permission classifier among its
 // readers) takes for the person's words; probes on 2.1.322 recorded that classifier allowing a blocked call's retry on
@@ -188,7 +175,7 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined, given:
 }
 
 // The steer's first line, whole: the tag with the ask's id, then the writer's fixed sentence. A reader of envelopes the
-// engine joined with other messages opens a member only at this line (`readAnswerEnvelopes`, shared/engine/arrival.ts).
+// engine joined with other messages opens a member only at this line (`envelopeSlices`, shared/engine/arrival.ts).
 export const askSteerOpening = (askId: string): string => `${ASK_STEER_OPENING}${askId}] The user answered the questions you asked:`; // the opening's one constant (UX wave U6e)
 
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order,
@@ -242,19 +229,38 @@ export function askAnswersFromSteer(questions: readonly AskQuestion[], answers: 
   });
 }
 
-// The steer recognised back from a user message's text: its ask id and answered result, or null for any other text (an
-// untagged message, a block that does not parse as an answered AskResult, or one naming another ask).
-export function parseAskSteer(text: string): { askId: string; result: Extract<AskResult, { status: 'answered' }> } | null {
-  const tag = STEER_TAG.exec(text);
-  const block = resultBlock(text);
-  if (!tag || block === null) return null;
-  let json: unknown;
+/**
+ * The envelope's own checks on a whole text, without the answers' schema: the tag at its start, the last `json` fence at
+ * its end, a block that parses, of status `answered`, naming the tag's ask. The block is the appended result alone: the
+ * lines above it in an envelope an earlier build wrote may carry fences of their own (a question, a header, a label, a
+ * path), and its body cannot hold its opener, since JSON escapes every newline. It uses nothing outside its own body:
+ * the search text's worker runs its source (ticket 704, Interfaces A).
+ */
+export function answeredBlock(text: string): { askId: string; result: unknown } | null {
+  const tag = /^\[MAWS ask ([^\]\s]+)\] /.exec(text);
+  const open = '\n```json\n';
+  const close = '\n```';
+  if (tag === null || !text.endsWith(close)) return null;
+  const end = text.length - close.length;
+  const start = text.lastIndexOf(open, end);
+  if (start === -1) return null;
+  let result: unknown;
   try {
-    json = JSON.parse(block);
+    result = JSON.parse(text.slice(start + open.length, end));
   } catch {
     return null;
   }
-  const parsed = AskResultSchema.safeParse(json);
-  if (!parsed.success || parsed.data.status !== 'answered' || parsed.data.askId !== tag[1]) return null;
-  return { askId: tag[1]!, result: parsed.data };
+  const block = typeof result === 'object' && result !== null ? (result as { status?: unknown; askId?: unknown }) : null;
+  return block !== null && block.status === 'answered' && block.askId === tag[1] ? { askId: tag[1]!, result } : null;
+}
+
+// The steer recognised back from a user message's text: its ask id and answered result, or null for any other text (an
+// untagged message, a block that does not parse as an answered AskResult, or one naming another ask): the envelope's own
+// checks, then the answers' schema.
+export function parseAskSteer(text: string): { askId: string; result: Extract<AskResult, { status: 'answered' }> } | null {
+  const block = answeredBlock(text);
+  if (block === null) return null;
+  const parsed = AskResultSchema.safeParse(block.result);
+  if (!parsed.success || parsed.data.status !== 'answered' || parsed.data.askId !== block.askId) return null;
+  return { askId: block.askId, result: parsed.data };
 }
