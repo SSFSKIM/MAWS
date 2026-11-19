@@ -232,7 +232,7 @@ export class ExtensionPopups {
   }
 
   private wire(popup: Popup): void {
-    const { view, window, contents: wc } = popup;
+    const { window, contents: wc } = popup;
     const live = () => this.popups.get(window.id) === popup;
     const closing = (reason: PopupCloseReason) => () => {
       if (live()) this.close(window.id, reason);
