@@ -402,6 +402,10 @@ interface Line {
   content: number; // the first character after the prefix and the indentation
   indent: number;
   thematic: boolean; // the content, indented less than four columns, is a thematic break
+  // The line's first list item could not interrupt a paragraph (micromark's list start under `interrupt`): an ordered
+  // marker other than `1` alone, or a `*`, a `+` or an ordered marker with nothing after it. A `-` with nothing after it
+  // is not counted: under a paragraph it is a setext underline, which this pass already reads as the paragraph's end.
+  weak: boolean;
 }
 
 // The longest tail of a line made of one thematic-break marker (`-`, `*`, `_`) and spaces, tabs or carriage returns:
@@ -428,6 +432,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
   let quote = 0;
   let opens = false;
   let footnote = false;
+  let weak = false;
   let markers = 0;
   // the thematic-break test, against the line's tail read once; the markers before `j` counted as `j` moves on
   let tail: { marker: number; from: number; count: number } | null = null;
@@ -470,6 +475,10 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
     }
     if (marker < 0 || (marker < end && !isSpaceOrTab(text.charCodeAt(marker)) && text.charCodeAt(marker) !== 13)) break;
     if (++markers > BLOCK_MARKERS_MAX) refuseAfter(m, marker - start + 16);
+    if (!opens && code !== 91) {
+      const ordered = isDigit(code);
+      weak = (ordered && (marker - j !== 2 || code !== 49)) || ((ordered || code === 42 || code === 43) && blankFrom(text, marker, end, m));
+    }
     opens = true;
     if (code === 91) footnote = true;
     // one to four spaces after the marker belong to it; past four, one does, and the rest is the content's indentation
@@ -489,7 +498,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
   decided(content, limit, end);
   const first = text.charCodeAt(content);
   const thematic = indent < 4 && content < end && (first === 45 || first === 42 || first === 95) && breakAt(content);
-  return { start, end, quote, opens, footnote, content, indent, thematic };
+  return { start, end, quote, opens, footnote, content, indent, thematic, weak };
 }
 
 // After at most `max` of a quote's `>` markers at the start of a line: how many stood there, and the index after them.
@@ -664,6 +673,9 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
   // extent, so this is the side that reads fewer links: set by a line that opens one, and cleared only by a line that
   // stands at the very start of its line (no quote marker, no indentation) after a blank one, which no list item holds.
   let listOpen = false;
+  // Set where the pass cannot tell whether a paragraph goes on (a list item that could not interrupt one, inside a list
+  // item): every paragraph is dropped until a blank line or a block start ends what the window may read as one
+  let doubtful = false;
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
   // draws it only where a call names it, so nothing in it is read as a link.
   let footnote = false;
@@ -708,6 +720,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     const blank = blankFrom(text, line.content, line.end, m);
     if (line.footnote) footnote = true;
     else if (footnote && !blank && afterBlank && line.indent < 4) footnote = false;
+    const listWasOpen = listOpen; // before this line, which may open one
     if (line.opens) listOpen = true;
     else if (listOpen && !blank && afterBlank && fence === null && line.content === line.start) listOpen = false;
     afterBlank = blank;
@@ -732,15 +745,32 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
         continue;
       }
     }
+    // A list item that could not interrupt the open paragraph of its quote is that paragraph's continuation (the review's
+    // finding 1, its neighbour): read so where no list item may be open; inside one it may as well be the next item, and
+    // after a quote marker the pass cannot tell whose quote it is, so there the paragraph and what follows it are not read
+    if (line.weak && paragraph !== null && line.quote >= paragraph.quote) {
+      if (!listWasOpen && line.quote === paragraph.quote) {
+        listOpen = false; // no list item: the line is the paragraph's text
+        paragraph.lines.push(line.content);
+        paragraph.end = line.end;
+        afterBlank = false;
+        start = next;
+        continue;
+      }
+      paragraph.dropped = true;
+      doubtful = true;
+    }
     if (blank) {
       yield* closeParagraph();
       table = null;
+      if (!line.weak) doubtful = false;
       start = next;
       continue;
     }
     const opened = line.indent < 4 ? fenceAt(text, line.content, line.end, m) : null;
     const heading = line.indent < 4 ? headingAt(text, line.content, line.end, m) : -1;
     const blockStarts = opened !== null || heading >= 0 || line.thematic;
+    if (blockStarts) doubtful = false;
     // A line of another quote's depth ends the table: a shallower one is no body row (never a lazy line), and a deeper one
     // opens a quote whose paragraph the next lines may continue lazily
     if (table !== null && (line.quote !== table.quote || line.opens || blockStarts)) table = null;
@@ -785,7 +815,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
       }
       if (paragraph === null || line.opens || line.quote > paragraph.quote) {
         yield* closeParagraph();
-        paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: footnote };
+        paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: footnote || doubtful };
       } else {
         paragraph.lines.push(line.content);
         paragraph.end = line.end;
