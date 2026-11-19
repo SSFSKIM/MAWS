@@ -2751,14 +2751,41 @@ describe('the mode said aloud', () => {
     expect(said()).toBe('Permission mode: Plan');
   });
 
-  it('a taken answer, then the engine reports another mode than the one asked: that mode is said', async () => {
+  it('a taken answer naming another mode than the one asked (a fallback): that mode is said once the chip shows it', async () => {
     mode(A, 'plan');
     mount([{ index: 0, id: A }]);
     await shiftTab(); // asks for Auto
-    await answer(0, taken('auto'));
+    await answer(0, taken('default')); // the engine set the fallback, and its answer says so
     expect(said()).toBe('');
-    mode(A, 'default', 'auto'); // the engine set the fallback
+    mode(A, 'default', 'auto');
     await waitFor(() => expect(said()).toBe('Permission mode: Manual'));
+  });
+
+  it('a report of another mode before the answer reaches the chip is not this press’s', async () => {
+    mode(A, 'acceptEdits');
+    mount([{ index: 0, id: A }]);
+    await shiftTab(); // asks for Plan
+    mode(A, 'default'); // a report that is not this press's answer (a change made elsewhere)
+    await answer(0, taken('plan'));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(said(), 'Manual is not what the press changed').toBe('');
+    mode(A, 'plan');
+    await waitFor(() => expect(said()).toBe('Permission mode: Plan'));
+  });
+
+  it('a press after the prior one was answered, before the chip shows its mode: both are said', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    await answer(0, taken('acceptEdits'));
+    await shiftTab(); // the chip still shows Manual: it asks for Accept edits again
+    expect(held).toHaveLength(2);
+    mode(A, 'acceptEdits');
+    await waitFor(() => expect(said(), 'the first press, answered, is not superseded').toBe('Permission mode: Accept edits'));
+    const first = region().firstChild;
+    await answer(1, taken('acceptEdits'));
+    await waitFor(() => expect(region().firstChild).not.toBe(first));
+    expect(said()).toBe('Permission mode: Accept edits');
   });
 
   it('two presses before the first is answered: only the last is said', async () => {

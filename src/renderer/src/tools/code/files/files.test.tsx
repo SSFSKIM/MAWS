@@ -1369,6 +1369,32 @@ describe('a file beside the chat as an editor', () => {
     await waitFor(() => expect(editor()!.hasFocus).toBe(true));
   });
 
+  // UX wave U6b-5a (M1, decision 4; the task review's first finding): an open that reuses the tab the key showed, before
+  // the key's second frame, asks the host for the keyboard with a later value of the counter, which is not the key's
+  it('an open that reuses the tab a surface’s key showed, before its second frame, gives the file no keyboard', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    try {
+      render(<TestHost />);
+      act(() => {
+        toggleSurface('files'); // the tree's tab, shown by its key
+        openFile(A, APP); // reused for the file in the same turn, the key's frames still to come
+      });
+      await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      expect(editor()!.hasFocus, 'the open gave the keyboard to nothing').toBe(false);
+      act(() => useLayout.getState().hideSurfaces(A)); // the control: the key's own show of the same tab
+      act(() => toggleSurface('files'));
+      await waitFor(() => expect(editor()!.hasFocus).toBe(true));
+    } finally {
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('the first edit keeps the preview tab, so the next single click opens a second tab and the edited file stands', async () => {
     render(<TestHost />);
     await openBeside(APP);
@@ -1486,5 +1512,117 @@ describe('a file beside the chat as an editor', () => {
     expect(sideTabs(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: APP, line: null }]);
     expect(mainTab(APP)).toBeUndefined();
     expect(entryOf(APP)?.dirty).toBe(true);
+  });
+});
+
+// UX wave U6b-5a (M1, decision 4; the task review's second and third findings): the tree takes the keyboard a surface's
+// key asked of it once its roots' listing has answered, on the row the rows name (the selected row, else the first),
+// brought into view; the tree itself where there is no row; and nothing when the showing ended or a page covers it.
+describe('the keyboard a surface’s key gives the tree', () => {
+  const offs: (() => void)[] = [];
+  const MANY = Array.from({ length: 200 }, (_, index) => file(`/r/f${String(index).padStart(3, '0')}.ts`));
+  let roots: FilesEntry[] | string;
+  let held: ReturnType<typeof deferred<void>> | null;
+  beforeEach(() => {
+    resetPanelStores();
+    resetTreeState();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    roots = [dir('/r')];
+    held = null;
+    installFakeMain(async (name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list') {
+        if (input.path !== undefined) return answer({ root: '/r', path: input.path, entries: input.path === '/r' ? MANY : [], truncated: false });
+        if (held) await held.promise;
+        return typeof roots === 'string' ? fail(roots) : answer({ root: null, path: '', entries: roots, truncated: false });
+      }
+      return fail(`unexpected ${name}`);
+    });
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r' })) }));
+  });
+  afterEach(() => {
+    held?.resolve();
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  const row = (path: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-path="${path}"]`);
+  const tree = () => document.querySelector<HTMLElement>('[role="tree"]');
+  const inTree = () => tree()?.contains(document.activeElement) ?? false;
+  // The column, inert under a page as the shell draws it
+  function Column() {
+    const page = useLayout((state) => state.destination !== null);
+    return <section id="region-panel" inert={page}><TestHost /></section>;
+  }
+  const showAgain = () => {
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    act(() => toggleSurface('files'));
+  };
+
+  it('with its roots’ listing held, takes the keyboard once the listing answers, on the first row', async () => {
+    held = deferred<void>();
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(inTree()).toBe(false);
+    await act(async () => held!.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+
+  it('a selected row outside the drawn rows is brought into view and takes the keyboard', async () => {
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(row('/r/f000.ts')).not.toBeNull());
+    expect(row('/r/f190.ts'), 'not drawn: past the list’s window').toBeNull();
+    act(() => useTreeState.getState().select(A, '/r/f190.ts'));
+    showAgain();
+    await waitFor(() => expect(document.activeElement).toBe(row('/r/f190.ts')));
+    expect(row('/r/f190.ts')!.getAttribute('aria-selected')).toBe('true');
+    expect(document.querySelector<HTMLElement>('[data-files-scroller]')!.scrollTop).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['failed', 'refused for the test'],
+    ['answered with no root', [] as FilesEntry[]],
+  ])('with its roots’ listing %s, the tree itself takes the keyboard', async (_case, answered) => {
+    roots = answered;
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(document.activeElement).toBe(tree()));
+    expect(row('/r')).toBeNull();
+  });
+
+  it('a page over the column when the listing answers: nothing moves, and the request is used up', async () => {
+    held = deferred<void>();
+    render(<Column />);
+    act(() => toggleSurface('files'));
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    await act(async () => held!.resolve());
+    await waitFor(() => expect(row('/r')).not.toBeNull());
+    expect(inTree()).toBe(false);
+    act(() => useLayout.getState().closeDestination());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(inTree(), 'not taken later either').toBe(false);
+    showAgain(); // the control: the same tree, shown by its key with nothing over it
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+
+  it('hidden before the listing answers: the request is withdrawn, and a show by another way takes no keyboard', async () => {
+    held = deferred<void>();
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    const tab = panelOf(A)!.tabs[0].id;
+    act(() => useLayout.getState().hideSurfaces(A));
+    await act(async () => held!.resolve());
+    act(() => useLayout.getState().showSurfaceTab(A, tab));
+    await waitFor(() => expect(row('/r')).not.toBeNull());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(inTree()).toBe(false);
+    showAgain(); // the control: shown by its key
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
   });
 });

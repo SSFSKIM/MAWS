@@ -72,6 +72,7 @@ describe('the keyboard on show and hide', () => {
     );
   });
   afterEach(() => {
+    for (let round = 0; round < 4 && frames.length > 0; round += 1) frame(); // what a case left asked runs, before the next case
     cleanup();
     offs.splice(0).forEach((off) => off());
     resetComposerStore();
@@ -162,6 +163,7 @@ describe('the keyboard on show and hide', () => {
     act(() => toggleSurface('terminal'));
     expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
     act(() => toggleSurface('terminal'));
+    frame(); // the hide drawn
     expect(document.activeElement, 'the keyboard was in the column').toBe(box());
 
     act(() => toggleSurface('terminal'));
@@ -170,6 +172,7 @@ describe('the keyboard on show and hide', () => {
     act(() => (document.activeElement as HTMLElement).blur());
     expect(document.activeElement).toBe(document.body);
     act(() => toggleSurface('terminal'));
+    frame();
     expect(document.activeElement, 'nothing held the keyboard').toBe(box());
 
     act(() => toggleSurface('terminal'));
@@ -177,6 +180,7 @@ describe('the keyboard on show and hide', () => {
     frame();
     act(() => field().focus());
     act(() => toggleSurface('terminal'));
+    frame();
     expect(surfaceTabs(useLayout.getState(), A)).toEqual([]);
     expect(document.activeElement, 'the keyboard was in the sidebar').toBe(field());
   });
@@ -186,6 +190,7 @@ describe('the keyboard on show and hide', () => {
     act(() => toggleSurface('terminal'));
     expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
     act(() => toggleSurface('terminal'));
+    frame();
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Chat A' }));
 
     composerOfA(); // the control: with a composer, the same act gives it the keyboard
@@ -193,6 +198,44 @@ describe('the keyboard on show and hide', () => {
     frame();
     frame();
     act(() => toggleSurface('terminal'));
+    frame();
     expect(document.activeElement).toBe(box());
+  });
+
+  // A side surface that covers the main area leaves it inert until the hide has been drawn, and an inert element takes no
+  // keyboard; the composer here refuses it while inert, as the browser does.
+  it('hidden by its key while it covered the main area, the composer takes the keyboard once the main area is no longer inert; a move in between stays', () => {
+    function CoveredWindow() {
+      const covered = useLayout((s) => s.regions.panel.maximized && surfaceTabs(s, A).length > 0);
+      return <>
+        <section id="region-sidebar"><input aria-label="Find a session" /></section>
+        <section id="region-main" inert={covered}>
+          <section id="pane-0" data-pane="0"><div role="tabpanel"><textarea aria-label="Message to A" /></div></section>
+        </section>
+        <section id="region-panel"><TestHost /></section>
+      </>;
+    }
+    render(<CoveredWindow />);
+    const takes = () => {
+      if (box().closest('[inert]') === null) box().focus();
+    };
+    offs.push(registerFocusTarget(A, { focusEditor: takes, focusFrame: takes, insertText: () => {} }));
+    act(() => toggleSurface('terminal'));
+    act(() => useLayout.getState().setPanel({ maximized: true }));
+    expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
+    act(() => toggleSurface('terminal'));
+    expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(false);
+    frame();
+    expect(document.activeElement).toBe(box());
+
+    act(() => toggleSurface('terminal'));
+    frame();
+    frame();
+    expect(document.activeElement).toBe(screen.getByLabelText('Shell input'));
+    act(() => toggleSurface('terminal'));
+    act(() => field().focus()); // the person, before the hide is drawn
+    frame();
+    expect(document.activeElement).toBe(field());
   });
 });
