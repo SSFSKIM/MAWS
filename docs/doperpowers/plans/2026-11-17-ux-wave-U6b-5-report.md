@@ -102,3 +102,34 @@ Evidence:
 - Desk-web, label `u6b5a-fix2-dw`, at `b7aa90334`: run **44605459608**, **success**. The composer is in desk-web's import closure.
 
 New load timeouts seen: `src/main/org/rows.test.ts` (above). H5's executor also saw six timeouts at the 5 s default while the VM's load was 17 to 50. None of those six takes a step, four of the files pass alone, and `session-navigation.test.ts`'s ⌘⇧T case passes in 7.8 s with a 60 s timeout.
+
+## Fix wave 3: one queue and a read-back (2026-11-19, the last round)
+
+The second delta review (`6f2184934..213aa491d`) returned "incorrect" with one P1, two P2 and one P3. All four came from H1's first form: a side channel for an attach's immediate save, with an answer for each save. The P1: with an attach's debounced save queued and a second immediate attach behind it, a send whose clear goes out first was then overwritten by the older snapshot, so the sent message came back as a draft. The coordinator ruled that the channel goes, and one rule replaces it. M2's executor built it red first (`14ddb56c8`, then `fd3a73ef0`, `b6dd4259c`, `46e0554fa`). Decision Log 21's H1 is rewritten to the new rule (`6a0eeefc9`). This supersedes the H1 bullet and the "edit in U4's file" note of the section above.
+
+- **One queue.** Every remote draft write goes through the session's one ordinary queue, in session order. An attach's save only flushes it. `saveRemoteDraftNow`, `DraftPort.saveNow` and the per-save answers are removed, and so is the forwarding member in `Composer.tsx`: `useDraftPort` is unedited again. Against `6f2184934`, the only line of U4's file this wave touches is H4's `atPress` at the composer's registration. No caller but the attach read the per-save answers: the editor's writer drops them, and the take-back's `saveRemoteDraftOnce` keeps its own.
+- **The read-back.** A remote box that answers `kept` ends only after the session's queue is no longer out (the new `remoteDraftsSent`). Then the machine's draft is read:
+  - it holds the block: `added`;
+  - the read fails, times out or is not offered: `unconfirmed`;
+  - the block is missing while the window still holds an unsent draft: `unconfirmed`;
+  - otherwise: refused `changed` ("not added").
+
+  A box on this Mac still ends on the store's answer to its save.
+- **The not-offered fallback** keeps the queue's newest draft, as at the base.
+- **Kept from the delta wave:** G1's `UNREAD`, H2 (a bridge that throws is a failed write and the queue goes on), and H3 (`savedIn`).
+- **Rewritten tests, not deleted.** `remote-drafts.test.ts`'s "the answer to each save" is now "one queue for each session's saves". In `attach-pasted.remote.test.tsx`, a save the machine does not take now ends `unconfirmed`, where it was refused `unsaved`.
+- **Size** against `213aa491d`: 7 files, +146/−117. The source shrinks by 59 lines net, and the tests grow by the three red cases.
+
+Evidence:
+- Red at `14ddb56c8`, 3 failed:
+  - resurrection: the sent message came back as a draft;
+  - not-offered: the attach's older snapshot was kept, and the newer typing was lost;
+  - timeout: the attach ended refused.
+- On the VM:
+  - at `46e0554fa`: the whole `pnpm typecheck` exits 0, eslint on the 7 changed files exits 0, and `attach-pasted.remote.test.tsx` passes 40/40;
+  - at `b6dd4259c`: vitest over `composer`, `lane-b`, `test/lane-b` and `terminal` passes, 110 files and 1,949 tests;
+  - desk-web builds, and its tests pass 801/801.
+- Class 1a, label `u6b5a-fix3`, at `6a0eeefc9`: run **44613794578**, **success** (static, unit 1 to 4, probes, e2e:cross-build).
+- Desk-web, label `u6b5a-fix3-dw`, at `6a0eeefc9`: run **44613806181**, **success**.
+
+A load flake seen: `terminal/ime-trace.test.ts` once failed to load at `fd3a73ef0`, with "Data error" in `@xterm/addon-unicode-graphemes`' `tiny-inflate`. It is untouched by this wave and passed on the next run.
