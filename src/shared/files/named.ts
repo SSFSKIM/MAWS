@@ -774,7 +774,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
         // reads its delimiter row as a lazy line (no table), or ends the table at a line the item does not hold, and either
         // way reads the lines round it as this pass cannot tell. Nothing of it is read, nor of the paragraph it interrupts;
         // the next blank line, block or quote ends it (the review's finding 1).
-        const dropped = listOpen || (paragraph !== null && line.quote < paragraph.quote);
+        const dropped: boolean = listOpen || (paragraph !== null && line.quote < paragraph.quote);
         if (dropped && paragraph !== null) paragraph.dropped = true;
         yield* closeParagraph();
         table = { quote: line.quote, cells, dropped };
