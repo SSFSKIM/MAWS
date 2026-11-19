@@ -99,6 +99,15 @@ export function memberChannels(member: Member): string[] {
   return [...counted];
 }
 
+/**
+ * Whether a held member's listing is withdrawn by its state word (the plan of 2026-11-18, Decision Log 18). A sminos
+ * thread whose process ended stays a member (Interfaces §G). With no transcript to reopen, its state word is `gone`,
+ * which in a listing is RL6's withdrawal: the member is held and its listing withdrawn by the one path that withdraws,
+ * not signed as a listing in that state, here and in `endpoint.listings` alike. `stopped` is listed like any state;
+ * lane B is not under the rule.
+ */
+export const listingWithdrawn = (member: Member): boolean => member.lane === 'A' && member.state === LISTING_GONE;
+
 const ACCESS: ReadonlySet<string> = new Set(['private', 'listed', 'org-view', 'org-converse']);
 const SHARE_GRADES: ReadonlySet<string> = new Set(['list', 'view', 'converse', 'approve']);
 const isText = (v: unknown, max = 4096): v is string => typeof v === 'string' && v.length <= max;
@@ -621,10 +630,7 @@ export class Members implements RecordSource, CheckoutSource {
     // U9: a lane B session's listing follows its record: withdrawn while archived, under the record's title
     const says = member.lane === 'B' ? await this.#recordOf(session) : null;
     if (says?.archived === true) return this.#ctx.listings.gone(session);
-    // A sminos thread whose process ended stays a member (the plan of 2026-11-18, Interfaces §G). With no transcript to
-    // reopen, its state word is `gone`, which in a listing is RL6's withdrawal: the member is held and its listing
-    // withdrawn by the one path that withdraws, not signed as a listing in that state. `stopped` is listed like any state.
-    if (member.lane === 'A' && member.state === LISTING_GONE) return this.#ctx.listings.gone(session);
+    if (listingWithdrawn(member)) return this.#ctx.listings.gone(session);
     await this.#ctx.listings.report({
       session,
       project: member.project,
