@@ -27,7 +27,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
-import { buildScmScratch, CHECKS_PASSED, prepareScm, type ScmScratch } from './support/scm-scratch';
+import { buildScmScratch, CHECKS_PASSED, prepareScm, scmLaunchEnv, type ScmScratch } from './support/scm-scratch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { mainTab, openSurface, sessionCard, sessionCards, showSessionCards, surface, unfoldSessionCard } from './support/shell';
 
@@ -56,7 +56,7 @@ async function withScm(options: ScmOptions, body: (p: Scm) => Promise<void>): Pr
   let maws: MawsLaunch | null = null;
   try {
     options.setup?.(scratch);
-    maws = await launchMaws({ env: scratch.env, prepare: prepareScm(scratch, { trust: options.trust ?? true, gh }) });
+    maws = await launchMaws({ env: scmLaunchEnv(scratch, gh), prepare: prepareScm(scratch, { trust: options.trust ?? true, gh }) });
     const { page } = maws;
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
