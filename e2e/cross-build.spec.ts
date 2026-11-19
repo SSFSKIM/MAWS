@@ -4147,7 +4147,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
     writeFileSync(followed, OUTSIDE_TEXT('followed.txt'));
     const [guide, inside] = [join(s.repo, 'guide.md'), join(s.repo, 'inside.txt')];
     writeFileSync(guide, followedGuide(followed, 'inside.txt'));
-    writeFileSync(inside, OUTSIDE_TEXT('inside.txt'));
+    writeFileSync(inside, 'An invented file inside the session’s folder.\n');
     appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}) and [the guide](${guide}).`);
     await withUnit(s, peer, 'xb-u6e-unit', async (unit) => {
       const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}), pid ${unit.pid}`];
@@ -4203,7 +4203,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       expect(await invoke(run.page, 'files.follow', { appSessionId: id, path: followed, from: { file: guide } }), 'the peer’s daemon answers the follow unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       await openGuide();
       await guideViewer.locator('[data-markdown-view] [data-chip="path"][title="inside.txt"]').click();
-      await expect(sideColumn(run.page).locator(`[data-file-viewer][data-path="${inside}"] .cm-content`), 'a link to a file inside the folders opens').toContainText('inside.txt', { timeout: 20_000 });
+      await expect(sideColumn(run.page).locator(`[data-file-viewer][data-path="${inside}"] .cm-content`), 'a link to a file inside the folders opens').toContainText('inside the session’s folder', { timeout: 20_000 });
       expect(existsSync(linksOf(s)), 'nothing recorded').toBe(false);
       expect(run.maws.consoleErrors()).toEqual([]);
       said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written; a Markdown file's link: files.follow unknown_command, the first notice; its link inside the folders opens`);

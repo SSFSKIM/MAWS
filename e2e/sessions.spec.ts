@@ -1522,7 +1522,7 @@ test.describe('sessions', () => {
 
       // the agent's row, under its turn's line unfolded (the line is unfolded only where it was folded); its row opens the
       // drill-in, which draws the child's own transcript
-      const turnLine = main.locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').filter({ hasText: /^Worked for / }).first();
+      const turnLine = main.locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').first(); // the one turn's
       await expect(turnLine, 'the turn’s line').toBeVisible({ timeout: 20_000 });
       if ((await turnLine.getAttribute('aria-expanded')) !== 'true') await turnLine.click();
       await expect(turnLine).toHaveAttribute('aria-expanded', 'true');
