@@ -911,8 +911,10 @@ test('skills: a skill’s Open in hands its listed file to an editor or Finder; 
     const mine = join(configDir, 'skills', 'outline-notes', 'SKILL.md');
     const projectSkill = join(projects[0]!, '.claude', 'skills', 'release-steps', 'SKILL.md');
     const detail = (name: string) => customizePage(page).locator(`[data-skill-detail="${name}"]`);
+    // a person clicks the row's name: the row's content stands above its full-row open button (its tooltips), and the
+    // row's own click opens the detail (SkillItem in src/renderer/src/widgets/skills/SkillsLibrary.tsx)
     const openDetail = async (name: string) => {
-      await customizePage(page).getByRole('button', { name: `View ${name}`, exact: true }).click();
+      await customizePage(page).locator(`[data-skill-row="${name}"] [data-skill-name]`).click();
       await expect(detail(name)).toBeVisible();
     };
     const choose = async (name: string, row: string) => {

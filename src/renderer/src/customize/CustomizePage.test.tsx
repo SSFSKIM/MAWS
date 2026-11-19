@@ -259,6 +259,25 @@ describe('the head', () => {
     }
   });
 
+  // the rows' shared shape (PluginRow, SkillItem): the content layer stands above the full-row open button so its tooltips
+  // show, and a click on it opens the detail through the row's own click, as the e2e:discover scenes click a row's name
+  it('a click on a row’s name opens its detail, its tooltip kept; the row’s own controls do not open it', async () => {
+    mountCustomize({ view: 'mine', show: 'plugins' });
+    const plugin = await pluginRow('buoy-log@harbour-market');
+    const pluginName = within(plugin).getByText('Buoy log');
+    expect(pluginName.getAttribute('title')).toBe('buoy-log@harbour-market');
+    fireEvent.click(pluginName);
+    await waitFor(() => expect(tools()).toBeNull()); // the detail, in the list's place
+    chooseShow('Skills');
+    const skillName = (await found('[data-skill-row="tide-tables"] [data-skill-name]'));
+    fireEvent.click(skillName);
+    await found('[data-skill-detail="tide-tables"]');
+    chooseShow('All');
+    const menu = within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: /^More actions for / });
+    fireEvent.click(menu);
+    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
+  });
+
   it('draws no tools while a plugin’s or a skill’s detail is open; pressing the view shown or a Show value returns to the list', async () => {
     mountCustomize({ view: 'mine', show: 'plugins' });
     fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View Buoy log' }));
