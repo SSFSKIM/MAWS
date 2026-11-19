@@ -709,6 +709,29 @@ describe('the task review’s findings (Decision Log 14)', () => {
     a.holds(store.doc(), 'earlier words');
   });
 
+  // The second re-review: a restore whose promise rejects ends the box's wait as a failure, never as an empty box that
+  // saves the block over the person's draft. The control: the restore answering.
+  it.each(['rejects', 'answers'] as const)('a covered composer whose restore %s while a draft is kept', async (restore) => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    store.hold(GET); // the composer's restore
+    mountComposer(S, store.client, { covered: true });
+    const a = attach(store);
+    await waitFor(() => expect(store.held(GET)).toHaveLength(1));
+    await settle();
+    if (restore === 'rejects') {
+      await store.held(GET)[0]!.reject(false);
+      expect(await a.done).toEqual(unconfirmed);
+      expect(store.writes()).toEqual([]);
+      expect(store.doc()).toEqual(EARLIER);
+    } else {
+      await store.held(GET)[0]!.answer();
+      expect(await a.done).toEqual(added);
+      a.holds(store.doc(), 'earlier words');
+    }
+    expect(a.lines()).toHaveLength(1);
+  });
+
   it.each(['answered late', 'lost'] as const)('(ii) a send that carried the block ends added, and the block is not put in again (the write’s reply %s)', async (reply) => {
     const store = draftStore(S);
     store.put(EARLIER);
