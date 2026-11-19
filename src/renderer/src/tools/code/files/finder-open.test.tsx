@@ -26,7 +26,7 @@ import { openFile, resetKeptOpens } from '../open-file';
 import { FileBody, FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
-import { connectGoToFile, requestKeyboard } from './finder';
+import { connectGoToFile, FILE_TAKE_BOUND_MS, keyboardWaits, requestKeyboard } from './finder';
 import { useFiles } from './store';
 import { resetTreeState, treeOf, useTreeState } from './tree-state';
 
@@ -334,6 +334,80 @@ describe('a take the page refuses (Decision Log 17)', { timeout: 20_000 }, () =>
     refusing = false;
     act(() => control.resolve());
     await waitFor(() => expect(document.activeElement).toBe(textOf(TIDES, 'panel')), { timeout: 5000 });
+  });
+
+  // Decision Log 18: the keyboard put elsewhere by any means ends the held request, a native menu's command among them,
+  // which makes no key or pointer press in the page.
+  it('a refused take, then the keyboard moved to the composer with no press (a native menu’s command): the held request ends, and neither the page’s change nor the editor takes the keyboard back', async () => {
+    const read = holdRead(APP);
+    render(<Page />);
+    await findAndEnter('app', APP, () => {
+      refusing = true;
+    });
+    await waitFor(() => expect(body(APP, 'panel')).not.toBeNull());
+    await settle();
+    refusing = false;
+    act(() => composer().focus()); // no keydown, no pointerdown
+    expect(keyboardWaits({ into: 'file', key: KEY(APP) }), 'the request ended').toBe(false);
+    act(() => {
+      panel().setAttribute('inert', '');
+      panel().removeAttribute('inert');
+    });
+    act(() => read.resolve());
+    await waitFor(() => expect(textOf(APP, 'panel')).not.toBeNull(), { timeout: 5000 });
+    await settle();
+    expect(document.activeElement).toBe(composer());
+    const control = holdRead(TIDES); // the control: the same refused take with nothing moved
+    await findAndEnter('tides', TIDES, () => {
+      refusing = true;
+    });
+    await waitFor(() => expect(body(TIDES, 'panel')).not.toBeNull());
+    await settle();
+    refusing = false;
+    expect(keyboardWaits({ into: 'file', key: KEY(TIDES) }), 'the request still waits').toBe(true);
+    act(() => control.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(textOf(TIDES, 'panel')), { timeout: 5000 });
+  });
+
+  // Decision Log 18: a view with no editor (here a read that fails) is ready once its read settles; a take still refused
+  // `FILE_TAKE_BOUND_MS` after that is dropped, and its watch on the page with it, so a much later change of the page
+  // moves nothing.
+  it('a view with no editor under a refusal: within the bound after its read settles the request ends and the page is no longer watched; a later change takes nothing', async () => {
+    const watching = new Set<MutationObserver>();
+    let watched = 0;
+    class Recording extends MutationObserver {
+      override observe(target: Node, options?: MutationObserverInit): void {
+        if (options?.attributeFilter?.includes('inert') === true) {
+          watching.add(this);
+          watched += 1;
+        }
+        super.observe(target, options);
+      }
+      override disconnect(): void {
+        watching.delete(this);
+        super.disconnect();
+      }
+    }
+    vi.stubGlobal('MutationObserver', Recording);
+    failedReads.set(APP, `denied: ${APP}`);
+    render(<Page />);
+    await findAndEnter('app', APP, () => {
+      refusing = true;
+    });
+    await waitFor(() => expect(body(APP, 'panel')?.querySelector('[data-refusal]')).not.toBeNull());
+    expect(watched, 'the held take watched the page').toBeGreaterThan(0);
+    await waitFor(
+      () => {
+        expect(keyboardWaits({ into: 'file', key: KEY(APP) }), 'the request ended').toBe(false);
+        expect(watching.size, 'the page no longer watched').toBe(0);
+      },
+      { timeout: FILE_TAKE_BOUND_MS * 4 },
+    );
+    refusing = false;
+    act(() => panel().classList.add('a-later-change'));
+    await settle();
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    expect(document.activeElement).not.toBe(body(APP, 'panel'));
   });
 });
 

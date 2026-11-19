@@ -76,6 +76,13 @@ export function requestKeyboard(request: KeyboardRequest): void {
   tell();
 }
 
+/**
+ * Decision Log 18: how long a file's view holds a request it has not taken, once the view is ready (in view, its read
+ * settled and its editor drawn where it draws one). Some frames' worth: long enough for a refusal while the view settles
+ * to pass, short enough that no later, unrelated change of the page moves the keyboard.
+ */
+export const FILE_TAKE_BOUND_MS = 500;
+
 /** True while the waiting request names this taker, which it leaves waiting: a taker whose focus the page may refuse reads it first. */
 export function keyboardWaits(request: KeyboardRequest): boolean {
   return pending?.taker === takerOf(request);
