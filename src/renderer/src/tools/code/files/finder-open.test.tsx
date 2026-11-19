@@ -336,6 +336,25 @@ describe('a take the page refuses (Decision Log 17)', { timeout: 20_000 }, () =>
     await waitFor(() => expect(document.activeElement).toBe(textOf(TIDES, 'panel')), { timeout: 5000 });
   });
 
+  // Decision Log 19: the request is held through its bound once the view is ready, landed or not, so a view drawn again
+  // in that time (here its read again: the entry back to loading, then ready, and the editor made anew) takes the
+  // keyboard back from wherever the old editor's going left it, with no press between.
+  it('the keyboard in the text, then the editor drawn anew with no press: the keyboard back in the new text', async () => {
+    render(<Page />);
+    act(() => void openFile(A, APP, null, { keep: true }));
+    await waitFor(() => expect(textOf(APP, 'panel')).not.toBeNull(), { timeout: 5000 });
+    await findAndEnter();
+    await waitFor(() => expect(document.activeElement).toBe(textOf(APP, 'panel')));
+    const first = textOf(APP, 'panel');
+    const entry = () => useViewer.getState().entries.get(KEY(APP))!;
+    act(() => useViewer.setState((s) => ({ entries: new Map(s.entries).set(KEY(APP), { ...entry(), status: 'loading' }) })));
+    await waitFor(() => expect(textOf(APP, 'panel')).toBeNull());
+    act(() => useViewer.setState((s) => ({ entries: new Map(s.entries).set(KEY(APP), { ...entry(), status: 'ready', epoch: entry().epoch + 1 }) })));
+    await waitFor(() => expect(textOf(APP, 'panel')).not.toBeNull(), { timeout: 5000 });
+    expect(textOf(APP, 'panel'), 'an editor made anew').not.toBe(first);
+    await waitFor(() => expect(document.activeElement).toBe(textOf(APP, 'panel')));
+  });
+
   // Decision Log 18: the keyboard put elsewhere by any means ends the held request, a native menu's command among them,
   // which makes no key or pointer press in the page.
   it('a refused take, then the keyboard moved to the composer with no press (a native menu’s command): the held request ends, and neither the page’s change nor the editor takes the keyboard back', async () => {
