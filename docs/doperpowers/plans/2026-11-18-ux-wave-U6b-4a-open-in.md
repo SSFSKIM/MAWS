@@ -15,7 +15,7 @@ How to see it working: open a session in a git checkout, open the title bar's "M
 - [x] (2026-11-18) Document written against master `8a7f308ff`; the external facts verified and cited (Decision 2).
 - [x] (2026-11-18) M1 built: the daemon's read, main's finder and launcher, the three menus, the unit tests, the scenes written. The menus' pinned lists in `app/Shell.test.tsx`, `sidebar/Sidebar.test.tsx` and `sidebar/reach.test.tsx` gain the item (Decision Log 5).
 - [x] (2026-11-18) Proof on the build VM: `pnpm typecheck` 0, eslint on the changed files 0, vitest over the touched directories green but for `src/shared/machine/git-reads.test.ts`'s two cases (the VM's git, ticket 756). The script tests and the whole suite: see Outcomes.
-- [ ] Class 1a (`--label u6b4a`) and desk-web e2e on Linux (`--label u6b4a-dw`).
+- [x] (2026-11-18) Class 1a (`--label u6b4a`, run 44439568341): static, probes, cross-build and unit 1 to 3 green; unit 4/4 failed one case of `src/shared/host/detached-transport.test.ts` (see Outcomes). Desk-web e2e on Linux (`--label u6b4a-dw`, run 44439559594): green.
 - [ ] Not by the builder: the scenes on a Mac (§E), the review, the owner's look.
 
 ## Acceptance
@@ -113,4 +113,4 @@ On the build VM: `pnpm typecheck`; eslint on the changed files; vitest on `src/m
 
 ## Outcomes & Retrospective
 
-(At the hand-back.)
+At `3ee86d713`: `pnpm typecheck` and eslint on every changed file clean on the build VM; the touched suites green. The gate's script tests on the VM: one case of `gate-copy.test.mjs` failed in the whole set under load and passed alone (no file of `.github/` or `scripts/` is changed). The whole unit suite on the VM ran beside another branch's (load about 16) and failed 117 cases in 31 files; each file that is not on the build brief's VM list was run again alone, 82 files at once with four workers, and all passed but `src/shared/host/detached-transport.test.ts` ("a host killed mid-drain, …"), which then passed four runs of four alone at the head and four of four at the base `8a7f308ff`. The same case is class 1a's one failure. This change touches nothing of the host transport; the case is timing-bound and deserves a row of its own (not this landing's). Not run by the builder: the scenes of §E on a Mac, and a hands-on pass that each installed editor opens at the line.
