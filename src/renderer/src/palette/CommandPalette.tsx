@@ -16,7 +16,7 @@
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
-import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -148,7 +148,7 @@ function hitGroups(search: ConversationSearch, records: ReadonlyMap<AppSessionId
     .filter((group) => group.entries.length > 0);
 }
 
-// The value cmdk selects each kind of row by (U6b-5a M4: the selection's first row is read from the same values).
+// The value cmdk selects each kind of row by (U6b-5a M4).
 const ROW = {
   session: (appSessionId: AppSessionId) => `session:${appSessionId}`,
   artifact: (machine: MachineRef, artifactId: string) => `artifact:${artifactKey(machine, artifactId)}`,
@@ -264,21 +264,11 @@ function Palette({ run }: { run(id: ActionId): void }) {
     ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
     : [];
   const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
-  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii)): in the All scope, until the person moves the selection (a
-  // key, the pointer), it is the first row and follows the first row as answers arrive; from then on it is kept by value.
-  // A move is forgotten at every change of the text or the scope. The Conversations scope keeps its selection by value,
-  // as before. Enter runs what is selected when it is pressed.
-  const firstRow = (() => {
-    const [lead] = recent;
-    if (lead) return lead.kind === 'session' ? ROW.session(lead.record.appId) : ROW.artifact(lead.machine, lead.artifactId);
-    if (typed && entries.sessions[0]) return ROW.session(entries.sessions[0].appId);
-    const artifact = artifactGroups[0]?.rows[0];
-    if (artifact) return ROW.artifact(artifactGroups[0]!.machine, artifact.id);
-    if (entries.projects[0]) return ROW.project(entries.projects[0].id);
-    if (entries.channels[0]) return ROW.channel(entries.channels[0].project);
-    if (actions[0]) return ROW.action(actions[0]);
-    return typed ? ROW.library : null;
-  })();
+  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-review): cmdk holds the one selection, reported
+  // through `onValueChange`. In the All scope, until the person moves it (a key or the pointer that changes the row), the
+  // selection follows the first row as answers arrive: when another row comes first, cmdk is asked to select it as Home
+  // does (`followFirst`), so its active descendant and Enter's target move with it. A move is forgotten at every change
+  // of the text or the scope. The Conversations scope keeps its selection by value, as before.
   const listKey = `${scope}\n${query}`;
   const [moved, setMoved] = useState(false);
   const [movedIn, setMovedIn] = useState(listKey);
@@ -286,7 +276,25 @@ function Palette({ run }: { run(id: ActionId): void }) {
     setMovedIn(listKey); // a new text or scope: whatever was moved is forgotten
     setMoved(false);
   }
-  const value = scope === 'all' && !moved ? (firstRow ?? selected) : selected;
+  const root = useRef<HTMLDivElement>(null);
+  const acting = useRef(false); // the person's key or pointer is being handled (one task)
+  const following = useRef(false); // `followFirst`'s own Home
+  const personActs = () => {
+    acting.current = true;
+    queueMicrotask(() => void (acting.current = false));
+  };
+  const onValueChange = (next: string) => {
+    if (acting.current && next !== selected) setMoved(true);
+    setSelected(next);
+  };
+  useLayoutEffect(() => {
+    if (scope !== 'all' || moved || root.current === null) return;
+    const first = root.current.querySelector('[cmdk-item]')?.getAttribute('data-value');
+    if (first == null || first === selected) return;
+    following.current = true;
+    root.current.dispatchEvent(new globalThis.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
+    following.current = false;
+  });
   const close = () => usePalette.setState({ open: false });
 
   const openSession = (appSessionId: AppSessionId, split: boolean) => {
@@ -313,14 +321,15 @@ function Palette({ run }: { run(id: ActionId): void }) {
   };
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
-    if (movesSelection(event)) setMoved(true);
-    if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:')) return;
+    if (following.current) return;
+    if (movesSelection(event)) personActs();
+    if (event.key !== 'Enter' || !event.metaKey || !selected.startsWith('session:')) return;
     event.preventDefault();
-    openSession(value.slice('session:'.length) as AppSessionId, true);
+    openSession(selected.slice('session:'.length) as AppSessionId, true);
   };
 
   return (
-    <Command label="Command palette" shouldFilter={false} value={value} onValueChange={setSelected} onKeyDown={onKeyDown} loop>
+    <Command ref={root} label="Command palette" shouldFilter={false} value={selected} onValueChange={onValueChange} onKeyDown={onKeyDown} loop>
       <Command.Input
         value={query}
         onValueChange={setQuery}
@@ -345,10 +354,8 @@ function Palette({ run }: { run(id: ActionId): void }) {
         <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
       )}
       <Command.List
-        // the pointer selects the row it moves over (cmdk): the person's move
-        onPointerMove={(event) => {
-          if (event.target instanceof Element && event.target.closest('[cmdk-item]') !== null) setMoved(true);
-        }}
+        // the pointer selects the row it moves over (cmdk, in the bubble after this): the person's move when the row changes
+        onPointerMoveCapture={personActs}
         className="max-h-[min(420px,60vh)] overflow-y-auto p-1"
       >
         <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>

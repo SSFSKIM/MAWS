@@ -25,15 +25,16 @@ export interface RecentInput {
   answered: ReadonlyMap<string, LibraryRow | null>; // `library.get`'s answers by `artifactKey`; absent: not answered yet
 }
 
-// The rows to draw, and the artifacts to ask `library.get` for. An artifact not answered yet holds its place in the first
-// eight (Decision Log 16 (v)): no more reads are out at once than the places left, and an answer that turns out null
-// frees its place for the next. The fill with sessions is drawn at once and gives way as the artifacts' rows come.
+// The rows to draw, and the artifacts to ask `library.get` for. The reads are bounded apart from the rows (Decision Log
+// 16 (v); M4's re-review): an artifact not answered yet is asked only while fewer than eight rows and reads come before
+// it, so no more reads are out at once than the places left, and an answer that turns out null frees its place for the
+// next; a session opened in this run is drawn at once, reads out or not. The fill gives way as the artifacts' rows come.
 export function recentRows({ opened, records, activity, answered }: RecentInput): { rows: RecentRow[]; ask: OpenedArtifact[] } {
   const rows: RecentRow[] = [];
   const ask: OpenedArtifact[] = [];
   const listed = new Set<AppSessionId>();
   for (const entry of opened) {
-    if (rows.length + ask.length === RECENT_MAX) break;
+    if (rows.length === RECENT_MAX) break;
     if (entry.kind === 'session') {
       const record = records.get(entry.appSessionId);
       if (record === undefined || record.archived || listed.has(record.appId)) continue;
@@ -42,7 +43,9 @@ export function recentRows({ opened, records, activity, answered }: RecentInput)
       continue;
     }
     const row = answered.get(artifactKey(entry.machine, entry.artifactId));
-    if (row === undefined) ask.push(entry);
+    if (row === undefined) {
+      if (rows.length + ask.length < RECENT_MAX) ask.push(entry);
+    }
     else if (row !== null) rows.push({ kind: 'artifact', artifactId: entry.artifactId, machine: entry.machine, row });
   }
   if (rows.length < RECENT_MAX) {
