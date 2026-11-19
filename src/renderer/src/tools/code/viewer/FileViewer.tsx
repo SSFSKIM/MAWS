@@ -295,20 +295,24 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     shown.current = inView;
     if (asked === 0 || !inView) return;
     take('asked in view');
-    // at most one try a frame: a focus that something takes straight back (a modal's trap) changes a class each time, and
-    // a try per change would never let the page draw
-    let frame = 0;
+    // One try a task for any number of changes, posted as a message, never waiting on a frame: a window that is covered
+    // or not in front draws no frames, so a try held for one would never run there (Decision Log 19). A task, not a
+    // microtask, so that a change the try itself makes cannot spin within one turn of the page.
+    let queued = false;
+    const tries = new MessageChannel();
+    tries.port1.onmessage = () => {
+      queued = false;
+      take('the page changed');
+    };
     const retry = new MutationObserver(() => {
-      if (frame === 0)
-        frame = requestAnimationFrame(() => {
-          frame = 0;
-          take('the page changed');
-        });
+      if (queued) return;
+      queued = true;
+      tries.port2.postMessage(null);
     });
     retry.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] });
     return () => {
       retry.disconnect();
-      cancelAnimationFrame(frame);
+      tries.port1.close();
     };
   }, [asked, inView, take]);
   // Decision Log 18: the keyboard landing outside this view (the document's body aside) gives the request up
