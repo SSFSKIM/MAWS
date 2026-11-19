@@ -215,7 +215,7 @@ describe('the editor takes an attached block', () => {
   // restore, took the block: the answer is `present` and nothing is put in. The control: with no send, it is put in.
   it.each(['a send carrying it is accepted', 'no send'] as const)('waiting on its restore while %s', async (meanwhile) => {
     const block = { id: 'attach-r', text: 'ls -la' };
-    const sender = mount(heldPort({ doc: { ...docOf([paragraph(textNode('with it '))]), content: [paragraph(textNode('with it '), pastedBlock(block.text, block.id))] }, attachments: [], updatedAt: '2026-11-17T09:00:00.000Z' }), { onSubmit: async () => true });
+    const sender = mount(heldPort({ doc: docOf([paragraph(textNode('with it '), pastedBlock(block.text, block.id))]), attachments: [], updatedAt: '2026-11-17T09:00:00.000Z' }).port, { onSubmit: async () => true });
     await act(async () => sender.handle.current!.restored());
     expect(ofId(sender.handle.current!.doc(), block.id)).toHaveLength(1);
     const { port, release, saved } = heldPort(null, { holdLoad: true });
