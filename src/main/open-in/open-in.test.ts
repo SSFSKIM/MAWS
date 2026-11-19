@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandResult } from '@shared/ipc/schema';
-import type { FilesAdmitInput } from '@shared/ipc/schema/files';
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { FILES_REFUSAL } from '../../services/files/service';
 import { createOpenIn, DAEMON_REFUSAL, INSTALLED_TTL_MS, OPEN_IN_WORDS, type OpenInDeps } from './open-in';
 
@@ -17,7 +16,7 @@ const failed = (code: 'unknown_command' | 'internal', message: string): Admitted
 
 let runs: [string, string[]][];
 let clock: number;
-function openIn({ installed = ['dev.zed.Zed', 'com.microsoft.VSCode'], admit = async () => ok('/real/app', 'folder'), env = {}, launchFails = false }: { installed?: string[]; admit?: (input: FilesAdmitInput) => Promise<Admitted>; env?: NodeJS.ProcessEnv; launchFails?: boolean } = {}) {
+function openIn({ installed = ['dev.zed.Zed', 'com.microsoft.VSCode'], admit = async () => ok('/real/app', 'folder'), env = {}, launchFails = false }: { installed?: string[]; admit?: (input: CommandInput<'files.admit'>) => Promise<Admitted>; env?: NodeJS.ProcessEnv; launchFails?: boolean } = {}) {
   const admits = vi.fn(admit);
   const run: OpenInDeps['run'] = async (file, args) => {
     runs.push([file, args]);

@@ -10,9 +10,8 @@
 // ids; Terminal and Finder always), and a launch appends `open-in <row> <path>[:<line>]` to MAWS_E2E_OPEN_LOG and starts
 // nothing (with no log, nothing at all).
 import fs from 'node:fs';
-import type { CommandResult } from '@shared/ipc/schema';
-import type { FilesAdmitInput } from '@shared/ipc/schema/files';
-import { OPEN_IN_APP_IDS, type OpenInApp, type OpenInAppId, type OpenInInput, type OpenInOutput } from '@shared/ipc/schema/layout';
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
+import { OPEN_IN_APP_IDS, type OpenInApp, type OpenInAppId, type OpenInOutput } from '@shared/ipc/schema/layout';
 import { appSpec, installedApps, launchCommand, seamLine, type OpenInTarget } from './apps';
 
 // The daemon's refusal of a path it does not admit (FILES_REFUSAL, src/services/files/service.ts; the test pins the two)
@@ -33,14 +32,14 @@ export const OPEN_IN_WORDS = {
 
 export interface OpenInDeps {
   run(file: string, args: string[], timeoutMs: number): Promise<{ stdout: string }>; // execFile; rejects on a non-zero exit
-  admit(input: FilesAdmitInput): Promise<CommandResult<'files.admit'>>; // main's own send to this Mac's daemon
+  admit(input: CommandInput<'files.admit'>): Promise<CommandResult<'files.admit'>>; // main's own send to this Mac's daemon
   env: NodeJS.ProcessEnv;
   now?(): number;
 }
 
 export interface OpenIn {
   apps(): Promise<OpenInApp[]>;
-  open(input: OpenInInput): Promise<OpenInOutput>;
+  open(input: CommandInput<'layout.openIn'>): Promise<OpenInOutput>;
 }
 
 const seamApps = (value: string | undefined): Set<string> => new Set((value ?? '').split(',').map((id) => id.trim()));
