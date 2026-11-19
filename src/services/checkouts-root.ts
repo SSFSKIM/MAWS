@@ -13,6 +13,7 @@ import type { SpineView } from '@shared/spine/view';
 import { fileAdmission } from './files/admission';
 import { allowlistOf } from './files/allowlist';
 import type { FileGrants } from './files/grants';
+import type { FileLinks } from './files/links';
 import { createIgnoreCheck } from './files/ignored';
 import { createNamedPaths } from './files/named';
 import { registerFilesHandlers } from './files/register';
@@ -43,6 +44,9 @@ export interface CheckoutsDeps {
   // files (<profile>/sessions/file-grants.json; null in a run refused the spine, where nothing is chosen), whether the
   // session's agent sent a file, and MAWS's own folders, which no write of files reaches
   grants: FileGrants | null;
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §B): the link records of
+  // followed files (<profile>/sessions/file-links.json; null in a run refused the spine, where nothing is followed)
+  links: FileLinks | null;
   sent: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
   own: () => readonly string[];
   // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §B): the machine's home
@@ -56,7 +60,7 @@ export interface CheckoutsRoot extends Settling {
   stop(): void;
 }
 
-export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots, transcript, grants, sent, own, where }: CheckoutsDeps): CheckoutsRoot {
+export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots, transcript, grants, links, sent, own, where }: CheckoutsDeps): CheckoutsRoot {
   // The read-only git service (C4 M6): git.* for any directory in a repository, and git.changed for watched roots
   const git = new GitService({ emit: (change) => void bus.emit('git.changed', change), log: (line) => console.log(line) }); // P5 O3-E: [git] lines in mawsd's log
   registerGitHandlers(git, bus);
@@ -73,7 +77,9 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
   // spine's lock and swept at the start and hourly while the checkouts run. UX wave U6c: a file outside the roots that the
   // session's own transcript links, read-only, for this machine's callers that ask by name: one search and its queue for
   // the daemon (./files/named.ts). UX wave U6f: each save and choice another machine makes outside a session's folders
-  // is a line of the same `[files]` log, in mawsd's log of this machine
+  // is a line of the same `[files]` log, in mawsd's log of this machine. UX wave U6b-4c: a link the person clicked in a
+  // Markdown file the session may read, recorded for the session once the daemon found it there, each record a line of
+  // that log
   const filesLog = (line: string) => console.warn(`[files] ${line}`);
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): which entries of
   // a listing git ignores, one bounded check per listing, at most four at once; its runs end at the stop, before files'
@@ -85,6 +91,8 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
     admitted: fileAdmission(view),
     named: createNamedPaths({ transcript }).names,
     ...(grants === null ? {} : { grants }), // U6e
+    ...(links === null ? {} : { links }), // U6b-4c: a link followed; its subagent source answers not-linked until M3 hands the search
+    log: filesLog, // U6b-4c: one line per link recorded, the session and the time
     sent,
     own,
     ignored: ignore.names,

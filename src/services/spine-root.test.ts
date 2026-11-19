@@ -608,6 +608,30 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(readFileSync(grantsFile, 'utf8')).toBe(before);
   });
 
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §B; K2, K9): the link
+  // records of followed files are a file of the profile beside the grants, read at the open and reconciled with the view,
+  // and the follow of a link that a Markdown file of the session's folder holds writes one there, with its line in the log
+  it('keeps the link records in the profile, drops those of a session the view no longer knows, and records a link the daemon finds', async () => {
+    const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
+    const outside = realpathSync(mkdtempSync(join(dir.path, 'outside-')));
+    for (const name of ['kept.txt', 'linked.txt']) writeFileSync(join(outside, name), `${name}\n`);
+    const guide = join(repository, 'guide.md');
+    writeFileSync(guide, `See [the file](${join(outside, 'linked.txt')}).\n`);
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const K = seeded.sessions.upsertFromSummary(summary({ directory: repository })).record.appId;
+    seeded.close();
+    const kept = { real: join(outside, 'kept.txt'), at: 1, from: { file: guide } };
+    const linksFile = writeAt(join(profile, 'sessions', 'file-links.json'), JSON.stringify({ version: 1, sessions: { [K]: [kept], 'a-deleted-session': [kept] } }));
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    expect(JSON.parse(readFileSync(linksFile, 'utf8')).sessions, 'reconciled at the open').toEqual({ [K]: [kept] });
+    expect(await bus.invoke('files.read', { appSessionId: K, path: kept.real, named: true })).toMatchObject({ ok: true, value: { named: true, outside: { real: kept.real, writable: true } } });
+    expect(await bus.invoke('files.follow', { appSessionId: K, path: join(outside, 'linked.txt'), from: { file: guide } })).toEqual({ ok: true, value: { status: 'linked' } });
+    expect(JSON.parse(readFileSync(linksFile, 'utf8')).sessions[K]).toEqual([kept, { real: join(outside, 'linked.txt'), at: expect.any(Number), from: { file: guide } }]);
+    expect(warned.mock.calls.map(([line]) => String(line)).filter((line) => line.includes('a link followed'))).toEqual([expect.stringMatching(new RegExp(`^\\[files\\] a link followed for session ${K} at \\S+$`))]);
+  });
+
   it('admits nothing by name in launch mode scenario, whose index is not read', async () => {
     const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
     writeFileSync(join(repository, 'inside.txt'), 'inside\n');

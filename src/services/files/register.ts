@@ -39,6 +39,11 @@ export interface FilesHandlerDeps {
   outsideLog?: FilesServiceOptions['outsideLog'];
   home?: FilesServiceOptions['home'];
   platform?: FilesServiceOptions['platform'];
+  // UX wave U6b-4c (Interfaces §D): the link records of followed files (./links.ts), the search over one subagent's
+  // transcript, and the log's line per record written (./service.ts)
+  links?: FilesServiceOptions['links'];
+  agentNames?: FilesServiceOptions['agentNames'];
+  log?: FilesServiceOptions['log'];
 }
 
 // The service, plus the live clients it follows (for tests and diagnostics: an ended client leaves no entry behind).
@@ -102,6 +107,10 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
     if (caller.remote && caller.claim === null) throw new Error(FILES_REFUSAL);
     return files.read({ ...input, named: true, appSessionId: session(input.appSessionId) }, caller, endOf(true, context, caller));
   });
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §C, R1): the follow of a link
+  // waits as long as its client lives, and is this machine's own caller's alone: another machine's, claimed or not, is
+  // the service's refusal
+  register('files.follow', (input, context?: HandlerContext) => files.follow({ ...input, appSessionId: session(input.appSessionId) }, callerOf(context), endOf(true, context)));
   register('files.listOutside', (input, context?: HandlerContext) => files.listOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context)));
   register('files.chooseOutside', (input, context?: HandlerContext) => files.chooseOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context)));
   register('files.watch', async ({ appSessionId, path }, context: HandlerContext) => {

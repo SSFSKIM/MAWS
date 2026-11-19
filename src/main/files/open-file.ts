@@ -2,7 +2,7 @@
 // §C; write rule line 2, decisions 3, 9 and 14).
 //
 // The guard: `files.writeOutside` and `layout.openFile` (and, UX wave U6f, the open, the chooser's listing and the pick of
-// a file outside a session's folders on another machine: `APP_PAGE_ONLY`) are answered only for a live page of an app
+// a file outside a session's folders on another machine; UX wave U6b-4c, the follow of a link: `APP_PAGE_ONLY`) are answered only for a live page of an app
 // window, the window `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's
 // own origin test, ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a
 // web contents that is no window's and a page at another origin; this refuses, too, a window of the app's origin that is
@@ -34,8 +34,12 @@ export function isAppPage(client: ClientRef, appUrl: string): boolean {
   return page !== null && appWindows().some((win) => win.webContents === page) && atAppOrigin(page.mainFrame.url, appUrl);
 }
 
-/** The commands the guard answers only for a live page of an app window: U6e's save and Open File…, and U6f's three acts. */
-export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile'];
+/**
+ * The commands the guard answers only for a live page of an app window: U6e's save and Open File…, U6f's three acts, and
+ * (UX wave U6b-4c, R1) the follow of a link, which writes an admission a save may use. The follow is not among
+ * `OUTSIDE_ACTS`, the list offered to another machine under a claim: no machine is offered it.
+ */
+export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile', 'files.follow'];
 
 export const appPageOnly =
   (appUrl: string): CommandGuard =>

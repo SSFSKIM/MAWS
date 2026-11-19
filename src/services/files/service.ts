@@ -23,6 +23,17 @@
 // saves and choices is a line of the daemon's log (`outsideLog`). A file the deliveries admit, read by another machine
 // with the key and no claim, is answered read-only (`why: 'added'`).
 //
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R1 to R5, Interfaces §D): a link the
+// person clicked in a shown Markdown file, or in one of the session's subagents' transcripts, is followed (`follow`), for
+// this machine's own caller alone. The window says only where the link stands; the daemon reads that source itself (a
+// Markdown file through the read's own boundary and descriptor, a subagent's transcript by the search, `agentNames`),
+// proves the link, resolves the target once more, and records its real path for the session (`links`, ./links.ts), with
+// the log's line. From then on the record admits the file as a grant does, for a request of this machine that asks by name
+// and that the agent did not ask for: a record that admits a save directly after the grant, a read-only one after the
+// transcript's result form. A record is no stronger than what wrote it: a Markdown file the service would never save for
+// the session (a tool's result or the Library its only evidence, or MAWS's own) links read-only, and so does a subagent's
+// result form.
+//
 // The boundary opens before it trusts: a pre-check (step 1) resolves the path to its in-root realpath `real0` and
 // refuses a path that ends in a symlink; step 3 opens `real0` with `O_RDONLY | O_NONBLOCK` and no link on its way
 // (`O_DIRECTORY` too for a directory; ../fs/no-link.ts: `O_NOFOLLOW_ANY` on macOS, where the kernel refuses a symlink
@@ -62,6 +73,7 @@ import { createHash } from 'node:crypto';
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
 import type { ClientRef } from '@shared/ipc/client';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -90,7 +102,11 @@ import {
   type FilesChooseOutsideOutput, // U6f
   type FilesListOutsideInput, // U6f
   type FilesListOutsideOutput, // U6f
+  type FilesFollowInput, // U6b-4c
+  type FilesFollowOutput, // U6b-4c
 } from '@shared/ipc/schema/files';
+import { isMarkdownName, MARKDOWN_RENDER_CAP } from '@shared/files/markdown'; // U6b-4c
+import { fileLinkSteps, PAUSE, resolveRelative } from '@shared/files/named'; // U6b-4c
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import { expandHome, type Home } from '@shared/machine/home-folders';
@@ -99,12 +115,13 @@ import { ReleaseFences } from '../release-fences';
 import { machineHome, machineHomes } from '@shared/machine/machine-home';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import type { FileGrants } from './grants';
+import type { FileLinks, LinkWhy } from './links';
 import { fileMime, isTextMime } from './mime';
-import type { Naming } from './named';
+import { NAMED_PATH_MAX, NAMED_WAIT_MS, type Naming } from './named';
 import { listOutsideFolder, refused as refusedListing, walkOutside } from './outside-list';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between an outside walk and the step that takes its real path */ | 'before-ignored' /* U6b-3a: between a listing's entries' reads and its ignore check */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between an outside walk and the step that takes its real path */ | 'before-ignored' /* U6b-3a: between a listing's entries' reads and its ignore check */ | 'after-follow-read' /* U6b-4c: between a followed Markdown file's read and its links' scan */ | 'before-follow-record' /* U6b-4c: between a follow's proof and the target's last resolution */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -142,6 +159,13 @@ export interface FilesServiceOptions {
   outsideLog?: (line: string) => void;
   home?: () => string;
   platform?: NodeJS.Platform;
+  // UX wave U6b-4c (Interfaces §D): the link records (absent: nothing is followed, and `follow` answers not-linked); the
+  // search over one subagent's transcript (M3's `namesInAgent`; absent: a subagent source is not-linked), whose `located` is
+  // called once, when the request's call of the transcript locator has settled (answered, thrown, or never made); and the
+  // log, one line per record written: the session and the time, never a path
+  links?: Pick<FileLinks, 'add' | 'get'>;
+  agentNames?: (appSessionId: AppSessionId, agentId: string, path: string, signal?: AbortSignal, located?: () => void) => Promise<Naming>;
+  log?: (line: string) => void;
 }
 
 /** Who asks: this machine's own client; another machine's with no claim; another machine's under the claim `machine.op` made for the act it runs. */
@@ -180,8 +204,11 @@ interface Asked {
 
 // U6e: what admitted a file outside the roots by the outside rule: the person chose it, the agent sent it, the
 // transcript names it by a counted form, only by a result form, or another record of the Library points at it. The
-// last two admit no save.
-type Mark = 'chosen' | 'sent' | 'named' | 'result' | 'added';
+// last two admit no save. U6b-4c: a link record, `linked` when it admits a save and `link-only` when the file that
+// links it admits none (one a subagent's result form wrote is `result`).
+type Mark = 'chosen' | 'linked' | 'sent' | 'named' | 'result' | 'link-only' | 'added';
+// The marks a Markdown file holds when the service would save it for the session, which a link in it inherits (R4)
+const SAVES: ReadonlySet<Mark> = new Set(['chosen', 'linked', 'sent', 'named']);
 
 // 2026-11-06 (the home-root rule, ./allowlist.ts): `remote`, a request from another machine (the handler context's), whose
 // roots leave out the machine's home and anything above it. U6f: where U6e took `remote`, `read`, `writeOutside` and
@@ -200,6 +227,7 @@ export interface FilesService {
   grant(appSessionId: AppSessionId, path: string, caller?: FilesCaller): Promise<FilesGrantOutput>; // U6e; U6f: another machine's under a claim alone
   listOutside(input: FilesListOutsideInput, caller: FilesCaller): Promise<FilesListOutsideOutput>; // U6f: another machine's under a claim alone
   chooseOutside(input: FilesChooseOutsideInput, caller: FilesCaller): Promise<FilesChooseOutsideOutput>; // U6f: another machine's under a claim alone
+  follow(input: FilesFollowInput, caller?: FilesCaller, signal?: AbortSignal): Promise<FilesFollowOutput>; // U6b-4c: this machine's own caller alone
   watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; agent?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c; U6e: `agent`
@@ -210,6 +238,12 @@ export interface FilesService {
 }
 
 export const FILES_REFUSAL = "path outside the session's directories";
+
+// UX wave U6b-4c (decision 7): follows in the service at once, each counted before its first file system call
+export const FOLLOW_IN_FLIGHT_MAX = 9;
+const LINKED: FilesFollowOutput = { status: 'linked' };
+const INSIDE: FilesFollowOutput = { status: 'inside' };
+const NOT_LINKED: FilesFollowOutput = { status: 'not-linked' };
 
 // How many entries of one listing are read (`lstat`, and `readlink` for a link) at once: a directory of thousands of
 // names must not start thousands of filesystem calls together.
@@ -251,7 +285,7 @@ interface Confirmed {
   mark: Mark | null; // U6e: what admitted it by the outside rule; null for a root's file and for a delivered one read without the key
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */, grants, sent, own /* U6e */, ignored /* U6b-3a */, outsideLog, home = machineHome, platform = process.platform /* U6f */ }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */, grants, sent, own /* U6e */, ignored /* U6b-3a */, outsideLog, home = machineHome, platform = process.platform /* U6f */, links, agentNames, log /* U6b-4c */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -290,8 +324,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       return naming;
     };
     const chosen = (real: string) => asked.agent !== true && grants !== undefined && grants.has(appSessionId, real);
+    // U6b-4c (R5): a link record of the file, asked where a grant is asked, never for an open the agent asked for, and for
+    // this machine's own caller alone (U6f's claimed caller reaches this question, and a grant admits it; a record must not)
+    const followed = (real: string) => (asked.agent !== true && !caller.remote && links !== undefined ? links.get(appSessionId, real) : null);
     // a session with no resolvable root still reaches the evidence it may have (U6c's Decision Log 14 b)
-    const evidence = outside && (named !== undefined || grants !== undefined || sent !== undefined);
+    const evidence = outside && (named !== undefined || grants !== undefined || sent !== undefined || links !== undefined);
     if (roots.length === 0 && !delivers && !evidence) throw new Refusal();
     // U6f (decision 18): another machine's claimed caller touches nothing inside a protected folder the person did not
     // open, before the path is resolved and before any evidence is asked; a path under one of its roots, as written, is
@@ -305,8 +342,9 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       real0 = await fs.promises.realpath(path);
     } catch (error) {
       const answer = await missing(path, roots, error);
-      // U6c (decision 16), U6e: a granted or named path that is gone says so, as one inside the roots does
-      if (answer instanceof Refusal && outside && absent(error) && (chosen(path) || (await namesIt()) !== false)) throw new Error(`not found: ${path}`, { cause: error });
+      // U6c (decision 16), U6e: a granted or named path that is gone says so, as one inside the roots does; U6b-4c: a
+      // followed one too, by the path as given
+      if (answer instanceof Refusal && outside && absent(error) && (chosen(path) || followed(path) !== null || (await namesIt()) !== false)) throw new Error(`not found: ${path}`, { cause: error });
       throw answer;
     }
     // U6f (the architect's ruling on the walk-to-use race): a path that changed between the walk and the resolution is
@@ -331,19 +369,25 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { roots, real0, mark };
 
     // U6e step 5: the first evidence that holds, in the order of decision 7. A save whose client ended meanwhile (its
-    // signal) is admitted by none of it (S4): the grant asked again after the search would otherwise admit it.
+    // signal) is admitted by none of it (S4): the grant asked again after the search would otherwise admit it. U6b-4c
+    // (§D): a link record that admits a save beside each ask of the grant; a read-only one after the result form, so a
+    // counted name always wins over it.
     async function markOf(real: string): Promise<Mark | null> {
       const mark = await firstEvidence(real);
       return purpose.save === true && asked.signal?.aborted === true ? null : mark;
     }
     async function firstEvidence(real: string): Promise<Mark | null> {
       if (chosen(real)) return 'chosen';
+      if (followed(real)?.why === null) return 'linked';
       if (sent !== undefined && (await sent(appSessionId, real))) return 'sent';
       const form = await namesIt();
       if (form === 'counted') return 'named';
       if (chosen(real)) return 'chosen'; // a grant made while the transcript was searched
+      if (followed(real)?.why === null) return 'linked'; // a link followed meanwhile
       if (purpose.save === true) return null;
       if (form === 'result') return 'result';
+      const link = followed(real);
+      if (link !== null) return link.why === 'result' ? 'result' : 'link-only';
       return delivers && (await admitted?.(appSessionId, real)) ? 'added' : null;
     }
   }
@@ -483,9 +527,16 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     const answer = await readOpened(handle, stat, real, offset, length, hash, asksRaw === true && !caller.remote ? { path } : null);
     return {
       ...answer,
-      ...(mark === null ? {} : { named: true as const, outside: mark === 'result' || mark === 'added' ? { real, writable: false, why: mark } : { real, writable: true } }),
+      ...(mark === null ? {} : { named: true as const, outside: outsideOf(mark, real) }),
       ...(isOwn(real) ? { own: true as const } : {}),
     };
+  }
+
+  // U6e: what a read answers of a file the outside rule admitted; U6b-4c (decision 11): a file linked only by one that admits
+  // no save says so beside the reason a window from before it reads
+  function outsideOf(mark: Mark, real: string): NonNullable<FilesReadOutput['outside']> {
+    if (mark === 'link-only') return { real, writable: false, why: 'result', linked: true };
+    return mark === 'result' || mark === 'added' ? { real, writable: false, why: mark } : { real, writable: true };
   }
 
   // U6e (decision 8): a confirmed real path under one of MAWS's own folders
@@ -706,6 +757,148 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return answer;
   }
 
+  // UX wave U6b-4c (Interfaces §D, decision 7): the follows in the service now, and the line of Markdown proofs, one at a time
+  let following = 0;
+  const proofs = oneAtATime();
+
+  // `files.follow`: the follow of a link the person clicked, in the order of §D. A follow is counted from before its first
+  // file system call until its own work has ended, its locator's call included (`hold`), whatever it answered meanwhile;
+  // its patience is NAMED_WAIT_MS from here, read once more directly before the record is written.
+  async function follow(input: FilesFollowInput, caller: FilesCaller = THIS_MACHINE, signal?: AbortSignal): Promise<FilesFollowOutput> {
+    if (caller.remote) throw new Refusal(); // any caller that is not this machine's own, under a claim or not (R1)
+    if (links === undefined || following >= FOLLOW_IN_FLIGHT_MAX) return NOT_LINKED;
+    following += 1;
+    let holds = 1;
+    const leave = () => {
+      holds -= 1;
+      if (holds === 0) following -= 1;
+    };
+    const hold = (): (() => void) => {
+      holds += 1;
+      let left = false;
+      return () => {
+        if (left) return;
+        left = true;
+        leave();
+      };
+    };
+    try {
+      return await followLink(input, links, Date.now() + NAMED_WAIT_MS, signal, hold);
+    } finally {
+      leave();
+    }
+  }
+
+  async function followLink({ appSessionId, path, from }: FilesFollowInput, store: Pick<FileLinks, 'add'>, deadline: number, signal: AbortSignal | undefined, hold: () => () => void): Promise<FilesFollowOutput> {
+    const over = () => signal?.aborted === true || Date.now() > deadline;
+    // step 2: what a read refuses, refused as a read refuses it; a path past the search's bound links nothing
+    if (!isAbsolute(path)) throw new Error('path must be absolute');
+    const record = records(appSessionId);
+    if (!record) throw new Error(`unknown app session: ${appSessionId}`);
+    if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
+    if (Buffer.byteLength(path) > NAMED_PATH_MAX) return NOT_LINKED;
+    // step 3, the early answers (decision 4): a path that ends in a link or does not resolve links nothing; one under the
+    // session's folders needs no record, whatever it is
+    const roots = await rootsOf(record);
+    const final = await fs.promises.lstat(path).catch(() => null);
+    if (final === null || final.isSymbolicLink()) return NOT_LINKED;
+    const real0 = await fs.promises.realpath(path).catch(() => null);
+    if (real0 === null) return NOT_LINKED;
+    if (roots.some((root) => under(root, real0))) return INSIDE;
+    // step 4, the proof, by where the link stands
+    const proof = 'file' in from ? await provedByFile(appSessionId, from.file, path, deadline, signal, over) : await provedByAgent(appSessionId, from.agent, path, signal, hold);
+    if (proof === null) return NOT_LINKED;
+    // step 5, the target resolved once more, the last thing learned before the record (as `grant` resolves the file it
+    // records): a Markdown source's record is of the real path its second test found, or of none
+    await at('before-follow-record', path);
+    const real = await fs.promises.realpath(path).catch(() => null);
+    if (real === null) return NOT_LINKED;
+    const last = await fs.promises.lstat(path).catch(() => null);
+    if (last === null || last.isSymbolicLink()) return NOT_LINKED;
+    if (!(await fs.promises.lstat(real).catch(() => null))?.isFile()) return NOT_LINKED;
+    if (roots.some((root) => under(root, real))) return INSIDE;
+    if (proof.real !== null && proof.real !== real) return NOT_LINKED;
+    // one synchronous step after the last await: the patience and the client read, then the record and its line
+    if (over()) return NOT_LINKED;
+    store.add(appSessionId, real, from, proof.why);
+    logLink(`a link followed for session ${appSessionId} at ${new Date().toISOString()}`);
+    return LINKED;
+  }
+
+  // Step 4 for a Markdown file (R2, R3): admitted and opened for the session as a read that asks by name opens it, read
+  // whole through that descriptor, and scanned by the window's own reading. A link is the link when its path, as the click
+  // reads it from the file's folder as the request spelled it, is the asked path, and when the same written path, resolved
+  // from the folder the daemon confirmed the file in, leads to the asked path's real path. Inside the proofs' line, one at
+  // a time; the descriptor is closed on every path, and the file never opened again. Answers the real path that second test
+  // found, and whether a save is admitted: when the service would save the Markdown file itself for the session (R4).
+  async function provedByFile(appSessionId: AppSessionId, file: string, path: string, deadline: number, signal: AbortSignal | undefined, over: () => boolean): Promise<{ real: string; why?: LinkWhy } | null> {
+    if (!isMarkdownName(basename(file))) return null;
+    if (!(await proofs.enter(deadline, signal))) return null;
+    try {
+      if (over()) return null;
+      let source: Confirmed;
+      try {
+        source = await openConfirmed(appSessionId, file, 'file', DELIVERED_OR_OUTSIDE, THIS_MACHINE, { named: true, signal });
+      } catch {
+        return null; // not admitted, not there, not a regular file: nothing is said of why
+      }
+      let text: string;
+      try {
+        if (Number(source.stat.size) > MARKDOWN_RENDER_CAP) return null;
+        const whole = await readWhole(source.handle, Number(source.stat.size), MARKDOWN_RENDER_CAP);
+        if (whole === null || !isTextMime(fileMime(basename(source.real), whole.subarray(0, BINARY_SNIFF_BYTES)))) return null;
+        text = whole.toString('utf8'); // as a read decodes it
+      } catch {
+        return null;
+      } finally {
+        await source.handle.close();
+      }
+      await at('after-follow-read', file);
+      const found = await linkedFrom(text, dirname(file), dirname(source.real), path, over);
+      if (found === null) return null;
+      return !isOwn(source.real) && (source.mark === null || SAVES.has(source.mark)) ? { real: found } : { real: found, why: 'linked' };
+    } finally {
+      proofs.leave();
+    }
+  }
+
+  // R3's two tests over the links of one text, giving the event loop back at every pause of the rule's scan and ending it
+  // once the client has ended or the patience has run out. The second test is run on the link that passed the first, by
+  // the path it writes, both resolutions made then. Answers the asked path's real path, or null.
+  async function linkedFrom(text: string, spelled: string, confirmed: string, path: string, over: () => boolean): Promise<string | null> {
+    for (const step of fileLinkSteps(text, spelled)) {
+      if (step === PAUSE) {
+        await nextTurn();
+        if (over()) return null;
+        continue;
+      }
+      if (step.path !== path) continue;
+      const [mine, asked] = await Promise.all([realOrNull(resolveRelative(confirmed, step.written)), realOrNull(path)]);
+      if (mine !== null && mine === asked) return mine;
+    }
+    return null;
+  }
+
+  // Step 4 for a subagent's transcript: the search over that one file (M3's), whose counted form admits a save and whose
+  // result form a read. The follow keeps its place until the search's call of the transcript locator has settled, also
+  // after the search answered (decision 7). A search that fails links nothing, and its work has ended with it.
+  async function provedByAgent(appSessionId: AppSessionId, agentId: string, path: string, signal: AbortSignal | undefined, hold: () => () => void): Promise<{ real: null; why?: LinkWhy } | null> {
+    if (agentNames === undefined) return null;
+    const located = hold();
+    const naming = await agentNames(appSessionId, agentId, path, signal, located).catch((): Naming => (located(), false));
+    if (naming === 'counted') return { real: null };
+    return naming === 'result' ? { real: null, why: 'result' } : null;
+  }
+
+  // U6b-4c (R1): the daemon's line for each record written, which no failure of it changes
+  function logLink(line: string): void {
+    try {
+      log?.(line);
+    } catch {
+      // the record stands; the log is the daemon's
+    }
+  }
+
   // Runs `task` after every earlier task of the same key has settled, and before any later one starts.
   async function exclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
     const before = writing.get(key) ?? Promise.resolve();
@@ -804,6 +997,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     grant, // U6e
     listOutside, // U6f
     chooseOutside, // U6f
+    follow, // U6b-4c
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new
@@ -849,6 +1043,44 @@ function writeRefusalWord(error: unknown): string {
   if (message.startsWith('not writable: ')) return 'not-writable';
   return 'other';
 }
+
+// UX wave U6b-4c (decision 7 (ii)): one holder at a time, in the order they asked. A waiter whose patience ends (its
+// deadline, its client's end) leaves the line holding nothing; the holder passes its turn on when it leaves.
+function oneAtATime(): { enter(deadline: number, signal?: AbortSignal): Promise<boolean>; leave(): void } {
+  let busy = false;
+  const line: (() => void)[] = [];
+  return {
+    enter(deadline, signal) {
+      if (signal?.aborted === true) return Promise.resolve(false);
+      if (!busy) {
+        busy = true;
+        return Promise.resolve(true);
+      }
+      return new Promise<boolean>((resolve) => {
+        const done = (entered: boolean) => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', give);
+          resolve(entered);
+        };
+        const turn = () => done(true);
+        const give = () => {
+          line.splice(line.indexOf(turn), 1);
+          done(false);
+        };
+        const timer = setTimeout(give, Math.max(0, deadline - Date.now()));
+        signal?.addEventListener('abort', give, { once: true });
+        line.push(turn);
+      });
+    },
+    leave() {
+      const next = line.shift();
+      if (next) next();
+      else busy = false;
+    },
+  };
+}
+
+const realOrNull = (path: string): Promise<string | null> => fs.promises.realpath(path).catch(() => null);
 
 // Step 5 (and the late confirmations): a fresh realpath of the path as given, under a root, whose `stat` names the
 // descriptor's object. Answers the confirmed realpath.

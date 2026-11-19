@@ -20,6 +20,7 @@ export const grades = {
   'files.upload': 'manage', // P5 O3-E: a write into the session's attachments directory, claimed by machine.op
   'files.readUploads': 'internal', // P5 O7 M8: the endpoint's read of a send's uploads, before the send reaches the engine host
   'files.grant': 'internal', // UX wave U6e: main's record of the person's choice in its chooser
+  'files.follow': 'manage', // UX wave U6b-4c (decision 12): it writes an admission a save may use, as the outside save does
   // UX wave U6e's files.writeOutside, and U6f's readOutside, listOutside and chooseOutside: the terminal's grade
   ...outsideGrades(pty[TERMINAL_ACT]),
 } as const satisfies CommandGrades<'files'>;
