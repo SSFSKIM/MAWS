@@ -28,7 +28,8 @@ const focused = (page: Page) =>
 // ux-wave-U6b-5-rest-of-keyboard.md, §I; Decision Logs 15 and 19): End no longer lands on the project, since the last row
 // is "Search the Library for …", and the selection follows the first row until a key moves it; the row is picked by its
 // value (`project:<id>`, read from the drawn option) and reached by ArrowDown, each press waited on the selection moving.
-async function reveal(page: Page, app: ElectronApplication, project: string): Promise<void> {
+// `beforeEnter` runs once the row is selected, just before ⏎ (the second case's frame patch, which must cover the close).
+async function reveal(page: Page, app: ElectronApplication, project: string, beforeEnter?: () => Promise<void>): Promise<void> {
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   await page.locator('[data-region="sidebar"] [role="treeitem"]').first().focus();
   await menu(app, 'palette.open');
@@ -48,6 +49,7 @@ async function reveal(page: Page, app: ElectronApplication, project: string): Pr
     await expect.poll(() => selected.getAttribute('data-value'), { message: 'ArrowDown moves the selection' }).not.toBe(from);
   }
   await expect(palette.locator(`[cmdk-item][data-value="${value}"]`)).toHaveAttribute('aria-selected', 'true');
+  await beforeEnter?.();
   await page.keyboard.press('Enter');
   await expect(palette).toHaveCount(0);
 }
@@ -71,16 +73,18 @@ test('palette reveal project: the row keeps focus as the browser orders the fram
 test('palette reveal project: the row keeps focus when a frame runs before the dialog restores focus', async () => {
   const { page, app } = maws;
   for (const project of PROJECTS) {
-    // Every frame callback asked for in the next half second runs at once (a microtask), ahead of any timer.
-    await page.evaluate(() => {
-      const original = window.requestAnimationFrame.bind(window);
-      window.requestAnimationFrame = (callback) => {
-        queueMicrotask(() => callback(performance.now()));
-        return 0;
-      };
-      setTimeout(() => (window.requestAnimationFrame = original), 500);
-    });
-    await reveal(page, app, project);
+    // Every frame callback asked for in the next half second runs at once (a microtask), ahead of any timer: patched
+    // once the project's row is selected, so the half second covers the ⏎ and the dialog's close.
+    await reveal(page, app, project, () =>
+      page.evaluate(() => {
+        const original = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = (callback) => {
+          queueMicrotask(() => callback(performance.now()));
+          return 0;
+        };
+        setTimeout(() => (window.requestAnimationFrame = original), 500);
+      }),
+    );
     await expectRowKeepsFocus(page, project);
     await page.waitForTimeout(300); // the frame patch expires before the next round
   }
