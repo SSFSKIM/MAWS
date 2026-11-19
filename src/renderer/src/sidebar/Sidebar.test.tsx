@@ -2122,7 +2122,7 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
     const glyph = (state: string) => within(row(`state ${state}`)).getByRole('img').getAttribute('aria-label');
-    expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Done', 'Done', 'Idle']);
+    expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Stopped', 'Done', 'Idle']);
   });
 
   // P5 O7 M10 (a busy remote session's state): a tab open here holds the record at a listed address, and no digest says
@@ -2140,7 +2140,7 @@ describe('listed rows from another machine', () => {
     expect(drawn(row('MAWS')).map(([name]) => name)).toEqual(['state busy', 'Sidebar pass', 'state waiting', 'state failed', 'state done']); // busy among the working, the rest by recency
     await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
     const glyph = (state: string) => within(row(`state ${state}`)).getAllByRole('img').find((mark) => mark.getAttribute('aria-label') !== 'Unread')!.getAttribute('aria-label');
-    expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Done', 'Done', 'Idle, unread']);
+    expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Stopped', 'Done', 'Idle, unread']);
     expect(row('state busy').querySelector('[data-session-age]')?.textContent).toBe(formatAge(0)); // a working session is "now"
   });
 
