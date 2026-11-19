@@ -179,6 +179,15 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`a | b\n--|--\nx | y | [r](${P})\n[s](${P}.bak) | z`)).toEqual([`${P}.bak`]);
   });
 
+  // N1.13: the window's tokenizer takes a delimiter row that holds a `:` or a `|`; under a head of one cell, `:---` makes
+  // a table of one column, whose rows draw their first cell alone
+  it('a delimiter row of a colon and dashes alone makes a table: a link past its one cell names nothing, one in it does', () => {
+    expect(linkPaths(`Title\n:---\ntext | [r](${P})`)).toEqual([]);
+    expect(linkPaths(`Title\n:---\n[r](${P}) | text`)).toEqual([P]);
+    expect(linkPaths(`Title\n---:\ntext | [r](${P})`)).toEqual([]);
+    expect(linkPaths(`Title\n---\ntext | [r](${P})`)).toEqual([P]); // no `:` and no `|`: a heading's underline, then prose
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

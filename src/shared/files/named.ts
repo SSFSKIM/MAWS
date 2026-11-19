@@ -563,22 +563,26 @@ function cellsOf(text: string, at: number, end: number, m: Meter): [number, numb
   return cells;
 }
 // GFM's delimiter row, read in one pass (it was a regular expression whose whitespace runs overlapped): cells of
-// `:?-+:?` between spaces or tabs, split by `|`, a leading and a trailing `|` optional, at least one `|` in the row, and
+// `:?-+:?` between spaces or tabs, split by `|`, a leading and a trailing `|` optional, at least one `|` or `:` in the
+// row (the tokenizer's `seen`, micromark-extension-gfm-table: `:---` alone is a delimiter row, `---` alone is not), and
 // only spaces, tabs or carriage returns after its last cell.
 function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolean {
   const limit = lineLimit(at, end);
   let i = at;
-  let pipes = 0;
+  let seen = false; // a `|` or a `:` stands in the row
   let valid = false;
   const code = () => (i < limit ? text.charCodeAt(i) : -1);
   if (code() === 124) {
     i += 1;
-    pipes += 1;
+    seen = true;
   }
   for (let first = true; ; first = false) {
     while (isSpaceOrTab(code())) i += 1;
     const cell = i;
-    if (code() === 58) i += 1;
+    if (code() === 58) {
+      i += 1;
+      seen = true;
+    }
     const dashes = i;
     while (code() === 45) i += 1;
     if (i === dashes) {
@@ -589,11 +593,14 @@ function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolea
       }
       break;
     }
-    if (code() === 58) i += 1;
+    if (code() === 58) {
+      i += 1;
+      seen = true;
+    }
     while (isSpaceOrTab(code())) i += 1;
     if (code() === 124) {
       i += 1;
-      pipes += 1;
+      seen = true;
       continue;
     }
     while (isSpaceOrTab(code()) || code() === 13) i += 1;
@@ -602,12 +609,17 @@ function isDelimiterRow(text: string, at: number, end: number, m: Meter): boolea
   }
   charge(m, i - at + 1);
   decided(i, limit, end);
-  return valid && pipes > 0;
+  return valid && seen;
 }
-// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells. How many cells the head
-// has, or 0 when the row is no head.
+// A row that is one pipe alone, between spaces, tabs or a carriage return: the tokenizer takes no head of it (its
+// `headRowBreak` needs more than one divider or run of data).
+function onePipe(text: string, line: Line, m: Meter): boolean {
+  return text.charCodeAt(line.content) === 124 && blankFrom(text, line.content + 1, line.end, m);
+}
+// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells, and that is not one pipe
+// alone. How many cells the head has, or 0 when the row is no head.
 function tableHeadCells(text: string, line: Line, below: Line, m: Meter): number {
-  if (below.quote !== line.quote || below.opens || below.indent >= 4 || !isDelimiterRow(text, below.content, below.end, m)) return 0;
+  if (below.quote !== line.quote || below.opens || below.indent >= 4 || onePipe(text, line, m) || !isDelimiterRow(text, below.content, below.end, m)) return 0;
   const cells = cellsOf(text, line.content, line.end, m).length;
   return cellsOf(text, below.content, below.end, m).length === cells ? cells : 0;
 }

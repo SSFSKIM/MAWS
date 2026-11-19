@@ -229,6 +229,18 @@ describe('the rule reads the blocks the window draws', () => {
     agree('| a | b |\n|---|---|\n| x | y | [r](/work/x.md) |', []);
     agree('| a | b |\n|---|---|\n| x | [r](/work/x.md) | y |', ['/work/x.md']);
   });
+
+  it('a delimiter row of a colon and dashes alone makes a table of one column (N1.13)', () => {
+    agree('Title\n:---\ntext | [r](/work/x.md)', []);
+    agree('Title\n:---\n[r](/work/x.md) | text', ['/work/x.md']);
+  });
+
+  // N1.14: the tokenizer takes no head of one pipe alone. Recorded: the window draws prose there, and the rule reads it
+  // as prose too, so a code span the paragraph opens before it still holds the link
+  it('a line of one pipe alone is no table’s head (N1.14)', () => {
+    agree('|\n|-|\n[r](/work/x.md) | [s](/work/y.md)', ['/work/x.md', '/work/y.md']);
+    agree('`a\n|\n|-|\n[r](/work/x.md)`', []);
+  });
 });
 
 // The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own
