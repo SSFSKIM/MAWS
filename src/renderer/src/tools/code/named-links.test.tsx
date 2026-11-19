@@ -365,6 +365,19 @@ describe('the rule reads the blocks the window draws', () => {
     }
     agree(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`, ['/s']);
   });
+
+  // The delta review again (fix wave 3): where the scan discarded anything and the text may hold a definition, nothing
+  it.each(['/s', 'file:///s'])('a text the scan discarded anything of names nothing when it may hold a definition (%s)', (destination) => {
+    for (const shape of [
+      '- > a\n2. [ref]: https://example.com\n\n[outer [ref]](@)',
+      '- T | u\n  -|-\n[ref]:\n  https://example.com\n\n[outer [ref]](@)',
+      '- T | u\n  -|-\n[ref]: https://example.com\n  "title"\n\n[outer [ref]](@)',
+    ]) {
+      agree(shape.replace('@', destination), []);
+    }
+    agree(`- > a\n2. x\n\n[c](${destination})`, ['/s']);
+    agree(`[ref]: /x\n\n[c](${destination})`, ['/s']);
+  });
 });
 
 // UX wave U6b-4b (R1): an inline `file:` link with an empty host is the path chip of its rest, and the rule names that

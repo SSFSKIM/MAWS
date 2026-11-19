@@ -303,6 +303,20 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`)).toEqual(['/s']);
   });
 
+  // The delta review again (fix wave 3): a line a discard took may have been part of a reference definition, which every
+  // context reads. Where the scan discarded anything and the text holds `]:`, the text names nothing.
+  it.each(['/s', 'file:///s'])('a text the scan discarded anything of names nothing when it may hold a definition (%s)', (destination) => {
+    const cases: [string, string][] = [
+      ['- > a\n2. [ref]: https://example.com\n\n[outer [ref]](@)', 'a definition taken into a dropped paragraph (the review’s input)'],
+      ['- T | u\n  -|-\n[ref]:\n  https://example.com\n\n[outer [ref]](@)', 'a definition over two lines read as a dropped table’s rows'],
+      ['- T | u\n  -|-\n[ref]: https://example.com\n  "title"\n\n[outer [ref]](@)', 'its title on the next line'],
+    ];
+    for (const [shape, what] of cases) expect(linkPaths(shape.replace('@', destination)), what).toEqual([]);
+    // the controls: a discard with no `]:` in the text ends at the blank line; a definition with no discard is read as before
+    expect(linkPaths(`- > a\n2. x\n\n[c](${destination})`)).toEqual(['/s']);
+    expect(linkPaths(`[ref]: /x\n\n[c](${destination})`)).toEqual(['/s']);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);
