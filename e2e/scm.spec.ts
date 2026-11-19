@@ -187,10 +187,10 @@ type Sized = Box & { full: number }; // `full`: the element's scroll width, the 
 interface Measures {
   page: Box;
   where: { line: Box; branch: Sized; branchMin: number; measuredBranch: number; measuredBranchText: string; worktree: Sized | null; machine: Box | null; below: Box | null };
-  uncommitted: { line: Box | null; counts: Sized | null; conflicts: (Sized & { rects: number }) | null };
-  heading: { line: Box; since: (Sized & { fit: string; text: string }) | null; sinceMin: number; measuredSince: number; behind: (Sized & { rects: number }) | null; latest: (Sized & { text: string }) | null; review: boolean };
-  phrases: { text: string; rects: number; top: number }[];
-  checkCounts: { text: string; rects: number; top: number }[];
+  uncommitted: { line: Box | null; counts: Sized | null; conflicts: (Sized & { lines: number }) | null };
+  heading: { line: Box; since: (Sized & { fit: string; text: string }) | null; sinceMin: number; measuredSince: number; behind: (Sized & { lines: number }) | null; latest: (Sized & { text: string }) | null; review: boolean };
+  phrases: { text: string; lines: number; top: number }[];
+  checkCounts: { text: string; lines: number; top: number }[];
   messages: (Box & { full: number; client: number })[];
   ages: { text: string; box: Box; textLeft: number; textRight: number; textWidth: number }[];
   fourDigits: number;
@@ -206,6 +206,19 @@ function measure(p: Scm): Promise<Measures> {
     };
     const one = (sel: string, scope: Element = root) => scope.querySelector<HTMLElement>(sel);
     const sized = (el: HTMLElement | null): Sized | null => (el === null ? null : { ...box(el), full: el.scrollWidth });
+    // The lines an inline element is drawn on: its client rects grouped by line. Chromium gives an inline one rect for each
+    // run of its content between child elements, so "2 passed" in a span and " ·" beside it are two rects on one line
+    const lines = (el: Element) => {
+      let count = 0;
+      let bottom = -Infinity;
+      for (const r of Array.from(el.getClientRects()).sort((a, b) => a.top - b.top)) {
+        if (r.top >= bottom - 1) {
+          count += 1; // below the line so far: a line of its own
+          bottom = r.bottom;
+        } else bottom = Math.max(bottom, r.bottom);
+      }
+      return count;
+    };
     const measured = (scope: Element, name: string) => scope.querySelector(`[data-scm-measure="${name}"]`)?.getBoundingClientRect().width ?? 0;
     const whereLine = one('[data-scm-where]')!;
     const uncommittedLine = one('[data-scm-uncommitted]');
@@ -254,19 +267,19 @@ function measure(p: Scm): Promise<Measures> {
       uncommitted: {
         line: uncommittedLine === null ? null : box(uncommittedLine),
         counts: uncommittedLine === null ? null : sized(one('[data-scm-counts]', uncommittedLine)),
-        conflicts: conflicts === null ? null : { ...box(conflicts), full: conflicts.scrollWidth, rects: conflicts.getClientRects().length },
+        conflicts: conflicts === null ? null : { ...box(conflicts), full: conflicts.scrollWidth, lines: lines(conflicts) },
       },
       heading: {
         line: box(headingLine),
         since: since === null ? null : { ...box(since), full: since.scrollWidth, fit: since.getAttribute('data-fit') ?? '', text: since.textContent ?? '' },
         sinceMin: measured(headingLine, 'since-min'),
         measuredSince: measured(headingLine, 'since'),
-        behind: behind === null ? null : { ...box(behind), full: behind.scrollWidth, rects: behind.getClientRects().length },
+        behind: behind === null ? null : { ...box(behind), full: behind.scrollWidth, lines: lines(behind) },
         latest: latest === null ? null : { ...box(latest), full: latest.scrollWidth, text: latest.textContent ?? '' },
         review: Array.from(headingLine.querySelectorAll('button')).some((b) => (b.textContent ?? '').trim() === 'Review ›'),
       },
-      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', rects: el.getClientRects().length, top: Math.round(el.getBoundingClientRect().top) })),
-      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), rects: el.parentElement!.getClientRects().length, top: Math.round(el.parentElement!.getBoundingClientRect().top) })),
+      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', lines: lines(el), top: Math.round(el.getBoundingClientRect().top) })),
+      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), lines: lines(el.parentElement!), top: Math.round(el.parentElement!.getBoundingClientRect().top) })),
       messages: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-pr-line], [data-scm-failure]')).map((el) => ({ ...box(el), full: el.scrollWidth, client: el.clientWidth })),
       ages,
       fourDigits,
@@ -322,12 +335,12 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = 
   // S6: "· N conflicts" and "· N behind" whole; the counts leave first, whole; "since" whole, or the base shortened to
   // eight characters, or the phrase left out whole; the checks' counts each whole on one line
   if (m.uncommitted.conflicts !== null) {
-    expect(drawnWhole(m.uncommitted.conflicts) && m.uncommitted.conflicts.rects === 1, `${at}: the conflicts whole on one line`).toBe(true);
+    expect(drawnWhole(m.uncommitted.conflicts) && m.uncommitted.conflicts.lines === 1, `${at}: the conflicts whole on one line`).toBe(true);
     expect(inside(m.uncommitted.conflicts, m.uncommitted.line!), `${at}: the conflicts inside the line`).toBe(true);
   }
   if (m.uncommitted.counts !== null) expect(drawnWhole(m.uncommitted.counts), `${at}: the counts whole where they stand`).toBe(true);
   if (m.heading.behind !== null) {
-    expect(drawnWhole(m.heading.behind) && m.heading.behind.rects === 1, `${at}: "· N behind" whole on one line`).toBe(true);
+    expect(drawnWhole(m.heading.behind) && m.heading.behind.lines === 1, `${at}: "· N behind" whole on one line`).toBe(true);
     expect(inside(m.heading.behind, m.heading.line), `${at}: "· N behind" inside the heading`).toBe(true);
   }
   if (m.heading.since !== null) {
@@ -335,9 +348,9 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = 
     if (m.heading.since.fit === 'shortened') expect(m.heading.since.right - m.heading.since.left, `${at}: the base keeps eight characters`).toBeGreaterThanOrEqual(m.heading.sinceMin - 1);
     else expect(drawnWhole(m.heading.since), `${at}: "since <base>" whole`).toBe(true);
   }
-  for (const count of m.checkCounts) expect(count.rects, `${at}: the check count "${count.text}" on one line`).toBe(1);
+  for (const count of m.checkCounts) expect(count.lines, `${at}: the check count "${count.text}" on one line`).toBe(1);
   // S5: the state line breaks only between its phrases
-  for (const phrase of m.phrases) expect(phrase.rects, `${at}: the phrase "${phrase.text}" whole on one line`).toBe(1);
+  for (const phrase of m.phrases) expect(phrase.lines, `${at}: the phrase "${phrase.text}" whole on one line`).toBe(1);
   // S7: a git or GitHub CLI message breaks anywhere inside its box and is never clipped at the column's edge
   for (const message of m.messages) {
     expect(message.full, `${at}: a message wraps inside its box`).toBeLessThanOrEqual(message.client + 1);
