@@ -244,8 +244,9 @@ const handedAfter = (appSessionId: AppSessionId, ticket: number): boolean => (or
  * One save of a take-back (the claim, or the settling save), with the `replaces` given, after the session's saves handed
  * before it and before those handed after it; sent once, its answer the caller's. A stage this machine's link would cut
  * is not sent (`withheld`): a stage must hold every byte. A settling save is an ordinary draft, fitted as any save is.
+ * UX wave U6b-5a (finding 4): an attach's save names what the machine answered in its round, which may be none (`null`).
  */
-export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
+export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string | null): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
   if (draft !== null && isStage(draft) && fitDraft(draft).withheld.length > 0) return { withheld: true };
   return inOrder(appSessionId, async (ticket) => {
     const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(nameWithheld(draft, leftThere.get(appSessionId) ?? []));

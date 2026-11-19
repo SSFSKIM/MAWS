@@ -37,6 +37,11 @@ export const ACTIONS = {
   'session.new':          { title: 'New chat',                    chord: 'Cmd+N',        sink: 'menu', menu: 'file', scope: 'app' },   // New chat (2026-10-01): registered with the session creator; disabled until one exists
   'tab.close':            { title: 'Close tab',                   chord: 'Cmd+W',        sink: 'menu', menu: 'file', scope: 'app' },
   'tab.reopen':           { title: 'Reopen closed tab',           chord: 'Cmd+Shift+T',  sink: 'menu', menu: 'file', scope: 'app' },
+  // Edit, after the menu's own items (U6a). UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-
+  // keyboard.md, M2; Interfaces §A; l5-code-08): the terminal holding the keyboard's selection, or with none what its
+  // screen shows, into its session's chat as one pasted block (`tools/terminal/attach.ts`); registered while a terminal
+  // holds the keyboard. No rebinding while build F may run (`isRebindable`)
+  'terminal.attachSelection': { title: 'Attach selection to chat', chord: 'Cmd+Shift+L', sink: 'menu', menu: 'edit', scope: 'app' },
   // View, in its order (U6a; l7-shell-07): Overview, Artifacts, Tabs ▸, Project channel (U11a), the panes, the regions,
   // the side surfaces and More surfaces ▸, the moves between them, then Comments ▸, Appearance ▸ and Usage (accounts.open,
   // in C11's block below)

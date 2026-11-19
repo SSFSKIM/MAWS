@@ -39,6 +39,7 @@ import type { PermissionMode } from '@shared/graph/enums'; // UX wave U6b-5a
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels'; // UX wave U6b-5a
 import { useAttention, selectPendingOf } from '../stores/attention';
 import { clearStackNotice, inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, showStackNotice, useComposerStore } from '../stores/composer';
+import { takeIntoBox } from './attach-pasted'; // UX wave U6b-5a
 import { toast, useNotices } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
@@ -330,6 +331,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
         draftShown: () => !promptState.current.docked, // UX wave U4a M5: the menu chords ask for nothing under a card
         empty: () => handle.current?.serialize().empty ?? true, // UX wave U1b (§F): a prompt's ⌘↩ yields to a draft
+        // UX wave U6b-5a (decision 8): an attached block, where this composer's box stands (a card over it, its pane covered)
+        attachPasted: (block, by) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: promptState.current.docked }),
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {
           read: () => handle.current?.promptBox() ?? { text: '', cursor: 0 },

@@ -13,6 +13,7 @@ import './xterm-overrides.css'; // the composition view in the terminal tokens (
 import { version as xtermVersion } from '@xterm/xterm/package.json';
 import {
   ansiNamed,
+  screenTextOf,
   type Acceleration,
   type RendererOptions,
   type TerminalFont,
@@ -167,6 +168,16 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
     },
     hasSelection: () => terminal.hasSelection(),
     getSelection: () => terminal.getSelection(),
+    screenText() {
+      // untrimmed, so a row that wraps keeps the space at its edge; `screenTextOf` trims each whole line
+      const buffer = terminal.buffer.active;
+      return screenTextOf(
+        Array.from({ length: terminal.rows }, (_, i) => {
+          const line = buffer.getLine(buffer.viewportY + i);
+          return { text: line?.translateToString(false) ?? '', wrapped: line?.isWrapped ?? false };
+        }),
+      );
+    },
     selectAll: () => terminal.selectAll(),
     paste: (text) => terminal.paste(text),
     setVisible(next) {

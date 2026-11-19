@@ -18,13 +18,14 @@ import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, MENTION, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, MENTION, mentionNode, paragraph, textNode, type Attachment, type ComposerDoc } from './doc';
 import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal, syncSelectionFromDOM } from './dictation-plugin'; // E9
-import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
+import { createDraftWriter, docOfDraft, draftOf, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav, type Recall } from './history';
 import { classifyFile, classifyText, mentionPath, pathRefusal, type FileAction } from './paste';
+import { holdsBlock, pastedBlock, type AttachedBlock } from './pasted-block'; // UX wave U6b-5a
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
@@ -83,7 +84,15 @@ export interface EditorHandle {
   // `settleDictation`); the sink's own `final` and `cancel` do not fire it.
   beginDictation(onEnded: () => void): DictationSink | null;
   settleDictation(): void; // the interim words become ordinary text where they stand and the sink ends (a card covered the box)
+  // UX wave U6b-5a (decisions 8 and 30; Interfaces §C): an attached block, once this mount's draft is restored. 'present'
+  // when the document holds a block of its id (nothing changes); else one block, at the caret the editor left (the
+  // keyboard with it) or at the end (the caret and the keyboard untouched). 'busy': a submission is in flight. 'closed':
+  // the editor takes no typing. 'gone': it unmounted meanwhile. Nothing changes in those three. With `save`, the pending
+  // write is dropped and the draft saved now through the port: 'taken' when the port answered true, 'unsaved' when not.
+  attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean }): Promise<EditorAttach>;
 }
+
+export type EditorAttach = 'taken' | 'present' | 'unsaved' | 'busy' | 'closed' | 'gone';
 
 // E9: what one capture writes through; every method is a no-op once the sink ended.
 export interface DictationSink {
@@ -177,6 +186,12 @@ interface Submission { doc: ComposerDoc; done: Promise<boolean> }
 const submissions = new Map<AppSessionId, Submission>();
 /** A page reload (tests): the new page holds no submission of the old one's, whose answer it never sees. */
 export const forgetSubmissions = (): void => submissions.clear();
+/**
+ * UX wave U6b-5a (S1; Interfaces §C): the session's send in flight, whether or not a composer is still mounted for it;
+ * it settles once the send has, after the controller handed over the send's own write of the draft (a clear when it was
+ * accepted, the text back when it was refused), true when it was accepted. Null: none.
+ */
+export const submissionOf = (appSessionId: AppSessionId): Promise<boolean> | null => submissions.get(appSessionId)?.done ?? null;
 
 // E9: the open dictation sink's bookkeeping.
 interface Dictation { ended: boolean; onEnded(): void }
@@ -217,20 +232,20 @@ export class EditorController {
     inputs: ControllerInputs,
   ) {
     this.inputs = inputs;
-    this.writer = createDraftWriter((draft) => this.saveDraft(draft));
+    this.writer = createDraftWriter((draft) => void this.saveDraft(draft));
   }
 
-  // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged.
-  private saveDraft(draft: Draft | null): void {
+  // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged. The
+  // answer is whether the port took it (UX wave U6b-5a: an attach that saves at once says so).
+  private saveDraft(draft: Draft | null): Promise<boolean> {
     const form = this.settleForm;
-    if (form === null) {
-      void this.drafts.save(draft);
-      return;
-    }
-    void this.drafts.save(draft, form.replaces).then((taken) => {
-      if (!taken || this.settleForm !== form) return;
-      this.settleForm = null;
-      form.taken();
+    if (form === null) return this.drafts.save(draft);
+    return this.drafts.save(draft, form.replaces).then((taken) => {
+      if (taken && this.settleForm === form) {
+        this.settleForm = null;
+        form.taken();
+      }
+      return taken;
     });
   }
 
@@ -483,7 +498,7 @@ export class EditorController {
     const widget = typed ? this.widgetFor(typed[1]) : null;
     if (typed && widget) {
       this.writer.cancel();
-      this.saveDraft(null);
+      void this.saveDraft(null);
       this.setDoc(emptyDoc(), { silently: true, caret: null });
       const args = typed[2] ?? '';
       const open = () => void this.openWidget(typed[1], args);
@@ -528,7 +543,7 @@ export class EditorController {
       warn(error instanceof Error ? error.message : String(error));
     }
     if (accepted) {
-      if (this.drafts.clearsOnSend?.() ?? true) this.saveDraft(null);
+      if (this.drafts.clearsOnSend?.() ?? true) void this.saveDraft(null);
     } else {
       this.writer.change(doc);
       if (!this.live) this.writer.flush();
@@ -725,11 +740,39 @@ export class EditorController {
 
   private insertPasted(text: string, name: string): void {
     if (this.busy) return;
-    this.editor
-      ?.chain()
-      .focus()
-      .insertContent(pastedNode({ id: atomId('pasted'), kind: 'text', name, lines: text.split('\n').length, text }))
-      .run();
+    this.editor?.chain().focus().insertContent(pastedBlock(text, undefined, name)).run(); // UX wave U6b-5a: the one maker
+  }
+
+  // UX wave U6b-5a (decisions 8 and 30; S1): an attached block, as `EditorHandle.attachPasted` says. A remount meanwhile
+  // is waited for in its turn, as files from outside are (`attachFromOutside`). A document that holds the block answers
+  // `present` first, even while it is being sent: the block then goes with the message, once.
+  private async attachPasted(block: AttachedBlock, options: { at: 'caret' | 'end'; save: boolean }): Promise<EditorAttach> {
+    for (;;) {
+      const lifetime = this.lifetime;
+      await this.restoring;
+      if (!this.live) return 'gone';
+      if (this.lifetime === lifetime) break;
+    }
+    const editor = this.editor;
+    if (!editor || editor.isDestroyed) return 'gone';
+    if (holdsBlock(editor.getJSON(), block.id)) return 'present';
+    if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId)) return 'busy';
+    if (this.inputs.disabled !== null || !editor.isEditable) return 'closed';
+    const node = pastedBlock(block.text, block.id);
+    if (options.at === 'caret') {
+      (editor.isFocused ? editor.chain() : editor.chain().focus(this.caretLeft ? null : 'end')).insertContent(node).run(); // `null`: the kept selection
+      editor.view.focus();
+    } else {
+      // as `appendPasted` places it in a stored draft: into an empty last paragraph, else a paragraph of its own
+      const { state } = editor;
+      const last = state.doc.lastChild;
+      const atom = state.schema.nodeFromJSON(node);
+      const empty = last !== null && last.type.name === 'paragraph' && last.content.size === 0;
+      editor.view.dispatch(empty ? state.tr.insert(state.doc.content.size - 1, atom) : state.tr.insert(state.doc.content.size, state.schema.nodes.paragraph.create(null, atom)));
+    }
+    if (!options.save) return 'taken';
+    this.writer.cancel(); // the insertion's own pending write: this save is it
+    return (await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()))) ? 'taken' : 'unsaved';
   }
 
   private insertMention(path: string): string | null {
@@ -1029,6 +1072,7 @@ export class EditorController {
       clearSettle: () => void (this.settleForm = null),
       beginDictation: (onEnded) => this.beginDictation(onEnded), // E9
       settleDictation: () => this.endDictation('keep'), // E9
+      attachPasted: (block, options) => this.attachPasted(block, options), // UX wave U6b-5a
     };
   }
 }

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DRAFT_CLAIM, STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { REQUEST_TIMEOUT_MS } from '@shared/host/host-supervisor';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { at } from '../../../../test/support/machine';
 import { resetReaderRows } from '../lane-b/reader-rows';
 import { useSetup } from '../sessions/store';
@@ -17,7 +18,7 @@ import { resetCatalogStore } from '../stores/catalog';
 import { resetComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { attachedIn, attachOf, draftStore, heldSends, heldWrite, holdsOnce, mountComposer, settle, staleRounds, textOf, TIMEOUT, type DraftStoreFake } from '../test-support/attach';
-import { ATTACH_DEADLINE_COMMANDS, ATTACH_ROUNDS, attachDeadlineMs, type AttachOutcome } from './attach-pasted';
+import { ATTACH_DEADLINE_COMMANDS, ATTACH_ROUNDS, attachDeadlineMs, COMMAND_BOUND_HERE_MS, type AttachOutcome } from './attach-pasted';
 import { forgetSubmissions } from './editor/controller';
 import { docOf, paragraph, textNode, type ComposerDoc } from './editor/doc';
 import { resetRemoteDrafts } from './editor/drafts';
@@ -566,8 +567,9 @@ describe('a session that has not started', () => {
 describe('the deadline', () => {
   it('is eight times a command’s bound: the store’s seven commands at their worst and one bound for a wait', () => {
     expect(ATTACH_DEADLINE_COMMANDS).toBe(8);
-    expect(attachDeadlineMs(false)).toBe(80_000);
-    expect(attachDeadlineMs(true)).toBe(480_000);
+    expect(COMMAND_BOUND_HERE_MS).toBe(REQUEST_TIMEOUT_MS); // main's bound on a host-owned command, which the renderer cannot import
+    expect(attachDeadlineMs(false)).toBe(8 * REQUEST_TIMEOUT_MS); // 80 s
+    expect(attachDeadlineMs(true)).toBe(8 * REMOTE_ACT_PENDING_MS); // eight minutes
   });
 
   async function sendingForever(store: DraftStoreFake) {
