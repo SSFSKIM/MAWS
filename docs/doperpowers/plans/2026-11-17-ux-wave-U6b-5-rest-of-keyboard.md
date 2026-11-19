@@ -30,7 +30,7 @@ How to see it working: the acceptance below, B1 to B9, B13 and B14. The unit hal
 - [x] (2026-11-17) The re-check of S1 and the architect's four rulings; revision 4. The review of S1 is closed.
 - [x] (2026-11-17) The owner's answers to K1, K2 and K4; revision 5.
 - [x] (2026-11-18) `origin/ux-wave/U6b-3b` (`6ee3382a7`, holding U6b-3a) merged (`74baf7950`); the twenty statements of "Statements to check again" read on that head (Decision Log 9). Master is not merged during M1 to M4: the chain's and master's merges before the landing are the architect's.
-- [ ] M1 — The keyboard on show and hide, and the mode said aloud. Built `a3c55fb0f`..`9cec26264` (Decision Log 10); its review is pending.
+- [x] (2026-11-18 11:10Z) M1 — The keyboard on show and hide, and the mode said aloud. `a3c55fb0f`..`9cec26264`, fix waves `d8aff6cea`..`a440d849c` and `e61fdd1f8`..`653bc5284`; reviewed clean (Decision Log 10).
 - [ ] M2 — "Attach selection to chat".
 - [ ] M3 — Back and Forward. Built `b1b1e755d`..`14a54bb50` (Decision Log 11); its review is pending.
 - [ ] M4 — The palette: Recent, Artifacts, ranking, no row that cannot run.
