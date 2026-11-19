@@ -130,9 +130,11 @@ async function columnAt(p: Scm, width: 360 | 280): Promise<void> {
 }
 
 // The scratch given a branch of its own, so the page has "Not pushed" and "Pushed to" (invented notes): `origin/main`
-// first moves one commit past the merge base (the branch one behind); then `feature/page` from `main`, carrying the
-// uncommitted entries, its upstream `origin/feature/page` at `main`'s commit ahead of the old `origin/main`, and two
-// commits not pushed, each one new note. A path-limited commit takes only its own path, so the staged file stays staged.
+// first moves one commit past the merge base (the branch one behind), a commit made by `commit-tree` and pushed by its
+// id, so neither the checkout's index nor its working tree is touched (a commit there would take the staged file with
+// it, and switching back would delete it); then `feature/page` from `main`, carrying the uncommitted entries, its
+// upstream `origin/feature/page` at `main`'s commit ahead of the old `origin/main`, and two commits not pushed, each one
+// new note. A path-limited commit takes only its own path, so the staged file stays staged.
 const NOTES = ['Add the first note', 'Add the second note', 'Add the third note'];
 // `at`: the commit's author and committer date, for a commit made long ago (the age column's widest age, frames' S12).
 function noteCommit(scratch: ScmScratch, n: number, at?: Date): string {
@@ -149,11 +151,9 @@ function noteCommit(scratch: ScmScratch, n: number, at?: Date): string {
 const OLD_AGE = '1003d';
 const OLD_DAYS = 1003;
 function featureBranch(scratch: ScmScratch): void {
-  scratch.git('switch', '--quiet', '-c', 'upstream-change', 'origin/main');
-  scratch.git('commit', '--quiet', '--no-verify', '--allow-empty', '-m', 'An upstream change');
-  scratch.git('push', '--quiet', 'origin', 'upstream-change:main');
-  scratch.git('switch', '--quiet', 'main');
-  scratch.git('branch', '--quiet', '-D', 'upstream-change');
+  const upstream = scratch.git('commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', 'An upstream change');
+  scratch.git('push', '--quiet', 'origin', `${upstream}:refs/heads/main`);
+  scratch.git('fetch', '--quiet', 'origin');
   scratch.git('switch', '--quiet', '-c', 'feature/page');
   scratch.git('push', '--quiet', '-u', 'origin', 'feature/page');
   noteCommit(scratch, 0, new Date(Date.now() - (OLD_DAYS * 24 + 2) * 3_600_000));
