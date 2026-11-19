@@ -200,6 +200,8 @@ export class Rl10 {
   #welcomed = false;
   #wanted = false;
   #changing: Promise<void> = Promise.resolve();
+  /** The last connection's hello or frame taken (`#inTurn`). */
+  #taking: Promise<void> = Promise.resolve();
 
   constructor(ctx: Rl10Context) {
     this.#ctx = ctx;
@@ -280,8 +282,11 @@ export class Rl10 {
       build: ctx.build,
       log: ctx.log,
       handlers: {
-        hello: (c, f) => this.#hello(c, f),
-        frame: (c, f) => this.#frame(c, f),
+        // One frame at a time, across a replacement too: the server hands one connection's lines on one at a time, and
+        // every connection's hello and frames take their turn here, so nothing of a replacement (its welcome, the
+        // restatement it opens, its frames) is taken while the replaced connection's handler is in flight.
+        hello: (c, f) => this.#inTurn(() => this.#hello(c, f)),
+        frame: (c, f) => this.#inTurn(() => this.#frame(c, f)),
         // A connection a newer one replaced closes after the newer one's hello: it ends nothing of the newer one's.
         closed: (c) => {
           const current = this.#server.current;
@@ -651,7 +656,20 @@ export class Rl10 {
 
   // ---- A connection -----------------------------------------------------------------------------------------------
 
+  /**
+   * `take` once the hello or frame taken before it settled, of whichever connection; its failure is the caller's (the
+   * server logs it) and holds up nothing after it. A replaced connection's lines still queued are not taken (the server
+   * skips a closed connection's), and one already queued here is dropped by `#frame`'s entry check.
+   */
+  #inTurn(take: () => Promise<void>): Promise<void> {
+    const taken = this.#taking.then(take);
+    this.#taking = taken.catch(() => {});
+    return taken;
+  }
+
   async #hello(connection: Rl10Connection, hello: Frame): Promise<void> {
+    // closed while it waited for the last connection's handler (its close ended the link), or replaced by a newer one
+    if (connection !== this.#server.current) return;
     const protocol = hello.protocol as { major?: unknown } | undefined;
     const identity = this.#ctx.identity();
     const head = this.#ctx.head();
