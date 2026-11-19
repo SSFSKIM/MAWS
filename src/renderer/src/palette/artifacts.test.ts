@@ -104,6 +104,21 @@ describe('Enter on an artifact', () => {
     expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${REMOTE}`);
   });
 
+  // Decision Log 16 (iii): step 2 reuses a main tab only when it shows this artifact on the row's machine
+  it('does not bring forward a main tab of another machine’s artifact with the same id; that machine’s own row does', () => {
+    registerPanelTool(artifactsTool);
+    openArtifactTab(DOC, undefined, OTHER_MACHINE); // the remote session's machine shows an artifact of the same id
+    sessionOnScreen(REMOTE);
+    openPaletteArtifact(DOC, TEST_MACHINE);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTab(DOC, TEST_MACHINE));
+    expect(mainArtifacts()).toEqual([artifactTab(DOC, OTHER_MACHINE), artifactTab(DOC, TEST_MACHINE)]);
+    expect(besideTheChat(REMOTE)).toBeNull();
+    sessionOnScreen(REMOTE);
+    openPaletteArtifact(DOC, OTHER_MACHINE); // the control: the row of the tab's own machine brings it forward
+    expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTab(DOC, OTHER_MACHINE));
+    expect(besideTheChat(REMOTE)).toBeNull();
+  });
+
   it('otherwise opens a main tab on the artifact’s machine: no session on screen, or a session on another machine than the artifact’s', () => {
     openPaletteArtifact(DOC, TEST_MACHINE); // no tool registered, no session on screen
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTab(DOC, TEST_MACHINE));

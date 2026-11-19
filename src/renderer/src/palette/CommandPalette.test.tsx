@@ -447,6 +447,30 @@ it('Escape returns focus to the element focused before each palette opening', as
   }
 });
 
+// UX wave U6b-5a M4 (Decision Log 16 (ii)): S5's following of the first row is the All scope's; in Conversations a retry
+// while indexing that adds an earlier hit leaves the selection where it was, and Enter runs it
+it('keeps the Conversations selection by value when an indexing retry adds an earlier hit', async () => {
+  vi.useFakeTimers();
+  const quota = idOf('Quota reset recovery');
+  const charter = idOf('Charter + research');
+  const invoke = vi.spyOn(ipc, 'invoke')
+    .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }], indexing: true, incomplete: false } } as never)
+    .mockResolvedValue({ ok: true, value: { hits: [{ appSessionId: charter, snippet: 'an earlier needle' }, { appSessionId: quota, snippet: 'a needle' }], indexing: false, incomplete: false } } as never);
+  try {
+    render(<CommandPalette />);
+    act(() => openConversationSearch('needle'));
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    const selectedValue = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+    expect(selectedValue()).toBe(`session:${quota}`);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(within(dialog()).getAllByRole('option').map((o) => o.dataset.value)).toEqual([`session:${charter}`, `session:${quota}`]); // the control: the earlier hit is drawn first
+    expect(selectedValue()).toBe(`session:${quota}`);
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Enter' });
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${quota}`);
+  } finally { invoke.mockRestore(); vi.useRealTimers(); }
+});
+
 it('shows terminal incomplete indexing without polling forever or hiding available results', async () => {
   vi.useFakeTimers();
   const id = idOf('Quota reset recovery');
@@ -540,6 +564,21 @@ describe('Recent', () => {
     // answer is drawn above the session that was first, the artifact is selected and no session stays selected above it
     const selected = within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
     expect(selected.dataset.value).toBe(`artifact:${TEST_MACHINE}/${notes.id}`);
+  });
+
+  // Decision Log 16 (v): Recent's reads are staged, no more out at once than the slots left in the first eight
+  it('has no more library.get reads out than slots are left, and a null answer frees its slot for the next read', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }, ...Array.from({ length: 9 }, (_, n) => ({ kind: 'artifact' as const, artifactId: artifactId(n + 1), machine: TEST_MACHINE }))] });
+    await openAndType('');
+    await vi.waitFor(() => expect(fake.pending('library.get')).toBe(7));
+    expect(options('Recent')[0]).toContain('Quota reset recovery'); // a session's row is drawn at once
+    expect(fake.invoked('library.get')).toEqual(Array.from({ length: 7 }, (_, n) => ({ artifactId: artifactId(n + 1) })));
+    await act(() => fake.reply('library.get', { row: null })); // the first no longer exists
+    await vi.waitFor(() => expect(fake.invoked('library.get')).toHaveLength(8));
+    expect(fake.invoked('library.get')[7]).toEqual({ artifactId: artifactId(8) });
+    expect(fake.pending('library.get')).toBe(7);
   });
 
   it('opens a recent session’s tab on ⏎, and a recent artifact by the artifact link’s rule', async () => {
@@ -650,6 +689,20 @@ describe('Artifacts in the palette', () => {
     expect(selected()).toBe(moved);
     act(() => usePalette.setState({ query: 'quota ' })); // the control: new text gives the selection back to the first row
     expect(selected()).toBe(quota);
+  });
+
+  // Decision Log 16 (i): a moved selection is forgotten at every change of the text, so it does not come back with it
+  it('forgets a moved selection when the text changes and comes back: a space typed and erased selects the first row', async () => {
+    await typed('quota');
+    const quota = `session:${idOf('Quota reset recovery')}`;
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'ArrowDown' });
+    expect(selected()).toBe('library:search');
+    act(() => usePalette.setState({ query: 'quota ' }));
+    act(() => usePalette.setState({ query: 'quota' }));
+    expect(selected()).toBe(quota);
+    enter();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(quota);
+    expect(useLayout.getState().destination).toBeNull();
   });
 
   it('runs on Enter the row selected when it is pressed; an answer released afterwards changes nothing', async () => {

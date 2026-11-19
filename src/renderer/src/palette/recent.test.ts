@@ -52,6 +52,16 @@ describe('Recent', () => {
     expect(ask).toEqual([artifact(4), artifact(3)]); // not answered yet; the third on this Mac is another artifact than the third on the other machine
   });
 
+  // Decision Log 16 (v): an artifact not answered yet holds its slot in the first eight; session rows are drawn at once
+  it('asks for no more artifacts than slots are left, and a null answer frees its slot for the next', () => {
+    const opened = [session('s1'), ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => artifact(n))];
+    const first = recentRows({ opened, records: records(...ALL), activity, answered: new Map() });
+    expect(first.ask).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => artifact(n)));
+    expect(ids(first.rows)[0]).toBe(S('s1'));
+    const answered = new Map([[artifactKey(TEST_MACHINE, artifactId(1)), null]]);
+    expect(recentRows({ opened, records: records(...ALL), activity, answered }).ask).toEqual([2, 3, 4, 5, 6, 7, 8].map((n) => artifact(n)));
+  });
+
   it('asks only for the artifacts it could draw before the eighth row', () => {
     const opened = [...['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8'].map(session), artifact(9)];
     expect(recentRows({ opened, records: records(...ALL), activity, answered: new Map() }).ask).toEqual([]);
