@@ -1449,6 +1449,11 @@ test.describe('the product over a session discovered from its transcript', () =>
     try {
       const sid = '5e551011-0000-4000-8000-0000000000d1';
       const worktree = await repo.addManagedWorktree('w1');
+      // The repository as the engine leaves one it makes a managed worktree in: its runtime-exclude block (which MAWS
+      // writes too, RUNTIME_EXCLUDE_BLOCK in src/services/git/worktrees.ts) excludes `.claude/worktrees/`, so the main
+      // checkout does not read the worktree's folder as an untracked `.claude/`
+      mkdirSync(repo.path('.git/info'), { recursive: true });
+      appendFileSync(repo.path('.git/info/exclude'), '**/.claude/worktrees/\n');
       const sub = join(worktree, 'sub');
       mkdirSync(sub);
       // One change in each checkout, so Review and Source control say which checkout they read.
