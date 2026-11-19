@@ -3665,6 +3665,66 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       await waitFor(() => expect(codeText()).toBe('from studio'));
     });
 
+    // The Mac run of e2e:remote's L9 scene: the link's return reopens the session's checkout feed, and main tells the folder
+    // of every files watch it gave back there invalidated (`src/main/lane-b/remote-checkout.ts`, `replay`). An errored tab
+    // whose folder's watch stood is read again by that invalidation, with no press: once, and the file shown.
+    it('L9: the machine back, the invalidation of the folder whose watch stood reads the unreachable file once, with no press', async () => {
+      const main = disk({ '/r/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      main.answers.by = () => null; // the link is up again
+      const before = reads(main, '/r/a.ts').length;
+      act(() => main.emit('files.changed', { appSessionId: bareOf(T), path: '/r', kind: 'invalidated' }, OTHER_MACHINE));
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+      await settle();
+      expect(reads(main, '/r/a.ts')).toHaveLength(before + 1);
+      expect(shown('/r/a.ts', T)).toMatchObject({ status: 'ready', error: null, failure: null, retrying: false, pending: 0 });
+      expect(block()).toBeNull();
+    });
+
+    it('L9: Retry pressed while the invalidation’s read is held is drawn disabled and starts nothing; the held read shows the file', async () => {
+      const main = disk({ '/r/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      main.answers.by = () => null;
+      const before = reads(main, '/r/a.ts').length;
+      const read = main.hold('files.read');
+      act(() => main.emit('files.changed', { appSessionId: bareOf(T), path: '/r', kind: 'invalidated' }, OTHER_MACHINE));
+      await waitFor(() => expect(reads(main, '/r/a.ts')).toHaveLength(before + 1));
+      await waitFor(() => expect(retry()?.disabled).toBe(true)); // the notice stands while the read is out
+      expect(noticeCause()).toBe('unreachable');
+      fireEvent.click(retry()!);
+      act(() => useViewer.getState().retry(tabOf('/r/a.ts', T).id));
+      await settle();
+      expect(reads(main, '/r/a.ts')).toHaveLength(before + 1);
+      read.release();
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+      await settle();
+      expect(reads(main, '/r/a.ts')).toHaveLength(before + 1);
+      expect(shown('/r/a.ts', T)).toMatchObject({ status: 'ready', retrying: false, pending: 0 });
+      expect(block()).toBeNull();
+    });
+
+    // The scene's other half: a folder nothing watched before the link went down (its watch failed with the read) is given
+    // back by no reopening, so nothing reads the tab again by itself; Retry, pressed with the machine back, shows the file.
+    it('L9: a folder whose watch failed with the read hears no invalidation, so the notice stands until Retry, which shows the file', async () => {
+      const main = disk({ '/r/notes/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' || name === 'files.watch' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/notes/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      main.answers.by = () => null;
+      const before = reads(main, '/r/notes/a.ts').length;
+      act(() => main.emit('files.changed', { appSessionId: bareOf(T), path: '/r', kind: 'invalidated' }, OTHER_MACHINE)); // the parent's, which stood
+      await settle();
+      expect(reads(main, '/r/notes/a.ts')).toHaveLength(before);
+      expect(retry()?.disabled).toBe(false);
+      fireEvent.click(retry()!);
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+      expect(reads(main, '/r/notes/a.ts')).toHaveLength(before + 1);
+    });
+
     it('L9: where studio’s daemon ran the open and refused the path, the notice says the three ways; UC-7’s refusal of the act is its headline, as it is', async () => {
       const main = disk({ [OUT]: 'x\n' });
       main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', OUTSIDE_REFUSAL)) : null);

@@ -3910,12 +3910,17 @@ test('U6b-3b G7, a session on B: Go to file lists a file that exists on B alone;
 // B, whose reply links a file in B's checkout and, by a relative link, a file outside B's folders that its transcript never
 // writes whole. A, whose member owns B, opens the second: B's daemon runs the open and finds no evidence, and the tab's
 // notice names B, says the three ways a file from elsewhere opens and offers Copy path, with no Retry. Then A's way to the
-// hub is cut (B unreachable, as G7 makes it), and the first link, clicked once the link is offline, reads "<B> is not
-// reachable." with Retry; restored, Retry shows the file. Waits on the notice's cause, the link's offline mark, A's link
-// up and the file's text. Every name is invented.
+// hub is cut (B unreachable, as G7 makes it), and a file in B's checkout, clicked once the link is offline, reads "<B> is
+// not reachable." with Retry. Restored, A's main tells the folder of every files watch it gives back on the session's
+// reopened feed invalidated, and an errored tab whose folder's watch stood is read again by itself (seen on the Mac run of
+// 2026-11-19): so Retry is proved on a file in a folder nothing watched before the cut (its watch failed
+// with the read, and nothing gives it back), whose notice stands with the link up until Retry shows it; and the file in the
+// checkout's own folder, which the Files tree may have watched, is shown again, read by itself or by Retry, whichever comes
+// first. Waits on the notice's cause, the link's offline mark, A's link up and the file's text. Every name is invented.
 const NOTICE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000f7';
 const NOTICE_LINK = 'the tide notes';
 const NOTICE_TEXT = 'Invented tide notes, in B’s checkout.\n';
+const NOTICE_LOG_TEXT = 'Invented tide log, in a folder of B’s checkout.\n';
 const NOTICE_RELATIVE = '../elsewhere/old-notes.md'; // from B's checkout, a file outside it
 test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming B; with B unreachable a file reads so with Retry, which shows it once B is back', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-notice-')));
@@ -3924,13 +3929,16 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
   try {
     const checkout = join(root, 'b-checkout');
     const inside = join(checkout, 'tide-notes.txt');
+    const logged = join(checkout, 'logs', 'tide-log.txt'); // in a folder of the checkout that no tree opens before the cut
     const outside = join(root, 'elsewhere', 'old-notes.md');
     mkdirSync(join(root, 'elsewhere'));
     writeFileSync(outside, 'Invented old notes, outside B’s checkout.\n');
     const journal = new SideJournal(NOTICE_SESSION, checkout);
-    journal.turn(`Read [${NOTICE_LINK}](${inside}) and [the old notes](${NOTICE_RELATIVE}).`);
+    journal.turn(`Read [${NOTICE_LINK}](${inside}), [the tide log](${logged}) and [the old notes](${NOTICE_RELATIVE}).`);
     const { scene, b, page } = await laneBOpened({ root, aUserData, journal, first: 'Where are the notes?', firstReply: NOTICE_LINK, title: 'B’s notes session' }, held);
     writeFileSync(inside, NOTICE_TEXT); // the checkout laneBOpened made
+    mkdirSync(dirname(logged));
+    writeFileSync(logged, NOTICE_LOG_TEXT);
     const said = () => `${mainSaid(page)}\nB's log:\n${b.log().slice(-3000)}`;
 
     await test.step('a file outside B’s folders that B has no evidence for: the notice names B, says the three ways and offers Copy path', async () => {
@@ -3952,22 +3960,39 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
       await expect(notice.locator('[data-notice-retry]'), 'no Retry: trying again cannot help').toHaveCount(0);
     });
 
-    await test.step('B unreachable: a file reads that B is not reachable, with Retry; B reachable again, Retry shows it', async () => {
+    await test.step('B unreachable: a file reads that B is not reachable, with Retry; B reachable again, Retry shows a file nothing read again, and the other is shown', async () => {
       scene.aHub.cut();
       await quoting(expect(linkLine(page), 'the link’s offline mark').toHaveAttribute('data-link-phase', 'offline', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
-      await main(page).locator(`[data-chip="path"][title="${inside}"]`).click();
-      const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${inside}"]`);
-      const notice = viewer.locator('[data-refusal]');
-      await quoting(expect(notice, 'the read failed for the link').toHaveAttribute('data-notice-cause', 'unreachable', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
-      await expect(notice.locator('p').first()).toHaveText(`${B_NAME} is not reachable.`);
-      await expect(notice.locator('[data-notice-copy]'), 'Copy path is the outside notice’s alone').toHaveCount(0);
-      const retry = notice.locator('[data-notice-retry]');
-      await expect(retry).toHaveText('Retry');
+      const unreachable = async (path: string) => {
+        await main(page).locator(`[data-chip="path"][title="${path}"]`).click();
+        const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);
+        const notice = viewer.locator('[data-refusal]');
+        await quoting(expect(notice, `the read of ${path} failed for the link`).toHaveAttribute('data-notice-cause', 'unreachable', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
+        await expect(notice.locator('p').first()).toHaveText(`${B_NAME} is not reachable.`);
+        await expect(notice.locator('[data-notice-copy]'), 'Copy path is the outside notice’s alone').toHaveCount(0);
+        await expect(notice.locator('[data-notice-retry]')).toHaveText('Retry');
+        return { viewer, notice, retry: notice.locator('[data-notice-retry]') };
+      };
+      await unreachable(inside);
+      const log = await unreachable(logged); // shown last, so its tab is the one in view when B is back
       scene.aHub.restore();
       await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
-      await expect(retry, 'Retry ready once nothing is pending').toBeEnabled({ timeout: 30_000 });
-      await retry.click();
-      await quoting(expect(viewer.locator('.cm-content'), 'Retry read the file on B').toContainText('Invented tide notes', { timeout: 60_000 }), said);
+      // the folder's watch failed with the read, so the reopened feed gives nothing back for it: the notice stands
+      await expect(log.notice, 'the notice stands with the link up: nothing read the file again').toHaveAttribute('data-notice-cause', 'unreachable');
+      await expect(log.retry, 'Retry ready once nothing is pending').toBeEnabled({ timeout: 30_000 });
+      await log.retry.click();
+      await quoting(expect(log.viewer.locator('.cm-content'), 'Retry read the file on B').toContainText('Invented tide log', { timeout: 60_000 }), said);
+      await expect(log.viewer.locator('[data-refusal]'), 'the notice gone').toHaveCount(0);
+
+      // the file in the checkout's own folder: read again by the invalidation of a watch that stood, by its showing again,
+      // or by Retry where its notice still offers it
+      await main(page).locator(`[data-chip="path"][title="${inside}"]`).click();
+      const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${inside}"]`);
+      const text = viewer.locator('.cm-content', { hasText: 'Invented tide notes' });
+      const offered = viewer.locator('[data-refusal] [data-notice-retry]:enabled');
+      await quoting(expect(text.or(offered).first(), 'the file, or Retry offered').toBeVisible({ timeout: 60_000 }), said);
+      if (await offered.isVisible()) await offered.click({ timeout: 5_000 }).catch(() => undefined); // a read that lands first takes the notice away
+      await quoting(expect(text, 'the file read on B once B is back').toBeVisible({ timeout: 60_000 }), said);
       await expect(viewer.locator('[data-refusal]'), 'the notice gone').toHaveCount(0);
     });
   } finally {
