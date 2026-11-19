@@ -1,13 +1,14 @@
 // A skill's actions on Customize's page (UX wave U11, docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md):
-// - Reveal: main shows the skill's SKILL.md in Finder when its own read of the place's inventory lists that path
-//   (`customization.skillFile`); the answer here is only the words a refusal shows, null when shown or when there is
-//   nothing to say (no window).
+// - Open in: main hands the skill's SKILL.md to an editor, or to Finder, which shows it, when its own read of the place's
+//   inventory lists that path (`customization.skillFile`, through U6b-4a's launcher); the answer here is only the words a
+//   refusal shows, null when it opened.
 // - "New skill…": a new chat in the page's place whose composer holds a first message, not sent (Claude Desktop's
 //   "Create with Claude", decision 4). It starts with skill-creator's invocation when that plugin's skill can run in a
 //   chat started here, the rule "Use in chat" follows (`diskSkillGroups`); else the sentence alone. `where` names the
 //   folder the skill goes in (decision 5).
 import type { ProjectId } from '@shared/graph/ids';
-import type { CustomizationSkill } from '@shared/ipc/schema/customization';
+import { SKILL_FILE_APPS, type CustomizationSkill } from '@shared/ipc/schema/customization';
+import type { OpenInAppId } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { createSession } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
@@ -18,15 +19,20 @@ import { diskSkillGroups, type SkillRow } from '../widgets/skills/skills';
 import { SKILL_ACTIONS } from './copy';
 
 export type SkillPlace = 'project' | 'yours';
+export type SkillFileApp = (typeof SKILL_FILE_APPS)[number];
 
-export async function revealSkill(cwd: string | null, path: string): Promise<string | null> {
-  const answer = await ipc.invoke('customization.skillFile', { cwd, path, action: 'reveal' });
+/** A skill's file to a row of "Open in"; the words of a refusal, null when it opened. */
+export async function openSkillFile(cwd: string | null, path: string, app: SkillFileApp): Promise<string | null> {
+  const answer = await ipc.invoke('customization.skillFile', { cwd, path, app });
   if (!answer.ok) return SKILL_ACTIONS.unreadable(answer.error.message);
   const value = answer.value;
-  if (value.status === 'revealed') return null;
+  if (value.status === 'opened') return null;
   if (value.reason === 'missing') return SKILL_ACTIONS.missing;
-  return value.reason === 'unreadable' ? SKILL_ACTIONS.unreadable(value.message ?? '') : null;
+  return value.reason === 'unreadable' ? SKILL_ACTIONS.unreadable(value.message ?? '') : (value.message ?? SKILL_ACTIONS.missing);
 }
+
+/** The rows a skill's file is offered to: an editor or Finder, never a terminal. */
+export const isSkillFileApp = (id: OpenInAppId): id is SkillFileApp => (SKILL_FILE_APPS as readonly string[]).includes(id);
 
 const CREATOR = 'skill-creator'; // the official plugin's manifest name and its skill's name (claude-plugins-official)
 

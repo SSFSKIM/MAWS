@@ -17,7 +17,7 @@ import { usePluginsEnv } from '../widgets/plugins/read';
 import { PluginsList, useLibrarySelection, usePluginsLibrary } from '../widgets/PluginsWidget';
 import { useEngineRead } from '../widgets/read';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
-import { skillNoteOf } from './skill-actions'; // UX wave U11's skill actions
+import { skillExtrasOf } from './SkillFile'; // UX wave U11's skill actions
 import { diskSkillGroups, hasPluginSkills, skillsView } from '../widgets/skills/skills';
 import { ConnectorsDiscover, ConnectorsMine } from './connectors/ConnectorsSection';
 import { CONNECTORS } from './connectors/copy';
@@ -149,6 +149,8 @@ function SkillsMine({ onDetail, toList }: { onDetail(open: boolean): void; toLis
 }
 
 function DiskSkills({ inventory, onDetail, toList }: { inventory: Inventory; onDetail(open: boolean): void; toList: number }) {
+  const { cwd } = usePlace();
+  const extrasOf = useMemo(() => skillExtrasOf(cwd), [cwd]);
   const groups = useMemo(() => diskSkillGroups(inventory.skills, { invocable: false }), [inventory]);
   const view = useLibraryStore((s) => s.skills);
   const search = useCustomizePage((s) => s.search);
@@ -158,7 +160,7 @@ function DiskSkills({ inventory, onDetail, toList }: { inventory: Inventory; onD
     clearSearch();
     useLibraryStore.setState((state) => ({ skills: { ...state.skills, sort: 'name' } }));
   };
-  return <SkillsLibrary groups={groups} shown={shown} onDetail={onDetail} onReset={reset} toList={toList} noteOf={skillNoteOf} />;
+  return <SkillsLibrary groups={groups} shown={shown} onDetail={onDetail} onReset={reset} toList={toList} extrasOf={extrasOf} />;
 }
 
 // My items' connectors, and under them what the attached session has live.

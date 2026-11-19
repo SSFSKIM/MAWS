@@ -34,19 +34,21 @@ export type CustomizationSkill = z.infer<typeof CustomizationSkillSchema>;
 export type CustomizationServer = z.infer<typeof CustomizationServerSchema>;
 export type CustomizationEndpoint = z.infer<typeof CustomizationEndpointSchema>;
 
-// UX wave U11, a skill's actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 2 and 6):
-// main shows a skill's SKILL.md in Finder only when the inventory main reads itself for `cwd` lists exactly `path`; the
-// window's string is a request, never the path revealed. `missing`: not listed, or no regular file there now;
-// `unreadable`: the inventory could not be read (`message`, its reason); `no-window`: no window to show Finder for.
+// UX wave U11, a skill's actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 2, 6 and
+// 11): a skill's SKILL.md handed to a row of "Open in" (an editor, or Finder, which reveals it) only when the inventory
+// main reads itself for `cwd` lists exactly `path`; the window's string is a request, never the path opened. `missing`:
+// not listed, or no regular file there now; `unreadable`: the inventory could not be read (`message`, its reason);
+// `launch`: the row is not installed or did not open (`message`, the launcher's sentence).
+export const SKILL_FILE_APPS = ['vscode', 'vscodeInsiders', 'cursor', 'windsurf', 'zed', 'xcode', 'finder'] as const; // no terminal: a skill is a file
 export const SkillFileOutputSchema = z.discriminatedUnion('status', [
-  z.strictObject({ status: z.literal('revealed') }),
-  z.strictObject({ status: z.literal('refused'), reason: z.enum(['missing', 'unreadable', 'no-window']), message: z.string().max(4096).nullable() }),
+  z.strictObject({ status: z.literal('opened') }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['missing', 'unreadable', 'launch']), message: z.string().max(4096).nullable() }),
 ]);
 export type SkillFileOutput = z.infer<typeof SkillFileOutputSchema>;
 
 export const commands = {
   'customization.inventory': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: CustomizationInventorySchema, owner: 'engine-host' },
   'customization.serverEndpoints': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: z.strictObject({ servers: z.array(CustomizationEndpointSchema) }), owner: 'engine-host' }, // P4-AGG M4, main-only
-  'customization.skillFile': { input: z.strictObject({ cwd: AbsolutePath.nullable(), path: AbsolutePath, action: z.literal('reveal') }), output: SkillFileOutputSchema, owner: 'main' }, // UX wave U11
+  'customization.skillFile': { input: z.strictObject({ cwd: AbsolutePath.nullable(), path: AbsolutePath, app: z.enum(SKILL_FILE_APPS) }), output: SkillFileOutputSchema, owner: 'main' }, // UX wave U11
 } as const satisfies Record<string, CommandSpec<z.ZodType, z.ZodType>>;
 export const events = {} as const;

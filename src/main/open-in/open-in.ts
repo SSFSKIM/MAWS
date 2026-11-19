@@ -40,6 +40,9 @@ export interface OpenInDeps {
 export interface OpenIn {
   apps(): Promise<OpenInApp[]>;
   open(input: CommandInput<'layout.openIn'>): Promise<OpenInOutput>;
+  // UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 11): a file
+  // its caller has already admitted by a rule of its own (a skill's file the inventory lists), handed to an installed row
+  launchFile(app: OpenInAppId, realPath: string): Promise<OpenInOutput>;
 }
 
 const seamApps = (value: string | undefined): Set<string> => new Set((value ?? '').split(',').map((id) => id.trim()));
@@ -97,6 +100,11 @@ export function createOpenIn(deps: OpenInDeps): OpenIn {
       const { path: real, kind } = admitted.value;
       const target: OpenInTarget = kind === 'file' ? { kind, path: real, line: line ?? null } : { kind, path: real };
       return (await launch(app, target)) ? { opened: true } : { opened: false, message: OPEN_IN_WORDS.failed(name) };
+    },
+    async launchFile(app, realPath) {
+      const { name } = appSpec(app);
+      if (!(await installed()).includes(app)) return { opened: false, message: OPEN_IN_WORDS.notInstalled(name) };
+      return (await launch(app, { kind: 'file', path: realPath, line: null })) ? { opened: true } : { opened: false, message: OPEN_IN_WORDS.failed(name) };
     },
   };
 }

@@ -49,6 +49,8 @@ let installed: (typeof installedLedger)[];
 let listAnswer: Promise<unknown> | null; // plugins.list's answer, when a test holds it
 let servers: { name: string; scope: string; path: string; transport: string }[];
 let opSeq: number;
+let extraSkills: object[]; // UX wave U11's skill actions
+let skillFileAnswer: unknown;
 
 const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
 const emit = (name: EventName, payload: unknown) => {
@@ -74,7 +76,11 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'mods.list':
       return [];
     case 'customization.inventory':
-      return { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }], servers, warnings: [], serversRead: true };
+      return { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }, ...extraSkills], servers, warnings: [], serversRead: true };
+    case 'layout.openInApps': // UX wave U11's skill actions: the rows this Mac has
+      return { apps: [{ id: 'zed', name: 'Zed' }, { id: 'terminal', name: 'Terminal' }, { id: 'finder', name: 'Finder' }] };
+    case 'customization.skillFile':
+      return skillFileAnswer;
     case 'catalog.home':
       return home();
     case 'catalog.query':
@@ -123,6 +129,8 @@ beforeEach(() => {
   listAnswer = null;
   servers = [{ name: 'tides', scope: 'user', path: `${HOME}/.claude.json`, transport: 'http' }];
   opSeq = 0;
+  extraSkills = [];
+  skillFileAnswer = { status: 'opened' };
   shelf = [ledger, berth];
   const bridge: PreloadBridge = {
     localMachine: TEST_MACHINE,
@@ -644,5 +652,43 @@ describe('a skill’s actions', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
     await found('[data-skill-detail="tide-tables"]');
     expect(document.querySelector('[data-skill-note]')).toBeNull();
+  });
+
+  const SKILL = `${QUAY}/.claude/skills/tide-tables/SKILL.md`;
+  const openDetail = async (show: 'skills' | 'all', name = 'tide-tables') => {
+    mountCustomize({ view: 'mine', show });
+    fireEvent.click(await screen.findByRole('button', { name: `View ${name}` }));
+    return found(`[data-skill-detail="${name}"]`);
+  };
+  const choose = async (detail: HTMLElement, row: string) => {
+    fireEvent.keyDown(within(detail).getByRole('button', { name: 'Open in' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: row }));
+  };
+
+  it('Open in on a skill’s detail lists the editors and Finder this Mac has, no terminal, and hands the row’s file with the page’s place', async () => {
+    const detail = await openDetail('skills');
+    fireEvent.keyDown(within(detail).getByRole('button', { name: 'Open in' }), { key: 'Enter' });
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual(['Zed', 'Finder']));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Zed' }));
+    await waitFor(() => expect(invoked('customization.skillFile')).toEqual([{ cwd: QUAY, path: SKILL, app: 'zed' }]));
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  it('from All too, and a refusal reads under the head until the detail is left', async () => {
+    skillFileAnswer = { status: 'refused', reason: 'missing', message: null };
+    const detail = await openDetail('all');
+    await choose(detail, 'Finder');
+    expect((await screen.findByRole('alert')).textContent).toBe("This skill's file is no longer here. Refresh, then try again.");
+    expect(invoked('customization.skillFile')).toEqual([{ cwd: QUAY, path: SKILL, app: 'finder' }]);
+    fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
+    await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {
+    extraSkills = [{ name: 'chart-reader', description: 'Reads charts', source: 'plugin', path: `${HOME}/plugins/cache/quay-ledger/skills/chart-reader/SKILL.md`, plugin: 'quay-ledger@harbour-market', pluginName: 'quay-ledger' }];
+    await openDetail('skills', 'chart-reader');
+    expect((await found('[data-skill-note]')).textContent).toBe('Comes with the plugin quay-ledger@harbour-market. An update of the plugin replaces this file, and any edit in it.');
   });
 });
