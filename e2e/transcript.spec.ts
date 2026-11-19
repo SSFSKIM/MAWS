@@ -44,8 +44,12 @@ const WARMUP_MS = 500;
 // The anchoring case's wall-clock and frame budgets (the load, the stream's rate, frame p95 and max) are measured bounds,
 // class 2 of the gate-offload spec (§3.1, §8): asserted only under MAWS_TRANSCRIPT_PERF=1, on the quiet Mac under the
 // load rule, which the gate never sets. Without it the case keeps its anchoring invariants and reports the numbers.
-// The frame budget is one 60 Hz display's: the Mac mini's virtual display paces frames at 18.4 ms with no long task.
+// The frame budgets are the display's own: the case reads the display's frame interval at idle, before the stream
+// starts (`idleFrame`: 16.7 ms at 60 Hz, about 18.4 ms on the Mac mini's virtual display), and allows a p95 of one
+// frame and 2% and a max of three frames, which at 60 Hz are the 17 and 50 ms the anchoring spike set.
 const MEASURED = process.env.MAWS_TRANSCRIPT_PERF === '1';
+const FRAME_P95 = 1.02;
+const FRAME_MAX = 3;
 
 async function harnessReady(page: Page) {
   await page.waitForFunction(() => (window as unknown as Partial<HarnessWindow>).__maws_harness !== undefined);
@@ -143,6 +147,21 @@ async function openEveryRun(scope: Page | Locator) {
 const p95 = (values: number[]) => [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(values.length * 0.95) - 1)] ?? 0;
 const round = (value: number) => Math.round(value * 10) / 10;
 
+// The display's frame interval with the page idle: the median of one second of requestAnimationFrame intervals, which a
+// late frame or two does not move.
+const idleFrame = (page: Page) =>
+  page.evaluate(async () => {
+    const frame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+    const intervals: number[] = [];
+    const started = await frame();
+    for (let last = started; last - started < 1000; ) {
+      const now = await frame();
+      intervals.push(now - last);
+      last = now;
+    }
+    return intervals.sort((a, b) => a - b)[Math.floor(intervals.length / 2)] ?? 0;
+  });
+
 test('anchoring: 500 turns stream while old work is expanded', async ({ harness }) => {
   test.setTimeout(120_000);
   const { page } = harness;
@@ -151,6 +170,7 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
 
   const loaded = await load(page, 'synthetic/500');
   if (MEASURED) expect(loaded.ms, 'synthetic/500 loads in under three seconds').toBeLessThan(3000);
+  const displayFrame = await idleFrame(page);
 
   // Stream the last turn in view, following, then move away to turn 120.
   await play(page, 1);
@@ -199,7 +219,7 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   const batches = after.batches - before.batches;
   const longTasks = after.longTasks.slice(before.longTasks.length);
   const report = {
-    framesP95: round(framesP95), framesMax: round(framesMax), frames: measured.length, drift: round(window10s.drift), scrollDelta: window10s.scrollDelta,
+    framesP95: round(framesP95), framesMax: round(framesMax), displayFrame: round(displayFrame), frames: measured.length, drift: round(window10s.drift), scrollDelta: window10s.scrollDelta,
     domRows: window10s.domRows, rows: after.rows, batches, loadMs: Math.round(loaded.ms), events: loaded.events, longTasks: longTasks.map((task) => round(task.duration)),
     deriveMs: round(after.deriveMs), lastBatchMs: round(after.lastBatchMs),
     blockedInput: await page.evaluate(() => (window as unknown as { __blockedInput: number }).__blockedInput),
@@ -214,8 +234,8 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   expect(window10s.domRows, 'DOM rows').toBeLessThanOrEqual(40);
   if (MEASURED) {
     expect(batches, 'the stream ran at about sixty batches a second throughout the window').toBeGreaterThanOrEqual(540);
-    expect(framesP95, 'frame interval p95 after the first 500 ms').toBeLessThanOrEqual(17);
-    expect(framesMax, 'frame interval max after the first 500 ms').toBeLessThanOrEqual(50);
+    expect(framesP95, 'frame interval p95 after the first 500 ms, against one frame of this display').toBeLessThanOrEqual(displayFrame * FRAME_P95);
+    expect(framesMax, 'frame interval max after the first 500 ms, against three frames of this display').toBeLessThanOrEqual(displayFrame * FRAME_MAX);
   }
 
   // Jump to latest lands at the end and follow mode resumes: the next batches keep the end pinned.
