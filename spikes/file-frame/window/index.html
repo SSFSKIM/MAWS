@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <!-- PRODUCTION_CSP of src/main/csp.ts at 281ef5a6c; main also attaches it as a header, as window.ts does -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self'; frame-src 'self' maws-artifact:; media-src 'self' maws-artifact:" />
+    <title>file-frame spike</title>
+    <style>
+      body { margin: 0; font: 13px sans-serif; background: #fff; }
+      #slots { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 8px; }
+      .slot { outline: 1px solid #ccc; }
+      iframe { border: 0; display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="slots"></div>
+    <script src="window.js"></script>
+  </body>
+</html>

@@ -8,6 +8,7 @@ import { Media } from './Media';
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('Media', () => {
@@ -37,5 +38,33 @@ describe('Media', () => {
     render(<Media kind="audio" url="maws-artifact://00000000-0000-4000-8000-000000000001/1/clip.webm" />);
     expect(document.querySelector('audio[data-artifact-media="audio"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull();
+  });
+
+  // UX wave U6b-2 (M5, decision 6): a file's video or sound keeps its position across a move and a hide, and tells the
+  // viewer an error the element reports.
+  it.each(['video', 'audio'] as const)('sets the start time once the metadata has loaded and reports the time as it plays (%s)', (kind) => {
+    installResizeObserver();
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play');
+    const onTime = vi.fn();
+    render(<Media kind={kind} url="maws-artifact://00000000-0000-4000-8000-000000000001/1/clip.webm" startAt={42.5} onTime={onTime} />);
+    const element = document.querySelector<HTMLMediaElement>(`[data-artifact-media="${kind}"]`)!;
+    Object.defineProperty(element, 'currentTime', { value: 0, writable: true, configurable: true });
+    expect(element.currentTime).toBe(0); // nothing set before the metadata
+    fireEvent.loadedMetadata(element);
+    expect(element.currentTime).toBe(42.5);
+    element.currentTime = 43.25;
+    fireEvent.timeUpdate(element);
+    expect(onTime).toHaveBeenLastCalledWith(43.25);
+    fireEvent.loadedMetadata(element); // set once: a second metadata event moves nothing
+    expect(element.currentTime).toBe(43.25);
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('tells its owner the element’s error', () => {
+    installResizeObserver();
+    const onError = vi.fn();
+    render(<Media kind="audio" url="maws-artifact://00000000-0000-4000-8000-000000000001/1/clip.webm" onError={onError} />);
+    fireEvent.error(document.querySelector('audio')!);
+    expect(onError).toHaveBeenCalledOnce();
   });
 });

@@ -14,6 +14,7 @@ import { BrowserTabIdSchema } from '../../browser/tab';
 import { addressOf, isAddress } from '../../machine/address';
 import { MachineRefSchema, type MachineRef } from '../../machine/ref';
 import { OrgKeySchema } from '../../machine/org-key'; // P5 O6 M5
+import { FRAME_TOKEN } from '../../files/framed'; // UX wave U6b-2
 
 // UX wave U4a M3: the action ids' enum typed by a named interface. Inferred, each use printed every id twice into
 // `REGISTRY`'s declaration (src/shared/ipc/registry.ts), which sits near what the compiler serializes; the wave's growing
@@ -800,6 +801,28 @@ const u6eCommands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // UX wave U6e end
 
+// UX wave U6b-2 start (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §D): a PDF, an HTML
+// page, a video or a sound a session's path names, drawn in a frame. `layout.frameFile` issues a token to the asking page
+// (`maws-artifact://<token>/<the file's base name>`, the one path it answers) or answers why its file shows a row
+// instead; `layout.releaseFrame` releases one of that page's tokens; the event `layout.frameFailed` tells the owning page
+// alone that a read for one of its live tokens failed. Main's own, outside the wire's manifest; no layout key.
+const FrameTokenSchema = z.string().regex(FRAME_TOKEN);
+const u6b2Commands = {
+  'layout.frameFile': {
+    // agent: the asking tab holds the agent's mark (UX wave U6e, decision 19), so main's reads for the frame carry it as
+    // the tab's own reads do
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1), agent: z.literal(true).optional() }),
+    output: z.discriminatedUnion('status', [
+      // neighbours: present exactly for 'html' (M5, decision 14)
+      z.strictObject({ status: z.literal('ready'), token: FrameTokenSchema, url: z.string(), framed: z.enum(['pdf', 'html', 'video', 'audio']), neighbours: z.boolean().optional() }),
+      z.strictObject({ status: z.literal('row'), why: z.enum(['too-large', 'unserved', 'unframed']) }),
+    ]),
+    owner: 'main',
+  },
+  'layout.releaseFrame': { input: z.strictObject({ token: FrameTokenSchema }), output: z.void(), owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// UX wave U6b-2 end
+
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
   'layout.set':          { input: z.strictObject({ key: LayoutKeySchema, value: z.unknown() }), output: z.void(), owner: 'main' },
@@ -815,6 +838,7 @@ export const commands = {
   ...p3gCommands, // P3-G
   ...p4b2Commands, // P4-B2 K6
   ...u6eCommands, // UX wave U6e: Open File…
+  ...u6b2Commands, // UX wave U6b-2
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -827,4 +851,5 @@ export const events = {
   'layout.saveAll': z.strictObject({ requestId: z.string() }),
   // E5 end
   'layout.edit': MenuEditSchema, // P4-B2 K6: Edit ▸ Undo or Redo, to the focused app page alone
+  'layout.frameFailed': z.strictObject({ token: FrameTokenSchema }), // UX wave U6b-2: a read for this live token failed, at any point of a response; to its page alone
 } as const satisfies Record<`layout.${string}`, z.ZodType>;

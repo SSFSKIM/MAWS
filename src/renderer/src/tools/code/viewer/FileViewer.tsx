@@ -17,17 +17,26 @@
 // that cannot be saved reads "Read-only" after what the tab puts at the bar's start and before the path, a button whose
 // panel gives the reason; a savable outside file carries no label, and its path's tooltip and description say where Save
 // writes. Save, Rendered/Source and Wrap are one group; a save's failure takes a line of its own below the path.
+//
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5): a PDF, an HTML page, a video or a
+// sound is drawn by `FrameBody`, with Open externally in the bar unless its body is a row (which holds its own, or none);
+// `data-frame` on the viewer says what the frame shows. `host` says where the tab is drawn (`'side'` beside the chat,
+// `'main'` in the main area), and only the PDF's fragment reads it. `inView` false: the tab's body is kept mounted while it
+// is not in view (Files' tree in its place, the panel collapsed), and a framed file draws no element (Decision Log 29). A tab
+// of the main area is in view while the main area is on screen (the shell's `useMainAreaOnScreen`, Decision Log 35).
 import { Popover } from 'radix-ui';
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ChevronDownIcon } from '../../../app/IconButton';
+import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
 import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
 import { openChosen } from '../files/open-chosen';
 import { ExternalRow, OpenExternally } from './ExternalRow';
+import { FrameBody } from './FrameBody';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
@@ -50,7 +59,8 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 // path). UX wave U6e (K11; decision 11): the path is cut in its middle with both ends drawn: the folder part keeps two
 // characters (its first and the ellipsis, where one character left a stray glyph), the slash before the name stays, and
 // the lead's least width counts them, within the 40. A savable outside file's path says where Save writes, as its tooltip
-// and its accessible description; `outside` marks how the file stands outside the folders.
+// and its accessible description (UX wave U6b-2: only where the body is text Save writes); `outside` marks how the file
+// stands outside the folders.
 const NAME_MIN_CH = 40;
 const FOLDER_MIN_CH = 2;
 
@@ -143,12 +153,18 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
 // UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button); (M4) `end`,
 // what it puts at the bar's end (Move to main area). UX wave U6e: "Read-only" between the two (K2), drawn from the entry
 // as it is drawn (K11); `agent`, the tab holds the mark of an open the agent asked for (decision 19).
-export function FileViewer({ tab, start, end, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; agent?: boolean }) {
+// UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent. (Decision Log 29) `inView`,
+// whether the mounted body is in view; in view when absent.
+export function FileViewer({ tab, start, end, host, inView = true, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean; agent?: boolean }) {
+  const mainOnScreen = useMainAreaOnScreen();
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const { appSessionId } = tab;
   const lead = (entry: ViewerEntry | null) => {
     const reason = entry === null ? null : readOnlyReason(entry);
-    const savesTo = entry !== null && entry.pin !== null && entry.locked === null ? VIEWER_COPY.savesTo(entry.pin) : null;
+    // UX wave U6b-2 at the chain merge (the architect's ruling): only a body that can be saved (the code view's text) says
+    // where Save writes; a framed file, an image or a row shows its plain path, its outside mark as it is
+    const savable = entry !== null && (entry.kind === 'code' || entry.kind === 'markdown');
+    const savesTo = savable && entry.pin !== null && entry.locked === null ? VIEWER_COPY.savesTo(entry.pin) : null;
     return (
       <>
         {start}
@@ -168,6 +184,8 @@ export function FileViewer({ tab, start, end, agent = false }: { tab: FileTab; s
       controls={(entry) => <EditorControls entry={entry} />}
       below={(entry) => <SaveFailure entry={entry} />}
       end={end}
+      host={host}
+      inView={inView && (host === 'side' || mainOnScreen)}
     />
   );
 }
@@ -205,10 +223,12 @@ interface FileBodyProps {
   controls?: (entry: ViewerEntry) => ReactNode; // beside the notices (the file tab's editor controls), in the controls' group
   below?: (entry: ViewerEntry) => ReactNode; // UX wave U6e (K1, K14): a line of its own below the path (a save's failure)
   end?: ReactNode; // UX wave U6b-1: the bar's last control (a side tab's Move to main area)
+  host?: 'side' | 'main'; // UX wave U6b-2: where the tab is drawn; the main area when absent
+  inView?: boolean; // UX wave U6b-2 (Decision Log 29): false while the mounted body is not in view
   agent?: boolean; // UX wave U6e (decision 19): the tab holds the agent's mark, and its reads say so
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, agent = false }: FileBodyProps) {
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -226,6 +246,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       data-file-viewer
       data-path={path}
       data-kind={entry?.kind ?? ''}
+      data-frame={entry ? frameMarker(entry) : ''}
       data-editable={String(entry !== null && entry.editable && showsCode(entry))}
       data-dirty={String(entry?.dirty ?? false)}
       data-theirs={entry?.theirs?.view ?? ''}
@@ -246,19 +267,33 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {end}
         {entry ? below?.(entry) : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} /> : <Loading />}</div>
     </div>
   );
 }
 
 const showsCode = (entry: ViewerEntry) => entry.kind === 'code' || entry.kind === 'head' || (entry.sourceView && (entry.kind === 'markdown' || entry.kind === 'image'));
+// UX wave U6b-2, card 1's one place ("The page alone"): a framed file (an HTML page among them) has no Source view.
 const hasSource = (entry: ViewerEntry) => entry.kind === 'markdown' || (entry.kind === 'image' && entry.encoding === 'utf8');
+
+// UX wave U6b-2 (M5, decision 8): what a framed file's body shows, for scenes; empty for another kind.
+function frameMarker(entry: ViewerEntry): string {
+  if (entry.kind !== 'frame' || entry.status !== 'ready') return '';
+  const { frame } = entry;
+  if (frame === null || frame.status === 'row') return 'row';
+  if (frame.status === 'failed') return 'failed';
+  const shown = frame.status === 'asking' ? frame.shown : frame;
+  return shown === null ? 'loading' : shown.framed;
+}
+// A framed file's bar holds Open externally unless its body is a row, which holds its own (or none: L4).
+const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !== null && entry.frame.status !== 'row';
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom }) {
+function Body({ entry, wrap, zoom, host, inView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
+  if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
   if (showsCode(entry)) {
     return (
       <Suspense fallback={<Loading />}>
@@ -306,7 +341,7 @@ function Controls({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zo
           {VIEWER_COPY.loadMore}
         </button>
       ) : null}
-      {entry.kind === 'head' && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} agent={entry.agent} /> : null}
+      {(entry.kind === 'head' || barOpens(entry)) && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} agent={entry.agent} /> : null}
       {hasSource(entry) ? (
         <button type="button" className={toggle} aria-pressed={entry.sourceView} onClick={() => useViewer.getState().toggleSource(tabId)}>
           {entry.sourceView ? VIEWER_COPY.rendered : VIEWER_COPY.source}
