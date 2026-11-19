@@ -287,6 +287,8 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     /** UX wave U6b-4c: whether a follow recorded the path for the session; `why` null when the record admits a save. */
     linked: (appSessionId: string, path: string) => (records.has(`${appSessionId}\0${realOf(path)}`) ? { why: records.get(`${appSessionId}\0${realOf(path)}`)! } : null),
     unlink: (appSessionId: string, path: string) => void records.delete(`${appSessionId}\0${realOf(path)}`), // UX wave U6b-4c
+    /** UX wave U6b-4c: the record a follow writes, published before its reply reaches the window (§D step 5; Decision Log 14). */
+    publish: (appSessionId: string, path: string, why: 'linked' | 'result' | null = null) => void records.set(`${appSessionId}\0${realOf(path)}`, why),
     released: () => main.callsOf('layout.releaseFrame').map((input) => input.token as string), // UX wave U6b-2
     // The next call of `name` is answered (as the disk is when it arrives) only once the returned gate is released.
     hold(name: CommandName) {

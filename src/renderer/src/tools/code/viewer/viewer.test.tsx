@@ -28,7 +28,7 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { openChosen } from '../files/open-chosen';
 import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
-import { resetFollows } from '../follow'; // UX wave U6b-4c
+import { follow, resetFollows } from '../follow'; // UX wave U6b-4c
 import { MarkdownView } from './MarkdownView'; // UX wave U6b-4c
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
@@ -2684,6 +2684,7 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
   const label = () => document.querySelector<HTMLElement>('[data-read-only]');
   const retryButton = () => document.querySelector<HTMLButtonElement>('[data-notice-retry]');
   const sideFiles = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  const mainFile = (path: string) => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).find((tab) => tab.kind === 'file' && tab.path === path);
   // A file's main tab and its viewer, as an open from the main area makes them
   const showFile = (path: string, appSessionId: AppSessionId = A) => {
     act(() => void openFile(appSessionId, path, null, { main: true }));
@@ -2733,7 +2734,7 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
   });
 
   it('X3.4 (M4): a relative chip of a file at /base/dir/doc.md follows with the entry’s path as its source and the path the read then asks; an artifact’s view follows nothing', async () => {
-    const main = disk({ '/base/dir/doc.md': '[a](sub/a.md) and [up](../up.txt)', '/base/dir/sub/a.md': 'a\n', '/base/up.txt': 'u\n' });
+    const main = disk({ '/base/dir/doc.md': '[a](sub/a.md) and [out](/elsewhere/notes.txt)', '/base/dir/sub/a.md': 'a\n', [OUT]: 'the notes\n' });
     click(await linkIn('sub/a.md', '/base/dir/doc.md'));
     render(<FileViewer tab={fileTab('/base/dir/sub/a.md')} />);
     await waitFor(() => expect(shown('/base/dir/sub/a.md')?.status).toBe('ready'));
@@ -2741,8 +2742,10 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     expect(followed).toEqual({ appSessionId: MAIN_A, path: '/base/dir/sub/a.md', from: { file: '/base/dir/doc.md' } });
     expect(reads(main, '/base/dir/sub/a.md').map((input) => input.path)).toEqual([followed.path]);
     cleanup();
-    render(<MarkdownView entry={shown('/base/dir/doc.md')!} artifactView />); // an artifact's view: resolved against nothing, and no source
-    click(screen.getByTitle('../up.txt'));
+    // an artifact's view names no source: an absolute link, which a follow could take, follows nothing
+    render(<MarkdownView entry={shown('/base/dir/doc.md')!} artifactView />);
+    click(screen.getByTitle(OUT));
+    expect(mainFile(OUT)).toBeDefined(); // the open was made
     expect(main.callsOf('files.follow')).toHaveLength(1);
   });
 
@@ -3021,12 +3024,22 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     render(<FileViewer tab={fileTab(OUT)} />);
     await settle();
     act(() => useViewer.getState().applyChanged({ appSessionId: A, path: OUT, kind: 'changed' })); // a second load, waiting too
-    main.files[OUT] = 'newer notes\n';
     await settle();
     expect(reads(main)).toEqual([]);
+    // the two reads tell apart: the older answers the old text and is held past the newer, which answers the new one
+    let n = 0;
+    main.answers.by = (name, input) => {
+      if (name === 'files.read' && input.path === OUT && ++n === 2) main.files[OUT] = 'newer notes\n';
+      return null;
+    };
+    const older = main.hold('files.read');
     await act(async () => held.release());
     await waitFor(() => expect(reads(main)).toHaveLength(2));
     await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'newer notes\n' }));
+    await act(async () => older.release()); // the older answer, 'the notes', lands nowhere
+    await settle();
+    expect(shown()).toMatchObject({ status: 'ready', text: 'newer notes\n' });
+    expect(reads(main)).toHaveLength(2);
   });
 
   it('K4: a file a read-only Markdown file links opens read-only with its own sentence and Open File…; once the Markdown file is chosen, the same link opens it editable', async () => {
@@ -3098,6 +3111,86 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     act(() => void openFile(REMOTE, OUT, null, { main: true, from: { file: DOC } }));
     act(() => codeTranscriptActions.openFile(OUT, undefined, REMOTE, { main: true, agent: 'agent-1' }));
     expect(main.callsOf('files.follow')).toEqual([]);
+  });
+
+  it('W1 (g): with two reads out from before the click, the newest landing refused while the older is still out is read once more when the older has ended', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const older = main.hold('files.read');
+    const newer = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    act(() => useViewer.getState().applyChanged({ appSessionId: A, path: OUT, kind: 'changed' })); // a newer load supersedes it
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    await act(async () => newer.release()); // the newest lands refused while the older read is out
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+    await act(async () => older.release()); // superseded: it lands nowhere, and the load it was ends
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main)).toHaveLength(3);
+  });
+
+  it('W1 (g): a Load more sent before the click that lands from a file that may not be saved is read once more, keeping what it loaded', async () => {
+    const BIG = '/elsewhere/big.log';
+    const text = `${'log line\n'.repeat(4)}`;
+    const main = disk({ [DOC]: `[the log](${BIG})`, [BIG]: text }, { results: [BIG], links: [{ from: { file: DOC }, path: BIG }] });
+    act(() => void openFile(A, DOC, null, { main: true })); // the source, as a read of it would find it
+    main.files[BIG] = { text, bytes: 5 * MiB } as never;
+    showFile(BIG);
+    await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', kind: 'head', locked: 'result' }));
+    const before = reads(main, BIG).length;
+    const more = main.hold('files.read');
+    act(() => useViewer.getState().loadMore(FILE(BIG)));
+    await waitFor(() => expect(reads(main, BIG)).toHaveLength(before + 1));
+    // the follow alone, with no open (whose own read again of a named tab would hide what this case holds)
+    act(() => follow(A, BIG, { file: DOC }));
+    await waitFor(() => expect(main.linked(MAIN_A, BIG)).not.toBeNull());
+    await act(async () => more.release()); // lands read-only: no record when it arrived
+    await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', locked: null }));
+    await settle();
+    expect(reads(main, BIG)).toHaveLength(before + 2);
+    expect(reads(main, BIG).at(-1)).toMatchObject({ offset: 0 });
+  });
+
+  it('K3: a relative link in a Markdown file outside the folders that the person chose opens the file beside it, editable', async () => {
+    const SOURCE = '/elsewhere/docs/guide.md';
+    const NEXT = '/elsewhere/docs/next.md';
+    const main = disk({ [SOURCE]: '[next](next.md)', [NEXT]: 'next\n' }, { links: [{ from: { file: SOURCE }, path: NEXT }] });
+    main.grant(MAIN_A, SOURCE); // chosen with Open File…
+    click(await linkIn('next.md', SOURCE));
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: MAIN_A, path: NEXT, from: { file: SOURCE } }]);
+    render(<FileViewer tab={fileTab(NEXT)} />);
+    await waitFor(() => expect(shown(NEXT)).toMatchObject({ status: 'ready', named: true, locked: null, editable: true }));
+    expect(main.linked(MAIN_A, NEXT)).toEqual({ why: null });
+  });
+
+  it('Decision Log 14: a Save the daemon admits after the record is written and before the window hears linked leaves the tab clean, as saved, with nothing read over it', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    main.unlink(MAIN_A, OUT); // the record pushed out
+    const readsBefore = reads(main).length;
+    const held = main.hold('files.follow');
+    click(chip);
+    main.publish(MAIN_A, OUT); // the daemon wrote the record; its reply has not reached the window
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    await waitFor(() => expect(shown()).toMatchObject({ dirty: false, saving: false, saveError: null }));
+    await act(async () => held.release());
+    await settle();
+    expect(shown()).toMatchObject({ status: 'ready', dirty: false, saveError: null, error: null, failure: null, locked: null, editable: true, text: 'two one\n', hash: fakeHash('two one\n') });
+    expect(view().state.doc.toString()).toBe('two one\n');
+    expect(document.body.textContent).not.toContain('Could not save');
+    expect(reads(main).length - readsBefore).toBeLessThanOrEqual(1);
   });
 
   it('X5.14: with unsaved edits and the record gone, Save is refused and the edits stand; pressed while the click’s follow is under way, refused again; after it answers linked, Save writes', async () => {
