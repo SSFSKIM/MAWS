@@ -1270,11 +1270,29 @@ test.describe('sessions', () => {
 
       // UX wave U6b-4b (L1, L2, R1): a `file:///` link to an outside file is a path link of that path and opens the file
       // beside the chat, as its scheme-less link does; one with a host is the link's text with no chip; and no element of
-      // the page carries a `file:` address
+      // the page carries a `file:` address. The page's own body is what is read (N1.9: an element drawn in the window): the
+      // head holds the `<link>`s Vite's preload helper adds for each lazy chunk, whose hrefs are absolute `file:` URLs
+      // because the build's base is relative and the window loads its page from a file. The control below shows the
+      // selector still finds such an address on any element of the body, and passes over the head's links.
       await expect(chip('by-url.txt'), 'the file: URL drawn as a path link').toBeVisible();
       await expect(main.getByText('by host', { exact: true }), 'the link with a host is drawn, as text').toBeVisible();
       await expect(chip('by-host.txt'), 'and is no chip').toHaveCount(0);
-      await expect(page.locator('[href^="file:"], [href^="maws-path:"]'), 'no file: or maws-path: address on any element').toHaveCount(0);
+      const addressed = page.locator('body').locator('[href^="file:"], [href^="maws-path:"]');
+      await expect(addressed, 'no file: or maws-path: address on any element of the window').toHaveCount(0);
+      await page.evaluate(() => {
+        const planted = (tag: string, href: string, into: HTMLElement) => {
+          const element = document.createElement(tag);
+          element.setAttribute('href', href);
+          element.setAttribute('data-e2e-planted', '');
+          into.append(element);
+        };
+        planted('a', 'file:///planted/notes.txt', document.querySelector('[data-region="main"]') ?? document.body);
+        planted('span', 'maws-path:/planted/notes.txt', document.body);
+        planted('link', 'file:///planted/chunk.js', document.head);
+      });
+      await expect(addressed, 'the control: an anchor and a span planted in the window are found').toHaveCount(2);
+      await page.evaluate(() => document.querySelectorAll('[data-e2e-planted]').forEach((element) => element.remove()));
+      await expect(addressed, 'the control removed').toHaveCount(0);
       await chip('by-url.txt').click();
       const byUrl = side.locator(`[data-file-viewer][data-path="${file('by-url.txt')}"]`);
       await expect(byUrl.locator('.cm-content'), 'the outside file the file: link names, read by the rule').toHaveText('Invented, linked as a file: URL.', { timeout: 20_000 });
