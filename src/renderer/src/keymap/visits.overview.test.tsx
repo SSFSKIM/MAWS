@@ -111,11 +111,12 @@ describe('a step and the mounted Overview over a split', () => {
     expect(record()).toEqual({ entries: [T('b')], at: 0 });
     act(() => layout().setOverviewOpen(true)); // over B, its opener in B's pane
     await settle();
+    expect(record()).toEqual({ entries: [T('b'), over(T('b'))], at: 1 });
     // A becomes the place under the open Overview by an act outside it (the strip's own reading: the focused pane), and
-    // the record steps from there
+    // the record steps from a record that stands there
     act(() => layout().focusPane(0));
     await settle();
-    expect(record()).toEqual({ entries: [over(T('a'))], at: 0 });
+    expect(record()).toEqual({ entries: [T('b'), over(T('a'))], at: 1 });
     useVisits.setState({ record: { entries: [T('a'), over(T('a'))], at: 1 } }); // the Overview over A, A before it
     act(() => runAction('go.back'));
     await settle();
