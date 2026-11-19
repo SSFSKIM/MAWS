@@ -23,7 +23,7 @@
 // W3 (B6): a bubble's Edit edits the bubble in place (`InlineEdit.tsx`, over `resubmit-seam.ts`); the composer has no
 // edit mode. Only once a rewind hid the edited bubble with its turn and the resend still waits (it failed, or the
 // rewind was confirmed late) does the composer's dock carry the resubmit's line, with Send or Retry.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -33,9 +33,13 @@ import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
-import { nextMode } from '../statusline';
+import { nextMode, type ModeBinding } from '../statusline';
+import { VisuallyHidden } from 'radix-ui'; // UX wave U6b-5a
+import type { PermissionMode } from '@shared/graph/enums'; // UX wave U6b-5a
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels'; // UX wave U6b-5a
 import { useAttention, selectPendingOf } from '../stores/attention';
 import { clearStackNotice, inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, showStackNotice, useComposerStore } from '../stores/composer';
+import { takeIntoBox } from './attach-pasted'; // UX wave U6b-5a
 import { toast, useNotices } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
@@ -70,6 +74,7 @@ import { ResubmitLine } from './InlineEdit'; // W3 (B6)
 import { endedBindings, intentBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
+import { ComposerBarContext } from './frame/bar'; // UX wave U10b (O-43, §F.3)
 import { PluginBand, PluginHint } from './frame/PluginSites'; // R2
 import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
@@ -135,6 +140,51 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
   }, [appSessionId, client]);
 }
 
+// UX wave U6b-5a (M1, decision 5; sequence S4): a change of the permission mode with ⇧Tab is said once per press, as
+// "Permission mode: <the chip's label>". A refusal says the mode in force at once. A taken change is said when the chip
+// shows the mode the engine answered it with (`effective`, which is the fallback when the engine set another than the
+// one asked; the mode asked where the binding names none), on the first render at or after the answer: a report of any
+// other mode meanwhile is not this press's. A later press supersedes an earlier one only while that one is unanswered; an
+// answered press still waiting for the chip is said when the chip shows its mode. A press while the chip takes no change
+// asks nothing and says nothing. Only ⇧Tab writes here: the chip's menu says its own selection, and a change the engine
+// makes by itself is no one's press.
+function useModeAnnouncement(mode: ModeBinding): { said: { press: number; text: string } | null; cycle(): void } {
+  const [said, setSaid] = useState<{ press: number; text: string } | null>(null);
+  const [answered, setAnswered] = useState(0); // a render after each taken answer, so the chip is read then
+  const presses = useRef(0);
+  // the presses not yet said, in order: unanswered (`shows` null) or taken and waiting for the chip to show `shows`
+  const waiting = useRef<{ press: number; shows: PermissionMode | null }[]>([]);
+  const shown = useRef(mode.value);
+  useLayoutEffect(() => void (shown.current = mode.value));
+  useEffect(() => {
+    const due = waiting.current.filter((press) => press.shows !== null && press.shows === mode.value);
+    if (due.length === 0) return;
+    waiting.current = waiting.current.filter((press) => !due.includes(press));
+    setSaid({ press: due.at(-1)!.press, text: modeSentence(mode.value) });
+  }, [mode.value, answered]);
+  const cycle = () => {
+    if (mode.disabled !== null) return;
+    const asked = nextMode(mode.value, mode.autoUnavailable === null);
+    presses.current += 1;
+    const press = presses.current;
+    waiting.current = [...waiting.current.filter((earlier) => earlier.shows !== null), { press, shows: null }]; // an unanswered press is superseded
+    void mode.set(asked).then((result) => {
+      if (!waiting.current.some((entry) => entry.press === press)) return; // superseded by a later press
+      if (!result.ok) {
+        waiting.current = waiting.current.filter((entry) => entry.press !== press);
+        setSaid({ press, text: modeSentence(shown.current) });
+        return;
+      }
+      const shows = result.effective ?? asked;
+      waiting.current = waiting.current.map((entry) => (entry.press === press ? { press, shows } : entry));
+      setAnswered((n) => n + 1);
+    });
+  };
+  return { said, cycle };
+}
+
+const modeSentence = (mode: PermissionMode | null): string => `Permission mode: ${PERMISSION_MODE_LABELS[mode ?? 'auto']}`; // the chip's label
+
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
 // shows it has opened (never per mount), the route's model catalogue for the model chip's name (a host read, from the
 // first render), and git's answer for the location chip's branch (W9, H2: a status, or that the folder is no repository).
@@ -166,6 +216,7 @@ function useLiveReads(
 
 export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProps) {
   const hook = useSetupIntent(appSessionId);
+  const bar = useContext(ComposerBarContext); // UX wave U10b (O-43, §F.3): the float's bar, the box alone
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const status = useSessionStatus(appSessionId, client);
   // Unstarted while C10 has an intent and C3 no status; the binding swaps when the status appears, without a remount.
@@ -280,8 +331,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         insertText: (text, options) => handle.current?.insertText(text, options),
         attachFiles: async (files, options) => (await handle.current?.attachFiles(files, options)) ?? false, // P3-G: Mark-up's Add to chat; registering drains the store's attachment queue
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
-        draftShown: () => !promptState.current.docked, // UX wave U4a M5: the menu chords ask for nothing under a card
+        draftShown: () => !promptState.current.docked && !bar, // UX wave U4a M5: the menu chords ask for nothing under a card; U10b (F5): nor in the bar
         empty: () => handle.current?.serialize().empty ?? true, // UX wave U1b (§F): a prompt's ⌘↩ yields to a draft
+        // UX wave U6b-5a (decision 8): an attached block, where this composer's box stands (a card over it, its pane covered)
+        attachPasted: (block, by, signal, atPress) => takeIntoBox(handle.current, block, by, { element: rootRef.current, covered: () => promptState.current.docked, held: () => takingBack(appSessionId) }, signal, atPress),
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {
           read: () => handle.current?.promptBox() ?? { text: '', cursor: 0 },
@@ -312,18 +365,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           },
         },
       }),
-    [appSessionId],
+    [appSessionId, bar],
   );
 
-  // ⇧Tab in the editor cycles the permission mode (C5's composer-scoped `composer.cycleMode`).
+  // ⇧Tab in the editor cycles the permission mode (C5's composer-scoped `composer.cycleMode`); UX wave U6b-5a: and the
+  // change is said in the live region (`useModeAnnouncement`)
   const mode = bindings.mode;
-  useKeyChord(
-    'composer.cycleMode',
-    () => {
-      if (mode.disabled === null) void mode.set(nextMode(mode.value, mode.autoUnavailable === null));
-    },
-    { within: boxRef },
-  );
+  const announcement = useModeAnnouncement(mode);
+  useKeyChord('composer.cycleMode', announcement.cycle, { within: boxRef });
 
   // ---- submissions ---------------------------------------------------------------------------------------------
   const drafts = useDraftPort(appSessionId, setup, client);
@@ -539,6 +588,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   return (
     <section ref={rootRef} aria-label="Composer" data-composer={appSessionId} data-pane-index={paneIndex} className="flex min-w-0 flex-col gap-2">
+      {/* UX wave U6b-5a (M1, Interfaces §F): mounted for the composer's whole life, so a sentence written to it is read; a
+          sentence is a node of its own, so the same sentence written again is read again */}
+      <VisuallyHidden.Root data-mode-announcement="" aria-live="polite">
+        {announcement.said && <span key={announcement.said.press}>{announcement.said.text}</span>}
+      </VisuallyHidden.Root>
       {/* W2: the setup's phase in the dock above the frame, only while it runs (Claude Desktop's dock notices) */}
       {phase !== null && (
         <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
@@ -584,10 +638,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {!unstarted && <PluginBand appSessionId={appSessionId} working={working} />}
       {/* UX wave U2b: the to-human view's switch, after the band, only while MAWS draws the view in force */}
       {!unstarted && <ViewSwitch appSessionId={appSessionId} />}
-      {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar it shows here */}
-      {docked && <DictationNotice appSessionId={appSessionId} client={client} />}
+      {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar, or in the bar, it shows here */}
+      {(docked || bar) && <DictationNotice appSessionId={appSessionId} client={client} />}
       <Frame
         appSessionId={appSessionId}
+        bar={bar}
         docked={
           card ? <div key={`card:${card.id}`}>{card.render()}</div> : null
         }
@@ -627,8 +682,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         }
         submit={<SubmitControl decision={decision} onPrimary={onPrimary} />}
       />
-      {/* R2: a plugin's hint under the frame, only while a plugin draws one */}
-      {!unstarted && <PluginHint appSessionId={appSessionId} isDraft={!draft.empty} isWorking={working} />}
+      {/* R2: a plugin's hint under the frame, only while a plugin draws one; none in the bar (U10b, H11) */}
+      {!unstarted && !bar && <PluginHint appSessionId={appSessionId} isDraft={!draft.empty} isWorking={working} />}
     </section>
   );
 }

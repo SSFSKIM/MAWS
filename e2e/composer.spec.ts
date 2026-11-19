@@ -681,6 +681,35 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B9): ⇧Tab in the box changes
+// the permission mode and the composer's live region says the mode that resulted, "Permission mode: <the chip's label>".
+// An unstarted session over the page's stub intent, whose chip writes through the intent as the scene above shows. The
+// chip's menu says its own selection, so a pick there leaves the region empty; the press then writes it (the control,
+// in this test, of that absence). Waited on: the chip's label, then the region's text.
+test('U6b-5a, ⇧Tab says the mode: the composer’s live region reads “Permission mode: Plan” after a press from Accept edits', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u6b5-mode-said';
+  const intent: HarnessIntent = { location: { kind: 'directory', path: repo }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null };
+  await openComposerPage(page);
+  await cards(page, 'intent', id, intent);
+  await showPanes(page, [{ composer: id }, null]);
+  const p = pane(page, 0);
+  const chip = p.getByRole('button', { name: /^Permission mode/ });
+  const said = p.locator('[data-mode-announcement]');
+  await expect(said, 'the region is mounted with the composer, empty').toHaveText('');
+  await chip.click();
+  await page.getByRole('menuitemradio', { name: /^Accept edits/ }).click();
+  await expect(chip).toHaveAttribute('aria-label', 'Permission mode Accept edits');
+  await expect(said, 'the chip’s menu says nothing in the region').toHaveText('');
+
+  await messageIn(page, 0).click();
+  await page.keyboard.press('Shift+Tab');
+  await expect(chip).toHaveAttribute('aria-label', 'Permission mode Plan');
+  await expect(said).toHaveText('Permission mode: Plan');
+  await expect(said).toHaveAttribute('aria-live', 'polite');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
 // ---- UX wave U4a: the stack, Send now, taking a message back, Stop ---------------------------------------------------
 // (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, M8's new scenes; C4: each runs alone on a Mac before its
 // group.) Each draws its session's transcript above the composer as the session's pane does (`transcript` with

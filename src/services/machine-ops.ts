@@ -10,13 +10,15 @@
 // and runs nothing; else the claim is fsynced (with the sealed `action` beside it, P5 O7 M4), the command runs through the
 // bus's `invoke` (the table the root registered, its intercept first, its output validated) with the claim in its
 // context (`HandlerContext.op`), and its answer (`{ok, value}` or `{ok: false, error}`, a throw
-// included: it was tried) is kept and returned. `machine.opQuery` answers RL4's states with the stored binding, as
+// included: it was tried) is kept and returned (UX wave U6f: for a name in ANSWER_NOT_KEPT, only that it ended, as
+// NOT_KEPT, the run's own caller still answered what ran). `machine.opQuery` answers RL4's states with the stored binding, as
 // `host.opQuery` does. A local client's own acts (the app's, through its router) run unclaimed, as the engine host's
 // local acts run beside `host.op` (D17). P5 O7 M4: the ledger opens with `orphanAtOpen`: a claim the last process left with
 // no result answers `expired` (its outcome unknown, never run again) until an outcome read back replaces it (`LateOutcome`).
 // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): the claim's `target`, the artifact
 // the endpoint resolved an artifact-targeted act to, is the binding's (else the session its input names, or none), and the
 // input's bytes crossed in json-bytes' tagged form: a decoded copy is validated and run, the claim and action kept as sent.
+import { NOT_KEPT_REFUSAL } from '@shared/files/outside';
 import { fromWire } from '@shared/host/json-bytes';
 import { thrownError } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
@@ -33,6 +35,14 @@ type OpQueryInput = CommandInput<'machine.opQuery'>;
 type OpQueryOutput = CommandOutput<'machine.opQuery'>;
 
 const NOT_ACTS: ReadonlySet<string> = new Set(['list', 'view', 'client', 'internal']);
+
+/**
+ * UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 4, §C): acts whose
+ * answer is a file's bytes or a folder's names: the ledger keeps that the operation ended, never what it answered.
+ */
+export const ANSWER_NOT_KEPT: ReadonlySet<string> = new Set(['files.readOutside', 'files.listOutside']);
+/** What the ledger keeps for such an act, and answers a copy of its operation: an error of the ledger's own shape, under its named word. */
+export const NOT_KEPT = { ok: false, error: { code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: NOT_KEPT_REFUSAL } } } as const;
 
 /** Whether `machine.op` claims `name`: a `machine`-owned act. */
 export function claimable(name: string): name is CommandName {
@@ -74,7 +84,7 @@ export function machineOps(deps: MachineOpsDeps): { op(input: OpInput, context: 
     } catch (error) {
       result = { ok: false, error: thrownError(error) };
     }
-    ledger.finish(opId, result);
+    ledger.finish(opId, ANSWER_NOT_KEPT.has(name) ? NOT_KEPT : result); // the run's own caller is answered what ran
     return closedSaid({ state: 'done', result } as OpOutput);
   }
 

@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { expandHome, isProtected, resolveInHome, within, type Home } from './home-folders';
+import { expandHome, isProtected, resolveInHome, walk, within, type Home } from './home-folders';
 
 let home: string;
 let outside: string;
@@ -143,5 +143,20 @@ describe('a path under the home', () => {
   it('touches nothing inside an unopened protected folder: a missing path in one is `protected`, never `no-folder`', async () => {
     expect(await resolveInHome(join(home, 'Documents/nothing-here'), mac, none)).toEqual({ ok: false, reason: 'protected' });
     expect(await resolveInHome(join(home, 'Desktop/nothing-here'), mac, none)).toEqual({ ok: false, reason: 'no-folder' }); // ~/Desktop itself is absent: its own entry, read in the home
+  });
+});
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 18 as ruled):
+// `open` opens the protected folders the path names and those the target of its last component enters when that is a
+// link, and never one a link met on the way leads into
+describe('the walk’s open', () => {
+  it('opens the target of a last-component link, and refuses a protected folder a link on the way leads into', async () => {
+    symlinkSync(join(home, 'Documents'), join(home, 'docs'));
+    symlinkSync(join(home, 'Documents', 'proj'), join(outside, 'to-proj'));
+    expect(await walk(join(home, 'docs'), mac, { opened: none, open: true })).toEqual({ ok: true, real: join(home, 'Documents') });
+    expect(await walk(join(outside, 'to-proj'), mac, { opened: none, open: true, outside: true })).toEqual({ ok: true, real: join(home, 'Documents', 'proj') });
+    expect(await walk(join(home, 'docs', 'proj'), mac, { opened: none, open: true })).toEqual({ ok: false, reason: 'protected' });
+    for (const path of [join(home, 'docs'), join(outside, 'to-proj')]) expect(await walk(path, mac, { opened: none, outside: true }), path).toEqual({ ok: false, reason: 'protected' });
+    expect(await walk(join(home, 'Documents', 'proj'), mac, { opened: none, open: true })).toEqual({ ok: true, real: join(home, 'Documents', 'proj') });
   });
 });

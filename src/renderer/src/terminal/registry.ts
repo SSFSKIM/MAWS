@@ -345,12 +345,19 @@ export class TerminalRegistry {
     else entry.focusPending = true;
   }
 
+  // UX wave U6b-5a (Interfaces §C): the terminal that holds the keyboard, the entry whose container holds the focused
+  // element (the emulator's helper textarea); null when the keyboard is elsewhere.
+  focused(): TerminalHandle | null {
+    const element = document.activeElement;
+    if (!element) return null;
+    for (const entry of this.entries.values()) if (entry.container.contains(element)) return entry;
+    return null;
+  }
+
   // Edit ▸ Select All (`layout.selectAll`): the editor command main ran selects nothing in a terminal, whose focused
   // element is the emulator's empty helper textarea, so the terminal holding focus selects its buffer.
   private selectAllFocused(): void {
-    const focused = document.activeElement;
-    if (!focused) return;
-    for (const entry of this.entries.values()) if (entry.container.contains(focused)) entry.renderer?.selectAll();
+    this.focused()?.renderer?.selectAll();
   }
 
   // An exited or lost terminal gets a new pty with the same cwd and label, in the same handle (tab and title stay);

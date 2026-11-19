@@ -1070,7 +1070,7 @@ test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its 
   const row = myItems.getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
   await expect(row).toContainText('To-human');
   await expect(row).toContainText('Built in');
-  await expect(row).toContainText('Version 8'); // P2-C2: contract 5; P4-R7: 7; P4-R7z: 8
+  await expect(row).toContainText('Version 9'); // P2-C2: contract 5; P4-R7: 7; P4-R7z: 8; UX wave U2b: 9, the number a launch the mod draws carries
   // P4-R7z: the scratch settings select no style declaring the to-human plugin's message tool, so a new launch's lane is off
   await expect(row).toContainText('Off: the agent is not asked to mark anything');
   await expect(row.getByRole('radiogroup', { name: 'To-human in this session' }).getByRole('radio')).toHaveCount(3);
@@ -1082,6 +1082,33 @@ test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its 
   await expect(row).toContainText('Off: the agent is not asked to mark anything');
   await expect(row.getByRole('radio', { name: 'Default (Off)' })).toBeChecked();
   await expect(row.getByRole('button', { name: /Uninstall|More actions/ })).toHaveCount(0); // the installed plugins above have theirs, in their overflow
+  expect(backend.consoleErrors()).toEqual([]);
+});
+
+// UX wave U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M, "The switch"): the To-human row's
+// second line, the machine's switch for new fold summaries, in the mods list alone. Its words are its label, so a press
+// on them toggles it; the write is `mods.setFoldSummaries`, and the row read again after it shows what is kept.
+test('U2b /plugins: the To-human row’s second line switches new fold summaries off, and the row read again keeps it off', async ({ backend }) => {
+  const w = await openPlugins(backend);
+  const row = w.locator('[data-plugins-section="my-items"]').getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
+  const line = row.locator('[data-mod-summaries]');
+  await expect(line).toContainText('Summaries on fold lines');
+  await expect(line).toContainText('Each summary is one small model call by the to-human mod, on the session’s own account. Off: sessions MAWS starts make no new summaries from their next start, and summaries already made stay. A session started in a terminal follows the mod’s own setting.');
+  const summaries = row.getByRole('switch', { name: 'Summaries on fold lines' });
+  await expect(summaries).toHaveCount(1);
+  await expect(summaries).toHaveAttribute('aria-checked', 'true'); // absent from the index's facts: on
+  await expect(row.getByRole('switch', { name: 'To-human in every session' })).toHaveAttribute('aria-checked', 'true'); // the entry's own switch, untouched
+  const listed = async () => value(await invoke(backend.page, 'mods.list', {}))[0]!.summaries;
+  expect(await listed()).toBe(true);
+
+  await line.getByText('Summaries on fold lines', { exact: true }).click(); // the words are the switch's label
+  await expect(summaries).toHaveAttribute('aria-checked', 'false');
+  await expect.poll(listed).toBe(false);
+  await expect(row.getByRole('switch', { name: 'To-human in every session' })).toHaveAttribute('aria-checked', 'true');
+
+  await summaries.click(); // and the control itself
+  await expect(summaries).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(listed).toBe(true);
   expect(backend.consoleErrors()).toEqual([]);
 });
 
@@ -1551,8 +1578,22 @@ test.describe('plugin management (E8)', () => {
     expect(scrolled).toBeGreaterThan(0);
     const detail = await openDetail(w, 'eli5@claude-community');
     await expect(w.getByRole('searchbox', { name: 'Search plugins' })).toHaveCount(0);
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B8): ⌘[ is also Go ▸ Back,
+    // a menu accelerator, which a page's keydown reaches first and keeps from the menu by taking it: the detail takes
+    // it (its keydown's default prevented), so the place in front does not change. This harness's page has no strip, so
+    // `defaultPrevented` stands in for "the tab in front is unchanged": what is read is what keeps the place, the chord's
+    // keydown as the window last hears it, defaulted or not. The place itself, through the real menu, is checked on the
+    // Mac by hand (B8). The window's listener sits after the page's own handlers, so it reads what they decided.
+    await page.evaluate(() => {
+      const w = window as unknown as { __chordTaken?: boolean | null };
+      w.__chordTaken = null;
+      window.addEventListener('keydown', (event) => {
+        if (event.key === '[' && event.metaKey) w.__chordTaken = event.defaultPrevented;
+      });
+    });
     await page.keyboard.press('Meta+BracketLeft');
     await expect(detail).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __chordTaken?: boolean | null }).__chordTaken), 'the detail took ⌘[, so the menu’s Back does not run').toBe(true);
     await expect.poll(() => pane.evaluate((el) => el.scrollTop)).toBe(scrolled);
     await expect(eli5.getByRole('button', { name: /^View / })).toBeFocused();
 

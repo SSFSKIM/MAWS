@@ -30,6 +30,7 @@ import { INSTALLED_PREFIX, installationOf, installedKey, PluginRow } from '../wi
 import { usePluginsEnv } from '../widgets/plugins/read';
 import { usePluginsLibrary } from '../widgets/PluginsWidget';
 import { SkillDetail, SkillItem, skillRowKey } from '../widgets/skills/SkillsLibrary';
+import { skillExtrasOf } from './SkillFile'; // UX wave U11's skill actions
 import { diskSkillGroups, skillsOfAll, type SkillRow } from '../widgets/skills/skills';
 import { ConnectorRow } from './connectors/ConnectorRow';
 import { Adding, Removed, useConnectorRowFacts, usePluginList, type ConnectorsAnswer } from './connectors/ConnectorsSection';
@@ -61,7 +62,7 @@ type PluginsPart = { state: 'out' } | { state: 'failed'; words: string | null; r
 type Opened = { kind: 'plugin'; id: string } | { kind: 'skill'; key: string };
 
 export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; toList: number }) {
-  const { directory, session, inventory } = usePlace();
+  const { cwd, directory, session, inventory } = usePlace();
   const { ops } = useManage();
   const env = usePluginsEnv();
   const library = usePluginsLibrary(directory, session);
@@ -165,7 +166,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
           onBack={back}
         />
       )}
-      {skillDetail && <SkillDetail row={skillDetail} onBack={back} backTo={L.myItems} />}
+      {skillDetail && <SkillDetail row={skillDetail} onBack={back} backTo={L.myItems} extras={skillExtrasOf(cwd)(skillDetail)} />}
       <div className={showing ? 'hidden' : 'contents'}>
         <div ref={pane} data-customize-all className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
           {nothing ? (

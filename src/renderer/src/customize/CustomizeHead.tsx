@@ -9,9 +9,9 @@
 // How the tools fill a line of their own and only then (the architect's ruling of 2026-11-15): the choices and the tools
 // both grow, the choices by 9999 to the tools' 1, so on a shared line the free space goes to the choices (the tools keep
 // their content's width, at the line's right end) and on a line of their own the tools, alone, take all of it.
-// The tools, per view and Show (§D's table): My items, All: the search ("Search my items"), "Add custom connector…" and
-// Refresh; Plugins: the search, Filter, Sort by and the Add menu; Skills: the search, Sort by while a plugin brings a
-// skill, Refresh; Connectors: the search ("Search connectors"), "Add custom connector…" and Refresh (U11g's action, which
+// The tools, per view and Show (§D's table): My items, All: the search ("Search my items"), "New skill…", "Add custom
+// connector…" and Refresh; Plugins: the search, Filter, Sort by and the Add menu; Skills: the search, Sort by while a
+// plugin brings a skill, "New skill…", Refresh (UX wave U11's skill actions, ./NewSkill.tsx); Connectors: the search ("Search connectors"), "Add custom connector…" and Refresh (U11g's action, which
 // stands in My items under Connectors and under All; ruled point 7). Discover: that kind's own tools, the Add menu under
 // Plugins; under All, All's own search, Refresh and the catalog's age.
 import { useQueryClient } from '@tanstack/react-query';
@@ -22,13 +22,14 @@ import { LIBRARY, SKILLS_LIBRARY } from '../widgets/copy';
 import { AddMenu } from '../widgets/plugins/AddMenu';
 import { Choice, LibrarySwitch, PluginsChoices } from '../widgets/plugins/LibraryHeader';
 import { useLibraryStore } from '../widgets/plugins/library-store';
-import { pluginsReadKey } from '../widgets/plugins/read';
+import { pluginsReadKey, usePluginsEnv } from '../widgets/plugins/read';
 import { diskSkillGroups, hasPluginSkills } from '../widgets/skills/skills';
 import { CONNECTORS } from './connectors/copy';
 import { CUSTOM_ADD, CUSTOM_ADD_KEY } from './connectors/manage';
 import { PAGE } from './copy';
 import { DISCOVER } from './discover/copy';
 import { DiscoverToolbar } from './discover/DiscoverToolbar';
+import { NewSkill } from './NewSkill';
 import { useCustomizePage, type CustomizeShow } from './page';
 import { usePlace } from './place';
 import { ToolsLine } from './ToolsLine';
@@ -110,6 +111,7 @@ function MineTools({ show, addCustom }: { show: CustomizeShow; addCustom: ReactN
           search={search(PAGE.searchMine)}
           actions={
             <>
+              <NewSkill />
               {addCustom}
               <Refresh plugins />
             </>
@@ -135,6 +137,7 @@ function MineTools({ show, addCustom }: { show: CustomizeShow; addCustom: ReactN
           actions={
             <>
               <SkillsSort />
+              <NewSkill />
               <Refresh />
             </>
           }
@@ -164,16 +167,20 @@ function SkillsSort() {
   return <Choice label={LIBRARY.sortBy} icon={<SortIcon />} value={sort} values={['name', 'plugin'] as const} words={SKILLS_LIBRARY.sort} isDefault={sort === 'name'} onChange={(next) => useLibraryStore.setState((state) => ({ skills: { ...state.skills, sort: next } }))} />;
 }
 
-// Refresh reads the inventory again, and under All the plugin list too.
+// Refresh reads the inventory again, and under All the plugin list too; while the engine's configuration home is unknown
+// (its first read failed), plugins.env again, which "New skill…" waits for (UX wave U11's skill actions, decision 13).
 function Refresh({ plugins = false }: { plugins?: boolean }) {
   const { inventory, directory } = usePlace();
   const client = useQueryClient();
+  const env = usePluginsEnv();
+  const homeUnknown = env.data?.configHome === undefined;
   return (
     <button
       type="button"
       className={BUTTON}
       onClick={() => {
         void inventory.refetch();
+        if (homeUnknown) void env.reread();
         if (plugins && directory !== null) void client.refetchQueries({ queryKey: pluginsReadKey('plugins.list', directory) });
       }}
     >

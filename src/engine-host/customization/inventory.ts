@@ -70,6 +70,7 @@ const transportOf = (entry: Record<string, unknown>): CustomizationServer['trans
   const type = entry.type === 'streamable-http' ? 'http' : entry.type === undefined && typeof entry.command === 'string' ? 'stdio' : entry.type;
   return (['stdio', 'http', 'sse', 'ws'].includes(type as string) ? type : 'unknown') as CustomizationServer['transport'];
 };
+interface FileRead { realPath?: string; fileId?: string }
 
 class Reading {
   readonly skills: CustomizationSkill[] = [];
@@ -86,19 +87,25 @@ class Reading {
   readonly warnings = new Set<string>();
   stopped = false;
   serversRead = false; // P4-AGG M4: every MCP configuration that applies was read without a warning
+  // UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 12): every skill
+  // folder that applies was read with no warning outside an MCP section but the coverage note, and the read ran to its end
+  skillsRead = true;
   private mcpMark = -1;
+  private inMcp = false;
   private entries = 0;
   private bytes = 0;
 
   check(): void { if (this.stopped) throw new Stop(); }
   tick(): void { this.check(); if (++this.entries > INVENTORY_BOUNDS.entries) throw new Stop(); }
-  warn(message: string): void { this.check(); if (this.warnings.size < 64) this.warnings.add(message); }
-  snapshot(): CustomizationInventory {
-    return { skills: [...this.skills], servers: [...this.servers], warnings: [...this.warnings], serversRead: this.serversRead, pluginServers: [...this.pluginServers], plugins: [...this.plugins] };
+  warn(message: string): void {
+    this.check();
+    if (!this.inMcp && message !== CUSTOMIZATION_INVENTORY_COVERAGE) this.skillsRead = false;
+    if (this.warnings.size < 64) this.warnings.add(message);
   }
+  snapshot(): CustomizationInventory { return { skills: [...this.skills], servers: [...this.servers], warnings: [...this.warnings], serversRead: this.serversRead, pluginServers: [...this.pluginServers], plugins: [...this.plugins], skillsRead: this.skillsRead }; }
   // An MCP read section: no warning added inside it (and the warning cap not reached), or the servers are not the whole set.
-  mcpStart(): void { this.mcpMark = this.warnings.size; }
-  mcpEnd(): boolean { return this.mcpMark >= 0 && this.warnings.size === this.mcpMark && this.warnings.size < 64; }
+  mcpStart(): void { this.mcpMark = this.warnings.size; this.inMcp = true; }
+  mcpEnd(): boolean { this.inMcp = false; return this.mcpMark >= 0 && this.warnings.size === this.mcpMark && this.warnings.size < 64; }
   addSkill(row: CustomizationSkill): void {
     this.check(); if (this.skills.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.skills.push(row);
   }
@@ -155,7 +162,9 @@ class Reading {
 
   // Markdown is prefix-only even when the body is enormous. Plugin files are confined and opened without following
   // links; rechecking their spelling and inode after open prevents a replaced link from borrowing the anchor.
-  private async boundedFile(path: string, maxBytes: number, prefix: boolean, anchor?: string): Promise<string | null> {
+  // UX wave U11's skill actions (decision 12): `read`, when given, is told the real path and the identity (device and inode)
+  // of the file the text came from, so main can later open that file and no other.
+  private async boundedFile(path: string, maxBytes: number, prefix: boolean, anchor?: string, read?: FileRead): Promise<string | null> {
     const found = anchor ? await this.confined(path, anchor) : path;
     if (found === null) return null;
     this.tick();
@@ -168,6 +177,11 @@ class Reading {
         const again = await realpath(path); this.check();
         const current = await lstat(found); this.check();
         if (again !== found || current.dev !== info.dev || current.ino !== info.ino) throw new Error('changed');
+      }
+      if (read) {
+        const id = await handle.stat({ bigint: true }); this.check();
+        read.realPath = anchor ? found : await realpath(path); this.check();
+        read.fileId = `${id.dev}:${id.ino}`;
       }
       const chunks: Buffer[] = [];
       let total = 0;
@@ -184,12 +198,12 @@ class Reading {
     } finally { await handle.close(); }
   }
 
-  async text(path: string, prefix = false, anchor?: string): Promise<string | null> {
+  async text(path: string, prefix = false, anchor?: string, read?: FileRead): Promise<string | null> {
     this.tick();
     const max = Math.min(prefix ? INVENTORY_BOUNDS.frontMatterBytes : INVENTORY_BOUNDS.jsonBytes, INVENTORY_BOUNDS.totalBytes - this.bytes);
     if (max <= 0) throw new Stop();
     try {
-      const text = prefix || anchor ? await this.boundedFile(path, max, prefix, anchor) : await nodeSourceFiles.read(path, max);
+      const text = prefix || anchor ? await this.boundedFile(path, max, prefix, anchor, read) : await nodeSourceFiles.read(path, max);
       this.check();
       if (text !== null) this.bytes += Buffer.byteLength(text);
       return text;
@@ -230,10 +244,11 @@ class Reading {
   // `pluginName`: a plugin skill's plugin as the engine names it (UX wave U11a); the other skills carry none
   async skillDirectory(path: string, source: CustomizationSkill['source'], plugin: string | null, anchor?: string, pluginName: string | null = null): Promise<boolean> {
     const file = join(path, 'SKILL.md');
-    const text = await this.text(file, true, anchor);
-    if (text === null) return false;
+    const read: FileRead = {};
+    const text = await this.text(file, true, anchor, read);
+    if (text === null || read.realPath === undefined || read.fileId === undefined) return false;
     const words = frontMatter(text);
-    this.addSkill({ name: (words.name ?? basename(path)).slice(0, 256), description: (words.description ?? '').slice(0, 4096), source, path: file, plugin, ...(source === 'plugin' && { pluginName }) });
+    this.addSkill({ name: (words.name ?? basename(path)).slice(0, 256), description: (words.description ?? '').slice(0, 4096), source, path: file, plugin, ...(source === 'plugin' && { pluginName }), realPath: read.realPath, fileId: read.fileId });
     return true;
   }
   async skillsIn(path: string, source: CustomizationSkill['source'], plugin: string | null = null, anchor?: string): Promise<void> {
@@ -437,7 +452,9 @@ async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Pro
       r.serversOf(record(raw)?.mcpServers, 'project', path);
     }
   }
-  r.serversRead = appRead && r.mcpEnd();
+  // the section ends whatever the app's settings said, so a later skill warning is not taken for an MCP one (U11 decision 13)
+  const restRead = r.mcpEnd();
+  r.serversRead = appRead && restRead;
   if (isAbsolute(configHome)) await installedPlugins(r, configHome, cwd);
 }
 
@@ -455,8 +472,9 @@ export async function readServerEndpoints(cwd: string | null, deps: InventoryDep
 async function readInventory(cwd: string | null, deps: InventoryDeps): Promise<Reading> {
   const r = new Reading();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<void>((settle) => { timer = setTimeout(() => { r.stopped = true; r.warnings.add(LIMIT); settle(); }, deps.timeoutMs ?? INVENTORY_BOUNDS.timeoutMs); });
+  const deadline = new Promise<void>((settle) => { timer = setTimeout(() => { r.stopped = true; r.skillsRead = false; r.warnings.add(LIMIT); settle(); }, deps.timeoutMs ?? INVENTORY_BOUNDS.timeoutMs); });
   const reading = collect(r, cwd === null ? null : resolve(cwd), deps).catch((error: unknown) => {
+    r.skillsRead = false;
     if (error instanceof Stop) r.warnings.add(LIMIT);
     else r.warnings.add('Customization inventory could not be fully read.');
   });

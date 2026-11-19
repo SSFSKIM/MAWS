@@ -1,15 +1,19 @@
 // WR #59: exercise the compact surface with the real Composer/EditorController, including session changes and
 // the compact-to-expanded swap. A slot probe cannot catch a draft or keyboard owner surviving the wrong boundary.
+// UX wave U10b (O-43; its execution document §F.3, §F.4, M7): the compact surface is the bar, the composer's box alone.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { QueueEntry } from '@shared/engine/session-state-store';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { addressOf } from '@shared/machine/address';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { humanTurn, record, status, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { registerSlot, resetSlots } from '../app/slots';
 import { Composer } from '../composer/Composer';
@@ -18,14 +22,17 @@ import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { connectKeys } from '../keymap/dispatcher';
 import { itemFor, permission, type RequestEvent } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
-import { resetComposerStore, useComposerStore } from '../stores/composer';
+import { queueComposerAttachment, resetComposerStore, useComposerStore } from '../stores/composer';
+import { useMachines } from '../stores/machines';
+import { sendToSession } from '../session/controls/controls-for';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { mainShowing, ref } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { FloatingCardLayer, SplitCardLayer } from './FloatingCard';
-import { useFloatingCard } from './floating';
+import { chatPresentation, hideChat, useFloatingCard } from './floating';
+import { drawsBesideTheBox } from './FloatingPill';
 
 // P5 O6 M2: the page holds addresses; the fake `window.maws` (main) is asked with, and keys its drafts by, the bare ids
 const BARE_A = 'app-a' as AppSessionId;
@@ -34,7 +41,8 @@ const A = at(BARE_A);
 const B = at(BARE_B);
 const tab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
 const message = () => screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: Editor };
-const compact = () => screen.getByRole('region', { name: 'Compact session composer' });
+const compact = () => screen.getByRole('region', { name: 'Chat' });
+let queued: QueueEntry[] = [];
 let fake: ReturnType<typeof fakeClient>;
 let query: QueryClient;
 let drafts: Map<AppSessionId, Draft | null>;
@@ -44,9 +52,10 @@ beforeEach(() => {
   resetShellStores();
   resetComposerStore();
   drafts = new Map();
+  queued = [];
   query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   fake = fakeClient({
-    'session.queue.list': { entries: [], paused: false, pauseReason: null },
+    'session.queue.list': () => ({ entries: queued, paused: false, pauseReason: null }),
     'session.history.list': { entries: [] },
     'session.drafts.get': ({ appSessionId }: { appSessionId: AppSessionId }) => drafts.get(appSessionId) ?? null,
     'session.drafts.set': ({ appSessionId, draft }: { appSessionId: AppSessionId; draft: Draft | null }) => { drafts.set(appSessionId, draft); },
@@ -170,4 +179,98 @@ it.each([
   await waitFor(() => expect(ownedFocus ? card.contains(document.activeElement) && message().contains(document.activeElement) : document.activeElement === elsewhere).toBe(true));
   expect(useComposerStore.getState().focusOnMount.has(A)).toBe(false);
   await waitFor(() => expect(message().editor.getText()).toBe('Draft retained across expansion'));
+});
+
+// ---- UX wave U10b (O-43; §F.3, §F.4, M7): the bar --------------------------------------------------------------------
+
+const surfaceOf = (bar: HTMLElement) => bar.querySelector<HTMLElement>('[data-bar-surface]')!;
+const boxOf = (bar: HTMLElement) => bar.querySelector<HTMLElement>('[data-composer-box]')!;
+const precedes = (a: Node, b: Node) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+it('is the composer’s box alone: no toolbar in the accessibility tree, no title button, Open conversation and Hide chat; 484 px', async () => {
+  mount();
+  await waitFor(() => expect(message()).toBeTruthy());
+  const bar = compact();
+  expect([bar.dataset.pane, bar.dataset.compactSession, bar.dataset.chatPresentation]).toEqual(['card', A, 'bar']);
+  expect(within(bar).queryByRole('toolbar'), 'the toolbar is not in the accessibility tree').toBeNull();
+  expect(bar.querySelector('[role="toolbar"]')?.closest('[hidden]'), 'it stays mounted, hidden, as under a docked card').not.toBeNull();
+  expect(within(bar).queryByRole('button', { name: 'Show session card' }), 'no title button').toBeNull();
+  expect(within(bar).getByRole('button', { name: 'Open conversation' }).title).toBe(useSessions.getState().records.get(A)!.title.text);
+  expect(within(bar).getByRole('button', { name: 'Hide chat' })).toBeTruthy();
+  expect(bar.style.width).toBe('484px');
+  expect([bar.style.right, bar.style.bottom]).toEqual(['16px', '16px']);
+  expect(bar.style.getPropertyValue('--measure-pad'), 'the composer column has no side padding in the bar').toBe('0px');
+  expect(boxOf(bar).className).toContain('border-border-strong');
+  expect(boxOf(bar).className, 'the box carries the float’s border and shadow').toContain('shadow-float');
+  expect(surfaceOf(bar).hasAttribute('data-raised'), 'nothing above the box: no surface').toBe(false);
+});
+
+it('draws attached files and a waiting message above the box, on the raised surface', async () => {
+  queued = [{ queueId: 'q-9', appSessionId: BARE_A, content: 'Then tidy the summary', createdAt: '2026-11-15T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }];
+  window.maws = { ...(fake.client as unknown as PreloadBridge), pathForFile: () => '' } as PreloadBridge; // a dropped file's path, as the preload gives it
+  mount();
+  await waitFor(() => expect(message()).toBeTruthy());
+  queueComposerAttachment(A, { files: [new File(['%PDF-1.4'], 'hall-booking.pdf', { type: 'application/pdf' })], text: '' });
+  const bar = compact();
+  const files = await within(bar).findByRole('list', { name: 'attachments' });
+  expect(files.textContent).toContain('hall-booking.pdf');
+  const waiting = await within(bar).findByText('Then tidy the summary');
+  await waitFor(() => expect(surfaceOf(bar).hasAttribute('data-raised')).toBe(true));
+  for (const above of [files, waiting]) {
+    expect(surfaceOf(bar).contains(above)).toBe(true);
+    expect(precedes(above, boxOf(bar)), 'above the box').toBe(true);
+  }
+});
+
+it('a comment sent to the session while the chat is hidden is delivered and opens nothing (UC-5)', async () => {
+  mount();
+  await waitFor(() => expect(message()).toBeTruthy());
+  act(() => hideChat());
+  expect(chatPresentation(useFloatingCard.getState())).toBe('hidden');
+  expect(screen.queryByRole('region', { name: 'Chat' })).toBeNull();
+  await act(async () => void (await sendToSession(A, 'Shorten the second paragraph', { origin: 'comment' })));
+  expect(fake.invoked('session.send')).toEqual([expect.objectContaining({ appSessionId: BARE_A, content: 'Shorten the second paragraph' })]);
+  expect(chatPresentation(useFloatingCard.getState())).toBe('hidden');
+  expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Chat' })).toBeNull();
+});
+
+// A6's routes: the bar is the session's compact pane, so what the pane draws in the composer's place or above it is in the
+// bar, on the raised surface, beside its two buttons.
+it('a terminal session that cannot be driven shows the holder’s notice in the box’s place, on the raised surface, with both buttons', async () => {
+  useSessions.setState({ records: new Map([[A, { ...record(A), holder: { kind: 'terminal', pid: 4242 } }], [B, record(B)]]) });
+  mount();
+  const bar = compact();
+  const notice = await within(bar).findByRole('note');
+  expect(notice.textContent).toContain('Live in Terminal · pid 4242 · read-only');
+  expect(bar.querySelector('[data-composer]'), 'no composer in its place').toBeNull();
+  await waitFor(() => expect(surfaceOf(bar).hasAttribute('data-raised')).toBe(true));
+  expect(surfaceOf(bar).contains(notice)).toBe(true);
+  expect(within(bar).getAllByRole('button', { name: /^(Open conversation|Hide chat)$/ })).toHaveLength(2);
+});
+
+it('a session whose machine’s link is not up shows the link’s phase words above the box, on the raised surface', async () => {
+  const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const machine = (state: MachineState['state']): MachineState => ({ ref: OTHER_MACHINE, name: 'Studio', local: false, state, since: new Date().toISOString(), generation: 0 });
+  act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: new Date().toISOString(), generation: 0 }, machine('connecting')]));
+  registerSlot('composer', () => <div data-testid="composer" data-composer-box="" />); // the composer's place, as a probe: its box alone
+  useSessions.setState({ records: new Map([[R, record(R)]]), engine: new Map() });
+  useLayout.setState({ main: mainShowing(R), panelBySession: new Map([[R, { tabs: [], activeTabId: useLayout.getState().panelPinned[0]!.id }]]) });
+  mount();
+  const bar = compact();
+  const line = bar.querySelector<HTMLElement>('[data-link-phase]');
+  expect(line?.textContent).toBe('Connecting to Studio…');
+  expect(precedes(line!, within(bar).getByTestId('composer'))).toBe(true);
+  await waitFor(() => expect(surfaceOf(bar).hasAttribute('data-raised')).toBe(true));
+  act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: new Date().toISOString(), generation: 0 }, { ...machine('up'), generation: 1, carrier: 'relay' }]));
+  expect(bar.querySelector('[data-link-phase]')).toBeNull();
+  await waitFor(() => expect(surfaceOf(bar).hasAttribute('data-raised'), 'the box alone again: no surface').toBe(false));
+});
+
+it('reads words or a control outside the box as something above it, and the box, what is hidden, and empty wrappers as nothing', () => {
+  const root = document.createElement('div');
+  root.innerHTML = '<div><div data-composer-box><p>typed text</p><button>Send</button></div><div hidden><span role="toolbar">Model</span></div><p>   </p></div>';
+  expect(drawsBesideTheBox(root)).toBe(false);
+  root.insertAdjacentHTML('afterbegin', '<p>Then tidy the summary</p>');
+  expect(drawsBesideTheBox(root)).toBe(true);
 });

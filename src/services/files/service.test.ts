@@ -7,13 +7,15 @@ import { createHash } from 'node:crypto';
 import fs, { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
-import { FILES_LIST_MAX_ENTRIES, FILES_MOVED, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, type FilesChanged, type FilesWriteOutput } from '@shared/ipc/schema/files';
+import { FILES_LIST_MAX_ENTRIES, FILES_MOVED, FILES_PROTECTED, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, OUTSIDE_LIST_PAGE, type FilesChanged, type FilesWriteOutput } from '@shared/ipc/schema/files';
+import { endableClientRef } from '@shared/ipc/client';
 import type { LibraryEntry } from '@shared/ipc/schema/library';
 import { summary } from '../../../test/support/index-fixture';
+import { fakeBus } from '../../../test/support/fake-bus';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { askSteerText } from '@shared/maws/ask';
@@ -26,10 +28,51 @@ import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../t
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { NO_LINK } from '../fs/no-link';
 import { StoreFixture } from '../../../test/support/store-fixture';
+import { runGit } from '../../../test/support/git-fixture';
+import { execGit, type ExecFileFn } from '../git/runner';
+import { createIgnoreCheck, type IgnoreCheck } from './ignored';
 import { createNamedPaths, type NamedPathsOptions } from './named';
 import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
+import { registerFilesHandlers } from './register';
 
 const OUT = "path outside the session's directories";
+// UX wave U6f: who asks (`FilesCaller`): a request from another machine that no claimed act carries, and, absent, this
+// machine's own client
+const UNCLAIMED = { remote: true, claim: null } as const;
+const fromAnotherMachine = (remote: boolean) => (remote ? UNCLAIMED : undefined);
+
+// UX wave U6f: what the disk is asked, by the walk and the listing (their `node:fs/promises` imports) and by the service
+// (`fs.promises`), recorded only while a case asks (`recordTouches`), for the cases that hold a private folder untouched
+const touches = vi.hoisted(() => ({ on: false, seen: [] as string[] }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const seen =
+    <A extends unknown[], R>(name: string, call: (...args: A) => R) =>
+    (...args: A): R => {
+      if (touches.on) touches.seen.push(`${name} ${String(args[0])}`);
+      return call(...args);
+    };
+  return { ...actual, lstat: seen('lstat', actual.lstat), stat: seen('stat', actual.stat), readdir: seen('readdir', actual.readdir), readlink: seen('readlink', actual.readlink), realpath: seen('realpath', actual.realpath), open: seen('open', actual.open) };
+});
+function recordTouches(): string[] {
+  touches.seen = [];
+  touches.on = true;
+  for (const name of ['lstat', 'stat', 'readdir', 'readlink', 'realpath', 'open'] as const) {
+    const original = (fs.promises[name] as (...args: unknown[]) => unknown).bind(fs.promises);
+    vi.spyOn(fs.promises, name).mockImplementation(((...args: unknown[]) => {
+      if (touches.on) touches.seen.push(`${name} ${String(args[0])}`);
+      return original(...args);
+    }) as never);
+  }
+  return touches.seen;
+}
+// What of the recorded asks lies inside `folder`: a path under it, or a read of its own entries
+const inside = (seen: readonly string[], folder: string) =>
+  seen.filter((entry) => {
+    const call = entry.slice(0, entry.indexOf(' '));
+    const path = entry.slice(entry.indexOf(' ') + 1);
+    return path.startsWith(`${folder}${sep}`) || ((call === 'readdir' || call === 'open') && path === folder);
+  });
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
 const H = 'H' as AppSessionId; // U6e: a session whose folder holds MAWS's own folders
@@ -142,6 +185,7 @@ beforeEach(() => {
   services = [];
 });
 afterEach(() => {
+  touches.on = false;
   for (const created of services) created.dispose();
   vi.restoreAllMocks();
   rmSync(base, { recursive: true, force: true });
@@ -682,6 +726,133 @@ describe('files service listing and reading', () => {
   });
 });
 
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13, S1): a listing
+// carries `ignored: true` on the entries the ignore check names, asked after the entries' reads and the cut, before the
+// last confirmation; the check here is a function the test gives.
+describe('files service listing: what git ignores', () => {
+  const mixed = () => {
+    write(inRoot('mix', 'b.txt'), 'b');
+    write(inRoot('mix', 'A.txt'), 'a');
+    mkdirSync(inRoot('mix', 'zdir'));
+    mkdirSync(inRoot('mix', 'adir'));
+  };
+  const markedOf = (listing: { entries: { name: string }[] }) => listing.entries.filter((entry) => 'ignored' in entry).map((entry) => [entry.name, (entry as { ignored?: unknown }).ignored]);
+
+  it('marks exactly the names the check answers, drops a name the listing does not carry, and asks with the confirmed realpath and the names answered', async () => {
+    mixed();
+    symlinkSync(root, at('root-link'));
+    records.set(A, record(at('root-link')));
+    const ignored = vi.fn(async () => new Set(['zdir', 'b.txt', 'not-listed']));
+    const listing = await service({ ignored }).list({ appSessionId: A, path: at('root-link', 'mix') });
+    expect(listing.entries.map((entry) => entry.name)).toEqual(['adir', 'zdir', 'A.txt', 'b.txt']);
+    expect(markedOf(listing)).toEqual([['zdir', true], ['b.txt', true]]);
+    expect(ignored).toHaveBeenCalledTimes(1);
+    const opened = statSync(inRoot('mix'), { bigint: true });
+    expect(ignored).toHaveBeenCalledWith(inRoot('mix'), ['adir', 'zdir', 'A.txt', 'b.txt'], expect.objectContaining({ dev: opened.dev, ino: opened.ino })); // the folder the service confirmed
+  });
+
+  it('marks no entry when the check answers nothing, gives no answer or is absent, and never asks for the roots, beside a listing it marks', async () => {
+    mixed();
+    const marking = vi.fn(async () => new Set(['b.txt']));
+    expect(markedOf(await service({ ignored: marking }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]); // the control
+    const before = await service().list({ appSessionId: A, path: inRoot('mix') });
+    for (const ignored of [async () => new Set<string>(), async () => null]) {
+      const listing = await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') });
+      expect(markedOf(listing)).toEqual([]);
+      expect(JSON.stringify(listing)).toBe(JSON.stringify(before)); // byte for byte what it was
+    }
+    expect(markedOf(before)).toEqual([]);
+    marking.mockClear();
+    const roots = await service({ ignored: marking }).list({ appSessionId: A });
+    expect(marking).not.toHaveBeenCalled();
+    expect(markedOf(roots)).toEqual([]);
+  });
+
+  it('asks about at most the capped entries, in the answer’s order', async () => {
+    mkdirSync(inRoot('many'));
+    for (let i = 0; i <= FILES_LIST_MAX_ENTRIES; i++) writeFileSync(inRoot('many', `f${String(i).padStart(5, '0')}.txt`), '');
+    const ignored = vi.fn(async (_dir: string, names: readonly string[]) => new Set([names.at(-1)!, 'f05000.txt']));
+    const listing = await service({ ignored }).list({ appSessionId: A, path: inRoot('many') });
+    expect(listing.truncated).toBe(true);
+    const asked = ignored.mock.calls[0]![1];
+    expect(asked).toHaveLength(FILES_LIST_MAX_ENTRIES);
+    expect(asked).toEqual(listing.entries.map((entry) => entry.name));
+    expect(markedOf(listing)).toEqual([['f04999.txt', true]]); // the name past the cut is dropped
+  });
+
+  it('refuses the whole listing when the directory is swapped for a link at before-ignored', async () => {
+    mixed();
+    write(join(outside, 'mix', 'secret.txt'), 'outside');
+    points['before-ignored'] = () => swapToLink(inRoot('mix'), join(outside, 'mix'));
+    await expect(service({ ignored: async () => new Set(['b.txt']) }).list({ appSessionId: A, path: inRoot('mix') })).rejects.toThrow(OUT);
+  });
+
+  it('reaches before-ignored in a listing it answers, with nothing swapped (the control for the refusal)', async () => {
+    mixed();
+    points['before-ignored'] = () => undefined;
+    const ignored = vi.fn(async () => new Set(['b.txt']));
+    expect(markedOf(await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]);
+    expect(points['before-ignored']).toBeUndefined(); // the point was reached
+  });
+
+  // The panel's scalpel 2, first finding, with its own input. The listed folder is reached through a link (`via`) to its
+  // real ancestor (`real`); at a point after the open, `real` is moved elsewhere in the root, `via` retargeted to it, and
+  // `real` replaced by a link to an outside repository. The request's spelling still names the opened folder; the
+  // spelling the listing read it by, and handed to git, leads outside.
+  describe('a standing substitution under a moved ancestor', () => {
+    let checks: IgnoreCheck[];
+    let calls: string[];
+    beforeEach(async () => {
+      checks = [];
+      calls = [];
+      await runGit(root, ['init', '-q', '-b', 'main']);
+      write(inRoot('.gitignore'), '*.tmp\n'); // the root's own rule
+      write(inRoot('real', 'listed', 'x.log'), 'x');
+      write(inRoot('real', 'listed', 'y.tmp'), 'y');
+      symlinkSync(inRoot('real'), inRoot('via'));
+      write(join(outside, 'repo', '.gitignore'), '*.log\n'); // the outside repository's rule
+      write(join(outside, 'repo', 'listed', 'x.log'), 'outside x');
+      await runGit(join(outside, 'repo'), ['init', '-q', '-b', 'main']);
+    });
+    afterEach(async () => {
+      await Promise.all(checks.map((check) => check.dispose()));
+    });
+    // The real check, under an empty home, keeping each git call's directory
+    const check = () => {
+      mkdirSync(at('home'), { recursive: true });
+      const execFile: ExecFileFn = (file, args, options, callback) => (calls.push(args[1]!), execGit(file, args, options, callback));
+      const made = createIgnoreCheck({ env: { PATH: process.env.PATH, HOME: at('home') }, execFile });
+      checks.push(made);
+      return made;
+    };
+    const substitute = () => {
+      renameSync(inRoot('real'), inRoot('moved'));
+      unlinkSync(inRoot('via'));
+      symlinkSync(inRoot('moved'), inRoot('via'));
+      symlinkSync(join(outside, 'repo'), inRoot('real'));
+    };
+
+    it('marks by the root’s rules through the link with nothing substituted (the control)', async () => {
+      const listing = await service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') });
+      expect(markedOf(listing)).toEqual([['y.tmp', true]]);
+      expect(calls.length).toBeGreaterThan(0);
+    });
+
+    it('refuses the listing, and runs no git, under the substitution at before-ignored', async () => {
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      points['before-ignored'] = substitute;
+      await expect(service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
+      expect(calls).toEqual([]);
+      expect(warned.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the folder or its repository changed before git ran/)]); // naming no folder
+    });
+
+    it('refuses the listing under the same substitution once the names were read, with no check', async () => {
+      points['after-readdir'] = substitute;
+      await expect(service().list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
+    });
+  });
+});
+
 describe('files openExternal', () => {
   beforeEach(() => {
     write(inRoot('doc.pdf'), '%PDF-1.4\n%%EOF\n');
@@ -1150,8 +1321,8 @@ describe('files service raw read', () => {
     write(inRoot('euros.txt'), 'ab€€cd\r\n');
     const files = service();
     for (const [offset, length] of [[0, 3], [3, 3], [0, 100]]) {
-      const plain = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length }, true);
-      const raw = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length, raw: true }, true);
+      const plain = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length }, UNCLAIMED);
+      const raw = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length, raw: true }, UNCLAIMED);
       expect(raw, `${offset} ${length}`).toStrictEqual(plain);
       expect(raw).not.toHaveProperty('identity');
     }
@@ -1419,7 +1590,7 @@ describe('files admission of named files', () => {
     await transcriptOf(A, [said(link(out('notes.txt'))), said(link(out('report.pdf')))]);
     const log = at('open.log');
     const files = namedService({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
-    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(OUT);
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, UNCLAIMED)).rejects.toThrow(OUT);
     await expect(files.openExternal(A, out('report.pdf'), null, { named: true, remote: true })).rejects.toThrow(OUT);
     expect(located).toEqual([]);
     expect(fs.existsSync(log)).toBe(false);
@@ -1437,7 +1608,7 @@ describe('files admission of named files', () => {
     const spy = opens();
     expect(await files.read({ appSessionId: A, path: out('notes.txt'), named: true })).toMatchObject({ content: 'outside notes\n', named: true });
     located.length = 0;
-    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(new Error(OUT));
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, UNCLAIMED)).rejects.toThrow(new Error(OUT));
     expect(located, 'a remote caller never reaches the transcript').toEqual([]);
     await expect(files.read({ appSessionId: A, path: out('notes.txt') })).rejects.toThrow(new Error(OUT));
     expect(located, 'nor does a request without the key').toEqual([]);
@@ -1464,8 +1635,8 @@ describe('files admission of named files', () => {
     expect(bytesOf(raw).equals(pdf)).toBe(true);
     // refused where the plain read is: without the key, from another machine, and a file the transcript does not name
     for (const [input, remote] of [[{ path: out('report.pdf') }, false], [{ path: out('report.pdf'), named: true as const }, true], [{ path: out('unnamed.txt'), named: true as const }, false]] as const) {
-      await expect(files.read({ appSessionId: A, ...input }, remote), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
-      await expect(files.read({ appSessionId: A, ...input, raw: true }, remote), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
+      await expect(files.read({ appSessionId: A, ...input }, fromAnotherMachine(remote)), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
+      await expect(files.read({ appSessionId: A, ...input, raw: true }, fromAnotherMachine(remote)), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
     }
   });
 
@@ -1557,7 +1728,7 @@ describe('files admission of named files', () => {
     const named = vi.fn(async () => 'counted' as const);
     const signal = new AbortController().signal;
     const files = service({ named, env: {} });
-    await files.read({ appSessionId: A, path: at('via', 'notes.txt'), named: true }, false, signal);
+    await files.read({ appSessionId: A, path: at('via', 'notes.txt'), named: true }, undefined, signal);
     expect(named.mock.calls).toEqual([[A, at('via', 'notes.txt'), signal]]);
   });
 
@@ -1669,11 +1840,11 @@ describe('files saves outside the folders', () => {
   const openGrants = () => openFileGrants(grantsFile, { known: (id) => records.has(id), log: (line) => logged.push(line) });
   // The service as the daemon composes it (spine-root.ts): the real search, the real grants, the Library's index, MAWS's
   // own folders, each asked through a counting spy
-  function outsideService(extra: Partial<FilesServiceOptions> = {}) {
+  function outsideOptions(extra: Partial<FilesServiceOptions> = {}): Partial<FilesServiceOptions> {
     const paths = createNamedPaths({ transcript: async (appSessionId) => (asked.transcript.push(appSessionId), transcripts.get(appSessionId) ?? null) });
     const counted: FilesServiceOptions['grants'] = { add: (id, real) => grants.add(id, real), has: (id, real) => (asked.grants += 1, grants.has(id, real)) };
     const linkedPaths = fileAdmission({ fileLinkedPaths: async (id) => index.library.fileLinkedPaths(id) });
-    return service({
+    return {
       named: paths.names,
       grants: counted,
       sent: async (id, real) => {
@@ -1685,8 +1856,9 @@ describe('files saves outside the folders', () => {
       own: ownFolders(profile, daemonExec(), () => told),
       env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: at('open.log') },
       ...extra,
-    });
+    };
   }
+  const outsideService = (extra: Partial<FilesServiceOptions> = {}) => service(outsideOptions(extra));
   type Files = ReturnType<typeof outsideService>;
   // A read as the window makes one (with the key and the hash), and the save of what it showed
   const shown = (files: Files, appSessionId: AppSessionId, path: string, extra: object = {}) => files.read({ appSessionId, path, named: true, hash: true, ...extra });
@@ -1791,10 +1963,10 @@ describe('files saves outside the folders', () => {
       grants.add(A, out('chosen.txt'));
       const files = outsideService();
       for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) {
-        await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: sha(`${name} as it was\n`), real: out(name) }, true), name).rejects.toThrow(new Error(OUT));
+        await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: sha(`${name} as it was\n`), real: out(name) }, UNCLAIMED), name).rejects.toThrow(new Error(OUT));
         expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} as it was\n`);
       }
-      await expect(files.grant(A, out('unnamed.txt'), true)).rejects.toThrow(new Error(OUT));
+      await expect(files.grant(A, out('unnamed.txt'), UNCLAIMED)).rejects.toThrow(new Error(OUT));
       expect(grants.has(A, out('unnamed.txt'))).toBe(false);
       nothingAsked();
     });
@@ -2272,7 +2444,7 @@ describe('files saves outside the folders', () => {
       const named = vi.fn((_appSessionId: AppSessionId, _path: string, signal?: AbortSignal) => new Promise<false>((resolve) => signal!.addEventListener('abort', () => resolve(false))));
       const files = outsideService({ named });
       const ended = new AbortController();
-      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal);
+      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, undefined, ended.signal);
       await vi.waitFor(() => expect(named).toHaveBeenCalledOnce());
       ended.abort();
       await expect(answer).rejects.toThrow(new Error(OUT));
@@ -2292,7 +2464,7 @@ describe('files saves outside the folders', () => {
         reached();
         await held;
       };
-      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal);
+      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, undefined, ended.signal);
       await searching;
       expect(await files.grant(A, far())).toEqual({ status: 'granted', path: far() });
       ended.abort();
@@ -2306,7 +2478,7 @@ describe('files saves outside the folders', () => {
       await files.grant(A, far());
       const ended = new AbortController();
       points['after-open'] = () => ended.abort();
-      await expect(files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal)).rejects.toThrow(new Error(OUT));
+      await expect(files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, undefined, ended.signal)).rejects.toThrow(new Error(OUT));
       expect(readFileSync(far(), 'utf8')).toBe('same bytes\n');
     });
 
@@ -2338,6 +2510,851 @@ describe('files saves outside the folders', () => {
         await files.grant(A, far());
       };
       expect(await shown(files, A, far())).toMatchObject({ content: 'same bytes\n', named: true, outside: { real: far(), writable: true } });
+    });
+  });
+
+  // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M1): the same rule for a
+  // request from another machine under the claim `machine.op` made for one of the four outside acts, read by this
+  // machine's daemon over its own evidence; below that claim, the pin's answers. The other machine's home is a folder of
+  // this suite and its private folders are macOS's by the platform handed in, so no case reads a real one.
+  describe('files from another machine', () => {
+    const member = 'member-of-the-suite';
+    const device = 'device-of-the-suite';
+    const claimed = (opId = 'op-1') => ({ remote: true as const, claim: { member, device, opId } });
+    const asker = endableClientRef('page:9.1');
+    const unclaimed = { client: asker, remote: true as const };
+    const claimedContext = (opId = 'op-1') => ({ ...unclaimed, op: { opId, opCreated: '2026-11-15T09:00:00.000Z', member, device, fingerprint: 'a'.repeat(64) } });
+    const refused = { ok: false, error: { code: 'internal', message: OUT } };
+    const protectedRefusal = { message: FILES_PROTECTED, ipcError: { code: 'internal', message: FILES_PROTECTED, issues: { refusal: 'protected' } } };
+    let home: string;
+    let logLines: string[];
+    let recordsAsked: number;
+    const inHome = (...parts: string[]) => join(home, ...parts);
+    const secret = () => inHome('Documents', 'private.txt');
+    // The service as the other machine's daemon composes it: U6e's, with the daemon user's home, macOS, and its log
+    const remoteOptions = (extra: Partial<FilesServiceOptions> = {}) => outsideOptions({ home: () => home, platform: 'darwin', homes: () => [home], outsideLog: (line) => logLines.push(line), ...extra });
+    const remoteService = (extra: Partial<FilesServiceOptions> = {}) => service(remoteOptions(extra));
+    // The same behind its handlers, which the endpoint's dispatch reaches with `remote` and `machine.op` with its claim too
+    function remoteHandlers(extra: Partial<FilesServiceOptions> = {}) {
+      const bus = fakeBus();
+      const files = registerFilesHandlers((id) => ((recordsAsked += 1), records.get(id) ?? null), {
+        bus,
+        emit: () => {},
+        port: { openExternal: async () => ({ opened: true }), reveal: async () => ({ revealed: true }) },
+        ...remoteOptions(extra),
+      });
+      services.push(files);
+      return bus;
+    }
+    // The open of files.readOutside (the keyed read, the hash asked) and the save of what it showed, each under a claim
+    const readThere = (files: Files, appSessionId: AppSessionId, path: string, opId = 'op-read', extra: object = {}) => files.read({ appSessionId, path, named: true, hash: true, ...extra }, claimed(opId));
+    async function saveThere(files: Files, appSessionId: AppSessionId, path: string, content: string, opId = 'op-save', extra: object = {}) {
+      const read = await readThere(files, appSessionId, path, `${opId}-read`, extra);
+      return files.writeOutside({ appSessionId, path, content, expectedHash: read.hash!, real: read.outside?.real ?? path, ...extra }, claimed(opId));
+    }
+    const choose = (files: Files, path: string, opId = 'op-choose', extra: object = {}) => files.chooseOutside({ appSessionId: A, path, ...extra }, claimed(opId));
+    const list = (files: Files, input: { path?: string; open?: true; cursor?: string } = {}, appSessionId: AppSessionId = A) => files.listOutside({ appSessionId, ...input }, claimed('op-list'));
+    const names = (answer: { status: string; entries?: { name: string }[] }) => (answer.entries ?? []).map((entry) => entry.name);
+    const nothingTouchedIn = (seen: readonly string[], folder: string) => expect(inside(seen, folder), `nothing inside ${folder} is touched`).toEqual([]);
+
+    beforeEach(() => {
+      home = at('home');
+      logLines = [];
+      recordsAsked = 0;
+      write(inHome('notes.txt'), 'notes in the home\n');
+      write(secret(), 'private as it was\n');
+      write(inHome('Documents', 'deep', 'more.txt'), 'more as it was\n');
+      mkdirSync(inHome('Desktop'));
+      mkdirSync(inHome('projects', 'garden'), { recursive: true });
+    });
+
+    describe('the claimed caller', () => {
+      it('reads a named, a chosen and a sent file writable and saves each: the bytes on disk the content sent', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        index.library.reconcile({ artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A })], links: [linked(1, A)], spaces: [] });
+        const files = remoteService();
+        expect(await choose(files, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) {
+          expect(await readThere(files, A, out(name)), name).toMatchObject({ content: `${name} as it was\n`, named: true, outside: { real: out(name), writable: true } });
+          expect(await saveThere(files, A, out(name), `${name} saved\n`), name).toEqual({ status: 'ok', hash: sha(`${name} saved\n`) });
+          expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} saved\n`);
+        }
+        expect(readFileSync(out('unnamed.txt'), 'utf8')).toBe('unnamed.txt as it was\n');
+      });
+
+      it('reads a file only a tool’s result names and one only an added record admits read-only, and refuses their save', async () => {
+        await transcriptOf(A, [called('t-mcp', 'mcp__docs__find', { query: 'notes' }), answered('t-mcp', link(out('result.txt')))]);
+        index.library.reconcile({ artifacts: [artifact(2, out('added.txt'), { kind: 'human' })], links: [linked(2, A)], spaces: [] });
+        const files = remoteService();
+        for (const [name, why] of [['result.txt', 'result'], ['added.txt', 'added']] as const) {
+          const read = await readThere(files, A, out(name));
+          expect(read, name).toMatchObject({ content: `${name} as it was\n`, named: true, outside: { real: out(name), writable: false, why } });
+          await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: read.hash!, real: out(name) }, claimed()), name).rejects.toThrow(new Error(OUT));
+          expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} as it was\n`);
+        }
+      });
+
+      it('reads a file inside the remote roots unmarked and saves it by files.writeOutside with the real path compared, asking no evidence', async () => {
+        const files = remoteService();
+        const path = inRoot('README.md');
+        const read = await readThere(files, A, path);
+        expect(read).toMatchObject({ content: '# readme\n' });
+        expect(read).not.toHaveProperty('outside');
+        expect(await files.writeOutside({ appSessionId: A, path, content: '# saved\n', expectedHash: read.hash!, real: path }, claimed())).toEqual({ status: 'ok', hash: sha('# saved\n') });
+        expect(readFileSync(path, 'utf8')).toBe('# saved\n');
+        await expect(files.writeOutside({ appSessionId: A, path, content: 'x', expectedHash: sha('# saved\n'), real: inRoot('src', 'a.ts') }, claimed())).rejects.toThrow(new Error(FILES_MOVED));
+        expect(readFileSync(path, 'utf8')).toBe('# saved\n');
+        nothingAsked();
+      });
+
+      it('answers a raw read asked with a claim with the plain read', async () => {
+        const files = remoteService();
+        const plain = await files.read({ appSessionId: A, path: inRoot('README.md') }, claimed());
+        const raw = await files.read({ appSessionId: A, path: inRoot('README.md'), raw: true }, claimed());
+        expect(raw).toStrictEqual(plain);
+        expect(raw).not.toHaveProperty('identity');
+      });
+
+      it('saves after the daemon restarts between the read and the save, on the evidence it reads then (R6)', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        await choose(remoteService(), out('chosen.txt'));
+        const named = await readThere(remoteService(), A, out('named.txt'));
+        const chosen = await readThere(remoteService(), A, out('chosen.txt'));
+        grants = openGrants(); // the daemon restarts: the grants are a file, the transcript is a file
+        const restarted = remoteService();
+        for (const [name, read] of [['named.txt', named], ['chosen.txt', chosen]] as const) {
+          expect(await restarted.writeOutside({ appSessionId: A, path: out(name), content: 'after a restart\n', expectedHash: read.hash!, real: read.outside!.real }, claimed()), name).toEqual({ status: 'ok', hash: sha('after a restart\n') });
+          expect(readFileSync(out(name), 'utf8'), name).toBe('after a restart\n');
+        }
+      });
+
+      it('refuses the save once the transcript no longer names the file, and saves it after a choice of the same file (R7)', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const files = remoteService();
+        const read = await readThere(files, A, out('named.txt'));
+        await transcriptOf(A, [said('the conversation was cleared')]);
+        const save = () => files.writeOutside({ appSessionId: A, path: out('named.txt'), content: 'saved\n', expectedHash: read.hash!, real: read.outside!.real }, claimed());
+        await expect(save()).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out('named.txt'), 'utf8')).toBe('named.txt as it was\n');
+        expect(await choose(files, out('named.txt'))).toEqual({ status: 'granted', path: out('named.txt') });
+        expect(await save()).toEqual({ status: 'ok', hash: sha('saved\n') });
+      });
+
+      it('refuses a claimed read and save whose last component becomes a link, or whose folder is swapped, between the check and the open (R2: S1, S2)', async () => {
+        write(at('far', 'dir', 'notes.txt'), 'same bytes\n');
+        write(at('twin', 'notes.txt'), 'same bytes\n');
+        const far = at('far', 'dir', 'notes.txt');
+        await transcriptOf(A, [said(link(far))]);
+        const files = remoteService();
+        const read = await readThere(files, A, far);
+        const swaps: [string, () => void, () => void][] = [
+          ['the last component', () => (renameSync(far, `${far}.away`), symlinkSync(at('twin', 'notes.txt'), far)), () => (unlinkSync(far), renameSync(`${far}.away`, far))],
+          ['the folder', () => swapToLink(at('far', 'dir'), at('twin')), () => restore(at('far', 'dir'))],
+        ];
+        for (const [what, swap, back] of swaps) {
+          points['before-open'] = swap;
+          await expect(readThere(files, A, far), what).rejects.toThrow(new Error(OUT));
+          back();
+          points['before-open'] = swap;
+          await expect(files.writeOutside({ appSessionId: A, path: far, content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real }, claimed()), what).rejects.toThrow(new Error(OUT));
+          back();
+          expect([readFileSync(far, 'utf8'), readFileSync(at('twin', 'notes.txt'), 'utf8')], what).toEqual(['same bytes\n', 'same bytes\n']);
+        }
+      });
+    });
+
+    describe('the four acts behind their handlers', () => {
+      it('refuses each of the four without a claim, and the listing and the choice to this machine’s own client, asking nothing and resolving no session', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        index.library.reconcile({ artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A })], links: [linked(1, A)], spaces: [] });
+        grants.add(A, out('chosen.txt'));
+        const bus = remoteHandlers();
+        const save = (path: string, before: string) => ({ appSessionId: A, path, content: 'pwned\n', expectedHash: sha(before), real: path });
+        for (const name of ['named.txt', 'chosen.txt', 'sent.txt', 'unnamed.txt']) expect(await bus.invoke('files.readOutside', { appSessionId: A, path: out(name) }, unclaimed), name).toEqual(refused);
+        expect(await bus.invoke('files.readOutside', { appSessionId: A, path: inRoot('README.md') }, unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.writeOutside', save(out('named.txt'), 'named.txt as it was\n'), unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.writeOutside', save(inRoot('README.md'), '# readme\n'), unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.listOutside', { appSessionId: A }, unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('unnamed.txt') }, unclaimed)).toEqual(refused);
+        // this machine's own client: its chooser is the system's, so the daemon lists and chooses nothing for it
+        expect(await bus.invoke('files.listOutside', { appSessionId: A }, asker)).toEqual(refused);
+        expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('unnamed.txt') }, asker)).toEqual(refused);
+        expect([readFileSync(out('named.txt'), 'utf8'), readFileSync(inRoot('README.md'), 'utf8')]).toEqual(['named.txt as it was\n', '# readme\n']);
+        expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+        nothingAsked();
+        expect(recordsAsked, 'no session is resolved, so no root is computed').toBe(0);
+        expect(logLines).toEqual([]);
+      });
+
+      it('answers files.readOutside and files.writeOutside under the claim machine.op passes, and logs the claim’s member', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const bus = remoteHandlers();
+        const read = await bus.invoke('files.readOutside', { appSessionId: A, path: out('named.txt'), hash: true }, claimedContext('op-read'));
+        expect(read).toMatchObject({ ok: true, value: { content: 'named.txt as it was\n', named: true, outside: { real: out('named.txt'), writable: true } } });
+        const save = { appSessionId: A, path: out('named.txt'), content: 'saved there\n', expectedHash: sha('named.txt as it was\n'), real: out('named.txt') };
+        expect(await bus.invoke('files.writeOutside', save, claimedContext('op-save'))).toEqual({ ok: true, value: { status: 'ok', hash: sha('saved there\n') } });
+        expect(readFileSync(out('named.txt'), 'utf8')).toBe('saved there\n');
+        expect(logLines).toEqual([`outside write: member ${member} device ${device} session ${A} op op-save: ok 12 bytes ${out('named.txt')}`]);
+      });
+
+      it('lists through files.listOutside under the claim machine.op passes, the folder’s real entries', async () => {
+        const folder = at('listing');
+        mkdirSync(join(folder, 'inner'), { recursive: true });
+        write(join(folder, 'a.txt'), '');
+        const bus = remoteHandlers();
+        expect(await bus.invoke('files.listOutside', { appSessionId: A, path: folder }, claimedContext('op-list'))).toEqual({
+          ok: true,
+          value: {
+            status: 'listed',
+            path: folder,
+            parent: base,
+            home,
+            entries: [
+              { name: 'inner', path: join(folder, 'inner'), kind: 'dir', protected: false },
+              { name: 'a.txt', path: join(folder, 'a.txt'), kind: 'file', protected: false },
+            ],
+            cursor: null,
+          },
+        });
+      });
+
+      it('holds each input to its schema: no raw, no key beyond it, and nothing in a choice that could name a grant’s content', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const bus = remoteHandlers();
+        const malformed = { ok: false, error: { code: 'invalid_input' } };
+        for (const input of [{ raw: true }, { named: true }, { real: out('named.txt') }]) expect(await bus.invoke('files.readOutside', { appSessionId: A, path: out('named.txt'), ...input }, claimedContext()), JSON.stringify(input)).toMatchObject(malformed);
+        for (const input of [{ real: out('unnamed.txt') }, { at: 1 }, { session: B }]) expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('unnamed.txt'), ...input }, claimedContext()), JSON.stringify(input)).toMatchObject(malformed);
+        expect(await bus.invoke('files.listOutside', { appSessionId: A, entries: [] }, claimedContext())).toMatchObject(malformed);
+        expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+        expect(logLines).toEqual([]);
+      });
+
+      it('chooses through files.chooseOutside, the grants file on this machine holding the real path, and refuses files.grant from another machine even under a claim', async () => {
+        symlinkSync(out('chosen.txt'), out('alias.txt'));
+        const bus = remoteHandlers();
+        expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('alias.txt') }, claimedContext('op-choose'))).toEqual({ ok: true, value: { status: 'granted', path: out('chosen.txt') } });
+        expect((JSON.parse(readFileSync(grantsFile, 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions[A]!.map((entry) => entry.real)).toEqual([out('chosen.txt')]);
+        expect(await bus.main('files.grant', { appSessionId: A, path: out('unnamed.txt') }, claimedContext('op-grant'))).toEqual(refused);
+        expect(await bus.main('files.grant', { appSessionId: A, path: out('unnamed.txt') }, unclaimed)).toEqual(refused);
+        expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+        expect(logLines).toEqual([`outside choice: member ${member} device ${device} session ${A} op op-choose: granted ${out('chosen.txt')}`]);
+      });
+    });
+
+    // Condition (c): P5's Decision Log 237 stands for every request no claimed act carries, and a claim changes nothing
+    // outside the four names
+    describe('below the terminal’s grade, to the byte', () => {
+      it('answers files.list, files.read, files.watch and files.write for a chat rooted at the home and one in a project what the pin answers, with a claim or without, asking no evidence', async () => {
+        const HOME_CHAT = 'home-chat' as AppSessionId;
+        records.set(HOME_CHAT, record(home));
+        for (const id of [HOME_CHAT, A]) {
+          await transcriptOf(id, [said(link(inHome('notes.txt')))]);
+          grants.add(id, inHome('notes.txt'));
+        }
+        const bus = remoteHandlers();
+        const answers = async (appSessionId: AppSessionId, context: typeof unclaimed) => ({
+          roots: await bus.invoke('files.list', { appSessionId }, context),
+          home: await bus.invoke('files.list', { appSessionId, path: home }, context),
+          folder: await bus.invoke('files.list', { appSessionId, path: inHome('projects') }, context),
+          notes: await bus.invoke('files.read', { appSessionId, path: inHome('notes.txt') }, context),
+          readme: await bus.invoke('files.read', { appSessionId, path: inRoot('README.md') }, context),
+          watch: await bus.invoke('files.watch', { appSessionId, path: home }, context),
+          write: await bus.invoke('files.write', { appSessionId, path: inHome('notes.txt'), content: 'pwned\n', expectedHash: sha('notes in the home\n') }, context),
+        });
+        const atHome = await answers(HOME_CHAT, unclaimed);
+        expect(atHome).toEqual({ roots: refused, home: refused, folder: refused, notes: refused, readme: refused, watch: refused, write: refused });
+        expect(await answers(HOME_CHAT, claimedContext())).toEqual(atHome);
+        const inProject = await answers(A, unclaimed);
+        expect(inProject).toMatchObject({ roots: { ok: true, value: { entries: [{ path: root }] } }, home: refused, folder: refused, notes: refused, readme: { ok: true, value: { content: '# readme\n' } }, watch: refused, write: refused });
+        expect(await answers(A, claimedContext())).toEqual(inProject);
+        expect(readFileSync(inHome('notes.txt'), 'utf8')).toBe('notes in the home\n');
+        // a read outside the roots asks the Library's delivered files, as at the pin; nothing else is asked
+        expect({ transcript: asked.transcript, grants: asked.grants, sent: asked.sent }).toEqual({ transcript: [], grants: 0, sent: 0 });
+        expect(logLines).toEqual([]);
+      });
+
+      it('marks a delivered file read with the key and no claim added and read-only, its bytes those read without the key, and refuses one only the transcript or a grant admits (decision 9)', async () => {
+        index.library.reconcile({ artifacts: [artifact(1, out('added.txt'), { kind: 'human' }), artifact(2, out('sent.txt'), { kind: 'session', appSessionId: A })], links: [linked(1, A), linked(2, A)], spaces: [] });
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        grants.add(A, out('chosen.txt'));
+        const bus = remoteHandlers();
+        for (const name of ['added.txt', 'sent.txt']) {
+          const without = (await bus.invoke('files.read', { appSessionId: A, path: out(name), hash: true }, unclaimed)) as { ok: true; value: object };
+          expect(without, name).toMatchObject({ ok: true, value: { content: `${name} as it was\n` } });
+          expect(without.value, name).not.toHaveProperty('outside');
+          expect(await bus.invoke('files.read', { appSessionId: A, path: out(name), hash: true, named: true }, unclaimed), name).toEqual({ ok: true, value: { ...without.value, named: true, outside: { real: out(name), writable: false, why: 'added' } } });
+        }
+        for (const name of ['named.txt', 'chosen.txt']) expect(await bus.invoke('files.read', { appSessionId: A, path: out(name), named: true }, unclaimed), name).toEqual(refused);
+        expect({ transcript: asked.transcript, grants: asked.grants, sent: asked.sent }).toEqual({ transcript: [], grants: 0, sent: 0 });
+      });
+    });
+
+    describe('the listing', () => {
+      it('lists one folder outside the home: folders first, dot names after the others of their kind, case aside, a link as a link', async () => {
+        const folder = at('listing');
+        for (const name of ['beta', 'Alpha', '.hidden-dir']) mkdirSync(join(folder, name), { recursive: true });
+        for (const name of ['b.txt', 'A.txt', '.zshrc', 'c.md']) write(join(folder, name), '');
+        symlinkSync(out('named.txt'), join(folder, 'latest'));
+        execFileSync('mkfifo', [join(folder, 'pipe')]);
+        const entry = (name: string, kind: string) => ({ name, path: join(folder, name), kind, protected: false });
+        expect(await list(remoteService(), { path: folder })).toEqual({
+          status: 'listed',
+          path: folder,
+          parent: base,
+          home,
+          entries: [entry('Alpha', 'dir'), entry('beta', 'dir'), entry('.hidden-dir', 'dir'), entry('A.txt', 'file'), entry('b.txt', 'file'), entry('c.md', 'file'), entry('latest', 'link'), entry('pipe', 'other'), entry('.zshrc', 'file')],
+          cursor: null,
+        });
+      });
+
+      it('answers one page of 200 with the cursor of the next, the dot names of a kind after its last page’s others', async () => {
+        expect(OUTSIDE_LIST_PAGE).toBe(200);
+        const folder = at('many');
+        for (const name of ['d1', 'd2', 'd3']) mkdirSync(join(folder, name), { recursive: true });
+        const fileNames = Array.from({ length: 205 }, (_, i) => `f-${String(i).padStart(3, '0')}.txt`);
+        for (const name of [...fileNames, '.dot.txt']) write(join(folder, name), '');
+        const files = remoteService();
+        const first = await list(files, { path: folder });
+        expect(names(first)).toEqual(['d1', 'd2', 'd3', ...fileNames.slice(0, 197)]);
+        expect(first).toMatchObject({ status: 'listed', cursor: 'f-196.txt' });
+        const second = await list(files, { path: folder, cursor: 'f-196.txt' });
+        expect(names(second)).toEqual([...fileNames.slice(197), '.dot.txt']);
+        expect(second).toMatchObject({ status: 'listed', cursor: null });
+      });
+
+      it('lists the home when no path is asked, `~` and `~/…` under it, the private folders marked, and the filesystem’s root', async () => {
+        const files = remoteService();
+        const answer = await list(files);
+        expect(answer).toEqual({
+          status: 'listed',
+          path: home,
+          parent: base,
+          home,
+          entries: [
+            { name: 'Desktop', path: inHome('Desktop'), kind: 'dir', protected: true },
+            { name: 'Documents', path: inHome('Documents'), kind: 'dir', protected: true },
+            { name: 'projects', path: inHome('projects'), kind: 'dir', protected: false },
+            { name: 'notes.txt', path: inHome('notes.txt'), kind: 'file', protected: false },
+          ],
+          cursor: null,
+        });
+        expect(await list(files, { path: '~' })).toEqual(answer);
+        expect(await list(files, { path: '~/projects' })).toMatchObject({ status: 'listed', path: inHome('projects'), parent: home, entries: [{ name: 'garden', kind: 'dir' }] });
+        const top = await list(files, { path: sep });
+        expect(top).toMatchObject({ status: 'listed', path: sep, parent: null, home });
+        expect((top as { entries: { name: string; kind: string }[] }).entries).toContainEqual(expect.objectContaining({ name: base.split(sep)[1], kind: 'dir' }));
+      });
+
+      it('takes each entry’s kind from its directory entry alone: no entry is stat’ed, read or followed', async () => {
+        const folder = at('listing');
+        mkdirSync(join(folder, 'dir'), { recursive: true });
+        write(join(folder, 'file.txt'), 'x');
+        symlinkSync(out('named.txt'), join(folder, 'latest'));
+        const seen = recordTouches();
+        expect(names(await list(remoteService(), { path: folder }))).toEqual(['dir', 'file.txt', 'latest']);
+        expect(seen.filter((entry) => ['dir', 'file.txt', 'latest'].some((name) => entry.endsWith(join(folder, name)) || entry.includes(`${join(folder, name)}${sep}`)))).toEqual([]);
+      });
+
+      it('refuses inside a private folder without open, touching nothing in it, and lists it with open', async () => {
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const path of [inHome('Documents'), '~/Documents/deep']) expect(await list(files, { path }), path).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+        expect(names(await list(files, { path: '~/Documents', open: true }))).toEqual(['deep', 'private.txt']);
+        expect(names(await list(files, { path: '~/Documents/deep', open: true }))).toEqual(['more.txt']);
+      });
+
+      it('refuses a link from outside the home into a private folder the same way, and with open lists where it leads', async () => {
+        symlinkSync(inHome('Documents'), at('to-documents'));
+        const files = remoteService();
+        const seen = recordTouches();
+        expect(await list(files, { path: at('to-documents') })).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+        expect(await list(files, { path: at('to-documents'), open: true })).toMatchObject({ status: 'listed', path: inHome('Documents'), entries: [{ name: 'deep' }, { name: 'private.txt' }] });
+      });
+
+      it('refuses a folder reached through a link on the way into a private folder even with open, touching nothing inside it', async () => {
+        symlinkSync(inHome('Documents'), at('to-documents'));
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const open of [undefined, true] as const) expect(await list(files, { path: join(at('to-documents'), 'deep'), ...(open && { open }) }), `open ${open}`).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+      });
+
+      it('answers unreadable for a folder it cannot read, not-a-folder for a file, no-folder for a missing or relative path, and an unknown session', async () => {
+        write(at('locked', 'inside.txt'), 'x');
+        const files = remoteService();
+        chmodSync(at('locked'), 0o000);
+        try {
+          expect(await list(files, { path: at('locked') })).toEqual({ status: 'refused', reason: 'unreadable' });
+        } finally {
+          chmodSync(at('locked'), 0o700);
+        }
+        expect(await list(files, { path: out('named.txt') })).toEqual({ status: 'refused', reason: 'not-a-folder' });
+        for (const path of [at('missing'), at('missing', 'deeper'), 'relative/path']) expect(await list(files, { path }), path).toEqual({ status: 'refused', reason: 'no-folder' });
+        await expect(list(files, {}, 'nope' as AppSessionId)).rejects.toThrow('unknown app session: nope');
+      });
+
+      it('marks and guards no folder as private on a platform that is not macOS', async () => {
+        const files = remoteService({ platform: 'linux' });
+        expect(names(await list(files, { path: '~/Documents' }))).toEqual(['deep', 'private.txt']);
+        expect((await list(files)) as { entries: { protected: boolean }[] }).toMatchObject({ entries: [{ protected: false }, { protected: false }, { protected: false }, { protected: false }] });
+      });
+    });
+
+    describe('the choice', () => {
+      it('grants a regular file by its real path and a link as its target, and refuses a directory, a package and a special file', async () => {
+        mkdirSync(out('folder'));
+        mkdirSync(out('Tool.app', 'Contents'), { recursive: true });
+        execFileSync('mkfifo', [out('pipe')]);
+        symlinkSync(out('chosen.txt'), out('alias.txt'));
+        const files = remoteService();
+        expect(await choose(files, out('alias.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        expect(grants.has(A, out('chosen.txt'))).toBe(true);
+        expect(grants.has(A, out('alias.txt'))).toBe(false);
+        for (const path of [out('folder'), out('Tool.app'), out('pipe')]) {
+          expect(await choose(files, path), path).toEqual({ status: 'refused', reason: 'not-a-file' });
+          expect(grants.has(A, path), path).toBe(false);
+        }
+        expect(await choose(files, '~/notes.txt')).toEqual({ status: 'granted', path: inHome('notes.txt') });
+      });
+
+      it('refuses a missing path no-file and a choice for a session this machine does not know', async () => {
+        const files = remoteService();
+        for (const path of [out('never.txt'), at('missing', 'never.txt')]) expect(await choose(files, path), path).toEqual({ status: 'refused', reason: 'no-file' });
+        await expect(files.chooseOutside({ appSessionId: 'nope' as AppSessionId, path: out('chosen.txt') }, claimed())).rejects.toThrow('unknown app session: nope');
+        expect(grants.has('nope' as AppSessionId, out('chosen.txt'))).toBe(false);
+      });
+
+      it('refuses a path in a private folder and a last link whose target lies in one without open, touching nothing inside it; with open grants the target’s real path', async () => {
+        symlinkSync(secret(), out('to-private'));
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const path of [secret(), out('to-private')]) expect(await choose(files, path), path).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+        expect(grants.has(A, secret())).toBe(false);
+        expect(await choose(files, out('to-private'), 'op-choose', { open: true })).toEqual({ status: 'granted', path: secret() });
+        expect(grants.has(A, secret())).toBe(true);
+      });
+
+      it('drops the oldest grant of a session at its 257th choice (U6e’s bound, reached from another machine)', async () => {
+        const many = Array.from({ length: 257 }, (_, i) => at('many', `chosen-${i}.txt`));
+        for (const path of many) write(path, 'x');
+        const files = remoteService();
+        for (const path of many) expect(await choose(files, path), path).toMatchObject({ status: 'granted' });
+        expect([grants.has(A, many[0]!), grants.has(A, many[1]!), grants.has(A, many[256]!)]).toEqual([false, true, true]);
+      }, 20_000); // 257 choices, each a walk and a grants file written: about 4.5 s on the build VM, near the default 5 s
+    });
+
+    // Decision 10: the other machine's own record of each save and each choice made from another machine
+    describe('the log', () => {
+      it('writes one line per ending of a claimed save and choice, with the claim’s member, device and operation id, and never the content', async () => {
+        write(out('readonly.txt'), 'read-only as it was\n');
+        chmodSync(out('readonly.txt'), 0o444);
+        mkdirSync(out('folder'));
+        const settings = join(profile, 'settings.json');
+        await transcriptOf(A, [said(link(out('named.txt'))), said(link(out('gone.txt'))), said(link(out('readonly.txt'))), said(link(settings))]);
+        const files = remoteService();
+        const read = await readThere(files, A, out('named.txt'));
+        const save = (appSessionId: AppSessionId, path: string, opId: string, extra: object = {}) =>
+          files.writeOutside({ appSessionId, path, content: 'the words typed\n', expectedHash: read.hash!, real: path, ...extra }, claimed(opId));
+        expect(await save(A, out('named.txt'), 'op-save')).toEqual({ status: 'ok', hash: sha('the words typed\n') });
+        expect(await save(A, out('named.txt'), 'op-conflict')).toEqual({ status: 'conflict', hash: sha('the words typed\n') });
+        await expect(save(A, out('unnamed.txt'), 'op-outside')).rejects.toThrow(new Error(OUT));
+        await expect(save(A, settings, 'op-own')).rejects.toThrow(new Error(`not writable: ${settings}`));
+        await expect(save(A, out('named.txt'), 'op-moved', { real: out('elsewhere.txt') })).rejects.toThrow(new Error(FILES_MOVED));
+        await expect(save(A, out('gone.txt'), 'op-missing')).rejects.toThrow(new Error(`not found: ${out('gone.txt')}`));
+        await expect(save(A, out('readonly.txt'), 'op-locked')).rejects.toThrow(new Error(`not writable: ${out('readonly.txt')}`));
+        await expect(save(A, secret(), 'op-private')).rejects.toMatchObject(protectedRefusal);
+        expect(await choose(files, out('chosen.txt'), 'op-choose')).toMatchObject({ status: 'granted' });
+        expect(await choose(files, out('folder'), 'op-folder')).toEqual({ status: 'refused', reason: 'not-a-file' });
+        const by = (appSessionId: AppSessionId, opId: string) => `member ${member} device ${device} session ${appSessionId} op ${opId}`;
+        expect(logLines).toEqual([
+          `outside write: ${by(A, 'op-save')}: ok 16 bytes ${out('named.txt')}`,
+          `outside write: ${by(A, 'op-conflict')}: conflict ${out('named.txt')}`,
+          `outside write: ${by(A, 'op-outside')}: refused (outside) ${out('unnamed.txt')}`,
+          `outside write: ${by(A, 'op-own')}: refused (own) ${settings}`,
+          `outside write: ${by(A, 'op-moved')}: refused (moved) ${out('named.txt')}`,
+          `outside write: ${by(A, 'op-missing')}: refused (missing) ${out('gone.txt')}`,
+          `outside write: ${by(A, 'op-locked')}: refused (not-writable) ${out('readonly.txt')}`,
+          `outside write: ${by(A, 'op-private')}: refused (protected) ${secret()}`,
+          `outside choice: ${by(A, 'op-choose')}: granted ${out('chosen.txt')}`,
+          `outside choice: ${by(A, 'op-folder')}: refused (not-a-file) ${out('folder')}`,
+        ]);
+        expect(logLines.join('\n')).not.toContain('the words typed');
+      });
+
+      it('escapes the control characters of a path in its line, so a name holding a line ending writes one line, and an ordinary path reads as it is', async () => {
+        const fed = out('fed\noutside choice: member someone device elsewhere session S op forged: granted .txt');
+        const returned = out('returned\r\u0001.txt');
+        write(fed, 'fed as it was\n');
+        write(returned, 'returned as it was\n');
+        const files = remoteService();
+        expect(await choose(files, fed, 'op-fed')).toEqual({ status: 'granted', path: fed });
+        expect(await saveThere(files, A, fed, 'saved\n', 'op-save')).toEqual({ status: 'ok', hash: sha('saved\n') });
+        await expect(files.writeOutside({ appSessionId: A, path: returned, content: 'pwned\n', expectedHash: sha('returned as it was\n'), real: returned }, claimed('op-returned'))).rejects.toThrow(new Error(OUT));
+        expect(await choose(files, out('tab\there'), 'op-tab')).toEqual({ status: 'refused', reason: 'no-file' });
+        expect(await choose(files, out('chosen.txt'), 'op-plain')).toEqual({ status: 'granted', path: out('chosen.txt') });
+        const by = (opId: string) => `member ${member} device ${device} session ${A} op ${opId}`;
+        const escapedFed = out('fed\\noutside choice: member someone device elsewhere session S op forged: granted .txt');
+        expect(logLines).toEqual([
+          `outside choice: ${by('op-fed')}: granted ${escapedFed}`,
+          `outside write: ${by('op-save')}: ok 6 bytes ${escapedFed}`,
+          `outside write: ${by('op-returned')}: refused (outside) ${out('returned\\r\\x01.txt')}`,
+          `outside choice: ${by('op-tab')}: refused (no-file) ${out('tab\\x09here')}`,
+          `outside choice: ${by('op-plain')}: granted ${out('chosen.txt')}`,
+        ]);
+        for (const line of logLines) expect(line, line).not.toMatch(/\p{Cc}/u);
+      });
+
+      it('writes none for a save on this machine, a read or a listing, and a log that throws changes no answer', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const files = remoteService();
+        expect(await saveShown(files, A, out('named.txt'), 'saved here\n')).toEqual({ status: 'ok', hash: sha('saved here\n') });
+        await readThere(files, A, out('named.txt'));
+        await list(files, { path: outside });
+        expect(logLines).toEqual([]);
+        const failing = remoteService({
+          outsideLog: () => {
+            throw new Error('the log cannot be written');
+          },
+        });
+        expect(await saveThere(failing, A, out('named.txt'), 'saved anyway\n')).toEqual({ status: 'ok', hash: sha('saved anyway\n') });
+        expect(await choose(failing, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        await expect(saveThere(failing, A, out('unnamed.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      });
+    });
+
+    // The architect's ruling on the walk-to-use race (the cheap half): the step after the chooser's walk uses the real path
+    // the walk ended at, and resolves nothing again from the path as typed. A link of the typed path is moved between the
+    // walk and that step, so a step that resolved the typed path again would reach the link's new target
+    describe('the walk’s real path, handed to the step after it', () => {
+      const relink = (link: string, target: string) => () => {
+        rmSync(link);
+        symlinkSync(target, link);
+        relinked.push(link);
+      };
+      let relinked: string[];
+      beforeEach(() => {
+        relinked = [];
+      });
+
+      it('grants the file the choice’s walk ended at', async () => {
+        symlinkSync(out('chosen.txt'), out('pick'));
+        const files = remoteService();
+        points['after-outside-walk'] = relink(out('pick'), out('unnamed.txt'));
+        expect(await choose(files, out('pick'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        expect(relinked, 'the link moved between the walk and the grant').toEqual([out('pick')]);
+        expect([grants.has(A, out('chosen.txt')), grants.has(A, out('unnamed.txt'))]).toEqual([true, false]);
+      });
+
+      it('lists the folder the listing’s walk ended at', async () => {
+        write(at('first', 'one.txt'), '');
+        write(at('second', 'two.txt'), '');
+        symlinkSync(at('first'), at('shown'));
+        points['after-outside-walk'] = relink(at('shown'), at('second'));
+        expect(await list(remoteService(), { path: at('shown') })).toEqual({ status: 'listed', path: at('first'), parent: base, home, entries: [{ name: 'one.txt', path: at('first', 'one.txt'), kind: 'file', protected: false }], cursor: null });
+        expect(relinked, 'the link moved between the walk and the listing').toEqual([at('shown')]);
+      });
+
+      // The architect's ruling on item 6 (b): U6e's step 4 resolves the typed path as before, and a claimed path whose walk
+      // answered is refused FILES_MOVED where step 4's real path is not the walk's, before anything is opened
+      it('refuses a claimed read and save FILES_MOVED where a link moved between the walk and the resolution, opening nothing; unmoved, each reads and saves', async () => {
+        write(at('first', 'file.txt'), 'first as it was\n');
+        write(at('second', 'file.txt'), 'second as it was\n');
+        symlinkSync(at('first'), at('via'));
+        const path = at('via', 'file.txt');
+        for (const real of [at('first', 'file.txt'), at('second', 'file.txt')]) grants.add(A, real); // either is the session's to read and save
+        const files = remoteService();
+        // the read
+        const seen = recordTouches();
+        points['after-outside-walk'] = relink(at('via'), at('second'));
+        await expect(readThere(files, A, path)).rejects.toThrow(new Error(FILES_MOVED));
+        expect(relinked, 'the link moved between the walk and the resolution').toEqual([at('via')]);
+        expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
+        // the save of what an unmoved read showed
+        touches.on = false;
+        relink(at('via'), at('first'))();
+        const read = await readThere(files, A, path);
+        expect(read).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
+        seen.length = 0;
+        touches.on = true;
+        points['after-outside-walk'] = relink(at('via'), at('second'));
+        await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real }, claimed('op-save'))).rejects.toThrow(new Error(FILES_MOVED));
+        expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
+        expect([readFileSync(at('first', 'file.txt'), 'utf8'), readFileSync(at('second', 'file.txt'), 'utf8')]).toEqual(['first as it was\n', 'second as it was\n']);
+        // the control: no move, and the same read and save answer
+        touches.on = false;
+        relink(at('via'), at('first'))();
+        expect(await readThere(files, A, path)).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
+        expect(await saveThere(files, A, path, 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect([readFileSync(at('first', 'file.txt'), 'utf8'), readFileSync(at('second', 'file.txt'), 'utf8')]).toEqual(['saved there\n', 'second as it was\n']);
+      });
+    });
+
+    // Decision 18: no act of another machine reads or writes inside a private folder of this one unasked
+    describe('a private folder, for a read and a save', () => {
+      it('refuses a claimed read and save of a named file in a private folder as protected, touching nothing inside it and asking no evidence; with open reads and writes it', async () => {
+        await transcriptOf(A, [said(link(secret()))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, secret())).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: secret(), content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret() }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingAsked();
+        touches.on = false;
+        expect(await readThere(files, A, secret(), 'op-read', { open: true })).toMatchObject({ content: 'private as it was\n', named: true, outside: { real: secret(), writable: true } });
+        expect(await saveThere(files, A, secret(), 'saved there\n', 'op-save', { open: true })).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect(readFileSync(secret(), 'utf8')).toBe('saved there\n');
+      });
+
+      it('answers protected for a link on the way, outside every private folder, that leads into one, with open or without, touching nothing inside it', async () => {
+        symlinkSync(inHome('Documents'), at('docs-link'));
+        const via = at('docs-link', 'private.txt');
+        await transcriptOf(A, [said(link(via))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret() }, claimed())).rejects.toMatchObject(protectedRefusal);
+        await expect(readThere(files, A, via, 'op-read', { open: true })).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), open: true }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingAsked();
+        expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
+      });
+
+      // Decision 18 as ruled (Decision Log 17): `open: true` covers the private folders the path names and the target of a
+      // link that is its last component, never a link met on the way into another one
+      it('answers protected for a path under an opened private folder whose link on the way leads into a second one, with open or without, touching nothing inside the second', async () => {
+        write(inHome('Desktop', 'far.txt'), 'far as it was\n');
+        symlinkSync(inHome('Desktop'), inHome('Documents', 'to-desktop'));
+        const via = inHome('Documents', 'to-desktop', 'far.txt');
+        await transcriptOf(A, [said(link(via))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingTouchedIn(seen, inHome('Desktop'));
+        await expect(readThere(files, A, via, 'op-read', { open: true })).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('far as it was\n'), real: inHome('Desktop', 'far.txt'), open: true }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Desktop'));
+        nothingAsked();
+        expect(readFileSync(inHome('Desktop', 'far.txt'), 'utf8')).toBe('far as it was\n');
+      });
+
+      it('opens with open the target in a private folder of a link that is the path’s last component, by the choice, and reads the file it grants', async () => {
+        write(inHome('Desktop', 'far.txt'), 'far as it was\n');
+        symlinkSync(inHome('Desktop', 'far.txt'), out('to-far'));
+        const files = remoteService();
+        const seen = recordTouches();
+        expect(await choose(files, out('to-far'))).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Desktop'));
+        expect(await choose(files, out('to-far'), 'op-choose', { open: true })).toEqual({ status: 'granted', path: inHome('Desktop', 'far.txt') });
+        expect(await readThere(files, A, inHome('Desktop', 'far.txt'), 'op-read', { open: true })).toMatchObject({ content: 'far as it was\n', outside: { real: inHome('Desktop', 'far.txt'), writable: true } });
+        nothingTouchedIn(seen, inHome('Documents'));
+      });
+
+      // The branch review (scalpel-2#1; Decision Log 33 (1)): a walk that cannot finish refuses as protected, and nothing
+      // resolves the path unchecked after it
+      it('refuses as protected a claimed read and a hash-checked save through a folder the walk cannot list (0111) holding a link into a private folder, with open or without, touching nothing inside it', async () => {
+        mkdirSync(at('passage'));
+        symlinkSync(inHome('Documents'), at('passage', 'to-docs'));
+        write(at('passage', 'beside.txt'), 'beside as it was\n');
+        const via = at('passage', 'to-docs', 'private.txt');
+        await transcriptOf(A, [said(link(via)), said(link(at('passage', 'beside.txt')))]);
+        const files = remoteService();
+        chmodSync(at('passage'), 0o111); // entered by name, never listed: the walk cannot read its entries
+        try {
+          const seen = recordTouches();
+          for (const open of [{}, { open: true as const }]) {
+            await expect(readThere(files, A, via, 'op-read', open), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
+            await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), ...open }, claimed('op-save')), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
+          }
+          nothingTouchedIn(seen, inHome('Documents'));
+          expect(seen.filter((entry) => entry === `realpath ${via}`), 'the path is never resolved unchecked').toEqual([]);
+          // fail closed: a file of that folder itself, which the walk cannot see either, is refused the same way
+          await expect(readThere(files, A, at('passage', 'beside.txt'))).rejects.toMatchObject(protectedRefusal);
+        } finally {
+          chmodSync(at('passage'), 0o755);
+        }
+        expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
+        expect(readFileSync(at('passage', 'beside.txt'), 'utf8')).toBe('beside as it was\n');
+      });
+
+      it('the control: through a folder the walk can list, a link to an ordinary folder reads and saves a named file; a named file gone from a folder it cannot list still says it is gone', async () => {
+        mkdirSync(at('passage'));
+        write(at('plain', 'notes.txt'), 'plain as it was\n');
+        symlinkSync(at('plain'), at('passage', 'to-plain'));
+        const via = at('passage', 'to-plain', 'notes.txt');
+        await transcriptOf(A, [said(link(via)), said(link(at('passage', 'gone.txt')))]);
+        const files = remoteService();
+        expect(await readThere(files, A, via)).toMatchObject({ content: 'plain as it was\n', named: true, outside: { real: at('plain', 'notes.txt'), writable: true } });
+        expect(await saveThere(files, A, via, 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect(readFileSync(at('plain', 'notes.txt'), 'utf8')).toBe('saved there\n');
+        chmodSync(at('passage'), 0o111);
+        try {
+          await expect(readThere(files, A, at('passage', 'gone.txt'))).rejects.toThrow(new Error(`not found: ${at('passage', 'gone.txt')}`));
+          await expect(files.writeOutside({ appSessionId: A, path: at('passage', 'gone.txt'), content: 'pwned\n', expectedHash: sha(''), real: at('passage', 'gone.txt') }, claimed('op-gone'))).rejects.toThrow(new Error(`not found: ${at('passage', 'gone.txt')}`));
+        } finally {
+          chmodSync(at('passage'), 0o755);
+        }
+      });
+
+      it('walks no path under one of the caller’s roots: a root inside a private folder reads and saves without open', async () => {
+        records.set(B, record(inHome('Documents', 'deep')));
+        const files = remoteService();
+        const read = await readThere(files, B, inHome('Documents', 'deep', 'more.txt'));
+        expect(read).toMatchObject({ content: 'more as it was\n' });
+        expect(read).not.toHaveProperty('outside');
+        expect(await files.writeOutside({ appSessionId: B, path: inHome('Documents', 'deep', 'more.txt'), content: 'saved\n', expectedHash: read.hash!, real: inHome('Documents', 'deep', 'more.txt') }, claimed())).toEqual({ status: 'ok', hash: sha('saved\n') });
+      });
+
+      it('reads a delivered file in a private folder for a request with no claim as at the pin', async () => {
+        index.library.reconcile({ artifacts: [artifact(1, secret(), { kind: 'human' })], links: [linked(1, A)], spaces: [] });
+        const files = remoteService();
+        const read = await files.read({ appSessionId: A, path: secret() }, UNCLAIMED);
+        expect(read).toMatchObject({ content: 'private as it was\n' });
+        expect(read).not.toHaveProperty('outside');
+      });
+
+      it('guards no folder on a platform that is not macOS: a claimed read and save there need no open', async () => {
+        await transcriptOf(A, [said(link(secret()))]);
+        const files = remoteService({ platform: 'linux' });
+        expect(await readThere(files, A, secret())).toMatchObject({ content: 'private as it was\n', outside: { writable: true } });
+        expect(await saveThere(files, A, secret(), 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+      });
+    });
+
+    describe('a chat rooted at the home', () => {
+      it('reads and saves a named file under that home as any outside file, refuses one nothing admits, and keeps the home out of its roots', async () => {
+        const HOME_CHAT = 'home-chat' as AppSessionId;
+        records.set(HOME_CHAT, record(home));
+        write(inHome('unnamed.txt'), 'unnamed in the home\n');
+        await transcriptOf(HOME_CHAT, [said(link(inHome('notes.txt')))]);
+        const files = remoteService();
+        expect(await readThere(files, HOME_CHAT, inHome('notes.txt'))).toMatchObject({ content: 'notes in the home\n', named: true, outside: { real: inHome('notes.txt'), writable: true } });
+        expect(await saveThere(files, HOME_CHAT, inHome('notes.txt'), 'saved in the home\n')).toEqual({ status: 'ok', hash: sha('saved in the home\n') });
+        expect(readFileSync(inHome('notes.txt'), 'utf8')).toBe('saved in the home\n');
+        await expect(readThere(files, HOME_CHAT, inHome('unnamed.txt'))).rejects.toThrow(new Error(OUT));
+        await expect(files.list({ appSessionId: HOME_CHAT }, true)).rejects.toThrow(new Error(OUT));
+      });
+    });
+
+    // Condition (e): MAWS's own folders and the real path, reached by the claimed caller with nothing skipped
+    describe('MAWS’s own folders and the real path', () => {
+      it('reads a file under the profile, the daemon’s bundle and a told bundle with own, and refuses its claimed save', async () => {
+        told = [at('Dev', 'MAWS Dev.app')];
+        const ownFiles = [join(profile, 'settings.json'), at('Apps', 'MAWS.app', 'Contents', 'Resources', 'app.txt'), at('Dev', 'MAWS Dev.app', 'Contents', 'Resources', 'dev.txt')];
+        await transcriptOf(A, ownFiles.map((path) => said(`See [the file](<${path}>).`)));
+        const files = remoteService();
+        for (const path of ownFiles) {
+          const before = readFileSync(path, 'utf8');
+          const read = await readThere(files, A, path);
+          expect(read, path).toMatchObject({ content: before, own: true, named: true, outside: { real: path } });
+          await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: path }, claimed()), path).rejects.toThrow(new Error(`not writable: ${path}`));
+          expect(readFileSync(path, 'utf8'), path).toBe(before);
+        }
+      });
+
+      it('refuses with FILES_MOVED a claimed save whose folder was swapped for a link since the read, and saves once it is back', async () => {
+        write(at('far', 'dir', 'notes.txt'), 'same bytes\n');
+        write(at('twin', 'notes.txt'), 'same bytes\n');
+        const far = at('far', 'dir', 'notes.txt');
+        await transcriptOf(A, [said(link(far))]);
+        const files = remoteService();
+        const read = await readThere(files, A, far);
+        swapToLink(at('far', 'dir'), at('twin'));
+        const save = () => files.writeOutside({ appSessionId: A, path: far, content: 'saved\n', expectedHash: read.hash!, real: read.outside!.real }, claimed());
+        await expect(save()).rejects.toThrow(new Error(FILES_MOVED));
+        expect([readFileSync(at('far', 'dir.away', 'notes.txt'), 'utf8'), readFileSync(at('twin', 'notes.txt'), 'utf8')]).toEqual(['same bytes\n', 'same bytes\n']);
+        restore(at('far', 'dir'));
+        expect(await save()).toEqual({ status: 'ok', hash: sha('saved\n') });
+      });
+    });
+  });
+
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission. The
+  // working folder as U8c-2 admits it; a path by the outside save's rule; the real path, which main launches with.
+  describe('Open in’s admission (files.admit)', () => {
+    it('admits the working folder by its real path, and refuses one U8c-2 does not admit or that is gone', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A })).toEqual({ path: root, kind: 'folder' });
+      records.set(B, { ...record(root), agentFolder: { checkout: outside, cwd: outside, branch: null, linked: true } }); // no work tree of root's repository
+      await expect(files.admit({ appSessionId: B })).rejects.toThrow(new Error(OUT));
+      records.set(H, record(at('gone')));
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: 'Z' as AppSessionId })).rejects.toThrow('unknown app session: Z');
+    });
+
+    it('admits a file and a folder inside the folders by their real paths, through a link in the path as given too', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+      expect(await files.admit({ appSessionId: A, path: inRoot('src') })).toEqual({ path: inRoot('src'), kind: 'folder' });
+      symlinkSync(inRoot('src'), at('src-link'));
+      records.set(B, record(at('src-link')));
+      expect(await files.admit({ appSessionId: B, path: join(at('src-link'), 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+    });
+
+    it('admits outside the folders what a save would write (named, chosen, sent), and refuses a result’s name, an added record, an unnamed file and MAWS’s own', async () => {
+      await transcriptOf(A, [said(link(out('named.txt'))), called('t-mcp', 'mcp__docs__find', {}), answered('t-mcp', link(out('result.txt')))]);
+      index.library.reconcile({
+        artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A }), artifact(2, out('added.txt'), { kind: 'human' })],
+        links: [linked(1, A), linked(2, A)],
+        spaces: [],
+      });
+      const files = outsideService();
+      await files.grant(A, out('chosen.txt'));
+      for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) expect(await files.admit({ appSessionId: A, path: out(name) }), name).toEqual({ path: out(name), kind: 'file' });
+      for (const name of ['result.txt', 'added.txt', 'unnamed.txt']) await expect(files.admit({ appSessionId: A, path: out(name) }), name).rejects.toThrow(new Error(OUT));
+      records.set(H, record(base));
+      await expect(files.admit({ appSessionId: H, path: join(profile, 'settings.json') })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Review of 785e66161, finding 1: outside the session's roots the evidence is of one file, so only a regular file is
+    // admitted there; a directory only under a root (and a terminal is handed only a folder the daemon admitted)
+    it('refuses a directory outside the folders though the transcript names it, and the folder of a file admitted alone', async () => {
+      await transcriptOf(A, [said(link(join(outside, 'dirs'))), said(link(out('named.txt')))]);
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A, path: join(outside, 'dirs') })).rejects.toThrow(new Error(OUT));
+      expect(await files.admit({ appSessionId: A, path: out('named.txt') })).toEqual({ path: out('named.txt'), kind: 'file' });
+      await expect(files.admit({ appSessionId: A, path: outside })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Finding 3: the path is confirmed again after precheck's await, through an open with no link and the opened object's
+    // identity, as files.read is; the working folder too, against the real path the admission checked
+    it('refuses a path turned into a link after precheck, a file and a folder', async () => {
+      const files = outsideService();
+      points['before-open'] = () => swapToLink(inRoot('src', 'a.ts'), out('unnamed.txt'));
+      await expect(files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(new Error(OUT));
+      restore(inRoot('src', 'a.ts'));
+      points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      await expect(files.admit({ appSessionId: A, path: inRoot('src') })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses the working folder when it is replaced after its admission', async () => {
+      const files = outsideService();
+      points['before-open'] = () => swapToLink(root, outside);
+      await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
+      restore(root);
+      points['after-open'] = () => {
+        renameSync(root, `${root}.away`);
+        mkdirSync(root); // another directory at the same path once the first is open: the identity differs
+      };
+      await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Finding 4: MAWS's own folders are no working folder an app is handed
+    it('refuses a working folder that is one of MAWS’s own folders', async () => {
+      records.set(H, record(profile));
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses a caller on another machine before anything is read', async () => {
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A }, true)).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: A, path: inRoot('README.md') }, true)).rejects.toThrow(new Error(OUT));
+      nothingAsked();
     });
   });
 });
@@ -2440,7 +3457,7 @@ describe('files service: the folders the record’s two facts name', () => {
     const svc = service({ homes: HOMES });
     for (const remote of [false, true]) {
       expect(await rootNames(svc, remote), `remote ${remote}`).toEqual([p.main, p.beside]);
-      expect((await svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, remote)).content, `remote ${remote}`).toBe('hello\n');
+      expect((await svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, fromAnotherMachine(remote))).content, `remote ${remote}`).toBe('hello\n');
       expect((await svc.list({ appSessionId: A, path: join(p.beside, 'packages') }, remote)).root, `remote ${remote}`).toBe(p.beside);
     }
     const away = join(p.base, 'beside-registration');
@@ -2448,7 +3465,7 @@ describe('files service: the folders the record’s two facts name', () => {
     try {
       expect(await rootNames(svc, false)).toEqual([p.main]);
       await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') })).rejects.toThrow(OUT);
-      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, UNCLAIMED)).rejects.toThrow(OUT);
     } finally {
       renameSync(away, join(p.main, '.git/worktrees/beside'));
     }
@@ -2469,8 +3486,8 @@ describe('files service: the folders the record’s two facts name', () => {
     records.set(A, { directory: p.w1, additionalDirectories: [], worktree: { path: p.w1, branch: 'w1' }, launchFolder: app });
     const svc = service({ homes: HOMES });
     expect(await rootNames(svc, true)).toEqual([p.w1, app]);
-    expect((await svc.read({ appSessionId: A, path: join(app, 'index.ts') }, true)).content).toBe('hello\n');
-    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') }, true)).rejects.toThrow(OUT);
+    expect((await svc.read({ appSessionId: A, path: join(app, 'index.ts') }, UNCLAIMED)).content).toBe('hello\n');
+    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') }, UNCLAIMED)).rejects.toThrow(OUT);
   });
 
   it('drops an admitted folder that is a home of the machine for a remote caller, and keeps it for this machine’s', async () => {
@@ -2478,7 +3495,7 @@ describe('files service: the folders the record’s two facts name', () => {
     const svc = service({ homes: () => [p.beside] });
     expect(await rootNames(svc, false)).toEqual([p.main, p.beside]);
     expect(await rootNames(svc, true)).toEqual([p.main]);
-    await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+    await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, UNCLAIMED)).rejects.toThrow(OUT);
   });
 
   it.each(ADMISSION_CASES)('reads under a fact’s folder only where the table admits it: %s', async (_name, make) => {

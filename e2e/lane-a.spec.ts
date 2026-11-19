@@ -304,6 +304,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.heartbeat();
     await reported('Manual')();
     await expect(info).toContainText(/Manual · Reported (now|1 minute ago)/);
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B9 and Decision Log 10 (ix)):
+    // ⇧Tab in this composer asks nothing, since the chip takes no change here, so its live region says nothing; the
+    // region is mounted as on the composer's route, whose scene in e2e/composer.spec.ts ("⇧Tab says the mode") is this
+    // one's control: there the same region reads the sentence after the same press.
+    const said = main(page).locator('[data-mode-announcement]');
+    await expect(said, 'the composer’s live region, mounted').toHaveCount(1);
+    await editor(page).click();
+    await page.keyboard.press('Shift+Tab');
+    await reported('Manual')();
+    await expect(said, 'nothing said on a terminal session').toHaveText('');
     // the menu still sets nothing: the reported mode checked, each choice closed with why
     await chip.click();
     await expect(page.getByRole('menuitemradio', { name: /^Manual/ })).toHaveAttribute('aria-checked', 'true');
@@ -482,7 +492,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await drive(c);
     const before = await created(page, maws.userData, c.appId);
     await openSurface(page, 'Files');
-    const row = surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`).first();
+    // UX wave U6b-3a (Decision Log 14, ruling 1): the tree's row by its `data-kind`; the new PDF's row in the Changed group
+    // above the tree has the same `data-path`, and `.first()` would take it
+    const row = surface(page, 'files').locator(`[role="treeitem"][data-kind][data-path="${path}"]`).first();
     await expect(row, 'the PDF in Files’ tree of the terminal session’s folder').toBeVisible({ timeout: 20_000 });
     await row.click();
     const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);

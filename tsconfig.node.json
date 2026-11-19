@@ -113,6 +113,7 @@
     // index, and the graph that queue imports (DOM-free)
     "src/renderer/src/lane-b/remote-drafts.ts",
     "src/renderer/src/lane-b/reader-rows.ts",
+    "src/renderer/src/composer/editor/unread.ts", // UX wave U6b-5a: the queue's answer for a draft it could not read
     "src/renderer/src/stores/machines.ts",
     "src/renderer/src/stores/notices.ts",
     "src/renderer/src/sessions/title.ts",

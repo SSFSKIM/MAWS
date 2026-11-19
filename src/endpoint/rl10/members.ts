@@ -11,7 +11,13 @@
 // sminos restates the whole set after each RL10 welcome and closes the restatement with `restated {}`, and the set
 // replaces what was held: a session held before the welcome, or listed at the hub, that the restatement left out left
 // while sminos or the endpoint was away, and is withdrawn as if it had sent `gone` (M3's note: its listing would
-// otherwise stay at the hub for good). A connection that ends before its `restated` withdraws nothing.
+// otherwise stay at the hub for good). A frame restates its held session and the one listing it reports (lane A its
+// session id, lane B its appSessionId once joined), so a listing made under the other lane before a restart is left out
+// too. A connection that ends before its `restated` withdraws nothing.
+//
+// A session whose lane changes (a sminos thread reopened under the other lane) leaves and arrives: a `member` frame whose
+// lane is not the held one is taken after `gone`, so its old listing, under its session id or its appSessionId, is
+// withdrawn then and not left at the hub (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §E).
 //
 // P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): the handed-off mark. Until the
 // endpoint first sees a sminos record for a lane B session, authorization ranks the spawner the spine's record names
@@ -144,8 +150,14 @@ export class Members implements RecordSource, CheckoutSource {
   readonly #listeners = new Set<(target: SessionTarget) => void>();
   /** U9: what the spine's record says of each joined lane B app session's listing, by its appSessionId (read, or heard). */
   readonly #records = new Map<string, RecordSays>();
-  /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
+  /** The members held at the latest welcome, by engine session id, not restated since; null outside a restatement. */
   #unrestated: Set<string> | null = null;
+  /**
+   * The ids listed at the hub at the latest welcome that no restated member has reported under since; null outside a
+   * restatement. Kept apart from the held members, so a frame confirms only the listing it reports: a session listed
+   * under one lane before a restart and restated under the other leaves its old listing here, to be withdrawn.
+   */
+  #unreported: Set<string> | null = null;
   /** P5 O12 M11: the handed-off mark as on disk, read on first use (null until then), and the marks not written yet. */
   #durable: MarkSets | null = null;
   readonly #pending: MarkSets = { apps: new Set(), engines: new Set() };
@@ -158,14 +170,25 @@ export class Members implements RecordSource, CheckoutSource {
 
   /** A welcome: every session held now, and every session listed at the hub, is to be restated before `restated`. */
   welcome(): void {
-    this.#unrestated = new Set([...this.#members.keys(), ...this.#ctx.listed()]);
+    this.#unrestated = new Set(this.#members.keys());
+    this.#unreported = new Set(this.#ctx.listed());
   }
 
-  /** sminos's `restated`: what the restatement left out left. Nothing outside a restatement (a second `restated`). */
+  /**
+   * sminos's `restated`: what the restatement left out left. A held member not restated is `gone`, its listing with it;
+   * a listing no restated member reported under is withdrawn. Nothing outside a restatement (a second `restated`).
+   */
   async restated(): Promise<void> {
-    const left = this.#unrestated ?? new Set<string>();
+    const held = this.#unrestated ?? new Set<string>();
+    const listed = this.#unreported ?? new Set<string>();
     this.#unrestated = null;
-    for (const session of left) await this.gone(session);
+    this.#unreported = null;
+    for (const session of held) {
+      const listing = this.listingId(session);
+      if (listing !== null) listed.delete(listing); // `gone` settles it
+      await this.gone(session);
+    }
+    for (const listing of listed) await this.#withdraw(listing);
   }
 
   /** A `member` frame: the session's record as it stands. */
@@ -176,6 +199,11 @@ export class Members implements RecordSource, CheckoutSource {
     }
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
+    // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
+    // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
+    // and the frame is then the session's first.
+    const held = this.#members.get(member.session);
+    if (held !== undefined && held.lane !== member.lane) await this.gone(member.session);
     this.#unrestated?.delete(member.session);
     const before = this.#members.get(member.session);
     this.#members.set(member.session, member);
@@ -187,9 +215,9 @@ export class Members implements RecordSource, CheckoutSource {
       await this.#join(member.session);
       if (this.#apps.has(member.session)) this.#changed(member, undefined);
     }
-    // A lane B session the join placed is restated under its appSessionId too, which its listing went by.
+    // The listing the frame reports is restated: lane A its session id, lane B its appSessionId once the join placed it.
     const listing = this.listingId(member.session);
-    if (listing !== null) this.#unrestated?.delete(listing);
+    if (listing !== null) this.#unreported?.delete(listing);
     await this.#report(member);
   }
 
@@ -207,10 +235,7 @@ export class Members implements RecordSource, CheckoutSource {
     // A lane B app's listing outlives an engine session it superseded: while another member holds the listing (the
     // app's engine session now), retiring the old record withdraws and forgets nothing.
     if (listing !== null && !this.#listedBy(listing)) {
-      // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
-      await this.#ctx.listings.gone(listing);
-      this.#ctx.forget(listing);
-      this.#records.delete(listing); // U9: read again if the session comes back
+      await this.#withdraw(listing);
     } else if (listing !== null && member !== undefined) {
       // P5 Decision Log 190 (b): a superseded record that deferred to the one that left reports the listing now (the
       // spine's index can lag a `/clear`, so the record it deferred to may have been the older).
@@ -362,6 +387,7 @@ export class Members implements RecordSource, CheckoutSource {
   /** The connection ended (or the endpoint stops): a restatement it left unfinished withdraws nothing. */
   stop(): void {
     this.#unrestated = null;
+    this.#unreported = null;
   }
 
   // ---- Inside -----------------------------------------------------------------------------------------------------
@@ -370,6 +396,14 @@ export class Members implements RecordSource, CheckoutSource {
   #listedBy(listing: string): boolean {
     for (const session of this.#members.keys()) if (this.listingId(session) === listing) return true;
     return false;
+  }
+
+  /** A listing no member held now reports under: withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten. */
+  async #withdraw(listing: string): Promise<void> {
+    if (this.#listedBy(listing)) return;
+    await this.#ctx.listings.gone(listing);
+    this.#ctx.forget(listing);
+    this.#records.delete(listing); // U9: read again if the session comes back
   }
 
   /**

@@ -297,7 +297,7 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   await openSurface(page, 'Session info');
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const card = mainRegion(page).getByRole('region', { name: 'Session card' });
-  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Chat' }); // UX wave U10b (O-43): the bar
   const panelBefore = await regionWidth(page, 'panel');
   expect(panelBefore, 'the panel open beside the split').toBeGreaterThan(0);
 
@@ -314,7 +314,7 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   const editorBox = (await inMain(page, id).boundingBox())!;
   expect(Math.round(editorBox.width), 'the editor spans the main area').toBeGreaterThanOrEqual(Math.round(area.width) - 2);
 
-  await compact.getByRole('button', { name: 'Show session card' }).click();
+  await compact.getByRole('button', { name: 'Open conversation' }).click();
   await expect(card).toBeVisible();
   await expect(card.getByRole('textbox', { name: 'Message' })).toContainText('Keep this draft through reopening and restore');
   await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
@@ -341,7 +341,7 @@ test('a split of a session and a document: the card column stays through a focus
   await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click(); // focus on the session's pane
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const expand = header.getByRole('button', { name: 'Expand pane' });
-  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Chat' });
   await expect(sessionCards(page), 'the column is placed beside the split').toBeVisible();
   await expect(compact).toHaveCount(0);
   const before = (await expand.boundingBox())!;
@@ -423,38 +423,36 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
 // document keeps WR #12's reading column beside the conversation), then after Restore split, the panel back and the tier as it was in the split. What
 // the margin draws in each is asserted; the widths go to the report.
-type MarginReading = { host: number; body: number; scrollBox: number; page: number; conversation: number; tier: string | null; threads: number };
+// `current`: whether the app has read the layout measured here (ticket 760). The session space and the margin write the widths
+// they last drew from (`data-document-session-width`, `data-margin-measured`), each read the way the app reads it, in
+// the same evaluate as the reading.
+type MarginReading = { host: number; body: number; scrollBox: number; page: number; conversation: number; tier: string | null; threads: number; current: boolean };
 const marginOf = (scope: Locator): Promise<MarginReading> =>
   scope.evaluate((root) => {
     const scroll = root.querySelector<HTMLElement>('.ds-doc')!;
+    const space = root.querySelector<HTMLElement>('[data-document-session-width]');
+    const margin = root.querySelector<HTMLElement>('.doc-margin');
+    const scroller = margin?.parentElement;
+    const widths = margin && scroller && `${margin.closest<HTMLElement>('.doc-editor-body')?.clientWidth ?? scroller.clientWidth} ${scroller.clientWidth} ${margin.previousElementSibling!.getBoundingClientRect().width}`;
     return {
       host: Math.round(root.getBoundingClientRect().width),
       body: Math.round(root.querySelector('.doc-editor-body')!.getBoundingClientRect().width),
       scrollBox: scroll.clientWidth,
       conversation: Math.round(root.querySelector('[data-document-session-column]')?.getBoundingClientRect().width ?? 0),
       page: Math.round(root.querySelector('.ds-doc-page')!.getBoundingClientRect().width),
-      tier: root.querySelector('.doc-margin')?.getAttribute('data-margin-tier') ?? null,
+      tier: margin?.getAttribute('data-margin-tier') ?? null,
       threads: new Set(Array.from(root.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
+      current: (space === null || space.dataset.documentSessionWidth === String(space.clientWidth)) && (!widths || margin!.dataset.marginMeasured === widths),
     };
   });
-// A reading taken once it holds still: two consecutive polls (expect.poll's intervals, 100 ms and up) that agree. The tier
-// follows the widths through a ResizeObserver and a React commit, so a single read can land between them, the scroll box
-// already at its new width and the tier still the old layout's (measured: two frames at 1211 px drawn 'off' after ⌥⌘B).
-async function settled<T>(read: () => Promise<T>, message: string): Promise<T> {
-  let last: string | undefined;
+// A reading taken once the app has read the layout it is taken in (ticket 760): its `current`, polled until it holds. The
+// column and the tier follow the widths through a ResizeObserver, which reports only in a frame's rendering, so a read
+// can land after the layout changed and before the app has drawn from it (the docked panel's readings after ⌥⌘B). A
+// reading that merely holds still is no proof: a late frame holds the old drawing as still as a settled one. The wait
+// asks only that the app has read the layout, never what it drew from it, so what it drew is still the scene's to assert.
+async function settled<T extends { current: boolean }>(read: () => Promise<T>, message: string): Promise<T> {
   let value: T | undefined;
-  await expect
-    .poll(
-      async () => {
-        value = await read();
-        const now = JSON.stringify(value);
-        const same = now === last;
-        last = now;
-        return same;
-      },
-      { message, timeout: 10_000 },
-    )
-    .toBe(true);
+  await expect.poll(async () => (value = await read()), { message, timeout: 10_000 }).toMatchObject({ current: true });
   return value!;
 }
 
@@ -523,7 +521,7 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
   const split = await settled(() => marginOf(inMain(page, id)), '(b) split settled');
   await test.info().attach(`before-expand-${width}x${height}`, { body: await page.screenshot(), contentType: 'image/png' });
   await header.getByRole('button', { name: 'Expand pane' }).click();
-  await expect(mainRegion(page).getByRole('region', { name: 'Compact session composer' })).toBeVisible();
+  await expect(mainRegion(page).getByRole('region', { name: 'Chat' })).toBeVisible(); // UX wave U10b (O-43): the bar
   await expect.poll(async () => (await widths()).panel, 'Expand folds the right panel').toBeLessThanOrEqual(0);
   // Expand releases the conversation reservation; record both dimensions and screenshots for acceptance.
   const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
@@ -698,7 +696,8 @@ async function startOnScratch(code: CodeScratch): Promise<Page> {
 }
 
 // A row of Files' tree in the Files tab in view (one group in these scenes, so one tree is drawn).
-const treeRow = (page: Page, path: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-path="${path}"]`);
+// UX wave U6b-3a (Decision Log 14, ruling 1): a tree row by its `data-kind`, which a Changed row of the same path lacks
+const treeRow = (page: Page, path: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-kind][data-path="${path}"]`);
 const fileViewer = (scope: Locator, path: string) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
 const codeText = async (scope: Locator, path: string) => (await fileViewer(scope, path).locator('.cm-content').textContent()) ?? '';
 // The caret at the start of the file's first line, in the view under `scope`.

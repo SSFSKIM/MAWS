@@ -4,4 +4,5 @@ import type { CommandGrades } from '../grades';
 export const grades = {
   'mods.list': 'view',
   'mods.setSessionOverride': 'manage', // changes what the session runs with
+  'mods.setFoldSummaries': 'manage', // UX wave U2b: changes what the machine's next launches run with
 } as const satisfies CommandGrades<'mods'>;

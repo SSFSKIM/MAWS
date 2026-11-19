@@ -95,9 +95,10 @@ function thrownAt(error: Error): string {
 
 // `launch` (`appKitDefaults`): the app's AppKit defaults for this launch (classic scroll bars, for a scene that drags one).
 // Both options share the one argument, so either side's callers read as they did.
-export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, opts: { frames?: RegExp[] } & Pick<ShellLaunchOptions, 'appKitDefaults'> = {}): Promise<void> {
-  const { frames, ...launch } = opts;
-  const scratch = buildCodeScratch();
+// UX wave U6b-3a: `gitHome`, the scratch's git commands under an empty home of their own (`buildCodeScratch`).
+export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, opts: { frames?: RegExp[]; gitHome?: boolean } & Pick<ShellLaunchOptions, 'appKitDefaults'> = {}): Promise<void> {
+  const { frames, gitHome, ...launch } = opts;
+  const scratch = buildCodeScratch({ gitHome });
   prepare?.(scratch);
   let maws: MawsLaunch | null = null;
   try {
@@ -107,8 +108,10 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     const own: string[] = expected ? maws.consoleErrors() : [];
     if (expected) {
       const theFrames = (location: string, text: string) => FRAME_LOCATION.test(location) && expected.some((pattern) => pattern.test(`${location} ${text}`));
+      // a frame's error is listed with its location, as the patterns read it, so a failure shows which frame logged it
       page.on('console', (message) => {
-        if (message.type() === 'error' && !theFrames(message.location().url, message.text())) own.push(message.text());
+        const location = message.location().url;
+        if (message.type() === 'error' && !theFrames(location, message.text())) own.push(FRAME_LOCATION.test(location) ? `${location} ${message.text()}` : message.text());
       });
       page.on('pageerror', (error) => {
         if (!theFrames(thrownAt(error), error.message)) own.push(`uncaught: ${error.message}`);
@@ -133,7 +136,9 @@ export async function addTool({ page }: Product, name: 'Files' | 'Review'): Prom
   await openSurface(page, name);
 }
 
-export const treeRow = ({ page }: Product, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`);
+// UX wave U6b-3a (Decision Log 14, ruling 1): a tree row by its `data-kind`, which a row of the Changed group above the
+// tree, a `treeitem` with the same `data-path`, does not carry
+export const treeRow = ({ page }: Product, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-kind][data-path="${path}"]`);
 
 // Files open, the repository's root expanded, and each directory on the way to `relative` expanded; then its row.
 export async function reveal(p: Product, relative: string): Promise<Locator> {

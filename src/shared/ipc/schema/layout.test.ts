@@ -535,6 +535,8 @@ describe('layout value shapes', () => {
       'layout.openFile': 'main', // UX wave U6e: Open File…, the system's chooser, then main's grant
       'layout.frameFile': 'main', // UX wave U6b-2: a file frame's token, issued to the asking page
       'layout.releaseFrame': 'main', // UX wave U6b-2: its release by that page
+      'layout.openInApps': 'main', // UX wave U6b-4a: the apps Open in lists
+      'layout.openIn': 'main', // UX wave U6b-4a: the hand-off, after main's files.admit
     });
   });
 

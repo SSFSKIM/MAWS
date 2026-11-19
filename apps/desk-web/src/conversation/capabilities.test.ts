@@ -49,7 +49,8 @@ describe('capabilities', () => {
     expect(c.steer).toEqual({ can: true, reason: null, note: 'sent as a message: it arrives at its next tool round', path: 'send' });
     const resting = at({ group: 'idle', presence: { record: { status: 'idle' }, bridge: false } });
     expect(resting.steer).toEqual({ can: false, reason: 'maws-45 is idle: Send starts a turn' });
-    expect(c.retire.note).toBe('records it retired; the process stays yours to close');
+    // True of a session its human opened and of a sminos thread alike (the MW execution document, Interfaces §H).
+    expect(c.retire.note).toBe('records it retired; it returns only if its human reopens it');
   });
 
   it('a machine offline: send goes to the log, everything else fails at once', () => {
@@ -72,7 +73,8 @@ describe('capabilities', () => {
   it('an ended session its machine serves the transcript of: Resume, and a send that is only recorded unless a seat resumes to read it', () => {
     const terminal = at({ group: 'ended', presence: { record: null, bridge: false }, transcript: 'served' });
     expect(terminal.resume).toEqual({ can: true, reason: null });
-    expect(terminal.send.note).toBe('recorded, not delivered: a closed terminal session is reopened only by Resume');
+    // Under every sminos in the field: one from before threads, a thread with no wake, a thread its machine wakes (§H).
+    expect(terminal.send.note).toBe('recorded: mini wakes it for this, or holds it until its human reopens it');
     expect(terminal.steer).toEqual({ can: false, reason: 'maws-45 is not running' });
     const seat = at({ group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false }, transcript: 'served' });
     expect(seat.send.note).toBe('resumes the seat to read it');

@@ -9,6 +9,7 @@
 // (§G's table); the endpoint's own take no grade (`null`): the grant's or the state's own signatures are the authority.
 import type { Feed, ReadStreamKind } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
+import { OUTSIDE_ACTS } from '@shared/files/outside';
 import type { GradeSpec } from '@shared/ipc/grades';
 
 /**
@@ -84,6 +85,14 @@ const eachSession: OfferRow = { kind: 'call', executor: 'machine', target: 'each
 const artifact = (kind: 'call' | 'act', executor: 'engine-host' | 'machine' = 'engine-host'): OfferRow => ({ kind, executor, target: 'artifact' });
 /** A terminal's act on the machine (`shell`, the registry's grade), under the pty host's ledger (`pty.op`). */
 const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
+/**
+ * UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 1, §C): a file
+ * outside a session's folders, read, listed, chosen and saved from another machine: the terminal's own row, run by the
+ * machine's services. Every member the grading function reads is the row it is handed, so a change of the terminal's
+ * row moves the four with it.
+ */
+export const outsideRows = (terminal: OfferRow): Record<(typeof OUTSIDE_ACTS)[number], OfferRow> =>
+  Object.fromEntries(OUTSIDE_ACTS.map((name) => [name, { ...terminal, executor: 'machine' }])) as Record<(typeof OUTSIDE_ACTS)[number], OfferRow>;
 /**
  * P5 O7 M5b: the read open's name for each of its kinds, the stream row that admits it (an endpoint name, not a
  * registry command: its `accepts` reads the open's kind fields).
@@ -321,6 +330,9 @@ export const OFFERS: Offers = {
     'pty.attach': pty,
     'pty.kill': pty,
     'pty.listFor': pty,
+    // UX wave U6f: the open, the chooser's listing, the pick and the save of a file outside a session's folders, each the
+    // terminal's row with the services as its executor (outsideRows), behind `rl2.outside-files`
+    ...outsideRows(pty),
     // A port of the machine's loopback forwarded to the device: the endpoint's own act (no registry name), `shell` on the
     // machine; its result names the forward, which a `tcp` stream names (forwards.ts).
     'forward.open': { kind: 'act', executor: 'endpoint', target: 'machine', grade: 'shell', accepts: isForwardArgs },

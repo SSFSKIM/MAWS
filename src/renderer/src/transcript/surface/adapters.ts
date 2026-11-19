@@ -2,14 +2,16 @@
 // The source turn retains the original X1 tool input and output; the compact cell detail alone is not that contract.
 import { carriedOf } from '@shared/engine/arrival-schema';
 import { handbackReport, messageText, parsePeerMessage, peerLabel } from '@shared/engine/peer-envelope';
-import { engineQuestionsOf, type TranscriptProps, type TranscriptSite } from '@shared/engine/surface-rows';
+import { engineQuestionsOf, type TranscriptProps, type TranscriptSite, type TurnDurationProps } from '@shared/engine/surface-rows';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
 import { cellOf, turnContextOf, type ArtifactTitles, type ToolRecord, type TurnContext } from '../model/cells';
-import { artifactTitlesIn, turnCommandLine } from '../model/derive'; // UX wave U2; U3b
+import { tableRowOf } from '../model/classify'; // UX wave U2b (M5's fix wave 2)
+import { artifactTitlesIn, turnCommandLine, turnRows } from '../model/derive'; // UX wave U2; U3b; U2b
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
+import { carriesReceipt } from '../../owner/view/mirror'; // UX wave U2b (R13)
 
 export interface RowInput<C extends TranscriptSite> { instanceId: string; props: TranscriptProps[C] }
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -28,20 +30,45 @@ export function userInput(row: RowOf<'user'>, turn: TurnState | undefined, revea
   return { instanceId: row.messageUuid ?? row.id, props: { text: row.text, origin: { kind }, isExpanded: true } };
 }
 
+// UX wave U2b (panel finding 4): what a text's ask reads of its turn's live text blocks, indexed in one pass for each live
+// map (the reducer replaces it whenever the turn changes), so a turn's text rows do not each walk its blocks: by API
+// message, its first text block's index; by API message and message uuid, its first block's; by API message and row,
+// the first such block's delivered text.
+interface TextBlocks { firstOfApi: Map<string, number>; firstOfMessage: Map<string, number>; sourceOf: Map<string, string | undefined> }
+const textBlocksCache = new WeakMap<TurnState['live'], TextBlocks>();
+const pairKey = (a: string, b: string) => `${a}\u0000${b}`;
+function textBlocksOf(live: TurnState['live']): TextBlocks {
+  const cached = textBlocksCache.get(live);
+  if (cached) return cached;
+  const index: TextBlocks = { firstOfApi: new Map(), firstOfMessage: new Map(), sourceOf: new Map() };
+  const lower = (map: Map<string, number>, key: string, value: number) => {
+    const known = map.get(key);
+    if (known === undefined || value < known) map.set(key, value);
+  };
+  for (const b of live.values()) {
+    if (b.blockType !== 'text' || b.apiMessageId === null) continue;
+    lower(index.firstOfApi, b.apiMessageId, b.blockIndex);
+    if (typeof b.messageUuid === 'string') lower(index.firstOfMessage, pairKey(b.apiMessageId, b.messageUuid), b.blockIndex);
+    const rowKey = pairKey(b.apiMessageId, b.rowId);
+    if (!index.sourceOf.has(rowKey)) index.sourceOf.set(rowKey, b.sourceText);
+  }
+  textBlocksCache.set(live, index);
+  return index;
+}
+
 export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'AssistantMessage'> | null {
   if (!row.markdown.trim() || row.id === revealed) return null;
   const identity = row.id.slice(row.id.indexOf(':') + 1);
   const api = identity.slice(0, identity.lastIndexOf(':'));
-  const peers = [...(turn?.live.values() ?? [])].filter((b) => b.blockType === 'text' && b.apiMessageId === api);
-  const firstIndex = peers.length ? Math.min(...peers.map((b) => b.blockIndex)) : row.blockIndex;
-  const sameMessage = peers.filter((b) => b.messageUuid === row.messageUuid);
-  const firstMessageBlock = sameMessage.length ? Math.min(...sameMessage.map((b) => b.blockIndex)) : row.blockIndex;
+  const blocks = turn === undefined ? undefined : textBlocksOf(turn.live);
+  const firstIndex = blocks?.firstOfApi.get(api) ?? row.blockIndex;
+  const firstMessageBlock = (row.messageUuid === null ? undefined : blocks?.firstOfMessage.get(pairKey(api, row.messageUuid))) ?? row.blockIndex;
   // The terminal passes messageUuid unqualified (chunk-5s6b4r7q, af -> Qs). MAWS can mount multiple blocks of that
   // UUID together: keep its first identity and qualify later ones so one instance never races another's props.
   const instanceId = row.messageUuid === null ? row.id : row.blockIndex === firstMessageBlock ? row.messageUuid : `${row.messageUuid}:text:${row.blockIndex}`;
   // MessageDisplay may replace tags with ANSI headers that another mod understands. Native markdown is stripped;
   // the hook contract is the engine's delivered block, not MAWS's plain drawing of it.
-  const text = peers.find((block) => block.rowId === row.id)?.sourceText ?? row.markdown;
+  const text = blocks?.sourceOf.get(pairKey(api, row.id)) ?? row.markdown;
   return { instanceId, props: { text, isFirstOfReply: row.blockIndex === firstIndex } };
 }
 
@@ -168,7 +195,7 @@ function bounded(value: unknown, depth = 1): Sized | null {
 // other ask does, for the run as a whole: a run that is the target or holds it asks nothing. `revealed` is not handed to
 // `toolInputs`, since an ask that left the revealed call out would name another first call, and the instance id is
 // made from the first call. The open state sent is the run's own.
-export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pending: TranscriptState['pending'], revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
+export function groupInput(row: Pick<RowOf<'group'>, 'id' | 'cells' | 'expanded'>, turn: TurnState | undefined, pending: TranscriptState['pending'], revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
   if (revealed !== undefined && (row.id === revealed || row.cells.some((cell) => cell.id === revealed))) return null;
   const tools = row.cells.flatMap((cell) => toolInputs(cell, turn));
   if (!tools.length) return null;
@@ -187,6 +214,23 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
     }
   }
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
+}
+
+// UX wave U2b, M5's fix waves 1 and 2 (the execution document, §E "A call's ask never changes kind over its row's
+// life"): a call whose tool joins runs is drawn alone only once its run of one is no longer active (a turn's end,
+// following text), or once a result has made it standalone (an image, a refusal that is not a stopped member), after it
+// was asked as a run. Its kind is its tool's own row of the classification table (`tableRowOf`), which no result moves,
+// not the cell's current `classification.groupable`, which a result does.
+export const asksAsRun = (cell: Cell): boolean => tableRowOf(cell.toolName).groupable;
+
+// Such a standalone row asks its run's site, as it did while its run stood: `ToolGroup` under its run's id with its
+// calls, the run's open state its own (`expandedGroups`, under the run's row id). Read from the cell alone, so a window
+// opened later, or the file's route, asks what the live window asked. Null for a call that never joins a run (it asks
+// `ToolUse`), and where the run would ask nothing (a waiting request, the jump's target).
+export function standaloneRunInput(cell: RowOf<'cell'>, turn: TurnState | undefined, state: TranscriptState, revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
+  if (!asksAsRun(cell)) return null;
+  const id = rowId.group(cell.id);
+  return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(id) }, turn, state.pending, revealed);
 }
 
 // UX wave U3b (decision 5): the command is the run the output's event carries, else, for an output under its command's
@@ -242,19 +286,109 @@ type UserMessageEvent = Extract<SessionEvent, { kind: 'user.message' }>;
 /**
  * What the row's ask depends on beyond the turn: the tab's revealed jump target (which asks no site), whether its line is
  * open, and the turn's rows as drawn (`turnRows`: after its fold), among whose notices a carrier's drawing owner is
- * elected; absent, every notice of the carrier is drawn (an opened turn).
+ * elected; absent, every notice of the carrier is drawn (an opened turn). UX wave U2b: `state`, where an answer's notice
+ * reads whether its question's row carries the receipt (R13); absent, it does not.
  */
-export interface ArrivalAsk { revealed: RowId | CellId | undefined; expanded: boolean; drawn?: readonly Row[] }
+export interface ArrivalAsk { revealed: RowId | CellId | undefined; expanded: boolean; drawn?: readonly Row[]; state?: TranscriptState }
 
-/** The UserMessage ask of a message line or a notice; null where it asks none. */
-export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { revealed, expanded, drawn }: ArrivalAsk): RowInput<'UserMessage'> | null {
+/**
+ * The UserMessage ask of a message line or a notice; null where it asks none. UX wave U2b (the execution document, §E;
+ * R3 and R13): a row the engine's props are not given for asks with its own line as text and the engine's origin for its
+ * class, under an anchored id (`ownLineInput`), so that where the mod draws it folds or stays by its own ask; an
+ * answer's notice asks so only where its question's row carries the receipt, and asks nothing and stays where it does
+ * not.
+ */
+export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { revealed, expanded, drawn, state }: ArrivalAsk): RowInput<'UserMessage'> | null {
   if (!turn || row.id === revealed) return null;
   const carried = row.kind === 'notice' ? noticeCarrier(row, turn) : null;
   if (carried !== null && drawingOwner(carried, revealed, drawn) !== row.id) return null; // another notice asks for the carrier
+  if (row.kind === 'notice' && row.class === 'answer') return row.toolUseId !== null && receiptCarried(state, row.toolUseId) ? ownLineInput(row, turn, expanded, carried?.carrier ?? null) : null;
+  // the session's own sending (to a subagent, or a message tool's send to another session), which no arrival carries
+  if (row.kind === 'agent_message' && (row.direction === 'to_child' || row.peer?.sender === null)) return null;
   const carrier = row.kind === 'notice' ? carried?.carrier ?? null : messageCarrier(row, turn);
-  if (carrier === null) return null;
-  const props = engineUserProps(messageText(carrier.content), expanded, row.kind === 'agent_message' ? row : null);
-  return props === null ? null : { instanceId: carrier.messageUuid ?? row.id, props };
+  const props = carrier === null ? null : engineUserProps(messageText(carrier.content), expanded, row.kind === 'agent_message' ? row : null);
+  return props !== null ? { instanceId: carrier!.messageUuid ?? row.id, props } : ownLineInput(row, turn, expanded, carrier);
+}
+
+// UX wave U2b (the execution document, §E, "An ask's id where the transcript holds no record of the row"; check 1's C3 and
+// C5): the row's own line under `<anchor>~<the row's id>`, its anchor the id the transcript file holds of the nearest
+// event before the row's own that a row asks under (a message's uuid, a call's id), which the mod places it after; the
+// origin the engine gives its class: a task's end `task-notification` with its task, a scheduled trigger
+// `scheduled-trigger`, the bridge's wake and an answer's delivery `plugin` (named `sminos`, the bridge), a message
+// between sessions or from a subagent `peer` with `from`. Null where no such event stands before it.
+function ownLineInput(row: ArrivalRow, turn: TurnState, expanded: boolean, carrier: UserMessageEvent | null): RowInput<'UserMessage'> | null {
+  const anchor = anchorBefore(turn, carrier ?? sourceOf(row, turn));
+  if (anchor === null) return null;
+  return { instanceId: `${anchor}~${row.id}`, props: { text: row.text, isExpanded: expanded, ...originOf(row) } };
+}
+
+function originOf(row: ArrivalRow): Pick<TranscriptProps['UserMessage'], 'origin' | 'task' | 'from'> {
+  if (row.kind === 'agent_message') return { origin: { kind: 'peer' }, from: { name: speakerName(row.peer?.sender?.name ?? row.from?.subagentType ?? row.from?.name ?? '', 'peer') } };
+  switch (row.class) {
+    case 'task': return { origin: { kind: 'task-notification' }, task: { ...(row.taskId !== null && { id: row.taskId }), ...(row.outcome !== null && { status: row.outcome }), ...(row.toolUseId !== null && { toolUseId: row.toolUseId }) } };
+    case 'schedule': return { origin: { kind: 'scheduled-trigger' } };
+    case 'wake': case 'answer': return { origin: { kind: 'plugin', name: 'sminos' } };
+  }
+}
+
+// The event a row with no carrier was derived from: an older host's task end, a subagent's message.
+function sourceOf(row: ArrivalRow, turn: TurnState): SessionEvent | null {
+  return turn.events.find((e) => (e.kind === 'task.notification' && rowId.notice(null, e.id, 0) === row.id) || (e.kind === 'subagent.message' && rowId.agentMessage(e.id) === row.id)) ?? null;
+}
+
+// The id the transcript file holds of the nearest event before `at` that a row asks under, scanning back from it: a
+// prompt's or an arrival's uuid, a text's or a thought's uuid, a call's id. The turn's last such id where `at` is none.
+function anchorBefore(turn: TurnState, at: SessionEvent | null): string | null {
+  const end = at === null ? -1 : turn.events.indexOf(at);
+  for (let i = (end < 0 ? turn.events.length : end) - 1; i >= 0; i -= 1) {
+    const e = turn.events[i]!;
+    if (e.kind === 'tool.use') return e.toolUseId;
+    if (e.kind === 'user.message' && e.messageUuid !== null) return e.messageUuid;
+    if (e.kind === 'assistant.block.complete' && e.messageUuid !== null && (e.block.type === 'text' || e.block.type === 'thinking')) return e.messageUuid;
+  }
+  return null;
+}
+
+// R13: whether the question's or the ask's row for the call carries the answer's receipt, read from the rows its turn
+// draws (the mirror's rule, `carriesReceipt`).
+function receiptCarried(state: TranscriptState | undefined, call: string): boolean {
+  const turn = state?.index.toolUses.get(call as never);
+  const rows = state === undefined || turn === undefined ? undefined : turnRows(state, turn);
+  return rows?.some((row) => (row.kind === 'question' || row.kind === 'ask') && row.toolUseId === call && carriesReceipt(row)) ?? false;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// UX wave U2b (the execution document, §E; R3): the asks of the rows the to-human view can fold that asked no site
+// before, each made whenever a surface is attached, whoever draws the view; the tab's revealed jump target asks nothing.
+
+/** A thought outside a run: `AssistantMessage` with the engine's props for one, under the thought row's own uuid, bare (check 1's C2); none before it has text. */
+export function thinkingInput(row: RowOf<'thinking'>, revealed?: RowId | CellId): RowInput<'AssistantMessage'> | null {
+  if (row.messageUuid === null || !row.text.trim() || row.id === revealed) return null;
+  return { instanceId: row.messageUuid, props: { text: row.text, isFirstOfReply: false, isSummary: true } };
+}
+
+/** A call a row of its own draws (a message tool's message, an agent listing, a browser action): `ToolUse` with the call's props, as a sent message's are built; no `ToolResult` is asked. */
+export function callInput(row: RowOf<'to_human'> | RowOf<'agent_list'> | RowOf<'browser_action'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'ToolUse'> | null {
+  if (!turn || row.id === revealed) return null;
+  const rec = toolRecords(turn).get(row.toolUseId);
+  return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContextOf(turn), false)) };
+}
+
+// The word the engine's closing line carries for a finished turn (check 1 asked it so).
+const TURN_WORD = 'Worked';
+/** A finished turn's duration, as its line reads it. */
+export const turnDurationMs = (row: RowOf<'divider'>): number => row.summary.durationMs ?? (row.endedAt === null ? 0 : Date.parse(row.endedAt) - Date.parse(row.startedAt));
+
+/**
+ * A closed turn's line: `TurnDuration` (asked through `session.ui.renderSite`) under `<anchor>~turn`, its anchor the uuid
+ * of the message that opens the turn, since MAWS draws the line at the head of the turn's work and the mod reads the turn
+ * forward from it (§E; §I, item 5; check 1's C1); the engine's props for its closing line, expanded. The running turn's
+ * line asks nothing new: it is what shows that the session works.
+ */
+export function turnLineInput(row: RowOf<'divider'>, turn: TurnState | undefined, revealed?: RowId | CellId): { instanceId: string; props: TurnDurationProps } | null {
+  if (!turn || row.state === 'working' || row.id === revealed) return null;
+  const opener = turn.events.find((e): e is UserMessageEvent => e.kind === 'user.message' && e.messageUuid !== null);
+  return opener === undefined ? null : { instanceId: `${opener.messageUuid}~turn`, props: { word: TURN_WORD, durationMs: turnDurationMs(row), isExpanded: true } };
 }
 
 /** The ToolUse ask of a message the agent sent: its call's props, as a cell's call asks; null for any other message line. */
@@ -269,12 +403,18 @@ export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefin
  * The ask a notice follows: the engine mounts one UserMessage site per carrier (its task renderer near line 925119), so of
  * a carrier's notices the first drawn and not revealed asks, with its own line's open state, and draws the answer; each
  * other one asks nothing and follows that ask's outcome by its instance id. Null for the notice that asks, for the
- * revealed one, and for a notice whose carrier is its only notice. `drawn` as in ArrivalAsk.
+ * revealed one, and for a notice whose carrier is its only notice. `drawn` and `state` as in ArrivalAsk. UX wave U2b
+ * (panel finding 6): the id is the asking notice's own ask's (`arrivalInput` on its row, which `drawn` holds), so a
+ * carrier the engine draws through no site, which its first notice asks as its own line under an anchored id, is followed
+ * under that id; an asking notice that asks nothing (no anchor, an answer whose receipt no row carries) is followed by
+ * none, and without `drawn` its row is not in hand, so none either.
  */
-export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined, drawn?: readonly Row[]): string | null {
+export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined, drawn?: readonly Row[], state?: TranscriptState): string | null {
   const carried = turn === undefined || row.id === revealed ? null : noticeCarrier(row, turn);
   const asking = carried === null ? undefined : drawingOwner(carried, revealed, drawn);
-  return carried === null || asking === undefined || asking === row.id ? null : carried.carrier.messageUuid ?? asking;
+  if (carried === null || asking === undefined || asking === row.id) return null;
+  const owner = drawn?.find((r): r is RowOf<'notice'> => r.kind === 'notice' && r.id === asking);
+  return owner === undefined ? null : (arrivalInput(owner, turn, { revealed, expanded: false, drawn, state })?.instanceId ?? null);
 }
 
 // The carrier's drawing owner (the whole-branch review's finding 5): its first notice that the turn draws after its fold
@@ -291,7 +431,8 @@ function drawnIds(rows: readonly Row[]): ReadonlySet<RowId> {
 }
 
 // The message a line stands for: a peer's by its companion's uuid, a subagent's the envelope its `subagent.message` was read from.
-function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessageEvent | null {
+// Exported for the record line's label (M7; §M), which places a row under the id its ask names.
+export function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessageEvent | null {
   const messages = turn.events.filter((e): e is UserMessageEvent => e.kind === 'user.message');
   if (row.peer !== undefined) return row.peer.sender === null || row.peer.messageUuid === null ? null : (messages.find((e) => e.messageUuid === row.peer!.messageUuid) ?? null);
   const at = turn.events.findIndex((e) => e.kind === 'subagent.message' && e.direction === 'from_child' && rowId.agentMessage(e.id) === row.id);
@@ -306,15 +447,15 @@ function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessa
 }
 
 // The synthetic message whose arrival the notice draws, the first that gives its id, as the derivation keeps the first;
-// with the notices it draws, in its order (the ids it gives that no earlier message gave).
-function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): NoticeCarrier | null {
+// with the notices it draws, in its order (the ids it gives that no earlier message gave). Exported as `messageCarrier` is.
+export function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): NoticeCarrier | null {
   return noticeIndex(turn.events).get(row.id) ?? null;
 }
 
 // The whole-branch review's finding 6: every notice's carrier in a turn, built once per turn's event list (a turn's list
 // is a new array whenever the reducer changes it) and read by every row of the turn, so a streaming update that leaves
 // the list untouched builds nothing for it.
-interface NoticeCarrier { carrier: UserMessageEvent; ids: RowId[] }
+export interface NoticeCarrier { carrier: UserMessageEvent; ids: RowId[] }
 const noticeIndexMemo = new WeakMap<readonly SessionEvent[], ReadonlyMap<RowId, NoticeCarrier>>();
 let indexBuilds = 0;
 /** How many times a turn's notice-to-carrier index was built: for tests, which count builds rather than time them. */

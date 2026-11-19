@@ -19,9 +19,9 @@ import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
 import { RecordFold } from '../../../owner/view/RecordFold'; // UX wave U2b
 import { ReportOnly } from '../../../owner/view/Message'; // UX wave U2b
-import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
+import { DrawnAnswerActions, FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCallRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceThinkingRow, SurfaceTurnLine, SurfaceUserRow } from '../../surface/Rows'; // UX wave U2b: the mod route's asks (§E)
+import { SurfaceFollower } from '../../surface/follow'; // UX wave U2b
 import { CutTextRow } from './AssistantText'; // P5 O9
-import { AnswerActions } from './AnswerActions'; // UX wave U3b
 import { ActivityRow } from './Activity'; // UX wave U3b (M4)
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
@@ -33,17 +33,16 @@ import { PlanRow } from './Plan';
 import { RequestSlotRow } from './RequestSlot';
 import { WaitingAsk, WaitingRow } from './WaitingForm'; // UX wave U1b
 import { SubagentRow } from './Subagent';
-import { ThinkingRow } from './Thinking';
 import { TimeRow } from './Time';
 import { ToHumanMessageRow } from '../../../owner/to-human/MessageRow'; // P4-R7
 
 function body(row: Row) {
   switch (row.kind) {
-    case 'time': return <TimeRow row={row} />;
+    case 'time': return <SurfaceFollower row={row}><TimeRow row={row} /></SurfaceFollower>; // UX wave U2b (§E): drawn while the row after it is
     case 'user': return <SurfaceUserRow row={row} />;
     case 'assistant_text': return <ReportOnly value={row.reportOnly === true}>{row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />}</ReportOnly>; // P5 O9: a cut reply is no answer a surface draws; UX wave U2b: a closed stretch's head draws only its messages, a cut one's under its note
-    case 'thinking': return <ThinkingRow row={row} />;
-    case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
+    case 'thinking': return <SurfaceThinkingRow row={row} />; // UX wave U2b (§E)
+    case 'divider': return <><FoldedAssistantProbes row={row} /><SurfaceTurnLine row={row}><DividerRow row={row} /></SurfaceTurnLine></>; // UX wave U2b (§E): a closed turn's line asks TurnDuration
     case 'group': return <SurfaceGroupRow row={row} />;
     case 'cell': return <CellRow row={row} />;
     case 'receipt': return null; // legacy X3 row; file changes are tool rows now
@@ -64,12 +63,12 @@ function body(row: Row) {
     case 'delivery': return <DeliveryRowView row={row} />;
     // E1 end
     case 'side_thread': return <SideThreadRow row={row} />; // E3
-    case 'agent_list': return <AgentListRow row={row} />; // E7
+    case 'agent_list': return <SurfaceCallRow row={row}><AgentListRow row={row} /></SurfaceCallRow>; // E7; UX wave U2b (§E): asks ToolUse
     case 'artifact': return <ArtifactRowView row={row} />; // E2
-    case 'browser_action': return <BrowserActionRow row={row} />; // E4c
-    case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
+    case 'browser_action': return <SurfaceCallRow row={row}><BrowserActionRow row={row} /></SurfaceCallRow>; // E4c; UX wave U2b (§E): asks ToolUse
+    case 'browser_activity': return row.toolUseId === null ? <BrowserActivityRow row={row} /> : <SurfaceFollower row={row}><BrowserActivityRow row={row} /></SurfaceFollower>; // E13; UX wave U2b (point 24): under a call, drawn while its call's row is
     case 'record_fold': return <RecordFold row={row} />; // UX wave U2b: placed by the mirror
-    case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
+    case 'to_human': return <SurfaceCallRow row={row}><ToHumanMessageRow row={row} /></SurfaceCallRow>; // P4-R7: a message tool's message; UX wave U2b (§E): asks ToolUse
     case 'activity': return <ActivityRow row={row} />; // UX wave U3b (M4): placed by the view at the drawn list's end
   }
 }
@@ -79,7 +78,8 @@ function body(row: Row) {
 const opensTurn = (row: Row, rows: readonly Row[] | undefined) => rows?.find((candidate) => candidate.turnId === row.turnId && candidate.kind !== 'time')?.id === row.id;
 
 // Keep one frame/body lineage when a surface answer moves a row into or out of the work area. UX wave U3b (Interfaces
-// §C): an answer's action row follows its body, drawn when the mount placed one on it.
+// §C): an answer's action row follows its body, drawn when the mount placed one on it; UX wave U2b (reported point 23):
+// and only while its site's answer draws the body.
 export function RowView({ row }: { row: Row }) {
   const motion = useWorkMotion();
   const work = inWorkArea(row);
@@ -89,7 +89,7 @@ export function RowView({ row }: { row: Row }) {
   return (
     <RowFrame row={row} frameRef={ref}>
       {mounted && body(row)}
-      {mounted && row.kind === 'assistant_text' && <AnswerActions row={row} />}
+      {mounted && row.kind === 'assistant_text' && <DrawnAnswerActions row={row} />}
     </RowFrame>
   );
 }

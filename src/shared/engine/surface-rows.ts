@@ -57,7 +57,9 @@ const schemas = {
     task: z.strictObject({ id: z.string().optional(), status: z.string().optional(), type: z.string().optional(), toolUseId: z.string().optional(), durationMs: z.number().optional() }).optional(),
     from: z.strictObject({ name: z.string() }).optional(), ...viewport,
   }),
-  AssistantMessage: z.strictObject({ text: z.string(), isFirstOfReply: z.boolean(), ...viewport }),
+  // UX wave U2b (the execution document, §E): a thought is drawn through the site with `isSummary`, as the engine draws one
+  // (`cli.pretty.js` of 2.1.322, line 923794; check 1's C2 recorded the site taking it from a surface)
+  AssistantMessage: z.strictObject({ text: z.string(), isFirstOfReply: z.boolean(), isSummary: z.boolean().optional(), ...viewport }),
   ToolUse: CallSchema.extend({ tool_use_id: z.string(), ...viewport }),
   ToolResult: z.strictObject({ tool_use_id: z.string(), tool: z.string(), output: z.unknown(), isErrored: z.boolean(), ...viewport }),
   ToolGroup: z.strictObject({ calls: z.array(CallSchema), isActive: z.boolean(), isExpanded: z.boolean(), ...viewport }),
@@ -70,9 +72,16 @@ const schemas = {
 
 export type TranscriptProps = { [C in TranscriptSite]: z.infer<(typeof schemas)[C]> };
 
+// UX wave U2b (the execution document, §E and §F): the turn's closing line, which the engine draws through `TurnDuration`
+// under the id of the transcript's `turn_duration` row with these props (line 929014; check 1's C1 recorded the site
+// taking them from a surface). It is no member of the wire's closed set of `session.ui.render` sites: MAWS asks it
+// through `session.ui.renderSite` (`RENDER_SITE_ONLY`, surface.ts), and draws its own line in the answer's engine slot,
+// taking no rewrite of these props.
+export interface TurnDurationProps { word: string; durationMs: number; isExpanded: boolean }
+
 const READ_ONLY: { [C in TranscriptSite]: readonly (keyof TranscriptProps[C])[] } = {
   UserMessage: ['origin', 'isExpanded', 'task', 'from', 'onScreen'],
-  AssistantMessage: ['onScreen'],
+  AssistantMessage: ['isSummary', 'onScreen'],
   ToolUse: ['tool_use_id', 'onScreen'],
   ToolResult: ['tool_use_id', 'tool', 'isErrored', 'onScreen'],
   ToolGroup: ['onScreen'],

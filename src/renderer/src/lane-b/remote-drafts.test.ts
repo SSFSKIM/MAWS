@@ -12,7 +12,7 @@ import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { rememberingRemoteDrafts, rememberRemoteDraft, resetRemoteDrafts } from '../composer/editor/drafts';
 import { readerRowsOf, resetReaderRows } from './reader-rows';
-import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS, unsavedRemoteDraft } from './remote-drafts';
+import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS, saveRemoteDraftOnce, unsavedRemoteDraft } from './remote-drafts';
 import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { useNotices } from '../stores/notices';
 import { useMachines } from '../stores/machines';
@@ -82,6 +82,24 @@ describe('a machine that keeps each member’s draft', () => {
       },
     };
   }
+
+  // UX wave U6b-5a (finding 4; Interfaces §C): the one-shot save may name "none" (`null`), which a machine takes only
+  // where nothing was ever kept, and its answer is the caller's.
+  it('sends a one-shot save naming none, taken where nothing was kept and refused stale where something is', async () => {
+    const machine = machineKeeping();
+    const first = draft('the first words');
+    const answer = saveRemoteDraftOnce(machine.fake.client, REMOTE, first, null);
+    await flush();
+    expect(machine.saved()).toEqual([{ appSessionId: REMOTE, draft: first, replaces: null }]);
+    await machine.take();
+    expect(await answer).toEqual({ ok: true, value: undefined });
+    expect(textOf(machine.kept())).toBe('the first words');
+    const second = saveRemoteDraftOnce(machine.fake.client, REMOTE, draft('over it'), null);
+    await flush();
+    await machine.take();
+    expect(await second).toMatchObject({ ok: false, error: { message: STALE_DRAFT_WORDS } }); // the control: a draft is kept now
+    expect(textOf(machine.kept())).toBe('the first words');
+  });
 
   it('saves it there, and a relaunch loads it back from there', async () => {
     const machine = machineKeeping();
@@ -535,5 +553,84 @@ describe('a take-back’s save taken over an older save past main’s bound', ()
     expect(await claim).toBe(true);
     await flush();
     expect((fake.invoked('session.drafts.set') as Saved[]).map((input) => textOf(input.draft))).toEqual(['typed', 'staged', 'typed after']);
+  });
+});
+
+// Fix wave 3 (the delta review's H1 and H2, rewritten to one queue): each draft goes in the session's order, the newest
+// in place of those waiting, and a bridge that throws leaves the queue able to take the next save.
+describe('one queue for each session’s saves', () => {
+  function machineKeepingOne() {
+    let kept: Draft | null = null;
+    let answered = 0;
+    const fake = fakeClient({ 'session.drafts.get': () => kept });
+    const saved = () => fake.invoked('session.drafts.set') as Saved[];
+    return {
+      fake,
+      kept: () => kept,
+      take: async () => {
+        const input = saved()[answered]!;
+        answered += 1;
+        kept = input.draft;
+        await fake.reply('session.drafts.set', undefined);
+        await flush();
+      },
+      lose: async () => {
+        answered += 1;
+        await fake.fail('session.drafts.set', 'Not sent: mini is offline', 'host_unavailable');
+        await flush();
+      },
+    };
+  }
+
+  it('a later save that fails leaves the one the machine took kept there, and the newer one held in this window', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const machine = machineKeepingOne();
+    const port = portOf(machine.fake);
+    port.save(draft('one'));
+    port.save(draft('one two')); // waits while the first is out
+    await flush();
+    await machine.take();
+    await machine.lose();
+    expect(textOf(machine.kept())).toBe('one');
+    expect(textOf(unsavedRemoteDraft(REMOTE))).toBe('one two');
+  });
+
+  it('a save passed over by a newer one is never sent: the newest goes after the one out', async () => {
+    const machine = machineKeepingOne();
+    const port = portOf(machine.fake);
+    port.save(draft('one'));
+    port.save(draft('one two')); // never sent: the next is newer
+    port.save(draft('one two three'));
+    await flush();
+    await machine.take();
+    await machine.take();
+    expect((machine.fake.invoked('session.drafts.set') as Saved[]).map((input) => textOf(input.draft))).toEqual(['one', 'one two three']);
+    expect(textOf(machine.kept())).toBe('one two three');
+  });
+
+  it('a bridge that throws is a failed write: the queue is not left out, and takes the next save', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const machine = machineKeepingOne();
+    let throws = true;
+    const client = {
+      ...machine.fake.client,
+      invoke: (name: string, input: unknown, opts?: unknown) => {
+        if (name === 'session.drafts.set' && throws) {
+          throws = false;
+          return Promise.reject(new Error('the bridge failed'));
+        }
+        return (machine.fake.client.invoke as (n: string, i: unknown, o?: unknown) => Promise<unknown>)(name, input, opts);
+      },
+    } as typeof machine.fake.client;
+    const port = rememberingRemoteDrafts(local(), REMOTE, () => true, client);
+    port.save(draft('one'));
+    await flush();
+    await flush();
+    expect(textOf(unsavedRemoteDraft(REMOTE))).toBe('one'); // not taken, still this window's
+    port.save(draft('one two'));
+    await flush();
+    await machine.take();
+    expect(textOf(machine.kept())).toBe('one two');
+    expect(unsavedRemoteDraft(REMOTE)).toBeUndefined();
   });
 });

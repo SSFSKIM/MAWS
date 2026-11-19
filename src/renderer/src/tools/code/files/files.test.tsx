@@ -13,17 +13,20 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { record } from '../../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
-import { panelHost, registerPanelTool } from '../../../panel/host';
+import { panelHost, registerPanelTool, usePanelHost } from '../../../panel/host';
+import { toggleSurface } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
+import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
-import { installDisk } from '../../../test-support/code-disk';
-import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
+import { installDisk, leaveRl2, overRl2, rosterSays } from '../../../test-support/code-disk';
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
+import { A, B, mainShowing, panelOf, probeTool, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { focusedFile, registerEditor, sideFilesViewer } from '../editor/register';
 import { openFile, resetKeptOpens } from '../open-file';
 import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from '../viewer/viewer-store';
-import { filesTool } from './FilesTool';
+import { filesTool, FILES_ROW_HEIGHT } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
 import { FILE_WIDTH_MIN, resetTreeState, treeOf, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { installResizeObserver } from '../../../test-support/resize';
@@ -207,6 +210,28 @@ describe('files store', () => {
     useFiles.getState().applyChanged({ appSessionId: at('app-b' as AppSessionId), path: '/r/other/x', kind: 'created' }); // another session's
     await flush();
     expect(main.callsOf('files.list')).toEqual([{ appSessionId: MAIN_S, path: '/r/src' }]);
+  });
+
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decision 14 (a)): a change of an
+  // entry called `.gitignore` lists again every listing the session holds at or beneath its directory, and no other
+  it('applyChanged of a .gitignore re-lists every listing at or beneath its directory, and no other', async () => {
+    const tree = { '/r': [dir('/r/src')], '/r/src': [dir('/r/src/deep')], '/r/src/deep': [], '/r/srcs': [], '/r/other': [] };
+    const main = mainWith(tree);
+    for (const path of Object.keys(tree)) useFiles.getState().list(S, path);
+    useFiles.getState().list(at('app-b' as AppSessionId), '/r/src/deep'); // another session's listing
+    await flush();
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/.gitignore', kind: 'changed' });
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path).sort()).toEqual(['/r/src', '/r/src/deep']);
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/.gitignored-not', kind: 'changed' }); // the control: another name lists its directory alone
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path)).toEqual(['/r/src']);
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/.gitignore', kind: 'created' });
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path).sort()).toEqual(['/r', '/r/other', '/r/src', '/r/src/deep', '/r/srcs']);
   });
 
   it('counts watches per directory, installs once and unwatches only after the grace', async () => {
@@ -1030,6 +1055,25 @@ describe('the tree at the file’s left', () => {
     expect(marked()).toEqual([STAGED]);
   });
 
+  // UX wave U6b-5a (M1, decision 4): Files answers the focus request of a surface's key in its own file: a tab with no
+  // file, its tree's selected row, else its first; an open of a file in the tree's tab asks nothing of the keyboard
+  it('shown by its key, a tab with no file puts the keyboard on its tree’s selected row, else on its first', async () => {
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    await shown('/r/src');
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+    expect(document.activeElement).toBe(document.querySelector('[role="treeitem"]')); // the first row
+
+    fireEvent.click(row('/r/src')!); // the row last activated is the tree's selected row
+    expect(marked()).toEqual(['/r/src']);
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(document.activeElement).toBe(row('/r/src')));
+  });
+
   it('in a tab too narrow for both the tree folds, and its button shows the tree in the file’s place until a file is chosen or it is pressed again', async () => {
     render(<TestHost />);
     await openBeside(APP);
@@ -1315,6 +1359,58 @@ describe('a file beside the chat as an editor', () => {
     await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(path));
   }
 
+  // UX wave U6b-5a (M1, decision 4): a tab that holds a file, shown by a surface's key, gives its file's editor the
+  // keyboard; the open that put the file there asked the host for the keyboard and Files left it where it was
+  it('shown by its key, a tab that holds a file gives the keyboard to its editor; the open that put the file there gave none', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    expect(usePanelHost.getState().focus[sideTabs(A)[0].id]).toBeGreaterThan(0); // the open asked
+    expect(editor()!.hasFocus, 'the open moved no keyboard').toBe(false);
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(editor()!.hasFocus).toBe(true));
+  });
+
+  // UX wave U6b-5a (M1, decisions 2 and 4; the task review's first finding, and its re-review): an open that reuses the
+  // tab a surface's key showed, before the key's second frame, asks the host for the keyboard with a later value of the
+  // counter; neither Files' answer nor the side column's fallback is the key's any more, and the keyboard stays where it is
+  it('an open that reuses the tab a surface’s key showed, before its second frame, leaves the keyboard where it was', async () => {
+    const frames: FrameRequestCallback[] = [];
+    const frame = () => act(() => frames.splice(0).forEach((callback) => callback(0)));
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    try {
+      render(<>
+        <section id="region-sidebar"><input aria-label="Find a session" /></section>
+        <section id="region-panel"><TestHost /></section>
+      </>);
+      const holder = screen.getByLabelText('Find a session');
+      const inColumn = () => document.getElementById('region-panel')!.contains(document.activeElement);
+      act(() => holder.focus());
+      act(() => toggleSurface('files')); // the tree's tab, shown by its key
+      const tab = sideTabs(A)[0].id;
+      act(() => void openFile(A, APP, null, { asked: 'agent' })); // the agent's open reuses it, the key's frames to come
+      expect(sideTabs(A).map((t) => t.id)).toEqual([tab]);
+      await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
+      frame();
+      frame();
+      expect(document.activeElement, 'the keyboard holder is unchanged').toBe(holder);
+      expect(inColumn()).toBe(false);
+
+      act(() => useLayout.getState().hideSurfaces(A)); // the control, in this test: the key's show with no later open
+      frame();
+      act(() => holder.focus());
+      act(() => toggleSurface('files'));
+      frame();
+      frame();
+      await waitFor(() => expect(inColumn()).toBe(true));
+      expect(document.activeElement).not.toBe(holder);
+    } finally {
+      frame();
+      frame();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('the first edit keeps the preview tab, so the next single click opens a second tab and the edited file stands', async () => {
     render(<TestHost />);
     await openBeside(APP);
@@ -1432,5 +1528,241 @@ describe('a file beside the chat as an editor', () => {
     expect(sideTabs(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: APP, line: null }]);
     expect(mainTab(APP)).toBeUndefined();
     expect(entryOf(APP)?.dirty).toBe(true);
+  });
+});
+
+// UX wave U6b-5a (M1, decision 4; the task review's second and third findings): the tree takes the keyboard a surface's
+// key asked of it once its roots' listing has answered, on the row the rows name (the selected row, else the first),
+// brought into view; the tree itself where there is no row; and nothing when the showing ended or a page covers it.
+describe('the keyboard a surface’s key gives the tree', () => {
+  const offs: (() => void)[] = [];
+  const MANY = Array.from({ length: 200 }, (_, index) => file(`/r/f${String(index).padStart(3, '0')}.ts`));
+  let roots: FilesEntry[] | string;
+  let held: ReturnType<typeof deferred<void>> | null;
+  let asked: ReturnType<typeof deferred<void>>; // released when main is asked for the roots
+  let fakeMain: ReturnType<typeof installFakeMain>;
+  const main = () => fakeMain;
+  beforeEach(() => {
+    asked = deferred<void>();
+    resetPanelStores();
+    resetTreeState();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    roots = [dir('/r')];
+    held = null;
+    fakeMain = installFakeMain(async (name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list') {
+        if (input.path !== undefined) return answer({ root: '/r', path: input.path, entries: input.path === '/r' ? MANY : [], truncated: false });
+        asked.resolve();
+        if (held) await held.promise;
+        return typeof roots === 'string' ? fail(roots) : answer({ root: null, path: '', entries: roots, truncated: false });
+      }
+      return fail(`unexpected ${name}`);
+    });
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r' })) }));
+  });
+  afterEach(() => {
+    held?.resolve();
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  const row = (path: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-path="${path}"]`);
+  const tree = () => document.querySelector<HTMLElement>('[role="tree"]');
+  const inTree = () => tree()?.contains(document.activeElement) ?? false;
+  // The column, inert under a page as the shell draws it
+  function Column() {
+    const page = useLayout((state) => state.destination !== null);
+    return <section id="region-panel" inert={page}><TestHost /></section>;
+  }
+  const showAgain = () => {
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    act(() => toggleSurface('files'));
+  };
+
+  it('with its roots’ listing held, takes the keyboard once the listing answers, on the first row', async () => {
+    held = deferred<void>();
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    await act(() => asked.promise); // the listing is out, the tab's effects have run
+    expect(main().callsOf('files.list').filter((input) => input.path === undefined)).toHaveLength(1);
+    expect(inTree()).toBe(false);
+    await act(async () => held!.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+
+  it('a selected row outside the drawn rows is brought into view and takes the keyboard', async () => {
+    // The list's scroller 240 px high, however the virtual list reads it (its box, its height, a resize report): ten rows
+    // and the overscan are drawn, not the 192nd.
+    const HEIGHT = 240;
+    installResizeObserver();
+    const scrollerBox = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const height = this.hasAttribute('data-files-scroller') ? HEIGHT : 0;
+      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
+    });
+    const sized = ['offsetHeight', 'clientHeight'].map((name) => {
+      const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
+      const inherited = own ?? Object.getOwnPropertyDescriptor(Element.prototype, name)!;
+      Object.defineProperty(HTMLElement.prototype, name, {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.hasAttribute('data-files-scroller') ? HEIGHT : inherited.get!.call(this);
+        },
+      });
+      return () => (own ? Object.defineProperty(HTMLElement.prototype, name, own) : delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]);
+    });
+    try {
+      render(<TestHost />);
+      act(() => toggleSurface('files'));
+      await waitFor(() => expect(row('/r/f000.ts')).not.toBeNull());
+      expect(row('/r/f190.ts'), 'not drawn: past the list’s window').toBeNull();
+      act(() => useTreeState.getState().select(A, '/r/f190.ts'));
+      showAgain();
+      await waitFor(() => expect(document.activeElement).toBe(row('/r/f190.ts')));
+      expect(row('/r/f190.ts')!.getAttribute('aria-selected')).toBe('true');
+      const scroller = document.querySelector<HTMLElement>('[data-files-scroller]')!;
+      expect(scroller.scrollTop, 'the row in view').toBe(192 * FILES_ROW_HEIGHT - HEIGHT); // its index 191 (the root first), its foot at the view's
+    } finally {
+      sized.forEach((restore) => restore());
+      scrollerBox.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    ['failed', 'refused for the test'],
+    ['answered with no root', [] as FilesEntry[]],
+  ])('with its roots’ listing %s, the tree itself takes the keyboard', async (_case, answered) => {
+    roots = answered;
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    await waitFor(() => expect(document.activeElement).toBe(tree()));
+    expect(row('/r')).toBeNull();
+  });
+
+  it('a page over the column when the listing answers: nothing moves, and the request is used up', async () => {
+    held = deferred<void>();
+    render(<Column />);
+    act(() => toggleSurface('files'));
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    await act(async () => held!.resolve());
+    await waitFor(() => expect(row('/r')).not.toBeNull());
+    expect(inTree()).toBe(false);
+    act(() => useLayout.getState().closeDestination());
+    expect(document.getElementById('region-panel')!.hasAttribute('inert'), 'the column drawn uncovered: its effects have run').toBe(false);
+    expect(inTree(), 'not taken later either').toBe(false);
+    showAgain(); // the control: the same tree, shown by its key with nothing over it
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+
+  // The branch panel's fix wave (G3): the key's show ends when the host asks any tab for the keyboard, and what it asked
+  // of this tree ends with it, though this tab is still in view and no key or pointer was pressed
+  it('a newer request of the host’s for another tab before the listing answers: the tree takes nothing', async () => {
+    held = deferred<void>();
+    offs.push(registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool));
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await act(() => asked.promise); // its roots' listing out, and held
+    let terminal = '';
+    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A })));
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower')); // two groups: Files above, Terminal below
+    act(() => useLayout.getState().hideSurfaces(A));
+    act(() => toggleSurface('files')); // shown by its key, both groups in view
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort()).toEqual(['files', 'terminal']);
+    act(() => panelHost.selectTab(terminal)); // a native menu's act: no key or pointer press
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId).sort(), 'Files still in view').toEqual(['files', 'terminal']);
+    await act(async () => held!.resolve());
+    await waitFor(() => expect(row('/r')).not.toBeNull()); // the rows drawn: the tree's taker has run over a settled listing
+    expect(inTree()).toBe(false);
+    showAgain(); // the control: shown by its key with no newer request
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+
+  it('hidden before the listing answers: the request is withdrawn, and a show by another way takes no keyboard', async () => {
+    held = deferred<void>();
+    render(<TestHost />);
+    act(() => toggleSurface('files'));
+    const tab = panelOf(A)!.tabs[0].id;
+    act(() => useLayout.getState().hideSurfaces(A));
+    await act(async () => held!.resolve());
+    act(() => useLayout.getState().showSurfaceTab(A, tab));
+    await waitFor(() => expect(row('/r')).not.toBeNull()); // the rows drawn: the tree's taker has run over a settled listing
+    expect(inTree()).toBe(false);
+    showAgain(); // the control: shown by its key
+    await waitFor(() => expect(document.activeElement).toBe(row('/r')));
+  });
+});
+
+// ---- UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; decision 12) --------
+// The Files list's row for a session that takes the remote route: enabled for one of the machine's owners, opening MAWS's
+// own chooser there; otherwise disabled with the first sentence of decision 12's table that applies as its title.
+describe('the Files list’s menu for a session on another machine (U6f)', () => {
+  const offs: (() => void)[] = [];
+  let main: ReturnType<typeof mainWith>;
+  const T = addressOf(OTHER_MACHINE, 'app-there') as AppSessionId;
+  const TERMINAL = addressOf(OTHER_MACHINE, 'app-terminal') as AppSessionId;
+  beforeEach(() => {
+    resetPanelStores();
+    resetTreeState();
+    resetRemoteLaneBStore();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    main = mainWith(REPO);
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(T, record(T, { directory: '/r' })).set(TERMINAL, record(TERMINAL, { directory: '/r' })) }));
+    overRl2(T);
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+  });
+  const menuRow = async (appSessionId: AppSessionId) => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId }));
+    fireEvent.contextMenu(await screen.findByRole('tree'));
+    return within(await screen.findByRole('menu')).getByRole('menuitem');
+  };
+
+  it('for one of the machine’s owners the row is enabled, reads Open File…, and opens the chooser there, never main’s', async () => {
+    const row = await menuRow(T);
+    expect(row.textContent).toBe('Open File…');
+    expect(row.hasAttribute('data-open-file')).toBe(true);
+    expect(row.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(row);
+    await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+    expect(main.callsOf('files.listOutside')).toEqual([{ appSessionId: bareOf(T) }]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  it.each([
+    ['not one of the machine’s owners', { owner: false }, 'Only studio’s owners can open a file there.'],
+    ['the roster not yet saying (R10)', { owner: undefined }, 'Only studio’s owners can open a file there.'],
+    ['a build that does not list the capability', { capabilities: ['rl2.channel'] }, 'Can’t open a file on studio yet. Update MAWS on studio and try again.'],
+    ['the machine offline', { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }, 'Open File is unavailable while studio is offline.'],
+    ['the link connecting', { state: 'connecting', capabilities: undefined }, 'Connecting to studio…'],
+  ] as const)('%s: the row is disabled, its title the sentence, and nothing is asked', async (_, over, sentence) => {
+    rosterSays(T, over as Partial<MachineState>);
+    const row = await menuRow(T);
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.getAttribute('title')).toBe(sentence);
+    expect(row.textContent).toBe('Open File…');
+    fireEvent.click(row);
+    await act(flush);
+    expect(document.querySelector('[data-remote-chooser]')).toBeNull();
+    expect(main.callsOf('files.listOutside')).toEqual([]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  it('for a terminal session there the row keeps U6e’s sentence', async () => {
+    overRl2(TERMINAL, {}, 'A');
+    const row = await menuRow(TERMINAL);
+    expect(row.getAttribute('title')).toBe('Open File… (this session runs on studio)');
+    expect(row.getAttribute('aria-disabled')).toBe('true');
   });
 });

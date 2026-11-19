@@ -1,0 +1,39 @@
+{
+ "what": "the E4 reader against a writer of the probe's own, no engine",
+ "result": {
+  "in place": {
+   "writes": 60,
+   "bytesPerWrite": 191801,
+   "reads": 11000,
+   "readsThatDidNotParse": 343,
+   "distinctVersions": 96,
+   "distinctInodes": 1,
+   "badSamples": [
+    {
+     "size": 0
+    },
+    {
+     "size": 0
+    },
+    {
+     "size": 0
+    },
+    {
+     "size": 65536
+    },
+    {
+     "size": 0
+    }
+   ]
+  },
+  "temporary and rename": {
+   "writes": 60,
+   "bytesPerWrite": 191801,
+   "reads": 11400,
+   "readsThatDidNotParse": 0,
+   "distinctVersions": 61,
+   "distinctInodes": 2,
+   "badSamples": []
+  }
+ }
+}

@@ -2,7 +2,8 @@
 // `uiSurface` while its process is ready), the instance's answer, and the connection that re-asks a session's mounted
 // instances when the engine invalidates them and forgets a session's answers when its surface goes.
 import { useEffect, useMemo } from 'react';
-import type { SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
+import type { AskedSite, SurfaceViewport } from '@shared/engine/surface';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { useSurfaceViewport } from './viewport';
@@ -10,7 +11,7 @@ import { assistantDrawingKey, useAssistantDrawings } from './assistant-drawings'
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
-import { forgetSession, hookKey, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
+import { forgetRenderSiteRefusal, forgetSession, hookKey, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
 
 // Attached and live: the only state in which a site asks the engine.
 export function useSurfaceAttached(appSessionId: AppSessionId | null): boolean {
@@ -23,7 +24,7 @@ export function useSurfaceAttached(appSessionId: AppSessionId | null): boolean {
 
 export interface SiteOptions {
   appSessionId: AppSessionId | null;
-  component: SurfaceSite;
+  component: AskedSite;
   instanceId: string;
   props: Record<string, unknown>;
   viewport?: SurfaceViewport;
@@ -54,13 +55,39 @@ export function useSurfaceSite({ appSessionId, component, instanceId, props, vie
 
 const UNHOOKED: SiteAnswer = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
 
-export function useSurfaceHooked(appSessionId: AppSessionId | null, component: SurfaceSite): boolean | undefined {
+export function useSurfaceHooked(appSessionId: AppSessionId | null, component: AskedSite): boolean | undefined {
   return useSurfaceAnswers((s) => appSessionId === null ? undefined : s.hooked.get(hookKey(appSessionId, component)));
 }
 
 // Live batches only (never a snapshot): an invalidate re-asks the session's mounted instances; a session whose status
-// no longer carries the surface forgets its answers.
+// no longer carries the surface forgets its answers. UX wave U2b (the execution document, §E, "After a reload MAWS
+// re-asks by itself"; check 1's C4: `reload_plugins` may push no invalidation): a status whose plugins were observed at
+// another time than the last one this window knew for the session (a reload, a new launch's report) re-asks its
+// mounted instances exactly as an invalidation does. What the window knows is the sessions store's, which both routes
+// of a status fill: an event, and the snapshot of `engine.sessions` a window reads at its start for sessions already
+// running (M5's fix wave 1), so the first reload after that snapshot is one too.
 export function connectEngineSurface(client: MawsBridge = ipc): () => void {
+  const observed = new Map<AppSessionId, string | null>();
+  const look = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>) => {
+    for (const [id, status] of engine) {
+      if (status.process !== 'ready' || status.uiSurface === undefined) {
+        observed.delete(id);
+        continue;
+      }
+      const before = observed.get(id);
+      observed.set(id, status.pluginsObservedAt);
+      if (before !== undefined && before !== status.pluginsObservedAt) invalidateSession(id);
+    }
+    for (const id of observed.keys()) {
+      if (engine.has(id)) continue;
+      // UX wave U2b (panel finding 2): a status gone from the store is a departed engine host's (`engine.hostState`
+      // leaving ready, ipc/events.ts), which sends no `session.status` of the session's: its refusal goes with it
+      observed.delete(id);
+      forgetRenderSiteRefusal(id);
+    }
+  };
+  look(useSessions.getState().engine);
+  const offSessions = useSessions.subscribe((s, prev) => { if (s.engine !== prev.engine) look(s.engine); });
   const offEvents = client.on('session.eventBatch', ({ appSessionId, events }) => {
     if (events.some((event) => event.kind === 'plugin.invalidate')) invalidateSession(appSessionId as AppSessionId);
   });
@@ -75,6 +102,7 @@ export function connectEngineSurface(client: MawsBridge = ipc): () => void {
     }
   });
   return () => {
+    offSessions();
     offEvents();
     offStatus();
   };

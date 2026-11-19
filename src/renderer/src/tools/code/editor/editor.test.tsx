@@ -2,7 +2,7 @@
 // service does, with answers held back so the interleavings are exact (`editor state`), and the code view's editing
 // half (`code view editing`): editable by kind, the dirty listener, the baseline counter.
 import { isolateHistory, undo } from '@codemirror/commands';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -175,6 +175,22 @@ describe('editor', () => {
       await waitFor(() => expect(doc()).toBe('one\ntwo\nthree is longer\n'));
       expect(cursor()).toEqual({ line: 3, column: 4 });
       expect(entry().dirty).toBe(false);
+    });
+
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M3, decision 17; B8): ⌘[ and ⌘]
+    // are Back and Forward, so the editor binds neither and the page leaves them to the menu; Tab and ⇧Tab still indent
+    it('binds neither Mod-[ nor Mod-] in an editable file, and Tab and ⇧Tab still indent', async () => {
+      await open({ [APP]: 'const a = 1;\n' });
+      const keys = view().state.facet(keymap).flat().flatMap((binding) => [binding.key, binding.mac, binding.win, binding.linux]);
+      expect(keys).not.toContain('Mod-[');
+      expect(keys).not.toContain('Mod-]');
+      expect(keys).toContain('Mod-/'); // the control: the same search finds the rest of CodeMirror's default keymap
+      const press = (shiftKey: boolean) => act(() => void runScopeHandlers(view(), new KeyboardEvent('keydown', { key: 'Tab', shiftKey }), 'editor'));
+      press(false);
+      expect(doc()).not.toBe('const a = 1;\n');
+      expect(doc().trimStart()).toBe('const a = 1;\n');
+      press(true);
+      expect(doc()).toBe('const a = 1;\n');
     });
 
     it('edits markdown in Source, keeping the buffer and the mark across Rendered', async () => {

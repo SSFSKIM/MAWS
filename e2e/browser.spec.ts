@@ -19,6 +19,7 @@ import { invoke, value } from './support/c7-replay';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
 import { menu } from './support/menu';
+import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
@@ -1568,4 +1569,31 @@ test('zoom probe: the view, the lights, the device box', async () => {
     await server.close();
     rmSync(scratch.root, { recursive: true, force: true });
   }
+
+// ---- UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G6; acceptance B4) --------
+// Go ▸ Go to file is one of the menu's actions that take the keyboard from a page of the in-app browser (main's
+// SHELL_FOCUS_ACTIONS): with the keyboard in Page A, the row's own click (which is what ⌘P does; the row is read first,
+// enabled and carrying ⌘P) puts it in Files' field in the app's page. The keyboard is put in the page as a click on its
+// view leaves it, by main focusing the view's contents. This group runs quiet (no MAWS_E2E_FOREGROUND; gate-offload
+// Decision Log 76), so the scene reads what the pages say and never activates the app: waits on the page's own witness
+// (its document has the focus), then on the field being the active element of the app's page and the app's page having
+// the focus. Main's focused contents, which exist only while the app's window is key, are read by the same scene in
+// the foreground in e2e/browser-focus.spec.ts (Decision Log 18).
+test('G6: with the keyboard in a page of the in-app browser, Go to file puts it in Files’ field', async () => {
+  await browserScene(['U6b-3b: Go to file from a page'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pageA = await pageAt(s, A);
+    await expectOnPane(s, t, paneIn(panel), 'panel');
+
+    await s.maws.app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find((contents) => contents.getURL() === url)!.focus(), A);
+    await expect.poll(() => pageA.evaluate(() => document.hasFocus()), { message: 'the page’s own witness: its document has the keyboard' }).toBe(true);
+
+    await goToFile(s.maws.app);
+    await expect.poll(() => s.page.evaluate(() => document.hasFocus() && (document.activeElement?.matches('[data-files-filter]') ?? false)), { message: 'the field is the active element of the app’s page, which has the keyboard' }).toBe(true);
+  });
 });

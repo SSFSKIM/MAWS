@@ -495,6 +495,8 @@ export function mergeReads(into: Cell, next: Cell): Cell {
   const files = [...a.files, ...b.files];
   const merged: Cell = {
     ...into, id: into.id.startsWith('cell:reads:') ? into.id : cellId.reads(into.toolUseId as ToolUseId), paths: files.map((file) => file.path),
+    // UX wave U2b (M7; §M): every member read's id, which a stored run's bounds can name (the cell's own id is unchanged)
+    reads: [...(into.reads ?? [into.toolUseId as ToolUseId]), ...(next.reads ?? [next.toolUseId as ToolUseId])],
     detail: { kind: 'read', files, preview: [a.preview, b.preview].filter((p) => p !== null).join('\n') || null, truncated: null },
     status: into.status === 'error' || next.status === 'error' ? 'error' : next.status === 'running' ? 'running' : into.status, endedAt: next.endedAt ?? into.endedAt,
   };

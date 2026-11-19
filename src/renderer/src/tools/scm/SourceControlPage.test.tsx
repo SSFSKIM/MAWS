@@ -524,6 +524,9 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
   // Decision Log 45: the part's first line opens with the muted "Checks" in every state, and "Checks" is drawn once
   const checksLines = () => [...part('pr')!.querySelectorAll<HTMLElement>('[data-scm-checks], [data-scm-fold-line]')].map((line) => text(line));
   const checksWords = () => (text(part('pr'))!.match(/Checks/g) ?? []).length;
+  // The folded line's own text as it is copied (textContent, its spaces folded): `text` joins the text nodes with a space
+  // and so cannot tell a space drawn from a gap between flex items
+  const foldText = () => (part('pr')!.querySelector('[data-scm-fold-line]')!.textContent ?? '').replace(/\s+/g, ' ').trim();
 
   it('with every check passed opens the folded line with "Checks", outside the fold’s button: "Checks › 5 passed", once', async () => {
     serves();
@@ -531,6 +534,7 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     mount();
     const fold = await screen.findByRole('button', { name: '5 passed' });
     expect(checksLines()).toEqual(['Checks › 5 passed']);
+    expect(foldText()).toBe('Checks › 5 passed');
     expect(checksWords()).toBe(1);
     expect(fold.textContent).not.toContain('Checks');
     const label = part('pr')!.querySelector('[data-scm-fold-line] [data-scm-checks-label]')!;
@@ -552,6 +556,7 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     mount();
     await screen.findByRole('button', { name: '3 passed' });
     expect(checksLines()).toEqual(['Checks 3 passed · 1 failed', '› 3 passed']);
+    expect(foldText()).toBe('› 3 passed');
     expect(checksWords()).toBe(1);
   });
 

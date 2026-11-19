@@ -6,7 +6,8 @@
 // same composition, from the same exported functions, read off the store when asked. The desk adds no browser activity
 // (MAWS's attachment of it is fed by its own app alone), and passes no withdrawn prompts and no start index, so those
 // parts of the composition are none. While the session is at rest, the turn it was running draws closed
-// (`restingRows`), here as there.
+// (`restingRows`), here as there. UX wave U2b (M7): the record lines' labels are not passed here: a label changes a
+// line's words and never which rows are drawn, so the count is the same without them.
 import { useMemo } from 'react';
 import { liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror';
 import { useTranscriptStore, type TranscriptEntry } from '../../stores/transcript';

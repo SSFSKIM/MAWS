@@ -28,6 +28,7 @@
 // is on (`hosting`), measured like any other; that thread's card yields to it meanwhile.
 import type { Editor } from '@tiptap/core';
 import { memo /* P4-B1 */, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject /* P4-B1 */ } from 'react';
+import { flushSync } from 'react-dom';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { ICON_GAP_PX, layoutMargin, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { CARD_MIN_PX, ICON_PX, MARGIN_EDGE_GUTTER_PX, MARGIN_PAGE_GUTTER_PX, tierFor, type MarginTier } from '../../../comments/margin-tiers';
@@ -122,6 +123,11 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   const open = useCardThreads(useOpenThreads(doc, tabId));
 
   // ── the tier: the body's, the scroll box's and the page's widths through one observer ──
+  // Ticket 760: the observer's tier is committed inside its callback (flushSync), so the frame that reports a resize paints
+  // the tier it brings: nothing else re-measures the margin when the panel floats, and a commit React only schedules
+  // lands after that frame's paint. A tier resizes none of the boxes it reads (theme.css: the column never narrows the
+  // page), so the commit queues no further resize in the frame. The widths the drawn tier was read from are written on
+  // the column (`data-margin-measured`, no render), so a reader can tell it from the widths now.
   const [tier, setTier] = useState<MarginTier>({ kind: 'off' });
   useLayoutEffect(() => {
     const element = column.current;
@@ -131,11 +137,13 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
     const body = element.closest<HTMLElement>('.doc-editor-body');
     if (!scroller || !page) return;
     const measure = () => {
-      const next = tierFor({ bodyWidth: body?.clientWidth ?? scroller.clientWidth, scrollWidth: scroller.clientWidth, pageWidth: page.getBoundingClientRect().width, view });
+      const widths = { bodyWidth: body?.clientWidth ?? scroller.clientWidth, scrollWidth: scroller.clientWidth, pageWidth: page.getBoundingClientRect().width };
+      const next = tierFor({ ...widths, view });
       setTier((now) => (sameTier(now, next) ? now : next));
+      element.dataset.marginMeasured = `${widths.bodyWidth} ${widths.scrollWidth} ${widths.pageWidth}`;
     };
     measure();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => flushSync(measure));
     observer?.observe(scroller);
     observer?.observe(page);
     if (body) observer?.observe(body);

@@ -102,7 +102,7 @@ export function SaveFailure({ entry }: { entry: ViewerEntry }) {
   if (entry.saveError === null) return null;
   return (
     <span role="alert" className="min-w-0 basis-full break-words wrap-anywhere text-danger">
-      {EDITOR_COPY.saveFailed(entry.saveError)}
+      {entry.saveSaid ? entry.saveError : EDITOR_COPY.saveFailed(entry.saveError) /* UX wave U6f (Decision Log 30 d): a sentence of UC-7 is said once */}
     </span>
   );
 }

@@ -13,6 +13,16 @@
 // any other record of the Library (`added`). The first that holds is the file's mark, which a read answers as `outside`,
 // writable for the first three. No write of either command reaches MAWS's own folders (`own`), whatever admits the file.
 //
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §B): who asks is a caller
+// (`FilesCaller`): this machine's own client; another machine's with no claim, whose roots leave out the machine's home
+// (P5's Decision Log 237) and which the outside rule never admits; or another machine's under the claim `machine.op`
+// made for one of the four outside acts the terminal's offer row admits (`files.readOutside`, `listOutside`,
+// `chooseOutside`, `writeOutside`), which reaches the same admission step as this machine's client, over this machine's
+// own evidence. Such a caller's read and save walk the path first and refuse it before anything inside a folder macOS
+// protects is touched, unless the person opened it (`open`); its listing and its choice walk the same way. Each of its
+// saves and choices is a line of the daemon's log (`outsideLog`). A file the deliveries admit, read by another machine
+// with the key and no claim, is answered read-only (`why: 'added'`).
+//
 // The boundary opens before it trusts: a pre-check (step 1) resolves the path to its in-root realpath `real0` and
 // refuses a path that ends in a symlink; step 3 opens `real0` with `O_RDONLY | O_NONBLOCK` and no link on its way
 // (`O_DIRECTORY` too for a directory; ../fs/no-link.ts: `O_NOFOLLOW_ANY` on macOS, where the kernel refuses a symlink
@@ -31,7 +41,10 @@
 // `stat` are two path steps an ancestor flipping symlink, directory, symlink can straddle; M1 review); hard links
 // inside a root, and a directory renamed into a root, are in the tree when opened, accepted by design. `list`: a
 // swap-and-restore between `readdir` and the final confirmation can let outside names and metadata (never contents)
-// into the answer. `watch`: a swap-and-restore between the install and its confirmation attaches the watcher outside
+// into the answer; a substitution that stands is refused by that confirmation, which holds both the request's spelling
+// and the realpath the names, the entries' reads and the ignore check were made by (UX wave U6b-3a's branch panel: a
+// moved real ancestor, the request's link retargeted to it, can keep the first on the opened directory while the second
+// leads elsewhere). `watch`: a swap-and-restore between the install and its confirmation attaches the watcher outside
 // until a batch's confirmation catches a standing swap, or forwards outside filenames if it was restored; a swap
 // between a batch's confirmation and its per-name `lstat` classifies that batch's kinds from outside metadata.
 // `openExternal` is path-checked immediately before `shell.openPath`, with no descriptor guarantee, and hands the OS
@@ -72,17 +85,28 @@ import {
   type FilesGrantOutput, // U6e
   type FilesWriteOutsideInput, // U6e
   FILES_MOVED, // U6e
+  FILES_PROTECTED, // U6f
+  type FilesChooseOutsideInput, // U6f
+  type FilesChooseOutsideOutput, // U6f
+  type FilesListOutsideInput, // U6f
+  type FilesListOutsideOutput, // U6f
+  type FilesAdmitInput, // U6b-4a
+  type FilesAdmitOutput, // U6b-4a
 } from '@shared/ipc/schema/files';
+import { HostCommandError } from '@shared/host/runtime';
+import { ipcError } from '@shared/ipc/errors';
+import { expandHome, type Home } from '@shared/machine/home-folders';
 import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
-import { machineHomes } from '@shared/machine/machine-home';
-import { rootsOf, under, type AllowlistRecord } from './allowlist';
+import { machineHome, machineHomes } from '@shared/machine/machine-home';
+import { admittedFolder, rootsOf, under, type AllowlistRecord } from './allowlist';
 import type { FileGrants } from './grants';
 import { fileMime, isTextMime } from './mime';
 import type { Naming } from './named';
+import { listOutsideFolder, refused as refusedListing, walkOutside } from './outside-list';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between an outside walk and the step that takes its real path */ | 'before-ignored' /* U6b-3a: between a listing's entries' reads and its ignore check */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -110,7 +134,25 @@ export interface FilesServiceOptions {
   grants?: Pick<FileGrants, 'add' | 'has'>;
   sent?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
   own?: () => readonly string[];
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): the names among
+  // a listed directory's entries that git ignores there (`createIgnoreCheck().names`), asked with the directory's
+  // confirmed realpath and the identity of the directory opened there, which git is asked about only while that realpath
+  // still names it; null when git gives no answer. Absent: nothing is asked and no entry is marked.
+  ignored?: (dir: string, names: readonly string[], opened: Identity) => Promise<ReadonlySet<string> | null>;
+  // UX wave U6f (§B): the lines of decision 10, one per ending of a claimed save and choice (absent: none); the daemon
+  // user's home and the platform, which the walk of a claimed request reads (only macOS protects folders)
+  outsideLog?: (line: string) => void;
+  home?: () => string;
+  platform?: NodeJS.Platform;
 }
+
+/** Who asks: this machine's own client; another machine's with no claim; another machine's under the claim `machine.op` made for the act it runs. */
+export type FilesCaller = { remote: false } | { remote: true; claim: null } | { remote: true; claim: { member: string; device: string; opId: string } };
+export type FilesClaim = Extract<FilesCaller, { claim: object }>['claim'];
+export const THIS_MACHINE: FilesCaller = { remote: false };
+export const UNCLAIMED: FilesCaller = { remote: true, claim: null };
+const callerOf = (remote: boolean): FilesCaller => (remote ? UNCLAIMED : THIS_MACHINE);
+const claimOf = (caller: FilesCaller): FilesClaim | null => (caller.remote ? caller.claim : null);
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
 // (`openExternal`, `reveal`) admit a delivered file; `write`, `list` and `watch` never do, so a file an agent delivered
@@ -130,10 +172,12 @@ const OUTSIDE_SAVE: Purpose = { admitDelivered: false, admitOutside: true, save:
 
 // U6c: what the request itself says about a name: whether it asked (`named`), and the signal its wait ends with (its
 // client's end, `register.ts`). U6e: whether the agent asked for the open (`agent`), which no grant admits (decision 19).
+// U6f: whether the person opened the protected folder the path lies in (`open`), for a claimed caller's walk.
 interface Asked {
   named?: boolean;
   agent?: boolean;
   signal?: AbortSignal;
+  open?: boolean;
 }
 
 // U6e: what admitted a file outside the roots by the outside rule: the person chose it, the agent sent it, the
@@ -142,10 +186,11 @@ interface Asked {
 type Mark = 'chosen' | 'sent' | 'named' | 'result' | 'added';
 
 // 2026-11-06 (the home-root rule, ./allowlist.ts): `remote`, a request from another machine (the handler context's), whose
-// roots leave out the machine's home and anything above it.
+// roots leave out the machine's home and anything above it. U6f: where U6e took `remote`, `read`, `writeOutside` and
+// `grant` take the caller, absent this machine's own client.
 export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }, remote?: boolean): Promise<FilesListOutput>;
-  read(input: FilesReadInput, remote?: boolean, signal?: AbortSignal): Promise<FilesReadOutput>; // U6c: `input.named`, answered with `named`; U6b-2: `input.raw`, answered with `identity`, for this machine's caller alone
+  read(input: FilesReadInput, caller?: FilesCaller, signal?: AbortSignal): Promise<FilesReadOutput>; // U6c: `input.named`, answered with `named`; U6b-2: `input.raw`, answered with `identity`, for this machine's caller alone
   // P3-L (M6b fix wave 2): a file at a path main itself resolved (a File artifact's stored file, `library.read`), read as
   // `read` reads one: the path's realpath opened with no symlink anywhere on it, a regular file, the same answer. No
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
@@ -153,8 +198,11 @@ export interface FilesService {
   // that resolved a path inside a directory it owns reads that file and nothing a link leads to (`library.read`'s export).
   readResolved(input: FilesReadResolvedInput, options?: { linkFree?: boolean }): Promise<FilesReadOutput>;
   write(input: FilesWriteInput, remote?: boolean): Promise<FilesWriteOutput>; // E5
-  writeOutside(input: FilesWriteOutsideInput, remote?: boolean, signal?: AbortSignal): Promise<FilesWriteOutput>; // U6e
-  grant(appSessionId: AppSessionId, path: string, remote?: boolean): Promise<FilesGrantOutput>; // U6e
+  writeOutside(input: FilesWriteOutsideInput, caller?: FilesCaller, signal?: AbortSignal): Promise<FilesWriteOutput>; // U6e; U6f: another machine's under a claim alone
+  grant(appSessionId: AppSessionId, path: string, caller?: FilesCaller): Promise<FilesGrantOutput>; // U6e; U6f: another machine's under a claim alone
+  listOutside(input: FilesListOutsideInput, caller: FilesCaller): Promise<FilesListOutsideOutput>; // U6f: another machine's under a claim alone
+  chooseOutside(input: FilesChooseOutsideInput, caller: FilesCaller): Promise<FilesChooseOutsideOutput>; // U6f: another machine's under a claim alone
+  admit(input: FilesAdmitInput, remote?: boolean, signal?: AbortSignal): Promise<FilesAdmitOutput>; // U6b-4a
   watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; agent?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c; U6e: `agent`
@@ -188,6 +236,13 @@ class Refusal extends Error {
     super(FILES_REFUSAL);
   }
 }
+// U6e (decision 8): a write that would reach one of MAWS's own folders; U6f: told apart from a file the daemon's user
+// may not write by the log's word alone, so it reads as the same message
+class OwnFolder extends Error {
+  constructor(path: string) {
+    super(`not writable: ${path}`);
+  }
+}
 const errno = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code;
 
 // What steps 1 to 5b leave behind: the open descriptor, its fstat, and the confirmed realpath with its roots.
@@ -199,7 +254,7 @@ interface Confirmed {
   mark: Mark | null; // U6e: what admitted it by the outside rule; null for a root's file and for a delivered one read without the key
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */, grants, sent, own /* U6e */ }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */, grants, sent, own /* U6e */, ignored /* U6b-3a */, outsideLog, home = machineHome, platform = process.platform /* U6f */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -216,18 +271,19 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // session's records name is a root of its own for the rest of the boundary (`under` accepts it as equal), so step 5
   // and every later confirmation hold for exactly that file and nothing beside it. U6c (Interfaces §C) and U6e (§B,
   // `precheck`): for `read`, `openExternal` and `writeOutside` asked by a caller on this machine, a realpath outside every
-  // root that the outside rule admits is such a root of one too, with its mark; a remote caller never reaches the
-  // question, and the transcript is asked at most once, after everything that does not need it.
-  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose, remote = false, asked: Asked = {}): Promise<{ roots: string[]; real0: string; mark: Mark | null }> {
+  // root that the outside rule admits is such a root of one too, with its mark; U6f: for `read` and `writeOutside` asked by
+  // another machine's caller under a claim too; any other remote caller never reaches the question, and the transcript is
+  // asked at most once, after everything that does not need it.
+  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose, caller: FilesCaller = THIS_MACHINE, asked: Asked = {}): Promise<{ roots: string[]; real0: string; mark: Mark | null }> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
-    let roots = await rootsOf(record, remote ? homes() : undefined); // 2026-11-06: a remote caller's, less the home
+    let roots = await rootsOf(record, caller.remote ? homes() : undefined); // 2026-11-06: a remote caller's, less the home
     const delivers = purpose.admitDelivered && admitted !== undefined; // E2
     // U6e step 3: whether the outside rule may admit, settled from the request's own context before a grant, the Library
-    // or the transcript is touched
-    const outside = purpose.admitOutside && (purpose.save === true || asked.named === true) && !remote;
+    // or the transcript is touched; U6f: a remote caller only under a claim, which `register.ts` hands the four acts alone
+    const outside = purpose.admitOutside && (purpose.save === true || asked.named === true) && (!caller.remote || caller.claim !== null);
     let naming: Naming | undefined;
     const namesIt = async (): Promise<Naming> => {
       if (naming === undefined) {
@@ -240,8 +296,15 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     // a session with no resolvable root still reaches the evidence it may have (U6c's Decision Log 14 b)
     const evidence = outside && (named !== undefined || grants !== undefined || sent !== undefined);
     if (roots.length === 0 && !delivers && !evidence) throw new Refusal();
+    // U6f (decision 18): another machine's claimed caller touches nothing inside a protected folder the person did not
+    // open, before the path is resolved and before any evidence is asked; a path under one of its roots, as written, is
+    // the session's own
+    const walk = claimOf(caller) !== null && !roots.some((root) => under(root, path)) ? await protectedFirst(path, asked.open === true) : null;
+    const walked = walk !== null && 'real' in walk ? walk.real : null;
+    if (walked !== null) await at('after-outside-walk', path);
     let real0: string;
     try {
+      if (walk !== null && 'gone' in walk) throw walk.gone; // the walk showed the path is not there: nothing resolves it
       real0 = await fs.promises.realpath(path);
     } catch (error) {
       const answer = await missing(path, roots, error);
@@ -249,12 +312,19 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       if (answer instanceof Refusal && outside && absent(error) && (chosen(path) || (await namesIt()) !== false)) throw new Error(`not found: ${path}`, { cause: error });
       throw answer;
     }
+    // U6f (the architect's ruling on the walk-to-use race): a path that changed between the walk and the resolution is
+    // refused as moved, before any evidence is asked and before anything is opened
+    if (walked !== null && walked !== real0) throw new Error(FILES_MOVED);
     let mark: Mark | null = null;
     if (!roots.some((root) => under(root, real0))) {
       if (outside) {
         mark = await markOf(real0);
         if (mark === null) throw new Refusal();
-      } else if (!(delivers && (await admitted?.(appSessionId, real0)))) throw new Refusal(); // E2: without the key, unmarked
+      } else if (delivers && (await admitted?.(appSessionId, real0))) {
+        // E2: without the key, unmarked; U6f (decision 9): another machine's request with the key, which the outside rule
+        // does not admit, is told the file is one it cannot save
+        if (caller.remote && asked.named === true) mark = 'added';
+      } else throw new Refusal();
       roots = [...roots, real0]; // a root of one
     }
     // P0 opens no symlink (K1): a path that ends in one is refused even when its target lies inside, since step 3
@@ -281,6 +351,37 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
+  // U6f (decision 18): the walk of a claimed path that enters no protected folder unopened, answering the real path it
+  // ended at. `protected` is refused here, and so, failing closed, is every walk that cannot finish (the branch review,
+  // Decision Log 33 (1)): a folder on the way that it cannot list (mode 0111) or a chain of links past its bound leaves
+  // what lies beyond unseen, a protected folder included, so nothing resolves the path unchecked after it. One ending
+  // alone goes on to the boundary's own steps, with no resolution of its own: a path shown not to be there (`gone`).
+  async function protectedFirst(path: string, open: boolean): Promise<{ real: string } | { gone: Error }> {
+    const walked = await walkOutside(path, where(), open);
+    if (walked.ok) return { real: walked.real };
+    const gone = walked.reason === 'protected' ? null : await goneAt(path, open);
+    if (gone !== null) return { gone };
+    throw new HostCommandError(ipcError('internal', FILES_PROTECTED, { refusal: 'protected' }));
+  }
+  // Whether `path` is not there, shown by the walk alone: its deepest ancestor the same walk resolves (whose inside the
+  // walk found it may touch) holds no entry of the path's next part. The `lstat`'s own failure, or null when the part is
+  // there (the walk then could not finish past it) or no ancestor resolves. A protected folder an ancestor's own last link
+  // leads into is one the whole path's walk met on its way first, and refused there before this is asked.
+  async function goneAt(path: string, open: boolean): Promise<Error | null> {
+    const parts = path.split(sep).filter((part) => part !== '');
+    for (let depth = parts.length - 1; depth >= 0; depth--) {
+      const ancestor = await walkOutside(sep + parts.slice(0, depth).join(sep), where(), open);
+      if (!ancestor.ok && ancestor.reason === 'protected') return null;
+      if (!ancestor.ok) continue;
+      return fs.promises.lstat(join(ancestor.real, parts[depth]!)).then(
+        () => null,
+        (error: unknown) => (absent(error) ? (error as Error) : null),
+      );
+    }
+    return null;
+  }
+  const where = (): Home => ({ home: home(), platform });
+
   // The one open of the service, every descriptor's (`openConfirmed`'s and `readResolved`'s): `real` with no link on
   // its way (../fs/no-link.ts). On Linux its ancestors are walked first, and an ancestor turned into a link between the
   // walk and the open, which the open followed, is refused by the descriptor's own path, closed before anything is read
@@ -303,8 +404,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 
   // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
   // closes the handle.
-  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY, remote = false, asked: Asked = {}): Promise<Confirmed> {
-    const { roots, real0, mark } = await precheck(appSessionId, path, purpose, remote, asked);
+  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY, caller: FilesCaller = THIS_MACHINE, asked: Asked = {}): Promise<Confirmed> {
+    const { roots, real0, mark } = await precheck(appSessionId, path, purpose, caller, asked);
     await at('before-open', path);
     let handle: FileHandle;
     try {
@@ -334,7 +435,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 
   async function list({ appSessionId, path }: { appSessionId: AppSessionId; path?: string }, remote = false): Promise<FilesListOutput> {
     if (path === undefined) return listRoots(appSessionId, remote);
-    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir', ROOTS_ONLY, remote);
+    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir', ROOTS_ONLY, callerOf(remote));
     try {
       const names = await fs.promises.readdir(real).catch(async () => {
         throw await afterConfirmed(path, roots);
@@ -342,10 +443,22 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       await at('after-readdir', path);
       // Private until the final confirmation below; an entry whose lstat or readlink fails is dropped unnamed.
       const collected = (await mapBounded(names, LIST_STAT_CONCURRENCY, (name) => entryAt(real, name))).filter((entry) => entry !== null);
-      await confirm(path, roots, stat);
       const sorted = collected.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name));
+      const entries = sorted.slice(0, FILES_LIST_MAX_ENTRIES);
+      // U6b-3a (decisions 12 and 13): which of the answered entries git ignores, asked in the confirmed directory, of the
+      // object opened there, before the last confirmation, so a swap while git runs refuses the listing as a swap after the reads does; no answer marks
+      // nothing, and a name the answer holds that the listing does not carry is dropped
+      await at('before-ignored', path);
+      const marked = ignored === undefined ? null : await ignored(real, entries.map((entry) => entry.name), stat);
+      await confirm(path, roots, stat);
+      await confirmSpelling(real, stat); // the spelling every read above, and git, was handed
       const root = roots.filter((candidate) => under(candidate, real)).sort((a, b) => b.length - a.length)[0] ?? null;
-      return { root, path: real, entries: sorted.slice(0, FILES_LIST_MAX_ENTRIES), truncated: sorted.length > FILES_LIST_MAX_ENTRIES };
+      return {
+        root,
+        path: real,
+        entries: marked === null || marked.size === 0 ? entries : entries.map((entry) => (marked.has(entry.name) ? { ...entry, ignored: true as const } : entry)),
+        truncated: sorted.length > FILES_LIST_MAX_ENTRIES,
+      };
     } finally {
       await handle.close();
     }
@@ -365,12 +478,12 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { root: null, path: '', entries: entries.filter((entry) => entry !== null), truncated: false };
   }
 
-  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed, agent, raw: asksRaw }: FilesReadInput, remote = false, signal?: AbortSignal): Promise<FilesReadOutput> {
+  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed, agent, raw: asksRaw, open }: FilesReadInput, caller: FilesCaller = THIS_MACHINE, signal?: AbortSignal): Promise<FilesReadOutput> {
     // E2: a delivered file is read; U6c: a named one too, and its every answer says so; U6e: every file the outside rule
     // admits, its every answer saying what it is (`outside`), and a file of MAWS's own saying so for every caller
-    const { handle, stat, real, mark } = await openConfirmed(appSessionId, path, 'file', DELIVERED_OR_OUTSIDE, remote, { named: asksNamed, agent, signal });
-    // U6b-2: a raw read is this machine's caller's alone; another machine's `raw` is passed over, as its `named` is
-    const answer = await readOpened(handle, stat, real, offset, length, hash, asksRaw === true && !remote ? { path } : null);
+    const { handle, stat, real, mark } = await openConfirmed(appSessionId, path, 'file', DELIVERED_OR_OUTSIDE, caller, { named: asksNamed, agent, signal, open });
+    // U6b-2: a raw read is this machine's caller's alone; another machine's `raw` is passed over, claimed or not
+    const answer = await readOpened(handle, stat, real, offset, length, hash, asksRaw === true && !caller.remote ? { path } : null);
     return {
       ...answer,
       ...(mark === null ? {} : { named: true as const, outside: mark === 'result' || mark === 'added' ? { real, writable: false, why: mark } : { real, writable: true } }),
@@ -464,14 +577,40 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // a directory confirmed earlier (the race the boundary closes) and replaces the inode (mode, hard links, xattrs).
   async function write({ appSessionId, path, content, expectedHash }: FilesWriteInput, remote = false): Promise<FilesWriteOutput> {
     const bytes = sized(content);
-    return save(await openConfirmed(appSessionId, path, 'write', ROOTS_ONLY, remote), path, bytes, expectedHash);
+    return save(await openConfirmed(appSessionId, path, 'write', ROOTS_ONLY, callerOf(remote)), path, bytes, expectedHash);
   }
 
   // U6e (§B): the save of a file the outside rule admits for a save (or of a root's file), the real path it was shown
-  // compared with the one confirmed at the open (write rule, line 3)
-  async function writeOutside({ appSessionId, path, content, expectedHash, real }: FilesWriteOutsideInput, remote = false, signal?: AbortSignal): Promise<FilesWriteOutput> {
-    const bytes = sized(content);
-    return save(await openConfirmed(appSessionId, path, 'write', OUTSIDE_SAVE, remote, { signal }), path, bytes, expectedHash, { real, signal });
+  // compared with the one confirmed at the open (write rule, line 3). U6f: another machine's caller only under a claim,
+  // each of whose endings is a line of the log
+  async function writeOutside({ appSessionId, path, content, expectedHash, real, open }: FilesWriteOutsideInput, caller: FilesCaller = THIS_MACHINE, signal?: AbortSignal): Promise<FilesWriteOutput> {
+    if (caller.remote && caller.claim === null) throw new Refusal();
+    const saved = async (): Promise<{ answer: FilesWriteOutput; real: string; bytes: number }> => {
+      const bytes = sized(content);
+      const confirmed = await openConfirmed(appSessionId, path, 'write', OUTSIDE_SAVE, caller, { signal, open: open === true });
+      return { answer: await save(confirmed, path, bytes, expectedHash, { real, signal }), real: confirmed.real, bytes: bytes.length };
+    };
+    const claim = claimOf(caller);
+    if (claim === null) return (await saved()).answer;
+    const logged = (ending: string) => logOutside(`outside write: ${askedBy(claim, appSessionId)}: ${ending}`);
+    try {
+      const done = await saved();
+      logged(done.answer.status === 'ok' ? `ok ${done.bytes} bytes ${done.real}` : `conflict ${done.real}`);
+      return done.answer;
+    } catch (error) {
+      logged(`refused (${writeRefusalWord(error)}) ${path}`);
+      throw error;
+    }
+  }
+
+  // U6f (decision 10): the daemon's own record of an outside act from another machine, which no failure of it changes;
+  // always one line, whatever the path it names holds
+  function logOutside(line: string): void {
+    try {
+      outsideLog?.(oneLine(line));
+    } catch {
+      // the act's answer stands; the log is the daemon's, and a line it could not take is not the act's to report
+    }
   }
 
   function sized(content: string): Buffer {
@@ -489,7 +628,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       if (outside?.signal?.aborted === true) throw new Refusal();
     };
     try {
-      if (isOwn(real)) throw new Error(`not writable: ${path}`);
+      if (isOwn(real)) throw new OwnFolder(path);
       if (outside !== undefined && real !== outside.real) throw new Error(FILES_MOVED);
       if (Number(stat.size) > FILES_WRITE_MAX_BYTES) throw tooLarge();
       ended();
@@ -513,9 +652,10 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   }
 
   // U6e (§B): the record of a file the person chose in main's chooser, by its real path, for this session; a caller on
-  // another machine, and a service given no grants, are refused
-  async function grant(appSessionId: AppSessionId, path: string, remote = false): Promise<FilesGrantOutput> {
-    if (remote) throw new Refusal();
+  // another machine with no claim, and a service given no grants, are refused. U6f: another machine's claimed caller
+  // reaches it through `chooseOutside` alone, which hands it the real path its walk ended at.
+  async function grant(appSessionId: AppSessionId, path: string, caller: FilesCaller = THIS_MACHINE): Promise<FilesGrantOutput> {
+    if (caller.remote && caller.claim === null) throw new Refusal();
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     if (!records(appSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
@@ -530,6 +670,90 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     if (!target?.isFile()) return { status: 'refused', reason: 'not-a-file' };
     grants.add(appSessionId, real);
     return { status: 'granted', path: real };
+  }
+
+  // U6f (§B, decision 8): one page of one folder of this machine, for another machine's chooser under a claim; this
+  // machine's own chooser is the system's
+  async function listOutside({ appSessionId, path, open, cursor }: FilesListOutsideInput, caller: FilesCaller): Promise<FilesListOutsideOutput> {
+    if (claimOf(caller) === null) throw new Refusal();
+    if (!records(appSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+    const named = expandHome(path ?? '~', home());
+    if (named === null) return refusedListing('no-folder');
+    const walked = await walkOutside(named, where(), open === true);
+    if (!walked.ok) return refusedListing(walked.reason === 'protected' ? 'protected' : 'no-folder');
+    await at('after-outside-walk', named);
+    return listOutsideFolder(walked.real, where(), cursor); // the walk's real path, resolved once
+  }
+
+  // U6f (§B, decision 7): the person's pick in another machine's chooser, under a claim: the whole path walked, a last
+  // link's target included, then U6e's grant of the real path the walk ended at, and the log's line
+  async function chooseOutside({ appSessionId, path, open }: FilesChooseOutsideInput, caller: FilesCaller): Promise<FilesChooseOutsideOutput> {
+    const claim = claimOf(caller);
+    if (claim === null) throw new Refusal();
+    const logged = (ending: string) => logOutside(`outside choice: ${askedBy(claim, appSessionId)}: ${ending}`);
+    let answer: FilesChooseOutsideOutput;
+    try {
+      if (!records(appSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+      const named = expandHome(path, home());
+      const walked = named === null ? null : await walkOutside(named, where(), open === true);
+      if (walked === null || !walked.ok) answer = { status: 'refused', reason: walked?.ok === false && walked.reason === 'protected' ? 'protected' : 'no-file' };
+      else {
+        await at('after-outside-walk', path);
+        answer = await grant(appSessionId, walked.real, caller); // the walk's real path, not the typed one resolved again
+      }
+    } catch (error) {
+      logged(`refused (other) ${path}`);
+      throw error;
+    }
+    logged(answer.status === 'granted' ? `granted ${answer.path}` : `refused (${answer.reason}) ${path}`);
+    return answer;
+  }
+
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1; Decision Log 7): "Open in"'s
+  // admission of the path main hands another app, main's alone. Without a path, the session's working folder as U8c-2
+  // admits it (UC-4): the real path the admission checked, never one of MAWS's own folders. With one, the outside save's
+  // admission (an editor writes, so a file is handed to one exactly when MAWS would save it): under a root a regular file
+  // or a directory; outside every root, where the evidence is of one file (precheck's mark), a regular file only; never
+  // one of MAWS's own. Either way the answer is confirmed as files.read confirms a file: the real path opened with no link
+  // on its way, and a fresh resolution of the path naming the opened object. A caller on another machine is refused.
+  async function admit({ appSessionId, path }: FilesAdmitInput, remote = false, signal?: AbortSignal): Promise<FilesAdmitOutput> {
+    if (remote) throw new Refusal();
+    if (path === undefined) {
+      const record = records(appSessionId);
+      if (!record) throw new Error(`unknown app session: ${appSessionId}`);
+      const fact = await admittedFolder(record, 'path');
+      if (fact === null) throw new Refusal();
+      const real = await fs.promises.realpath(fact.folder).catch(() => null);
+      if (real === null || (fact.checked && real !== fact.folder) || isOwn(real)) throw new Refusal();
+      await opened(fact.folder, real, [real], 'folder');
+      return { path: real, kind: 'folder' };
+    }
+    const { roots, real0, mark } = await precheck(appSessionId, path, OUTSIDE_SAVE, THIS_MACHINE, { signal });
+    if (isOwn(real0)) throw new Refusal();
+    const kind = await opened(path, real0, roots, mark === null ? 'any' : 'file');
+    return { path: real0, kind };
+  }
+
+  // `admit`'s confirmation: `real` opened with no link on its way, its type judged from the descriptor, and `path` resolved
+  // again to `real`, under `roots`, naming the opened object (`confirm`); the descriptor is closed before the answer.
+  async function opened(path: string, real: string, roots: readonly string[], want: 'file' | 'folder' | 'any'): Promise<'file' | 'folder'> {
+    await at('before-open', path);
+    let handle: FileHandle;
+    try {
+      handle = await openNoLink(real, want === 'folder' ? OPEN_FLAGS | O_DIRECTORY : OPEN_FLAGS, path);
+    } catch {
+      throw new Refusal();
+    }
+    try {
+      const stat = await handle.stat({ bigint: true });
+      await at('after-open', path);
+      if ((await confirm(path, roots, stat)) !== real) throw new Refusal();
+      if (stat.isFile() && want !== 'folder') return 'file';
+      if (stat.isDirectory() && want !== 'file') return 'folder';
+      throw new Refusal();
+    } finally {
+      await handle.close();
+    }
   }
 
   // Runs `task` after every earlier task of the same key has settled, and before any later one starts.
@@ -549,7 +773,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   }
 
   async function watch(appSessionId: AppSessionId, path: string, owner: string, remote = false): Promise<void> {
-    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir', ROOTS_ONLY, remote);
+    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir', ROOTS_ONLY, callerOf(remote));
     const holder = { owner, appSessionId, path };
     try {
       const identity: Identity = { dev: stat.dev, ino: stat.ino };
@@ -585,7 +809,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   async function openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked: { named?: boolean; agent?: boolean; remote?: boolean; signal?: AbortSignal } = {}): Promise<FilesOpenExternalOutput> {
     // E2: a delivered file opens outside wherever it lives; U6c: a named one too, for a caller on this machine; U6e: every
     // file the outside rule admits for a read
-    const { real0 } = await precheck(appSessionId, path, DELIVERED_OR_OUTSIDE, asked.remote === true, { named: asked.named, agent: asked.agent, signal: asked.signal });
+    const { real0 } = await precheck(appSessionId, path, DELIVERED_OR_OUTSIDE, callerOf(asked.remote === true), { named: asked.named, agent: asked.agent, signal: asked.signal });
     // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
     // object is admitted (step 1), so naming it in the message leaks nothing.
     const target = await fs.promises.lstat(real0).catch(() => null);
@@ -628,6 +852,9 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     write,
     writeOutside, // U6e
     grant, // U6e
+    listOutside, // U6f
+    chooseOutside, // U6f
+    admit, // U6b-4a
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new
@@ -653,6 +880,27 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 // other values because a writer can set a modification time back and cannot set a change time.
 export const identityOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 
+// UX wave U6f (decision 10): a line of the log as one line. A POSIX name may hold any character but `/` and NUL, a line
+// ending included, so each control character is escaped (`\n`, `\r`, any other `\xNN`) and a path cannot end its line
+// and write one of its own; a line with none reads as written
+const oneLine = (line: string): string => line.replace(/\p{Cc}/gu, (char) => (char === '\n' ? '\\n' : char === '\r' ? '\\r' : `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`));
+
+// UX wave U6f (decision 10): who a line of the log is for, the claim's own (the member and device the endpoint proved)
+const askedBy = (claim: FilesClaim, appSessionId: AppSessionId): string => `member ${claim.member} device ${claim.device} session ${appSessionId} op ${claim.opId}`;
+
+// UX wave U6f (decision 10): the word a refused save's line gives for why: outside the rule, MAWS's own, moved since it
+// was shown, gone, not the daemon user's to write, in a protected folder not opened, or anything else
+function writeRefusalWord(error: unknown): string {
+  if (error instanceof Refusal) return 'outside';
+  if (error instanceof OwnFolder) return 'own';
+  if (error instanceof HostCommandError) return (error.ipcError.issues as { refusal?: unknown } | undefined)?.refusal === 'protected' ? 'protected' : 'other';
+  const message = error instanceof Error ? error.message : '';
+  if (message === FILES_MOVED) return 'moved';
+  if (message.startsWith('not found: ')) return 'missing';
+  if (message.startsWith('not writable: ')) return 'not-writable';
+  return 'other';
+}
+
 // Step 5 (and the late confirmations): a fresh realpath of the path as given, under a root, whose `stat` names the
 // descriptor's object. Answers the confirmed realpath.
 async function confirm(path: string, roots: readonly string[], opened: Identity): Promise<string> {
@@ -661,6 +909,14 @@ async function confirm(path: string, roots: readonly string[], opened: Identity)
   const now = await fs.promises.stat(real, { bigint: true }).catch(() => null);
   if (!now || !sameIdentity(now, opened)) throw new Refusal();
   return real;
+}
+
+// The last confirmation of a listing, for the spelling its reads were made by: still its own realpath, so no link has
+// come onto its way, and still the opened object (UX wave U6b-3a's branch panel, its security findings)
+async function confirmSpelling(real: string, opened: Identity): Promise<void> {
+  if ((await fs.promises.realpath(real).catch(() => null)) !== real) throw new Refusal();
+  const now = await fs.promises.stat(real, { bigint: true }).catch(() => null);
+  if (!now || !sameIdentity(now, opened)) throw new Refusal();
 }
 
 async function entryAt(real: string, name: string): Promise<FilesEntry | null> {

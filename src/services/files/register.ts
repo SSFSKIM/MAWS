@@ -5,6 +5,10 @@
 // reloads) releases whatever it still holds, since its page can no longer unwatch and a reloaded page watches afresh.
 // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §C): a read or an open outside
 // the folders that asks by name (`named`) waits for the transcript's answer as long as its client lives, and no longer.
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §B Wiring; decision 3): the
+// handlers hand the service who asks, read from the context the dispatch set and never from the input. Only the four
+// outside acts pass on the claim `machine.op` made for the run (`context.op`, which every claimed act carries,
+// `files.write` and `files.upload` too), so for every other command a claimed request is another machine's like any.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientPort } from '@shared/client/port';
 import type { ClientId, ClientRef, HandlerContext } from '@shared/ipc/client';
@@ -12,7 +16,7 @@ import type { FilesChanged, FilesReadUploadsInput, FilesReadUploadsOutput, Files
 import type { ServicesBus } from '@shared/spine/bus';
 import type { AllowlistRecord } from './allowlist';
 import type { Naming } from './named';
-import { createFilesService, type FilesService, type FilesServiceOptions } from './service';
+import { createFilesService, FILES_REFUSAL, THIS_MACHINE, UNCLAIMED, type FilesCaller, type FilesService, type FilesServiceOptions } from './service';
 import { UPLOAD_READS_UNAVAILABLE, UPLOADS_UNAVAILABLE } from './upload';
 
 export interface FilesHandlerDeps {
@@ -29,6 +33,12 @@ export interface FilesHandlerDeps {
   grants?: FilesServiceOptions['grants'];
   sent?: FilesServiceOptions['sent'];
   own?: FilesServiceOptions['own'];
+  ignored?: FilesServiceOptions['ignored']; // UX wave U6b-3a: the daemon's ignore check (./ignored.ts); none: nothing is marked
+  // UX wave U6f (§B): the daemon's log of the outside saves and choices from another machine, and the daemon user's home
+  // and platform, which their walks read (./service.ts)
+  outsideLog?: FilesServiceOptions['outsideLog'];
+  home?: FilesServiceOptions['home'];
+  platform?: FilesServiceOptions['platform'];
 }
 
 // The service, plus the live clients it follows (for tests and diagnostics: an ended client leaves no entry behind).
@@ -52,11 +62,18 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   const session = (id: string) => id as AppSessionId;
   // 2026-11-06: a remote request's roots leave out the machine's home (the context's `remote`, the endpoint seam's)
   const remote = (context: HandlerContext | undefined) => context?.remote === true; // a caller that passes no context is this machine's
+  // U6f: who asks, for every command; and for the four outside acts alone, another machine's under its claim
+  const callerOf = (context: HandlerContext | undefined): FilesCaller => (remote(context) ? UNCLAIMED : THIS_MACHINE);
+  const claimedOf = (context: HandlerContext | undefined): FilesCaller => {
+    const op = context?.op;
+    return remote(context) && op !== undefined ? { remote: true, claim: { member: op.member, device: op.device, opId: op.opId } } : callerOf(context);
+  };
   // U6c (M2 decision 4): per asking client, one signal that ends when the client does, made for the first request that
-  // asks by name and dropped with the client; a caller with no context, or one from another machine (never asked), has none
+  // asks by name and dropped with the client; a caller with no context, or one from another machine with no claim (never
+  // asked), has none. U6f: a claimed read's client is the channel's, and its end ends the wait too.
   const ends = new Map<ClientId, AbortSignal>();
-  const endOf = (named: boolean | undefined, context: HandlerContext | undefined): AbortSignal | undefined => {
-    if (named !== true || context === undefined || remote(context)) return undefined;
+  const endOf = (named: boolean | undefined, context: HandlerContext | undefined, caller: FilesCaller = callerOf(context)): AbortSignal | undefined => {
+    if (named !== true || context === undefined || (caller.remote && caller.claim === null)) return undefined;
     const { client } = context;
     const known = ends.get(client.id);
     if (known) return known;
@@ -69,12 +86,26 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
     return ended.signal;
   };
   register('files.list', ({ appSessionId, path }, context?: HandlerContext) => files.list({ appSessionId: session(appSessionId), path }, remote(context)));
-  register('files.read', (input, context?: HandlerContext) => files.read({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(input.named, context)));
+  register('files.read', (input, context?: HandlerContext) => files.read({ ...input, appSessionId: session(input.appSessionId) }, callerOf(context), endOf(input.named, context)));
   register('files.write', (input, context?: HandlerContext) => files.write({ ...input, appSessionId: session(input.appSessionId) }, remote(context))); // E5
   // UX wave U6e (§B, Wiring): the save outside the folders asks by name, so it waits for the transcript as long as its
-  // client lives; the grant is main's alone (main-only), refused for a caller from another machine
-  register('files.writeOutside', (input, context?: HandlerContext) => files.writeOutside({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(true, context)));
-  register('files.grant', ({ appSessionId, path }, context?: HandlerContext) => files.grant(session(appSessionId), path, remote(context)));
+  // client lives; the grant is main's alone (main-only), refused for a caller from another machine. U6f: the save from
+  // another machine runs under its claim, and the channel's end refuses it nothing: the act is the link's, and its answer
+  // is kept for the device to ask again
+  register('files.writeOutside', (input, context?: HandlerContext) => files.writeOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context), endOf(true, context)));
+  register('files.grant', ({ appSessionId, path }, context?: HandlerContext) => files.grant(session(appSessionId), path, callerOf(context)));
+  // UX wave U6f (§B, Wiring): the open, the chooser's listing and the pick. The open is the keyed read under the claim (on
+  // this machine's own client, U6e's keyed read); another machine's request no `machine.op` claimed is refused before any
+  // session is resolved
+  register('files.readOutside', (input, context?: HandlerContext) => {
+    const caller = claimedOf(context);
+    if (caller.remote && caller.claim === null) throw new Error(FILES_REFUSAL);
+    return files.read({ ...input, named: true, appSessionId: session(input.appSessionId) }, caller, endOf(true, context, caller));
+  });
+  register('files.listOutside', (input, context?: HandlerContext) => files.listOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context)));
+  register('files.chooseOutside', (input, context?: HandlerContext) => files.chooseOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context)));
+  // UX wave U6b-4a: Open in's admission, main-only; a file outside the folders waits for the transcript while main's call lives
+  register('files.admit', (input, context?: HandlerContext) => files.admit({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(input.path !== undefined, context)));
   register('files.watch', async ({ appSessionId, path }, context: HandlerContext) => {
     const { client } = context;
     follow(client);
