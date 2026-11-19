@@ -34,6 +34,53 @@ function openedOf(tabId: string): Opened | null {
 const sameView = (a: Projection, b: Projection) =>
   a.overview === b.overview && JSON.stringify(a.page) === JSON.stringify(b.page) && a.fronts.length === b.fronts.length && a.fronts.every((id, i) => id === b.fronts[i]);
 
+// A step's hand-off of the keyboard (M3's task review): from the step until a task after its frame, the pane the step put
+// in front is the focused pane, whatever else takes the keyboard in between. The Overview, closing, gives the keyboard
+// back to the element that held it when it opened, which can stand in the other pane of a split; the pane it lands in
+// becomes the focused pane (`main/Pane.tsx`). The reader does not take that as the person's move: it gives the keyboard
+// back to the step's pane. Nothing of the person's can come in between but a key or a press, which ends the hand-off.
+let handoff: { place: Place; pane: number } | null = null;
+let handoffEnds: (() => void) | null = null;
+
+function endHandoff(): void {
+  handoff = null;
+  handoffEnds?.();
+  handoffEnds = null;
+}
+
+function startHandoff(place: Place, pane: number): void {
+  endHandoff();
+  handoff = { place, pane };
+  let frame = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const byPerson = () => endHandoff();
+  frame = requestAnimationFrame(() => {
+    timer = setTimeout(endHandoff, 0);
+  });
+  window.addEventListener('keydown', byPerson, true);
+  window.addEventListener('pointerdown', byPerson, true);
+  handoffEnds = () => {
+    cancelAnimationFrame(frame);
+    if (timer !== undefined) clearTimeout(timer);
+    window.removeEventListener('keydown', byPerson, true);
+    window.removeEventListener('pointerdown', byPerson, true);
+  };
+}
+
+// The projection as the step means it, when it differs from it only by a pane that took the keyboard during the
+// hand-off; the keyboard and the focused pane are put back on the step's pane.
+function heldByStep(next: Projection): Projection {
+  if (handoff === null || next.focusedPane === handoff.pane) return next;
+  const meant = { ...next, focusedPane: handoff.pane };
+  const place = placeOf(meant);
+  if (place === null || !samePlace(place, handoff.place)) return next;
+  const { pane } = handoff;
+  const region = document.getElementById('region-main');
+  if (region && available(region)) focusPaneElement(pane as 0 | 1);
+  if (currentSet(useLayout.getState().main).focusedPane !== pane) useLayout.getState().focusPane(pane as 0 | 1);
+  return meant;
+}
+
 // One read (Interfaces §D, the reader's four steps): tabs that left take their entries; a change of the focused pane
 // alone points the entry at the tab now in front; any other change of the projection is `seen`.
 function read(last: Projection, next: Projection): void {
@@ -54,7 +101,9 @@ function read(last: Projection, next: Projection): void {
 
 // A step (decision 15), in one synchronous run: the position first, then the layout written whole through the store's
 // own acts, so the reader's next read finds the projection equal to the entry it stands at and records nothing. The
-// Settings dialog closes; the Overview is set both ways (finding 5).
+// Settings dialog closes; the Overview is set both ways (finding 5). The pane in front takes the keyboard: after a step
+// to a tab, on the next frame, as after ⌥⌘] (`stepMainTab`); before the Overview opens over a tab, at once, so the
+// element the Overview gives the keyboard back to when it closes is in the pane of the place it is over.
 function step(delta: 1 | -1): void {
   const { record } = useVisits.getState();
   const to = target(record, delta);
@@ -69,16 +118,17 @@ function step(delta: 1 | -1): void {
   if (layout().overviewOpen) layout().setOverviewOpen(false);
   if (under.kind === 'tab') layout().activateTab(under.id);
   else layout().openDestination(under.destination);
-  if (to.place.kind === 'overview') layout().setOverviewOpen(true);
-  else if (to.place.kind === 'tab') focusPaneInFront();
+  if (under.kind === 'tab') startHandoff(to.place, currentSet(layout().main).focusedPane);
+  else endHandoff();
+  if (to.place.kind === 'overview') {
+    if (under.kind === 'tab') focusPaneNow();
+    layout().setOverviewOpen(true);
+  } else if (to.place.kind === 'tab') requestAnimationFrame(focusPaneNow);
 }
 
-// After a step to a tab the pane in front takes the keyboard, as after ⌥⌘] (`stepMainTab`).
-function focusPaneInFront(): void {
-  requestAnimationFrame(() => {
-    const region = document.getElementById('region-main');
-    if (region && available(region)) focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
-  });
+function focusPaneNow(): void {
+  const region = document.getElementById('region-main');
+  if (region && available(region)) focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
 }
 
 // The ends by registration (decision 16): `go.back` has a handler while there is an entry before, `go.forward` while
@@ -116,7 +166,7 @@ export function connectVisits(): () => void {
     pending = false;
     const state = useLayout.getState();
     if (!live || !state.hydrated) return;
-    const next = projectionOf(state);
+    const next = heldByStep(projectionOf(state));
     if (last === null) {
       const place: Place | null = placeOf(next);
       if (place !== null) useVisits.setState({ record: seen(EMPTY_RECORD, place) });
@@ -134,5 +184,6 @@ export function connectVisits(): () => void {
     live = false;
     offLayout();
     offHandlers();
+    endHandoff();
   };
 }

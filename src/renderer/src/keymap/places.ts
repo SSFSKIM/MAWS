@@ -44,8 +44,9 @@ export function placeOf(p: Projection): Place | null {
   return p.overview ? { kind: 'overview', over: under } : under;
 }
 
-// A tab by its id; a page by its kind (its view and filter are the entry's state, not another place); the Overview by
-// what it is over.
+// A tab by its id; a page by its kind (what its `Destination` carries besides, Customize's view and filter, is the
+// entry's state, not another place; the Library's query lives in its own store and is not the record's, Decision Log 12);
+// the Overview by what it is over.
 export function samePlace(a: Place, b: Place): boolean {
   if (a.kind === 'tab') return b.kind === 'tab' && a.id === b.id;
   if (a.kind === 'page') return b.kind === 'page' && a.destination.kind === b.destination.kind;
@@ -55,7 +56,7 @@ export function samePlace(a: Place, b: Place): boolean {
 const replaced = (entries: readonly Place[], index: number, place: Place): Place[] => entries.map((entry, i) => (i === index ? place : entry));
 
 // The first rule that applies (Interfaces §D):
-// 1. the entry the record is at: it is replaced (a page's view and filter follow), nothing else changes;
+// 1. the entry the record is at: it is replaced (a page's `Destination` follows), nothing else changes;
 // 2. leaving the Overview, or a page, for the place before it is a step back, the entry kept ahead (P5; card K2's
 //    answer: Esc was a step back);
 // 3. a new visit: what was ahead leaves, the place is appended and the record is at it; past PLACES_MAX the oldest leaves.
@@ -70,14 +71,23 @@ export function seen(record: PlaceRecord, place: Place): PlaceRecord {
   return { entries: next, at: next.length - 1 };
 }
 
-// Entries kept in order, two neighbours that are the same place made one (the later entry's value, the newer), with the
-// index each kept entry had before; `at` is the new index of the entry it was on, else of the nearest one before it.
+// Entries kept in order, neighbours that are the same place made one, with the index each kept entry had before; `at` is
+// the new index of the entry it was on, else of the nearest one before it. A merged group keeps the value of the entry
+// `at` was on when the group holds it (what the window shows: a page's view), else of its newest entry.
 function compact(kept: readonly { place: Place; from: number }[], at: number): PlaceRecord {
   const entries: Place[] = [];
   let next = -1;
+  let heldAt = false; // the last entry pushed holds the entry `at` was on
   for (const { place, from } of kept) {
-    if (entries.length > 0 && samePlace(entries.at(-1)!, place)) entries[entries.length - 1] = place;
-    else entries.push(place);
+    const merges = entries.length > 0 && samePlace(entries.at(-1)!, place);
+    if (!merges) {
+      entries.push(place);
+      heldAt = false;
+    } else if (!heldAt) entries[entries.length - 1] = place;
+    if (from === at) {
+      entries[entries.length - 1] = place;
+      heldAt = true;
+    }
     if (from <= at) next = entries.length - 1;
   }
   return { entries, at: next };
