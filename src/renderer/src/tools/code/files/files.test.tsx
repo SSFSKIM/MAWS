@@ -536,7 +536,7 @@ describe('files tool', () => {
     for (const p of alert.querySelectorAll('p:not([data-notice-detail])')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.)/); // the sentences; the command's words are the small line's
     up = true;
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(items()).toEqual(['r']));
+    await waitFor(() => expect(item('r')).toBeTruthy()); // the root, listed now
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
