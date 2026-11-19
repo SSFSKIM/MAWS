@@ -121,7 +121,7 @@ import { NAMED_PATH_MAX, NAMED_WAIT_MS, type Naming } from './named';
 import { listOutsideFolder, refused as refusedListing, walkOutside } from './outside-list';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between an outside walk and the step that takes its real path */ | 'before-ignored' /* U6b-3a: between a listing's entries' reads and its ignore check */ | 'after-follow-read' /* U6b-4c: between a followed Markdown file's read and its links' scan */ | 'before-follow-record' /* U6b-4c: between a follow's proof and the target's last resolution */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between an outside walk and the step that takes its real path */ | 'before-ignored' /* U6b-3a: between a listing's entries' reads and its ignore check */ | 'after-follow-read' /* U6b-4c: between a followed Markdown file's read and its links' scan */ | 'before-follow-turn' /* U6b-4c: before a follow's Markdown proof takes its place in the line */ | 'before-follow-record' /* U6b-4c: between a follow's proof and the target's last resolution */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -761,9 +761,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   let following = 0;
   const proofs = oneAtATime();
 
-  // `files.follow`: the follow of a link the person clicked, in the order of §D. A follow is counted from before its first
-  // file system call until its own work has ended, its locator's call included (`hold`), whatever it answered meanwhile;
-  // its patience is NAMED_WAIT_MS from here, read once more directly before the record is written.
+  // `files.follow`: the follow of a link the person clicked, in the order of §D. Its patience is NAMED_WAIT_MS from here,
+  // and it bounds the answer: once the patience has run out or the client has ended, the follow answers not-linked at
+  // once, whatever step is under way, and its work starts no further step. A follow is counted from before its first file
+  // system call until its own work has ended (its locator's call included, `hold`), not until it answered (decision 7):
+  // a step stuck on a mount that stopped answering keeps its place, and its place in the proofs' line where it holds one.
   async function follow(input: FilesFollowInput, caller: FilesCaller = THIS_MACHINE, signal?: AbortSignal): Promise<FilesFollowOutput> {
     if (caller.remote) throw new Refusal(); // any caller that is not this machine's own, under a claim or not (R1)
     if (links === undefined || following >= FOLLOW_IN_FLIGHT_MAX) return NOT_LINKED;
@@ -782,11 +784,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
         leave();
       };
     };
-    try {
-      return await followLink(input, links, Date.now() + NAMED_WAIT_MS, signal, hold);
-    } finally {
-      leave();
-    }
+    const deadline = Date.now() + NAMED_WAIT_MS;
+    const work = followLink(input, links, deadline, signal, hold);
+    const settled = () => leave();
+    void work.then(settled, settled); // the place is the work's, until it has ended
+    return Promise.race([work, patience(deadline, signal, work)]);
   }
 
   async function followLink({ appSessionId, path, from }: FilesFollowInput, store: Pick<FileLinks, 'add'>, deadline: number, signal: AbortSignal | undefined, hold: () => () => void): Promise<FilesFollowOutput> {
@@ -798,24 +800,27 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
     if (Buffer.byteLength(path) > NAMED_PATH_MAX) return NOT_LINKED;
     // step 3, the early answers (decision 4): a path that ends in a link or does not resolve links nothing; one under the
-    // session's folders needs no record, whatever it is
+    // session's folders needs no record, whatever it is. After each step the patience is read before the next starts.
     const roots = await rootsOf(record);
+    if (over()) return NOT_LINKED;
     const final = await fs.promises.lstat(path).catch(() => null);
-    if (final === null || final.isSymbolicLink()) return NOT_LINKED;
+    if (over() || final === null || final.isSymbolicLink()) return NOT_LINKED;
     const real0 = await fs.promises.realpath(path).catch(() => null);
-    if (real0 === null) return NOT_LINKED;
+    if (over() || real0 === null) return NOT_LINKED;
     if (roots.some((root) => under(root, real0))) return INSIDE;
     // step 4, the proof, by where the link stands
     const proof = 'file' in from ? await provedByFile(appSessionId, from.file, path, deadline, signal, over) : await provedByAgent(appSessionId, from.agent, path, signal, hold);
-    if (proof === null) return NOT_LINKED;
+    if (over() || proof === null) return NOT_LINKED;
     // step 5, the target resolved once more, the last thing learned before the record (as `grant` resolves the file it
     // records): a Markdown source's record is of the real path its second test found, or of none
     await at('before-follow-record', path);
+    if (over()) return NOT_LINKED;
     const real = await fs.promises.realpath(path).catch(() => null);
-    if (real === null) return NOT_LINKED;
+    if (over() || real === null) return NOT_LINKED;
     const last = await fs.promises.lstat(path).catch(() => null);
-    if (last === null || last.isSymbolicLink()) return NOT_LINKED;
-    if (!(await fs.promises.lstat(real).catch(() => null))?.isFile()) return NOT_LINKED;
+    if (over() || last === null || last.isSymbolicLink()) return NOT_LINKED;
+    const target = await fs.promises.lstat(real).catch(() => null);
+    if (over() || !target?.isFile()) return NOT_LINKED;
     if (roots.some((root) => under(root, real))) return INSIDE;
     if (proof.real !== null && proof.real !== real) return NOT_LINKED;
     // one synchronous step after the last await: the patience and the client read, then the record and its line
@@ -833,7 +838,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // found, and whether a save is admitted: when the service would save the Markdown file itself for the session (R4).
   async function provedByFile(appSessionId: AppSessionId, file: string, path: string, deadline: number, signal: AbortSignal | undefined, over: () => boolean): Promise<{ real: string; why?: LinkWhy } | null> {
     if (!isMarkdownName(basename(file))) return null;
-    if (!(await proofs.enter(deadline, signal))) return null;
+    await at('before-follow-turn', file);
+    if (over() || !(await proofs.enter(deadline, signal))) return null;
     try {
       if (over()) return null;
       let source: Confirmed;
@@ -841,6 +847,10 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
         source = await openConfirmed(appSessionId, file, 'file', DELIVERED_OR_OUTSIDE, THIS_MACHINE, { named: true, signal });
       } catch {
         return null; // not admitted, not there, not a regular file: nothing is said of why
+      }
+      if (over()) {
+        await source.handle.close();
+        return null;
       }
       let text: string;
       try {
@@ -854,6 +864,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
         await source.handle.close();
       }
       await at('after-follow-read', file);
+      if (over()) return null;
       const found = await linkedFrom(text, dirname(file), dirname(source.real), path, over);
       if (found === null) return null;
       return !isOwn(source.real) && (source.mark === null || SAVES.has(source.mark)) ? { real: found } : { real: found, why: 'linked' };
@@ -874,6 +885,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       }
       if (step.path !== path) continue;
       const [mine, asked] = await Promise.all([realOrNull(resolveRelative(confirmed, step.written)), realOrNull(path)]);
+      if (over()) return null;
       if (mine !== null && mine === asked) return mine;
     }
     return null;
@@ -881,11 +893,17 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 
   // Step 4 for a subagent's transcript: the search over that one file (M3's), whose counted form admits a save and whose
   // result form a read. The follow keeps its place until the search's call of the transcript locator has settled, also
-  // after the search answered (decision 7). A search that fails links nothing, and its work has ended with it.
+  // after the search answered (decision 7): the place is given back by `located` alone, which the search calls exactly once
+  // when its locator call has settled (answered, thrown, or never made), whether the search itself fulfils or rejects. A
+  // search that fails, or throws as it is called, links nothing.
   async function provedByAgent(appSessionId: AppSessionId, agentId: string, path: string, signal: AbortSignal | undefined, hold: () => () => void): Promise<{ real: null; why?: LinkWhy } | null> {
     if (agentNames === undefined) return null;
-    const located = hold();
-    const naming = await agentNames(appSessionId, agentId, path, signal, located).catch((): Naming => (located(), false));
+    let naming: Naming;
+    try {
+      naming = await agentNames(appSessionId, agentId, path, signal, hold());
+    } catch {
+      return null;
+    }
     if (naming === 'counted') return { real: null };
     return naming === 'result' ? { real: null, why: 'result' } : null;
   }
@@ -1042,6 +1060,22 @@ function writeRefusalWord(error: unknown): string {
   if (message.startsWith('not found: ')) return 'missing';
   if (message.startsWith('not writable: ')) return 'not-writable';
   return 'other';
+}
+
+// UX wave U6b-4c (decision 7 (iv)): not-linked once the deadline has passed or the client has ended, whichever comes first;
+// its timer and its listener go when `work` settles, and it never settles once `work` has
+function patience(deadline: number, signal: AbortSignal | undefined, work: Promise<unknown>): Promise<FilesFollowOutput> {
+  return new Promise((resolve) => {
+    const expire = () => resolve(NOT_LINKED);
+    if (signal?.aborted === true) return expire();
+    const timer = setTimeout(expire, Math.max(0, deadline - Date.now()));
+    signal?.addEventListener('abort', expire, { once: true });
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', expire);
+    };
+    void work.then(done, done);
+  });
 }
 
 // UX wave U6b-4c (decision 7 (ii)): one holder at a time, in the order they asked. A waiter whose patience ends (its

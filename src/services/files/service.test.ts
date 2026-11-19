@@ -3633,10 +3633,14 @@ describe('files saves outside the folders', () => {
         const held = new Promise<void>((resolve) => (release = resolve));
         let reached!: () => void;
         const proving = new Promise<void>((resolve) => (reached = resolve));
+        const waiting = new Set<string>(); // the follows that reached the line, by their source's name
+        let bothWaiting!: () => void;
+        const lined = new Promise<void>((resolve) => (bothWaiting = resolve));
         const files = followService({
           hooks: {
             at: async (point, path) => {
               if (point === 'before-open') order.push(`open ${basename(path)}`);
+              if (point === 'before-follow-turn' && basename(path) !== 'guide.md' && waiting.add(basename(path)).size === 2) bothWaiting();
               if (point !== 'after-follow-read') return;
               order.push(`read ${basename(path)}`);
               if (basename(path) !== 'guide.md') return;
@@ -3650,7 +3654,8 @@ describe('files saves outside the folders', () => {
         const second = follow(files, out('result.txt'), { file: inRoot('docs', 'second.md') });
         const ending = new AbortController();
         const third = follow(files, out('chosen.txt'), { file: inRoot('docs', 'third.md') }, A, ending.signal);
-        await new Promise((resolve) => setTimeout(resolve, 50)); // the second's and the third's early answers have had their turns
+        await lined;
+        await new Promise((resolve) => setImmediate(resolve)); // each has taken its place in the line, the turn after its hook
         ending.abort();
         expect(await third, 'its client ended while it waited').toEqual(NOT_LINKED);
         expect(order).toEqual(['open guide.md', 'read guide.md']);
@@ -3862,6 +3867,28 @@ describe('files saves outside the folders', () => {
         expect(seen.length, 'a place given back: the next follow reads').toBeGreaterThan(0);
         for (const one of held.slice(1)) one.located();
       });
+
+      // The search's contract (M3's `namesInAgent`, faked here): it calls `located` exactly once, when its call of the
+      // transcript locator has settled (answered, thrown, or never made), whether the search itself fulfils, rejects or
+      // throws as it is called, and possibly after it did. The follow gives its place back on `located` alone.
+      it('keeps a follow’s place while its locator’s call is under way, whether its search rejects or throws as it is called (decision 7)', async () => {
+        const locators: (() => void)[] = [];
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) => {
+          locators.push(located!);
+          if (locators.length % 2 === 0) throw new Error('the search threw as it was called');
+          return Promise.reject(new Error('the search failed'));
+        };
+        const files = followService({ agentNames });
+        const answers = await Promise.all(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), { agent: 'a1b2c3' })));
+        expect(answers).toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+        const seen = recordTouches();
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(seen, 'nine locators’ calls under way: nine places held').toEqual([]);
+        locators[0]!();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(seen.length, 'one located: one place given back').toBeGreaterThan(0);
+        for (const located of locators.slice(1)) located();
+      });
     });
 
     describe('between the proof and the record (W2, R5)', () => {
@@ -3900,13 +3927,77 @@ describe('files saves outside the folders', () => {
         expect(await follow(files, out('notes.txt'), { file: guide() }, A, new AbortController().signal)).toEqual(LINKED);
       });
 
-      it('records nothing for a follow whose proof is held past its own deadline, its client alive (X5.12)', async () => {
-        const files = followService();
-        points['after-follow-read'] = () => void vi.spyOn(Date, 'now').mockReturnValue(Date.now() + NAMED_WAIT_MS + 1);
-        expect(await follow(files, out('notes.txt'), { file: guide() }, A, new AbortController().signal)).toEqual(NOT_LINKED);
-        expect(existsSync(linksFile)).toBe(false);
-        vi.mocked(Date.now).mockRestore();
-        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      // decision 7 (iv): the patience bounds the answer; the work under way keeps the follow's places until it ends, and
+      // starts no step after it. The clock and the timers are the suite's (setTimeout and Date faked), the disk the real one.
+      it('answers not-linked once its patience runs out while its Markdown proof is held open, keeps its place in the proofs’ line until the proof ends, and records nothing after (X5.12)', async () => {
+        write(inRoot('docs', 'second.md'), `${link(out('result.txt'))}\n`);
+        const seen: string[] = [];
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let reached!: () => void;
+        const proving = new Promise<void>((resolve) => (reached = resolve));
+        let queued!: () => void;
+        const lined = new Promise<void>((resolve) => (queued = resolve));
+        const files = followService({
+          hooks: {
+            at: async (point, path) => {
+              seen.push(`${point} ${basename(path)}`);
+              if (point === 'before-follow-turn' && basename(path) === 'second.md') queued();
+              if (point !== 'after-follow-read' || basename(path) !== 'guide.md') return;
+              reached();
+              await held;
+            },
+          },
+        });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const first = follow(files, out('notes.txt'), { file: guide() }, A, new AbortController().signal);
+          await proving;
+          vi.advanceTimersByTime(NAMED_WAIT_MS + 1);
+          expect(await first, 'answered with its proof still held').toEqual(NOT_LINKED);
+          const second = follow(files, out('result.txt'), { file: inRoot('docs', 'second.md') });
+          await lined;
+          await new Promise((resolve) => setImmediate(resolve)); // the second has taken its place in the line
+          expect(seen.filter((entry) => entry.startsWith('before-open')), 'the line is still the first’s').toEqual(['before-open guide.md']);
+          release();
+          expect(await second).toEqual(LINKED);
+          expect(seen, 'the first starts no step after its patience').not.toContain('before-follow-record notes.txt');
+          expect(realsOf(A)).toEqual([out('result.txt')]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('answers not-linked once its patience runs out while its subagent’s search is held open, keeps its place in the count until the search ends, and records nothing after (X5.12, K13)', async () => {
+        const held: { located: () => void; answer: (naming: Naming) => void }[] = [];
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) =>
+          new Promise<Naming>((answer) => {
+            held.push({ located: located!, answer });
+            if (held.length === FOLLOW_IN_FLIGHT_MAX) nine();
+          });
+        const files = followService({ agentNames });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), { agent: 'a1b2c3' }));
+          await allIn;
+          vi.advanceTimersByTime(NAMED_WAIT_MS + 1);
+          expect(await Promise.all(follows), 'answered with each search still held').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+          const seen = recordTouches();
+          expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+          expect(seen, 'every place is still held').toEqual([]);
+          for (const one of held) {
+            one.answer('counted'); // a counted form, which would have recorded within the patience
+            one.located();
+          }
+          await new Promise((resolve) => setImmediate(resolve));
+          expect(existsSync(linksFile), 'nothing recorded after the patience').toBe(false);
+          expect(await follow(files, out('notes.txt'))).toEqual(LINKED); // the places are given back
+          expect(seen.length).toBeGreaterThan(0);
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it('fails the follow of a session removed before its record is written, writing nothing (W2 b)', async () => {
