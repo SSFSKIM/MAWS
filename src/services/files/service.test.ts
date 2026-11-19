@@ -4090,7 +4090,7 @@ describe('files saves outside the folders', () => {
         const seen = recordTouches();
         expect(await Promise.all(burst.map((path) => follow(files, path, { agent: AGENT })))).toEqual(burst.map(() => NOT_LINKED));
         expect(seen.filter((entry) => entry.startsWith('readdir ')), 'no folder read by any of them').toEqual([]);
-        expect(inside(seen, folderOf(A)), 'nothing of the transcript’s folder').toEqual([]);
+        expect([...inside(seen, folderOf(A)), ...inside(seen, realpathSync(folderOf(A)))], 'nothing of the transcript’s folder, by either spelling').toEqual([]);
         for (const path of burst) expect(seen.some((entry) => entry.endsWith(` ${path}`)), `${path} was read, under the count of follows`).toBe(true);
         touches.on = false;
         opened.release();

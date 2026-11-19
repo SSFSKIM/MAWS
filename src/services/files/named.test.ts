@@ -3,7 +3,7 @@
 // transcript here is made of invented records, written into a scratch store.
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, openSync, readdirSync, readFileSync } from 'node:fs';
-import { cp, open as fsOpen, readFile, readdir, rename, rm, symlink, unlink, writeFile, mkdir, stat, type FileHandle } from 'node:fs/promises';
+import { cp, open as fsOpen, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile, mkdir, stat, type FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -1158,7 +1158,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
   // descriptor is closed with nothing asked of it (no stat), and the job waiting behind runs.
   it('closes, unread, an agent file whose open answered after its last waiter left, and the next job runs', async () => {
     await writeTranscript([linkTo('/work/out/next.md')]);
-    const agent = await writeAgent(AGENT, linking());
+    const agent = await realpath(await writeAgent(AGENT, linking())); // as the search opens it: under the real path of the transcript's folder
     const client = new AbortController();
     const asked: string[] = [];
     const open: NonNullable<NamedPathsOptions['open']> = async (path, flags) => {
