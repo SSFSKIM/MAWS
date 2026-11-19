@@ -15,7 +15,9 @@
 // only through its sessions (`registry:<id>`) offers Channel alone. The UX wave, U9 (Interfaces §6): a session on another
 // machine offers its acts over the link (`remoteSessionActions`), from its listing alone where this Mac holds no record:
 // there after the opens and Hide (U7's rule, the architect's ruling of 2026-11-13), before Share and Add owner; an item is
-// drawn disabled with the window's helper's sentence as its title.
+// drawn disabled with the window's helper's sentence as its title. UX wave U6b-4a: Open in, a submenu after the session's
+// own items and before Share, handing the session's working folder to an app; drawn disabled for a session on another
+// machine, its label saying where the folder is.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -49,6 +51,7 @@ import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../session
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { useHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { useTree } from './tree'; // UX wave U7, O-16
+import { OpenInSubmenu } from '../open-in/OpenInMenu'; // UX wave U6b-4a
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget =
@@ -130,6 +133,7 @@ function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionI
         <ListedOpenItems listed={listed} dropdown={dropdown} />
         {hidable && <HideItem appSessionId={appSessionId} dropdown={dropdown} />}
         {acts.map((id) => <SessionItem key={id} id={id} appSessionId={appSessionId} label={SESSION_ACTIONS[id]} dropdown={dropdown} />)}
+        <OpenInSubmenu appSessionId={appSessionId} menu={dropdown ? 'dropdown' : 'context'} />
         {reach}
       </>
     );
@@ -142,6 +146,7 @@ function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionI
     <>
       {items.map((id) => (id === 'hide' ? <HideItem key={id} appSessionId={appSessionId} dropdown={dropdown} /> : <SessionItem key={id} id={id} appSessionId={appSessionId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} dropdown={dropdown} />))}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
+      <OpenInSubmenu appSessionId={appSessionId} menu={dropdown ? 'dropdown' : 'context'} />
       {reach}
     </>
   );
