@@ -11,7 +11,7 @@ import type { Draft } from '@shared/ipc/schema/session';
 import { addressOf } from '@shared/machine/address';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { heardReaderRows, resetReaderRows } from '../lane-b/reader-rows';
-import { REMOTE_DRAFT_RETRY_MS, unsavedRemoteDraft } from '../lane-b/remote-drafts';
+import { REMOTE_DRAFT_RETRY_MS, saveRemoteDraftOnce, unsavedRemoteDraft } from '../lane-b/remote-drafts';
 import { resetRemoteLaneBStore, useRemoteLaneB } from '../lane-b/remote-session';
 import { resetCatalogStore } from '../stores/catalog';
 import { resetComposerStore } from '../stores/composer';
@@ -19,7 +19,7 @@ import { attachedIn, attachOf, draftStore, heldSends, holdsOnce, mountComposer, 
 import { ATTACH_ROUNDS, type AttachOutcome } from './attach-pasted';
 import { forgetSubmissions, ipcDrafts } from './editor/controller';
 import { docOf, paragraph, textNode, type ComposerDoc } from './editor/doc';
-import { rememberingRemoteDrafts, resetRemoteDrafts } from './editor/drafts';
+import { DRAFT_DELAY_MS, rememberingRemoteDrafts, resetRemoteDrafts } from './editor/drafts';
 
 const R = addressOf(OTHER_MACHINE, 'app-attach-there' as AppSessionId);
 const R2 = addressOf(OTHER_MACHINE, 'app-attach-there-too' as AppSessionId);
@@ -256,3 +256,79 @@ describe('a box over the link whose saves the machine refuses', () => {
     expect(a.lines()).toHaveLength(1);
   });
 });
+
+// Fix wave 3: every remote draft write goes through the session's one queue, so nothing overtakes and nothing is
+// overtaken; "Added" is said on a read-back that holds the block. Each case starts with a write ahead of the box's in the
+// session's order (a take-back's, here), held, so the box's saves queue behind it.
+describe('one queue for a box over the link', () => {
+  async function boxBehindAWrite(store: DraftStoreFake, options: { onSubmit?: (s: never) => Promise<boolean> } = {}) {
+    fakeClock();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    store.put(EARLIER);
+    const box = mountComposer(R, store.client, { overLink: true, covered: true, ...(options.onSubmit && { onSubmit: options.onSubmit }) });
+    await box.restored();
+    store.hold(SET);
+    void saveRemoteDraftOnce(store.client, R, { doc: EARLIER, attachments: [], updatedAt: '2026-11-17T12:30:00.000Z' }, store.revision());
+    await settle();
+    expect(store.held(SET)).toHaveLength(1);
+    return box;
+  }
+  const settleAll = async () => {
+    for (let i = 0; i < 10; i++) await settle();
+  };
+
+  it('a send’s clear is the last word: an attach’s save handed before it never lands after it', async () => {
+    const store = over();
+    const sends = heldSends();
+    const box = await boxBehindAWrite(store, { onSubmit: sends.onSubmit as never });
+    await box.type(TYPED);
+    await vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS); // the typing's save, queued
+    const a = attach(store);
+    await settle();
+    box.send();
+    await settle();
+    expect(sends.sent).toHaveLength(1);
+    await sends.answer(true); // the send's clear, queued
+    await store.held(SET)[0]!.answer();
+    await settleAll();
+    await a.done;
+    expect(store.doc()).toBeNull(); // cleared: the sent message is not back as a draft
+  });
+
+  it('a machine that keeps no drafts hands the newest document to this window, not the attach’s older one', async () => {
+    const store = over();
+    const box = await boxBehindAWrite(store);
+    const a = attach(store);
+    await settle();
+    await box.type(TYPED); // newer than the attach's save
+    await vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS);
+    store.refuseDrafts();
+    await store.held(SET)[0]!.answer(NOT_OFFERED);
+    await settleAll();
+    await a.done;
+    const kept = await rememberingRemoteDrafts(ipcDrafts(store.client, R), R, () => true, store.client).load();
+    const doc = (kept as Draft).doc as ComposerDoc;
+    expect(attachedIn(doc)).toHaveLength(1);
+    expect(textOf(doc)).toContain(TYPED.trim());
+    box.unmount();
+  });
+
+  it('a box’s save answered timeout that then lands is added or unconfirmed, never not saved', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = over();
+    store.put(EARLIER);
+    const box = mountComposer(R, store.client, { overLink: true, covered: true });
+    await box.restored();
+    store.hold(SET);
+    const a = attach(store);
+    await waitFor(() => expect(store.held(SET)).toHaveLength(1));
+    const save = store.held(SET)[0]!;
+    save.land();
+    await save.answer(TIMEOUT);
+    const outcome = await a.done;
+    expect(['added', 'unconfirmed']).toContain(outcome.kind);
+    holdsOnce(store.doc(), 'earlier words');
+    box.unmount();
+  });
+});
+
