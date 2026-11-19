@@ -21,7 +21,8 @@
 //   unavailable with the reason, as M2 substitutes `attention.request`, so the reader always holds a reading. Its changes
 //   come on the session's checkout feed (./remote-checkout.ts).
 // - The machine's `artifacts` feed (./remote-artifact-feed.ts), and open-a-copy and Save As's bytes (./remote-copy.ts).
-//   UX wave U6b-2: and a file frame's copy, into the nameless descriptor main hands it (`copyInto`).
+//   UX wave U6b-2: and a file frame's copy, into the nameless descriptor main hands it (`copyInto`). UX wave U6f: both
+//   copies read a session's file through the reader the adapter hands in (`readSessionFile`), for the caller that asked.
 // - P5 O7 M5b ("The `http` stream"): the scheme's remote responder (../artifacts/remote-scheme.ts), which main's chain asks
 //   for a page of an artifact the table places on an RL2 machine (`scheme`), and through which a dashboard's Download
 //   fetches another machine's asset (`assets`, for `artifacts.downloadAsset`; the artifact recorded as it goes).
@@ -93,6 +94,11 @@ export interface RemoteArtifactsDeps {
   openPath(path: string): Promise<string>;
   tempDir?(): string;
   env: NodeJS.ProcessEnv;
+  /**
+   * UX wave U6f (decision 15): a session's file read for a copy, for the caller that asked (null: no page did), through
+   * the adapter's outside-aware read (./remote-outside-files.ts); without it a copy reads by the plain call, as before.
+   */
+  readSessionFile?(link: RemoteLink, fields: Record<string, unknown>, client: ClientRef | null, options: { label?: string }): Promise<Result>;
   now(): number;
   log(line: string): void;
 }
@@ -101,10 +107,13 @@ export interface RemoteArtifacts {
   handles(name: CommandName): boolean;
   /** `client`: the window that asked, where a document's port goes (P5 O7 M5b). */
   dispatch(link: RemoteLink, name: CommandName, fields: Record<string, unknown>, client?: ClientRef): Promise<CommandResult<CommandName>>;
-  /** `remote.openCopy`, main's handler's. */
-  openCopy(input: CommandInput<'remote.openCopy'>): Promise<CommandResult<'remote.openCopy'>>;
-  /** UX wave U6b-2: a session's file paged into `sink`, a descriptor with no name (`fetchInto`); null while no link reaches the machine. */
-  copyInto(machine: MachineRef, source: { appSessionId: AppSessionId; path: string }, sink: FileHandle, max: number, options: { label: string; seen(first: { mime: string; bytes: number }): void }): Promise<Awaited<ReturnType<typeof fetchInto>> | null>;
+  /** `remote.openCopy`, main's handler's; UX wave U6f: for the caller that asked (absent: no page). */
+  openCopy(input: CommandInput<'remote.openCopy'>, client?: ClientRef): Promise<CommandResult<'remote.openCopy'>>;
+  /**
+   * UX wave U6b-2: a session's file paged into `sink`, a descriptor with no name (`fetchInto`); null while no link reaches
+   * the machine. UX wave U6f: read for `client` (absent: no page), with the tab's `agent` mark.
+   */
+  copyInto(machine: MachineRef, source: { appSessionId: AppSessionId; path: string }, sink: FileHandle, max: number, options: CopyOptions): Promise<Awaited<ReturnType<typeof fetchInto>> | null>;
   /** A remote artifact's stored files and exports, for Save As (../library/files.ts); null while no link reaches it. */
   files(machine: MachineRef): RemoteLibraryFiles | null;
   /** P5 O7 M5b: the scheme's remote responder, main's chain's second (../artifacts/index.ts). */
@@ -113,6 +122,9 @@ export interface RemoteArtifacts {
   assets(machine: MachineRef): RemoteAssets | null;
   stop(): void;
 }
+
+/** What a file frame's copy gives the read (UX wave U6b-2's `label` and `seen`; U6f's caller and the tab's mark). */
+export type CopyOptions = { label: string; seen(first: { mime: string; bytes: number }): void; client?: ClientRef; agent?: true; open?: true };
 
 type Result = CommandResult<CommandName>;
 const failure = (code: IpcErrorCode, message: string, issues?: unknown): Result => ({ ok: false, error: ipcError(code, message, issues) });
@@ -221,16 +233,26 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
       if (ARTIFACT_ACTS.has(name)) return act(link, name, fields);
       return call(link, name, fields);
     },
-    async openCopy(input) {
-      const { machine, source } = input as { machine: MachineRef; source: RemoteCopySource }; // validated at the boundary
+    async openCopy(input, client) {
+      const { machine, source, open } = input as { machine: MachineRef; source: RemoteCopySource; open?: true }; // validated at the boundary
       const link = deps.remote(machine);
       if (link === null) return failure('host_unavailable', `remote.openCopy: machine ${machine} is not connected`) as CommandResult<'remote.openCopy'>;
       if ('artifactId' in source) deps.machines.record(source.artifactId, machine);
-      return openCopy(link, source, { openPath: deps.openPath, tempDir, env: deps.env, log: deps.log });
+      // UX wave U6f (decision 15): a session's file is read for the caller that asked, the act on a file outside the folders
+      // for the people it is offered to (Decision Log 27: the plain read today's); the page's `open` rides that act alone, as
+      // a frame's does (the branch review, Decision Log 33 (3))
+      const read = deps.readSessionFile;
+      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, { ...fields, ...(open && { open }) }, client ?? null, {}) };
+      return openCopy(link, source, { openPath: deps.openPath, tempDir, env: deps.env, log: deps.log, ...reader });
     },
-    async copyInto(machine, source, sink, max, options) {
+    async copyInto(machine, source, sink, max, { client, agent, open, ...options }) {
       const link = deps.remote(machine);
-      return link === null ? null : fetchInto(link, source, sink, max, deps.log, options);
+      if (link === null) return null;
+      // UX wave U6f (decision 15; Decision Log 26, 27): the frame's copy is read for the page that asked, its log lines
+      // naming the label; the tab's mark and its `open` ride the act on a file outside the folders alone
+      const read = deps.readSessionFile;
+      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, { ...fields, ...(agent && { agent }), ...(open && { open }) }, client ?? null, { label: options.label }) };
+      return fetchInto(link, source, sink, max, deps.log, { ...options, ...reader });
     },
     files(machine) {
       if (deps.remote(machine) === null) return null;

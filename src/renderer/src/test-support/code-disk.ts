@@ -16,11 +16,20 @@
 // the parent pin (`2c7044231`): `named` with no `outside` and no `own`, and `unknown_command` for the two new commands.
 // UX wave U6b-2 (M5): main's file frames. `layout.frameFile` answers a fresh token of the path's framed kind (`frames`
 // answers otherwise when the test gives it), `layout.releaseFrame` is recorded and answered; every token issued is listed.
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M4): `answers` stands for
+// main's adapter where a test needs what it answers before the disk is asked (a refusal in UC-7's words, `issues.refusal`
+// beside it), and `overRl2` makes a session one main runs on another machine over RL2, its machine as the roster says it.
 import type { CommandName } from '@shared/ipc/schema';
 import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { mimeOf } from '@shared/files/mime';
+import { OUTSIDE_FILES_CAPABILITY } from '@shared/files/outside';
 import { FILES_MOVED, FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import type { OpenFileOutput } from '@shared/ipc/schema/layout';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { bareOf, machineOf } from '@shared/machine/address';
+import { remoteRow } from '../../../../test/support/builders';
+import { useMachines } from '../stores/machines';
+import { useSessions } from '../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from './code';
 import { utf8Length } from '../tools/code/viewer/viewer-store';
 
@@ -62,6 +71,37 @@ export interface DiskOptions {
   added?: Iterable<string>; // files an added record of the Library points at
   own?: Iterable<string>; // MAWS's own folders, through the returned `own`
   older?: boolean; // a daemon of the parent pin, through the returned `daemon.older`
+  // UX wave U6f: main's answer before the disk's, where it gives one (null: the disk answers), through the returned `answers`
+  answers?: (name: CommandName, input: Record<string, unknown>) => Answer | null;
+}
+
+/** UX wave U6f: a failure as main's adapter words one of UC-7's refusals, the code in `issues.refusal`. */
+export const refused = (message: string, refusal: string, code = 'internal'): Answer => ({ ok: false, error: { code, message, issues: { refusal } } } as Answer);
+
+/** UX wave U6f: the machine studio, up, listing the capability, the person one of its owners, as the roster says it. */
+export const STUDIO = (ref: MachineState['ref'], over: Partial<MachineState> = {}): MachineState => ({
+  ref, name: 'studio', local: false, state: 'up', since: '2026-11-17T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities: [OUTSIDE_FILES_CAPABILITY], owner: true, ...over,
+});
+
+/** UX wave U6f: the session (an address) is one main runs on another machine over RL2 (`lane` B, or a terminal's A), that machine as `over` says. */
+export function overRl2(appSessionId: string, over: Partial<MachineState> = {}, lane: 'A' | 'B' = 'B'): void {
+  const machine = machineOf(appSessionId);
+  useSessions.setState((s) => ({
+    listed: new Map(s.listed).set(appSessionId as never, { ...remoteRow(machine, bareOf(appSessionId), { lane }), appId: appSessionId as never }),
+    listedMachines: new Set([...s.listedMachines, machine]),
+  }));
+  useMachines.getState().applyRoster([STUDIO(machine, over)]);
+}
+
+/** The roster again, the session's machine as `over` says it now. */
+export function rosterSays(appSessionId: string, over: Partial<MachineState>): void {
+  useMachines.getState().applyRoster([STUDIO(machineOf(appSessionId), over)]);
+}
+
+/** Forgets every session `overRl2` listed and the roster. */
+export function leaveRl2(): void {
+  useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+  useMachines.setState({ machines: new Map(), roster: 'unread' });
 }
 
 const unknownCommand = (name: CommandName) => ({ ok: false as const, error: { code: 'unknown_command', message: `unknown command: ${name}` } });
@@ -108,7 +148,10 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true, mime: undefined } : { utf8: true, ...file };
   };
 
+  const answers = { by: options.answers ?? (() => null) };
   const answer = (name: CommandName, input: Record<string, unknown>) => {
+    const said = answers.by(name, input); // UX wave U6f: main's own answer first
+    if (said !== null) return said;
     if (name === 'files.watch' && isOutside(input.path as string)) return fail(OUTSIDE_REFUSAL); // a folder outside is never watched
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     if (name === 'layout.unsavedFiles' || name === 'layout.saveAllDone') return ok(); // M5: the quit guard's, recorded only
@@ -189,6 +232,7 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     added,
     reals,
     daemon,
+    answers, // UX wave U6f: `answers.by` replaced by the test as main's adapter answers
     grant: (appSessionId: string, path: string) => void grants.add(`${appSessionId}\0${realOf(path)}`),
     picks: (next: (appSessionId: string) => OpenFileOutput) => void (pick = next),
     issued, // UX wave U6b-2

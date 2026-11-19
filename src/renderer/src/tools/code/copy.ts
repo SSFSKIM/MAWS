@@ -67,6 +67,12 @@ export const VIEWER_COPY = {
   // UX wave U6e (§D): the label of a file that cannot be saved, and a savable outside file's path's tooltip and description
   readOnly: 'Read-only',
   savesTo: (real: string) => `Save writes to ${real}`,
+  // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; decisions 12 and 18,
+  // Decision Log 20): a savable outside file of a session on another machine, and a file there inside a folder macOS protects
+  savesToOn: (real: string, machine: string) => `Save writes to ${real} on ${machine}`,
+  protectedThere: (machine: string) => `This file is in a folder macOS protects on ${machine}. Opening it may show a privacy prompt on ${machine}’s own screen.`,
+  openIt: 'Open it',
+  protectedThrough: (machine: string) => `This path goes through a link into another folder macOS protects on ${machine}. Choose the file with Open File… to open it.`,
   // P2-F W-V (L95): an image's or a video's sizing controls
   zoom: 'Zoom',
   zoomIn: 'Zoom in',
@@ -203,6 +209,9 @@ export const EDITOR_COPY = {
     head: 'Read-only: the file is larger than the editor’s cap',
     encoding: 'Read-only: the file is not UTF-8',
     loading: 'Read-only until the file has loaded',
+    // UX wave U6f (§E; decision 12's third column): an outside file of a session on another machine this person may not
+    // save there, with the sentence of the window's helper
+    elsewhere: (words: string) => `Read-only: ${words}`,
   },
   comment: (line: number) => `Comment on line ${line}`,
   anchorTitle: (label: string) => `Comment on ${label}`, anchorBody: 'The comment composer arrives with side threads (E3). This anchor will open it:', close: 'Close',
@@ -219,4 +228,21 @@ export const OPEN_FILE_COPY = {
   elsewhere: (machine: string) => `Open File… (this session runs on ${machine})`,
   notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.',
   unavailable: 'MAWS could not open the file just now. Try Open File again in a moment.',
+} as const;
+
+// UX wave U6f (§E; Card 1 as the owner answered it): the chooser MAWS draws for Open File… when the files are on another
+// machine.
+export const REMOTE_CHOOSER_COPY = {
+  title: (machine: string) => `Open a file on ${machine}`,
+  go: 'Go', up: '..', more: 'More…', open: 'Open', cancel: 'Cancel', back: 'Back', retry: 'Try again',
+  private: 'private', link: 'link',
+  foot: (machine: string) => `Files on ${machine}, read as its MAWS service can read them.`,
+  reading: 'Reading the folders…',
+  empty: 'Nothing here',
+  openPrivate: (folder: string, machine: string) => `Open ${folder} on ${machine}? macOS protects this folder, and opening it may show a privacy prompt on ${machine}’s own screen.`,
+  unreadable: (machine: string) => `MAWS on ${machine} cannot read this folder.`,
+  noAnswer: (machine: string) => `${machine} has not answered yet.`,
+  unreachable: (machine: string) => `${machine} is not reachable.`,
+  nothingThere: (machine: string) => `There is no file or folder at that path on ${machine}.`,
+  notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.', // U6e's sentence
 } as const;

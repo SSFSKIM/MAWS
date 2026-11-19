@@ -58,6 +58,7 @@
 // No wall-clock bound beyond Playwright's own timeouts: the measured numbers are M7's.
 // Run by `pnpm e2e:remote` (MAWS_REMOTE_E2E=1).
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto'; // UX wave U6f: the files service's content hash, for a save asked by hand
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -101,6 +102,7 @@ import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5
 import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
 import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
 import { sendNowJournal, steerStopJournal } from './support/c7-replay'; // the UX wave, U4b: U4a's journals, run on B
+import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -378,6 +380,21 @@ const needsYouCount = (page: Page, count: number) => sidebarOf(page).getByRole('
 const dockBadge = (app: ElectronApplication) => app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
 // The files a session's desk-uploads holds on B (its parts' `.staging` directory left out).
 const uploadedFiles = (cwd: string, app: string) => readdirSync(join(cwd, '.claude', 'desk-uploads', app)).filter((name) => !name.startsWith('.'));
+// UX wave U6f: the names of the acts B's services claimed, from B's own ledger (`<profile>/spine-ops.jsonl`: the claim
+// `machine.op` writes before each act it runs, src/shared/host/op-ledger.ts); a torn last line is no claim
+function claimedOnB(b: { userData: string }): string[] {
+  const file = join(b.userData, 'spine-ops.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+    try {
+      const name = (JSON.parse(line) as { claim?: { name?: unknown } }).claim?.name;
+      return typeof name === 'string' ? [name] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+const outsideClaimsOnB = (b: { userData: string }) => claimedOnB(b).filter((name) => (OUTSIDE_ACTS as readonly string[]).includes(name));
 
 // A paste into the focused composer: one PNG file, as a screenshot is pasted (composer.spec.ts's synthetic paste)
 async function pastePng(page: Page): Promise<void> {
@@ -786,6 +803,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         })
         .toBe(`${TYPED}\n${NOTES_TEXT}`);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
+      // UX wave U6f (§G): a file of B's checkout is saved by `files.write`, and its read was the plain call, as before: B's
+      // ledger holds the save's claim and no claim of any outside act
+      expect(claimedOnB(b), 'the save is files.write, claimed by B’s services').toContain('files.write');
+      expect(outsideClaimsOnB(b), 'the read of a file inside the checkout was a call, not an act').toEqual([]);
       // the session's tab never left the front: the panel's tools are the session's
       await expect(mainTabById(page, `session:${address}`)).toHaveAttribute('aria-selected', 'true');
     });
@@ -4261,3 +4282,362 @@ for (const withheld of [['rl2.send-now'], ['rl2.send-now', 'rl2.session-acts']])
     }
   });
 }
+
+// ---- UX wave U6f: a file outside the session's folders on B --------------------------------------------------------------
+// docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §G (B1 to B4, B7, B8, B9's drop, B15). A
+// session MAWS runs on B, whose agent links a text file in a fresh folder outside its checkout. B's transcript is the
+// evidence B's daemon reads: the replay writes only the first prompt's record (src/engine-host/replay-transcript.ts), so
+// the agent's row naming the files is appended there, as the engine writes one; the same words are the turn's reply A
+// draws. B's HOME is a scratch folder (the chooser starts in it), which holds none of the folders macOS protects: no
+// scene stages a private folder, and none drives a member who is not an owner (the scene's org has one member, who owns
+// B, so nothing here asks a step-up). Every bound is the product's own; nothing measures a duration. What it asserts is
+// on B's disk and in B's daemon log, never the page alone.
+const U6F_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000f6';
+const U6F_WITHHELD_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000f7';
+const U6F_ASK = 'Where are the notes from outside?';
+const U6F_LINK = 'the notes outside';
+const U6F_REPLY = (notes: string) => `They are [${U6F_LINK}](${notes}).`;
+const U6F_NOTES = 'An invented note outside the session’s folders.\n';
+const U6F_LONG = 'a-file-whose-invented-name-runs-on-well-past-the-width-of-one-row-of-the-chooser-sheet.txt';
+const U6F_MANY = 205; // one page of the listing (200 names) and five more
+// The files of the scene on B's disk (B runs on this Mac): its HOME, three fresh folders outside the checkout and one deep
+// one whose path is wider than the chooser's field
+function outsideOnB(root: string) {
+  const home = join(root, 'b-home');
+  const linked = join(root, 'outside-linked');
+  const picked = join(root, 'outside-picked');
+  const many = join(root, 'outside-many');
+  const deep = join(root, 'outside-deep', 'an-invented-folder-with-a-long-name', 'and-a-second-one-under-it', 'and-a-third-before-the-end');
+  for (const dir of [join(home, 'garden-club'), linked, picked, many, deep]) mkdirSync(dir, { recursive: true });
+  const w = { home, linked, picked, many, deep, notes: join(linked, 'notes.txt'), unnamed: join(linked, 'unnamed.txt'), chosen: join(picked, 'chosen.txt'), pdf: join(picked, 'drawn.pdf') };
+  writeFileSync(join(home, 'todo.txt'), 'An invented list in B’s home.\n');
+  writeFileSync(w.notes, U6F_NOTES);
+  writeFileSync(w.unnamed, 'Never named by the session.\n');
+  writeFileSync(w.chosen, 'An invented file picked with Open File.\n');
+  writeFileSync(w.pdf, minimalPdf());
+  writeFileSync(join(many, U6F_LONG), 'long\n');
+  for (let i = 1; i < U6F_MANY; i++) writeFileSync(join(many, `file-${String(i).padStart(3, '0')}.txt`), `${i}\n`);
+  writeFileSync(join(deep, 'deep.txt'), 'deep\n');
+  return w;
+}
+// The agent's row naming `text`'s links, appended to B's transcript of the session (U6c's counted form: the agent's own
+// text), parented on the last row there
+function appendAgentRow(file: string, sessionId: string, cwd: string, text: string): void {
+  const rows = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown });
+  const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
+  const message = { id: 'msg_u6f0000001', type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } };
+  writeFileSync(file, `${JSON.stringify({ parentUuid, isSidechain: false, type: 'assistant', message, uuid: 'a6f00000-0000-4000-8000-000000000001', timestamp: new Date().toISOString(), cwd, sessionId, version: '2.1.300' })}\n`, { flag: 'a' });
+}
+// B's daemon log's lines of one kind of outside act (decision 10: `[files] outside write: member … device … session …
+// op …: <ending>`, and `outside choice:`)
+const outsideLogOnB = (b: { log(): string }, kind: 'write' | 'choice') => b.log().split('\n').filter((line) => line.includes(`[files] outside ${kind}: `));
+// The raw bridge's answer for a command of B's session, whatever it is
+const answerOnA = (page: Page, name: string, input: unknown, machine: MachineRef) =>
+  page.evaluate(([n, i, m]) => window.maws.invoke(n as never, i as never, m as never), [name, input, machine] as const) as Promise<{ ok: boolean; error?: { code: string; message: string } }>;
+const sha256Of = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+const menuEnabled = (app: ElectronApplication, id: string) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? null, id);
+// The chooser's sheet as it stands: its height, the list's area and More… (their boxes, the list's scroll), the window's
+// height and the words in the list's area
+type SheetNow = { height: number; listBottom: number; moreTop: number; moreBottom: number; windowHeight: number; listScrolled: number; words: string };
+const sheetNow = (page: Page) =>
+  page.evaluate((): SheetNow | null => {
+    const sheet = document.querySelector('[data-remote-chooser]');
+    const list = sheet?.querySelector('[data-chooser-list]');
+    const more = sheet?.querySelector('[data-chooser-more]');
+    if (!sheet || !list || !more) return null;
+    const [s, l, m] = [sheet, list, more].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
+    return { height: Math.round(s.height), listBottom: l.bottom, moreTop: m.top, moreBottom: m.bottom, windowHeight: window.innerHeight, listScrolled: list.scrollTop, words: list.textContent ?? '' };
+  });
+// The sheet caught in the state whose words its list's area shows, or null: a window a scene only stages (the held pipe's
+// reading), tried for a while and then skipped and said by the caller, never asserted
+async function sheetSaying(page: Page, words: string, timeout: number): Promise<SheetNow | null> {
+  let caught: SheetNow | null = null;
+  await expect
+    .poll(async () => {
+      const now = await sheetNow(page);
+      if (now !== null && now.words.includes(words)) caught = now;
+      return caught !== null;
+    }, { timeout })
+    .toBe(true)
+    .catch(() => undefined);
+  return caught;
+}
+// The main log of A's profile (src/main/log-file.ts: `<profile>/logs/main.log` and its one earlier generation)
+const mainLogOf = (userData: string) => ['main.log.1', 'main.log'].map((name) => join(userData, 'logs', name)).filter((file) => existsSync(file)).map((file) => readFileSync(file, 'utf8')).join('');
+
+test('U6f: a file outside the session’s folders on B opens in A, is edited, and is written on B only by Save; Open File… picks a file on B; a relaunch keeps it', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-u6f-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-u6f-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const w = outsideOnB(root);
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(U6F_SESSION, checkout);
+    journal.turn(U6F_REPLY(w.notes));
+    const { scene, b, page, electron, app } = await laneBOpened({ root, aUserData, journal, first: U6F_ASK, firstReply: U6F_LINK, title: 'B’s session with a file outside', bEnv: { HOME: w.home } }, held);
+    const address = addressOf(b.ref, app);
+    const said = () => `${mainSaid(page)}\nB's log:\n${b.log().slice(-3000)}`;
+    // a file under B's profile, MAWS's own folder there, named by the agent as the notes are
+    const own = join(b.userData, 'u6f-in-profile.txt');
+    writeFileSync(own, 'MAWS’s own, on B.\n');
+    const transcriptOnB = join(b.claudeConfigDir, 'projects', slugOf(checkout), `${U6F_SESSION}.jsonl`);
+    await expect.poll(() => existsSync(transcriptOnB), { timeout: 30_000, message: `the replay wrote B’s transcript at ${transcriptOnB}` }).toBe(true);
+    appendAgentRow(transcriptOnB, U6F_SESSION, checkout, `${U6F_REPLY(w.notes)} Also [the profile note](${own}).`);
+    const linkUp = async () => (await machineOf(page, b.ref))?.state ?? null;
+
+    await test.step('B1, B2, B8: the link opens the file beside the chat, editable; it is written on B only by Save, and B’s log has the line', async () => {
+      const chip = main(page).locator(`[data-chip="path"][title="${w.notes}"]`).first();
+      await expect(chip, 'the agent’s link to the file outside').toBeVisible({ timeout: 60_000 });
+      await chip.click();
+      const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${w.notes}"]`);
+      await quoting(expect(viewer, 'the file beside the chat, editable').toHaveAttribute('data-editable', 'true', { timeout: 60_000 }), said);
+      await expect(viewer.locator('[data-path-lead]')).toHaveAttribute('data-outside', 'writable');
+      await expect(viewer.locator('[data-path-lead]'), 'the tooltip names where Save writes, on B').toHaveAttribute('title', `Save writes to ${w.notes} on ${B_NAME}`);
+      await expect(viewer.locator('[data-read-only]'), 'no “Read-only” before the path').toHaveCount(0);
+      await expect(viewer.locator('.cm-content')).toContainText('An invented note outside');
+      await viewer.locator('.cm-content').click();
+      await page.keyboard.press('Meta+End');
+      await page.keyboard.type('Typed on A.');
+      await expect(viewer).toHaveAttribute('data-dirty', 'true');
+      expect(readFileSync(w.notes, 'utf8'), 'nothing written on B before Save').toBe(U6F_NOTES);
+      expect(outsideLogOnB(b, 'write'), 'and nothing logged').toEqual([]);
+      await menu(electron, 'file.save');
+      await quoting(expect.poll(() => readFileSync(w.notes, 'utf8'), { timeout: 60_000, message: '⌘S wrote the file on B' }).toBe(`${U6F_NOTES}Typed on A.`), said);
+      await expect(viewer).toHaveAttribute('data-dirty', 'false');
+      const written = outsideLogOnB(b, 'write');
+      expect(written, 'one line in B’s daemon log for the save').toHaveLength(1);
+      expect(written[0], 'naming A’s member, the session and what was written').toMatch(new RegExp(`\\[files\\] outside write: member ${scene.member} device \\S+ session ${app} op \\S+: ok \\d+ bytes ${escaped(w.notes)}$`));
+      expect(claimedOnB(b), 'the save is files.writeOutside').toContain('files.writeOutside');
+      expect(claimedOnB(b), 'never files.write').not.toContain('files.write');
+
+      // B changes the file; A's next save meets it: the merge view, and B's bytes stay B's
+      writeFileSync(w.notes, 'Changed on B meanwhile.\n');
+      await viewer.locator('.cm-content').click();
+      await page.keyboard.press('Meta+End');
+      await page.keyboard.type(' And more from A.');
+      await menu(electron, 'file.save');
+      await quoting(expect(viewer.locator('[data-theirs-notice="merge"]'), 'the stale save opens the merge view').toBeVisible({ timeout: 60_000 }), said);
+      expect(readFileSync(w.notes, 'utf8'), 'B’s bytes still B’s').toBe('Changed on B meanwhile.\n');
+      await viewer.locator('[data-editor-controls]').getByRole('button', { name: 'Reload', exact: true }).click();
+      await expect(viewer).toHaveAttribute('data-dirty', 'false');
+      await expect(viewer.locator('.cm-content')).toContainText('Changed on B meanwhile.');
+    });
+
+    await test.step('B7: through the page’s bridge, each outside act on B that its evidence or its place does not admit is refused, and writes nothing', async () => {
+      const before = { notes: readFileSync(w.notes, 'utf8'), unnamed: readFileSync(w.unnamed, 'utf8'), own: readFileSync(own, 'utf8') };
+      const refused = async (name: string, input: Record<string, unknown>, why: string) => {
+        const answer = await answerOnA(page, name, { appSessionId: app, ...input }, b.ref);
+        expect(answer.ok, `${name} ${why}: ${JSON.stringify(answer)}`).toBe(false);
+      };
+      await refused('files.readOutside', { path: w.unnamed }, 'of a file nothing admits');
+      await refused('files.writeOutside', { path: w.unnamed, real: w.unnamed, content: 'overwritten', expectedHash: sha256Of(w.unnamed) }, 'of a file nothing admits');
+      await refused('files.writeOutside', { path: own, real: own, content: 'overwritten', expectedHash: sha256Of(own) }, 'of a file of MAWS’s own on B');
+      await refused('files.write', { path: w.notes, content: 'overwritten', expectedHash: sha256Of(w.notes) }, 'of a file outside the folders');
+      expect({ notes: readFileSync(w.notes, 'utf8'), unnamed: readFileSync(w.unnamed, 'utf8'), own: readFileSync(own, 'utf8') }, 'B’s bytes read back').toEqual(before);
+    });
+
+    const sheet = page.getByRole('dialog', { name: `Open a file on ${B_NAME}` });
+    const field = sheet.locator('[data-chooser-path]');
+    const goTo = async (path: string) => {
+      await field.fill(path);
+      await field.press('Enter');
+    };
+
+    await test.step('B3, B4: ⌘O opens MAWS’s chooser on B’s home; a typed path lists a folder; the sheet’s layout at its real sizes', async () => {
+      await expect.poll(() => menuEnabled(electron, 'file.open'), { message: 'Open File… with B’s chat in front' }).toBe(true);
+      await menu(electron, 'file.open');
+      await quoting(expect(sheet, 'the chooser, MAWS’s own sheet').toHaveAttribute('data-remote-chooser', '', { timeout: 30_000 }), said);
+      await expect(field, 'it starts in B’s home').toHaveValue('~');
+      await expect(sheet.getByRole('button', { name: 'garden-club', exact: true }), 'a folder of B’s home').toBeVisible({ timeout: 60_000 });
+      await expect(sheet.getByRole('button', { name: 'garden-club', exact: true })).toHaveAttribute('data-kind', 'dir');
+      await expect(sheet.getByRole('button', { name: 'todo.txt', exact: true })).toHaveAttribute('data-kind', 'file');
+      await goTo(w.picked);
+      await expect(sheet.getByRole('button', { name: 'chosen.txt', exact: true }), 'the typed folder listed').toBeVisible({ timeout: 60_000 });
+      await expect(sheet.getByRole('button', { name: 'drawn.pdf', exact: true })).toBeVisible();
+
+      // a folder of more than a page: More… under the list's box, in the window, the list not scrolled
+      await goTo(w.many);
+      await expect(sheet.locator('[data-entry]'), 'one page of 200 names').toHaveCount(200, { timeout: 60_000 });
+      const more = sheet.locator('[data-chooser-more]');
+      await expect(more, 'More…, a further page').toBeVisible();
+      await expect(more).toBeEnabled();
+      const listed = (await sheetNow(page))!;
+      expect(listed.moreTop, 'More… lies below the list’s box').toBeGreaterThanOrEqual(listed.listBottom);
+      expect(listed.moreBottom, 'and inside the window').toBeLessThanOrEqual(listed.windowHeight);
+      expect(listed.listScrolled, 'with no scroll of the list').toBe(0);
+      // a long name: its row's title is the whole name, the row's text cut at its end
+      const long = sheet.getByRole('button', { name: U6F_LONG, exact: true });
+      await expect(long).toHaveAttribute('title', U6F_LONG);
+      expect(await long.locator('span.truncate').evaluate((name) => name.scrollWidth > name.clientWidth), 'the long name is cut by the row').toBe(true);
+
+      // one height while it reads (A's way to B held: nothing answers) and while it says B is not reachable (the way cut)
+      scene.aHub.hold();
+      await goTo(w.many);
+      const reading = await sheetSaying(page, 'Reading the folders…', 10_000);
+      if (reading === null) test.info().annotations.push({ type: 'skipped check', description: 'the sheet’s height while it reads: the held read was not caught reading' });
+      else expect(reading.height, 'the sheet as tall while it reads as while it lists').toBe(listed.height);
+      scene.aHub.cut();
+      const unreachable = await sheetSaying(page, `${B_NAME} is not reachable.`, 90_000);
+      expect(unreachable, `the list’s place says B is not reachable\n${said()}`).not.toBeNull();
+      expect(unreachable!.height, 'as tall while it says B is not reachable').toBe(listed.height);
+      await expect(sheet.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+      // the link reports up through its reconnect grace with no channel current, when a listing answers at once that B is
+      // not reachable (decision 6): the link is back once it went down and came up again, as the other scenes' cuts wait
+      await expect.poll(linkUp, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
+      scene.aHub.restore();
+      await expect.poll(linkUp, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+      await quoting(expect(sheet.locator('[data-entry]'), 'listed again').toHaveCount(200, { timeout: 60_000 }), async () => `the sheet: ${(await sheet.locator('[data-chooser-list]').innerText()).slice(0, 300)}\n${said()}`);
+
+      // a path deeper than the field is wide: the field's scroll stands at its end while it does not hold the keyboard
+      await goTo(w.deep);
+      await expect(sheet.getByRole('button', { name: 'deep.txt', exact: true })).toBeVisible({ timeout: 60_000 });
+      await sheet.getByRole('heading', { name: `Open a file on ${B_NAME}` }).click(); // the keyboard leaves the field
+      await expect(field).not.toBeFocused();
+      await expect(field).toHaveValue(w.deep);
+      const scrolled = await field.evaluate((input: HTMLInputElement) => ({ left: input.scrollLeft, width: input.clientWidth, whole: input.scrollWidth }));
+      expect(scrolled.whole, `the path is wider than the field: ${JSON.stringify(scrolled)}`).toBeGreaterThan(scrolled.width);
+      expect(scrolled.left + scrolled.width, `the field shows the path’s end: ${JSON.stringify(scrolled)}`).toBeGreaterThanOrEqual(scrolled.whole - 1);
+    });
+
+    await test.step('B15, B8: a PDF picked on B is drawn beside the chat from a copy; no copy has a name here and main logs no path; B logs the choice', async () => {
+      const frameCopies = () => { const dir = join(aUserData, 'frame-copies'); return existsSync(dir) ? readdirSync(dir) : []; }; // prettier-ignore
+      await goTo(w.picked);
+      await sheet.getByRole('button', { name: 'drawn.pdf', exact: true }).click({ timeout: 60_000 });
+      await sheet.getByRole('button', { name: 'Open', exact: true }).click();
+      await expect(sheet, 'the sheet closes on the grant').toHaveCount(0, { timeout: 60_000 });
+      const pdfViewer = sideColumn(page).locator(`[data-file-viewer][data-path="${w.pdf}"]`);
+      await quoting(expect(pdfViewer, 'the PDF drawn here from a copy').toHaveAttribute('data-frame', 'pdf', { timeout: 60_000 }), said);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry while the PDF is drawn').toEqual([]);
+      expect(mainLogOf(aUserData).split('\n').filter((line) => line.includes(w.pdf)), 'A’s main log names no path of the PDF').toEqual([]);
+      const chosen = outsideLogOnB(b, 'choice');
+      expect(chosen, 'one choice in B’s daemon log').toHaveLength(1);
+      expect(chosen[0]).toMatch(new RegExp(`outside choice: member ${scene.member} device \\S+ session ${app} op \\S+: granted ${escaped(w.pdf)}$`));
+    });
+
+    const chosenViewer = (on: Page) => sideColumn(on).locator(`[data-file-viewer][data-path="${w.chosen}"]`);
+    await test.step('B3, B8, B9: the Files list’s row opens the chooser where it was; the file picked opens as a kept tab, saves on B, waits out a cut link, and saves once it is back', async () => {
+      await openSurface(page, 'Files');
+      const files = surface(page, 'files');
+      const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
+      await expect(checkoutRow, 'B’s checkout in A’s Files tool').toBeVisible({ timeout: 60_000 });
+      await checkoutRow.click({ button: 'right' });
+      const filesMenu = page.locator('[data-files-menu]');
+      await expect(filesMenu.locator('[data-open-file]')).toHaveText('Open File…');
+      await filesMenu.locator('[data-open-file]').click();
+      await expect(field, 'the chooser reopens at the last folder shown on B this run').toHaveValue(w.picked, { timeout: 30_000 });
+      await sheet.getByRole('button', { name: 'chosen.txt', exact: true }).click({ timeout: 60_000 });
+      await sheet.getByRole('button', { name: 'Open', exact: true }).click();
+      await expect(sheet).toHaveCount(0, { timeout: 60_000 });
+      const viewer = chosenViewer(page);
+      await quoting(expect(viewer, 'the picked file beside the chat, editable').toHaveAttribute('data-editable', 'true', { timeout: 60_000 }), said);
+      const chosenTab = sideColumn(page).locator('[data-side-strip] [data-tab-id]', { has: page.getByRole('tab', { name: 'chosen.txt', exact: true }) });
+      await expect(chosenTab, 'its tab in the side strip').toHaveCount(1);
+      await expect(chosenTab, 'a kept tab, not the preview').not.toHaveAttribute('data-preview', 'true');
+      await expect(viewer.locator('[data-path-lead]')).toHaveAttribute('data-outside', 'writable');
+      await expect(viewer.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${w.chosen} on ${B_NAME}`);
+      const chosen = outsideLogOnB(b, 'choice');
+      expect(chosen, 'a second choice in B’s daemon log').toHaveLength(2);
+      expect(chosen[1]).toContain(`: granted ${w.chosen}`);
+      const original = readFileSync(w.chosen, 'utf8');
+      await viewer.locator('.cm-content').click();
+      await page.keyboard.press('Meta+End');
+      await page.keyboard.type('Saved on B from A.');
+      await expect(viewer).toHaveAttribute('data-dirty', 'true');
+      await menu(electron, 'file.save');
+      await quoting(expect.poll(() => readFileSync(w.chosen, 'utf8'), { timeout: 60_000, message: 'the picked file written on B' }).toBe(`${original}Saved on B from A.`), said);
+      expect(outsideLogOnB(b, 'write').at(-1), 'and its save logged').toContain(`: ok ${Buffer.byteLength(`${original}Saved on B from A.`)} bytes ${w.chosen}`);
+
+      // A's way to B cut: the edit stands, the save waits out its send window and says B is offline, nothing is written
+      scene.aHub.cut();
+      await expect.poll(linkUp, { timeout: 60_000, message: 'A’s link to B goes down' }).not.toBe('up');
+      await viewer.locator('.cm-content').click();
+      await page.keyboard.press('Meta+End');
+      await page.keyboard.type(' While cut.');
+      await menu(electron, 'file.save');
+      await quoting(expect(viewer.getByRole('alert').filter({ hasText: 'Not saved' }), 'the save says B is offline once its window passed').toHaveText(`Not saved: ${B_NAME} is offline`, { timeout: REMOTE_ACT_PENDING_MS + 90_000 }), said);
+      await expect(viewer, 'the edit stands').toHaveAttribute('data-dirty', 'true');
+      expect(readFileSync(w.chosen, 'utf8'), 'nothing written on B').toBe(`${original}Saved on B from A.`);
+      scene.aHub.restore();
+      await expect.poll(linkUp, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await viewer.locator('.cm-content').click();
+      await menu(electron, 'file.save');
+      await quoting(expect.poll(() => readFileSync(w.chosen, 'utf8'), { timeout: 60_000, message: 'Save writes once B is back' }).toBe(`${original}Saved on B from A. While cut.`), said);
+      await expect(viewer).toHaveAttribute('data-dirty', 'false');
+      expect(held.a!.consoleErrors()).toEqual([]);
+    });
+
+    await test.step('B3: A relaunched on its profile: the picked file’s tab is there, shows the saved text and saves again', async () => {
+      await held.a!.cleanup(); // the profile is the test's: closed, kept
+      held.a = null;
+      const again = (held.a = await launchMaws({ userData: aUserData, keepConfigHome: true, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+      keepMainLines(again);
+      const p2 = again.page;
+      await expect.poll(async () => (await machineOf(p2, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up after the relaunch\n${mainSaid(p2)}` }).toBe('up');
+      await expandMachine(p2, b.ref);
+      await sessionRow(p2, address).click({ timeout: 30_000 });
+      await sideTab(sideColumn(p2), 'chosen.txt').click({ timeout: 60_000 });
+      const viewer = chosenViewer(p2);
+      const saved = readFileSync(w.chosen, 'utf8');
+      await quoting(expect(viewer.locator('.cm-content'), 'the saved text, read from B again').toContainText('While cut.', { timeout: 60_000 }), () => mainSaid(p2));
+      await expect(viewer).toHaveAttribute('data-editable', 'true');
+      await viewer.locator('.cm-content').click();
+      await p2.keyboard.press('Meta+End');
+      await p2.keyboard.type(' After the relaunch.');
+      await menu(again.app, 'file.save');
+      await quoting(expect.poll(() => readFileSync(w.chosen, 'utf8'), { timeout: 60_000, message: 'it saves again' }).toBe(`${saved} After the relaunch.`), () => mainSaid(p2));
+      expect(again.consoleErrors()).toEqual([]);
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U6f (§G, B6; condition (g)): B's endpoint started as one of an earlier build, its `h2` without
+// `rl2.outside-files` (MAWS_E2E_ENDPOINT_WITHOUT, read under MAWS_E2E=1 alone). A has nothing of this landing to send:
+// Open File… is disabled, the Files list's row and a link's tab say to update B, and B's ledger and log hold nothing of
+// the four acts. The run with a real older build as B is e2e:cross-build's.
+test('U6f: with B’s endpoint listing no rl2.outside-files, Open File… is disabled, its row and a link’s tab say to update B, and nothing of the four acts reaches B', async () => {
+  test.setTimeout(300_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-u6f-old-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-u6f-old-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const w = outsideOnB(root);
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(U6F_WITHHELD_SESSION, checkout);
+    journal.turn(U6F_REPLY(w.notes));
+    const { b, page, electron } = await laneBOpened({ root, aUserData, journal, first: U6F_ASK, firstReply: U6F_LINK, title: 'B’s session of an earlier build', bEnv: { HOME: w.home, MAWS_E2E_ENDPOINT_WITHOUT: OUTSIDE_FILES_CAPABILITY } }, held);
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? null, { message: `A knows B’s capabilities\n${mainSaid(page)}` }).not.toBeNull();
+    const capabilities = (await machineOf(page, b.ref))!.capabilities!;
+    expect(capabilities, 'A’s entry for B lists no rl2.outside-files').not.toContain(OUTSIDE_FILES_CAPABILITY);
+    expect(capabilities, 'and the rest as B’s build lists them').toContain('rl2.git-reads');
+
+    await expect.poll(() => menuEnabled(electron, 'file.open'), { message: 'File ▸ Open File… disabled with B’s chat in front' }).toBe(false);
+    await openSurface(page, 'Files');
+    const checkoutRow = surface(page, 'files').locator(`[role="treeitem"][data-path="${checkout}"]`);
+    await expect(checkoutRow, 'B’s checkout in A’s Files tool').toBeVisible({ timeout: 60_000 });
+    await checkoutRow.click({ button: 'right' });
+    const openRow = page.locator('[data-files-menu] [data-open-file]');
+    await expect(openRow).toHaveAttribute('data-disabled', /.*/);
+    await expect(openRow, 'the Files list’s row says to update B').toHaveAttribute('title', `Can’t open a file on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+    await page.keyboard.press('Escape');
+
+    const chip = main(page).locator(`[data-chip="path"][title="${w.notes}"]`).first();
+    await expect(chip, 'the agent’s link to the file outside').toBeVisible({ timeout: 60_000 });
+    await chip.click();
+    const refusal = sideColumn(page).locator(`[data-file-viewer][data-path="${w.notes}"] [data-refusal]`);
+    await quoting(expect(refusal.locator('p').first(), 'the link’s tab says to update B, as it is').toHaveText(`Not opened: update MAWS on ${B_NAME} and try again`, { timeout: 60_000 }), () => mainSaid(page));
+    expect(outsideClaimsOnB(b), 'B’s ledger holds no claim of the four acts').toEqual([]);
+    expect([...outsideLogOnB(b, 'write'), ...outsideLogOnB(b, 'choice')], 'and B’s log no line of them').toEqual([]);
+    expect(held.a!.consoleErrors()).toEqual([]);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});

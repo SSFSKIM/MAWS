@@ -268,10 +268,16 @@ describe('ipc schema validates both directions', () => {
     // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
     // the spine, with library.read's reach and the upload).
     it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.grant' /* UX wave U6e */, 'files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.chooseOutside' /* UX wave U6f */, 'files.grant' /* UX wave U6e */, 'files.list', 'files.listOutside' /* UX wave U6f */, 'files.openExternal', 'files.read', 'files.readOutside' /* UX wave U6f */, 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
       // UX wave U6e: the grant is main's alone; the outside save is bridged, and takes files.write's input and the real path
       expect(MAIN_ONLY_COMMANDS).toContain('files.grant');
       expect(MAIN_ONLY_COMMANDS).not.toContain('files.writeOutside');
+      // UX wave U6f: the three acts another machine's page asks are bridged; `open` rides a read and a save, and no raw read
+      for (const name of ['files.readOutside', 'files.listOutside', 'files.chooseOutside']) expect(MAIN_ONLY_COMMANDS, name).not.toContain(name);
+      expect(validateCommandInput('files.read', { appSessionId: 'a', path: '/w/notes.md', named: true, open: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readOutside', { appSessionId: 'a', path: '/w/notes.md', agent: true, open: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readOutside', { appSessionId: 'a', path: '/w/notes.md', raw: true }).ok).toBe(false);
+      expect(validateCommandInput('files.readResolved', { path: '/w/notes.md', open: true }).ok).toBe(false);
       const save = { appSessionId: 'a', path: '/w/notes.md', content: 'x', expectedHash: 'a'.repeat(64) };
       expect(validateCommandInput('files.writeOutside', { ...save, real: '/w/notes.md' }).ok).toBe(true);
       expect(validateCommandInput('files.writeOutside', save).ok).toBe(false);

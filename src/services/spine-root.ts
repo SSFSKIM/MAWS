@@ -578,6 +578,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       return false;
     },
     own: ownFolders(profile, process.execPath, deps.appBundles ?? (() => [])), // U6e (decision 8): no write reaches them
+    where: setupGuard.where, // UX wave U6f: the home and platform another machine's outside acts walk under, the folder list's
   });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);
