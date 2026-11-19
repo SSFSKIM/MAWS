@@ -406,6 +406,11 @@ interface Line {
   // marker other than `1` alone, or a `*`, a `+` or an ordered marker with nothing after it. A `-` with nothing after it
   // is not counted: under a paragraph it is a setext underline, which this pass already reads as the paragraph's end.
   weak: boolean;
+  // Columns, where the line has no quote marker and no tab before its content (else -1): `lead`, where its first list
+  // marker stands (-1 when it opens none); `column`, where the content of its innermost item begins when it opens one,
+  // else where its content begins
+  lead: number;
+  column: number;
 }
 
 // The longest tail of a line made of one thematic-break marker (`-`, `*`, `_`) and spaces, tabs or carriage returns:
@@ -433,6 +438,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
   let opens = false;
   let footnote = false;
   let weak = false;
+  let lead = -1;
   let markers = 0;
   // the thematic-break test, against the line's tail read once; the markers before `j` counted as `j` moves on
   let tail: { marker: number; from: number; count: number } | null = null;
@@ -476,6 +482,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
     if (marker < 0 || (marker < end && !isSpaceOrTab(text.charCodeAt(marker)) && text.charCodeAt(marker) !== 13)) break;
     if (++markers > BLOCK_MARKERS_MAX) refuseAfter(m, marker - start + 16);
     if (!opens && code !== 91) {
+      lead = j - start;
       const ordered = isDigit(code);
       weak = (ordered && (marker - j !== 2 || code !== 49)) || ((ordered || code === 42 || code === 43) && blankFrom(text, marker, end, m));
     }
@@ -498,7 +505,12 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
   decided(content, limit, end);
   const first = text.charCodeAt(content);
   const thematic = indent < 4 && content < end && (first === 45 || first === 42 || first === 95) && breakAt(content);
-  return { start, end, quote, opens, footnote, content, indent, thematic, weak };
+  // the columns are characters when no tab stands before the content
+  let tab = false;
+  for (let k = start; k < content && !tab; k += 1) tab = text.charCodeAt(k) === 9;
+  charge(m, content - start + 1);
+  const plain = quote === 0 && !tab;
+  return { start, end, quote, opens, footnote, content, indent, thematic, weak, lead: plain && opens ? lead : -1, column: plain ? (opens ? i : content) - start : -1 };
 }
 
 // After at most `max` of a quote's `>` markers at the start of a line: how many stood there, and the index after them.
@@ -666,7 +678,8 @@ interface Context {
 // (a cap, the budget) refuses the whole text: its definitions, which every context reads, are not all known.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
   let fence: { marker: number; length: number; quote: number; column: number } | null = null;
-  let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean } | null = null;
+  // `column`: its first line's (`Line.column`); `opened`: whether that line opened the item that holds the paragraph
+  let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean; column: number; opened: boolean } | null = null;
   // `cells`: the head's, as many as the window draws in a row. `dropped`: a table in a container, of which nothing is read
   let table: { quote: number; cells: number; dropped: boolean } | null = null;
   // Whether a list item may be open (UX wave U6b-4b, the review's finding 1). The pass does not follow a list item's
@@ -745,20 +758,28 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
         continue;
       }
     }
-    // A list item that could not interrupt the open paragraph of its quote is that paragraph's continuation (the review's
-    // finding 1, its neighbour): read so where no list item may be open; inside one it may as well be the next item, and
-    // after a quote marker the pass cannot tell whose quote it is, so there the paragraph and what follows it are not read
+    // A list item that could not interrupt the open paragraph of its quote (the review's finding 1, its neighbour). Where
+    // no list item may be open, the line is that paragraph's text. In a list it is text when it stands inside the item
+    // that holds the paragraph (as indented as that item's content, or as the paragraph's own first line); one less
+    // indented than the item whose first line the paragraph is closes that item and starts one, a sibling or another
+    // list's (micromark closes the paragraph before it tries the item), and is read as any opening line. Where the pass
+    // cannot place it (a quote marker, a tab, a paragraph that did not open its item and a line less indented than its
+    // text), the paragraph and what follows it up to a blank line or a block start are not read.
     if (line.weak && paragraph !== null && line.quote >= paragraph.quote) {
-      if (!listWasOpen && line.quote === paragraph.quote) {
-        listOpen = false; // no list item: the line is the paragraph's text
+      const known = line.quote === paragraph.quote && (!listWasOpen || (paragraph.column >= 0 && line.lead >= 0));
+      const inside = known && (!listWasOpen || line.lead >= paragraph.column);
+      if (inside) {
+        if (!listWasOpen) listOpen = false; // no list item: the line is the paragraph's text
         paragraph.lines.push(line.content);
         paragraph.end = line.end;
         afterBlank = false;
         start = next;
         continue;
       }
-      paragraph.dropped = true;
-      doubtful = true;
+      if (!known || !paragraph.opened) {
+        paragraph.dropped = true;
+        doubtful = true;
+      }
     }
     if (blank) {
       yield* closeParagraph();
@@ -815,7 +836,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
       }
       if (paragraph === null || line.opens || line.quote > paragraph.quote) {
         yield* closeParagraph();
-        paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: footnote || doubtful };
+        paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: footnote || doubtful, column: line.column, opened: line.opens };
       } else {
         paragraph.lines.push(line.content);
         paragraph.end = line.end;
