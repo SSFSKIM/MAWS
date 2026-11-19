@@ -55,13 +55,18 @@ async function storedFiles(page: Page): Promise<{ beside: string[]; main: string
 }
 
 // Where the keyboard is, as the page says: in Go to file's field; or inside a file's text, answered as the key of the file
-// view whose text holds it (null anywhere else, a tab's button among them).
+// view whose text holds it. Anywhere else (a tab's button among them) it answers where the keyboard is instead, which a
+// failed wait on a key prints: the active element's tag, its role and `data-key`, whether it is a file view's body
+// (`[data-file-keyboard]`) or the document's body, the key of the file view it is in, and whether the page has the focus.
 const fieldHasKeyboard = (page: Page) => page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false);
 const keyboardInText = (page: Page) =>
   page.evaluate(() => {
     const active = document.activeElement;
-    if (active === null || active.getAttribute('role') === 'tab' || active.closest('.cm-content') === null) return null;
-    return active.closest('[data-file-keyboard]')?.getAttribute('data-key') ?? null;
+    const key = active?.closest('[data-file-keyboard]')?.getAttribute('data-key') ?? null;
+    if (active !== null && active.getAttribute('role') !== 'tab' && active.closest('.cm-content') !== null && key !== null) return key;
+    const where = active === null ? 'no active element' : `<${active.tagName.toLowerCase()}> role=${active.getAttribute('role')} data-key=${active.getAttribute('data-key')}`;
+    const what = active === document.body ? 'the document’s body' : active?.matches('[data-file-keyboard]') ? 'a file view’s body' : key !== null ? `inside the file view ${key}, not its text` : 'outside every file view';
+    return `not in a file’s text: ${where}, ${what}; the page ${document.hasFocus() ? 'has' : 'lacks'} the focus`;
   });
 
 // ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): a session's file in its frame --
@@ -2402,8 +2407,10 @@ test.describe('UX wave U6b-3b: Go to file', () => {
   // each opened by its menu row with the side column closed and the composer's editor the active element: waits on the
   // modal holding the keyboard; Go ▸ Go to file (whose helper waits on the row enabled); then waits on the modal gone, Files
   // in view and the field being the active element; after Esc in the empty field, on the composer's editor being the active
-  // element, the modal's opener. Then the Rename sheet from the session's row in the sidebar: waits on the sheet in view
-  // and polls the menu row to disabled; after Esc, on the sheet gone, and polls the row to enabled.
+  // element, the modal's opener. Then a sheet this launch has (the Mac run's finding: the stub-mode launch registers no
+  // Rename, Decision Log 17): src/app.ts opened beside the chat and a line typed into it, waited on the view being dirty;
+  // its tab's close asks "Save changes to app.ts?"; waits on that sheet in view and polls the menu row to disabled; after
+  // Esc, on the sheet gone and the tab still dirty, and polls the row to enabled. Then Don’t save, so no edit outlives it.
   test('G10: Go to file while the Command palette or Keyboard shortcuts holds the keyboard closes it and puts the keyboard in the field, Esc giving it back to the composer; while a sheet is open the menu row is disabled', async () => {
     await withProduct(async (p) => {
       const composer = composerOf(p);
@@ -2422,15 +2429,25 @@ test.describe('UX wave U6b-3b: Go to file', () => {
         await expect(composer, `Esc in the empty field: the keyboard back in the composer, ${name}’s opener`).toBeFocused();
       }
 
-      // a sheet holds what a person types into it: Go to file is disabled while it is open
-      await (await sidebarRow(p.page, { appSessionId: p.scratch.appSessionId })).click({ button: 'right' });
-      await p.page.getByRole('menuitem', { name: 'Rename…' }).click();
-      const sheet = p.page.getByRole('dialog', { name: 'Rename' });
-      await expect(sheet, 'the Rename sheet').toBeVisible();
+      // a sheet holds what a person types into it: Go to file is disabled while it is open (the sheet a dirty file's close
+      // asks with, a Sheet as every other is)
+      const viewer = await openInViewer(p, 'src/app.ts');
+      await expect(viewer.locator('.cm-content'), 'app.ts editable').toHaveAttribute('contenteditable', 'true');
+      await viewer.locator('.cm-content .cm-line').first().click({ position: { x: 3, y: 4 } });
+      await p.page.keyboard.type('// an invented edit');
+      await expect(viewer, 'app.ts dirty').toHaveAttribute('data-dirty', 'true');
+      const closeApp = () => sideFileTab(p.page, 'app.ts').getByRole('button', { name: 'Close app.ts', exact: true }).click();
+      await closeApp();
+      const sheet = p.page.getByRole('dialog', { name: 'Save changes to app.ts?', exact: true });
+      await expect(sheet, 'the close sheet').toBeVisible();
       await expect.poll(() => goToFileRow(p.maws.app), { message: 'Go ▸ Go to file disabled under the sheet' }).toEqual({ enabled: false, accelerator: 'Cmd+P' });
       await p.page.keyboard.press('Escape');
       await expect(sheet, 'the sheet closed').toHaveCount(0);
+      await expect(viewer, 'Esc: the tab kept, still dirty').toHaveAttribute('data-dirty', 'true');
       await expect.poll(() => goToFileRow(p.maws.app), { message: 'Go ▸ Go to file enabled again' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
+      await closeApp();
+      await sheet.getByRole('button', { name: 'Don’t save', exact: true }).click();
+      await expect(sheet, 'Don’t save: the sheet closed').toHaveCount(0);
     }, goToFileRepository, { gitHome: true });
   });
 });

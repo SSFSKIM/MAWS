@@ -41,7 +41,7 @@ import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 
 import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
-import { takeKeyboard, useKeyboardRequest } from '../files/finder';
+import { keyboardWaits, takeKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosen } from '../files/open-chosen';
 import { ExternalRow, OpenExternally } from './ExternalRow';
 import { FrameBody } from './FrameBody';
@@ -253,20 +253,38 @@ const TAKES_KEYBOARD = 'outline-accent focus-visible:outline-2 -outline-offset-2
 
 export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, takesKeyboard }: FileBodyProps) {
   // UX wave U6b-3b: the request for the keyboard by this body's key, taken while it is in view; the editor, when one is
-  // drawn in it, is told through `editorFocus`.
+  // drawn in it, is told through `editorFocus`. Decision Log 17: the page can refuse the focus (an inert or hidden
+  // ancestor while the view mounts), so the request is ended only once the keyboard is inside the body, its text
+  // included; until then it is tried again when the editor is drawn and when an attribute that can hide or free an
+  // element changes in the page. The person's own key or pointer press still drops it (`files/finder.ts`).
   const body = useRef<HTMLDivElement>(null);
   const editorFocus = useRef<(() => void) | null>(null);
+  const shown = useRef(inView);
   const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
-  useEffect(() => {
+  const take = useCallback(() => {
     const element = body.current;
-    if (asked === 0 || !inView || takesKeyboard === undefined || element === null || !takeKeyboard({ into: 'file', key: takesKeyboard })) return;
-    element.focus({ preventScroll: true });
+    if (!shown.current || takesKeyboard === undefined || element === null || !keyboardWaits({ into: 'file', key: takesKeyboard })) return;
+    if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
     editorFocus.current?.();
-  }, [asked, inView, takesKeyboard]);
-  const onEditor = useCallback((focus: (() => void) | null) => {
-    editorFocus.current = focus;
-    if (focus !== null && body.current !== null && document.activeElement === body.current) focus(); // the body still has it
-  }, []);
+    if (element.contains(document.activeElement)) takeKeyboard({ into: 'file', key: takesKeyboard }); // landed: the request ends
+  }, [takesKeyboard]);
+  useEffect(() => {
+    shown.current = inView;
+    if (asked === 0 || !inView) return;
+    take();
+    const retry = new MutationObserver(take);
+    retry.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] });
+    return () => retry.disconnect();
+  }, [asked, inView, take]);
+  const onEditor = useCallback(
+    (focus: (() => void) | null) => {
+      editorFocus.current = focus;
+      if (focus === null) return;
+      if (body.current !== null && document.activeElement === body.current) focus(); // the body still has it
+      else take(); // a request still waiting, its take refused so far
+    },
+    [take],
+  );
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);

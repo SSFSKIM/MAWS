@@ -295,7 +295,9 @@ describe('a take the page refuses (Decision Log 17)', { timeout: 20_000 }, () =>
   it('beside the chat, a moment that refuses the body’s take: the request holds, and the editor takes the keyboard when it is drawn', async () => {
     const read = holdRead(APP);
     render(<Page />);
-    await findAndEnter('app', APP, () => (refusing = true));
+    await findAndEnter('app', APP, () => {
+      refusing = true;
+    });
     await waitFor(() => expect(body(APP, 'panel')).not.toBeNull());
     await settle();
     expect(document.activeElement, 'the take refused').not.toBe(body(APP, 'panel'));
@@ -307,7 +309,9 @@ describe('a take the page refuses (Decision Log 17)', { timeout: 20_000 }, () =>
   it('a refused take, then the person’s press in the composer: the held request is dropped, and neither the page’s change nor the editor takes the keyboard from there', async () => {
     const read = holdRead(APP);
     render(<Page />);
-    await findAndEnter('app', APP, () => (refusing = true));
+    await findAndEnter('app', APP, () => {
+      refusing = true;
+    });
     await waitFor(() => expect(body(APP, 'panel')).not.toBeNull());
     await settle();
     refusing = false;
@@ -322,7 +326,9 @@ describe('a take the page refuses (Decision Log 17)', { timeout: 20_000 }, () =>
     await settle();
     expect(document.activeElement).toBe(composer());
     const control = holdRead(TIDES); // the control: the same refused take with no press between
-    await findAndEnter('tides', TIDES, () => (refusing = true));
+    await findAndEnter('tides', TIDES, () => {
+      refusing = true;
+    });
     await waitFor(() => expect(body(TIDES, 'panel')).not.toBeNull());
     await settle();
     refusing = false;

@@ -1420,9 +1420,13 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
 // Go ▸ Go to file is one of the menu's actions that take the keyboard from a page of the in-app browser (main's
 // SHELL_FOCUS_ACTIONS): with the keyboard in Page A, the row's own click (which is what ⌘P does; the row is read first,
 // enabled and carrying ⌘P) puts it in Files' field in the app's page. The keyboard is put in the page as a click on its
-// view leaves it, by main focusing the view's contents. Waits on the page's own witness first (its document has the
-// focus, and main's focused contents are its), then on the field being the active element of the app's page and the
-// app's page having the focus, and main's focused contents no longer the page's.
+// view leaves it, by main focusing the view's contents. Main has focused contents only while the app's window is the
+// key window, and e2e:browser runs with its window inactive (no MAWS_E2E_FOREGROUND; src/main/menu.ts, Select All), so
+// the scene first activates the window as foreground-trace's `activateForScene` does and waits on it being focused,
+// failing with that message when macOS does not give it the focus (Decision Log 17). Then waits on the page's own witness
+// (its document has the focus, and main's focused contents are its), then on the field being the active element of the
+// app's page and the app's page having the focus, and main's focused contents being the app's page (no contents at all
+// is a failure, not a pass).
 test('G6: with the keyboard in a page of the in-app browser, Go to file puts it in Files’ field', async () => {
   await browserScene(['U6b-3b: Go to file from a page'], async (s) => {
     const [id] = s.ids as [AppSessionId];
@@ -1433,14 +1437,31 @@ test('G6: with the keyboard in a page of the in-app browser, Go to file puts it 
     const t = await tabAt(s, id, A);
     const pageA = await pageAt(s, A);
     await expectOnPane(s, t, paneIn(panel), 'panel');
-    const focusedUrl = () => s.maws.app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.getURL() ?? null);
+    // main's focused contents: Page A's, the app's own page, another's (by its address), or none
+    const focused = () =>
+      s.maws.app.evaluate(({ BrowserWindow, webContents }, url) => {
+        const contents = webContents.getFocusedWebContents();
+        if (!contents) return 'no focused contents';
+        if (contents.getURL() === url) return 'Page A';
+        return BrowserWindow.getAllWindows().some((win) => win.webContents.id === contents.id) ? 'the app’s page' : `other contents, ${contents.getURL()}`;
+      }, A);
 
+    await s.maws.app.evaluate(({ app, BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((candidate) => candidate.isVisible())!;
+      app.focus({ steal: true });
+      win.focus();
+    });
+    await expect
+      .poll(() => s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => win.isVisible())?.isFocused() ?? false), {
+        message: 'the app’s window is the key window (activated; when this fails macOS did not give the window the focus, and main can have no focused contents)',
+      })
+      .toBe(true);
     await s.maws.app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find((contents) => contents.getURL() === url)!.focus(), A);
     await expect.poll(() => pageA.evaluate(() => document.hasFocus()), { message: 'the page’s own witness: its document has the keyboard' }).toBe(true);
-    await expect.poll(focusedUrl, { message: 'main’s focused contents are the page’s' }).toBe(A);
+    await expect.poll(focused, { message: 'main’s focused contents are the page’s' }).toBe('Page A');
 
     await goToFile(s.maws.app);
     await expect.poll(() => s.page.evaluate(() => document.hasFocus() && (document.activeElement?.matches('[data-files-filter]') ?? false)), { message: 'the field is the active element of the app’s page, which has the keyboard' }).toBe(true);
-    await expect.poll(focusedUrl, { message: 'main’s focused contents no longer the page’s' }).not.toBe(A);
+    await expect.poll(focused, { message: 'main’s focused contents are the app’s page, no longer Page A’s' }).toBe('the app’s page');
   });
 });
