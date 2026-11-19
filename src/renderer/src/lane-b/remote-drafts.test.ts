@@ -12,7 +12,7 @@ import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { rememberingRemoteDrafts, rememberRemoteDraft, resetRemoteDrafts } from '../composer/editor/drafts';
 import { readerRowsOf, resetReaderRows } from './reader-rows';
-import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS, unsavedRemoteDraft } from './remote-drafts';
+import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS, saveRemoteDraftOnce, unsavedRemoteDraft } from './remote-drafts';
 import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { useNotices } from '../stores/notices';
 import { useMachines } from '../stores/machines';
@@ -82,6 +82,24 @@ describe('a machine that keeps each member’s draft', () => {
       },
     };
   }
+
+  // UX wave U6b-5a (finding 4; Interfaces §C): the one-shot save may name "none" (`null`), which a machine takes only
+  // where nothing was ever kept, and its answer is the caller's.
+  it('sends a one-shot save naming none, taken where nothing was kept and refused stale where something is', async () => {
+    const machine = machineKeeping();
+    const first = draft('the first words');
+    const answer = saveRemoteDraftOnce(machine.fake.client, REMOTE, first, null);
+    await flush();
+    expect(machine.saved()).toEqual([{ appSessionId: REMOTE, draft: first, replaces: null }]);
+    await machine.take();
+    expect(await answer).toEqual({ ok: true, value: undefined });
+    expect(textOf(machine.kept())).toBe('the first words');
+    const second = saveRemoteDraftOnce(machine.fake.client, REMOTE, draft('over it'), null);
+    await flush();
+    await machine.take();
+    expect(await second).toMatchObject({ ok: false, error: { message: STALE_DRAFT_WORDS } }); // the control: a draft is kept now
+    expect(textOf(machine.kept())).toBe('the first words');
+  });
 
   it('saves it there, and a relaunch loads it back from there', async () => {
     const machine = machineKeeping();

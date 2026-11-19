@@ -476,9 +476,12 @@ describe('the menus drawn from the table', () => {
 
   it('puts an edit row after the Edit menu’s own items, in its submenu', () => {
     const edit = submenuOf(menuTemplate(EXTENDED_TABLE, {}, new Set(idsOf(EXTENDED_TABLE)), vi.fn()), 'Edit');
-    expect(shape(edit)).toEqual(['Undo', 'Redo', '—', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'Select All', '—', 'Sample ▸']);
+    expect(shape(edit)).toEqual(['Undo', 'Redo', '—', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'Select All', '—', 'Attach selection to chat', '—', 'Sample ▸']);
     expect((edit.at(-1)!.submenu as Item[]).map((item) => item.id)).toEqual([sample('sample.menu')]);
-    expect(shape(submenuOf(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'Edit')).at(-1)).toBe('Select All'); // no edit row today: nothing after
+    // UX wave U6b-5a (M2): the table's one Edit row, after the menu's own items and a separator, at ⇧⌘L
+    const own = submenuOf(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'Edit');
+    expect(shape(own).slice(-3)).toEqual(['Select All', '—', 'Attach selection to chat']);
+    expect(own.at(-1)).toMatchObject({ id: 'terminal.attachSelection', accelerator: 'Cmd+Shift+L' });
   });
 
   it('reads View and Go in groups, with Tabs, More surfaces, Comments, Appearance and Developer as submenus', () => {

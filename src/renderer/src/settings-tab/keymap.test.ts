@@ -152,13 +152,14 @@ describe('the keymap table', () => {
   it('lists a sibling’s rows with no edit here: an edit row’s submenu, a fixed row under its scope, neither rebindable', () => {
     const groups = keymapGroups({}, EXTENDED_TABLE);
     const labels = groups.map((g) => g.label);
-    expect(labels.indexOf('Edit › Sample')).toBe(labels.indexOf('File') + 1); // after File, before View: no Edit row names no submenu
+    expect(labels.indexOf('Edit')).toBe(labels.indexOf('File') + 1); // UX wave U6b-5a: Attach selection to chat, the table's Edit row
+    expect(labels.indexOf('Edit › Sample')).toBe(labels.indexOf('Edit') + 1); // after the Edit rows that name no submenu, before View
     const composer = groups.find((g) => g.label === 'In the composer')!.rows;
     expect(composer.find((r) => r.id === sample('sample.fixed'))).toMatchObject({ chord: 'Shift+Enter', display: '⇧↩', rebindable: false });
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
     for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U11a M5's channel.open, U1a's two)
-    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'go.back', 'go.forward', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U11a M5's one; U6b-5a's Back and Forward (M3); U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['terminal.attachSelection', 'channel.open', 'go.back', 'go.forward', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U6b-5a's Attach selection to chat (M2); U11a M5's one; U6b-5a's Back and Forward (M3); U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {

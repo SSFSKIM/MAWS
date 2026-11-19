@@ -56,6 +56,8 @@ const LANDED = [
   'files.goToFile',
   // U6b-5a: Back and Forward (M3)
   'go.back', 'go.forward',
+  // U6b-5a: Attach selection to chat (M2)
+  'terminal.attachSelection',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
