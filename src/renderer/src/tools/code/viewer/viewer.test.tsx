@@ -3134,13 +3134,44 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     expect(reads(main)).toHaveLength(3);
   });
 
+  it('W1 (g): a comparison of A’s read that ends after the tab became B’s leaves B’s owed read again in place: B reads once more', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const aRead = main.hold('files.read');
+    const { rerender } = showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const aFollow = main.hold('files.follow');
+    click(chip);
+    await act(async () => aRead.release()); // A's read lands refused; its comparison waits for A's follow
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: A, status: 'error' }));
+    const bOlder = main.hold('files.read');
+    const bNewer = main.hold('files.read');
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />); // the same tab, now B's
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    act(() => useViewer.getState().applyChanged({ appSessionId: B, path: OUT, kind: 'changed' })); // B's newer load
+    await waitFor(() => expect(reads(main)).toHaveLength(3));
+    act(() => follow(B, OUT, { file: DOC })); // B's own follow finds the link
+    await waitFor(() => expect(main.linked('app-b', OUT)).not.toBeNull());
+    await act(async () => bNewer.release()); // B's newest lands refused while its older read is out: B owes a read again
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }));
+    await act(async () => aFollow.release()); // A's comparison resumes, for an entry no longer A's
+    await settle();
+    expect(reads(main)).toHaveLength(3);
+    await act(async () => bOlder.release()); // B's superseded read ends: B's read again goes now
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main).map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b', 'app-b', 'app-b']);
+  });
+
   it('W1 (g): a Load more sent before the click that lands from a file that may not be saved is read once more, keeping what it loaded', async () => {
     const BIG = '/elsewhere/big.log';
-    const text = `${'log line\n'.repeat(4)}`;
+    // two and a half chunks of real lines, in a file past the editor's cap: a head of one chunk, and one more by Load more
+    const text = lines(81_920, (n) => `log line ${String(n).padStart(6, '0')} of the invented run`.padEnd(31, '.'));
+    expect(text.length).toBe(81_920 * 32);
     const main = disk({ [DOC]: `[the log](${BIG})`, [BIG]: text }, { results: [BIG], links: [{ from: { file: DOC }, path: BIG }] });
     main.files[BIG] = { text, bytes: 5 * MiB } as never;
     showFile(BIG);
-    await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', kind: 'head', locked: 'result' }));
+    await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', kind: 'head', locked: 'result', loaded: MiB }));
     const before = reads(main, BIG).length;
     const more = main.hold('files.read');
     act(() => useViewer.getState().loadMore(FILE(BIG)));
@@ -3151,8 +3182,9 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     await act(async () => more.release()); // lands read-only: no record when it arrived
     await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', locked: null }));
     await settle();
-    expect(reads(main, BIG)).toHaveLength(before + 2);
-    expect(reads(main, BIG).at(-1)).toMatchObject({ offset: 0 });
+    // the read again covers what Load more reached: its two chunks, and the text stays the two chunks' whole
+    expect(reads(main, BIG).slice(before).map((input) => input.offset)).toEqual([MiB, 0, MiB]);
+    expect(shown(BIG)).toMatchObject({ loaded: 2 * MiB, text: text.slice(0, 2 * MiB) });
   });
 
   it('K3: a relative link in a Markdown file outside the folders that the person chose opens the file beside it, editable', async () => {
