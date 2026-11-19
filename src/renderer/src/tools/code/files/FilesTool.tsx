@@ -39,6 +39,7 @@ import { workingFolder } from '@shared/sessions/working-folder';
 import { Resizer } from '../../../app/Resizer';
 import { panelHost } from '../../../panel/host';
 import { shownByItsKey } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
+import { available } from '../../../keymap/shell-navigation'; // UX wave U6b-5a
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { ipc } from '../../../ipc/client';
 import { checkoutKey, machineFor } from '../../../ipc/machine';
@@ -55,7 +56,7 @@ import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; //
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, reviewEntry, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
 import { FinderColumn } from './FinderView';
-import { requestKeyboard, takeKeyboard, useKeyboardRequest } from './finder'; // UX wave U6b-5a
+import { requestKeyboard, takeKeyboard, useKeyboardRequest, withdrawKeyboard } from './finder'; // UX wave U6b-5a
 import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
 import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
@@ -141,8 +142,10 @@ function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext })
 }
 
 // UX wave U6b-5a (M1, decision 4): the last focus request each tab acted on; X5's counter outlives the tab's mounts, so a
-// remount under the same counter takes no keyboard.
+// remount under the same counter takes no keyboard. And the number of the request for the keyboard each tab made for a
+// surface's key, withdrawn when that showing ends (the tab hidden or unmounted) if it still waits.
 const focusSeen = new WeakMap<FilesState, number>();
+const keyboardAsked = new WeakMap<FilesState, number>();
 
 const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-border bg-bg px-3 py-1 text-ui-sm';
 
@@ -190,18 +193,26 @@ function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabI
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
-  // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`shownByItsKey`) is answered once, by U6b-3b's
-  // request for the keyboard (`finder.ts`), whose taker takes it when it is drawn and which the person's next key or
-  // pointer press drops: the file's view while the tab holds a file not covered by the tree (it hands the keyboard to its
+  // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`shownByItsKey`, by the counter's value the key
+  // made) is answered once, by U6b-3b's request for the keyboard (`finder.ts`), whose taker takes it when it is drawn,
+  // which the person's next key or pointer press drops and which this tab withdraws when its showing ends: the file's view while the tab holds a file not covered by the tree (it hands the keyboard to its
   // editor once one is drawn), else the tree (`TreeList`: its selected row, else its first row, else itself). Go to file's
   // field is not where it lands. The host's other requests (an open of a file from a link or the tree, the agent's show)
   // are used up and answered with nothing, as before this landing: the keyboard stays where the person has it.
   useEffect(() => {
     if (focus.request <= (focusSeen.get(focus.of) ?? 0)) return;
     focusSeen.set(focus.of, focus.request);
-    if (!shownByItsKey(tabId)) return;
-    requestKeyboard(key !== null && place !== 'instead' ? { into: 'file', key } : { into: 'tree', tabId });
+    if (!shownByItsKey(tabId, focus.request)) return; // the request of an open, made after the key's
+    keyboardAsked.set(focus.of, requestKeyboard(key !== null && place !== 'instead' ? { into: 'file', key } : { into: 'tree', tabId }));
   }, [focus.request, focus.of, key, place, tabId]);
+  useEffect(() => {
+    if (!visible) return;
+    const of = focus.of;
+    return () => {
+      const asked = keyboardAsked.get(of);
+      if (asked !== undefined) withdrawKeyboard(asked);
+    };
+  }, [visible, focus.of]);
   // U6b-3b: the field above the tree, outside its menu, and while it holds text the list in the tree's place
   const column = (
     <FinderColumn
@@ -483,7 +494,7 @@ function SessionTree({ tabId, appSessionId, session, marked, chosen, searching }
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
         {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
-        <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} tabId={tabId} />
+        <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} tabId={tabId} settled={roots !== undefined && roots.status !== 'loading'} />
       </div>
     </FilesMenu>
   );
@@ -617,6 +628,7 @@ function TreeList({
   refresh,
   changed,
   tabId,
+  settled,
 }: {
   rows: TreeRow[];
   selected: string | null;
@@ -626,6 +638,7 @@ function TreeList({
   refresh(): void;
   changed: ChangedProps;
   tabId: string; // UX wave U6b-5a: the tab whose tree this is, for the keyboard a surface's key asks of it
+  settled: boolean; // UX wave U6b-5a: the roots' listing has answered (with roots, none, or a failure)
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const tree = useRef<HTMLDivElement>(null);
@@ -701,18 +714,38 @@ function TreeList({
     pending.current = null;
     useTreeState.getState().revealed(appSessionId);
   };
-  // UX wave U6b-5a (M1, decision 4): the keyboard a surface's key asked of this tab's tree, taken once rows are drawn (the
-  // first listing may still be out, and the list draws its rows only after it has measured itself): the selected row,
-  // else the first, else the tree itself (rows that are all notices).
+  // UX wave U6b-5a (M1, decision 4): the keyboard a surface's key asked of this tab's tree, taken once the roots' listing
+  // has answered. Taken under a cover (a page over the column) it moves nothing. Its row is read from the rows, not from
+  // what is drawn: the selected row, else the first row; it is scrolled into view and kept drawn (`focused`), then
+  // focused once drawn. With no row (no roots, or their listing failed), the tree itself.
   const asked = useKeyboardRequest({ into: 'tree', tabId });
-  const drawn = virtualizer.getVirtualItems().length;
+  const aim = useRef<string | null>(null);
   useLayoutEffect(() => {
     const element = tree.current;
-    if (asked === 0 || element === null || drawn === 0 || !takeKeyboard({ into: 'tree', tabId })) return;
-    const row = element.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]') ?? element.querySelector<HTMLElement>('[role="treeitem"]');
-    if (row === null) element.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
-    (row ?? element).focus({ preventScroll: true });
-  }, [asked, drawn, tabId]);
+    const scrolling = scroller.current;
+    if (asked === 0 || element === null || scrolling === null || !settled || !takeKeyboard({ into: 'tree', tabId }) || !available(element)) return;
+    const at = keyboardRow(rows, selected);
+    if (at < 0) {
+      element.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
+      element.focus({ preventScroll: true });
+      return;
+    }
+    const top = at * FILES_ROW_HEIGHT;
+    const height = scrolling.clientHeight || scrolling.offsetHeight; // happy-dom lays nothing out: its offsetHeight is the tests' viewport
+    if (top < scrolling.scrollTop) scrolling.scrollTop = top;
+    else if (top + FILES_ROW_HEIGHT > scrolling.scrollTop + height) scrolling.scrollTop = top + FILES_ROW_HEIGHT - height;
+    pending.current = null; // the restored offset no longer pulls the list back over the row
+    aim.current = rows[at].key;
+    setFocused(rows[at].key);
+  }, [asked, settled, rows, selected, tabId]);
+  useLayoutEffect(() => {
+    const key = aim.current;
+    if (key === null) return;
+    const item = [...(tree.current?.querySelectorAll<HTMLElement>('[data-row-key]') ?? [])].find((drawn) => drawn.dataset.rowKey === key)?.querySelector<HTMLElement>('[role="treeitem"]');
+    if (!item) return;
+    aim.current = null;
+    item.focus({ preventScroll: true });
+  });
   return (
     <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
       <KeepTreeInView scroller={scroller} length={sectionLength} folded={folded} restoring={() => pending.current !== null} />
@@ -723,6 +756,7 @@ function TreeList({
             return (
               <div
                 key={item.key}
+                data-row-key={row.key}
                 className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`}
                 style={{ top: item.start, height: FILES_ROW_HEIGHT }}
                 onFocus={() => setFocused(row.key)}
@@ -747,6 +781,13 @@ function TreeList({
       </div>
     </div>
   );
+}
+
+// UX wave U6b-5a (M1, decision 4): the row a surface's key gives the keyboard to: the selected row, else the first row
+// that is one (a notice is not); -1 when there is none.
+function keyboardRow(rows: readonly TreeRow[], selected: string | null): number {
+  const chosen = selected === null ? -1 : rows.findIndex((row) => (row.kind === 'root' || row.kind === 'entry') && sameFile(row.path, selected));
+  return chosen >= 0 ? chosen : rows.findIndex((row) => row.kind !== 'notice');
 }
 
 // E11: what main says of a session it cannot place (a New chat with no project yet): the pane's no-session sentence,

@@ -8,7 +8,7 @@ import { currentSet, paramsHoldFile } from '../stores/layout-model'; // UX wave 
 import { useComposerStore } from '../stores/composer'; // UX wave U6b-5a
 import { focusedSession, focusFocused } from '../composer/ComposerAppKeys'; // UX wave U6b-5a
 import { focusPaneElement } from '../main/pane-dom'; // UX wave U6b-5a
-import { focusSurfaceStop, sideSurfaceOf } from '../keymap/shell-navigation'; // UX wave U6b-5a
+import { available, focusSurfaceStop, sideSurfaceOf } from '../keymap/shell-navigation'; // UX wave U6b-5a
 import { usePanes, openPaneTab } from '../engine-surface/panes';
 import { lastInViewOf, panelHost, requestFocus, usePanelHost } from './host';
 import { COPY } from './copy';
@@ -26,17 +26,17 @@ const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay
 // UX wave U7b (M6, decision 6; the owner's answer to question 4): with a page open it only shows. The page is left, and
 // a tool already in view behind it stays in view, so leaving the page is all it does; any other tool is shown as above.
 // UX wave U6b-5a (M1, decisions 1 to 3): the keyboard follows, the same from every control. A tool shown has it
-// (`focusShown`); the column hidden gives it back (`giveKeyboardBack`). With a page open and the tool in view behind it,
-// leaving the page moves no keyboard.
+// (`focusShown`); the column hidden gives it back in the next frame (`giveKeyboardBack`). With a page open and the tool
+// in view behind it, leaving the page moves no keyboard.
 export function toggleSurface(toolId: string) {
   const state = useLayout.getState();
   const session = surfaceSession(state);
   if (!state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId)) {
     if (pageOpen(state)) state.closeDestination();
     else {
-      const holder = document.activeElement;
+      const returns = keyboardInColumn();
       state.hideSurfaces(session);
-      giveKeyboardBack(holder);
+      if (returns) giveKeyboardBack();
     }
     return;
   }
@@ -59,14 +59,15 @@ export function toggleSurface(toolId: string) {
 // tab's surface already. Nothing moves when the person pressed a key or a pointer in between (the press that ran this
 // one was dispatched before it began), or when by then the tab is out of view or a dialog holds the keyboard.
 function focusShown(tabId: string): void {
-  showing.add(tabId);
   requestFocus(tabId);
+  const request = usePanelHost.getState().focus[tabId] ?? 0;
+  showing.set(tabId, request);
   let pressed = false;
   const heard = () => void (pressed = true);
   window.addEventListener('keydown', heard, true);
   window.addEventListener('pointerdown', heard, true);
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    showing.delete(tabId);
+    if (showing.get(tabId) === request) showing.delete(tabId);
     window.removeEventListener('keydown', heard, true);
     window.removeEventListener('pointerdown', heard, true);
     if (pressed || (sideSurfaceOf(tabId)?.contains(document.activeElement) ?? false)) return;
@@ -74,20 +75,32 @@ function focusShown(tabId: string): void {
   }));
 }
 
-// The tabs a surface's key has shown whose second frame has not come. The host also asks a tab for the keyboard when it
-// opens something in it (a link's file, the agent's show); a tool that answers only the person's show by a surface's
-// key (Files) reads this, so those opens leave the keyboard where it was.
-const showing = new Set<string>();
-export const shownByItsKey = (tabId: string): boolean => showing.has(tabId);
+// The focus request a surface's key made, by tab, until its second frame. The host also asks a tab for the keyboard when
+// it opens something in it (a link's file, the agent's show), with a later value of the same counter; a tool that answers
+// only the person's show by a surface's key (Files) asks for the value it was given, so those opens, even one that reuses
+// the tab before the second frame, leave the keyboard where it was.
+const showing = new Map<string, number>();
+export const shownByItsKey = (tabId: string, request: number): boolean => showing.get(tabId) === request;
 
-// Decision 3: with the keyboard in the side column, or held by nothing, the composer of the session on screen takes it,
-// else the pane in front; anywhere else (the sidebar, the main area) it stays.
-function giveKeyboardBack(holder: Element | null): void {
-  const column = document.getElementById('region-panel');
-  if (holder !== null && holder !== document.body && !(column?.contains(holder) ?? false)) return;
-  const session = focusedSession();
-  if (session !== null && useComposerStore.getState().focusTargets.has(session)) focusFocused();
-  else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
+// Decision 3: the keyboard comes back from the column when the column held it or nothing did; anywhere else (the
+// sidebar, the main area) it stays. Read before the hide.
+function keyboardInColumn(): boolean {
+  const holder = document.activeElement;
+  return holder === null || holder === document.body || (document.getElementById('region-panel')?.contains(holder) ?? false);
+}
+
+// The composer of the session on screen takes it, else the pane in front, in the next frame: a side surface that covered
+// the main area (maximized, a sheet) leaves it inert until the hide has been drawn, and inert takes no keyboard (as the
+// sheet's own dismissal waits, `dismissSheet`). Nothing moves when by then something outside the column holds it (the
+// person moved it).
+function giveKeyboardBack(): void {
+  requestAnimationFrame(() => {
+    const holder = document.activeElement;
+    if (holder instanceof HTMLElement && holder !== document.body && holder.isConnected && available(holder) && !(document.getElementById('region-panel')?.contains(holder) ?? false)) return;
+    const session = focusedSession();
+    if (session !== null && useComposerStore.getState().focusTargets.has(session)) focusFocused();
+    else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
+  });
 }
 
 // The Session cards icon and its menu row: off when the column is shown, else shown (UX wave U8b: read from its one source).

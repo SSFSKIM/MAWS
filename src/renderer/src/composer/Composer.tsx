@@ -139,38 +139,42 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 }
 
 // UX wave U6b-5a (M1, decision 5; sequence S4): a change of the permission mode with ⇧Tab is said once per press, as
-// "Permission mode: <the chip's label>", with the mode the chip shows once the change is answered: a refusal at once,
-// with the mode in force; a change taken when the chip shows it (the render after the answer, or a later one), and if the
-// engine reports another mode than the one asked (a fallback), that one. A later press supersedes an earlier one not yet
-// said. A press while the chip takes no change asks nothing and says nothing. Only ⇧Tab writes here: the chip's menu says
-// its own selection, and a change the engine makes by itself is no one's press.
+// "Permission mode: <the chip's label>". A refusal says the mode in force at once. A taken change is said when the chip
+// shows the mode the engine answered it with (`effective`, which is the fallback when the engine set another than the
+// one asked; the mode asked where the binding names none), on the first render at or after the answer: a report of any
+// other mode meanwhile is not this press's. A later press supersedes an earlier one only while that one is unanswered; an
+// answered press still waiting for the chip is said when the chip shows its mode. A press while the chip takes no change
+// asks nothing and says nothing. Only ⇧Tab writes here: the chip's menu says its own selection, and a change the engine
+// makes by itself is no one's press.
 function useModeAnnouncement(mode: ModeBinding): { said: { press: number; text: string } | null; cycle(): void } {
   const [said, setSaid] = useState<{ press: number; text: string } | null>(null);
   const [answered, setAnswered] = useState(0); // a render after each taken answer, so the chip is read then
   const presses = useRef(0);
-  const waiting = useRef<{ press: number; asked: PermissionMode; from: PermissionMode | null; taken: boolean } | null>(null);
+  // the presses not yet said, in order: unanswered (`shows` null) or taken and waiting for the chip to show `shows`
+  const waiting = useRef<{ press: number; shows: PermissionMode | null }[]>([]);
   const shown = useRef(mode.value);
   useLayoutEffect(() => void (shown.current = mode.value));
   useEffect(() => {
-    const press = waiting.current;
-    if (press === null || !press.taken || (mode.value !== press.asked && mode.value === press.from)) return;
-    waiting.current = null;
-    setSaid({ press: press.press, text: modeSentence(mode.value) });
+    const due = waiting.current.filter((press) => press.shows !== null && press.shows === mode.value);
+    if (due.length === 0) return;
+    waiting.current = waiting.current.filter((press) => !due.includes(press));
+    setSaid({ press: due.at(-1)!.press, text: modeSentence(mode.value) });
   }, [mode.value, answered]);
   const cycle = () => {
     if (mode.disabled !== null) return;
     const asked = nextMode(mode.value, mode.autoUnavailable === null);
     presses.current += 1;
     const press = presses.current;
-    waiting.current = { press, asked, from: mode.value, taken: false };
+    waiting.current = [...waiting.current.filter((earlier) => earlier.shows !== null), { press, shows: null }]; // an unanswered press is superseded
     void mode.set(asked).then((result) => {
-      if (waiting.current?.press !== press) return; // superseded by a later press
+      if (!waiting.current.some((entry) => entry.press === press)) return; // superseded by a later press
       if (!result.ok) {
-        waiting.current = null;
+        waiting.current = waiting.current.filter((entry) => entry.press !== press);
         setSaid({ press, text: modeSentence(shown.current) });
         return;
       }
-      waiting.current = { ...waiting.current, taken: true };
+      const shows = result.effective ?? asked;
+      waiting.current = waiting.current.map((entry) => (entry.press === press ? { press, shows } : entry));
       setAnswered((n) => n + 1);
     });
   };

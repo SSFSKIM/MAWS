@@ -24,7 +24,7 @@ import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../..
 import { focusedFile, registerEditor, sideFilesViewer } from '../editor/register';
 import { openFile, resetKeptOpens } from '../open-file';
 import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from '../viewer/viewer-store';
-import { filesTool } from './FilesTool';
+import { filesTool, FILES_ROW_HEIGHT } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
 import { FILE_WIDTH_MIN, resetTreeState, treeOf, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { installResizeObserver } from '../../../test-support/resize';
@@ -1574,15 +1574,41 @@ describe('the keyboard a surface’s key gives the tree', () => {
   });
 
   it('a selected row outside the drawn rows is brought into view and takes the keyboard', async () => {
-    render(<TestHost />);
-    act(() => toggleSurface('files'));
-    await waitFor(() => expect(row('/r/f000.ts')).not.toBeNull());
-    expect(row('/r/f190.ts'), 'not drawn: past the list’s window').toBeNull();
-    act(() => useTreeState.getState().select(A, '/r/f190.ts'));
-    showAgain();
-    await waitFor(() => expect(document.activeElement).toBe(row('/r/f190.ts')));
-    expect(row('/r/f190.ts')!.getAttribute('aria-selected')).toBe('true');
-    expect(document.querySelector<HTMLElement>('[data-files-scroller]')!.scrollTop).toBeGreaterThan(0);
+    // The list's scroller 240 px high, however the virtual list reads it (its box, its height, a resize report): ten rows
+    // and the overscan are drawn, not the 192nd.
+    const HEIGHT = 240;
+    installResizeObserver();
+    const scrollerBox = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const height = this.hasAttribute('data-files-scroller') ? HEIGHT : 0;
+      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
+    });
+    const sized = ['offsetHeight', 'clientHeight'].map((name) => {
+      const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
+      const inherited = own ?? Object.getOwnPropertyDescriptor(Element.prototype, name)!;
+      Object.defineProperty(HTMLElement.prototype, name, {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.hasAttribute('data-files-scroller') ? HEIGHT : inherited.get!.call(this);
+        },
+      });
+      return () => (own ? Object.defineProperty(HTMLElement.prototype, name, own) : delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]);
+    });
+    try {
+      render(<TestHost />);
+      act(() => toggleSurface('files'));
+      await waitFor(() => expect(row('/r/f000.ts')).not.toBeNull());
+      expect(row('/r/f190.ts'), 'not drawn: past the list’s window').toBeNull();
+      act(() => useTreeState.getState().select(A, '/r/f190.ts'));
+      showAgain();
+      await waitFor(() => expect(document.activeElement).toBe(row('/r/f190.ts')));
+      expect(row('/r/f190.ts')!.getAttribute('aria-selected')).toBe('true');
+      const scroller = document.querySelector<HTMLElement>('[data-files-scroller]')!;
+      expect(scroller.scrollTop, 'the row in view').toBe(192 * FILES_ROW_HEIGHT - HEIGHT); // its index 191 (the root first), its foot at the view's
+    } finally {
+      sized.forEach((restore) => restore());
+      scrollerBox.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each([
