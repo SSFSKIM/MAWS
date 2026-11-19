@@ -228,6 +228,19 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`- item\n\n| a | b |\n|---|---|\n| [r](${destination}) | x |`), 'the control: the list ended by a blank line').toEqual([path]);
   });
 
+  // The same review, finding 1's neighbour: a list item that could not interrupt a paragraph (an ordered marker other
+  // than `1`, an empty `*`, `+` or ordered item) is the paragraph's text to the window; inside a list item it may be the
+  // next item, and the rule names nothing there
+  it.each(['/example/report.md', 'file:///example/report.md'])('a list item that cannot interrupt a paragraph continues it (%s)', (destination) => {
+    const path = '/example/report.md';
+    for (const marker of ['2.', '2)', '10.']) expect(linkPaths(`x \`y\n${marker} [r](${destination}) \``), marker).toEqual([]);
+    for (const marker of ['1.', '*', '+']) expect(linkPaths(`x \`y\n${marker}\n[r](${destination}) \``), marker).toEqual([]);
+    expect(linkPaths(`x\n2. [r](${destination})`), 'continued, the link stands').toEqual([path]);
+    expect(linkPaths(`x \`y\n1. [r](${destination}) \``), 'the control: `1.` interrupts').toEqual([path]);
+    expect(linkPaths(`- a\n\n  x \`y\n  2) [r](${destination}) \``), 'inside a list item').toEqual([]);
+    expect(linkPaths(`1. a \`x\n2. [r](${destination}) \``), 'a sibling, which the rule cannot tell: nothing').toEqual([]);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

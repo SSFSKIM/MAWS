@@ -282,6 +282,20 @@ describe('the rule reads the blocks the window draws', () => {
     agree(`- item\n\n| a | b |\n|---|---|\n| [r](${destination}) | x |`, ['/example/report.md']);
   });
 
+  // Finding 1's neighbour: a list item that could not interrupt a paragraph continues it in the window
+  it.each(['/example/report.md', 'file:///example/report.md'])('a list item that cannot interrupt a paragraph (%s)', (destination) => {
+    const path = '/example/report.md';
+    for (const marker of ['2.', '2)', '10.']) agree(`x \`y\n${marker} [r](${destination}) \``, []);
+    for (const marker of ['1.', '*', '+']) agree(`x \`y\n${marker}\n[r](${destination}) \``, []);
+    agree(`x\n2. [r](${destination})`, [path]);
+    agree(`x \`y\n1. [r](${destination}) \``, [path]);
+    agree(`- a\n\n  x \`y\n  2) [r](${destination}) \``, []);
+    // a sibling item: the window draws it, the rule cannot tell it from the case above and names nothing
+    const sibling = `1. a \`x\n2. [r](${destination}) \``;
+    expect(chipPaths(sibling)).toEqual([path]);
+    expect(linkPaths(sibling)).toEqual([]);
+  });
+
   // N1.16: the window ends a line at a carriage return alone; the rule names nothing of such a text
   it('lone carriage returns round a fence: the rule names nothing, the window draws no chip in the fence (N1.16)', () => {
     for (const fence of ['```', '~~~']) {
