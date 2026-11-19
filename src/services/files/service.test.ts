@@ -2217,9 +2217,9 @@ describe('files saves outside the folders', () => {
       points['before-open'] = () => swapToLink(root, outside);
       await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
       restore(root);
-      points['before-open'] = () => {
+      points['after-open'] = () => {
         renameSync(root, `${root}.away`);
-        mkdirSync(root); // another directory at the same path: the identity differs
+        mkdirSync(root); // another directory at the same path once the first is open: the identity differs
       };
       await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
     });

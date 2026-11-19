@@ -6,4 +6,6 @@ export const OPEN_IN_COPY = {
   elsewhere: (machine: string) => `Open in (the folder is on ${machine})`,
   looking: 'Looking for apps…',
   failed: 'MAWS could not open it just now', // the bridge threw, or main answered an error
+  // a file outside the session's folders: a terminal opens a folder, and this file's is not one the session works in
+  terminalOutside: 'A terminal opens a folder this session works in, and this file is outside them',
 } as const;

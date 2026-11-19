@@ -171,7 +171,7 @@ export function FileViewer({ tab, start, end, agent = false }: { tab: FileTab; s
       controls={(entry) => (
         <>
           {/* UX wave U6b-4a: Open in, the file at the line shown */}
-          <OpenInButton appSessionId={appSessionId} path={tab.path} line={() => shownLine(tab.id)} />
+          <OpenInButton appSessionId={appSessionId} path={tab.path} line={() => shownLine(tab.id)} outside={entry.named} />
           <EditorControls entry={entry} />
         </>
       )}
