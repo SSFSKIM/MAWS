@@ -54,11 +54,46 @@ async function reveal(page: Page, app: ElectronApplication, project: string, bef
   await expect(palette).toHaveCount(0);
 }
 
-async function expectRowKeepsFocus(page: Page, project: string): Promise<void> {
+// Every zero-delay timer queued before this call has run (the one queued here runs after them): the dialog's restore
+// among them, queued as the palette closed.
+const timersRun = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+const framesRun = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
+// The row takes focus, and still holds it once the close's timers and two frames after them have run. `afterTimers`
+// runs between the two (the second case takes its frame order out there).
+async function expectRowKeepsFocus(page: Page, project: string, afterTimers?: () => Promise<void>): Promise<void> {
   await expect.poll(() => focused(page)).toEqual({ kind: 'project', row: project });
-  await page.waitForTimeout(250); // past the dialog's restore and a few frames
+  await timersRun(page);
+  await afterTimers?.();
+  await framesRun(page);
   expect(await focused(page), `${project}'s row still holds focus`).toEqual({ kind: 'project', row: project });
 }
+
+type ForcedWindow = { __forcedFrames?: { ran: number; original: typeof requestAnimationFrame } };
+
+// The order the loss would need: every frame callback asked for runs at once (a microtask), ahead of any timer.
+const forceFrames = (page: Page) =>
+  page.evaluate(() => {
+    const forced = { ran: 0, original: window.requestAnimationFrame };
+    window.requestAnimationFrame = (callback) => {
+      queueMicrotask(() => {
+        forced.ran++;
+        callback(performance.now());
+      });
+      return 0;
+    };
+    (window as unknown as ForcedWindow).__forcedFrames = forced;
+  });
+
+// The browser's frames back; answers how many callbacks ran in the forced order.
+const unforceFrames = (page: Page) =>
+  page.evaluate(() => {
+    const win = window as unknown as ForcedWindow;
+    const forced = win.__forcedFrames!;
+    window.requestAnimationFrame = forced.original;
+    delete win.__forcedFrames;
+    return forced.ran;
+  });
 
 test('palette reveal project: the row keeps focus as the browser orders the frame and the dialog restore', async () => {
   const { page, app } = maws;
@@ -73,20 +108,12 @@ test('palette reveal project: the row keeps focus as the browser orders the fram
 test('palette reveal project: the row keeps focus when a frame runs before the dialog restores focus', async () => {
   const { page, app } = maws;
   for (const project of PROJECTS) {
-    // Every frame callback asked for in the next half second runs at once (a microtask), ahead of any timer: patched
-    // once the project's row is selected, so the half second covers the ⏎ and the dialog's close.
-    await reveal(page, app, project, () =>
-      page.evaluate(() => {
-        const original = window.requestAnimationFrame.bind(window);
-        window.requestAnimationFrame = (callback) => {
-          queueMicrotask(() => callback(performance.now()));
-          return 0;
-        };
-        setTimeout(() => (window.requestAnimationFrame = original), 500);
-      }),
-    );
-    await expectRowKeepsFocus(page, project);
-    await page.waitForTimeout(300); // the frame patch expires before the next round
+    // forced once the project's row is selected, so it covers the ⏎ and the dialog's close, and taken out once the
+    // close's timers have run; a frame of the close ran in the forced order, or the case tested nothing
+    await reveal(page, app, project, () => forceFrames(page));
+    await expectRowKeepsFocus(page, project, async () => {
+      expect(await unforceFrames(page), 'a frame of the close ran in the forced order').toBeGreaterThan(0);
+    });
   }
 });
 

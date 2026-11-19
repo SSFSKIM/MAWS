@@ -37,6 +37,8 @@ const panel = (page: Page) => page.locator('[data-region="panel"]');
 const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
 const surfaces = (page: Page) => page.locator('[data-surface-row]');
 const surface = (page: Page, id: string) => panel(page).locator(`[data-surface="${id}"]`);
+// What a terminal shows, read from its emulator through the page's terminals seam (`window.__maws_terminals`).
+const terminalLines = (page: Page, id: string) => page.evaluate((tid) => (window as unknown as { __maws_terminals?: { lines(id: string): string[] | null } }).__maws_terminals?.lines(tid) ?? null, id);
 const stack = (page: Page) => panel(page).locator('[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-surface')));
 
 async function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -1061,9 +1063,11 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
 // Playwright (support/menu.ts), so the scene reads the installed menu and clicks its items by id. Free of how two surfaces
 // arrange: each surface is shown and hidden again before the next.
 // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B1 and B13): after each click,
-// where the keyboard is, polled: inside the surface it showed (the tool's own answer, else F6's stop for its tab), then
-// in the composer once the same item hides the column; and the open-column path, View ▸ Terminal over a column open on
-// Review. Edit and Go hold this half's three rows in their places, and the sheet lists them under those groups.
+// where the keyboard is, polled: for Terminal, in its emulator's own input once its shell has drawn a prompt, and the
+// first time a typed command reaches the shell; for Review and Files, inside the surface (the tool's own answer, else
+// F6's stop for its tab); then in the composer once the same item hides the column, the column gone. Each item is
+// clicked once main reads it enabled. And the open-column path, View ▸ Terminal over a column open on Review. Edit and
+// Go hold this half's three rows in their places, and the sheet lists them under those groups.
 test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; View in groups; the sheet in the same groups', async ({ maws }) => {
   const { app, page } = maws;
   await size(maws, 1512, 982);
@@ -1095,24 +1099,45 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
   // U6b-5a (B1): the keyboard follows each show and hide. The composer holds it first.
   const composer = main(page).getByRole('textbox', { name: 'Message' });
   const holds = (id: string) => page.evaluate((tool) => document.activeElement?.closest(`[data-region="panel"] [data-surface="${tool}"]`) != null, id);
+  const click = async (id: string) => {
+    await expect.poll(() => app.evaluate(({ Menu }, item) => Menu.getApplicationMenu()?.getMenuItemById(item)?.enabled ?? null, id), { message: `${id} enabled` }).toBe(true);
+    await menu(app, id);
+  };
+  // The terminal's shell has the keyboard: its emulator's input is focused once the shell has drawn a prompt (read
+  // through the page's terminals seam, the terminal drawing on a canvas).
+  const shellHasKeyboard = async (): Promise<string> => {
+    const element = panel(page).locator('[data-surface="terminal"] [data-terminal-id]:visible');
+    await expect(element).toHaveCount(1, { timeout: 15_000 });
+    const terminal = (await element.getAttribute('data-terminal-id'))!;
+    await expect.poll(async () => (await terminalLines(page, terminal))?.some((line) => line.trim() !== '') ?? false, { timeout: 15_000, message: 'a prompt' }).toBe(true);
+    await expect(element.locator('textarea.xterm-helper-textarea'), 'the shell has the keyboard').toBeFocused();
+    return terminal;
+  };
   await composer.click();
   await expect(composer).toBeFocused();
   for (const id of ['terminal', 'review', 'files']) {
-    await menu(app, `surface.${id}`);
+    await click(`surface.${id}`);
     await expect.poll(() => stack(page), { message: `View ▸ ${id} shows it` }).toContain(id);
-    await expect.poll(() => holds(id), { message: `View ▸ ${id} gives it the keyboard` }).toBe(true);
-    await menu(app, `surface.${id}`);
+    if (id === 'terminal') {
+      const terminal = await shellHasKeyboard();
+      await page.keyboard.type('echo b1-$((40 + 2))');
+      await page.keyboard.press('Enter');
+      await expect.poll(async () => (await terminalLines(page, terminal))?.some((line) => line.trim() === 'b1-42') ?? false, { timeout: 10_000, message: 'what is typed goes to the shell' }).toBe(true);
+    } else await expect.poll(() => holds(id), { message: `View ▸ ${id} gives it the keyboard` }).toBe(true);
+    await click(`surface.${id}`);
     await expect.poll(() => stack(page), { message: `View ▸ ${id} again hides it` }).not.toContain(id);
+    await expect(sideColumn(page), `hiding ${id} hides the column`).toHaveCount(0);
     await expect(composer, `hiding ${id} gives the composer the keyboard`).toBeFocused();
   }
   // the open-column path: with the column open on Review, View ▸ Terminal shows the terminal and gives it the keyboard
-  await menu(app, 'surface.review');
+  await click('surface.review');
   await expect.poll(() => holds('review'), { message: 'Review has the keyboard' }).toBe(true);
-  await menu(app, 'surface.terminal');
+  await click('surface.terminal');
   await expect.poll(() => stack(page), { message: 'View ▸ Terminal over Review shows the terminal' }).toContain('terminal');
-  await expect.poll(() => holds('terminal'), { message: 'and gives it the keyboard' }).toBe(true);
-  await menu(app, 'surface.terminal');
+  await shellHasKeyboard();
+  await click('surface.terminal');
   await expect.poll(() => stack(page), { message: 'View ▸ Terminal again hides the column' }).not.toContain('terminal');
+  await expect(sideColumn(page), 'the column is hidden').toHaveCount(0);
   await expect(composer, 'the composer has the keyboard back').toBeFocused();
 
   await menu(app, 'shortcuts.open');

@@ -845,6 +845,13 @@ test('a page beside the sidebar', async () => {
     // by the visit or by Back has landed, and the side column reads as it was drawn.
     await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed', timeout: 15_000 }).toBe(false);
     expect(sideColumn(), 'nothing of the side column written by the visit').toEqual(drawn);
+    // and the page's Esc, the same step back: opened again, the page is the newest place, so Forward has nothing until Esc
+    const forward = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('go.forward')?.enabled ?? null);
+    await openAppDestination(page, 'Customize');
+    await expect.poll(forward, { message: 'Go ▸ Forward disabled with the page the newest place' }).toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(region).toHaveCount(0);
+    await expect.poll(forward, { message: 'Go ▸ Forward enabled after the page’s Esc' }).toBe(true);
 
     // a session's row leaves the page and shows that session
     await openAppDestination(page, 'Projects');

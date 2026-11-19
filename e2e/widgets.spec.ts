@@ -1553,9 +1553,10 @@ test.describe('plugin management (E8)', () => {
     await expect(w.getByRole('searchbox', { name: 'Search plugins' })).toHaveCount(0);
     // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B8): ⌘[ is also Go ▸ Back,
     // a menu accelerator, which a page's keydown reaches first and keeps from the menu by taking it: the detail takes
-    // it (its keydown's default prevented), so the place in front does not change. This page has no strip, so what is
-    // read is what keeps the place: the chord's keydown as the window last hears it, defaulted or not. The window's
-    // listener sits after the page's own handlers, so it reads what they decided.
+    // it (its keydown's default prevented), so the place in front does not change. This harness's page has no strip, so
+    // `defaultPrevented` stands in for "the tab in front is unchanged": what is read is what keeps the place, the chord's
+    // keydown as the window last hears it, defaulted or not. The place itself, through the real menu, is checked on the
+    // Mac by hand (B8). The window's listener sits after the page's own handlers, so it reads what they decided.
     await page.evaluate(() => {
       const w = window as unknown as { __chordTaken?: boolean | null };
       w.__chordTaken = null;

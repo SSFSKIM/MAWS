@@ -954,11 +954,13 @@ test('openTerminal runs the attach command', async ({ maws }) => {
 // (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B2, B3 and B4.) The `#panel` page draws no
 // composer for a session, so these scenes run the product itself over indexed sessions (`support/maws-tools.ts`'s scene:
 // the replay transport, a scratch config home), each in its own launch, with real login shells. The terminal draws on a
-// canvas, so its lines are read through the page's terminals seam (`window.__maws_terminals`), and its text is chosen
-// with its own menu's Select all; a right click inside a selection keeps it (xterm's right-click word selection skips a
-// click inside the selection), and one on the empty foot of the screen selects nothing. Each scene waits on the
-// composer's pasted chip (its title is the block's text) and the line's text; "nothing was sent" is read from the
-// session's events, the transcript's source, with a send at the scene's end as the control.
+// canvas, so its lines are read through the page's terminals seam (`window.__maws_terminals`). Each command clears the
+// screen first, so what it prints is the first row's one word; a double click selects that word alone, as a hand does,
+// and the terminal's menu is opened on that row, where it has room below it inside the panel: on the word (a right click
+// inside a selection keeps it) or on the row's empty half (a right click on blank cells selects nothing; xterm's
+// right-click word selection takes only a word). Each scene waits on the composer's pasted chip, whose title is the
+// block's whole text, and the line's text; "nothing was sent" is read from the session's events, the transcript's
+// source, with a send at the scene's end as the control.
 
 type SeamWindow = { __maws_terminals?: { lines(id: string): string[] | null } };
 const seamLines = (page: Page, id: string) => page.evaluate((tid) => (window as unknown as SeamWindow).__maws_terminals?.lines(tid) ?? null, id);
@@ -984,18 +986,27 @@ async function runIn(page: Page, id: string, command: string, prints: string): P
   await expect.poll(async () => (await seamLines(page, id))?.some((line) => line.trim() === prints) ?? false, { timeout: 10_000, message: `a line reading ${prints}` }).toBe(true);
 }
 
-// The terminal's own menu, opened by a right click on the foot of its screen (an empty row after `clear`).
-async function terminalMenu(page: Page, id: string): Promise<Locator> {
+// A point on the screen's first row: on the word a command printed there after `clear` (its third cell), or on the
+// row's empty half.
+async function firstRow(page: Page, id: string, on: 'word' | 'blank'): Promise<{ x: number; y: number }> {
   const box = (await screenOf(page, id).boundingBox())!;
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height - 6, { button: 'right' });
-  const opened = surface(page, 'terminal').getByRole('menu', { name: 'terminal' });
-  await expect(opened).toBeVisible();
-  return opened;
+  return { x: on === 'word' ? box.x + 20 : box.x + box.width / 2, y: box.y + 5 };
 }
 
-async function selectAllFromItsMenu(page: Page, id: string): Promise<void> {
-  await (await terminalMenu(page, id)).getByRole('menuitem', { name: 'Select all', exact: true }).click();
-  await expect(surface(page, 'terminal').getByRole('menu', { name: 'terminal' })).toHaveCount(0);
+// The word on the first row, selected by a double click, and nothing else.
+async function selectPrinted(page: Page, id: string): Promise<void> {
+  const at = await firstRow(page, id, 'word');
+  await page.mouse.dblclick(at.x, at.y);
+}
+
+// The terminal's own menu, opened by a right click on the first row, every item of it inside the panel.
+async function terminalMenu(page: Page, id: string, on: 'word' | 'blank'): Promise<Locator> {
+  const at = await firstRow(page, id, on);
+  await page.mouse.click(at.x, at.y, { button: 'right' });
+  const opened = surface(page, 'terminal').getByRole('menu', { name: 'terminal' });
+  await expect(opened).toBeVisible();
+  await expect(opened.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeInViewport({ ratio: 1 });
+  return opened;
 }
 
 const userSends = async (s: Scene, id: string) => ofKind(await s.events(id), 'user.message').filter((event) => !event.isReplay).length;
@@ -1013,28 +1024,37 @@ test('Attach selection to chat: the menu’s fifth item attaches the selection a
     await runIn(page, terminal, "clear; printf 'attach-%s\\n' first", 'attach-first');
 
     // B3, the menu's half: with nothing selected its fifth item is drawn disabled, after a separator
-    const unselected = await terminalMenu(page, terminal);
+    const unselected = await terminalMenu(page, terminal, 'blank');
     await expect(unselected.getByRole('menuitem')).toHaveText(['Copy', 'Paste', 'Select all', 'Clear', 'Attach selection to chat']);
     await expect(unselected.getByRole('separator')).toHaveCount(1);
     await expect(unselected.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(unselected).toHaveCount(0);
 
-    // B2: a selection, attached from the menu, is one block in this session's composer, which takes the keyboard
-    await selectAllFromItsMenu(page, terminal);
-    const selected = await terminalMenu(page, terminal);
+    // B2: a selection, attached from the menu, is one block in this session's composer, which takes the keyboard; the
+    // block is the selection alone, not the screen it was chosen from
+    await selectPrinted(page, terminal);
+    const selected = await terminalMenu(page, terminal, 'word');
     await expect(selected.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeEnabled();
     await selected.getByRole('menuitem', { name: 'Attach selection to chat' }).click();
     await expect(chips).toHaveCount(1);
-    await expect(chips.first()).toHaveAttribute('title', /attach-first/);
+    await expect(chips.first()).toHaveAttribute('title', 'attach-first');
     await expect(box, 'the composer has the keyboard').toBeFocused();
 
-    // B3: with nothing selected, Edit ▸ Attach selection to chat attaches what the screen shows, a second block
-    await runIn(page, terminal, "printf 'attach-%s\\n' second", 'attach-second');
+    // B3: with nothing selected, Edit ▸ Attach selection to chat attaches what the screen shows, a second block. The
+    // click that types the command clears the selection; the menu's item, drawn disabled, says none is left, and a
+    // click on blank cells gives the terminal the keyboard back without choosing any.
+    await runIn(page, terminal, "clear; printf 'attach-%s\\n' second", 'attach-second');
+    const cleared = await terminalMenu(page, terminal, 'blank');
+    await expect(cleared.getByRole('menuitem', { name: 'Attach selection to chat' }), 'nothing is selected').toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(cleared).toHaveCount(0);
+    const blank = await firstRow(page, terminal, 'blank');
+    await page.mouse.click(blank.x, blank.y);
     await expect.poll(() => s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('terminal.attachSelection')?.enabled ?? null), { message: 'Edit ▸ Attach selection to chat enabled while the terminal has the keyboard' }).toBe(true);
     await menu(s.maws.app, 'terminal.attachSelection');
     await expect(chips).toHaveCount(2);
-    await expect(chips.nth(1)).toHaveAttribute('title', /attach-second/);
+    await expect(chips.nth(1)).toHaveAttribute('title', /^attach-second\n/); // the screen from its first row, not a selection
     await expect(box).toBeFocused();
 
     // nothing was sent: no message of the person's among the session's events (what its transcript draws its rows from);
@@ -1059,8 +1079,8 @@ test('Attach selection to chat from a terminal kept open for every session, besi
     // beside beta's chat: alpha's composer is mounted nowhere, so the block goes to alpha's stored draft
     await show(s, beta);
     expect(await shownTerminal(page), 'the same terminal, kept for every session').toBe(terminal);
-    await selectAllFromItsMenu(page, terminal);
-    await (await terminalMenu(page, terminal)).getByRole('menuitem', { name: 'Attach selection to chat' }).click();
+    await selectPrinted(page, terminal);
+    await (await terminalMenu(page, terminal, 'word')).getByRole('menuitem', { name: 'Attach selection to chat' }).click();
     await expect(page.getByRole('region', { name: /^Notifications/ }), 'the line names the terminal’s session').toContainText('Added to Attach alpha');
     const chipsOf = async (id: string) => s.pane.locator(`[data-composer="${await addressed(page, id)}"]`).getByRole('textbox', { name: 'Message' }).locator('[data-pasted="text"]');
     await expect(await chipsOf(beta), 'nothing in the chat on screen').toHaveCount(0);
@@ -1071,7 +1091,7 @@ test('Attach selection to chat from a terminal kept open for every session, besi
     await show(s, alpha);
     const kept = await chipsOf(alpha);
     await expect(kept).toHaveCount(1, { timeout: 15_000 });
-    await expect(kept.first()).toHaveAttribute('title', /attach-pinned/);
+    await expect(kept.first()).toHaveAttribute('title', 'attach-pinned');
   });
 });
 
