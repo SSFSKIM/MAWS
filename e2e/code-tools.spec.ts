@@ -903,7 +903,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       }, soundTab);
       await expect(sideColumn(p.page).locator(`${soundTab} [data-files-tree][data-place="instead"]`), 'the tree in the file’s place').toBeVisible();
       await expect(p.page.locator('audio[data-artifact-media="audio"]'), 'no audio element left').toHaveCount(0);
-      await sideColumn(p.page).locator(`${soundTab} [data-files-tree-toggle]`).click();
+      // the tree's own button (the file's bar keeps its copy, hidden and inert with the file, while the tree stands in its place)
+      await sideColumn(p.page).locator(`${soundTab} [data-files-tree][data-place="instead"] [data-files-tree-toggle]`).click();
       const back = sound.locator('audio[data-artifact-media="audio"]');
       await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
       await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'at the time it left' }).toBeCloseTo(left, 0);
