@@ -208,7 +208,7 @@ describe('overview card lines', () => {
   // P5 O7 M10: another machine's lane B record, with no digest, says its listing's word as its glyph does
   it('a remote lane B record with no digest reads its listing’s state, its open items first', () => {
     const lane = (state: string): ListedSession => ({ ...remoteRow(OTHER_MACHINE, 'b', { state }), appId: 'b' as AppSessionId });
-    expect(['busy', 'waiting', 'failed', 'stopped', 'idle'].map((state) => cardActivity(record('b'), null, [], lane(state)))).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Idle']);
+    expect(['busy', 'waiting', 'failed', 'stopped', 'idle'].map((state) => cardActivity(record('b'), null, [], lane(state)))).toEqual(['Working', 'Needs you', 'Failed', 'Stopped', 'Idle']); // "Stopped": the owner's decision of 2026-11-19, as the glyph reads
     expect(cardActivity(record('b'), null, [item('b', 'permission', '2026-10-28T10:00:00Z')], lane('busy'))).toBe('Waiting for approval');
     expect(cardActivity(record('b'), null, [item('b', 'question', '2026-10-28T10:00:00Z')], lane('busy'))).toBe('Question');
   });
