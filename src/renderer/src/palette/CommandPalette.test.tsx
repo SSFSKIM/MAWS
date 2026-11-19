@@ -152,10 +152,10 @@ describe('command palette', () => {
   it('lists Back while there is a place before, and Forward only once there is one after', async () => {
     offs.push(connectVisits());
     const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-    act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
-    await act(turn);
-    act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
-    await act(turn);
+    for (const title of ['Quota reset recovery', 'Fix sidebar drag']) {
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: idOf(title) }));
+      await act(turn);
+    }
     const user = await openAndType('back');
     const values = () => (group('Actions') ? within(group('Actions')!).getAllByRole('option').map((o) => o.dataset.value) : []);
     expect(values()).toContain('action:go.back');
@@ -341,13 +341,15 @@ describe('palette entries', () => {
     expect(paletteEntries('', { records, projects }).actions).toEqual(ACTION_IDS.filter((id) => listable(id, ACTIONS as ActionTable))); // UX wave U6b-5a M4
   });
 
-  // U6a (decision 7): a fixed row (a key its editor handles) is not an act the palette can run, so it is not listed
-  it('lists no fixed row, and every other row of a table extended with a sibling’s rows', () => {
+  // U6a (decision 7): a fixed row (a key its editor handles) is not an act the palette can run, so it is not listed.
+  // UX wave U6b-5a M4 (P9): nor is a composer's own key, which only the focused composer runs
+  it('lists no fixed row and no composer key, and every other row of a table extended with a sibling’s rows', () => {
     const empty = { records: new Map(), projects: new Map() };
     const actions = paletteEntries('', empty, EXTENDED_TABLE).actions;
     expect(actions).not.toContain(sample('sample.fixed'));
-    expect(actions).toEqual(expect.arrayContaining([sample('sample.menu'), sample('sample.shared')]));
-    expect(paletteEntries('sample', empty, EXTENDED_TABLE).actions).toEqual([sample('sample.menu'), sample('sample.shared')]);
+    expect(actions).not.toContain(sample('sample.shared'));
+    expect(actions).toContain(sample('sample.menu')); // the control: a sibling's menu row is listed
+    expect(paletteEntries('sample', empty, EXTENDED_TABLE).actions).toEqual([sample('sample.menu')]);
   });
 });
 
