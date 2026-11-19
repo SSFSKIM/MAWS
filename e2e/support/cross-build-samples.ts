@@ -86,6 +86,7 @@ export const INPUTS: Record<string, unknown> = {
   'files.upload': { appSessionId: 'x', files: [{ name: 'x', bytes: '' }] },
   'files.write': { appSessionId: 'x', path: 'x', content: '', expectedHash: '0'.repeat(64) },
   'files.writeOutside': { appSessionId: 'x', path: 'x', content: '', expectedHash: '0'.repeat(64), real: 'x' }, // UX wave U6e: files.write's, with the shown real path
+  'files.follow': { appSessionId: 'x', path: 'x', from: { file: 'x' } }, // UX wave U6b-4c: a source, one of two shapes; an unknown session's, so nothing is followed
   'laneA.answer': { appSessionId: 'x', request: 'x', answer: { kind: 'permission', decision: 'deny' } }, // `allow` needs a scope
   'laneA.model': { appSessionId: 'x', model: 'x' }, // a model, an effort or both
   'session.drafts.set': { appSessionId: 'x', draft: null },

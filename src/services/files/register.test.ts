@@ -291,6 +291,40 @@ describe('main answers files.* on the services bus', () => {
     });
   });
 
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R1, X1.2): the follow of a link
+  // is this machine's own client's, waiting as long as that client lives; another machine's request, claimed or not, is
+  // the service's refusal and records nothing
+  describe('the follow of a link (UX wave U6b-4c)', () => {
+    const outside = () => join(root, 'outside');
+    beforeEach(() => {
+      mkdirSync(outside());
+      writeFileSync(join(outside(), 'notes.txt'), 'outside notes\n');
+      writeFileSync(join(root, 'repo', 'guide.md'), `See [the notes](${join(outside(), 'notes.txt')}).\n`);
+    });
+
+    it('follows a link for this machine’s page with its client’s signal, and refuses another machine’s request, claimed or not, recording nothing', async () => {
+      const added: unknown[][] = [];
+      const signals: (AbortSignal | undefined)[] = [];
+      const links = { add: (...args: unknown[]) => void added.push(args.slice(0, 3)), get: () => null };
+      const agentNames = vi.fn(async (_appSessionId: string, _agentId: string, _path: string, signal?: AbortSignal, located?: () => void) => (signals.push(signal), located?.(), 'counted' as const));
+      await install(undefined, undefined, { links, agentNames, log: () => {} });
+      const path = join(outside(), 'notes.txt');
+      const byFile = { appSessionId: 'A', path, from: { file: join(root, 'repo', 'guide.md') } };
+      const remote = { client: page, remote: true as const };
+      const claimed = { ...remote, op: { opId: 'op-1', opCreated: '2026-11-18T09:00:00.000Z', member: 'member-of-the-suite', device: 'device-of-the-suite', fingerprint: 'a'.repeat(64) } };
+      expect(await bus.invoke('files.follow', byFile, remote)).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+      expect(await bus.invoke('files.follow', byFile, claimed)).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+      expect(added).toEqual([]);
+      expect(await invoke('files.follow', byFile)).toEqual({ ok: true, value: { status: 'linked' } });
+      expect(added).toEqual([['A', path, { file: join(root, 'repo', 'guide.md') }]]);
+      expect(await invoke('files.follow', { appSessionId: 'A', path, from: { agent: 'a1b2c3' } })).toEqual({ ok: true, value: { status: 'linked' } });
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      close();
+      expect(signals[0]!.aborted).toBe(true);
+    });
+  });
+
   it('forgets an ended client: it is no longer followed once its page closes', async () => {
     const { files, followed } = await install();
     await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });

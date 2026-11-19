@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as z from 'zod'; // UX wave U6b-4c: outside's schema as it stood before the landing
 import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
 import { NAMES, MAIN_ONLY_COMMANDS, MAIN_ONLY_EVENTS } from './names';
@@ -12,6 +13,7 @@ import * as pty from './schema/pty';
 import * as session from './schema/session';
 import * as settings from './schema/settings';
 import { isCommandName, isEventName, validateCommandInput, validateCommandOutput, validateEventPayload } from './validate';
+import { readTolerant } from './tolerant'; // UX wave U6b-4c
 // C3 start
 import { C3_ATTENTION_COMMANDS, C3_ATTENTION_EVENTS } from './schema/attention';
 import { C3_ENGINE_COMMANDS, C3_ENGINE_EVENTS } from './schema/engine';
@@ -265,10 +267,22 @@ describe('ipc schema validates both directions', () => {
     });
     // C5 end
 
+    // UX wave U6b-4c (decision 11, Q15): a window of this wave from before the landing reads a read's outside with the schema
+    // written out here, as it stood then, through the tolerant reader its client reads an answer with: it drops linked and
+    // reads the file read-only, as one a tool's output names
+    it('reads a linked answer, through outside’s schema as it stood before U6b-4c, as a file a tool’s result names', () => {
+      const OUTSIDE_BEFORE = z.strictObject({ real: z.string(), writable: z.boolean(), why: z.enum(['result', 'added']).optional() });
+      const linked = { real: '/o/b.txt', writable: false, why: 'result', linked: true };
+      const read = readTolerant(OUTSIDE_BEFORE, linked);
+      expect(read.ok && read.dropped).toEqual(['linked']);
+      expect(read.ok && read.value).toEqual({ real: '/o/b.txt', writable: false, why: 'result' });
+      expect(files.FilesReadOutputSchema.shape.outside.unwrap().safeParse(linked).success).toBe(true);
+    });
+
     // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
     // the spine, with library.read's reach and the upload).
     it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.chooseOutside' /* UX wave U6f */, 'files.grant' /* UX wave U6e */, 'files.list', 'files.listOutside' /* UX wave U6f */, 'files.openExternal', 'files.read', 'files.readOutside' /* UX wave U6f */, 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.chooseOutside' /* UX wave U6f */, 'files.follow' /* UX wave U6b-4c */, 'files.grant' /* UX wave U6e */, 'files.list', 'files.listOutside' /* UX wave U6f */, 'files.openExternal', 'files.read', 'files.readOutside' /* UX wave U6f */, 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
       // UX wave U6e: the grant is main's alone; the outside save is bridged, and takes files.write's input and the real path
       expect(MAIN_ONLY_COMMANDS).toContain('files.grant');
       expect(MAIN_ONLY_COMMANDS).not.toContain('files.writeOutside');
@@ -286,6 +300,30 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('files.grant', { status: 'refused', reason: 'not-a-file' }).ok).toBe(true);
       expect(validateCommandInput('files.read', { appSessionId: 'a', path: '/w/notes.md', named: true, agent: true }).ok).toBe(true);
       expect(validateCommandInput('files.readResolved', { path: '/w/notes.md', agent: true }).ok).toBe(false);
+      // UX wave U6b-4c (Interfaces §C; X1.4, K14): the follow of a link is bridged; its source is the path of a file or the
+      // id of a subagent, exactly one of the two, the id as laneA.watch's; the read, the open outside MAWS and the outside
+      // save take no source; a read's outside may say linked, and nothing but true
+      expect(MAIN_ONLY_COMMANDS).not.toContain('files.follow');
+      const follow = (from: unknown) => validateCommandInput('files.follow', { appSessionId: 'a', path: '/w/notes.txt', from }).ok;
+      expect(follow({ file: '/w/guide.md' })).toBe(true);
+      expect(follow({ agent: 'a1b2-C3_d4' })).toBe(true);
+      expect(follow({ agent: 'x'.repeat(128) })).toBe(true);
+      for (const agent of ['a/b', 'a.b', '..', 'x'.repeat(129), '']) expect(follow({ agent }), agent).toBe(false);
+      expect(follow({ file: '/w/guide.md', agent: 'a1' })).toBe(false);
+      expect(follow({})).toBe(false);
+      expect(follow({ file: '/w/guide.md', line: 3 })).toBe(false);
+      expect(validateCommandInput('files.follow', { appSessionId: 'a', path: '/w/notes.txt' }).ok).toBe(false);
+      for (const status of ['linked', 'inside', 'not-linked']) expect(validateCommandOutput('files.follow', { status }).ok, status).toBe(true);
+      expect(validateCommandOutput('files.follow', { status: 'refused' }).ok).toBe(false);
+      expect(validateCommandOutput('files.follow', { status: 'not-linked', reason: 'no-link' }).ok).toBe(false);
+      const source = { from: { file: '/w/guide.md' } };
+      expect(validateCommandInput('files.read', { appSessionId: 'a', path: '/w/notes.md', named: true, ...source }).ok).toBe(false);
+      expect(validateCommandInput('files.openExternal', { appSessionId: 'a', path: '/w/notes.pdf', named: true, ...source }).ok).toBe(false);
+      expect(validateCommandInput('files.writeOutside', { ...save, real: '/w/notes.md', ...source }).ok).toBe(false);
+      const answer = { encoding: 'utf8', content: '', bytes: 0, offset: 0, length: 0, truncated: false, mime: 'text/plain', hash: null, utf8: null, named: true };
+      expect(validateCommandOutput('files.read', { ...answer, outside: { real: '/o/b.txt', writable: false, why: 'result', linked: true } }).ok).toBe(true);
+      expect(validateCommandOutput('files.read', { ...answer, outside: { real: '/o/b.txt', writable: false, why: 'result', linked: false } }).ok).toBe(false);
+      expect(validateCommandOutput('files.read', { ...answer, outside: { real: '/o/b.txt', writable: false, why: 'linked' } }).ok, 'why keeps its two values').toBe(false);
       for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('machine');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;

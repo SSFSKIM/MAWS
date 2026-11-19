@@ -131,15 +131,17 @@ describe('main’s root on mawsd', () => {
   // stands for the outside save and the chooser before the router takes its first command, and refuses an asker that is
   // no app page (main itself here). UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md,
   // M2 and Decision Log 25, 26): the list is `APP_PAGE_ONLY`, the four outside acts with the chooser, and a frame's `open`
-  // has its guard installed as early
+  // has its guard installed as early. UX wave U6b-4c (R1): the follow of a link joins the list
   it('guards the outside acts and layout.openFile for an app page before the router is installed', async () => {
     const { mainClient } = await import('./ipc/clients');
     const { APP_PAGE_ONLY, OPENS_FROM_APP_PAGE_ONLY } = await import('./files/open-file');
-    expect(APP_PAGE_ONLY, 'the four outside acts and the chooser').toEqual(['files.readOutside', 'files.listOutside', 'files.chooseOutside', 'files.writeOutside', 'layout.openFile']);
+    expect(APP_PAGE_ONLY, 'the four outside acts, the chooser and the follow of a link').toEqual(['files.readOutside', 'files.listOutside', 'files.chooseOutside', 'files.writeOutside', 'layout.openFile', 'files.follow']);
     const guards = router.guards.filter(({ names }) => names.includes('files.writeOutside'));
     expect(guards.map(({ names, installed }) => ({ names, installed }))).toEqual([{ names: [...APP_PAGE_ONLY], installed: 0 }]);
     expect(router.guards.filter(({ names }) => names.includes('layout.frameFile')).map(({ names, installed }) => ({ names, installed })), 'a frame’s open, guarded as early').toEqual([{ names: [...OPENS_FROM_APP_PAGE_ONLY], installed: 0 }]);
     expect(guards[0]!.guard('files.writeOutside', {}, { client: mainClient, target: 'LocalMachineRef0000000' as never })).toMatchObject({ code: 'forbidden_sender' });
+    // UX wave U6b-4c (X1.1): the follow of a link, asked by main itself
+    expect(guards[0]!.guard('files.follow', {}, { client: mainClient, target: 'LocalMachineRef0000000' as never })).toMatchObject({ code: 'forbidden_sender', message: 'files.follow may only be invoked by the app window' });
   });
 
   // UX wave U5a (Decision Log 52): on the route that carries it, a side thread of several comments that this Mac's daemon
