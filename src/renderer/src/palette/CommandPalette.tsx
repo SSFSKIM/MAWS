@@ -148,6 +148,20 @@ function hitGroups(search: ConversationSearch, records: ReadonlyMap<AppSessionId
     .filter((group) => group.entries.length > 0);
 }
 
+// The value cmdk selects each kind of row by (U6b-5a M4: the selection's first row is read from the same values).
+const ROW = {
+  session: (appSessionId: AppSessionId) => `session:${appSessionId}`,
+  artifact: (machine: MachineRef, artifactId: string) => `artifact:${artifactKey(machine, artifactId)}`,
+  project: (projectId: ProjectId) => `project:${projectId}`,
+  channel: (project: string) => `channel:${project}`,
+  action: (id: ActionId) => `action:${id}`,
+  library: 'library:search',
+};
+
+// cmdk's keys that move the selection (its arrows, Home and End, and its Ctrl bindings, `vimBindings`).
+const movesSelection = (event: KeyboardEvent) =>
+  ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || (event.ctrlKey && ['j', 'k', 'n', 'p'].includes(event.key));
+
 const ITEM = 'flex h-(--row-h) cursor-default items-center gap-2 rounded-sm px-2 text-ui data-[selected=true]:bg-bg-hover';
 const GROUP = '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-ui-sm [&_[cmdk-group-heading]]:text-fg-muted';
 
@@ -250,6 +264,24 @@ function Palette({ run }: { run(id: ActionId): void }) {
     ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
     : [];
   const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
+  // U6b-5a M4 (S5; Decision Log 15 (viii)): until the person moves the selection (a key, the pointer) for the text and
+  // scope now, it is the first row and follows the first row as answers arrive; from then on it is kept by value. Enter
+  // runs what is selected when it is pressed.
+  const firstRow = (() => {
+    if (scope === 'sessions') return groups[0]?.entries[0] ? ROW.session(groups[0].entries[0].appId) : null;
+    const [lead] = recent;
+    if (lead) return lead.kind === 'session' ? ROW.session(lead.record.appId) : ROW.artifact(lead.machine, lead.artifactId);
+    if (typed && entries.sessions[0]) return ROW.session(entries.sessions[0].appId);
+    const artifact = artifactGroups[0]?.rows[0];
+    if (artifact) return ROW.artifact(artifactGroups[0]!.machine, artifact.id);
+    if (entries.projects[0]) return ROW.project(entries.projects[0].id);
+    if (entries.channels[0]) return ROW.channel(entries.channels[0].project);
+    if (actions[0]) return ROW.action(actions[0]);
+    return typed ? ROW.library : null;
+  })();
+  const listKey = `${scope}\n${query}`;
+  const [movedFor, setMovedFor] = useState<string | null>(null);
+  const value = movedFor === listKey ? selected : (firstRow ?? selected);
   const close = () => usePalette.setState({ open: false });
 
   const openSession = (appSessionId: AppSessionId, split: boolean) => {
@@ -276,13 +308,14 @@ function Palette({ run }: { run(id: ActionId): void }) {
   };
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Enter' || !event.metaKey || !selected.startsWith('session:')) return;
+    if (movesSelection(event)) setMovedFor(listKey);
+    if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:')) return;
     event.preventDefault();
-    openSession(selected.slice('session:'.length) as AppSessionId, true);
+    openSession(value.slice('session:'.length) as AppSessionId, true);
   };
 
   return (
-    <Command label="Command palette" shouldFilter={false} value={selected} onValueChange={setSelected} onKeyDown={onKeyDown} loop>
+    <Command label="Command palette" shouldFilter={false} value={value} onValueChange={setSelected} onKeyDown={onKeyDown} loop>
       <Command.Input
         value={query}
         onValueChange={setQuery}
@@ -306,7 +339,13 @@ function Palette({ run }: { run(id: ActionId): void }) {
         : typed && (entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT || entries.channels.length > RESULT_LIMIT || artifactGroups.some((g) => g.rows.length > RESULT_LIMIT))) && (
         <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
       )}
-      <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto p-1">
+      <Command.List
+        // the pointer selects the row it moves over (cmdk): the person's move
+        onPointerMove={(event) => {
+          if (event.target instanceof Element && event.target.closest('[cmdk-item]') !== null) setMovedFor(listKey);
+        }}
+        className="max-h-[min(420px,60vh)] overflow-y-auto p-1"
+      >
         <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>
         {recent.length > 0 && (
           <Command.Group heading={PALETTE.recent} className={GROUP}>
@@ -347,7 +386,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
         {scope === 'all' && entries.projects.length > 0 && (
           <Command.Group heading="Projects" className={GROUP}>
             {entries.projects.slice(0, RESULT_LIMIT).map((project) => (
-              <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => reveal(project.id)} className={ITEM}>
+              <Command.Item key={project.id} value={ROW.project(project.id)} onSelect={() => reveal(project.id)} className={ITEM}>
                 <span className="truncate">{project.name}</span>
               </Command.Item>
             ))}
@@ -356,7 +395,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
         {scope === 'all' && entries.channels.length > 0 && (
           <Command.Group heading="Channels" className={GROUP}>
             {entries.channels.slice(0, RESULT_LIMIT).map((entry) => (
-              <Command.Item key={entry.project} value={`channel:${entry.project}`} onSelect={() => openChannelTab(entry.project)} className={ITEM}>
+              <Command.Item key={entry.project} value={ROW.channel(entry.project)} onSelect={() => openChannelTab(entry.project)} className={ITEM}>
                 <span data-channel-name className="truncate">{CHANNEL.title(entry.name)}</span>
                 {entry.waiting > 0 && <span data-channel-count className="ml-auto shrink-0 text-ui-sm text-fg-muted">{CHANNEL.waitingCount(entry.waiting)}</span>}
               </Command.Item>
@@ -371,7 +410,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
           </Command.Group>
         )}
         {scope === 'all' && typed && (
-          <Command.Item value="library:search" onSelect={searchLibrary} className={ITEM}>
+          <Command.Item value={ROW.library} onSelect={searchLibrary} className={ITEM}>
             <span className="truncate">{PALETTE.searchLibrary(query.trim())}</span>
           </Command.Item>
         )}
@@ -387,7 +426,7 @@ function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | 
   const listing = useSessions((s) => s.listed.get(record.appId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
   return (
-    <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
+    <Command.Item value={ROW.session(record.appId)} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
       <GlyphMark glyph={glyphFor(record, digest, pending, listing)} className="w-4 shrink-0" />
       <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
@@ -402,7 +441,7 @@ function ListedItem({ listed, snippet, onOpen }: { listed: ListedSession; snippe
   const pending = useAttention((s) => selectPendingOf(s, listed.appId));
   const issued = Date.parse(listed.issued);
   return (
-    <Command.Item value={`session:${listed.appId}`} onSelect={() => onOpen(listed.appId, false)} className={`${ITEM} ${snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
+    <Command.Item value={ROW.session(listed.appId)} onSelect={() => onOpen(listed.appId, false)} className={`${ITEM} ${snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
       <GlyphMark glyph={listedGlyph(listed.state, pending)} className="w-4 shrink-0" />
       <span className="min-w-0 flex-1"><span className="block truncate">{listedTitle(listed)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       <span className="ml-auto shrink-0 text-ui-sm text-fg-faint">{Number.isFinite(issued) ? formatAge(now - issued) : null}</span>
@@ -414,7 +453,7 @@ function ActionItem({ id, onRun }: { id: ActionId; onRun(id: ActionId): void }) 
   const overrides = useSettings((s) => s.state?.settings.keymap);
   const chord = effectiveChord(id, overrides ?? {});
   return (
-    <Command.Item value={`action:${id}`} onSelect={() => onRun(id)} className={ITEM}>
+    <Command.Item value={ROW.action(id)} onSelect={() => onRun(id)} className={ITEM}>
       <span className="truncate">{ACTIONS[id].title}</span>
       {chord && <kbd className="ml-auto shrink-0 font-ui text-ui-sm text-fg-muted">{formatChord(chord)}</kbd>}
     </Command.Item>
@@ -425,7 +464,7 @@ function ActionItem({ id, onRun }: { id: ActionId; onRun(id: ActionId): void }) 
 function ArtifactItem({ row, machine, onOpen }: { row: LibraryRow; machine: MachineRef; onOpen(artifactId: string, machine: MachineRef): void }) {
   const now = useNow();
   return (
-    <Command.Item value={`artifact:${artifactKey(machine, row.id)}`} onSelect={() => onOpen(row.id, machine)} className={`${ITEM} ${row.snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
+    <Command.Item value={ROW.artifact(machine, row.id)} onSelect={() => onOpen(row.id, machine)} className={`${ITEM} ${row.snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
       <KindIcon kind={row.kind} className="w-4 shrink-0 text-fg-muted" />
       <span className="min-w-0 flex-1"><span className="block truncate">{row.title}</span>{row.snippet && <span className="block truncate text-ui-sm text-fg-muted">{row.snippet}</span>}</span>
       <span className="ml-auto shrink-0 text-ui-sm text-fg-faint">{formatAge(now - row.lastEditedAt)}</span>
