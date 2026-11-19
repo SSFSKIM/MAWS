@@ -533,7 +533,7 @@ describe('files tool', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.getAttribute('data-notice-cause')).toBe('unreachable');
     expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(["MAWS's service on this Mac is not answering.", 'files.list: the files service is not running']);
-    for (const p of alert.querySelectorAll('p')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.list)/);
+    for (const p of alert.querySelectorAll('p:not([data-notice-detail])')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.)/); // the sentences; the command's words are the small line's
     up = true;
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(items()).toEqual(['r']));
