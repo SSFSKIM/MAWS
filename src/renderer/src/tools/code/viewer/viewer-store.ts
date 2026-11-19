@@ -485,6 +485,7 @@ export function createViewerStore(client: MawsBridge) {
   const pressedOpen = new Set<string>(); // UX wave U6f (W3): tabs whose Open it asked for a load not started yet
   const guards = new Map<string, number>(); // UX wave U6b-4c: each tab's latest turn of the read again's guard (`retrying`)
   let lastGuard = 0;
+  const owed = new Map<string, Landed>(); // UX wave U6b-4c (W1 g): a read again owed, kept until the entry can read again
 
   return create<ViewerStore>()((set, get) => {
     const patch = (tabId: string, next: Partial<ViewerEntry>) =>
@@ -545,6 +546,7 @@ export function createViewerStore(client: MawsBridge) {
       held.delete(tabId);
       pressedOpen.delete(tabId);
       guards.delete(tabId); // UX wave U6b-4c
+      owed.delete(tabId);
       mounted.delete(tabId);
       views.delete(tabId);
       set((s) => {
@@ -869,7 +871,9 @@ export function createViewerStore(client: MawsBridge) {
       const landed = await loadOnce(tabId, reason, cause);
       const entry = get().entries.get(tabId);
       if (entry && incarnations.get(tabId) === incarnation) patch(tabId, { loads: entry.loads + 1, pending: entry.pending - 1 });
-      if (landed !== null) void readAfterFollows(tabId, landed); // U6b-4c (W1 g): outside the load, which has left `pending`
+      // U6b-4c (W1 g): outside the load, which has left `pending`; a read again owed meanwhile may be possible now
+      if (landed !== null) void readAfterFollows(tabId, landed);
+      else readOwed(tabId);
     };
 
     // U6c (decision 15; the branch review's finding 4): an entry asked for again is read again; one whose last read
@@ -891,6 +895,7 @@ export function createViewerStore(client: MawsBridge) {
         if (holds.get(tabId) !== hold) return undefined;
         if (still()) return load(tabId, reason, cause);
         if (waiting.invalidated) refresh(tabId); // the invalidation's own read, which this one would have been
+        else readOwed(tabId); // UX wave U6b-4c: this one read nothing, so a read again owed may go now
         return undefined;
       });
     };
@@ -903,19 +908,21 @@ export function createViewerStore(client: MawsBridge) {
     // turn: each drawing a turn of its own (`guards`), only the last clears it, so the guard holds while either's read is on
     // its way. What started it is asked again once the watch has answered, right before the read (Retry's fix wave 1): a
     // save started meanwhile, or a load begun since, starts nothing, and the guard clears.
-    const readAgainGuarded = (tabId: string, entry: ViewerEntry): Promise<void> => {
+    // `also`, what else the starter asks right before the read (W1 g: the entry still as its answer landed).
+    const readAgainGuarded = (tabId: string, entry: ViewerEntry, also: () => boolean = () => true): Promise<void> => {
       const incarnation = incarnations.get(tabId);
       const turn = ++lastGuard;
       guards.set(tabId, turn);
       patch(tabId, { retrying: true });
       const still = () => {
         const now = get().entries.get(tabId);
-        return now !== undefined && incarnations.get(tabId) === incarnation && now.status === 'error' && now.pending === 0 && !now.saving;
+        return now !== undefined && incarnations.get(tabId) === incarnation && now.status === 'error' && now.pending === 0 && !now.saving && also();
       };
       return readAgain(tabId, entry, 'revisit', still).then(() => {
         if (incarnations.get(tabId) !== incarnation || guards.get(tabId) !== turn) return;
         guards.delete(tabId);
         patch(tabId, { retrying: false });
+        readOwed(tabId); // a read again owed while the guard was held
       });
     };
     // A read again waiting on the file's watch (`readAgain`'s hold), which is no load yet
@@ -926,15 +933,31 @@ export function createViewerStore(client: MawsBridge) {
 
     // UX wave U6b-4c (W1 g): an answer that landed refused, or as an outside file that may not be saved, compared once no
     // follow of its session and path is under way (at once when none is). When a follow has answered `linked` since its read
-    // was sent, and the entry is still that session's, that path's and of the generation it landed in, with no read since
-    // and no edits unsaved, it is read once more: now when its view is mounted, else at its next mount. The new read notes
-    // the new count, so it starts no further one.
-    const readAfterFollows = async (tabId: string, { appSessionId, path, generation, noted }: Landed) => {
-      for (let under = following(appSessionId, path); under !== null; under = following(appSessionId, path)) await under;
+    // was sent, a read again is owed (`owed`), and it is made as soon as the entry can read again: now, or when the load,
+    // the read again on its watch or the guarded read that holds it back has ended. It is made only while the entry is
+    // still that session's, that path's and of the generation the answer landed in (a read since answers for itself), with
+    // no edits unsaved; it is asked again right before the read (`still`). Then it reads as a shown tab is read again: now
+    // when its view is mounted, else at its next mount. The new read notes the new count, so it starts no further one.
+    const readAfterFollows = async (tabId: string, landed: Landed) => {
+      for (let under = following(landed.appSessionId, landed.path); under !== null; under = following(landed.appSessionId, landed.path)) await under;
+      if (linkedCount(landed.appSessionId, landed.path) <= landed.noted) return;
+      owed.set(tabId, landed);
+      readOwed(tabId);
+    };
+    // Whether the read again owed for the tab may still be made: the entry, its session, path and generation as it landed,
+    // no edits unsaved
+    const stillOwed = (tabId: string, { appSessionId, path, generation }: Landed): boolean => {
       const entry = get().entries.get(tabId);
-      if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || generations.get(tabId) !== generation) return;
-      if (linkedCount(appSessionId, path) <= noted || unsaved(entry) || entry.pending > 0 || waitingOnWatch(tabId)) return;
-      if (mounted.get(tabId)) void readAgainGuarded(tabId, entry);
+      return entry !== undefined && entry.appSessionId === appSessionId && entry.path === path && generations.get(tabId) === generation && !unsaved(entry);
+    };
+    const readOwed = (tabId: string) => {
+      const landed = owed.get(tabId);
+      if (landed === undefined) return;
+      if (!stillOwed(tabId, landed)) return void owed.delete(tabId);
+      const entry = get().entries.get(tabId)!;
+      if (entry.pending > 0 || waitingOnWatch(tabId) || entry.retrying) return; // kept: asked again when that read ends
+      owed.delete(tabId);
+      if (mounted.get(tabId)) void readAgainGuarded(tabId, entry, () => stillOwed(tabId, landed));
       else if (!stale.has(tabId)) stale.set(tabId, 'revisit');
     };
 
@@ -1133,6 +1156,8 @@ export function createViewerStore(client: MawsBridge) {
           const current = get().entries.get(tabId)!;
           const pin = pinAfter(current, admissionOf(next.value).real);
           patch(tabId, { text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false, pin, editable: editableWith(current, pin) });
+          // U6b-4c (W1 g): landed from a file that may not be saved; a read again covers what Load more reached (a head's extent)
+          if (next.value.outside?.writable === false && generation !== undefined) void readAfterFollows(tabId, { appSessionId: entry.appSessionId, path: entry.path, generation, noted });
         });
       },
 
@@ -1380,6 +1405,7 @@ export function createViewerStore(client: MawsBridge) {
         views.clear();
         pressedOpen.clear();
         guards.clear(); // UX wave U6b-4c
+        owed.clear();
         unsubscribe?.();
         unsubscribe = null;
         unfollowStanding?.();

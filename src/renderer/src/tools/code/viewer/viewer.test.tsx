@@ -3138,7 +3138,6 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     const BIG = '/elsewhere/big.log';
     const text = `${'log line\n'.repeat(4)}`;
     const main = disk({ [DOC]: `[the log](${BIG})`, [BIG]: text }, { results: [BIG], links: [{ from: { file: DOC }, path: BIG }] });
-    act(() => void openFile(A, DOC, null, { main: true })); // the source, as a read of it would find it
     main.files[BIG] = { text, bytes: 5 * MiB } as never;
     showFile(BIG);
     await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', kind: 'head', locked: 'result' }));
