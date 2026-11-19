@@ -405,16 +405,23 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   // the one file of that name; it does not prove the way to it, since a folder can be replaced by a link between two of
   // its reads. The open does: by its path under `P`, with no link anywhere on its way (../fs/no-link.ts; on Linux its
   // folders walked first and the descriptor's own path confirmed), so `S` and everything below it is inside the check.
+  // A job whose last waiter has left starts no further stage on the disk (the branch's M3 review; W2 a, W3): a call that
+  // stalls would hold the one slot for nobody.
   async function openAgent(job: Job, agentId: string): Promise<FileHandle | null> {
     const folder = join(await realpath(dirname(job.transcript)), basename(job.transcript).slice(0, -TRANSCRIPT_EXTENSION.length));
+    stay(job);
     const subagents = join(folder, 'subagents');
-    if (!(await lstat(folder)).isDirectory() || !(await lstat(subagents)).isDirectory()) return null;
+    if (!(await lstat(folder)).isDirectory()) return null;
+    stay(job);
+    if (!(await lstat(subagents)).isDirectory()) return null;
     const found = await agentFileIn(subagents, agentFileName(agentId), job);
     if (found === null) return null;
     await hooks?.at?.('found', job.appSessionId);
+    stay(job);
     if (WALKED) {
       await walk(dirname(found));
       await hooks?.at?.('walked', job.appSessionId);
+      stay(job);
     }
     const handle = await open(found, TRANSCRIPT_FLAGS | NO_LINK);
     try {
@@ -435,7 +442,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     let found: string | null = null;
     for (let read = 1; unread.length > 0; read += 1) {
       if (read > dirsMax) return null;
-      if (job.waiters.size === 0) throw new Left();
+      stay(job);
       const [dir, depth] = unread.pop()!;
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
@@ -446,7 +453,12 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         }
       }
     }
+    stay(job); // after the last read, too: what follows is the next stage
     return found;
+  }
+  // A job nobody waits for any more stops here, as its reads stop (`Left`)
+  function stay(job: Job): void {
+    if (job.waiters.size === 0) throw new Left();
   }
 
   function pump(): void {
