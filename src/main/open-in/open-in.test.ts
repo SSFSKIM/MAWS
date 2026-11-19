@@ -123,6 +123,25 @@ describe('the hand-off', () => {
   });
 });
 
+// UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 11): a file the
+// caller admitted by its own rule is launched as given, asking the daemon nothing, and only on an installed row.
+describe('launchFile', () => {
+  it('hands an editor and Finder the path as given, with no line, and asks the daemon nothing', async () => {
+    const { openIn: o, admits } = openIn();
+    expect(await o.launchFile('zed', '/config/skills/notes/SKILL.md')).toEqual({ opened: true });
+    expect(await o.launchFile('finder', '/config/skills/notes/SKILL.md')).toEqual({ opened: true });
+    expect(launches()).toEqual([['/usr/bin/open', ['-b', 'dev.zed.Zed', '/config/skills/notes/SKILL.md']], ['/usr/bin/open', ['-R', '/config/skills/notes/SKILL.md']]]);
+    expect(admits).not.toHaveBeenCalled();
+  });
+
+  it('opens nothing on a row that is not installed, and says when the launch fails', async () => {
+    expect(await openIn().openIn.launchFile('cursor', '/config/skills/notes/SKILL.md')).toEqual({ opened: false, message: OPEN_IN_WORDS.notInstalled('Cursor') });
+    expect(launches()).toEqual([]);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await openIn({ launchFails: true }).openIn.launchFile('zed', '/config/skills/notes/SKILL.md')).toEqual({ opened: false, message: OPEN_IN_WORDS.failed('Zed') });
+  });
+});
+
 describe('the e2e seam', () => {
   let dir: string;
   beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), 'maws-open-in-'))));

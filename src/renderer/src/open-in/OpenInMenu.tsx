@@ -7,9 +7,10 @@ import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect } from 'react';
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { OpenInApp, OpenInAppId } from '@shared/ipc/schema/layout';
 import { openInGroups, refreshOpenInApps, useOpenInApps } from './apps';
 import { OPEN_IN_COPY } from './copy';
-import { openIn, useOtherMachine, type OpenInFile } from './open';
+import { openIn, useOtherMachine } from './open';
 
 const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 const CONTENT = 'z-50 min-w-40 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
@@ -17,20 +18,22 @@ const SEPARATOR = 'my-1 h-px bg-border';
 
 type Kit = typeof DropdownMenu | typeof ContextMenu;
 
-// The rows, asked of main again as they are drawn (main keeps its answer for a minute).
+// The rows, asked of main again as they are drawn (main keeps its answer for a minute). UX wave U11's skill actions:
+// `only`, the rows a caller offers (a skill's file goes to no terminal), and `choose`, what a row does.
 // `outside`: the file is outside the session's folders, admitted alone, so no terminal is handed its folder (Decision Log 8)
 const TERMINALS = new Set(['terminal', 'iterm', 'ghostty']);
-function Rows({ kit, appSessionId, file, outside = false }: { kit: Kit; appSessionId: AppSessionId; file: () => OpenInFile | null; outside?: boolean }) {
-  const apps = useOpenInApps((s) => s.apps);
+function Rows({ kit, choose, only, outside = false }: { kit: Kit; choose(app: OpenInAppId): void; only?(app: OpenInApp): boolean; outside?: boolean }) {
+  const all = useOpenInApps((s) => s.apps);
   useEffect(() => void refreshOpenInApps(), []);
-  if (apps === null) return <kit.Item disabled className={ITEM}>{OPEN_IN_COPY.looking}</kit.Item>;
+  if (all === null) return <kit.Item disabled className={ITEM}>{OPEN_IN_COPY.looking}</kit.Item>;
+  const apps = only === undefined ? all : all.filter(only);
   return openInGroups(apps).map((group, i) => (
     <kit.Group key={group[0]!.id}>
       {i > 0 && <kit.Separator className={SEPARATOR} />}
       {group.map((app) => {
         const refused = outside && TERMINALS.has(app.id);
         return (
-          <kit.Item key={app.id} data-open-in={app.id} disabled={refused} title={refused ? OPEN_IN_COPY.terminalOutside : undefined} onSelect={() => void openIn(appSessionId, app.id, file())} className={ITEM}>
+          <kit.Item key={app.id} data-open-in={app.id} disabled={refused} title={refused ? OPEN_IN_COPY.terminalOutside : undefined} onSelect={() => choose(app.id)} className={ITEM}>
             {app.name}
           </kit.Item>
         );
@@ -38,8 +41,6 @@ function Rows({ kit, appSessionId, file, outside = false }: { kit: Kit; appSessi
     </kit.Group>
   ));
 }
-
-const FOLDER = () => null;
 
 /** The submenu of a session's menu: its working folder, to an app. `menu`: the kind of menu it stands in. */
 export function OpenInSubmenu({ appSessionId, menu }: { appSessionId: AppSessionId; menu: 'dropdown' | 'context' }) {
@@ -55,7 +56,7 @@ export function OpenInSubmenu({ appSessionId, menu }: { appSessionId: AppSession
       </kit.SubTrigger>
       <kit.Portal>
         <kit.SubContent className={CONTENT}>
-          <Rows kit={kit} appSessionId={appSessionId} file={FOLDER} />
+          <Rows kit={kit} choose={(app) => void openIn(appSessionId, app)} />
         </kit.SubContent>
       </kit.Portal>
     </kit.Sub>
@@ -79,7 +80,26 @@ export function OpenInButton({ appSessionId, path, line, outside = false }: { ap
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={CONTENT}>
-          <Rows kit={DropdownMenu} appSessionId={appSessionId} file={() => ({ path, line: line() })} outside={outside} />
+          <Rows kit={DropdownMenu} choose={(app) => void openIn(appSessionId, app, { path, line: line() })} outside={outside} />
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+/** UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 1): the same
+ * menu button for a file no session holds, whose hand-off is its caller's own (`choose`), over the rows `only` keeps. */
+export function OpenInChooser({ choose, only }: { choose(app: OpenInAppId): void; only?(app: OpenInApp): boolean }) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" data-open-in-trigger className={BUTTON}>
+          {OPEN_IN_COPY.label}
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="end" sideOffset={4} className={CONTENT}>
+          <Rows kit={DropdownMenu} choose={choose} only={only} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

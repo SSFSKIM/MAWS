@@ -3,6 +3,7 @@ import type { CommandGrades } from '../grades';
 
 export const grades = {
   'customization.inventory': 'spawn', // a machine-wide read that feeds a spawn
+  'customization.skillFile': 'client', // UX wave U11: this app's Finder, on this machine's inventory
   // main-only
   'customization.serverEndpoints': 'internal',
 } as const satisfies CommandGrades<'customization'>;

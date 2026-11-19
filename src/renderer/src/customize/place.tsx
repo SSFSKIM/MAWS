@@ -11,7 +11,7 @@
 // The page is not remounted when its project changes (its head keeps the keyboard), so what is asked is held for the
 // place it was asked on (`usePlaceHeld`), and the bodies below are keyed by the place.
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { isMcpAction } from '@shared/plugins/cli';
 import { useSessions } from '../stores/sessions';
 import { readyCount, ReadySession, resolutionOf } from '../widgets/PluginsWidget';
@@ -27,6 +27,7 @@ import { useCustomizationInventory } from './inventory';
 
 export interface Place {
   cwd: string | null; // the page's folder; null for the user configuration
+  projectId: ProjectId | null; // the project whose folder it is; null for the user configuration and a folder no project has
   directory: string | null; // where the CLI runs: the folder, else the engine's configuration directory once known
   name: string | null; // the page's name for its place ("Open a session in <place>", the custom sheet's "Add to")
   attached: AppSessionId | null; // the ready session MAWS runs on this Mac in exactly this folder, as picked
@@ -47,7 +48,7 @@ export function usePlace(): Place {
 /** The book a page's place keeps its operations in, found again by this name after its views have gone. */
 export const bookOf = (cwd: string | null): string => `customize:${cwd ?? 'user'}`;
 
-export function CustomizePlace({ cwd, name, attached, children }: { cwd: string | null; name: string | null; attached: AppSessionId | null; children: ReactNode }) {
+export function CustomizePlace({ cwd, projectId = null, name, attached, children }: { cwd: string | null; projectId?: ProjectId | null; name: string | null; attached: AppSessionId | null; children: ReactNode }) {
   const book = bookOf(cwd);
   const env = usePluginsEnv();
   const { reread } = env;
@@ -68,7 +69,7 @@ export function CustomizePlace({ cwd, name, attached, children }: { cwd: string 
     () => ({ cwd: pluginManage.cwd, ops: pluginManage.ops, reloadMods: pluginManage.reloadMods, ask: (key, request) => (isMcpAction(request.action) ? connectorAsk(key, request) : pluginManage.ask(key, request)) }),
     [pluginManage, connectorAsk],
   );
-  const place = useMemo<Place>(() => ({ cwd, directory, name, attached, session, inventory, askIn: connectors.askIn, openDialog: setDialog }), [cwd, directory, name, attached, session, inventory, connectors.askIn, setDialog]);
+  const place = useMemo<Place>(() => ({ cwd, projectId, directory, name, attached, session, inventory, askIn: connectors.askIn, openDialog: setDialog }), [cwd, projectId, directory, name, attached, session, inventory, connectors.askIn, setDialog]);
   return (
     <PlaceContext.Provider value={place}>
       <ManageProvider value={manage}>
