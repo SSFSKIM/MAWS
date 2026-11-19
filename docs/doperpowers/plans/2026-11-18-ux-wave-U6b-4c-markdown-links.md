@@ -22,7 +22,9 @@ How to see it working: in a session on this Mac, open a Markdown file of the ses
 
 - [x] (2026-11-18) U6b-4b's P1, the child's paragraphs, U6c's and U6e's documents and the code read against the pin; the design made; the document written.
 - [x] (2026-11-18) The adversarial review of the first writing (`9d8b0216f`): fifteen findings, all accepted; revision 2. `ux-wave/U6b-4b` merged at `f3568e398`.
-- [ ] The architect's rulings on the points reported (Q1 to Q17).
+- [x] (2026-11-18) ux-wave's rulings on Q1, Q4 and Q6 to Q17 (Decision Log 3).
+- [ ] The owner's answers on Q3 and Q2, wanted before M4.
+- [ ] The delta review of revision 2, and what survives absorbed.
 - [ ] M1 — The rule reads a Markdown file's links and a subagent's records.
 - [ ] M2 — The record, the command, and a Markdown file as the source.
 - [ ] M3 — A subagent's transcript as the source.
@@ -625,7 +627,7 @@ One is new: "Read-only: the file that links this one is read-only in this conver
 
 ## Points reported to the architect
 
-Each has the default this document builds and the one place a ruling changes.
+Each has the default this document builds and the one place a ruling changes. Q1, Q4 and Q6 to Q17 are ruled (Decision Log 3): accepted as built. Q3 and Q2 are with the owner.
 
 | # | the point | the default built | the one place |
 |---|---|---|---|
@@ -692,6 +694,7 @@ Its body names the class 1a run, the panel's verdict, the two cross-build runs a
 1. **2026-11-18 · The verification call.** This document gets an adversarial review before an executor starts (the design, the trust rules and buildability). The branch gets the `doperpowers:review-code` xhigh panel, by size (about 2,500 changed lines, about 55 files) and because it widens the daemon's admission of files outside a session's folders. Class 1a on GitHub Actions is the gate of record; the scenes of §H and the two cross-build runs run on a Mac.
 
 2. **2026-11-18 · The adversarial review of the first writing (`9d8b0216f`): fifteen findings, each read in the cited code, all accepted.** It judged the record sound for every later read of a tab while the record lives, and the claims about the profile file and `unknown_command` on both older builds right. First rank. (1) The page can write its own evidence (`files.write`, `files.upload`), so its reach is not bounded by links that exist; U6c's ruled limit already had that reach by a message, and what differs is the trace: R1 rewritten, the record keeps `from`, a log line, and the choice put to the architect and the owner (Q3). (2) A relative link resolved against the spelling the window sent let the asker choose its meaning through a linked folder: R3's second test, against the folder the daemon confirmed (X3.6; Q17). (3) The subagent's file was found by name and opened by path: found by a walk that follows no link, opened with none on its way (R2; X2.9; §E). (4) A new value of `outside.why` is a breaking change by the wire's own rule: an optional property, `outside.linked`, with `why: 'result'` as what an earlier window reads (decision 11; §C; Q15). (5) Line endings and a leading byte order mark: U6b-4b's first milestone, merged here, repairs the rule; X3.7 holds a file's cases (Q16). (6) A source under MAWS's own folders gave a save: R4 reads `isOwn` of the source (X2.10). (7) The target was resolved before a proof that can take seconds: resolved again at the write, and a path that ends in a link is never `inside` (§D steps 3 and 5; X5.10, X5.11). (8) The guard is main's router's: said so, as U6e's is (R1; Q14). (9) Costs ran before their bounds, and a request the host gave up on could still record: the gate and the queue are entered first, the walk runs in the slot, one deadline read before the write (decision 7; X5.12). Second rank. (10) A read sent before the click passed no wait: `followed` (W1 g to i; §F). (11) M1 could not prove what only M4 sends, and M2 would have changed a type the window reads: X3.4 split, the property is optional, X2.8 moved to M3. (12) Both older windows draw a side tab that holds a file as their tree: the stored table and the scene stage both placements. (13) A record cannot answer `not found` by a spelling it did not prove; a tab can outlive its record: both said (R5; Q7; K2). (14) Four negative tests were not constructible as written (X2.5, X3.2, K6, K8): restated. (15) The subagent's scene clicks, staged as the spec already stages an agent, with no direct request in its place; the gate's group is `e2e:default`.
+3. **2026-11-18 · ux-wave's rulings.** Q1, Q4 and Q6 to Q17 are accepted with the defaults this document builds. Q8's insertions are named insertions (UC-8); the ones in `src/main/app.ts` and in the wire's files are told to the MAWS architect when the pull request goes up. Q3 and Q2 are put to the owner, with (a) recommended for Q3 (the record keeps where the link stood and the daemon logs each record; no confirmation) and the read-only rule as built for Q2; their answers come before M4, and M1 to M3 do not wait. Revision 2 gets one delta review, against the first review's fifteen findings and R1 to R6; if it finds the document can be dispatched there is no third.
 
 ## Outcomes & Retrospective
 
