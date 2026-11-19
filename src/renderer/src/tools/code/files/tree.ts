@@ -4,6 +4,7 @@
 import type { SessionRecord } from '@shared/graph/session';
 import type { FilesEntry, FilesListOutput } from '@shared/ipc/schema/files';
 import { workingFolder } from '@shared/sessions/working-folder';
+import type { ChangedRow } from './changed';
 
 export type Listing = { status: 'loading' } | { status: 'ok'; value: FilesListOutput } | { status: 'error'; message: string };
 export type RootRole = 'directory' | 'additional directory' | 'worktree' | 'working folder';
@@ -100,7 +101,14 @@ function restUnder(root: string, path: string): string | null {
 export type TreeRow =
   | { kind: 'root'; key: string; path: string; depth: 0; name: string; role: RootRole | null; expanded: boolean }
   | { kind: 'entry'; key: string; path: string; depth: number; entry: FilesEntry; expanded: boolean }
-  | { kind: 'notice'; key: string; path: string; depth: number; notice: 'empty' | 'truncated' | 'error' | 'refused'; message: string | null };
+  | { kind: 'notice'; key: string; path: string; depth: number; notice: 'empty' | 'truncated' | 'error' | 'refused'; message: string | null }
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §C): the Changed group's
+  // heading and rows, drawn as the list's first rows above the tree's own
+  | { kind: 'changed-heading'; key: string; count: number; folded: boolean }
+  | { kind: 'changed'; key: string; row: ChangedRow };
+
+// The tree's own rows, which `rowsOf` makes: every kind but the Changed group's.
+export type ListedRow = Exclude<TreeRow, { kind: 'changed-heading' | 'changed' }>;
 
 const REFUSAL = "path outside the session's directories";
 
@@ -114,8 +122,8 @@ export function rowsOf({
   listing: (path: string) => Listing | undefined;
   expanded: ReadonlySet<string>;
   roles: ReadonlyMap<string, RootRole>;
-}): TreeRow[] {
-  const rows: TreeRow[] = [];
+}): ListedRow[] {
+  const rows: ListedRow[] = [];
   const children = (dir: string, depth: number, isRoot: boolean) => {
     const found = listing(dir);
     if (!found || found.status === 'loading') return;

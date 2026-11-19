@@ -16,6 +16,7 @@ import { registerAction, registerCloseGuard, registerReplaceVerdict } from '../.
 import { tabOnScreen, useLayout, type ReplaceVerdict } from '../../../stores/layout';
 import { commentOnCursorLine } from '../anchor/anchor'; // E11
 import { connectOpenFile } from '../files/open-chosen'; // UX wave U6e: File › Open File… (⌘O)
+import { connectGoToFile } from '../files/finder'; // UX wave U6b-3b: Go › Go to file (⌘P)
 import type { SideFilesViewer } from '../files/tabs';
 import { useViewer } from '../viewer/viewer-store';
 import { askClose } from './EditorDialogs';
@@ -123,6 +124,7 @@ export function registerEditor(): () => void {
     registerAction('file.save', saveFocusedFile),
     registerAction('file.commentLine', commentOnFocusedLine),
     connectOpenFile(),
+    connectGoToFile(), // UX wave U6b-3b (decision 11)
   ];
   return () => offs.forEach((off) => off());
 }

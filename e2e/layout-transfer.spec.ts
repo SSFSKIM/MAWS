@@ -698,7 +698,8 @@ async function startOnScratch(code: CodeScratch): Promise<Page> {
 }
 
 // A row of Files' tree in the Files tab in view (one group in these scenes, so one tree is drawn).
-const treeRow = (page: Page, path: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-path="${path}"]`);
+// UX wave U6b-3a (Decision Log 14, ruling 1): a tree row by its `data-kind`, which a Changed row of the same path lacks
+const treeRow = (page: Page, path: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-kind][data-path="${path}"]`);
 const fileViewer = (scope: Locator, path: string) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
 const codeText = async (scope: Locator, path: string) => (await fileViewer(scope, path).locator('.cm-content').textContent()) ?? '';
 // The caret at the start of the file's first line, in the view under `scope`.

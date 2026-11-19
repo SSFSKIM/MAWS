@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type * as z from 'zod';
 import { readTolerant } from '@shared/ipc/tolerant';
-import { commands as built, FilesReadOutputSchema, FilesWriteInputSchema, FilesWriteOutsideInputSchema } from '@shared/ipc/schema/files';
+import { commands as built, FilesListOutputSchema, FilesReadOutputSchema, FilesWriteInputSchema, FilesWriteOutsideInputSchema } from '@shared/ipc/schema/files';
 import * as namesF from './peers/f1852de3a/names-files';
 import * as schemaF from './peers/f1852de3a/schema-files';
 import * as namesMaster from './peers/2c7044231/names-files';
@@ -29,6 +29,11 @@ const HASH = 'a'.repeat(64);
 // What the tolerant reader dropped, in a stable order
 const droppedBy = (read: ReturnType<typeof readTolerant>) => (read.ok ? [...read.dropped].sort() : null);
 const READ_OUTPUT = { encoding: 'utf8', content: 'notes\n', bytes: 6, offset: 0, length: 6, truncated: false, mime: 'text/plain', hash: HASH, utf8: true } as const;
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, M1 decision 9): a listing as both
+// builds answer it, and the same listing as this build answers it with two entries git ignores
+const entry = (name: string, kind: 'file' | 'dir') => ({ name, path: `/work/repo/${name}`, kind, size: kind === 'dir' ? 96 : 12, mtimeMs: 1_700_000_000_000, target: null });
+const LISTING = { root: '/work/repo', path: '/work/repo', entries: [entry('node_modules', 'dir'), entry('src', 'dir'), entry('debug.log', 'file')], truncated: false };
+const MARKED = { ...LISTING, entries: [{ ...LISTING.entries[0]!, ignored: true }, LISTING.entries[1]!, { ...LISTING.entries[2]!, ignored: true }] };
 
 describe.each(PEERS)('a peer of build $build', (peer) => {
   const peerInput = (name: string) => peer.schema.commands[name]!.input;
@@ -65,6 +70,22 @@ describe.each(PEERS)('a peer of build $build', (peer) => {
     const outside = { ...READ_OUTPUT, named: true, outside: { real: '/work/notes.txt', writable: true }, own: true };
     expect(FilesReadOutputSchema.safeParse(outside).success).toBe(true);
     expect(droppedBy(readTolerant(peerOutput('files.read'), outside))).toEqual(peer.knowsNamed ? ['outside', 'own'] : ['named', 'outside', 'own']);
+  });
+
+  it('reads this build’s files.list answer with marked entries less exactly their ignored keys', () => {
+    expect(built['files.list'].output).toBe(FilesListOutputSchema);
+    expect(FilesListOutputSchema.safeParse(MARKED).success).toBe(true);
+    expect(peerOutput('files.list').safeParse(MARKED).success).toBe(false); // the peer's schema is strict: the reader is what passes it
+    const read = readTolerant(peerOutput('files.list'), MARKED);
+    expect(droppedBy(read)).toEqual(['entries.0.ignored', 'entries.2.ignored']);
+    expect(read.ok && read.value).toEqual(LISTING);
+  });
+
+  it('answers a files.list this build’s output schema parses unchanged', () => {
+    expect(peerOutput('files.list').safeParse(LISTING).success).toBe(true);
+    const parsed = FilesListOutputSchema.safeParse(LISTING);
+    expect(parsed.success && parsed.data).toEqual(LISTING);
+    expect(parsed.success && parsed.data.entries.some((one) => 'ignored' in one)).toBe(false);
   });
 
   it('sends a files.write this build parses unchanged, and this build’s files.write is the peer’s', () => {

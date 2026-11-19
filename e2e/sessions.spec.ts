@@ -1371,18 +1371,23 @@ test.describe('sessions', () => {
         const tree = sideColumn(page).locator('[data-files-tree][data-place="beside"]');
         await expect(tree, 'the tree at the file’s left, at its own width').toBeVisible({ timeout: 20_000 });
         const treeBox = await boxOf(tree);
-        expect(treeBox.right - treeBox.left, 'the tree no narrower than its least (tools/code/files/tree-state.ts)').toBeGreaterThanOrEqual(160);
+        expect(treeBox.right - treeBox.left, `the tree no narrower than its least (tools/code/files/tree-state.ts): the column ${JSON.stringify(treeBox)}`).toBeGreaterThanOrEqual(160);
+        // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, Decision Log 13): the column holds
+        // Go to file's field above the tree's list, and the menu is the list's (its trigger, and its collision boundary), so
+        // the presses and the bound are the list's box, under the field
+        const listBox = await boxOf(tree.locator('[data-tool="files"]'));
         const filesMenu = page.locator('[data-files-menu]');
-        for (const [x, y, where] of [[treeBox.left + 8, treeBox.bottom - 8, 'low in the tree'], [treeBox.right - 12, treeBox.bottom - 8, 'low, near the right edge'], [treeBox.right - 12, treeBox.top + 48, 'near the right edge']] as const) {
+        for (const [x, y, where] of [[listBox.left + 8, listBox.bottom - 8, 'low in the tree'], [listBox.right - 12, listBox.bottom - 8, 'low, near the right edge'], [listBox.right - 12, listBox.top + 48, 'near the right edge']] as const) {
           await page.mouse.click(x, y, { button: 'right' });
           await expect(filesMenu, where).toBeVisible();
           await expect(filesMenu.locator('[data-open-file]'), 'one row, no chord').toHaveText('Open File…');
-          expectInside(await boxOf(filesMenu), treeBox, `the menu opened ${where}`);
+          const menuBox = await boxOf(filesMenu);
+          expectInside(menuBox, listBox, `the menu opened ${where} (the menu ${JSON.stringify(menuBox)}, the list ${JSON.stringify(listBox)}, the column ${JSON.stringify(treeBox)})`);
           await page.keyboard.press('Escape');
           await expect(filesMenu).toHaveCount(0);
         }
         await pick(second);
-        await page.mouse.click(treeBox.right - 12, treeBox.bottom - 8, { button: 'right' }); // clear of the divider, which straddles the tree's edge
+        await page.mouse.click(listBox.right - 12, listBox.bottom - 8, { button: 'right' }); // clear of the divider, which straddles the tree's edge
         await filesMenu.locator('[data-open-file]').click();
         await expect(viewerOf(second).locator('.cm-content'), 'the row opened the chosen file beside the chat').toHaveText('A second invented file.', { timeout: 20_000 });
         await expect(sideTab(sideColumn(page), 'second.txt')).toHaveAttribute('aria-selected', 'true');
