@@ -47,7 +47,7 @@ import {
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu'; // P3-G
 import { solidPng } from './support/side-replay';
-import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // P3-L M5b: shared with e2e/library.spec.ts
+import { INVENTED_RED, MARK_TOLERANCE, markPixels, minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // P3-L M5b: shared with e2e/library.spec.ts
 import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 
 test.describe.configure({ timeout: 120_000 });
@@ -395,18 +395,19 @@ const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
 const pageOf = (text: string, background: string, extra = '') =>
   `<!doctype html><html><head><meta charset="utf-8"><title>${text}</title></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:${background};color:#fff;font:600 28px system-ui"><h1 id="heading" style="margin:0;font-size:inherit">${text}</h1>${extra}</body></html>`;
 
-// The window rect of an element, and what main paints there: how many near-black pixels, and the centre of the widest
+// The window rect of an element, and what main paints there: how many black pixels (as `markPixels` reads its black
+// mark, within MARK_TOLERANCE, so the PDF viewer's own dark background is not one), and the centre of the widest
 // run of columns holding them, in window coordinates (the PDF page's black square, which is its link; the viewer's
 // thumbnail of it, when its sidebar shows, is the narrower run).
 async function darkIn(s: Scene, element: Locator): Promise<{ dark: number; centre: { x: number; y: number } | null }> {
   const rect = (await element.boundingBox())!;
   const clip = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
-  return s.maws.app.evaluate(async ({ BrowserWindow }, clip) => {
+  return s.maws.app.evaluate(async ({ BrowserWindow }, { clip, tolerance }) => {
     const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
     const bitmap = (await win.webContents.capturePage(clip)).toBitmap(); // BGRA, at the display's scale
     const scale = Math.sqrt(bitmap.length / 4 / (clip.width * clip.height));
     const width = Math.round(clip.width * scale);
-    const isDark = (i: number) => bitmap[i] < 40 && bitmap[i + 1] < 40 && bitmap[i + 2] < 40;
+    const isDark = (i: number) => bitmap[i] <= tolerance && bitmap[i + 1] <= tolerance && bitmap[i + 2] <= tolerance;
     const columns: number[][] = Array.from({ length: width }, () => []);
     let dark = 0;
     for (let i = 0; i < bitmap.length; i += 4) {
@@ -427,7 +428,7 @@ async function darkIn(s: Scene, element: Locator): Promise<{ dark: number; centr
     const middle = columns[Math.floor((best[0] + best[1]) / 2)]!;
     const y = (Math.min(...middle) + Math.max(...middle)) / 2;
     return { dark, centre: { x: clip.x + (best[0] + best[1]) / 2 / scale, y: clip.y + y / scale } };
-  }, clip);
+  }, { clip, tolerance: MARK_TOLERANCE });
 }
 
 // What main saw the app window navigate, from now on: starts and failed loads of any frame, and top-level commits.
@@ -1279,10 +1280,11 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
     expect(stun.received(), 'the STUN listener received no datagram of the page by the end of gathering').toBe(1); // the control's alone
     await stun.close();
     // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
-    // the barrier is the sandbox's own refusal, which Chromium logs in the frame as it declines to start the download
-    const refusedDownload = s.page.waitForEvent('console', { predicate: (message) => message.text().startsWith('Download is disallowed. The frame initiating or instantiating the download is sandboxed'), timeout: 15_000 });
+    // Chromium declines it silently (the pinned Electron logs nothing for a sandboxed `download` link), so no event says
+    // that a download is not coming: an observation window as B15's, bounded and no barrier, as the delivered files'
+    // scene observes the same link, after which neither main's download filter nor the disk has seen one
     await page.locator('#save').click();
-    await refusedDownload;
+    await s.page.waitForTimeout(2_000);
     expect(seamLines(s).filter((l) => l.startsWith('blocked-download')), 'no download reached main').toEqual([]);
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(s.maws.userData, (name) => name === 'e2-download.txt' || name.endsWith('.crdownload'))).toEqual([]);
