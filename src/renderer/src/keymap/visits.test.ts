@@ -1,7 +1,7 @@
 // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M3; Interfaces §D; S2; B7): the
 // record's one reader over the layout store, the step Back and Forward take, and their two handlers. Every layout change
 // here goes through the store's own acts (or `setState` for a split's start), and the reader is read after a whole turn.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_STRIP, type Destination, type TabRef } from '@shared/ipc/schema/layout';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -39,7 +39,10 @@ beforeEach(() => {
   useVisits.setState({ record: EMPTY_RECORD, opened: [] });
   off = connectVisits();
 });
-afterEach(() => off());
+afterEach(() => {
+  off();
+  vi.unstubAllGlobals();
+});
 
 describe('Back and Forward over the layout', () => {
   it('walk A11: A, B, Customize; back twice, forward; each step records nothing', async () => {
@@ -314,3 +317,50 @@ describe('the projection: a move between the panes of a split (finding 6)', () =
     expect(frontOf(layout())).toBe(tabOf('x'));
   });
 });
+
+// M3's re-review: the step's hand-off of the keyboard yields to anything but a return of the keyboard to another pane.
+describe('the step’s hand-off of the keyboard', () => {
+  // Frames held until the test lets them run: the hand-off lasts until a task after the step's frame.
+  function holdFrames() {
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++next, callback);
+      return next;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    return () => {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const callback of due) callback(0);
+    };
+  }
+
+  it('gives a pane that only took the keyboard back to the step’s, and yields to a tab activated by a store act before the frame', async () => {
+    const release = holdFrames();
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a')], activeTabId: tabOf('a') }, { tabs: [ref('b'), ref('c')], activeTabId: tabOf('b') }], focusedPane: 0 } });
+    await turn();
+    layout().focusPane(1);
+    await turn();
+    useVisits.setState({ record: { entries: [T('a'), T('b')], at: 1 } });
+    runAction('go.back'); // to A, on the left
+    await turn();
+    expect(record()).toEqual({ entries: [T('a'), T('b')], at: 0 });
+    // the control: the keyboard only returned to the right pane (the Overview's return of it, an opener there)
+    layout().focusPane(1);
+    await turn();
+    expect(layout().main.focusedPane).toBe(0);
+    expect(record()).toEqual({ entries: [T('a'), T('b')], at: 0 });
+    // an act that shows another tab, made with no key and no press of the person's (an agent's, a store act)
+    layout().activateTab(tabOf('c'));
+    await turn();
+    expect(frontOf(layout())).toBe(tabOf('c'));
+    expect(layout().main.focusedPane).toBe(1);
+    expect(record()).toEqual({ entries: [T('a'), T('c')], at: 1 });
+    release();
+    await turn();
+    expect(frontOf(layout())).toBe(tabOf('c'));
+    expect(record()).toEqual({ entries: [T('a'), T('c')], at: 1 });
+  });
+});
+

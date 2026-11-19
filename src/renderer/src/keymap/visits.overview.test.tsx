@@ -3,7 +3,7 @@
 // and a pane that takes the keyboard becomes the focused pane (as `main/Pane.tsx` does); a step's target must win over
 // that return, and the record must not be re-pointed by a focus move the step itself caused (M3's task review).
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_STRIP, type TabRef } from '@shared/ipc/schema/layout';
 import { at } from '../../../../test/support/machine';
@@ -31,6 +31,8 @@ const settle = () => act(() => new Promise<void>((resolve) => setTimeout(() => r
 function Split() {
   const set = useLayout((s) => currentSet(s.main));
   return (
+    <>
+    <button type="button">Somewhere else</button>
     <section id="region-main" style={{ position: 'relative' }}>
       {set.panes.map((pane, index) => (
         <section id={`pane-${index}`} data-pane={index} key={index} onFocusCapture={() => layout().focusPane(index as 0 | 1)}>
@@ -43,6 +45,7 @@ function Split() {
       ))}
       <OverviewLayer />
     </section>
+    </>
   );
 }
 
@@ -60,6 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   off();
   cleanup();
+  vi.unstubAllGlobals();
   delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
   delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
 });
@@ -124,5 +128,72 @@ describe('a step and the mounted Overview over a split', () => {
     expect(frontOf(layout())).toBe(tabOf('a'));
     expect(document.activeElement).toBe(tab('a'));
     expect(record()).toEqual({ entries: [T('a'), over(T('a'))], at: 0 });
+  });
+
+  // Frames held until the test lets them run (the step's frame for the keyboard among them).
+  function holdFrames() {
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++next, callback);
+      return next;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    return () => act(() => {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const callback of due) callback(0);
+    });
+  }
+  const turn = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+
+  it('a step superseded before its frame takes no keyboard: Back to B, Back again to the Overview over A, and the Overview keeps it', async () => {
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a')], activeTabId: tabOf('a') }, { tabs: [ref('b'), ref('c')], activeTabId: tabOf('c') }], focusedPane: 1 } });
+    render(<Split />);
+    act(() => tab('c').focus());
+    await settle();
+    useVisits.setState({ record: { entries: [T('a'), over(T('a')), T('b'), T('c')], at: 3 } });
+    const release = holdFrames();
+    act(() => runAction('go.back')); // to B: its frame for the keyboard is queued
+    await turn();
+    act(() => runAction('go.back')); // to the Overview over A, before that frame
+    await turn();
+    const panel = screen.getByRole('dialog', { name: 'Overview' });
+    expect(document.activeElement).toBe(panel);
+    await release();
+    await turn();
+    expect(document.activeElement).toBe(panel);
+    expect(layout().overviewOpen).toBe(true);
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(record()).toEqual({ entries: [T('a'), over(T('a')), T('b'), T('c')], at: 1 });
+  });
+
+  it('a step’s frame takes no keyboard after the person pressed a key and moved it elsewhere; with no press, it does', async () => {
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a')], activeTabId: tabOf('a') }, { tabs: [ref('b')], activeTabId: tabOf('b') }], focusedPane: 1 } });
+    render(<Split />);
+    act(() => tab('b').focus());
+    await settle();
+    useVisits.setState({ record: { entries: [T('a'), T('b')], at: 1 } });
+    let release = holdFrames();
+    act(() => runAction('go.back')); // to A
+    await turn();
+    const elsewhere = screen.getByRole('button', { name: 'Somewhere else' });
+    act(() => {
+      fireEvent.keyDown(elsewhere, { key: 'Tab' });
+      elsewhere.focus();
+    });
+    await release();
+    await turn();
+    expect(document.activeElement).toBe(elsewhere);
+    // the control: the same step with no press between it and its frame gives A's pane the keyboard
+    act(() => runAction('go.forward'));
+    await turn();
+    act(() => elsewhere.focus());
+    release = holdFrames();
+    act(() => runAction('go.back'));
+    await turn();
+    await release();
+    await turn();
+    expect(document.activeElement).toBe(tab('a'));
   });
 });
