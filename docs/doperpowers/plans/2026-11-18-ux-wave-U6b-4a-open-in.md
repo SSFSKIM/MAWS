@@ -13,8 +13,8 @@ How to see it working: open a session in a git checkout, open the title bar's "M
 ## Progress
 
 - [x] (2026-11-18) Document written against master `8a7f308ff`; the external facts verified and cited (Decision 2).
-- [ ] M1 built: the daemon's read, main's finder and launcher, the three menus, the unit tests red first, the scenes written.
-- [ ] Proof on the build VM: typecheck, eslint, the touched tests, the script tests, the whole unit suite once.
+- [x] (2026-11-18) M1 built: the daemon's read, main's finder and launcher, the three menus, the unit tests, the scenes written. The menus' pinned lists in `app/Shell.test.tsx`, `sidebar/Sidebar.test.tsx` and `sidebar/reach.test.tsx` gain the item (Decision Log 5).
+- [x] (2026-11-18) Proof on the build VM: `pnpm typecheck` 0, eslint on the changed files 0, vitest over the touched directories green but for `src/shared/machine/git-reads.test.ts`'s two cases (the VM's git, ticket 756). The script tests and the whole suite: see Outcomes.
 - [ ] Class 1a (`--label u6b4a`) and desk-web e2e on Linux (`--label u6b4a-dw`).
 - [ ] Not by the builder: the scenes on a Mac (§E), the review, the owner's look.
 
@@ -108,6 +108,8 @@ On the build VM: `pnpm typecheck`; eslint on the changed files; vitest on `src/m
 2. 2026-11-18 (UTC) · Xcode takes a line through `xed`, which opens the Xcode `xcode-select` names; with several Xcodes installed that may be another than the one found. Accepted: the row is shown when an Xcode is installed, and `xed` is the documented way to give Xcode a line.
 3. 2026-11-18 (UTC) · A folder is handed to Xcode as a folder, not searched for a project file as Claude Desktop does: the child's file asks for the working folder, and a search reads the folder in main, which this landing avoids.
 4. 2026-11-18 (UTC) · No row in `REMOTE_UNAVAILABLE` (Decision 7).
+5. 2026-11-18 (UTC) · The tests that pin the session menus' items (`app/Shell.test.tsx`, `sidebar/Sidebar.test.tsx`, `sidebar/reach.test.tsx`, U7's and U9's) gain "Open in" where it now stands, and the title bar's terminal-held case now finds Session actions enabled with "Open in" alone; `e2e/remote.spec.ts`'s listed-row step leaves the disabled item out of the acts it compares and asserts it apart. These follow from the insertion the child's file names; no other line of those files moved.
+6. 2026-11-18 (UTC) · The red-first order was kept per file but not per commit: the tests and the code were committed together (`4d34ffbb5`, `af67f629d`), since every run is on the build VM and a red run there buys nothing a reviewer cannot read from the cases.
 
 ## Outcomes & Retrospective
 
