@@ -440,7 +440,10 @@ describe('history after the branch panel', () => {
 
   it('reveals the main area when a step brings back a tab under a maximized side column (scalpel-2#4)', async () => {
     await visit('a', 'b');
-    layout().setPanel({ maximized: true, collapsed: false });
+    // the side column maximized over the main area (as with a terminal shown in it; written whole, since the store's own
+    // act keeps no maximize for a column that shows no surface)
+    const { regions } = layout();
+    useLayout.setState({ regions: { ...regions, panel: { ...regions.panel, maximized: true, collapsed: false } } });
     await turn();
     expect(layout().regions.panel.maximized).toBe(true); // the control: reading the layout leaves the column as it is
     runAction('go.back');
