@@ -6,6 +6,7 @@
 // threshold and a dropped text file still make today's node.
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import type { JSONContent } from '@tiptap/core';
+import type { Editor as TiptapEditor } from '@tiptap/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -110,6 +111,57 @@ describe('the editor takes an attached block', () => {
     expect(content.contains(document.activeElement)).toBe(true);
     expect(ofId(handle.current!.doc(), 'attach-b')).toHaveLength(1);
     expect(ofId(handle.current!.doc(), 'attach-c')).toHaveLength(1);
+  });
+
+  // Decision Log 14 (iv): the block goes in at a collapsed position, never over a selection, and an append at the end
+  // leaves the person's caret and selection where they were.
+  const tiptapOf = (content: HTMLElement) => (content as HTMLElement & { editor: TiptapEditor }).editor;
+  const selectionOf = (content: HTMLElement) => {
+    const { from, to } = tiptapOf(content).state.selection;
+    return { from, to };
+  };
+
+  it('at the caret, over a selection made before the keyboard went elsewhere: the selected words stay, the block after them, the caret after it', async () => {
+    const { port } = heldPort({ doc: docOf([paragraph(textNode('keep these words'))]), attachments: [], updatedAt: '2026-11-17T09:00:00.000Z' });
+    const { handle, content, elsewhere } = mount(port);
+    await act(async () => handle.current!.restored());
+    act(() => {
+      tiptapOf(content).commands.focus();
+      tiptapOf(content).commands.setTextSelection({ from: 6, to: 11 }); // `these` (the paragraph opens at 1)
+    });
+    act(() => elsewhere.focus()); // the keyboard goes to the terminal
+    await act(async () => void (await handle.current!.attachPasted({ id: 'attach-s', text: 'ls -la' }, { at: 'caret', save: false })));
+    expect(handle.current!.serialize().display).toBe('keep these[Pasted text #1 +1 lines] words');
+    expect(selectionOf(content)).toEqual({ from: 12, to: 12 }); // after the block
+    expect(content.contains(document.activeElement)).toBe(true);
+  });
+
+  it('at the end, with the caret in an empty last paragraph: the block goes there and the caret stays where it was', async () => {
+    const { port } = heldPort({ doc: docOf([paragraph(textNode('first line')), paragraph()]), attachments: [], updatedAt: '2026-11-17T09:00:00.000Z' });
+    const { handle, content } = mount(port);
+    await act(async () => handle.current!.restored());
+    act(() => {
+      tiptapOf(content).commands.focus();
+      tiptapOf(content).commands.setTextSelection(13); // the empty last paragraph (it opens at 12)
+    });
+    await act(async () => void (await handle.current!.attachPasted({ id: 'attach-t', text: 'x' }, { at: 'end', save: false })));
+    expect(ofId(handle.current!.doc(), 'attach-t')).toHaveLength(1);
+    expect(tiptapOf(content).state.doc.lastChild!.firstChild!.type.name).toBe(PASTED); // into that paragraph
+    expect(selectionOf(content)).toEqual({ from: 13, to: 13 });
+    expect(content.contains(document.activeElement)).toBe(true);
+  });
+
+  it('at the end, with words selected: the selection stays as it was', async () => {
+    const { port } = heldPort(STORED);
+    const { handle, content } = mount(port);
+    await act(async () => handle.current!.restored());
+    act(() => {
+      tiptapOf(content).commands.focus();
+      tiptapOf(content).commands.setTextSelection({ from: 1, to: 5 }); // `kept`
+    });
+    await act(async () => void (await handle.current!.attachPasted({ id: 'attach-u', text: 'x' }, { at: 'end', save: false })));
+    expect(handle.current!.serialize().display).toBe('kept from before\n[Pasted text #1 +1 lines]');
+    expect(selectionOf(content)).toEqual({ from: 1, to: 5 });
   });
 
   it('with save, drops the pending write and saves at once, answering the port; without it, the writer’s pause saves', async () => {

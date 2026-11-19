@@ -18,7 +18,8 @@ import { ATTACH } from './copy';
 
 const line = (level: 'info' | 'warning', text: string) => void toast({ level, text, actions: [], dismissible: true });
 
-function say(appSessionId: AppSessionId, outcome: AttachOutcome): void {
+/** The outcome said in its one line (`ATTACH`); nothing for a block the box on screen took. */
+export function sayAttached(appSessionId: AppSessionId, outcome: AttachOutcome): void {
   if (outcome.kind === 'taken') return; // the box on screen has it, and the keyboard
   const local = ipc.localMachine;
   const machine = isAddress(appSessionId) && machineOf(appSessionId) !== local ? machineName(useMachines.getState().machines, machineOf(appSessionId), local) : null;
@@ -42,7 +43,7 @@ export async function attachFromTerminal(id: TerminalId, source: 'menu' | 'chord
     return;
   }
   const appSessionId = handle.info.appSessionId;
-  say(appSessionId, await attachPasted(appSessionId, text));
+  sayAttached(appSessionId, await attachPasted(appSessionId, text));
 }
 
 /**

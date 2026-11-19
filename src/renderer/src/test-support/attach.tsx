@@ -18,6 +18,8 @@ import { rememberingRemoteDrafts } from '../composer/editor/drafts';
 import { Editor, type EditorHandle } from '../composer/editor/Editor';
 import type { Serialized } from '../composer/editor/serialize';
 import { registerFocusTarget } from '../stores/composer';
+import { useNotices } from '../stores/notices';
+import { sayAttached } from '../tools/terminal/attach';
 
 type Result = CommandResult<'session.drafts.set'> | CommandResult<'session.drafts.get'>;
 type Name = 'session.drafts.get' | 'session.drafts.set';
@@ -38,6 +40,8 @@ export interface Held {
   land(): Result;
   /** Answers with what it landed as (landing it first if it has not), or with the result given. */
   answer(result?: Result): Promise<void>;
+  /** Rejects the command's promise, as a route that fails rejects it (landing it first, if `landed`). */
+  reject(landed: boolean): Promise<void>;
 }
 
 /**
@@ -109,8 +113,9 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
       const at = holds.indexOf(name);
       if (at >= 0) {
         holds.splice(at, 1);
-        return new Promise<Result>((resolve) => {
+        return new Promise<Result>((resolve, rejectWith) => {
           let landedAs: Result | null = null;
+          let fail!: (error: Error) => void;
           const call: Held = {
             name,
             input: input as SetInput,
@@ -127,7 +132,14 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
               resolve(given);
               await settle();
             },
+            async reject(landed) {
+              if (landed) call.land();
+              call.answered = true;
+              fail(new Error('the route failed'));
+              await settle();
+            },
           };
+          fail = rejectWith;
           held.push(call);
         });
       }
@@ -253,15 +265,32 @@ export function heldSends() {
   };
 }
 
-/** One attach, its outcome watched: `said` is what it ended on (null while it has not ended), `times` how often it ended. */
+/**
+ * One attach, its outcome watched and said as the terminal says it (`sayAttached`, into the real notice store). `said`:
+ * what it ended on (null while it has not ended); `lines()`: the notices shown since it began; `id`: its block's id, as
+ * its first write or ask carries it; `holds(doc, ...typed)`: the document holds that block exactly once, no other
+ * attach's, and what the person typed.
+ */
 export function attachOf(store: DraftStoreFake, session: AppSessionId, text = 'npm test\n3 failed') {
-  const watch = { said: null as AttachOutcome | null, times: 0 };
+  const before = new Set(useNotices.getState().notices.map((notice) => notice.id));
+  const uuid = crypto.randomUUID();
+  vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(uuid);
+  const id = `attach-${uuid}`;
+  const watch = { said: null as AttachOutcome | null };
   const done = attachPasted(session, text, store.client).then((outcome) => {
     watch.said = outcome;
-    watch.times += 1;
+    sayAttached(session, outcome);
     return outcome;
   });
-  return Object.assign(watch, { done });
+  return Object.assign(watch, {
+    done,
+    id,
+    lines: () => useNotices.getState().notices.filter((notice) => !before.has(notice.id)).map((notice) => notice.text),
+    holds(doc: ComposerDoc | null | undefined, ...typed: string[]) {
+      expect(attachedIn(doc).map((node) => node.attrs?.id)).toEqual([id]);
+      for (const words of typed) expect(textOf(doc)).toContain(words.trim());
+    },
+  });
 }
 
 /** Two of the three claims at an end: the document holds exactly one block of the attach, and what the person typed. */

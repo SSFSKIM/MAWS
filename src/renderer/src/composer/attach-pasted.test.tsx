@@ -75,14 +75,15 @@ describe('a composer mounted at the press', () => {
     store.hold(SET);
     const a = attach(store);
     const save = await heldWrite(store);
-    holdsOnce((save.input as { draft: Draft }).draft.doc as ComposerDoc, 'earlier words');
+    a.holds((save.input as { draft: Draft }).draft.doc as ComposerDoc, 'earlier words');
     await settle();
-    expect(a.said).toBeNull(); // held: nothing said before the port's answer
+    expect(a.said).toBeNull();
+    expect(a.lines()).toEqual([]); // held: nothing said before the port's answer
     expect(box.content().contains(document.activeElement)).toBe(false);
     await save.answer();
     expect(await a.done).toEqual(added);
-    expect(a.times).toBe(1);
-    holdsOnce(store.doc(), 'earlier words');
+    expect(a.lines()).toHaveLength(1);
+    a.holds(store.doc(), 'earlier words');
   });
 
   it('whose port does not keep the save ends unsaved, with the block in its box', async () => {
@@ -129,14 +130,15 @@ describe('the hand-over, a write held while a composer comes', () => {
     if (when === 'after') {
       await settle();
       expect(a.said).toBeNull();
+      expect(a.lines()).toEqual([]);
       await write.answer();
     }
     expect(await a.done).toEqual(added);
     await settle();
-    expect(a.times).toBe(1);
-    holdsOnce(box.editor().doc(), 'earlier words');
+    expect(a.lines()).toHaveLength(1);
+    a.holds(box.editor().doc(), 'earlier words');
     box.unmount();
-    holdsOnce(store.doc(), 'earlier words');
+    a.holds(store.doc(), 'earlier words');
   });
 
   it.each(['after', 'before'] as const)('a composer mounts and the person types in it (the write released %s)', async (when) => {
@@ -190,7 +192,7 @@ describe('the hand-over, a write held while a composer comes', () => {
     await sends.answer(true);
     expect(Object.values(sends.sent[0]!.pastedContents)).toHaveLength(1); // the block, sent once
     expect(attachedIn(box.editor().doc())).toEqual([]);
-    expect(a.times).toBe(1);
+    expect(a.lines()).toHaveLength(1);
   });
 
   it.each(['before', 'after'] as const)('a composer mounts, the person types, and it unmounts, its flush landing %s the held write', async (order) => {
@@ -208,8 +210,8 @@ describe('the hand-over, a write held while a composer comes', () => {
       await flush.answer();
     } else await write.answer(); // the flush landed first: the write is stale
     expect(await a.done).toEqual(added);
-    expect(a.times).toBe(1);
-    holdsOnce(store.doc(), 'earlier words', TYPED);
+    expect(a.lines()).toHaveLength(1);
+    a.holds(store.doc(), 'earlier words', TYPED);
   });
 
   it('a composer mounts and unmounts with the write released before: its flush keeps the block once', async () => {
@@ -240,13 +242,14 @@ describe('the hand-over, a write held while a composer comes', () => {
     await write.answer(); // accepted: the block is kept, but a send is in flight
     await settle();
     expect(a.said).toBeNull();
+    expect(a.lines()).toEqual([]);
     await sends.answer(accepted);
     expect(await a.done).toEqual(added);
-    expect(a.times).toBe(1);
+    expect(a.lines()).toHaveLength(1);
     if (accepted) {
-      holdsOnce(store.doc());
+      a.holds(store.doc());
       expect(textOf(store.doc())).not.toContain('typed words');
-    } else holdsOnce(store.doc(), 'earlier words', TYPED);
+    } else a.holds(store.doc(), 'earlier words', TYPED);
   });
 });
 
@@ -640,5 +643,109 @@ describe('a store of build F (f1852de3a), which knows no claim form', () => {
     expect(store.writes().map((write) => write.replaces)).toEqual([DRAFT_CLAIM, DRAFT_CLAIM, DRAFT_CLAIM]);
     expect(store.accepted()).toBe(0);
     expect(attachedIn(store.doc())).toEqual([]);
+  });
+});
+
+// Decision Log 14 (M2's task review): each case loses the block, puts it in twice, or says a false "not added" or
+// nothing, without its fix.
+describe('the task review’s findings (Decision Log 14)', () => {
+  it('(i) a departed composer’s save is not believed: the composer after it, typed in before its restore, ends holding the block once', async () => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const first = mountComposer(S, store.client, { covered: true });
+    await first.restored();
+    store.hold(SET); // the covered composer's immediate save
+    const a = attach(store);
+    const save = await heldWrite(store);
+    first.unmount();
+    store.hold(GET); // the next composer's restore
+    const second = mountComposer(S, store.client);
+    await second.type(TYPED); // before its restore answers: the restore is skipped
+    await save.answer(); // the departed composer's save is kept
+    await settle();
+    await store.held(GET)[0]!.answer();
+    expect(await a.done).toEqual(added);
+    second.unmount(); // its final flush
+    await settle();
+    expect(a.lines()).toHaveLength(1);
+    a.holds(store.doc(), TYPED);
+  });
+
+  it.each(['answered late', 'lost'] as const)('(ii) a send that carried the block ends added, and the block is not put in again (the write’s reply %s)', async (reply) => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    store.hold(SET);
+    const a = attach(store);
+    const write = await heldWrite(store);
+    write.land(); // the store keeps the block; its reply is held
+    const sends = heldSends();
+    const box = mountComposer(S, store.client, { onSubmit: sends.onSubmit });
+    await box.restored();
+    a.holds(box.editor().doc(), 'earlier words'); // restored with the block
+    box.send();
+    await waitFor(() => expect(sends.sent).toHaveLength(1));
+    await sends.answer(true); // the box is cleared, the block sent with the message
+    await write.answer(reply === 'lost' ? TIMEOUT : undefined);
+    expect(await a.done).toEqual(added);
+    expect(Object.keys(sends.sent[0]!.pastedContents)).toHaveLength(1);
+    expect(attachedIn(box.editor().doc())).toEqual([]);
+    box.unmount();
+    await settle();
+    expect(attachedIn(store.doc())).toEqual([]);
+    expect(a.lines()).toHaveLength(1);
+  });
+
+  it('(iii) an accepted write in a round a composer came and went under stays unaccounted for: a failed read after it is unconfirmed', async () => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    store.hold(SET);
+    const a = attach(store);
+    const write = await heldWrite(store);
+    const box = mountComposer(S, store.client); // untouched
+    await box.restored();
+    box.unmount();
+    store.failReads({ ok: false, error: { code: 'internal', message: 'the index could not be read' } });
+    await write.answer(); // accepted
+    expect(await a.done).toEqual(unconfirmed);
+    a.holds(store.doc(), 'earlier words');
+    expect(a.lines()).toHaveLength(1);
+  });
+
+  describe('(vi) a rejected promise of the route', () => {
+    it('a read that rejects is a failed read: not added, and nothing written', async () => {
+      const store = draftStore(S);
+      store.put(EARLIER);
+      store.hold(GET);
+      const a = attach(store);
+      await waitFor(() => expect(store.held(GET)).toHaveLength(1));
+      await store.held(GET)[0]!.reject(false);
+      expect(await a.done).toEqual(refused('failed'));
+      expect(store.writes()).toEqual([]);
+      expect(a.lines()).toHaveLength(1);
+    });
+
+    it('a write that rejects having landed is found by the next read, and not written again', async () => {
+      const store = draftStore(S);
+      store.put(EARLIER);
+      store.hold(SET);
+      const a = attach(store);
+      await (await heldWrite(store)).reject(true);
+      expect(await a.done).toEqual(added);
+      expect(store.writes()).toHaveLength(1);
+      a.holds(store.doc(), 'earlier words');
+      expect(a.lines()).toHaveLength(1);
+    });
+
+    it('a write that rejects with every later read failing is not definite: unconfirmed', async () => {
+      const store = draftStore(S);
+      store.put(EARLIER);
+      store.hold(SET);
+      const a = attach(store);
+      const write = await heldWrite(store);
+      store.failReads({ ok: false, error: { code: 'host_unavailable', message: 'the service is not running' } });
+      await write.reject(false);
+      expect(await a.done).toEqual(unconfirmed);
+      expect(a.lines()).toHaveLength(1);
+    });
   });
 });

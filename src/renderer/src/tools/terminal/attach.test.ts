@@ -161,4 +161,21 @@ describe('the handler of terminal.attachSelection', () => {
     disconnect();
     expect(isActionEnabled('terminal.attachSelection')).toBe(false);
   });
+
+  it('a focus that left just before the teardown registers nothing after it', async () => {
+    const container = document.createElement('div');
+    const helper = document.createElement('textarea');
+    container.append(helper);
+    document.body.append(container);
+    terminal.container = container;
+    terminal.focused = 't7';
+    const disconnect = connectTerminalAttach();
+    helper.focus();
+    await settled();
+    expect(isActionEnabled('terminal.attachSelection')).toBe(true);
+    helper.blur(); // its read is queued for once the page has moved the focus
+    disconnect();
+    await settled();
+    expect(isActionEnabled('terminal.attachSelection')).toBe(false);
+  });
 });

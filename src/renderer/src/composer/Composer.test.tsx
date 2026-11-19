@@ -63,7 +63,9 @@ import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX w
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, hardBreak, mentionNode, paragraph, textNode } from './editor/doc';
+import { docOf, hardBreak, mentionNode, paragraph, textNode, type ComposerDoc } from './editor/doc';
+import { attachPasted, type AttachOutcome } from './attach-pasted'; // UX wave U6b-5a
+import { attachedIn } from '../test-support/attach'; // UX wave U6b-5a
 import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
 import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
@@ -2002,6 +2004,32 @@ describe('a lane B session on another machine', () => {
     // the send answered, so no submission of this session is left in flight for the cases after it
     await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
+  // UX wave U6b-5a (Decision Log 14 (v)): an attach to a spawned session's box waits for its first send, which goes as
+  // handed; the block is never sent without a press. The box cannot send until the session's send is available.
+  const docNow = () => (editorOf().editor as unknown as { getJSON(): ComposerDoc }).getJSON();
+  it('an attach to a spawned session waits for its first send, which goes without the block; the box takes the block after', async () => {
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], []));
+    queueFirstSend(R);
+    act(() => applyRemoteSession(remoteSessionState(R, { controls: { ...ALL_OPEN, send: { available: false, reason: 'not yet' } } })));
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('read this'));
+    const watch: { outcome: AttachOutcome | null } = { outcome: null };
+    void attachPasted(R, 'npm test').then((said) => (watch.outcome = said));
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 300))));
+    expect(attachedIn(docNow())).toEqual([]); // not put in before the first send
+    expect(remote.invoked('session.send')).toEqual([]);
+    expect(watch.outcome).toBeNull();
+    act(() => applyRemoteSession(remoteSessionState(R))); // the session can take a message now
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(watch.outcome).not.toBeNull());
+    expect(['taken', 'added']).toContain(watch.outcome!.kind);
+    expect(attachedIn(docNow())).toHaveLength(1);
+    expect(editorOf().editor.getText()).not.toContain('read this');
+    expect(remote.invoked('session.send')).toHaveLength(1);
   });
 
   // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload

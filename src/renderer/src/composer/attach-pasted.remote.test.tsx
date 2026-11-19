@@ -188,6 +188,7 @@ describe('a send that outlives its composer, on another machine', () => {
     await write.answer(); // taken there; a composer came, and a send is in flight
     await settle();
     expect(a.said).toBeNull();
+    expect(a.lines()).toEqual([]);
     store.hold(SET); // the save the send makes when it settles
     if (fate === 'resent') store.hold(GET); // the next round's read, answered after the queue has sent the save again
     await sends.answer(accepted);
@@ -205,10 +206,10 @@ describe('a send that outlives its composer, on another machine', () => {
     expect(await a.done).toEqual(added);
     if (fate === 'late') save.land(); // it lands after all, on top of what is kept by then
     await vi.advanceTimersByTimeAsync(REMOTE_DRAFT_RETRY_MS * 4); // every resend the queue still had
-    expect(a.times).toBe(1);
+    expect(a.lines()).toHaveLength(1);
     if (accepted) {
-      holdsOnce(store.doc());
+      a.holds(store.doc());
       expect(textOf(store.doc())).not.toContain('typed words');
-    } else holdsOnce(store.doc(), 'earlier words', TYPED);
+    } else a.holds(store.doc(), 'earlier words', TYPED);
   });
 });
