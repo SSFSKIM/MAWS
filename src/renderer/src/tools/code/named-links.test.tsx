@@ -180,6 +180,16 @@ describe('listed refusals: what the click asks for, and the rule names nothing',
     expect(clickedPaths(markdown)).toEqual(asked);
     expect(linkPaths(markdown)).toEqual([]);
   });
+
+  // M1's review, finding 3: N1.6's control through the rule's own reader, a form of the same path that it names
+  it.each([
+    ['[r](file:///work/%41.md)', '[r](file:///work/A.md)', '/work/A.md'],
+    ['[r](file&colon;///work/x.md)', '[r](file:///work/x.md)', '/work/x.md'],
+  ])('%j names nothing; %j names %j', (refused, named, path) => {
+    expect(linkPaths(refused)).toEqual([]);
+    expect(linkPaths(named)).toEqual([path]);
+    expect(clickedPaths(named)).toEqual([path]);
+  });
 });
 
 describe('the chip’s and the anchor’s readers', () => {

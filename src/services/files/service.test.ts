@@ -1922,6 +1922,11 @@ describe('files saves outside the folders', () => {
       expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: false, why: 'result' } });
       await expect(saveShown(files, A, out('result.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
       expect(readFileSync(out('result.txt'), 'utf8')).toBe('result.txt as it was\n');
+      // the control: once the person chooses the same file, the same save is made
+      expect(await files.grant(A, out('result.txt'))).toEqual({ status: 'granted', path: out('result.txt') });
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: true } });
+      expect(await saveShown(files, A, out('result.txt'), 'pwned\n')).toEqual({ status: 'ok', hash: sha('pwned\n') });
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('pwned\n');
     });
   });
 
