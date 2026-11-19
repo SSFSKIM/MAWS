@@ -122,6 +122,19 @@ describe('xterm adapter', () => {
     expect(wrapping.screenText()).toBe('hello wonderful world\nnext'); // the wrap kept whole, its space at the edge included
     wrapping.dispose();
 
+    // a wide character that does not fit at a row's end goes to the next row, and the cell it left is not text
+    for (const [written, read] of [
+      ['abcd界ef', 'abcd界ef'],
+      ['가나다라마', '가나다라마'],
+      ['abc 한글', 'abc 한글'],
+    ]) {
+      const wide = createXtermRenderer(options);
+      wide.resize(5, 5);
+      await new Promise<void>((resolve) => wide.write(written, resolve));
+      expect(wide.screenText()).toBe(read);
+      wide.dispose();
+    }
+
     const empty = createXtermRenderer(options);
     expect(empty.screenText()).toBe('');
     empty.dispose();

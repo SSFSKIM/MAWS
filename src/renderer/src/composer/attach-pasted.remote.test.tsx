@@ -4,7 +4,7 @@
 // round; the write goes once, in the session's order (`saveRemoteDraftOnce`); and the last read is judged on the
 // machine's own answer, only with no save of the session still out. A send that outlives its composer is followed
 // through the real remote queue (`lane-b/remote-drafts.ts`).
-import { cleanup } from '@testing-library/react';
+import { cleanup, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Draft } from '@shared/ipc/schema/session';
@@ -213,3 +213,25 @@ describe('a send that outlives its composer, on another machine', () => {
     } else a.holds(store.doc(), 'earlier words', TYPED);
   });
 });
+
+// The branch panel's fix wave, G1 (scalpel-2#5): a box over the link says its save was kept only once the machine took it.
+describe('a box over the link that saves at once', () => {
+  it.each(['takes it', 'does not take it'] as const)('says nothing before the machine answers, then what it answered (the machine %s)', async (machine) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the queue says a save was not kept, as it does
+    const store = over();
+    store.put(EARLIER);
+    const box = mountComposer(R, store.client, { overLink: true, covered: true });
+    await box.restored();
+    store.hold(SET);
+    const a = attach(store);
+    await waitFor(() => expect(store.held(SET)).toHaveLength(1));
+    await settle();
+    expect(a.said).toBeNull();
+    expect(a.lines()).toEqual([]);
+    await store.held(SET)[0]!.answer(machine === 'takes it' ? undefined : { ok: false, error: { code: 'host_unavailable', message: 'the machine is offline' } });
+    expect(await a.done).toEqual(machine === 'takes it' ? added : refused('unsaved'));
+    expect(a.lines()).toHaveLength(1);
+    box.unmount();
+  });
+});
+

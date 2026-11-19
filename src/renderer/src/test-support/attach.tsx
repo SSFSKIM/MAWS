@@ -208,7 +208,7 @@ export const textOf = (doc: JSONContent | null | undefined): string => {
  * `session.drafts.*` on this Mac, the remote queue over the link), and a focus target whose `attachPasted` is the
  * Composer's (`takeIntoBox`). `covered`: a card holds its box. `inert`: its pane is covered (a maximized side column).
  */
-export function mountComposer(appSessionId: AppSessionId, client: MawsBridge, options: { overLink?: boolean; covered?: boolean; inert?: boolean; disabled?: string | null; port?: DraftPort; onSubmit?: (s: Serialized) => Promise<boolean> } = {}) {
+export function mountComposer(appSessionId: AppSessionId, client: MawsBridge, options: { overLink?: boolean; covered?: boolean; inert?: boolean; disabled?: string | null; port?: DraftPort; onSubmit?: (s: Serialized) => Promise<boolean>; takingBack?: () => boolean } = {}) {
   const handle = createRef<EditorHandle>();
   const base = options.port ?? ipcDrafts(client, appSessionId);
   const port = options.overLink ? rememberingRemoteDrafts(base, appSessionId, () => true, client) : base;
@@ -220,7 +220,7 @@ export function mountComposer(appSessionId: AppSessionId, client: MawsBridge, op
           focusEditor: () => handle.current?.focus(),
           focusFrame: () => handle.current?.focus(),
           insertText: (text) => handle.current?.insertText(text),
-          attachPasted: (block, by, signal) => takeIntoBox(handle.current, block, by, { element: root.current, covered: options.covered ?? false }, signal),
+          attachPasted: (block, by, signal) => takeIntoBox(handle.current, block, by, { element: root.current, covered: options.covered ?? false, held: () => options.takingBack?.() ?? false } as never, signal),
         }),
       [],
     );
@@ -242,6 +242,8 @@ export function mountComposer(appSessionId: AppSessionId, client: MawsBridge, op
     send: () => act(() => editor().submit()),
     unmount: () => act(() => view.unmount()),
     content: () => view.container.querySelector('[contenteditable]') as HTMLElement,
+    /** The element standing for its pane, which a maximized side column makes inert. */
+    pane: () => view.container.firstElementChild as HTMLElement,
   };
 }
 export type MountedComposer = ReturnType<typeof mountComposer>;

@@ -48,6 +48,7 @@ afterEach(() => {
   useSetup.setState({ intents: new Map() });
   useSessions.setState({ records: new Map(), engine: new Map() });
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('a composer mounted at the press', () => {
@@ -815,6 +816,117 @@ describe('the task review’s findings (Decision Log 14)', () => {
       await write.reject(false);
       expect(await a.done).toEqual(unconfirmed);
       expect(a.lines()).toHaveLength(1);
+    });
+  });
+});
+
+// The branch panel's fix wave, G1: an attach never writes over a draft it has not read, and never says a place holds the
+// block that it did not save to. G2: the keyboard goes to the box only where it still can, after the restore.
+describe('the branch panel’s fix wave (G1, G2)', () => {
+  const NOT_WRITTEN = { ok: false as const, error: { code: 'internal' as const, message: 'the index could not be written' } };
+
+  it.each(['fails', 'answers'] as const)('a box whose restore read %s: a failed read is no draft, and nothing is written over the one kept', async (read) => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    store.hold(GET); // the box's restore
+    mountComposer(S, store.client, { covered: true });
+    const a = attach(store);
+    await waitFor(() => expect(store.held(GET)).toHaveLength(1));
+    await store.held(GET)[0]!.answer(read === 'fails' ? TIMEOUT : undefined);
+    if (read === 'fails') {
+      expect(await a.done).toEqual(refused('failed'));
+      expect(store.writes()).toEqual([]);
+      expect(store.doc()).toEqual(EARLIER);
+    } else {
+      expect(await a.done).toEqual(added);
+      a.holds(store.doc(), 'earlier words');
+    }
+    expect(a.lines()).toHaveLength(1);
+  });
+
+  it('a box’s save that fails keeps what it holds to save: its unmount saves the typing and the block', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the port says the draft is not kept, as it does
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const box = mountComposer(S, store.client, { covered: true });
+    await box.restored();
+    await box.type(TYPED); // a pending write of the box's
+    store.hold(SET);
+    const a = attach(store);
+    const save = await heldWrite(store);
+    await save.answer(NOT_WRITTEN);
+    expect(await a.done).toEqual(refused('unsaved'));
+    box.unmount(); // its flush
+    await settle();
+    a.holds(store.doc(), 'earlier words', TYPED);
+  });
+
+  it('a box that left while its save was out, the save refused: the chat it left is not said to hold the block', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the port says the draft is not kept, as it does
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const box = mountComposer(S, store.client, { covered: true });
+    await box.restored();
+    store.hold(SET);
+    const a = attach(store);
+    const save = await heldWrite(store);
+    box.unmount(); // its flush holds the block
+    await settle();
+    await save.answer(NOT_WRITTEN);
+    expect(await a.done).toEqual(added); // the flush kept it, and a read says so
+    a.holds(store.doc(), 'earlier words');
+    expect(a.lines()).toHaveLength(1);
+  });
+
+  it.each([true, false])('a box taken over by a take-back (in hand: %s) puts nothing in; the control takes it', async (inHand) => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const box = mountComposer(S, store.client, { covered: true, takingBack: () => inHand });
+    await box.restored();
+    const a = attach(store);
+    if (inHand) {
+      expect(await a.done).toEqual(refused('taking-back'));
+      expect(attachedIn(box.editor().doc())).toEqual([]);
+      expect(store.writes()).toEqual([]);
+    } else {
+      expect(await a.done).toEqual(added);
+      a.holds(box.editor().doc(), 'earlier words');
+    }
+  });
+
+  describe('the keyboard after the restore', () => {
+    const terminalHasTheKeyboard = () => {
+      const terminal = document.createElement('textarea'); // where xterm holds the keyboard
+      const sidebar = document.createElement('button');
+      document.body.append(terminal, sidebar);
+      terminal.focus();
+      return { terminal, sidebar };
+    };
+
+    it.each(['the pane is covered', 'the person moved the keyboard', 'nothing changed'] as const)('a press whose box restores late, when %s', async (meanwhile) => {
+      const store = draftStore(S);
+      store.put(EARLIER);
+      store.hold(GET);
+      const box = mountComposer(S, store.client);
+      const { terminal, sidebar } = terminalHasTheKeyboard();
+      const a = attach(store);
+      await waitFor(() => expect(store.held(GET)).toHaveLength(1));
+      if (meanwhile === 'the pane is covered') box.pane().setAttribute('inert', '');
+      if (meanwhile === 'the person moved the keyboard') sidebar.focus();
+      await store.held(GET)[0]!.answer();
+      const outcome = await a.done;
+      if (meanwhile === 'nothing changed') {
+        expect(outcome).toEqual({ kind: 'taken' });
+        expect(box.content().contains(document.activeElement)).toBe(true);
+        expect(a.lines()).toEqual([]);
+      } else {
+        expect(outcome).toEqual(added); // saved at once, and said
+        a.holds(store.doc(), 'earlier words');
+        expect(a.lines()).toHaveLength(1);
+        expect(document.activeElement).toBe(meanwhile === 'the pane is covered' ? terminal : sidebar);
+      }
+      terminal.remove();
+      sidebar.remove();
     });
   });
 });
