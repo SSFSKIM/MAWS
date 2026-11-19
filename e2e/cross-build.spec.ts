@@ -4882,8 +4882,8 @@ const unitPeer = (peer: Build): string | null =>
   : knowsDrawnBy(peer) ? `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of this landing, so §H's rows 3 and 4 are not about it`
   : !peer.manifest.capabilities.includes('machine.spine') ? `the peer (wire ${wireOf(peer)}) lists no machine.spine: it runs no owner channel on a daemon`
   : null;
-// The scene's session on the stub, held after its handshake: a decided resume of the seeded session
-function stubbedSession(s: Scratch, name: string): StubEngine {
+// The scene's session on the stub: a decided resume of the seeded session, which plays the turn the scene sends, then holds
+function stubbedSession(s: Scratch): StubEngine {
   trustIn(s, [s.repo]);
   installToHumanPlugin(join(s.userData, 'claude-config')); // the style and an installation that declares nothing: a lane-on launch at 8
   seedToHumanSession(s);
@@ -4899,7 +4899,7 @@ test('(to-human, on the peer’s daemon) this build’s window on the peer’s u
   test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
   test.setTimeout(300_000);
   await withScratch('xb-to-human-unit-peer', async (s) => {
-    const stub = stubbedSession(s, 'xb-to-human-unit-peer');
+    const stub = stubbedSession(s);
     await withUnit(s, peer, 'xb-to-human-unit-peer', async (unit) => {
       const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
       const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
@@ -4936,7 +4936,7 @@ test('(to-human, the peer on this daemon) the peer’s window on this build’s 
   test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
   test.setTimeout(300_000);
   await withScratch('xb-to-human-unit-here', async (s) => {
-    const stub = stubbedSession(s, 'xb-to-human-unit-here');
+    const stub = stubbedSession(s);
     await withUnit(s, here, 'xb-to-human-unit-here', async (unit) => {
       const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
       const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
