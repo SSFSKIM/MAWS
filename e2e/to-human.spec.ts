@@ -1,11 +1,12 @@
 // UX1: output-style text stays unboxed while extraction, attention, navigation and answer delivery remain independent.
 // The legacy owner-channel lifecycle is exercised through its commands, not retired transcript-card controls.
+// UX wave U2b (M6): the record line's summary where MAWS draws, read from the to-human mod's file (the last scenes).
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
 import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { traceForeground } from './support/foreground-trace';
@@ -14,7 +15,8 @@ import { installToHumanPlugin } from '../test/support/to-human-plugin'; // P4-R7
 import { sessionJournal } from './support/live-turns';
 import { clearToasts, metaEvents } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
-import { SUPPLEMENT, supplementJournal, TO_HUMAN, toHumanJournal, toHumanSessionId } from './support/to-human-replay';
+import { SUMMARY, summaryJournal, SUPPLEMENT, supplementJournal, TO_HUMAN, toHumanJournal, toHumanSessionId } from './support/to-human-replay';
+import { foldsFileOf } from '../src/shared/owner/folds'; // UX wave U2b: the mod's file of fold summaries, by session
 
 test('legacy mark text stays unboxed; attention jumps and owner-channel read/answer lifecycle remain intact', async () => {
   test.setTimeout(150_000);
@@ -195,8 +197,10 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     const answeredByMaws = rows().filter((r) => r.direction === 'out' && frameOf(r).type === 'control_response' && JSON.stringify(r.frame).includes('"text":"sent"'));
     expect(answeredByMaws).toEqual([]);
 
-    // The launch: the supplement passed once, no contract of MAWS's, the lane advertised (8) in the settings env and no
-    // hook of MAWS's there; the decision recorded (no longer pending).
+    // The launch: the supplement passed once, no contract of MAWS's, the lane advertised in the settings env and no hook
+    // of MAWS's there; the decision recorded (no longer pending). UX wave U2b: the installation carries no declaration
+    // (test/support/to-human-plugin.ts writes none unless asked), so MAWS draws the view and the launch carries the
+    // mirror's number.
     const spawns = rows().filter((r) => r.direction === 'meta' && frameOf(r).event === 'spawn');
     expect(spawns).toHaveLength(1);
     const { args } = spawns[0]!.frame as { args: string[] };
@@ -205,8 +209,7 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     expect(args.flatMap((arg, k) => (arg === '--disallowedTools' ? [args[k + 1]] : []))).toEqual(['AskUserQuestion']); // Decision Log 33
     expect(args.flatMap((arg, k) => (arg === '--allowedTools' ? [args[k + 1]] : []))).toEqual(['mcp__maws__ask']); // P4-R7z: the ask alone; the plugin's message tool asks no permission
     const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { env?: Record<string, string>; hooks?: unknown };
-    expect(settings.env?.[NATIVE_TO_HUMAN_ENV]).toBe(String(TO_HUMAN_CONTRACT_VERSION));
-    expect(String(TO_HUMAN_CONTRACT_VERSION)).toBe('8');
+    expect(settings.env?.[NATIVE_TO_HUMAN_ENV]).toBe(String(TO_HUMAN_MIRROR_VERSION));
     expect(settings.hooks).toBeUndefined(); // P4-R7z: P4-R7y's SessionStart alias is gone
     await expect.poll(async () => { const row = await lane(); return [row.source, row.pending ?? null]; }).toEqual(['external-style-plus-supplement', null]);
 
@@ -253,3 +256,103 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
   }
 });
 // P2-C2 end
+
+// UX wave U2b (M6; docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M): where MAWS draws the view (the
+// launch carries 8: the installation declares nothing), a record line reads what the to-human mod's file of fold
+// summaries holds for its stretch, a stretch still growing its newest call, and `working record` where there is
+// neither. The scratch configuration directory holds an invented file for the recorded session in the mod's form (a
+// temporary beside it, then a rename over it); the file is then replaced, by a rename, with one that holds one more run,
+// and the line changes with no reload, at the round's next read or at the window's return of focus. MAWS reads shape 2
+// alone: the same runs at shape 1, as releases before the mod's pull request write them, read as no summaries.
+for (const shape of [2, 1] as const) {
+  const title = shape === 2
+    ? 'a record line reads its stored summary, a growing one its newest call, and working record where there is neither'
+    : 'a folds file of shape 1 holding the same runs reads as no summaries: every closed record line reads working record';
+  test(title, async () => {
+    test.setTimeout(180_000);
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u2b-summary-')));
+    const repo = join(root, 'repo');
+    const config = join(root, 'claude-config');
+    mkdirSync(repo);
+    const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+    writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+    installToHumanPlugin(config); // the plugin's style (6) and the plugin, no declaration: the lane on, MAWS draws
+    const engineId = toHumanSessionId();
+    const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session whose work is summarised' }, uuid: randomUUID(), timestamp: '2026-11-16T08:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.322' };
+    writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+    // The mod's file, as the mod keeps it: written whole to a temporary in the same folder, then moved over the file
+    const folds = foldsFileOf(config, engineId)!;
+    mkdirSync(dirname(folds), { recursive: true });
+    const keep = (runs: [string, string, string][]) => {
+      const temporary = `${folds}.${randomUUID()}.tmp`;
+      writeFileSync(temporary, JSON.stringify({ shape, runs }));
+      renameSync(temporary, folds);
+    };
+    const tree: [string, string, string] = [SUMMARY.calls.tree, SUMMARY.calls.tree, SUMMARY.stored.tree];
+    const list: [string, string, string] = [SUMMARY.calls.list, SUMMARY.calls.list, SUMMARY.stored.list];
+    keep([tree]);
+    const journal = summaryJournal(root, Date.now() + 5 * 60_000);
+    const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: journal, CLAUDE_CONFIG_DIR: config } });
+    try {
+      const { page } = maws;
+      value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } })); // no relay in the run
+      let id = '';
+      await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? ''), { timeout: 20_000 }).not.toBe('');
+      const turn = async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).turn;
+      const stored = async () => value(await invoke(page, 'ownerChannel.folds', { appSessionId: id as never })).runs;
+      await (await sidebarRow(page, { appSessionId: id })).click();
+      await page.mouse.move(700, 450);
+      const pane = page.locator('[data-region="main"] [data-pane="0"]');
+      const composer = pane.getByRole('textbox', { name: 'Message' });
+      await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
+      const line = (call: string) => pane.locator(`[data-row-id="record-fold:closed:${call}"]`).getByRole('button');
+      const message = (text: string) => pane.locator('.owner-message-ink').filter({ hasText: text });
+      const NONE = '› working record';
+
+      // Turn 1: two stretches close. The view's first read takes the file whole: the first stretch reads its summary,
+      // the second, which the file does not hold, `working record`.
+      await composer.click();
+      await page.keyboard.type(SUMMARY.first);
+      await page.keyboard.press('Enter');
+      await expect(message(SUMMARY.messages.list)).toBeVisible({ timeout: 20_000 });
+      await expect.poll(turn, { timeout: 20_000 }).toBeNull();
+      await expect(pane.locator('[data-view-switch]')).toHaveText('to-human view · full transcript ›'); // MAWS draws: the mirror and its switch
+      expect(await stored(), 'what the owner service reads of the file').toEqual(shape === 2 ? [{ first: tree[0], last: tree[1], summary: tree[2] }] : null);
+      await expect(line(SUMMARY.calls.tree)).toHaveText(shape === 2 ? `› ${SUMMARY.stored.tree}` : NONE, { timeout: 20_000 });
+      await expect(line(SUMMARY.calls.list)).toHaveText(NONE);
+
+      // Turn 2: the stretch grows while its call runs: its line is its newest call's, whatever the file holds
+      await composer.click();
+      await page.keyboard.type(SUMMARY.second);
+      await page.keyboard.press('Enter');
+      await expect.poll(turn, { timeout: 20_000 }).not.toBeNull();
+      await expect(line(SUMMARY.calls.suite)).toHaveText(`› ${SUMMARY.lines.suite}`, { timeout: 20_000 });
+      value(await invoke(page, 'session.getContextUsage', { appSessionId: id as never, detail: 'summary' })); // the replay goes on
+      await expect(message(SUMMARY.messages.suite)).toBeVisible({ timeout: 20_000 });
+      await expect.poll(turn, { timeout: 20_000 }).toBeNull();
+      await expect(line(SUMMARY.calls.suite), 'closed, with no run in the file').toHaveText(NONE);
+
+      // The file replaced by a rename with one more run, then the window's focus returns: the line changes in place
+      keep([tree, list]);
+      expect(await stored()).toEqual(shape === 2 ? [tree, list].map(([first, last, summary]) => ({ first, last, summary })) : null);
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      if (shape === 2) {
+        // the focus's read, or the round's next one (3, 8, 20 or 45 s after the last close or end)
+        await expect(line(SUMMARY.calls.list)).toHaveText(`› ${SUMMARY.stored.list}`, { timeout: 50_000 });
+        await expect(line(SUMMARY.calls.tree)).toHaveText(`› ${SUMMARY.stored.tree}`);
+      } else {
+        await expect(line(SUMMARY.calls.list)).toHaveText(NONE);
+        await expect(line(SUMMARY.calls.tree)).toHaveText(NONE);
+      }
+      await expect(line(SUMMARY.calls.suite)).toHaveText(NONE);
+      await expect(pane.getByRole('button', { name: NONE, exact: true })).toHaveCount(shape === 2 ? 1 : 3);
+      expect(metaEvents(sessionJournal(maws.userData, id))).not.toContain('replay_mismatch');
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      await maws.cleanup();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

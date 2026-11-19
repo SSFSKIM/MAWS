@@ -51,8 +51,15 @@ export const carriesPluginMessageTool = (declared: number | null): boolean => de
 // The advertisement (Design §3): set in a launch's settings env, its value the contract version, while the lane is on,
 // so a plugin that draws its own to-human view can defer to MAWS. P4-R7z: 8 says MAWS offers no message tool, which the
 // plugin reads as its cue to register its own in MAWS's headless launch.
+// The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A): the number follows who
+// draws the session's to-human view. 9 where the mod draws it (an installation whose declaration says it draws from 9,
+// read by src/services/owner/declaration.ts, never a release number); 8 where MAWS draws it, the mirror, at which every
+// release of the mod steps aside and registers its tool. No launch advertises 9 while TO_HUMAN_MOD_ROUTE is off.
 export const NATIVE_TO_HUMAN_ENV = 'MAWS_NATIVE_TO_HUMAN';
-export const TO_HUMAN_CONTRACT_VERSION = 8;
+export const TO_HUMAN_CONTRACT_VERSION = 9; // advertised where the mod draws MAWS's view
+export const TO_HUMAN_MIRROR_VERSION = 8; // advertised where MAWS draws it: every installation steps aside and registers its tool
+export const TO_HUMAN_MOD_ROUTE: boolean = true; // on since M5's cutover; while it is off no launch advertises 9
+export const TO_HUMAN_DECLARATION = 'maws-surface.json'; // at an installation's root (§I)
 
 export interface ContractText {
   version: number;

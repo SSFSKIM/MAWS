@@ -6,7 +6,8 @@ import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
 import { withOwnerChannel } from './launch-mapping'; // P2-C
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement; U2b: the mirror's number by name
+import { FOLD_SUMMARIES_ENV } from '@shared/owner/folds'; // U2b: the summaries' value
 import { buildLaunch } from '../../engine-host/launch'; // P4-R8: the launch line a spec becomes
 import type { AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
@@ -197,16 +198,16 @@ describe('the app\'s MCP servers', () => {
   it('leaves them out of the trust bootstrap, which serves no turn, and keeps them through the owner channel\'s decision', () => {
     const boot = bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers);
     expect(boot.mcpConfig).toBeNull();
-    expect(withOwnerChannel(launches(withServers).new, { laneOn: true, append: 'supplement', snapshotOff: true }).mcpConfig).toEqual(CONFIG);
+    expect(withOwnerChannel(launches(withServers).new, { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: true, summariesOff: false }).mcpConfig).toEqual(CONFIG);
   });
 
   // a lane-on launch carries the app's servers and the advertisement (P4-R7z: no hook of MAWS's); the bootstrap neither
   it('gives a lane-on launch with app servers both --mcp-config and the advertisement in --settings, and the bootstrap neither', () => {
     const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf('--settings') + 1]!) as { hooks?: unknown; env?: Record<string, string> };
     for (const [kind, spec] of Object.entries(launches(withServers))) {
-      const args = argsOf(withOwnerChannel(spec, { laneOn: true, append: 'supplement', snapshotOff: false }));
+      const args = argsOf(withOwnerChannel(spec, { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: false, summariesOff: false }));
       expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual(CONFIG);
-      expect(settingsOf(args).env?.[NATIVE_TO_HUMAN_ENV], kind).toBe(String(TO_HUMAN_CONTRACT_VERSION));
+      expect(settingsOf(args).env?.[NATIVE_TO_HUMAN_ENV], kind).toBe(String(TO_HUMAN_MIRROR_VERSION));
       expect(settingsOf(args).hooks, kind).toBeUndefined();
     }
     const boot = argsOf(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers));
@@ -228,11 +229,11 @@ describe('home directory attests without a bootstrap', () => {
 describe('withOwnerChannel', () => {
   const socket = '/u/browser/cua/a.sock';
   const spec = (extraSettings: Record<string, unknown> | null) => ({ ...toLaunchSpec({ ...base, browserBackend: null }), extraSettings });
-  const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION);
+  const ADVERTISED = String(TO_HUMAN_MIRROR_VERSION);
 
   // P2-C2 (Decision Log 31): the plugin's style gets the supplement; P4-R7z: MAWS appends no contract, and no hook goes in
   it('advertises 8 beside the browser socket while the lane is on, appends the supplement and passes "off" as decided', () => {
-    const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: 'supplement', snapshotOff: true });
+    const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: true, summariesOff: false });
     expect(ADVERTISED).toBe('8');
     expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: ADVERTISED }, enableWorkflows: true });
     expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
@@ -241,17 +242,39 @@ describe('withOwnerChannel', () => {
   });
 
   it('omits the variable when the lane is off, leaving the other settings as they were', () => {
-    expect(withOwnerChannel(spec(null), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
-    expect(withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { laneOn: false, append: null, snapshotOff: true })).toMatchObject({ extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, systemPromptSnapshot: 'off' });
-    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '7' } }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull(); // a retried spec
-    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '7' } }), { laneOn: true, append: 'supplement', snapshotOff: false }).extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(withOwnerChannel(spec(null), { advertisement: null, append: null, snapshotOff: false, summariesOff: false }).extraSettings).toBeNull();
+    expect(withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { advertisement: null, append: null, snapshotOff: true, summariesOff: false })).toMatchObject({ extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, systemPromptSnapshot: 'off' });
+    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '7' } }), { advertisement: null, append: null, snapshotOff: false, summariesOff: false }).extraSettings).toBeNull(); // a retried spec
+    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '7' } }), { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: false, summariesOff: false }).extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+  });
+
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A and §M): the
+  // settings env carries the advertisement the decision made, 9, 8 or none, and TO_HUMAN_FOLD_SUMMARIES=off for every
+  // launch decided while the summaries' switch is off, whatever the lane; a caller's value of either name is replaced
+  it('writes the decided advertisement, 9, 8 or none, in place of a caller’s', () => {
+    for (const advertisement of [9, 8, null] as const) {
+      const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: '7' } }), { advertisement, append: null, snapshotOff: false, summariesOff: false });
+      expect(decided.extraSettings, String(advertisement)).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, ...(advertisement === null ? {} : { [NATIVE_TO_HUMAN_ENV]: String(advertisement) }) } });
+    }
+  });
+
+  it('writes TO_HUMAN_FOLD_SUMMARIES=off beside each advertisement while the switch is off, and removes a caller’s value while it is on', () => {
+    expect(FOLD_SUMMARIES_ENV).toBe('TO_HUMAN_FOLD_SUMMARIES');
+    for (const advertisement of [9, 8, null] as const) {
+      const off = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { advertisement, append: null, snapshotOff: false, summariesOff: true });
+      expect(off.extraSettings, `off, ${advertisement}`).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, ...(advertisement === null ? {} : { [NATIVE_TO_HUMAN_ENV]: String(advertisement) }), [FOLD_SUMMARIES_ENV]: 'off' } });
+      expect(LaunchSpecSchema.parse(off)).toEqual(off);
+      const on = withOwnerChannel(spec({ env: { [FOLD_SUMMARIES_ENV]: 'off' } }), { advertisement, append: null, snapshotOff: false, summariesOff: false });
+      expect(on.extraSettings, `on, ${advertisement}`).toEqual(advertisement === null ? null : { env: { [NATIVE_TO_HUMAN_ENV]: String(advertisement) } });
+    }
+    expect(withOwnerChannel(spec(null), { advertisement: null, append: null, snapshotOff: false, summariesOff: true }).extraSettings).toEqual({ env: { [FOLD_SUMMARIES_ENV]: 'off' } });
   });
 
   // P4-R7z: P4-R7y's SessionStart group and P4-A2's appended alias are gone; the caller's hooks pass as they are
   it('leaves the caller’s hooks as they are, with the lane on or off, and adds none of its own', () => {
     const caller = { SessionStart: [{ hooks: [{ type: 'command', command: 'echo own' }] }], PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo post' }] }] };
     for (const laneOn of [true, false]) {
-      const decided = withOwnerChannel(spec({ hooks: caller, disableAllHooks: true }), { laneOn, append: laneOn ? 'supplement' : null, snapshotOff: false });
+      const decided = withOwnerChannel(spec({ hooks: caller, disableAllHooks: true }), { advertisement: laneOn ? TO_HUMAN_MIRROR_VERSION : null, append: laneOn ? 'supplement' : null, snapshotOff: false, summariesOff: false });
       expect(decided.extraSettings).toEqual({ hooks: caller, disableAllHooks: true, ...(laneOn ? { env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } } : {}) });
       expect(decided.appendSystemPrompt ?? null).toBe(laneOn ? TO_HUMAN_SUPPLEMENT : null);
       expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
@@ -297,10 +320,10 @@ describe('the cursor label', () => {
 
   it('is kept through the owner channel’s merge of the environment, lane on and off', () => {
     const spec = resumed(titled('Fix the login form'), '/u/cua.sock');
-    expect(withOwnerChannel(spec, { laneOn: true, append: 'supplement', snapshotOff: false }).extraSettings).toEqual({
-      env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form', [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) },
+    expect(withOwnerChannel(spec, { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: false, summariesOff: false }).extraSettings).toEqual({
+      env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form', [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_MIRROR_VERSION) },
     });
-    expect(withOwnerChannel(spec, { laneOn: false, append: null, snapshotOff: false }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form' } });
+    expect(withOwnerChannel(spec, { advertisement: null, append: null, snapshotOff: false, summariesOff: false }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form' } });
   });
 });
 // UX wave U12a end
@@ -337,9 +360,9 @@ describe('the launch profile', () => {
       expect(flagOf(argsOf(today[kind])), kind).toBe(kind === 'bootstrap' ? '{"dialogExpiry":"never"}' : '{"dialogExpiry":"never","effortLevel":"high"}');
     }
     expect(launches(C10_SETTING_DEFAULTS, '/u/cua.sock').new.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } });
-    expect(withOwnerChannel(today.new, { laneOn: true, append: 'supplement', snapshotOff: false })).toMatchObject({
+    expect(withOwnerChannel(today.new, { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: false, summariesOff: false })).toMatchObject({
       appendSystemPrompt: TO_HUMAN_SUPPLEMENT,
-      extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } },
+      extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_MIRROR_VERSION) } },
     });
   });
 
@@ -378,11 +401,11 @@ describe('the launch profile', () => {
   // start-time context to give any more: P4 Decision Log 50's alias is gone with its SessionStart group
   it('under hooks none appends the supplement alone, the profile’s keys kept, and nothing with the lane off', () => {
     const off = launches(withProfile(PROFILE)).new;
-    const on = withOwnerChannel(off, { laneOn: true, append: 'supplement', snapshotOff: true });
-    expect(on.extraSettings).toEqual({ enabledPlugins: OFF, disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
+    const on = withOwnerChannel(off, { advertisement: TO_HUMAN_MIRROR_VERSION, append: 'supplement', snapshotOff: true, summariesOff: false });
+    expect(on.extraSettings).toEqual({ enabledPlugins: OFF, disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_MIRROR_VERSION) } });
     expect(on).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
     expect(LaunchSpecSchema.parse(on)).toEqual(on);
-    const laneOff = withOwnerChannel(off, { laneOn: false, append: null, snapshotOff: false });
+    const laneOff = withOwnerChannel(off, { advertisement: null, append: null, snapshotOff: false, summariesOff: false });
     expect(laneOff).not.toHaveProperty('appendSystemPrompt');
     expect(laneOff.extraSettings).toEqual({ enabledPlugins: OFF, disableAllHooks: true });
   });

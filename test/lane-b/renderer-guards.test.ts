@@ -95,6 +95,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['ownerChannel.markRead'], // UX wave U2b: the report's cards, and their answer and cancel, are gone
     reported: 'request-card/RequestCard.tsx’s MarkRead marks an essential item read with no guard, an item of another machine’s attention feed included (request-card/, owner/report/)',
   },
+  'stores/folds.ts': { commands: ['ownerChannel.folds'], guard: 'UX wave U2b (M7): read only while transcript/view/TranscriptSlot.tsx enables it, which it does for this Mac’s sessions alone (a session on another machine is given no key)' },
   'stores/owner-channel.ts': { commands: ['ownerChannel.state'], reported: 'read at mount by transcript/view/TranscriptSlot.tsx for a lane B session on another machine (stores/, transcript/view/)' },
   'composer/editor/submit.ts': {
     commands: ['session.history.append'],

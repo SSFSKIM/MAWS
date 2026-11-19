@@ -35,6 +35,7 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { SessionRecord } from '@shared/graph/session';
 import { answersOf, answerText } from '@shared/owner/answer';
 import { markIdOf, type MarkId } from '@shared/owner/marks';
+import type { DrawnBy } from '@shared/owner/draws';
 import type { AnswerMember, OwnerChannelState, OwnerMark, QuestionState } from '@shared/owner/state';
 import { TO_HUMAN_GRAMMAR_VERSION } from '@shared/owner/to-human-parser';
 import type { SessionStore } from '../index/sessions';
@@ -75,6 +76,9 @@ export interface OwnerChannelServiceDeps {
   now?: () => string; // ISO-8601; the tests' clock
   log?: (message: string) => void;
   recoveryRetryMs?: number; // the first retry's delay after a failed recovery read
+  // the UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A): who draws the session's
+  // to-human view, published with every state (./drawn-by.ts); absent, MAWS
+  drawnBy?: (appSessionId: AppSessionId) => DrawnBy;
 }
 
 // A send of a question's answer that did not go out, as the seam said (X22): refused in its words, or held by a trust or
@@ -102,6 +106,7 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 
 export class OwnerChannelService {
   private readonly live = new Map<AppSessionId, SessionLive>();
+  private readonly built = new Map<AppSessionId, OwnerChannelState>(); // U2b: each session's last state built from its row
   private readonly recovering = new Set<AppSessionId>(); // until its recovery read is folded, no event reaches its answers
   private connection = 0; // counts the host's departures: a read begun before one cannot open the gate after it
   private readonly reading = new Map<AppSessionId, number>(); // the connection each session's recovery read was begun in
@@ -336,7 +341,23 @@ export class OwnerChannelService {
     if (read) this.changed(appSessionId);
   }
 
+  // U2b: while the row cannot be read, the last state built for the session is answered with `drawnBy` fresh (the
+  // tracker reads the row as not known on its own); with none built, the read's failure is the answer.
   state(appSessionId: AppSessionId): OwnerChannelState {
+    const drawnBy = this.deps.drawnBy?.(appSessionId) ?? 'maws'; // always sent
+    let state: OwnerChannelState;
+    try {
+      state = this.build(appSessionId, drawnBy);
+    } catch (error) {
+      const last = this.built.get(appSessionId);
+      if (last === undefined) throw error;
+      return { ...last, lane: { ...last.lane, drawnBy } };
+    }
+    this.built.set(appSessionId, state);
+    return state;
+  }
+
+  private build(appSessionId: AppSessionId, drawnBy: DrawnBy): OwnerChannelState {
     const row = this.deps.store.session(appSessionId);
     const override = row?.override ?? 'inherit';
     const on = laneOn(this.deps.appEnabled(), override);
@@ -347,6 +368,7 @@ export class OwnerChannelService {
       lane: {
         on: effective, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
         mismatch: row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null,
+        drawnBy,
       },
       marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId), this.unreadable(appSessionId, mark.id as MarkId))),
     };
@@ -359,6 +381,11 @@ export class OwnerChannelService {
       this.project(id, true);
       this.emitState(id);
     }
+  }
+
+  // U2b: who draws the session's view moved (a status, a declaration read, a bound launch): its state is published again.
+  drawnByChanged(appSessionId: AppSessionId): void {
+    this.emitState(appSessionId);
   }
 
   // ---------------------------------------------------------------------------------------------------------------------

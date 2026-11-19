@@ -44,6 +44,11 @@ export interface HarnessApi {
   questions(): HarnessQuestion[];
   raise(call: string): string;
   lower(id: string): void;
+  // UX wave U2b (M6, the labelled variant of the mirrored view's measured scene): the loaded session's record lines read
+  // the runs of a to-human folds file's text, as MAWS reads the mod's file (`storedRunsOf`), handed to the transcript as
+  // its stored summaries; answers how many runs it read, or null for a file not of the contract's shape (no runs). The
+  // next load drops them.
+  foldsFile(text: string): number | null;
 }
 
 export interface HarnessQuestion {

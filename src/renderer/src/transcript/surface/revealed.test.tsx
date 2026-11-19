@@ -41,7 +41,8 @@ const call = (b: ReturnType<typeof builder>, u: string, word: string) => {
 const cases: [string, Kind, string, () => ReturnType<typeof builder>, (container: HTMLElement) => boolean][] = [
   ['a prompt', 'user', 'UserMessage', () => { const b = builder(); b.turn('u1', 'alpha prompt'); b.end(['u1']); b.turn('u2', 'beta prompt'); return b; }, (c) => c.textContent!.includes('alpha prompt')],
   ['an answer', 'assistant_text', 'AssistantMessage', () => { const b = builder(); b.turn('u'); b.text('m1', 0, 'alpha part'); b.text('m2', 0, 'beta part'); return b; }, (c) => c.textContent!.includes('alpha part')],
-  ['a call', 'cell', 'ToolUse', () => { const b = builder(); call(b, 'u1', 'alpha'); call(b, 'u2', 'beta'); return b; }, (c) => c.querySelector('.transcript-cell-label') !== null],
+  // a closed call that the live derivation drew as a run asks its run's site (M5's fix wave 1, §E)
+  ['a call', 'cell', 'ToolGroup', () => { const b = builder(); call(b, 'u1', 'alpha'); call(b, 'u2', 'beta'); return b; }, (c) => c.querySelector('.transcript-cell-label') !== null],
   ['a command’s output', 'local_command', 'CommandOutput', () => { const b = builder(); echo(b, 'u1', 'alpha'); echo(b, 'u2', 'beta'); return b; }, (c) => c.textContent!.includes('Set model to alpha')],
   ['a question', 'question', 'AskUserQuestion', () => {
     const b = builder(); b.turn('u');

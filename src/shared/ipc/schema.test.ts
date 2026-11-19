@@ -1868,10 +1868,14 @@ describe('ipc schema validates both directions', () => {
   // P2-C start (2026-10-09): the built-in mods (X20; the P2-C document, §9) and the binary's flag declaration
   describe('P2-C entries', () => {
     const row = { id: 'maws.to-human', name: 'To-human', description: 'd', version: 1, enabled: true, source: 'maws-contract' };
-    it('adds the mods namespace: two main commands (machine since P5 O3-D), no event', () => {
-      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'machine', 'mods.setSessionOverride': 'machine' });
+    it('adds the mods namespace: three main commands (machine since P5 O3-D; the UX wave U2b’s summaries switch), and the switch’s one event, empty', () => {
+      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'machine', 'mods.setSessionOverride': 'machine', 'mods.setFoldSummaries': 'machine' });
       expect([...NAMES.mods.commands]).toEqual(Object.keys(mods.commands));
-      expect(Object.keys(mods.events)).toEqual([]);
+      // UX wave U2b (panel finding 3): `mods.list` stays the one source of the value, so the event carries nothing
+      expect(Object.keys(mods.events)).toEqual(['mods.foldSummariesChanged']);
+      expect([...NAMES.mods.events]).toEqual(Object.keys(mods.events));
+      expect(validateEventPayload('mods.foldSummariesChanged', {}).ok).toBe(true);
+      expect(validateEventPayload('mods.foldSummariesChanged', { on: true }).ok).toBe(false);
     });
 
     it('lists the mods with or without a session, and answers rows of the registry’s shape', () => {
@@ -1898,9 +1902,9 @@ describe('ipc schema validates both directions', () => {
     });
 
     // M4 (2026-10-09): main's owner channel
-    it('adds the ownerChannel namespace: four main commands (machine since P5 O3-D) and its changed event', () => {
+    it('adds the ownerChannel namespace: five main commands (machine since P5 O3-D; the UX wave U2b’s folds) and its changed event', () => {
       expect(Object.fromEntries(Object.entries(ownerChannel.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
-        'ownerChannel.state': 'machine', 'ownerChannel.answered': 'machine', 'ownerChannel.cancel': 'machine', 'ownerChannel.markRead': 'machine',
+        'ownerChannel.state': 'machine', 'ownerChannel.answered': 'machine', 'ownerChannel.cancel': 'machine', 'ownerChannel.markRead': 'machine', 'ownerChannel.folds': 'machine',
       });
       expect([...NAMES.ownerChannel.commands]).toEqual(Object.keys(ownerChannel.commands));
       expect([...NAMES.ownerChannel.events]).toEqual(Object.keys(ownerChannel.events));

@@ -391,6 +391,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       index, settings: () => machineSettings.state(), engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: bus.register,
       attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
+      foldSummariesChanged: () => void bus.emit('mods.foldSummariesChanged', {}), // UX wave U2b (panel finding 3)
     });
     parts.push(['owner channel', ownerChannel.stop]);
     settling.push(ownerChannel.work);

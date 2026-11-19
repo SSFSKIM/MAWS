@@ -6,4 +6,5 @@ export const grades = {
   'ownerChannel.answered': 'converse',
   'ownerChannel.cancel': 'converse',
   'ownerChannel.markRead': 'view', // a reader's act, as session.update's unread
+  'ownerChannel.folds': 'view', // UX wave U2b: as ownerChannel.state
 } as const satisfies CommandGrades<'ownerChannel'>;
