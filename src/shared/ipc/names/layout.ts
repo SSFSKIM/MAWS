@@ -9,6 +9,7 @@ export const commands = [
   'layout.captureRegion', // P3-G
   'layout.nativeEdit', // P4-B2 K6
   'layout.openFile', // UX wave U6e: Open File…
+  'layout.openInApps', 'layout.openIn', // UX wave U6b-4a: Open in
 ] as const;
 
 export const events = [

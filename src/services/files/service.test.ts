@@ -2153,6 +2153,51 @@ describe('files saves outside the folders', () => {
       expect(await shown(files, A, far())).toMatchObject({ content: 'same bytes\n', named: true, outside: { real: far(), writable: true } });
     });
   });
+
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission. The
+  // working folder as U8c-2 admits it; a path by the outside save's rule; the real path, which main launches with.
+  describe('Open in’s admission (files.admit)', () => {
+    it('admits the working folder by its real path, and refuses one U8c-2 does not admit or that is gone', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A })).toEqual({ path: root, kind: 'folder' });
+      records.set(B, { ...record(root), agentFolder: { checkout: outside, cwd: outside, branch: null, linked: true } }); // no work tree of root's repository
+      await expect(files.admit({ appSessionId: B })).rejects.toThrow(new Error(OUT));
+      records.set(H, record(at('gone')));
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: 'Z' as AppSessionId })).rejects.toThrow('unknown app session: Z');
+    });
+
+    it('admits a file and a folder inside the folders by their real paths, through a link in the path as given too', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+      expect(await files.admit({ appSessionId: A, path: inRoot('src') })).toEqual({ path: inRoot('src'), kind: 'folder' });
+      symlinkSync(inRoot('src'), at('src-link'));
+      records.set(B, record(at('src-link')));
+      expect(await files.admit({ appSessionId: B, path: join(at('src-link'), 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+    });
+
+    it('admits outside the folders what a save would write (named, chosen, sent), and refuses a result’s name, an added record, an unnamed file and MAWS’s own', async () => {
+      await transcriptOf(A, [said(link(out('named.txt'))), called('t-mcp', 'mcp__docs__find', {}), answered('t-mcp', link(out('result.txt')))]);
+      index.library.reconcile({
+        artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A }), artifact(2, out('added.txt'), { kind: 'human' })],
+        links: [linked(1, A), linked(2, A)],
+        spaces: [],
+      });
+      const files = outsideService();
+      await files.grant(A, out('chosen.txt'));
+      for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) expect(await files.admit({ appSessionId: A, path: out(name) }), name).toEqual({ path: out(name), kind: 'file' });
+      for (const name of ['result.txt', 'added.txt', 'unnamed.txt']) await expect(files.admit({ appSessionId: A, path: out(name) }), name).rejects.toThrow(new Error(OUT));
+      records.set(H, record(base));
+      await expect(files.admit({ appSessionId: H, path: join(profile, 'settings.json') })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses a caller on another machine before anything is read', async () => {
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A }, true)).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: A, path: inRoot('README.md') }, true)).rejects.toThrow(new Error(OUT));
+      nothingAsked();
+    });
+  });
 });
 
 // P3-L (M6b fix wave 2): a path main resolved itself (a File artifact's stored file, `library.read`), read with no session

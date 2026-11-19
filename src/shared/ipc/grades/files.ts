@@ -14,4 +14,5 @@ export const grades = {
   'files.readUploads': 'internal', // P5 O7 M8: the endpoint's read of a send's uploads, before the send reaches the engine host
   'files.writeOutside': 'manage', // UX wave U6e: files.write's save, outside the session's directories
   'files.grant': 'internal', // UX wave U6e: main's record of the person's choice in its chooser
+  'files.admit': 'internal', // UX wave U6b-4a: main's admission of the path "Open in" hands another app
 } as const satisfies CommandGrades<'files'>;
