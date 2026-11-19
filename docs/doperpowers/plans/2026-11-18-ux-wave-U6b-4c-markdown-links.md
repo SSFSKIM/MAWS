@@ -31,7 +31,7 @@ How to see it working: in a session on this Mac, open a Markdown file of the ses
 - [x] (2026-11-18) The delta review of revision 2 (`2f753d03a`): nine findings, all accepted; revision 3 (Decision Log 5). Its verdict on revision 2 was "do not dispatch"; revision 3 has not been read by a reviewer.
 - [x] (2026-11-18) ux-wave's rulings on Q18 and Q19 (Decision Log 6).
 - [x] (2026-11-18) The narrow read of revision 3 (`8ef361278`): five findings, all accepted; revision 4 (Decision Log 7). Its verdict on revision 3 was "do not dispatch", for the one first-rank finding; revision 4 answers it and is read by no reviewer: by ux-wave's ruling this was the last round, and the rest is the branch panel's.
-- [ ] M1 — The rule reads a Markdown file's links and a subagent's records.
+- [x] (2026-11-19) M1 — The rule reads a Markdown file's links and a subagent's records. Reviewed clean after one fix round (`579496c5e`..`11c7c8438`).
 - [ ] M2 — The record, the command, and a Markdown file as the source.
 - [ ] M3 — A subagent's transcript as the source.
 - [ ] M4 — The window follows.
