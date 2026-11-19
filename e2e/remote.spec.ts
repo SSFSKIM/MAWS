@@ -1085,12 +1085,23 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await pageRow.click();
       const pageViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
       await quoting(expect(pageViewer, 'B’s page drawn here from a copy').toHaveAttribute('data-frame', 'html', { timeout: 60_000 }), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
-      const pageSrc = (await pageViewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
-      expect(pageSrc, 'a token and the file’s name, no folder of B’s').toMatch(new RegExp(`^maws-artifact://[0-9a-f]{32}/${PAGE_ON_B.name.replace('.', '\\.')}$`));
-      let drawn: ReturnType<Page['frames']>[number] | undefined;
-      await expect.poll(() => (drawn = again.frames().find((frame) => frame.url() === pageSrc)) !== undefined, { message: 'the page’s frame' }).toBe(true);
-      await expect(drawn!.locator('#said')).toHaveText('A page in the checkout on B.');
-      await expect.poll(() => drawn!.evaluate(() => document.body.dataset.ran ?? ''), { message: 'its inline script ran' }).toBe('yes');
+      const pageFrame = pageViewer.locator('[data-artifact-frame="html"]');
+      const tokenUrl = new RegExp(`^maws-artifact://[0-9a-f]{32}/${PAGE_ON_B.name.replace('.', '\\.')}$`);
+      const pageSrc = (await pageFrame.getAttribute('src'))!;
+      expect(pageSrc, 'a token and the file’s name, no folder of B’s').toMatch(tokenUrl);
+      // the page read through the viewer's iframe as it is at each try: an event in the file's folder (B's writes just
+      // above can reach the watch after it is taken) reads the file again and makes the frame again from a new token, which
+      // detaches a frame found by the first token's URL. On a failure: the iframe's src now against the first, and the
+      // responder's entries for the page (each token's requests)
+      const pageDoc = pageViewer.frameLocator('[data-artifact-frame="html"]');
+      const srcNow = async () => {
+        const now = await pageFrame.getAttribute('src', { timeout: 1_000 }).catch(() => null);
+        const entries = (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.startsWith('frame-entry ') && line.endsWith(`/${PAGE_ON_B.name}`));
+        return `the page's iframe src now: ${now ?? '(none)'}; first: ${pageSrc}\nthe responder's entries for the page:\n${entries.join('\n')}`;
+      };
+      await quoting(expect(pageDoc.locator('#said')).toHaveText('A page in the checkout on B.'), srcNow);
+      await quoting(expect(pageDoc.locator('body'), 'its inline script ran').toHaveAttribute('data-ran', 'yes'), srcNow);
+      await expect(pageFrame, 'the page drawn is a token’s too').toHaveAttribute('src', tokenUrl);
       await expect(pageViewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
       expect(frameCopies(), 'A’s frame-copies folder lists no entry while the page is drawn').toEqual([]);
       const open = pageViewer.getByRole('button', { name: 'Open externally', exact: true }); // the bar's
