@@ -641,8 +641,7 @@ describe('Recent', () => {
     const combobox = within(dialog()).getByRole('combobox');
     const rows = () => within(group('Recent')!).getAllByRole('option');
     expect(rows()).toHaveLength(RECENT_MAX); // eight sessions of the fill
-    fireEvent.keyDown(combobox, { key: 'End' });
-    fireEvent.keyDown(combobox, { key: 'ArrowUp' });
+    for (let n = 0; n < RECENT_MAX - 2; n++) fireEvent.keyDown(combobox, { key: 'ArrowDown' }); // to Recent's penultimate row
     const penultimate = rows()[RECENT_MAX - 2]!.dataset.value;
     expect(rows()[RECENT_MAX - 2]!.getAttribute('aria-selected')).toBe('true');
     await act(async () => {
