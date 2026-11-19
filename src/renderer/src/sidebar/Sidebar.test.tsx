@@ -2359,6 +2359,29 @@ describe('listed rows from another machine', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  // The review of the stopped-rows change (2026-11-19): an unhidden listed row drawn past the cap only by its lead, which
+  // the keyboard left and came back to, stays drawn and keeps the keyboard when its machine stops it (a stopped row has no
+  // lead), until the keyboard leaves it; at both caps
+  for (const [cap, more] of [[5, false], [8, true]] as const) {
+    it(`a focused listed row past the cap of ${cap} stays drawn when it stops, until the keyboard leaves it`, async () => {
+      const pins = Array.from({ length: cap }, (_, i) => record(at(`pin-${i}`), { projectId: maws.id, pinned: true, title: { text: `pin ${i}`, source: 'user' }, updatedAt: `2026-10-28T09:${10 + i}:00Z` }));
+      const build = listedOn('b1', { title: 'Studio build', issued: '2026-10-28T08:00:00Z' });
+      fill([build], pins);
+      act(() => useHidden.setState({ leading: new Set([build.appId]) })); // unhidden in this run
+      act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+      render(<><Sidebar /><button>Outside</button></>);
+      if (more) await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
+      act(() => row('Studio build').focus());
+      act(() => row('pin 0').focus());
+      act(() => row('Studio build').focus());
+      act(() => useSessions.setState({ listed: new Map([[build.appId, { ...build, state: 'stopped' }]]) }));
+      expect(screen.queryByRole('treeitem', { name: 'Studio build' }), 'drawn while the keyboard is on it').not.toBeNull();
+      expect(document.activeElement).toBe(row('Studio build'));
+      act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+      expect(screen.queryByRole('treeitem', { name: 'Studio build' }), 'cut once it leaves').toBeNull();
+    });
+  }
+
   // UX wave U7b (M5): with no session tab in front, a listed row picked as the selection is not selected under a page,
   // whose tab behind is not on screen; Back shows it selected again, the tab being the same.
   it('a listed row picked with no session tab in front is not selected under a page, and is again at Back', async () => {

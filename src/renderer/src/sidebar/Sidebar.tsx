@@ -209,9 +209,11 @@ function SidebarBody() {
     return (item: SidebarSession) => (item.kind === 'record' ? matches(item.record) : matchesListed(item.listed));
   }, [query, matches]);
   const expanded = useMemo(() => new Set(sidebar.expandedProjects), [sidebar.expandedProjects]);
-  // UX wave U7, O-16: a row that returns from the Hidden list while the keyboard is on it, or on the Hidden row the return
-  // empties, keeps the keyboard and stays drawn while the keyboard stays on it: exempt from the caps as a spawned lead is, at
-  // its own rank and with no lead. Once the keyboard leaves it, it falls under the caps like any row.
+  // UX wave U7, O-16: the session row the keyboard is on stays drawn while the keyboard stays on it: exempt from the caps as
+  // a spawned lead is, at its own rank and with no lead, so a row drawn past the caps (by a lead that then ends, or a
+  // listing that stops) is not cut from under the keyboard. A row that returns from the Hidden list while the keyboard is
+  // on it, or on the Hidden row the return empties, takes the keyboard and so the same. Once the keyboard leaves it, it
+  // falls under the caps like any row.
   const [kept, setKept] = useState<{ hidden: typeof hiddenSessions; id: AppSessionId | null }>({ hidden: hiddenSessions, id: null });
   if (kept.hidden !== hiddenSessions) {
     const empties = (id: AppSessionId) => {
@@ -221,8 +223,9 @@ function SidebarBody() {
     const back = focusWithin ? [...kept.hidden.keys()].find((id) => !hiddenSessions.has(id) && (focused === sessionNodeId(id) || empties(id))) : undefined;
     setKept({ hidden: hiddenSessions, id: back ?? kept.id });
     if (back !== undefined) setFocused(sessionNodeId(back));
-  } else if (kept.id !== null && !(focusWithin && focused === sessionNodeId(kept.id))) {
-    setKept({ hidden: hiddenSessions, id: null });
+  } else if (!(focusWithin && kept.id !== null && focused === sessionNodeId(kept.id))) {
+    const onRow = focusWithin ? (rankedEntries.flatMap((e) => e.items.map(sidebarSessionId)).find((id) => focused === sessionNodeId(id)) ?? null) : null;
+    if (onRow !== kept.id) setKept({ hidden: hiddenSessions, id: onRow });
   }
 
   // Five project rows, then "Show more" for the rest (Codex's `maxGroups`); the machines' rows stay last whatever is
