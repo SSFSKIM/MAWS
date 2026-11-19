@@ -196,4 +196,35 @@ describe('a step and the mounted Overview over a split', () => {
     await turn();
     expect(document.activeElement).toBe(tab('a'));
   });
+
+  it('a step between two Overview entries keeps the Overview open and its keyboard; a step from a tab onto one opens it with the keyboard', async () => {
+    render(<Split />);
+    act(() => tab('a').focus());
+    await settle();
+    act(() => layout().setOverviewOpen(true));
+    await settle();
+    const panel = screen.getByRole('dialog', { name: 'Overview' });
+    expect(document.activeElement).toBe(panel);
+    act(() => layout().activateTab(tabOf('b'))); // an act outside the Overview shows B under it, and leaves it open
+    await settle();
+    expect(layout().overviewOpen).toBe(true);
+    expect(record()).toEqual({ entries: [T('a'), over(T('a')), over(T('b'))], at: 2 });
+    act(() => runAction('go.back')); // to the Overview over A
+    await settle();
+    expect(layout().overviewOpen).toBe(true);
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(screen.getByRole('dialog', { name: 'Overview' })).toBe(panel); // the same panel, never closed between
+    expect(document.activeElement).toBe(panel);
+    expect(record()).toEqual({ entries: [T('a'), over(T('a')), over(T('b'))], at: 1 });
+    // the control: back to the tab A, then Forward from it opens the Overview over A, which takes the keyboard
+    act(() => runAction('go.back'));
+    await settle();
+    expect(layout().overviewOpen).toBe(false);
+    expect(document.activeElement).toBe(tab('a'));
+    act(() => runAction('go.forward'));
+    await settle();
+    expect(layout().overviewOpen).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'Overview' }));
+    expect(record().at).toBe(1);
+  });
 });
