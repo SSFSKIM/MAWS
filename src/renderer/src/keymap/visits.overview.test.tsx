@@ -38,7 +38,7 @@ function Split() {
         <section id={`pane-${index}`} data-pane={index} key={index} onFocusCapture={() => layout().focusPane(index as 0 | 1)}>
           <div data-pane-strip>
             <div role="tablist" aria-label={`Tabs ${index}`}>
-              {pane.tabs.map((t) => <button type="button" role="tab" aria-label={t.id} aria-selected={t.id === pane.activeTabId} key={t.id}>{t.id}</button>)}
+              {pane.tabs.map((t) => <button type="button" role="tab" aria-label={t.id} aria-selected={t.id === pane.activeTabId} data-tab-id={t.id} key={t.id}>{t.id}</button>)}
             </div>
           </div>
         </section>
@@ -230,5 +230,64 @@ describe('a step and the mounted Overview over a split', () => {
     expect(layout().overviewOpen).toBe(true);
     expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'Overview' }));
     expect(record().at).toBe(1);
+  });
+
+  // The branch panel's fix wave (group G4): where the Overview gives the keyboard back when it closes after a step.
+  const escape = () => act(() => void fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' }));
+
+  it('Back onto the Overview over A, B in front of the same pane: dismissed, it gives the keyboard to A, not to B (sweep#6)', async () => {
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a'), ref('b')], activeTabId: tabOf('b') }], focusedPane: 0 } });
+    render(<Split />);
+    act(() => tab('b').focus());
+    await settle();
+    useVisits.setState({ record: { entries: [over(T('a')), T('b')], at: 1 } });
+    act(() => runAction('go.back'));
+    await settle();
+    expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'Overview' }));
+    escape();
+    await settle();
+    expect(layout().overviewOpen).toBe(false);
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(document.activeElement).toBe(tab('a'));
+  });
+
+  it('Back and Forward between two Overview entries over two panes: dismissed, it gives the keyboard to the pane Forward restored (scalpel-2#3)', async () => {
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('c'), ref('a')], activeTabId: tabOf('c') }, { tabs: [ref('b')], activeTabId: tabOf('b') }], focusedPane: 1 } });
+    render(<Split />);
+    act(() => tab('b').focus());
+    await settle();
+    useVisits.setState({ record: { entries: [T('b')], at: 0 } });
+    act(() => layout().setOverviewOpen(true)); // over B, its opener B's tab
+    await settle();
+    act(() => layout().activateTab(tabOf('a'))); // A on the left, from outside the Overview
+    await settle();
+    expect(record()).toEqual({ entries: [T('b'), over(T('b')), over(T('a'))], at: 2 });
+    act(() => runAction('go.back'));
+    await settle();
+    act(() => runAction('go.forward'));
+    await settle();
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    escape();
+    await settle();
+    expect(layout().overviewOpen).toBe(false);
+    expect(document.activeElement).toBe(tab('a'));
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(layout().main.focusedPane).toBe(0);
+  });
+
+  it('a step from the Overview to a tab of the other pane gives that tab the keyboard as the Overview closes', async () => {
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [ref('a')], activeTabId: tabOf('a') }, { tabs: [ref('b')], activeTabId: tabOf('b') }], focusedPane: 1 } });
+    render(<Split />);
+    act(() => tab('b').focus());
+    await settle();
+    act(() => layout().setOverviewOpen(true)); // over B, its opener B's tab
+    await settle();
+    useVisits.setState({ record: { entries: [T('a'), over(T('b'))], at: 1 } });
+    act(() => runAction('go.back'));
+    await settle();
+    expect(layout().overviewOpen).toBe(false);
+    expect(document.activeElement).toBe(tab('a'));
+    expect(frontOf(layout())).toBe(tabOf('a'));
+    expect(record()).toEqual({ entries: [T('a'), over(T('b'))], at: 0 });
   });
 });
