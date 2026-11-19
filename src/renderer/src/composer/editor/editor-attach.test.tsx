@@ -20,6 +20,7 @@ import { docOf, paragraph, PASTED, textNode, type ComposerDoc } from './doc';
 import { DRAFT_DELAY_MS } from './drafts';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import { pastedBlock } from './pasted-block';
+import { UNREAD } from './unread';
 
 const APP = at('app-attach' as AppSessionId);
 const client = {
@@ -178,6 +179,20 @@ describe('the editor takes an attached block', () => {
     await release();
     expect(ofId(handle.current!.doc(), 'attach-w')).toHaveLength(0);
     expect(saved).toEqual([]);
+  });
+
+  // The delta review's fix wave, H3: a save of this mount's taken before its restore came back unread leaves it read.
+  it('a box whose own save was taken before its restore answered unread takes the block', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { port, release } = heldPort(UNREAD as never, { holdLoad: true });
+    const { handle } = mount(port);
+    act(() => handle.current!.insertText('typed first'));
+    await act(async () => void vi.advanceTimersByTime(DRAFT_DELAY_MS)); // its save, taken
+    await release(); // the restore answers: not read
+    let answer: string | null = null;
+    await act(async () => void (answer = await handle.current!.attachPasted({ id: 'attach-y', text: 'x' }, { at: 'end', save: false })));
+    expect(answer).toBe('taken');
+    expect(ofId(handle.current!.doc(), 'attach-y')).toHaveLength(1);
   });
 
   it('a wait on a restore that never comes ends gone when it unmounts', async () => {

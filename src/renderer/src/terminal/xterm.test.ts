@@ -128,6 +128,7 @@ describe('xterm adapter', () => {
       ['가나다라마', '가나다라마'],
       ['abc 한글', 'abc 한글'],
       ['abc界ef', 'abc界ef'], // the wide character fits at the row's end: nothing to drop
+      ['abcdeX\x1b[1;5H\x1b[X', 'abcd X'], // a cell erased in place before a narrow wrap is a blank, kept
     ]) {
       const wide = createXtermRenderer(options);
       wide.resize(5, 5);

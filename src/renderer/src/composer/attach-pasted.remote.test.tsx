@@ -235,3 +235,24 @@ describe('a box over the link that saves at once', () => {
   });
 });
 
+// The delta review's fix wave, H1: "Added" only where a document the machine took holds the block. The window's queued
+// draft is a document to keep, never proof that it was kept.
+describe('a box over the link whose saves the machine refuses', () => {
+  it('a covered box that leaves while its save is out, both its save and its flush refused: never added', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the queue says a save was not kept, as it does
+    const OFFLINE = { ok: false as const, error: { code: 'host_unavailable' as const, message: 'the machine is offline' } };
+    const store = over();
+    store.put(EARLIER);
+    const box = mountComposer(R, store.client, { overLink: true, covered: true });
+    await box.restored();
+    store.hold(SET);
+    const a = attach(store);
+    await waitFor(() => expect(store.held(SET)).toHaveLength(1));
+    box.unmount(); // its flush holds the block, queued behind the save
+    store.failWrites(OFFLINE);
+    await store.held(SET)[0]!.answer(OFFLINE);
+    expect(await a.done).toEqual(unconfirmed);
+    expect(store.doc()).toEqual(EARLIER); // the machine took nothing
+    expect(a.lines()).toHaveLength(1);
+  });
+});

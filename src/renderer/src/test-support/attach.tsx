@@ -55,6 +55,7 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
   let known = true;
   let offered = true;
   let readFails: Result | null = null;
+  let writeFails: Result | null = null;
   let stamps = 0;
   const holds: Name[] = [];
   const held: Held[] = [];
@@ -79,6 +80,7 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
   const write = (input: SetInput): Result => {
     if (!offered) return NOT_OFFERED;
     if (!known) return failure('internal', `unknown app session: ${appSessionId}`);
+    if (writeFails !== null) return writeFails;
     const { draft, replaces } = input;
     const now = row !== null && !row.cleared ? row : null;
     if (rule === 'this-build') {
@@ -171,6 +173,10 @@ export function draftStore(appSessionId: AppSessionId, options: { overLink?: boo
     },
     failReads(result: Result | null) {
       readFails = result;
+    },
+    /** Every write from now on answered so, landing nothing (null: written again as the rule says). */
+    failWrites(result: Result | null) {
+      writeFails = result;
     },
     /** The document kept now (null: none, or cleared), and its revision. */
     doc: (): ComposerDoc | null => (row === null || row.cleared ? null : (row.doc as ComposerDoc)),

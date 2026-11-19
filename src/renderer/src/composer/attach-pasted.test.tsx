@@ -13,6 +13,7 @@ import { REQUEST_TIMEOUT_MS } from '@shared/host/host-supervisor';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { at } from '../../../../test/support/machine';
 import { resetReaderRows } from '../lane-b/reader-rows';
+import { queueFirstSend, takeFirstSend } from '../sessions/remote-spawn';
 import { useSetup } from '../sessions/store';
 import { resetCatalogStore } from '../stores/catalog';
 import { resetComposerStore } from '../stores/composer';
@@ -928,5 +929,29 @@ describe('the branch panel’s fix wave (G1, G2)', () => {
       terminal.remove();
       sidebar.remove();
     });
+  });
+});
+
+// The delta review's fix wave, H4: where the keyboard was is read as the attach begins, before any wait.
+describe('the keyboard at the press, across a first send’s wait', () => {
+  it('a keyboard the person moved while the attach waited is not taken back', async () => {
+    const store = draftStore(S);
+    store.put(EARLIER);
+    const box = mountComposer(S, store.client);
+    await box.restored();
+    const terminal = document.createElement('textarea');
+    const sidebar = document.createElement('button');
+    document.body.append(terminal, sidebar);
+    terminal.focus();
+    queueFirstSend(S); // a first send still to go: the attach waits for it
+    const a = attach(store);
+    await settle();
+    sidebar.focus(); // the person moves on
+    takeFirstSend(S); // it went
+    expect(await a.done).toEqual(added); // at the end, saved, and said
+    expect(document.activeElement).toBe(sidebar);
+    a.holds(store.doc(), 'earlier words');
+    terminal.remove();
+    sidebar.remove();
   });
 });
