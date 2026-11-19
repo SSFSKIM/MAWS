@@ -66,6 +66,7 @@ describe('what is attached', () => {
     await attachFromTerminal('t1' as never, 'chord');
     expect(attached.calls).toEqual([[HERE, 'prompt $ ls\nREADME.md']]);
     attached.calls = [];
+    useNotices.setState({ notices: [] });
     await attachFromTerminal('t1' as never, 'menu'); // the menu's item is disabled with no selection: nothing to read
     terminal.screen = '   ';
     await attachFromTerminal('t1' as never, 'chord');

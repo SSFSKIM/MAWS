@@ -215,7 +215,7 @@ export function mountComposer(appSessionId: AppSessionId, client: MawsBridge, op
       [],
     );
     return (
-      <div {...(options.inert && { inert: '' })}>
+      <div inert={options.inert ?? false}>
         <section ref={root} aria-label="Composer">
           <Editor appSessionId={appSessionId} cwd="/work" sessionId={null} drafts={port} client={client} handle={handle} disabled={options.disabled ?? null} {...(options.onSubmit && { onSubmit: options.onSubmit })} />
         </section>

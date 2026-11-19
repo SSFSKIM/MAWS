@@ -543,7 +543,7 @@ describe('the store’s round', () => {
 // The named question: a terminal can belong to a session that has not started, in three ways.
 describe('a session that has not started', () => {
   const intent = { appSessionId: S } as never;
-  const record = { appId: S, title: { text: 'A chat' } } as never;
+  const record = { appId: S, title: { text: 'A chat' }, holder: { kind: 'self' } } as never;
   const status = { process: 'exited' } as never;
   it.each([
     ['before any start', { intent: true, record: false, engine: false }],

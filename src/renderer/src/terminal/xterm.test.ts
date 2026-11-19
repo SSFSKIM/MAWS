@@ -111,7 +111,8 @@ describe('xterm adapter', () => {
     const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
     await new Promise<void>((resolve) => renderer.write(lines.join('\r\n'), resolve));
     expect(renderer.screenText()).toBe(['line 9', 'line 10', 'line 11', 'line 12'].join('\n')); // the screen at the end
-    instances.at(-1)!.scrollLines(-5);
+    // a person's scroll up, as it leaves the buffer: happy-dom lays nothing out, so xterm's own viewport cannot move it
+    (instances.at(-1) as unknown as { _core: { _bufferService: { scrollLines(rows: number): void } } })._core._bufferService.scrollLines(-5);
     expect(renderer.screenText()).toBe(['line 4', 'line 5', 'line 6', 'line 7'].join('\n')); // scrolled up: what it shows, not the end
     renderer.dispose();
 
