@@ -1154,6 +1154,36 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     expect(await paths().namesInAgent(S, AGENT, P), 'the control: the same search, not abandoned').toBe('counted');
   });
 
+  // The branch's M3 re-review: the client ends while the agent file's open is under way, and the open then succeeds: the
+  // descriptor is closed with nothing asked of it (no stat), and the job waiting behind runs.
+  it('closes, unread, an agent file whose open answered after its last waiter left, and the next job runs', async () => {
+    await writeTranscript([linkTo('/work/out/next.md')]);
+    const agent = await writeAgent(AGENT, linking());
+    const client = new AbortController();
+    const asked: string[] = [];
+    const open: NonNullable<NamedPathsOptions['open']> = async (path, flags) => {
+      const handle = await counting(path, flags);
+      if (path !== agent) return handle;
+      client.abort(); // while the open was pending: it answers after the last waiter left
+      const stat = handle.stat.bind(handle);
+      const close = handle.close.bind(handle);
+      return Object.assign(handle, {
+        stat: (...args: Parameters<FileHandle['stat']>) => (asked.push('stat'), stat(...args)),
+        close: () => (asked.push('close'), close()),
+      });
+    };
+    const named = paths({ open });
+    const held = holdAt('found');
+    const abandoned = named.namesInAgent(S, AGENT, P, client.signal);
+    await held.reached;
+    const next = named.names(S, '/work/out/next.md'); // waits behind it, in the one slot
+    held.release();
+    expect(await abandoned).toBe(false);
+    expect(await next, 'the next job runs').toBe('counted');
+    expect(asked, 'closed, with no stat').toEqual(['close']);
+    expect(await paths({ open }).namesInAgent(S, AGENT, P), 'the control: the same open, its waiter still there').toBe('counted');
+  });
+
   it('a request made after the session is bound to another transcript does not join the search of the old one’s subagent (X2.11, W3)', async () => {
     await writeTranscript(filler(2));
     await writeAgent(AGENT, linking());
