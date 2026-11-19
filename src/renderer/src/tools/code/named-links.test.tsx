@@ -311,6 +311,9 @@ describe('the rule reads the blocks the window draws', () => {
     const fenced = `- a\n\n  x \`y\n  2.\t\`\`\`\n  [r](${at}r.md)\n\n[s](${at}s.md)`;
     expect(linkPaths(fenced)).toEqual([]);
     expect(chipPaths(fenced)).toContain('/x/s.md');
+    // a weak line over a delimiter row is a table's head to the window; the control has no delimiter row
+    agree(`x \`y\n2. \`\`\`\n  :---\n| x | y | [r](${at}r.md) |`, []);
+    agree(`x \`y\n2. a\n  b\n| x | y | [r](${at}r.md) |`, ['/x/r.md']);
     // what still drops: a paragraph that does not open its item, and a weak line less indented than its text
     const uncertain = `- a\n\n  x \`y\n2. [r](${at}r.md) \``;
     expect(chipPaths(uncertain)).toEqual(['/x/r.md']);

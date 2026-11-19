@@ -258,6 +258,8 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(`- a\n\n  x \`y\n  2.\t# [r](${at}r.md) \``), 'a tab after the marker').toEqual([]);
     expect(linkPaths(`- a\n\n  x \`y\n  1.\t# [r](${at}r.md) \``), 'a tab after the marker, the control').toEqual(['/x/r.md']);
     expect(linkPaths(`- a\n\n  x \`y\n  2.\t\`\`\`\n  [r](${at}r.md)\n\n[s](${at}s.md)`), 'a fence it may open: the text is refused').toEqual([]);
+    expect(linkPaths(`x \`y\n2. \`\`\`\n  :---\n| x | y | [r](${at}r.md) |`), 'a weak line over a delimiter row: a table to the window').toEqual([]);
+    expect(linkPaths(`x \`y\n2. a\n  b\n| x | y | [r](${at}r.md) |`), 'the control: no delimiter row, the code span stays open').toEqual(['/x/r.md']);
   });
 
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
