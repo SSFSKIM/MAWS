@@ -18,6 +18,7 @@ export const SKILL_ACTIONS = {
   newSkill: 'New skill…',
   inProject: 'In this project', // the skills' own group headings (widgets/copy.ts)
   yours: 'Created by you',
+  homeUnknown: 'Your Claude configuration folder is not known yet. Refresh to try again.', // why "Created by you" waits
   // the composer's text, sent by the person; `creator` is skill-creator's invocation when it can run here
   firstMessage: (where: 'project' | 'yours', skillsHome: string, creator: string | null) =>
     `${creator === null ? '' : `/${creator} `}Let's create a new skill in ${where === 'project' ? '.claude/skills/ of this project' : `${skillsHome}, for all my projects`}. First ask me what it should do.`,

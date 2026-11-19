@@ -321,7 +321,9 @@ async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Pro
       r.serversOf(record(raw)?.mcpServers, 'project', path);
     }
   }
-  r.serversRead = appRead && r.mcpEnd();
+  // the section ends whatever the app's settings said, so a later skill warning is not taken for an MCP one (U11 decision 13)
+  const restRead = r.mcpEnd();
+  r.serversRead = appRead && restRead;
   if (isAbsolute(configHome)) await installedSkills(r, configHome, cwd);
 }
 

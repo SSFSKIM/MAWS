@@ -15,6 +15,8 @@ import { project, status } from '../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
+import { useSettings } from '../stores/settings';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mountCustomize } from '../test-support/customize-page';
@@ -716,6 +718,60 @@ describe('a skill’s actions', () => {
     await act(async () => replies[2]!({ status: 'opened' }));
     await act(async () => replies[1]!(MISSING));
     expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  // the review's second round (U11 decision 13)
+  const rejected = (message: string) => {
+    const promise = Promise.reject(new Error(message));
+    promise.catch(() => undefined);
+    return promise;
+  };
+  const CREATOR = { name: 'skill-creator', description: 'Makes skills', source: 'plugin', path: `${HOME}/plugins/cache/skill-creator/skills/skill-creator/SKILL.md`, plugin: 'skill-creator@official', pluginName: 'skill-creator' };
+  const PLAIN = `Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`;
+
+  it('calls skill-creator only on a current listing: not after a refresh of the plugin list fails, nor while one is being read', async () => {
+    useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' } });
+    extraSkills = [CREATOR];
+    installed = [buoyLog, { ...buoyLog, id: 'skill-creator@official', name: 'skill-creator', installPath: `${HOME}/plugins/cache/skill-creator` }];
+    useCustomizeProject.setState({ projectId: null }, true);
+    mountCustomize({ view: 'mine', show: 'all' });
+    await envRead();
+    const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
+    await waitFor(() => expect(invoked('plugins.list')).not.toEqual([]));
+    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
+    await act(async () => undefined);
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(1)).toBe(`/skill-creator:skill-creator ${PLAIN}`));
+    // a refresh that fails: the list shown is the last one read, which confirms nothing now
+    listAnswer = rejected('listing failed');
+    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(invoked('plugins.list').length).toBeGreaterThan(1));
+    await act(async () => undefined);
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(2)).toBe(PLAIN));
+    // a refresh still being read
+    listAnswer = new Promise(() => {});
+    const asked = invoked('plugins.list').length;
+    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(invoked('plugins.list').length).toBeGreaterThan(asked));
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(3)).toBe(PLAIN));
+    act(() => useSettings.setState({ state: null }));
+  });
+
+  it('when the configuration home’s first read fails, New skill… says why it waits, and Refresh reads it again', async () => {
+    useCustomizeProject.setState({ projectId: null }, true);
+    envAnswer = rejected('engine unavailable');
+    mountCustomize({ view: 'mine', show: 'skills' });
+    await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
+    const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
+    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(true));
+    expect(newSkill().getAttribute('title')).toBe('Your Claude configuration folder is not known yet. Refresh to try again.');
+    envAnswer = null;
+    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(1)).toBe(PLAIN));
   });
 
   it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {

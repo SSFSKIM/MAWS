@@ -22,7 +22,7 @@ import { LIBRARY, SKILLS_LIBRARY } from '../widgets/copy';
 import { AddMenu } from '../widgets/plugins/AddMenu';
 import { Choice, LibrarySwitch, PluginsChoices } from '../widgets/plugins/LibraryHeader';
 import { useLibraryStore } from '../widgets/plugins/library-store';
-import { pluginsReadKey } from '../widgets/plugins/read';
+import { pluginsReadKey, usePluginsEnv } from '../widgets/plugins/read';
 import { diskSkillGroups, hasPluginSkills } from '../widgets/skills/skills';
 import { CONNECTORS } from './connectors/copy';
 import { CUSTOM_ADD, CUSTOM_ADD_KEY } from './connectors/manage';
@@ -167,16 +167,20 @@ function SkillsSort() {
   return <Choice label={LIBRARY.sortBy} icon={<SortIcon />} value={sort} values={['name', 'plugin'] as const} words={SKILLS_LIBRARY.sort} isDefault={sort === 'name'} onChange={(next) => useLibraryStore.setState((state) => ({ skills: { ...state.skills, sort: next } }))} />;
 }
 
-// Refresh reads the inventory again, and under All the plugin list too.
+// Refresh reads the inventory again, and under All the plugin list too; while the engine's configuration home is unknown
+// (its first read failed), plugins.env again, which "New skill…" waits for (UX wave U11's skill actions, decision 13).
 function Refresh({ plugins = false }: { plugins?: boolean }) {
   const { inventory, directory } = usePlace();
   const client = useQueryClient();
+  const env = usePluginsEnv();
+  const homeUnknown = env.data?.configHome === undefined;
   return (
     <button
       type="button"
       className={BUTTON}
       onClick={() => {
         void inventory.refetch();
+        if (homeUnknown) void env.reread();
         if (plugins && directory !== null) void client.refetchQueries({ queryKey: pluginsReadKey('plugins.list', directory) });
       }}
     >

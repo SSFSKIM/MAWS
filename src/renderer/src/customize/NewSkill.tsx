@@ -5,7 +5,8 @@
 import { DropdownMenu } from 'radix-ui';
 import { useMemo } from 'react';
 import { useSettings } from '../stores/settings';
-import { usePluginsEnv, usePluginsRead } from '../widgets/plugins/read';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { pluginsReadKey, usePluginsEnv, usePluginsRead } from '../widgets/plugins/read';
 import { SKILL_ACTIONS as A } from './copy';
 import { usePlace } from './place';
 import { creatorInvocation, skillsHomeOf, startNewSkill, type SkillPlace } from './skill-actions';
@@ -21,8 +22,13 @@ export function NewSkill() {
   // the plugins a chat started here goes without, as the session's Skills dialog reads them (widgets/SkillsWidget.tsx)
   const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
   const pluginsOff = useMemo(() => (off === undefined ? null : new Set(off)), [off]);
-  // the plugins in effect for this place, as the plugin library counts them (widgets/plugins/library.ts, `enabledHere`)
-  const installed = usePluginsRead('plugins.list', directory).data?.plugins;
+  // the plugins in effect for this place, as the plugin library counts them (widgets/plugins/library.ts, `enabledHere`), from
+  // a current listing only: one being read again, invalidated or whose last read failed is unknown, the plain sentence
+  const listing = usePluginsRead('plugins.list', directory);
+  const key = pluginsReadKey('plugins.list', directory);
+  const reading = useIsFetching({ queryKey: key }) > 0;
+  const invalidated = useQueryClient().getQueryState(key)?.isInvalidated ?? false;
+  const installed = listing.error === null && !reading && !invalidated ? listing.data?.plugins : undefined;
   const enabledHere = useMemo(() => (installed === undefined ? null : new Set(installed.filter((p) => p.enabled).map((p) => p.id))), [installed]);
   const start = (where: SkillPlace) => {
     if (where === 'yours' && configHome === null) return;
@@ -32,7 +38,7 @@ export function NewSkill() {
   const waiting = configHome === null;
   if (cwd === null) {
     return (
-      <button type="button" data-new-skill className={BUTTON} disabled={waiting} onClick={() => start('yours')}>
+      <button type="button" data-new-skill className={BUTTON} disabled={waiting} title={waiting ? A.homeUnknown : undefined} onClick={() => start('yours')}>
         {A.newSkill}
       </button>
     );
@@ -49,7 +55,7 @@ export function NewSkill() {
           <DropdownMenu.Item className={ITEM} onSelect={() => start('project')}>
             {A.inProject}
           </DropdownMenu.Item>
-          <DropdownMenu.Item className={ITEM} disabled={waiting} onSelect={() => start('yours')}>
+          <DropdownMenu.Item className={ITEM} disabled={waiting} title={waiting ? A.homeUnknown : undefined} onSelect={() => start('yours')}>
             {A.yours}
           </DropdownMenu.Item>
         </DropdownMenu.Content>

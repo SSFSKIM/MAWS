@@ -218,6 +218,15 @@ describe('cold customization inventory', () => {
     expect((await read()).skillsRead).toBe(false);
   });
 
+  it('an unreadable plugin directory leaves the skills not wholly read though MAWS’s own settings file is invalid', async () => {
+    await file(join(userData, 'machine-settings.json'), '{ not json');
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: join(root, 'gone') }] } });
+    const answer = await read();
+    expect(answer.serversRead).toBe(false);
+    expect(answer.warnings.join(' ')).toMatch(/installed plugin directory could not be read/);
+    expect(answer.skillsRead).toBe(false);
+  });
+
   it('does not mistake a linked checkout for an attested local key', async () => {
     const cwd = join(home, 'linked');
     await file(join(cwd, '.git'), 'gitdir: /not/read');
