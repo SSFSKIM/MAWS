@@ -37,6 +37,7 @@ import { OTHER_MACHINE } from '../support/machine';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
 import { resetReaderRows } from '../../src/renderer/src/lane-b/reader-rows';
+import { UNREAD } from '../../src/renderer/src/composer/editor/unread';
 import { loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft } from '../../src/renderer/src/lane-b/remote-drafts';
 import { useNotices } from '../../src/renderer/src/stores/notices';
 
@@ -132,7 +133,10 @@ async function play(events: readonly Event[], reader: Reader, start: 'kept' | 'n
   const m = machine(bus, reader);
   let held: unknown[] = []; // the attachments the composer holds: those its last load gave it
   const port = {
-    load: async () => void (held = attachmentsOf(await loadRemoteDraft(m.client, app, () => null))),
+    load: async () => {
+      const loaded = await loadRemoteDraft(m.client, app, () => null);
+      held = attachmentsOf(loaded === UNREAD ? null : loaded); // a draft not read restores nothing, as the composer does
+    },
     save: (draft: Draft | null) => saveRemoteDraft(m.client, app, draft, () => {}),
   };
   await port.load(); // the composer opens
