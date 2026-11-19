@@ -88,6 +88,19 @@ describe('the record of places', () => {
     expect(gone(record([P, A, P]), new Set(['a']))).toEqual(record([P], 0)); // a page by its kind
   });
 
+  it('gone: a merged group keeps the value of the entry the record is at, which is what the window shows, else the newer', () => {
+    const plugins = page({ kind: 'customize', view: 'mine', show: 'plugins' });
+    const connectors = page({ kind: 'customize', view: 'mine', show: 'connectors' });
+    const pruned = gone(record([plugins, B, connectors, C], 0), new Set(['b']));
+    expect(pruned).toEqual(record([plugins, C], 0));
+    // the round trip: Forward to C, then Back, restores the page as it was shown
+    const forward = step(pruned, 1);
+    expect(forward).toEqual(record([plugins, C], 1));
+    expect(target(forward, -1)).toEqual({ place: plugins, at: 0 });
+    expect(gone(record([plugins, B, connectors, C], 3), new Set(['b']))).toEqual(record([connectors, C], 1)); // not at either: the newer
+    expect(gone(record([plugins, B, connectors, C], 2), new Set(['b']))).toEqual(record([connectors, C], 0)); // at the later one
+  });
+
   it('gone: the position stays on its entry when it survives, else moves to the nearest entry before it that does', () => {
     expect(gone(record([A, B, C], 0), new Set(['b']))).toEqual(record([A, C], 0));
     expect(gone(record([A, B, C], 2), new Set(['c']))).toEqual(record([A, B], 1));
