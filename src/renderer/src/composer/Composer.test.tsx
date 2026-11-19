@@ -2689,7 +2689,7 @@ describe('a Stop that fails says so (S-01)', () => {
 // force; a later press supersedes an earlier one; a press while the chip takes no change says nothing.
 describe('the mode said aloud', () => {
   type ModeAnswer = { effective: PermissionMode; refusal: AutoModeRefusalCode | null; error: string | null };
-  let held: ((value: { ok: true; value: ModeAnswer }) => void)[] = [];
+  let held: ((value: unknown) => void)[] = [];
   // `session.setPermissionMode` held open until the test answers it; every other command as the suite's fake answers it
   beforeEach(() => {
     held = [];
@@ -2697,7 +2697,7 @@ describe('the mode said aloud', () => {
     window.maws = {
       ...bridge,
       invoke: ((name: string, input: unknown, target?: unknown) =>
-        name === 'session.setPermissionMode' ? new Promise((resolve) => held.push(resolve)) : (bridge.invoke as (n: string, i: unknown, t?: unknown) => Promise<unknown>)(name, input, target)) as PreloadBridge['invoke'],
+        name === 'session.setPermissionMode' ? new Promise<unknown>((resolve) => held.push(resolve)) : (bridge.invoke as (n: string, i: unknown, t?: unknown) => Promise<unknown>)(name, input, target)) as PreloadBridge['invoke'],
     };
   });
   const answer = (nth: number, value: ModeAnswer) => act(async () => {
