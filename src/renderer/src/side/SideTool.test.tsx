@@ -51,6 +51,13 @@ import { registerDock } from '../tools/browser/comment/dock'; // P2-F L146
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files'; // UX wave U6b-4b
 import { FileViewer } from '../tools/code/viewer/FileViewer';
 import { useViewer } from '../tools/code/viewer/viewer-store';
+import { openFile } from '../tools/code/open-file';
+// UX wave U6b-4b (R4): the opener the answers' chips call, spied through to the real one, so a case counts its calls
+vi.mock('../tools/code/open-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../tools/code/open-file')>();
+  return { ...actual, openFile: vi.fn(actual.openFile) };
+});
+
 
 const ONE = at('side-one' as AppSessionId);
 const TWO = at('side-two' as AppSessionId);
@@ -509,6 +516,7 @@ describe('a path in a side thread’s question answers (U6b-4b)', () => {
   beforeEach(() => {
     resetSideQuestions();
     useViewer.getState().reset();
+    vi.mocked(openFile).mockClear();
     unregister = registerPanelTool(filesTool);
   });
   afterEach(() => unregister());
@@ -528,6 +536,7 @@ describe('a path in a side thread’s question answers (U6b-4b)', () => {
   it('a click opens the file beside the thread’s own chat at its line', async () => {
     const chip = await chipOf('See [a](/work/a.ts#L12).', '/work/a.ts');
     act(() => void fireEvent.click(chip));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[ONE, '/work/a.ts', 12, { main: false }]]); // one open per click, the tabs' reuse aside
     expect(filesBeside(ONE)).toEqual([{ file: '/work/a.ts', line: 12, preview: true }]);
     expect(filesBeside(A)).toEqual([]);
   });
@@ -535,6 +544,7 @@ describe('a path in a side thread’s question answers (U6b-4b)', () => {
   it('⌘ opens a main tab for the thread at the line; a path outside the folders makes one read by name for the thread, refused as today', async () => {
     const chip = await chipOf('See [o](/elsewhere/o.md#L12).', '/elsewhere/o.md');
     act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[ONE, '/elsewhere/o.md', 12, { main: true }]]);
     const tab = allTabs(useLayout.getState().main).find((t): t is Extract<typeof t, { kind: 'file' }> => t.kind === 'file');
     expect(tab).toMatchObject({ path: '/elsewhere/o.md', line: 12, appSessionId: ONE });
     cleanup();

@@ -2104,6 +2104,31 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     expect(main.callsOf('files.read').filter((input) => input.path === '/elsewhere/docs/setup.md')).toEqual([asked('/elsewhere/docs/setup.md')]);
   });
 
+  // L5 (R2): the window resolves the relative chip against the session's working folder; the transcript wrote the relative
+  // string, which names nothing, so the one read for the absolute path is refused
+  it('a relative transcript chip that climbs out of the working folder makes one named read of the absolute path for the row’s session, refused (L5)', async () => {
+    const main = installDisk({ '/outside/secret.md': 'secret\n' }, { outside: ['/outside'], names: () => false });
+    useSessions.setState({ records: new Map([[A, record(A, { directory: '/r/work' })], [B, record(B, { directory: '/b' })]]) });
+    try {
+      useLayout.getState().openTab({ kind: 'session', appSessionId: B }); // another session in front
+      const row = { storeKey: A, variant: 'session', actions: { ...NO_ACTIONS, openFile: codeTranscriptActions.openFile }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'row' } as const;
+      render(
+        <TranscriptProvider value={row}>
+          <Markdown markdown="See [x](../../outside/secret.md)." live={false} />
+        </TranscriptProvider>,
+      );
+      const chip = await screen.findByTitle('../../outside/secret.md');
+      act(() => void fireEvent.click(chip, { metaKey: true }));
+      const tab = mainFile('/outside/secret.md')!;
+      expect(tab).toMatchObject({ appSessionId: A });
+      render(<FileViewer tab={tab} />);
+      await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}/outside/secret.md`));
+      expect(main.callsOf('files.read')).toEqual([asked('/outside/secret.md')]);
+    } finally {
+      useSessions.setState({ records: new Map() });
+    }
+  });
+
   it('a path link in a subagent’s transcript and in a shown Markdown file asks by name alone: refused with no evidence, opened once the transcript names it (L14)', async () => {
     const main = disk({ '/elsewhere/guide.md': `[the notes](${OUT})`, [OUT]: 'the notes\n' }, ['/elsewhere/guide.md']);
     // a subagent's transcript is keyed `<session>:<agent>`; its rows act on the session (useRowSession)

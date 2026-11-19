@@ -32,6 +32,7 @@ import { allTabs } from '../stores/layout-model';
 import { filesTool } from '../tools/code/files/FilesTool';
 import { FileViewer } from '../tools/code/viewer/FileViewer';
 import { useViewer } from '../tools/code/viewer/viewer-store';
+import { openFile } from '../tools/code/open-file';
 import { preloadOf } from '../test-support/preload-of';
 import { SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
@@ -39,6 +40,12 @@ import { BtwCard } from './BtwCard';
 import { BtwWidget } from './BtwWidget';
 import { registerSidePane } from './register';
 import { btwCardOf, btwUnseen, onSideOperation, openBtwCard, resetSideQuestions, sidePaneOf, useBtwCards, useSidePane } from './store';
+
+// UX wave U6b-4b (R4): the opener the answers' chips call, spied through to the real one, so a case counts its calls
+vi.mock('../tools/code/open-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../tools/code/open-file')>();
+  return { ...actual, openFile: vi.fn(actual.openFile) };
+});
 
 const A_ID = bareOf(A);
 const T = Date.parse('2026-11-13T10:00:00.000Z');
@@ -570,6 +577,7 @@ describe('a path in the card’s answer (U6b-4b)', () => {
   beforeEach(() => {
     unregister = registerPanelTool(filesTool);
     useViewer.getState().reset();
+    vi.mocked(openFile).mockClear();
     withProcess(A, 'ready');
     useLayout.setState({ main: mainShowing(B) }); // another session in front
   });
@@ -581,8 +589,10 @@ describe('a path in the card’s answer (U6b-4b)', () => {
     render(<BtwCard appSessionId={A} />);
     const chip = await within(card()!).findByTitle('/work/a.ts');
     act(() => void fireEvent.click(chip));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/work/a.ts', 12, { main: false }]]); // one open per click, the tabs' reuse aside
     expect(filesBeside(A)).toEqual([{ file: '/work/a.ts', line: 12, preview: true }]);
     act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/work/a.ts', 12, { main: false }], [A, '/work/a.ts', 12, { main: true }]]);
     expect(mainFiles()).toEqual([expect.objectContaining({ path: '/work/a.ts', line: 12, appSessionId: A })]);
     expect(filesBeside(A)).toEqual([]);
     expect(filesBeside(B)).toEqual([]);
@@ -594,6 +604,7 @@ describe('a path in the card’s answer (U6b-4b)', () => {
     render(<BtwCard appSessionId={A} />);
     const chip = await within(card()!).findByTitle('/elsewhere/o.md');
     act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/elsewhere/o.md', undefined, { main: true }]]);
     const [tab] = mainFiles();
     expect(tab).toMatchObject({ path: '/elsewhere/o.md', appSessionId: A });
     render(<FileViewer tab={tab} />);
