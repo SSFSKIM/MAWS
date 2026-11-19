@@ -1893,6 +1893,38 @@ describe('files saves outside the folders', () => {
     });
   });
 
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): a `file:` link with an empty host is
+  // the scheme-less link's form, under the same rule; every other `file:` form adds no evidence
+  describe('the file: form of a link', () => {
+    const fileLink = (path: string) => `See [the file](file://${path}).`;
+
+    it('in the agent’s text, opens a file outside the folders and saves it (L2)', async () => {
+      await transcriptOf(A, [said(fileLink(out('named.txt')))]);
+      const files = outsideService();
+      expect(await shown(files, A, out('named.txt'))).toMatchObject({ named: true, outside: { real: out('named.txt'), writable: true } });
+      expect(await saveShown(files, A, out('named.txt'), 'saved\n')).toEqual({ status: 'ok', hash: sha('saved\n') });
+    });
+
+    // N1.7: refused for a session with no other evidence; the control, the person's choice, which no form takes away
+    it('a transcript whose only mention of the file is another `file:` form is refused; the person’s choice still opens it (N1.7)', async () => {
+      const path = out('unnamed.txt');
+      await transcriptOf(A, [said(`[r](file://host${path}) [r](file://localhost${path}) [r](file:${path}) <file://${path}>`), said(`[r][l]\n\n[l]: file://${path}`)]);
+      const files = outsideService();
+      await expect(shown(files, A, path)).rejects.toThrow(new Error(OUT));
+      expect(asked.transcript).toEqual([A]);
+      expect(await files.grant(A, path)).toEqual({ status: 'granted', path });
+      expect(await shown(files, A, path)).toMatchObject({ named: true, outside: { real: path, writable: true } });
+    });
+
+    it('written only in an MCP tool’s result, it opens read-only and is never saved by that name (N1.8)', async () => {
+      await transcriptOf(A, [called('t-mcp', 'mcp__docs__find', { query: 'notes' }), answered('t-mcp', [{ type: 'text', text: fileLink(out('result.txt')) }])]);
+      const files = outsideService();
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: false, why: 'result' } });
+      await expect(saveShown(files, A, out('result.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('result.txt as it was\n');
+    });
+  });
+
   // The panel's finding 2: a prompt queued in a running turn counts for a save only when the person wrote it
   describe('which queued prompts count for a save', () => {
     // board ticket 711: the envelope holds what the person typed and no label of an option, so the answer names the path

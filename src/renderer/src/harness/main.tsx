@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import '../styles/app.css';
 import { Harness } from './Harness';
 import { connectEditClaimants } from '../keymap/edit-claimants'; // P4-B2 K6
+import { turnFileLinks } from '../transcript/view/context'; // UX wave U6b-4b
 // C8a start
 import { PanelHarness } from './panel/PanelHarness';
 // C8a end
@@ -42,6 +43,8 @@ ROUTES['document-stack'] = () => <DocumentHarness stacked />; // P4-B1: the repl
 import { Probe } from './terminal/Probe';
 ROUTES.probe = () => <Probe />;
 // C9 block end
+
+turnFileLinks(true); // UX wave U6b-4b (decision 17): the harness pages are the window's, and draw a `file:` link as App does
 
 const routeOf = () => location.hash.replace(/^#/, '') || 'transcript';
 

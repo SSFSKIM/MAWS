@@ -1,11 +1,17 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { setHostActions } from '../context';
+import { fileLinksTurned, setHostActions, turnFileLinks } from '../context';
 import { DEFAULT_ACTIONS } from '../default-actions';
+import '../Transcript'; // UX wave U6b-4b (N1.12): what the desk's web app loads of the window, default-actions.ts through it
 import { Markdown } from './Markdown';
 import { transcriptUrlTransform } from './sanitize';
 
-afterEach(cleanup);
+// UX wave U6b-4b (N1.9): whatever a case of this suite draws, no element carries a `file:` or a `maws-path:` href
+afterEach(() => {
+  const hrefs = [...document.querySelectorAll('[href]')].map((element) => element.getAttribute('href')!);
+  cleanup();
+  expect(hrefs.filter((href) => /^\s*(file|maws-path):/i.test(href))).toEqual([]);
+});
 
 const ARTIFACT = '0b4f3c1e-6a2d-4c8e-9f1a-2b3c4d5e6f70';
 
@@ -95,6 +101,41 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
     expect(sources.every((src) => src !== null && src.startsWith('data:image/'))).toBe(true);
     const chips = [...root.querySelectorAll('[data-chip="image"]')].map((chip) => chip.getAttribute('title'));
     expect(chips).toContain('https://example.com/i.png');
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1 and decision 17): an inline `file:` link
+// with an empty host is a path link where the window's entries turned the switch on, and its text where they did not:
+// the desk's web app loads this Markdown and its default actions and never turns it.
+describe('the file: form', () => {
+  const FORMS = '[r](file:///work/x.md) [h](file://host/work/x.md) [s](file:/work/x.md) <file:///work/a.md> [p](src/y.ts)';
+  const chips = (root: HTMLElement) => [...root.querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'));
+
+  it('with what the desk loads loaded and the switch never turned, a `file:` link is its text; a scheme-less one is the chip it was (N1.12)', () => {
+    expect(fileLinksTurned()).toBe(false);
+    const before = render(<Markdown markdown={FORMS} live={false} />).container;
+    expect(chips(before)).toEqual(['src/y.ts']);
+    const text = [...before.querySelectorAll('span')].find((span) => span.textContent === 'r' && span.dataset.chip === undefined);
+    expect(text?.tagName).toBe('SPAN');
+    cleanup();
+    turnFileLinks(true);
+    try {
+      expect(chips(render(<Markdown markdown={FORMS} live={false} />).container)).toEqual(['/work/x.md', 'src/y.ts']);
+    } finally {
+      turnFileLinks(false);
+    }
+  });
+
+  it.each([false, true])('turned on, the inline form with an empty host alone is a chip, and no element’s href is a `file:` or `maws-path:` URL (live: %s)', (live) => {
+    turnFileLinks(true);
+    try {
+      const root = render(<Markdown markdown={`${HOSTILE}\n\n${FORMS}\n\n[c](FILE:///work/c.md#L3) and [e](<file:///work/my notes.md>)`} live={live} />).container;
+      expect(chips(root)).toEqual(['src/renderer/x.ts', '/etc/passwd', '/work/x.md', 'src/y.ts', '/work/c.md', '/work/my notes.md']);
+      expect([...root.querySelectorAll('[href]')].map((element) => element.getAttribute('href')).filter((href) => /^\s*(file|maws-path):/i.test(href!))).toEqual([]);
+      expect(root.textContent).toContain('file:///work/a.md'); // the autolink is its text
+    } finally {
+      turnFileLinks(false);
+    }
   });
 });
 

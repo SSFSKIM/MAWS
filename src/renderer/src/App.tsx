@@ -38,7 +38,7 @@ import { ComposerAppKeys, connectComposer, connectInlineEdit, WidgetDialogHost }
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { DEFAULT_ACTIONS, registerTranscriptActions } from './transcript';
-import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 review 2)
+import { setHostActions, turnFileLinks } from './transcript/view/context'; // P3-F wave S (F14 review 2); UX wave U6b-4b
 // C7 end
 import { registerBlockedCalls } from './blocked-call'; // UX wave U1c
 // C8c start
@@ -174,6 +174,7 @@ provideDocumentDesignSystem(DOCUMENT_DESIGN_SYSTEM);
 // sheet's previews, the Code tool's preview, a plugin surface) open an artifact link's main tab, so its chip works there;
 // at module load, before any surface renders
 setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
+turnFileLinks(true); // UX wave U6b-4b (decision 17): the window draws a `file:` link with an empty host as a path link; the desk does not
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);

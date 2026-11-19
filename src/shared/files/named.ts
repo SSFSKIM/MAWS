@@ -5,12 +5,17 @@
 // anchored comment's tag (the anchor form). Each form's string is read as the click reads it and compared with the
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
-// same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
+// same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing, but for one form
+// (UX wave U6b-4b, docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): an inline link's destination that is
+// a `file:` URL with an empty host (`file:///work/x.md`) names exactly what its rest names written scheme-less, read by
+// the reader the window shares (`./file-url.ts`). A `file:` URL with a host, without `//`, as an autolink or as a
+// reference's destination names nothing.
 import { ANCHOR_TAG_OPENING, commentsMessage, readAnchoredMessage } from '../anchor/message';
 import { neutralisePastedTags } from '../composer/pasted-framing';
 import { framePasted } from '../composer/pasted-content';
 import { readArrivals } from '../engine/arrival';
 import { CLAIMED_FOR_SAVES } from '../engine/composed-forms';
+import { fileUrlRest } from './file-url';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -75,9 +80,10 @@ const PERCENT_ESCAPE = /%([0-9a-fA-F]{2})/g;
 const LINE = /(?:#L(\d+)|:(\d+))$/; // the click's line suffix (markdown/Link.tsx)
 const CHIP_SCHEME = 'maws-path:'; // the window's path chip (markdown/sanitize.ts, `remarkTranscriptSources`)
 
-// The path a link with this destination asks for (click source 1): Markdown's backslash escapes resolved, remark's href,
-// `decodeURI`, the line suffix off once, `.` and `..` collapsed. Null for a destination that is no path chip (a scheme in
-// front, or empty) or that this reading does not recognise: a character reference, a letter or digit written as `%XX`
+// The path a link with this destination asks for (click source 1): Markdown's backslash escapes resolved, a `file:` URL
+// with an empty host read as its rest (`fileUrlRest`, U6b-4b), remark's href, `decodeURI`, the line suffix off once, `.`
+// and `..` collapsed. Null for a destination that is no path chip (any other scheme in front, or empty) or that this
+// reading does not recognise: a character reference (tested on the whole destination), a letter or digit written as `%XX`
 // (which is what lets the search pass a line over by its bytes, `needlesOf`), or an href `decodeURI` cannot read.
 // Step 7 (Decision Log 12): the window parses `maws-path:<href>` as a URL before the click reads it (rehype-harden's
 // `transformUrl`), so the destination is named only when the same reading of that serialisation gives the same path.
@@ -85,7 +91,8 @@ const CHIP_SCHEME = 'maws-path:'; // the window's path chip (markdown/sanitize.t
 // href, the click asks for another path than the transcript wrote, and the answer is null.
 export function clickPath(destination: string): string | null {
   if (destination === '' || CHARACTER_REFERENCE.test(destination)) return null;
-  const url = destination.replace(BACKSLASH_ESCAPE, '$1');
+  const written = destination.replace(BACKSLASH_ESCAPE, '$1');
+  const url = fileUrlRest(written) ?? written;
   if (SCHEME.test(url)) return null;
   const href = hrefOf(url);
   const path = pathOfHref(href);

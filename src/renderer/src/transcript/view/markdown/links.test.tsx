@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_ACTIONS, setHostActions, TranscriptProvider, useTranscriptContext, type TranscriptActions } from '../context';
+import { NO_ACTIONS, setHostActions, TranscriptProvider, turnFileLinks, useTranscriptContext, type TranscriptActions } from '../context';
 import { DEFAULT_ACTIONS } from '../default-actions';
 import { ARTIFACT_LINK_TITLE, openArtifactMention } from './Link';
 import { Markdown } from './Markdown';
@@ -55,6 +55,24 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts#L3).', live);
     fireEvent.click(screen.getByRole('button', { name: 'x.ts' }), { metaKey: true });
     expect(actions.openFile).toHaveBeenCalledExactlyOnceWith('src/renderer/x.ts', 3, null, { main: true });
+  });
+
+  // UX wave U6b-4b (R1, L1): where the window turned the form on, an inline `file:` link with an empty host is the path
+  // link of its rest: the same line, the same session, and ⌘ for the main area; a `file:` link with a host is its text
+  it('a file: link with no host is the path link of its path, with its line; ⌘-click asks for the main area', () => {
+    turnFileLinks(true);
+    try {
+      const { actions } = renderWith('Open [x.ts](file:///work/x.ts#L12), [y](FILE:///work/y.ts:7) and [h](file://host/work/h.ts).', live, 'app-local-session');
+      const link = screen.getByRole('button', { name: 'x.ts' });
+      expect([link.dataset.chip, link.getAttribute('title')]).toEqual(['path', '/work/x.ts']);
+      fireEvent.click(link);
+      fireEvent.click(screen.getByRole('button', { name: 'y' }), { metaKey: true });
+      expect(vi.mocked(actions.openFile).mock.calls).toEqual([['/work/x.ts', 12, 'app-local-session', { main: false }], ['/work/y.ts', 7, 'app-local-session', { main: true }]]);
+      expect(screen.queryByRole('button', { name: 'h' })).toBeNull();
+      expect(screen.getByText('h').closest('[data-chip], a')).toBeNull();
+    } finally {
+      turnFileLinks(false);
+    }
   });
 
   // UX wave U6d: a path link takes the mention's element and look (its text in the monospace font, by its data-chip),

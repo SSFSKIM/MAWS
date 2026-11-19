@@ -41,6 +41,8 @@ describe('the link form: linkPaths', () => {
     '| a | b |\n|---|---|\n| [r](/work/out/report.md) | x |',
     '> quoted [r](/work/out/report.md)',
     'two lines [of\nlink text](/work/out/report.md)',
+    '[r](file:///work/out/report.md)', // UX wave U6b-4b (R1): a `file:` URL with an empty host
+    '[r](FILE:///work/out/report.md#L12)',
   ])('%j names the path', (text) => {
     expect(linkPaths(text)).toContain(P);
   });
@@ -79,7 +81,7 @@ describe('the link form: linkPaths', () => {
     '[r](</work/out/\nreport.md>)',
     '[r](/work/out/report.md\n\n)',
     '[r](host:/work/out/report.md)',
-    '[r](file:///work/out/report.md)',
+    '[r](file://localhost/work/out/report.md)',
     '[r](/mnt/work/out/report.md)',
     '[r](/WORK/out/report.md)',
     '[r](/work/out/%72eport.md)',
@@ -437,6 +439,75 @@ describe('the window’s URL step: a parse that can only take a name away', () =
   it('a destination the URL parser refuses is null, and nothing is thrown', () => {
     expect(() => clickPath('//work:99999/x')).not.toThrow();
     expect(clickPath('//work:99999/x')).toBeNull();
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): the `file:` form names exactly what the
+// scheme-less form names, by the reader the window shares; every other `file:` form, and every other scheme, names nothing.
+describe('the file: form of a link (U6b-4b)', () => {
+  const F = '/work/x.md';
+
+  it('clickPath of `file://` and a destination that begins with `/` is clickPath of the destination', () => {
+    const destinations = [
+      P, '/work/out/report.md:12', '/work/out/report.md#L12', '/work/out/my%20notes.md', '/work/out/my notes.md', '/work/out/a(1).md', '/work/out/a\\(1\\).md',
+      '/work/out/보고서.md', '/work/out/%EB%B3%B4%EA%B3%A0%EC%84%9C.md', '/vault/key,backup', '/vault/key:backup', '/work/tmp/../out/report.md', '/work//out/report.md',
+      '/a/%2e%2e/b', '//work/out/report.md', '/work/notes#1.md', '/work/%41.md', '/work/%zz', '/a/b/..#c/../d', '//x:/y', '//work:99999/x', '/work/out/report\\_v2.md',
+    ];
+    for (const destination of destinations) {
+      expect(clickPath(`file://${destination}`), destination).toBe(clickPath(destination));
+      expect(clickPath(`FILE://${destination}`), destination).toBe(clickPath(destination));
+    }
+    expect(clickPath(`file://${P}`)).toBe(P);
+    expect(clickPath('file:////work/out/report.md')).toBe(P);
+  });
+
+  it('the character-reference test stays first, on the whole destination', () => {
+    expect(clickPath('file&colon;///work/x.md')).toBeNull();
+    expect(clickPath('file:///work/&amp;x.md')).toBeNull();
+    expect(clickPath(`file://${F}`)).toBe(F);
+  });
+
+  // N1.1, N1.2, N1.5: a host, no `//`, an empty rest, and another scheme name nothing; the control beside them names
+  it.each([
+    '[r](file://host/work/x.md)',
+    '[r](file://localhost/work/x.md)',
+    '[r](file:/work/x.md)',
+    '[r](file:work/x.md)',
+    '[r](file://)',
+    '[r](files:///work/x.md)',
+    '[r](xfile:///work/x.md)',
+    '[r](http://file:///work/x.md)',
+    '[r](maws-path:file:///work/x.md)',
+  ])('%j names nothing; `[r](file:///work/x.md)` beside it names the path', (text) => {
+    expect(linkPaths(text)).toEqual([]);
+    expect(linkPaths(`${text} [c](file://${F})`)).toEqual([F]);
+  });
+
+  // N1.3, N1.4: an autolink, a bare URL in prose, the form in code or math, and a reference's destination name nothing
+  it.each([
+    `<file://${F}>`,
+    `see file://${F} here`,
+    `\`[r](file://${F})\``,
+    `\`\`\`\n[r](file://${F})\n\`\`\``,
+    `~~~\n[r](file://${F})\n~~~`,
+    `$$\n[r](file://${F})\n$$`,
+    `$$[r](file://${F})$$`,
+    `[r][l]\n\n[l]: file://${F}`,
+  ])('%j names nothing; the inline link after it names the path', (text) => {
+    expect(linkPaths(text)).toEqual([]);
+    expect(linkPaths(`${text}\n\n[c](file://${F})`)).toEqual([F]);
+  });
+
+  it('a table’s cell past the head’s width names nothing in this form too (N1.11, N1.13)', () => {
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | y | [r](file://${F}) |`)).toEqual([]);
+    expect(linkPaths(`| a | b |\n|---|---|\n| x | [r](file://${F}) | y |`)).toEqual([F]);
+    expect(linkPaths(`Title\n:---\ntext | [r](file://${F})`)).toEqual([]);
+    expect(linkPaths(`Title\n:---\n[r](file://${F}) | text`)).toEqual([F]);
+  });
+
+  it('a leading byte order mark is passed over before the form, and before its autolink, which names nothing (N1.10)', () => {
+    expect(linkPaths(`\uFEFF[r](file://${F})`)).toEqual([F]);
+    expect(linkPaths(`\uFEFF<file://${F}>`)).toEqual([]);
   });
 });
 

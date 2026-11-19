@@ -5,7 +5,7 @@
 // the anchor's readers are held to the rule's copies the same way. The daemon's rule is specified from remark's and
 // micromark's code; this file is what shows the two agree.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
 import { anchorPaths, chipPath, EDIT_TOOLS, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
@@ -13,10 +13,14 @@ import { Markdown } from '../../transcript';
 import { filePathOf } from '../../transcript/model/cells';
 import { userTextOf } from '../../transcript/model/user-text';
 import { MCP_TOOL } from '../../transcript/model/classify';
-import { TranscriptActionsProvider } from '../../transcript/view/context';
+import { TranscriptActionsProvider, turnFileLinks } from '../../transcript/view/context';
 import { normalizeLexically } from './open-file';
 
 afterEach(cleanup);
+
+// UX wave U6b-4b (decision 17): the window's entries turn the `file:` form on as they load; this suite draws as the window does
+beforeAll(() => turnFileLinks(true));
+afterAll(() => turnFileLinks(false));
 
 // The Markdown chunk loaded once, so every later mount draws in its first commit.
 beforeAll(async () => {
@@ -91,7 +95,6 @@ describe('what is not clickable today yields no path chip', () => {
     '![r](/work/out/report.md)',
     '[r][ref]\n\n[ref]: /work/out/report.md',
     '[r](host:/work/out/report.md)',
-    '[r](file:///work/out/report.md)',
     '[r](C:/work/out/report.md)',
     'the key is at host:/vault/key',
   ])('%j', (markdown) => {
@@ -170,6 +173,9 @@ describe('listed refusals: what the click asks for, and the rule names nothing',
     ['[r](//a:b:c@x/y)', ['/a:b%3Ac@x/y']],
     ['[r](//u@@h/x)', ['/u%40@h/x']],
     ['[r](maws-path:/work/out/report.md)', [P]],
+    // UX wave U6b-4b (N1.6): U6c's refusals hold for the `file:` form, whatever the window draws
+    ['[r](file:///work/%41.md)', ['/work/A.md']],
+    ['[r](file&colon;///work/x.md)', ['/work/x.md']],
   ])('%j', (markdown, asked) => {
     expect(clickedPaths(markdown)).toEqual(asked);
     expect(linkPaths(markdown)).toEqual([]);
@@ -263,6 +269,73 @@ describe('the rule reads the blocks the window draws', () => {
   });
 });
 
+// UX wave U6b-4b (R1): an inline `file:` link with an empty host is the path chip of its rest, and the rule names that
+// rest; every other `file:` form is text and names nothing. The fixed rows are drawn finished and while still arriving
+// (`live`); the seeded differential below draws finished text only.
+describe.each([false, true])('the file: form (live: %s)', (live) => {
+  // [the string, the path its chip asks for, a path the rule must not name for it]
+  it.each([
+    ['[r](file:///work/out/report.md)', P, 'file:///work/out/report.md'],
+    ['[r](file:///work/out/report.md#L12)', P, '/work/out/report.md#L12'],
+    ['[n](file:///work/out/my%20notes.md)', '/work/out/my notes.md', '/work/out/my%20notes.md'],
+    ['[n](<file:///work/out/my notes.md>)', '/work/out/my notes.md', '/work/out/my'],
+    ['[r](FILE:///work/out/report.md)', P, 'FILE:///work/out/report.md'],
+    ['[r](file:////work/out/report.md)', P, '//work/out/report.md'],
+  ])('%j', (markdown, path, counter) => {
+    const chips = chipPaths(markdown, live);
+    expect(chips).toEqual([path]);
+    const named = linkPaths(markdown);
+    for (const asked of chips) expect(named).toContain(asked);
+    expect(named).not.toContain(counter);
+  });
+
+  // N1.1 to N1.4 and L3: no chip, nothing named, and no element's href is a `file:` URL; the control, an inline link to
+  // the same path beside it, is both
+  it.each([
+    '[r](file://host/work/x.md)',
+    '[r](file://localhost/work/x.md)',
+    '[r](file:/work/x.md)',
+    '[r](file:work/x.md)',
+    '[r](file://)',
+    '<file:///work/x.md>',
+    'see file:///work/x.md here',
+    '`[r](file:///work/x.md)`',
+    '```\n[r](file:///work/x.md)\n```',
+    '$$\n[r](file:///work/x.md)\n$$',
+    '$$[r](file:///work/x.md)$$',
+    '[r][l]\n\n[l]: file:///work/x.md',
+  ])('%j: no chip and nothing named; the inline link beside it is both', (markdown) => {
+    expect(chipPaths(markdown, live)).toEqual([]);
+    expect(linkPaths(markdown)).toEqual([]);
+    const { container } = render(<Markdown markdown={markdown} live={live} />);
+    expect([...container.querySelectorAll('[href]')].map((element) => element.getAttribute('href')).filter((href) => /^(file|maws-path):/i.test(href!))).toEqual([]);
+    cleanup();
+    const control = `${markdown}\n\n[c](file:///work/c.md)`;
+    expect(chipPaths(control, live)).toEqual(['/work/c.md']);
+    expect(linkPaths(control)).toEqual(['/work/c.md']);
+  });
+
+  // N1.10: an offset is not an index into the text (the parser drops a leading byte order mark before it counts)
+  it('after a leading byte order mark the inline form is a chip and is named; its autolink is neither (N1.10)', () => {
+    for (const [markdown, paths] of [['﻿[r](file:///work/x.md)', ['/work/x.md']], ['﻿<file:///work/x.md>', []]] as const) {
+      expect(chipPaths(markdown, live), JSON.stringify(markdown)).toEqual(paths);
+      expect(linkPaths(markdown), JSON.stringify(markdown)).toEqual(paths);
+    }
+  });
+
+  it('a table’s cell past the head’s width: no chip and nothing named in this form either (N1.11, N1.13)', () => {
+    for (const [markdown, paths] of [
+      ['| a | b |\n|---|---|\n| x | y | [r](file:///work/x.md) |', []],
+      ['| a | b |\n|---|---|\n| x | [r](file:///work/x.md) | y |', ['/work/x.md']],
+      ['Title\n:---\ntext | [r](file:///work/x.md)', []],
+      ['Title\n:---\n[r](file:///work/x.md) | text', ['/work/x.md']],
+    ] as const) {
+      expect(chipPaths(markdown, live), JSON.stringify(markdown)).toEqual(paths);
+      expect(linkPaths(markdown), JSON.stringify(markdown)).toEqual(paths);
+    }
+  });
+});
+
 // The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own
 // Markdown. One direction is asserted, the one that admits: every path the rule names is a path chip the window draws.
 // The other direction (a chip the rule refuses) fails towards the refusal; it is counted and a few are printed.
@@ -281,6 +354,9 @@ const FRAGMENTS = [
   '#L3', ':12', '%20', '%72', '/work/a.md', '/secret', '/work/my notes.md', '/w/(x).md', '/vault/key,backup', '[ref]: ', '[ref]',
   '[^1]: ', '# ', '**', 'text', 'x', ':', 'host:', '//', '..', '/./', '[r](/work/a.md)', '[r](</secret>)', '[r](/secret "t")',
   '![i](/secret)', '[ref]: /secret', '[ref]: </secret>', '<https://e.com/', 'Here is:\n', '[a [b](/secret) c]',
+  // UX wave U6b-4b (R1): the `file:` form beside the scheme-less one, the marks the window's parser reads apart, and a
+  // table whose rows can run past its head
+  'file://', 'file:///', 'FILE:///', '<file:///', 'file://h/', '\uFEFF', '\r', '~~~\n', '| a | b |\n', '|---|---|\n', ':---\n', '| x | y | z |\n',
 ];
 const LONG_TAIL = 'a'.repeat(17_000); // past the 16 KiB bound; few, for the time
 function generated(seed: number, count: number): string[] {
@@ -291,12 +367,13 @@ function generated(seed: number, count: number): string[] {
     return text;
   });
 }
-// What the window's path chips in `markdown` ask for, as `clickedPaths`, for a string that may draw nothing.
-function chipPaths(markdown: string): string[] {
+// What the window's path chips in `markdown` ask for, as `clickedPaths`, for a string that may draw nothing; drawn
+// finished unless `live` says it is still arriving.
+function chipPaths(markdown: string, live = false): string[] {
   const openFile = vi.fn();
   const { container } = render(
     <TranscriptActionsProvider actions={{ openFile }}>
-      <Markdown markdown={markdown} live={false} />
+      <Markdown markdown={markdown} live={live} />
     </TranscriptActionsProvider>,
   );
   for (const chip of container.querySelectorAll('[data-chip="path"]')) fireEvent.click(chip);

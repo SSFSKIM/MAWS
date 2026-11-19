@@ -151,6 +151,20 @@ export function setHostActions(actions: TranscriptActions): void {
   hostActions = actions;
 }
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, decision 17): whether the Markdown pipeline
+// turns a `file:` link with an empty host into a path link (sanitize.ts, `remarkTranscriptSources`). Off until one of the
+// window's two entries (App.tsx, harness/main.tsx) turns it on as it loads; the desk's web app, which mounts this
+// Markdown with no file action, never does, so a `file:` link there stays its text. Here and not in default-actions.ts,
+// which the desk loads too; a light module, so the Markdown chunk is not imported to set a flag.
+let fileLinks = false;
+/** Whether a `file:` link is turned into a path link. Off until one of the window's entries turns it on; the desk's web app never does. */
+export function turnFileLinks(on: boolean): void {
+  fileLinks = on;
+}
+export function fileLinksTurned(): boolean {
+  return fileLinks;
+}
+
 // Open/closed flags by id, kept per mounted transcript rather than in a row's own state.
 export class Disclosures {
   private open = new Set<string>();
