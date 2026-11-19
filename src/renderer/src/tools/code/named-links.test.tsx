@@ -118,6 +118,7 @@ describe('what is not clickable today yields no path chip', () => {
     '[r](host:/work/out/report.md)',
     '[r](C:/work/out/report.md)',
     'the key is at host:/vault/key',
+    '[n](notes.md:7)', // U6b-4c: a relative path with its line as `:<n>` begins with what reads as a scheme
   ])('%j', (markdown) => {
     expect(clickedPaths(markdown)).toEqual([]);
     expect(linkPaths(markdown)).toEqual([]);

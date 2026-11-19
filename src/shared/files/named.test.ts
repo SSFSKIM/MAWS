@@ -617,7 +617,7 @@ describe('the links of a Markdown file: fileLinkSteps and fileLinkTargets (U6b-4
   });
 
   it('yields each link as written (the click’s reading) and as resolved against the file’s folder, in order', () => {
-    const markdown = '[a](a.md) [b](./sub/b.md) [c](./../c.md) [d](<sub/d e.md>) [l](a.md#L3) [n](a.md:7) [abs](/out/x.txt) [f](file:///out/y.txt)';
+    const markdown = '[a](a.md) [b](./sub/b.md) [c](./../c.md) [d](<sub/d e.md>) [l](a.md#L3) [n](./a.md:7) [abs](/out/x.txt) [f](file:///out/y.txt)';
     expect(run(markdown)).toEqual([
       { written: 'a.md', path: '/base/dir/a.md' },
       { written: 'sub/b.md', path: '/base/dir/sub/b.md' },
@@ -629,6 +629,9 @@ describe('the links of a Markdown file: fileLinkSteps and fileLinkTargets (U6b-4
       { written: '/out/y.txt', path: '/out/y.txt' },
     ]);
     expect(fileLinkTargets(markdown, BASE)).toEqual(run(markdown).map((link) => (link as { path: string }).path));
+    // a relative path written with its line as `:<n>` and no `./` begins with what reads as a scheme (`a.md:`), as for
+    // the window's sanitiser: it names nothing
+    expect(fileLinkTargets('[n](a.md:7)', BASE)).toEqual([]);
   });
 
   it('names exactly what linkPaths names, each resolved; a link that names no path is passed over', () => {
