@@ -130,7 +130,7 @@ describe('the file: form', () => {
     turnFileLinks(true);
     try {
       const root = render(<Markdown markdown={`${HOSTILE}\n\n${FORMS}\n\n[c](FILE:///work/c.md#L3) and [e](<file:///work/my notes.md>)`} live={live} />).container;
-      expect(chips(root)).toEqual(['src/renderer/x.ts', '/etc/passwd', '/work/x.md', 'src/y.ts', '/work/c.md', '/work/my notes.md']);
+      expect(chips(root)).toEqual(['/etc/passwd', 'src/renderer/x.ts', '/work/x.md', 'src/y.ts', '/work/c.md', '/work/my notes.md']);
       expect([...root.querySelectorAll('[href]')].map((element) => element.getAttribute('href')).filter((href) => /^\s*(file|maws-path):/i.test(href!))).toEqual([]);
       expect(root.textContent).toContain('file:///work/a.md'); // the autolink is its text
     } finally {
