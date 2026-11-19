@@ -18,7 +18,6 @@ export function MarkdownView({ entry, artifactView = false }: { entry: ViewerEnt
   const scroller = useRef<HTMLDivElement>(null);
   const { tabId } = entry;
   const openTab = useActions().openArtifactTab;
-  const base = artifactView ? null : dirname(entry.path);
   const source = entry.artifact ? (artifactMachineOf(entry.artifact.artifactId) ?? ipc.localMachine) : entry.appSessionId !== null && isAddress(entry.appSessionId) ? machineOf(entry.appSessionId) : ipc.localMachine;
   useLayoutEffect(() => {
     const el = scroller.current!;
@@ -34,7 +33,7 @@ export function MarkdownView({ entry, artifactView = false }: { entry: ViewerEnt
   return (
     <div ref={scroller} data-markdown-view className="h-full min-h-0 overflow-auto px-6 py-4">
       <div className="mx-auto max-w-[var(--measure)]">
-        <TranscriptActionsProvider actions={{ openFile: (path, line, _session, options) => void openFile(entry.appSessionId, path, line, { main: options?.main === true, base }), ...(openTab && { openArtifactTab: (artifactId, location) => openTab(artifactId, location, source) }) }}>
+        <TranscriptActionsProvider actions={{ openFile: (path, line, _session, options) => void openFile(entry.appSessionId, path, line, { main: options?.main === true, base: artifactView ? null : dirname(entry.path) }), ...(openTab && { openArtifactTab: (artifactId, location) => openTab(artifactId, location, source) }) }}>
           <Markdown markdown={entry.text} live={false} />
         </TranscriptActionsProvider>
       </div>
