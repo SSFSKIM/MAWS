@@ -35,7 +35,12 @@ const skill = (base: string, name: string, words = '---\nname: Shared\ndescripti
 const environment = () => Promise.resolve({ HOME: home, CLAUDE_CONFIG_DIR: configHome });
 const read = (cwd: string | null = null) => readCustomizationInventory(cwd, { userData, captureEnv: environment });
 // a skill's row without the file the inventory read (UX wave U11's skill actions), which its own case pins
-const bare = ({ realPath: _real, fileId: _id, ...row }: CommandOutput<'customization.inventory'>['skills'][number]) => row;
+const bare = (row: CommandOutput<'customization.inventory'>['skills'][number]) => {
+  const copy: Partial<typeof row> = { ...row };
+  delete copy.realPath;
+  delete copy.fileId;
+  return copy;
+};
 
 describe('cold customization inventory', () => {
   it('reads user and app configuration without a project, returns metadata only, and never writes configuration', async () => {
@@ -252,9 +257,10 @@ describe('cold customization inventory', () => {
     const path = await skill(join(configHome, 'skills'), 'large', `---\nname: Large\ndescription: Prefix only\n---\n${'PRIVATE_BODY'.repeat(INVENTORY_BOUNDS.frontMatterBytes)}`);
     await file(join(configHome, '.claude.json'), ' '.repeat(INVENTORY_BOUNDS.jsonBytes + 1));
     const answer = await read();
-    expect(answer.skills).toEqual([{ name: 'Large', description: 'Prefix only', source: 'user', path, plugin: null }]);
+    expect(answer.skills.map(bare)).toEqual([{ name: 'Large', description: 'Prefix only', source: 'user', path, plugin: null }]);
     expect(answer.servers).toEqual([]);
     expect(answer.serversRead).toBe(false); // the servers it lists are not the whole set
+    expect(answer.skillsRead).toBe(true); // an MCP file it could not read leaves the skills wholly read
     expect(answer.warnings.join(' ')).toMatch(/could not be read/);
     expect(JSON.stringify(answer)).not.toContain('PRIVATE_BODY');
   });
