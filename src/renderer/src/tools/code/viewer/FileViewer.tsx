@@ -57,7 +57,7 @@ import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
-import { classifyFailure } from './notice'; // UX wave U6b-4b
+import { classifyFailure, type NoticeCause } from './notice'; // UX wave U6b-4b
 import { useNoticePlace } from './notice-place'; // UX wave U6b-4b
 import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 
@@ -240,12 +240,11 @@ function NoSessionNotice({ path }: { path: string }) {
 // `data-refusal`, and its first paragraph is the headline in every case.
 function Refused({ entry }: { entry: ViewerEntry }) {
   const { path, tabId, appSessionId } = entry;
-  const place = useNoticePlace(appSessionId);
+  const place = useNoticePlace(appSessionId, entry.artifact?.artifactId ?? null); // the branch review: an artifact's view names its machine
   const canRetry = useViewer.getState().canRetry(entry); // of the entry drawn, which every change of it draws again
-  const block = 'flex h-full flex-col items-center justify-center gap-1 p-6 text-center';
   if (entry.needsOpen || entry.offersOpenFile) {
     return (
-      <div role="alert" data-refusal data-notice-cause="protected" className={block}>
+      <NoticeBox cause="protected">
         <p className="text-ui text-fg">{entry.error ?? ''}</p>
         <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
         {entry.needsOpen ? (
@@ -257,14 +256,14 @@ function Refused({ entry }: { entry: ViewerEntry }) {
             {OPEN_FILE_COPY.row}
           </button>
         ) : null}
-      </div>
+      </NoticeBox>
     );
   }
   const failure = entry.failure ?? { code: 'internal' as const, message: entry.error ?? '', refusal: null };
   const notice = classifyFailure(failure, { ...place, subject: 'file' });
   const [headline, ...further] = notice.lines;
   return (
-    <div role="alert" data-refusal data-notice-cause={notice.cause} className={block}>
+    <NoticeBox cause={notice.cause}>
       <p className="text-ui text-fg">{headline}</p>
       {further.map((line) => (
         <p key={line} className="text-ui text-fg-muted">
@@ -285,6 +284,16 @@ function Refused({ entry }: { entry: ViewerEntry }) {
           {notice.detail}
         </p>
       ) : null}
+    </NoticeBox>
+  );
+}
+
+// The notice's block (the branch review): its own scroll box, whose column is centred within at least the box's height,
+// so in a pane shorter than the notice it starts at the headline and scrolls, nothing above the scroll origin
+function NoticeBox({ cause, children }: { cause: NoticeCause | 'protected'; children: ReactNode }) {
+  return (
+    <div role="alert" data-refusal data-notice-cause={cause} className="h-full overflow-y-auto">
+      <div className="flex min-h-full flex-col items-center justify-center gap-1 p-6 text-center">{children}</div>
     </div>
   );
 }
