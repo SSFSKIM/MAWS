@@ -4077,8 +4077,9 @@ describe('files saves outside the folders', () => {
         }
       });
 
-      it('with eight searches waiting, a follow answers not-linked at once and reads no folder of the transcript’s (K13)', async () => {
-        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+      it('with eight searches waiting, a burst of follows for the session answers not-linked at once and reads no folder (K13)', async () => {
+        const burst = ['notes.txt', 'named.txt', 'result.txt', 'chosen.txt', 'sent.txt'].map((name) => out(name));
+        agentOf(A, [prompt('Go.'), ...burst.map((path) => said(link(path)))]);
         const opened = held();
         searchPoints.opened = opened.hold;
         const { paths, files } = searched();
@@ -4087,9 +4088,10 @@ describe('files saves outside the folders', () => {
         const waiting = Array.from({ length: NAMED_WAITING_MAX }, (_, i) => paths.names(A, out(`waiting-${i}.txt`)));
         await turn();
         const seen = recordTouches();
-        expect(await follow(files, out('notes.txt'), { agent: AGENT })).toEqual(NOT_LINKED);
-        expect(seen.filter((entry) => entry.startsWith('readdir ')), 'no folder read').toEqual([]);
+        expect(await Promise.all(burst.map((path) => follow(files, path, { agent: AGENT })))).toEqual(burst.map(() => NOT_LINKED));
+        expect(seen.filter((entry) => entry.startsWith('readdir ')), 'no folder read by any of them').toEqual([]);
         expect(inside(seen, folderOf(A)), 'nothing of the transcript’s folder').toEqual([]);
+        expect(seen.filter((entry) => burst.some((path) => entry.endsWith(` ${path}`))).length, 'each target was read, under the count of follows').toBeGreaterThanOrEqual(burst.length);
         touches.on = false;
         opened.release();
         expect(await running).toBe(false);

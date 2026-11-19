@@ -1133,6 +1133,27 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     expect({ dirs: dirReads.count, opens: stats.opens }).toEqual({ dirs: 0, opens: 0 });
   });
 
+  // The branch's M3 review: a search whose last waiter left starts no further stage on the disk (W2 a, W3). Its client ends
+  // after the walk found the file: nothing is opened, the slot is free, and the job waiting behind it runs.
+  it('starts no further stage once its last waiter has left: an abort after the walk found the file opens nothing, and the next job runs', async () => {
+    await writeTranscript([linkTo('/work/out/next.md')]);
+    await writeAgent(AGENT, linking());
+    for (const point of ['found', ...(WALKED ? ['walked' as const] : [])] as const) {
+      const named = paths();
+      const client = new AbortController();
+      const held = holdAt(point, async () => client.abort());
+      const abandoned = named.namesInAgent(S, AGENT, P, client.signal);
+      await held.reached;
+      const next = named.names(S, '/work/out/next.md'); // waits behind it, in the one slot
+      reset();
+      held.release();
+      expect(await abandoned, point).toBe(false);
+      expect(await next, `${point}: the next job runs`).toBe('counted');
+      expect(stats.opens, `${point}: only the next job's transcript is opened`).toBe(1);
+    }
+    expect(await paths().namesInAgent(S, AGENT, P), 'the control: the same search, not abandoned').toBe('counted');
+  });
+
   it('a request made after the session is bound to another transcript does not join the search of the old one’s subagent (X2.11, W3)', async () => {
     await writeTranscript(filler(2));
     await writeAgent(AGENT, linking());
