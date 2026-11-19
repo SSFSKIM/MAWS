@@ -1222,12 +1222,16 @@ describe('agentRowClaimSteps: a subagent’s record (U6b-4c)', () => {
     expect(rowClaim(prompt, P)).toEqual(read);
   });
 
-  it('a tool’s result still waits for its call, and a record that names nothing names nothing', () => {
+  it('a tool’s result still waits for its call', () => {
     const mcp = user([result('t1', `Saved to ${LINK}`)], { origin: undefined });
     expect(agentClaim(mcp, P)).toEqual({ names: false, pending: [{ toolUseId: 't1', when: 'mcp' }] });
     const edit = user([result('t2', 'File created')], { origin: undefined, toolUseResult: { filePath: P } });
     expect(agentClaim(edit, P)).toEqual({ names: false, pending: [{ toolUseId: 't2', when: 'edit' }] });
+  });
+
+  it('a record that does not link the path names nothing; the control, the path linked in an assistant’s text, counts', () => {
     for (const row of [assistant(text('no link here')), user('nothing'), { type: 'system', content: LINK }, null]) expect(agentClaim(row, P)).toEqual({ names: false, pending: [] });
+    expect(agentClaim(assistant(text(`See ${LINK}.`)), P)).toEqual({ names: true });
   });
 
   it('gives back the steps rowClaimSteps gives, the scan’s pauses included', () => {

@@ -118,10 +118,18 @@ describe('what is not clickable today yields no path chip', () => {
     '[r](host:/work/out/report.md)',
     '[r](C:/work/out/report.md)',
     'the key is at host:/vault/key',
-    '[n](notes.md:7)', // U6b-4c: a relative path with its line as `:<n>` begins with what reads as a scheme
   ])('%j', (markdown) => {
     expect(clickedPaths(markdown)).toEqual([]);
     expect(linkPaths(markdown)).toEqual([]);
+  });
+
+  // U6b-4c: a relative path written with its line as `:<n>` begins with what reads as a scheme (`notes.md:`): no chip,
+  // and the rule names nothing; the control, the same path written from `./`, is both
+  it('[n](notes.md:7) is no chip and names nothing; [n](./notes.md:7) is both', () => {
+    expect(clickedPaths('[n](notes.md:7)')).toEqual([]);
+    expect(linkPaths('[n](notes.md:7)')).toEqual([]);
+    expect(clickedPaths('[n](./notes.md:7)')).toEqual(['notes.md']);
+    expect(linkPaths('[n](./notes.md:7)')).toEqual(['notes.md']);
   });
 
   // a link in code, in math, in another link's text or in an image's: no chip, and the rule names nothing (fix round 1)
@@ -356,7 +364,16 @@ describe('the rule reads the blocks the window draws', () => {
 // UX wave U6b-4c (X3.7): a file's text as a shown Markdown file draws it (`MarkdownView`, for a file at BASE): a link in
 // a block the window draws as code is no chip, and the rule names nothing of it, each beside its control.
 describe('a Markdown file’s text, drawn by MarkdownView (U6b-4c)', () => {
-  beforeAll(() => void installFakeMain(() => ok()));
+  // `MarkdownView` asks the bridge for this Mac; the suite's bridge is put back after it
+  let prior: typeof window.maws | undefined;
+  beforeAll(() => {
+    prior = window.maws;
+    installFakeMain(() => ok());
+  });
+  afterAll(() => {
+    if (prior === undefined) Reflect.deleteProperty(window, 'maws');
+    else window.maws = prior;
+  });
   // the paths of the chips drawn, as each chip holds it
   function drawn(text: string): string[] {
     const { container } = render(<MarkdownView entry={{ tabId: 'u6b4c-doc', appSessionId: null, path: `${BASE}/doc.md`, text } as never} />);
