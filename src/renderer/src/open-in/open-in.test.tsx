@@ -2,7 +2,7 @@
 // rows main found, in groups; a choice asks main with the session and, from a file's bar, the path and the line; an open
 // that did not happen is a notice with main's sentence; a session on another machine has the item disabled, saying where
 // its folder is. Invented paths.
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DropdownMenu } from 'radix-ui';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -41,7 +41,10 @@ beforeEach(() => {
     return fail(`unexpected ${name}`);
   });
 });
-afterEach(() => useMachines.setState({ machines: new Map() }));
+afterEach(() => {
+  cleanup();
+  useMachines.setState({ machines: new Map() });
+});
 
 function SessionMenu({ appSessionId }: { appSessionId: AppSessionId }) {
   return (

@@ -386,12 +386,14 @@ describe('toolbar', () => {
       ['Fork to a new worktree…', true], // C10
       ['Archive', true],
       ['Delete conversation…', true],
+      ['Open in', false], // UX wave U6b-4a: the session's working folder, to an app
     ]); // no worktree, so no "Remove worktree…", as in the sidebar's menu
     await user.click(within(menu).getByRole('menuitem', { name: 'Open in split' }));
     expect(split).toHaveBeenCalledWith(A);
   });
 
-  it('offers a foreign-live session no actions, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
+  // UX wave U6b-4a: and Open in, which the child's file gives a terminal session on this Mac as it gives one MAWS runs
+  it('offers a foreign-live session no actions but Open in, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
     const user = userEvent.setup();
     const nine = pageScenario(scenarioFile('nine-sessions')); // P5 O6 M2: the store holds the page's records
     const held = nine.sessions.find((r) => r.holder.kind === 'terminal')!;
@@ -401,7 +403,12 @@ describe('toolbar', () => {
     act(() => useLayout.setState({ main: withActive(sessionTab(held.appId)) }));
     expect(within(chromeTabs()).getByRole('tab', { name: held.title.text })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'More surfaces' }));
-    expect((await screen.findByRole('menuitem', { name: 'Session actions' })).getAttribute('aria-disabled')).toBe('true');
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    expect(actions.getAttribute('aria-disabled')).toBeNull();
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const menu = (await screen.findByRole('menuitem', { name: 'Open in' })).closest<HTMLElement>('[role="menu"]')!;
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open in']);
   });
 });
 
