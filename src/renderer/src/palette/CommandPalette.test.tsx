@@ -512,6 +512,35 @@ it('keeps the Conversations selection by value when an indexing retry adds an ea
   } finally { invoke.mockRestore(); vi.useRealTimers(); }
 });
 
+// UX wave U6b-5a, the delta review's H6: with no row drawn there is no selection, so ⌘⏎ splits nothing, neither while a
+// new text's search is pending nor when it found nothing
+it.each([
+  ['while the new text is searched', () => new Promise<never>(() => {})],
+  ['when the new text finds nothing', () => Promise.resolve({ ok: true, value: { hits: [], indexing: false, incomplete: false } })],
+])('selects nothing and splits nothing on ⌘⏎ %s', async (_, second) => {
+  vi.useFakeTimers();
+  useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which a split would open
+  const quota = idOf('Quota reset recovery');
+  const invoke = vi.spyOn(ipc, 'invoke')
+    .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }], indexing: false, incomplete: false } } as never)
+    .mockImplementation(second as never);
+  try {
+    render(<CommandPalette />);
+    act(() => openConversationSearch('needle'));
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    const input = within(dialog()).getByRole('combobox');
+    expect(input.getAttribute('aria-activedescendant')).toBeTruthy(); // the control: the hit is selected
+    fireEvent.change(input, { target: { value: 'needles' } });
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    expect(within(dialog()).queryAllByRole('option')).toEqual([]);
+    expect(input.getAttribute('aria-activedescendant')).toBeNull();
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(currentSet(useLayout.getState().main).panes).toHaveLength(1);
+    expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).not.toContain(`session:${quota}`);
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+  } finally { invoke.mockRestore(); vi.useRealTimers(); }
+});
+
 it('shows terminal incomplete indexing without polling forever or hiding available results', async () => {
   vi.useFakeTimers();
   const id = idOf('Quota reset recovery');
