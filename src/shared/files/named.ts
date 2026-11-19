@@ -687,8 +687,8 @@ interface Context {
 // paragraph, or an indented line that opens a deeper quote under a paragraph, nothing is read from the paragraph that
 // line meets or opens to the next blank line (`doubtful`), and a fence such a line could open refuses the text. Such a
 // discard never resets what the window's parse keeps (fix wave 2): only a blank line ends `doubtful`, or a block start read
-// from a line's own prefix with no marker stripped that might not interrupt, and a dropped table head that could be a
-// reference definition refuses the text.
+// from a line's own prefix with no marker stripped that might not interrupt; and where any line was not read, a text that
+// holds `]:` (a reference definition may be among the lines not read) names nothing (fix wave 3).
 // A refusal here (a cap, the budget) refuses the whole text: its definitions, which every context reads, are not all
 // known.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: Meter): Generator<typeof PAUSE, void, void> {
@@ -705,6 +705,12 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
   // item; a container the pass does not follow): every paragraph and table is dropped until a blank line or a block start
   // ends what the window may read as one
   let doubtful = false;
+  // Whether `doubtful` was ever set, so some line was not read: see the guard at the pass's end (fix wave 3)
+  let discarded = false;
+  const doubt = () => {
+    doubtful = true;
+    discarded = true;
+  };
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
   // draws it only where a call names it, so nothing in it is read as a link.
   let footnote = false;
@@ -813,7 +819,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
       if (!inside && (!known || !paragraph.opened)) {
         if (fenceAt(text, line.content, line.end, m) !== null) throw new ScanRefused();
         paragraph.dropped = true;
-        doubtful = true;
+        doubt();
       }
       if (inside || doubtful) {
         if (inside && !listWasOpen) listOpen = false; // no list item: the line is the paragraph's text
@@ -838,7 +844,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     // the pass does not follow); a fence it opens may run past any blank line, and refuses the text
     if (line.quoteInItem) {
       if (opened !== null) throw new ScanRefused();
-      doubtful = true;
+      doubt();
     }
     if (blockStarts) doubtful = false;
     // A line of another quote's depth ends the table: a shallower one is no body row (never a lazy line), and a deeper one
@@ -862,7 +868,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
         }
         if (unplaced) {
           paragraph.dropped = true;
-          doubtful = true;
+          doubt();
         }
         paragraph.lines.push(line.content);
         paragraph.end = line.end;
@@ -890,12 +896,9 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
         // up to the next blank line, since the window's paragraph may run on past the table's end lazily (`doubtful`); a
         // table met where nothing is read is not read either.
         const dropped: boolean = doubtful || listOpen || (paragraph !== null && line.quote < paragraph.quote);
-        // Fix wave 2 (the delta review's second): a head the pass does not read may be a reference definition to the
-        // window, which every context reads (a link around its label is no link); one that could be names nothing at all
-        if (dropped && text.charCodeAt(line.content) === 91) throw new ScanRefused();
         if (dropped) {
           if (paragraph !== null) paragraph.dropped = true;
-          doubtful = true;
+          doubt();
         }
         yield* closeParagraph();
         table = { quote: line.quote, cells, dropped };
@@ -915,6 +918,18 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
     start = next;
   }
   yield* closeParagraph();
+  // Fix wave 3 (the delta review's ruling): a line a discard took may have been part of a reference definition, which the
+  // window registers and every context reads (a link around its label is no link). Where any line was not read and the
+  // text holds `]:` anywhere, under any prefix, the text names nothing: one guard for every discard path, read in the
+  // meter's stretches.
+  if (discarded) {
+    for (let at = 0; at < text.length; at += SCAN_STEP_CHARS) {
+      if (m.work >= m.pause) yield pauseAt(m);
+      const stretch = Math.min(text.length, at + SCAN_STEP_CHARS + 1); // one more, so a `]:` across two stretches is seen
+      charge(m, stretch - at);
+      if (text.slice(at, stretch).includes(']:')) throw new ScanRefused();
+    }
+  }
 }
 
 // A context's runs of backticks and of dollars, indexed in one pass from the first one met (a code span's or inline
