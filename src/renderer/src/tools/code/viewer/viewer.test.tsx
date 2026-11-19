@@ -3166,7 +3166,7 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
   it('W1 (g): a Load more sent before the click that lands from a file that may not be saved is read once more, keeping what it loaded', async () => {
     const BIG = '/elsewhere/big.log';
     // two and a half chunks of real lines, in a file past the editor's cap: a head of one chunk, and one more by Load more
-    const text = lines(81_920, (n) => `log line ${String(n).padStart(6, '0')} of the invented run`.padEnd(31, '.'));
+    const text = lines(81_920, (n) => `log ${String(n).padStart(6, '0')} invented`.padEnd(31, '.'));
     expect(text.length).toBe(81_920 * 32);
     const main = disk({ [DOC]: `[the log](${BIG})`, [BIG]: text }, { results: [BIG], links: [{ from: { file: DOC }, path: BIG }] });
     main.files[BIG] = { text, bytes: 5 * MiB } as never;
