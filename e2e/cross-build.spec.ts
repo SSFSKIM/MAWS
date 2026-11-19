@@ -1868,8 +1868,8 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | the index's own facts                         | session and launches it, and the key is left as it    | this build's next launch carries                   |
 //   |                                               | was                                                   | TO_HUMAN_FOLD_SUMMARIES=off                        |
 //   | U6b-3a: nothing stored. On the wire (its      | (what changed, both ways), after its same-build       | the second half: the peer's app on this build's    |
-//   | minor 55 for now, a stand-in the chain's      | control: on the peer's mawsd this build's window      | mawsd lists the folder, shows the dirty submodule  |
-//   | merge takes again, Decision Log 13):          | lists the folder with nothing dimmed, draws the       | and then a second change in its own Review,        |
+//   | minor 56, over U2b's 55 at the chain's        | control: on the peer's mawsd this build's window      | mawsd lists the folder, shows the dirty submodule  |
+//   | merge, Decision Log 13):                      | lists the folder with nothing dimmed, draws the       | and then a second change in its own Review,        |
 //   | `files.list`'s entries' `ignored`, and a      | dirty submodule as a file's row, and a second         | refuses no answer and no event, and its log names  |
 //   | status entry's `submodule` and                | change reaches the Changed group by the peer's        | `ignored` and `submodule` as dropped (its          |
 //   | `worktreeKind`, in answers and in             | `git.changed`                                         | repository sends no `worktreeKind`). Every peer    |
