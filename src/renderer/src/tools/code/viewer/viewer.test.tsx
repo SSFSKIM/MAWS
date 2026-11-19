@@ -167,6 +167,14 @@ const lines = (count: number, at: (n: number) => string) => Array.from({ length:
 const notice = () => document.querySelector('[data-notice]')?.getAttribute('data-notice') ?? null;
 const flashed = () => document.querySelector(`.${FLASH_CLASS}`)?.textContent ?? null;
 const codeText = () => document.querySelector('.cm-content')?.textContent ?? null;
+// UX wave U6b-4b (M3): the notice of a file that cannot be read, as a person reads it: its paragraphs in order (the
+// sentences, the path, the command's own words), and its cause
+const noticeLines = () => [...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent);
+const noticeCause = () => document.querySelector('[data-refusal]')?.getAttribute('data-notice-cause') ?? null;
+const THREE_WAYS = "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.";
+const ASK_AGENT = 'Ask the agent to send the file to see it here.';
+// The first notice, as this Mac says it, for `path`
+const outsideHere = (path: string) => ['This file is outside the folders this session works in.', THREE_WAYS, ASK_AGENT, path, "path outside the session's directories"];
 
 describe('viewer', () => {
   const offs: (() => void)[] = [];
@@ -183,12 +191,11 @@ describe('viewer', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders a refusal in words with the path, and reads no more than once', async () => {
+  it('renders a refusal as its notice, in words with the path, and reads no more than once', async () => {
     const main = serve({ '/r/secret': { refusal: "path outside the session's directories" } });
     render(<FileViewer tab={fileTab('/r/secret')} />);
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain("Refused: path outside the session's directories");
-    expect(alert.textContent).toContain('/r/secret');
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(outsideHere('/r/secret')); // UX wave U6b-4b: the notice's words, no longer "Refused: "
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(main.callsOf('files.read')).toHaveLength(1);
     expect(main.callsOf('files.watch')).toEqual([{ appSessionId: MAIN_A, path: '/r' }]); // the file's directory, watched before the read
@@ -240,8 +247,8 @@ describe('viewer', () => {
     });
     refuse = true;
     render(<FileViewer tab={fileTab('/r/half.txt')} />);
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain("Refused: path outside the session's directories");
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(outsideHere('/r/half.txt'));
     expect(useViewer.getState().entries.get(FILE('/r/half.txt'))?.text).toBe('');
     expect(document.querySelector('.cm-content')).toBeNull();
   });
@@ -720,7 +727,8 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
   it('W3: reads a refused file again when its link is clicked again, and when its tab is shown again', async () => {
     const main = disk({ [OUT]: 'written later\n', '/elsewhere/other.txt': 'other\n' });
     show();
-    expect((await screen.findByRole('alert')).textContent).toContain(`Refused: ${OUTSIDE_REFUSAL}`);
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(outsideHere(OUT));
     await settle();
     expect(main.callsOf('files.read')).toHaveLength(1);
     main.names.add(OUT); // the row that links it is written
@@ -1157,7 +1165,8 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(frames.every(Boolean)).toBe(true);
     main.added.delete(OUT); // the Library's record goes: the next read is refused
     act(() => void openFile(A, OUT, null, { main: true }));
-    expect((await screen.findByRole('alert')).textContent).toContain('Refused');
+    await screen.findByRole('alert');
+    expect(noticeCause()).toBe('outside'); // UX wave U6b-4b: the notice in place of "Refused: "
     expect(shown()).toMatchObject({ status: 'error', named: false, locked: 'added', pin: OUT });
     expect(label()?.getAttribute('data-read-only')).toBe('added');
   });
@@ -1770,7 +1779,8 @@ describe('a framed file (UX wave U6b-2)', () => {
     let connected = false;
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_, issue) => (connected ? issue() : fail('layout.frameFile: machine mini is not connected')) });
     show();
-    expect((await screen.findByRole('alert')).textContent).toContain('Refused: layout.frameFile: machine mini is not connected');
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(['This file could not be opened.', PDF, 'layout.frameFile: machine mini is not connected']); // UX wave U6b-4b
     expect(entry()).toMatchObject({ status: 'error', frame: null });
     connected = true;
     act(() => useViewer.getState().revisit(FILE(PDF)));
@@ -2185,7 +2195,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
     expect(main.callsOf('files.writeOutside')).toEqual([]);
   });
 
-  it('a read’s failure that carries issues.refusal is drawn as its message alone, nothing of the file shown; one that carries none as “Refused: ” and its message', async () => {
+  it('a read’s failure that carries issues.refusal is drawn as its message alone, nothing of the file shown; one that carries none as its notice (UX wave U6b-4b)', async () => {
     const main = disk({ [OUT]: 'secret\n' }, { names: [OUT] });
     main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
     show();
@@ -2197,7 +2207,9 @@ describe('a file outside the folders on another machine (U6f)', () => {
     main.answers.by = () => null;
     show('/elsewhere/unnamed.txt');
     await waitFor(() => expect(body()).not.toBeNull());
-    expect(body()!.querySelector('p')!.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}`);
+    // UX wave U6b-4b: the plain read's refusal there: the path is outside the folders on studio; the three ways are not said,
+    // since studio's daemon did not run the open itself
+    expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', ASK_AGENT, '/elsewhere/unnamed.txt', OUTSIDE_REFUSAL]);
     expect(shown('/elsewhere/unnamed.txt').said).toBe(false);
   });
 
@@ -2206,7 +2218,8 @@ describe('a file outside the folders on another machine (U6f)', () => {
     main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', FILES_MOVED)) : null);
     show();
     await waitFor(() => expect(body()).not.toBeNull());
-    expect(body()!.querySelector('p')!.textContent).toBe(`Refused: Not opened: ${FILES_MOVED}`);
+    expect(body()!.querySelector('p')!.textContent).toBe('This file could not be opened.'); // UX wave U6b-4b: the act ran and failed otherwise
+    expect(body()!.querySelector('[data-notice-detail]')!.textContent).toBe(`Not opened: ${FILES_MOVED}`);
     expect(shown()).toMatchObject({ status: 'error', kind: null, editable: false });
   });
 
@@ -2553,7 +2566,7 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     const tab = mainFile('/elsewhere/docs/setup.md')!;
     expect(tab).toMatchObject({ appSessionId: A });
     render(<FileViewer tab={tab} />);
-    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}/elsewhere/docs/setup.md`));
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere('/elsewhere/docs/setup.md')));
     expect(main.callsOf('files.read').filter((input) => input.path === '/elsewhere/docs/setup.md')).toEqual([asked('/elsewhere/docs/setup.md')]);
   });
 
@@ -2575,7 +2588,7 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
       const tab = mainFile('/outside/secret.md')!;
       expect(tab).toMatchObject({ appSessionId: A });
       render(<FileViewer tab={tab} />);
-      await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}/outside/secret.md`));
+      await waitFor(() => expect(noticeLines()).toEqual(outsideHere('/outside/secret.md')));
       expect(main.callsOf('files.read')).toEqual([asked('/outside/secret.md')]);
     } finally {
       useSessions.setState({ records: new Map() });
@@ -2597,7 +2610,7 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     const reads = () => main.callsOf('files.read').filter((input) => input.path === OUT);
     act(() => void fireEvent.click(inSubagent, { metaKey: true }));
     render(<FileViewer tab={mainFile(OUT)!} />);
-    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}${OUT}`));
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
     expect(reads()).toEqual([asked(OUT)]);
     act(() => void fireEvent.click(inFile, { metaKey: true })); // the same tab, read again: its last read failed
     await waitFor(() => expect(reads()).toEqual([asked(OUT), asked(OUT)]));
@@ -2607,5 +2620,327 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
     await waitFor(() => expect(useViewer.getState().entries.get(FILE(OUT))).toMatchObject({ status: 'ready', text: 'the notes\n', named: true }));
     expect(reads()).toEqual([asked(OUT), asked(OUT), asked(OUT)]);
     expect(mainFile(OUT)).toMatchObject({ appSessionId: A });
+  });
+});
+
+// ---- UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; Interfaces §C, S1, "The look") ------
+// A file that cannot be read shows the notice of its cause where "Refused: " and the command's words stood: its sentences,
+// the path (with Copy path where the path is outside the folders), Retry where reading again can help, and the command's
+// own words last. Retry is the store's `retry`: one read per press, held from the press until that read has settled, and
+// none while a save is out; under unsaved edits it reads as a watch's event does, the edits standing. Invented paths under
+// `/elsewhere` (outside session A's folders) and `/r`, invented text.
+describe('the notice of a file that cannot be read (U6b-4b)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const CODE = '/r/a.ts';
+  const T = addressOf(OTHER_MACHINE, 'app-notice' as AppSessionId); // a session MAWS runs on studio
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+    resetRemoteLaneBStore();
+  });
+
+  const unreachable = (message = 'files.read: the files service is not running') => fail(message, 'host_unavailable');
+  function disk(files: Record<string, string>) {
+    const served = installDisk(files, { outside: ['/elsewhere'], names: () => false });
+    offs.push(connectCodeEvents());
+    return served;
+  }
+  const tabOf = (path: string, appSessionId: AppSessionId = A): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${machineOf(appSessionId)}:${path}`, kind: 'file', path, line: null, appSessionId, machine: machineOf(appSessionId), pinned: false });
+  const shown = (path: string, appSessionId: AppSessionId = A) => useViewer.getState().entries.get(tabOf(path, appSessionId).id);
+  const show = (path: string, appSessionId: AppSessionId = A) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={tabOf(path, appSessionId)} />);
+  };
+  const block = () => document.querySelector<HTMLElement>('[data-refusal]');
+  const retry = () => block()?.querySelector<HTMLButtonElement>('[data-notice-retry]') ?? null;
+  const reads = (main: { callsOf: ReturnType<typeof installDisk>['callsOf'] }, path: string) => main.callsOf('files.read').filter((input) => input.path === path);
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+
+  it('L7: on this Mac a path outside the folders the session has no evidence for reads the first notice: three sentences, the path with Copy path, the command’s words small, and no Retry', async () => {
+    disk({ [OUT]: 'secret\n' });
+    const writeText = vi.fn(async () => {});
+    const before = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    try {
+      show(OUT);
+      await waitFor(() => expect(block()).not.toBeNull());
+      expect(block()!.getAttribute('role')).toBe('alert');
+      expect(noticeCause()).toBe('outside');
+      expect(noticeLines()).toEqual(outsideHere(OUT));
+      expect(block()!.querySelector('p')!.textContent).toBe('This file is outside the folders this session works in.'); // the headline, first
+      expect(block()!.querySelector('[data-notice-detail]')!.textContent).toBe(OUTSIDE_REFUSAL);
+      for (const line of noticeLines()) expect(line).not.toMatch(/^(Refused|files\.)/);
+      expect(retry()).toBeNull();
+      fireEvent.click(within(block()!).getByRole('button', { name: 'Copy path' }));
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(OUT);
+      expect(document.body.textContent).not.toContain('secret\n');
+    } finally {
+      if (before) Object.defineProperty(navigator, 'clipboard', before);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('L8: a path with no file reads “No file at this path.” with its path, and offers neither Copy path nor Retry', async () => {
+    disk({});
+    show('/r/gone.md');
+    await waitFor(() => expect(block()).not.toBeNull());
+    expect(noticeCause()).toBe('not-found');
+    expect(noticeLines()).toEqual(['No file at this path.', '/r/gone.md', 'not found: /r/gone.md']);
+    expect(block()!.querySelector('[data-notice-copy]')).toBeNull();
+    expect(retry()).toBeNull();
+  });
+
+  it('L10 and S1 (b): with this Mac’s daemon not answering the notice offers Retry; a Retry that fails again draws its own cause, and one that reads shows the file', async () => {
+    const main = disk({ [CODE]: 'export const a = 1;\n' });
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    expect(noticeLines()).toEqual(["MAWS's service on this Mac is not answering.", CODE, 'files.read: the files service is not running']);
+    expect(retry()!.textContent).toBe('Retry');
+    expect(retry()!.disabled).toBe(false);
+    main.answers.by = (name, input) => (name === 'files.read' ? fail(`not found: ${input.path as string}`) : null); // back, and the file is not there
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(noticeCause()).toBe('not-found'));
+    expect(retry()).toBeNull();
+    expect(reads(main, CODE)).toHaveLength(2);
+
+    cleanup();
+    useViewer.getState().reset();
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null; // the daemon answers again
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(codeText()).toBe('export const a = 1;'));
+    expect(block()).toBeNull();
+    expect(shown(CODE)).toMatchObject({ status: 'ready', error: null, failure: null, retrying: false });
+  });
+
+  it('S1 (c): a read the route gave up on reads as unreachable, with Retry', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    main.answers.by = (name) => (name === 'files.read' ? fail('files.read: no answer within 10 s', 'timeout') : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    expect(noticeLines()[0]).toBe("MAWS's service on this Mac is not answering.");
+    expect(retry()).not.toBeNull();
+  });
+
+  it('S1 (a): a second press while the file’s watch has not answered starts nothing, the button drawn disabled; one read follows the watch', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    // the first watch is refused, so a read again takes the watch again first (the Files store installs a refused watch again)
+    let watches = 0;
+    main.answers.by = (name) => (name === 'files.watch' && ++watches === 1 ? fail('files.watch: the files service is not running', 'host_unavailable') : name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    const watch = main.hold('files.watch');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(retry()!.disabled).toBe(true));
+    fireEvent.click(retry()!);
+    act(() => useViewer.getState().retry(tabOf(CODE).id)); // the act itself refuses too, not only the button
+    await settle();
+    expect(main.callsOf('files.watch')).toHaveLength(2);
+    expect(reads(main, CODE)).toHaveLength(1); // none yet: the read waits for the watch
+    watch.release();
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(2));
+    await waitFor(() => expect(retry()!.disabled).toBe(false));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(2);
+  });
+
+  it('S1 (a): a second press while the read is held starts nothing, the button drawn disabled', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    const read = main.hold('files.read');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(2));
+    expect(retry()!.disabled).toBe(true);
+    fireEvent.click(retry()!);
+    act(() => useViewer.getState().retry(tabOf(CODE).id));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(2);
+    read.release();
+    await waitFor(() => expect(retry()!.disabled).toBe(false));
+    expect(reads(main, CODE)).toHaveLength(2);
+  });
+
+  it('S1 (d): a Retry’s read held while the same path is opened for another session lands nowhere', async () => {
+    const main = disk({ [CODE]: 'session a’s\n' });
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    const { rerender } = show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null;
+    const read = main.hold('files.read'); // session A's Retry, answered with A's text once released
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(2));
+    main.files[CODE] = 'session b’s\n';
+    act(() => void openFile(B, CODE)); // the tab is one per machine and path: it takes session B
+    rerender(<FileViewer tab={tabOf(CODE, B)} />);
+    await waitFor(() => expect(shown(CODE, B)).toMatchObject({ appSessionId: B, status: 'ready', text: 'session b’s\n' }));
+    read.release();
+    await settle();
+    expect(shown(CODE, B)).toMatchObject({ appSessionId: B, status: 'ready', text: 'session b’s\n', retrying: false });
+  });
+
+  it('S1 (e): under unsaved edits a re-read that failed shows the notice over them; Retry keeps the edit while held, lands the file with the edit standing in the view the person chose, and a failure again keeps it', async () => {
+    const main = disk({ [CODE]: 'one\n' });
+    show(CODE);
+    await waitFor(() => expect(shown(CODE)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('mine ');
+    await waitFor(() => expect(shown(CODE)!.dirty).toBe(true));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    expect(shown(CODE)).toMatchObject({ status: 'error', dirty: true });
+    expect(existingViewState(tabOf(CODE).id)?.docOf?.()).toBe('mine one\n');
+
+    // held: the notice stands and so does the edit
+    main.answers.by = () => null;
+    const read = main.hold('files.read');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(shown(CODE)!.pending).toBe(1));
+    expect(noticeCause()).toBe('unreachable');
+    expect(retry()!.disabled).toBe(true);
+    expect(shown(CODE)).toMatchObject({ dirty: true });
+    read.release();
+    // answered with the file: the notice goes, the entry still unsaved, the edited text in the editor
+    await waitFor(() => expect(block()).toBeNull());
+    expect(shown(CODE)).toMatchObject({ status: 'ready', dirty: true, sourceView: false, failure: null });
+    await waitFor(() => expect(codeText()).toBe('mine one'));
+
+    // answered with a failure: the notice again, the edit still held
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(retry()!.disabled).toBe(false));
+    expect(noticeCause()).toBe('unreachable');
+    expect(shown(CODE)).toMatchObject({ status: 'error', dirty: true });
+    expect(existingViewState(tabOf(CODE).id)?.docOf?.()).toBe('mine one\n');
+  });
+
+  it('S1 (e): a Markdown file left on Rendered with unsaved edits stays on Rendered after a Retry, and its Source holds the edit', async () => {
+    const DOC = '/r/notes.md';
+    const main = disk({ [DOC]: 'saved\n' });
+    show(DOC);
+    await waitFor(() => expect(shown(DOC)).toMatchObject({ status: 'ready', kind: 'markdown' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('edited ');
+    await waitFor(() => expect(shown(DOC)!.dirty).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: DOC, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null;
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(block()).toBeNull());
+    expect(shown(DOC)).toMatchObject({ status: 'ready', dirty: true, sourceView: false });
+    expect(screen.getByText('saved')).toBeTruthy(); // Rendered shows the saved text, as for any unsaved edit
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(codeText()).toBe('edited saved'));
+  });
+
+  it('S1 (f): while a save is out Retry is drawn disabled and starts nothing', async () => {
+    const main = disk({ [CODE]: 'one\n' });
+    show(CODE);
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('mine ');
+    await waitFor(() => expect(shown(CODE)!.dirty).toBe(true));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    const write = main.hold('files.write');
+    let saved: Promise<unknown> = Promise.resolve();
+    act(() => void (saved = useViewer.getState().save(tabOf(CODE).id)));
+    await waitFor(() => expect(shown(CODE)!.saving).toBe(true));
+    expect(retry()!.disabled).toBe(true);
+    const before = reads(main, CODE).length;
+    fireEvent.click(retry()!);
+    act(() => useViewer.getState().retry(tabOf(CODE).id));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(before);
+    write.release();
+    await act(() => saved);
+    await waitFor(() => expect(retry()?.disabled).toBe(false));
+  });
+
+  describe('a session on another machine', () => {
+    beforeEach(() => overRl2(T));
+    const listed = (mine: boolean | null) =>
+      useSessions.setState((s) => {
+        const next = new Map(s.listed);
+        if (mine === null) next.delete(T);
+        else next.set(T, { ...s.listed.get(T)!, mine });
+        return { listed: next };
+      });
+    const grade = () => refused('files.read: refused grade by machine studio', 'grade');
+
+    it.each([
+      [true, 'not-on-record', 'studio does not have this session on record right now.', true],
+      [false, 'no-access', 'Your access to this session on studio does not include its files.', false],
+      [null, 'other', 'This file could not be opened.', true],
+    ] as const)('L9: a grade refusal of the read, the listing’s mine %s, reads %s', async (mine, cause, headline, offersRetry) => {
+      const main = disk({ '/r/a.ts': 'a\n' });
+      main.answers.by = (name) => (name === 'files.read' ? grade() : null);
+      listed(mine);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe(cause));
+      expect(noticeLines()).toEqual([headline, '/r/a.ts', 'files.read: refused grade by machine studio']);
+      expect(retry() !== null).toBe(offersRetry);
+    });
+
+    it('L9: with the machine not reachable the notice names it and offers Retry; started again, Retry shows the file', async () => {
+      const main = disk({ '/r/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      expect(noticeLines()[0]).toBe('studio is not reachable.');
+      main.answers.by = () => null;
+      fireEvent.click(retry()!);
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+    });
+
+    it('L9: where studio’s daemon ran the open and refused the path, the notice says the three ways; UC-7’s refusal of the act is its headline, as it is', async () => {
+      const main = disk({ [OUT]: 'x\n' });
+      main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', OUTSIDE_REFUSAL)) : null);
+      show(OUT, T);
+      await waitFor(() => expect(noticeCause()).toBe('outside'));
+      expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', THREE_WAYS, ASK_AGENT, OUT, `Not opened: ${OUTSIDE_REFUSAL}`]);
+      expect(block()!.querySelector('[data-notice-copy]')).not.toBeNull();
+
+      cleanup();
+      useViewer.getState().reset();
+      main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
+      show(OUT, T);
+      await waitFor(() => expect(noticeCause()).toBe('said'));
+      expect(noticeLines()).toEqual(['Not opened: only studio’s owners can', OUT]); // no small line: it would say the same
+      expect(retry()).toBeNull();
+    });
+
+    it('decision 20: a folder macOS protects there keeps U6f’s sentence and Open it inside the notice’s block; the failure is kept whole', async () => {
+      const main = disk({ '/elsewhere/Documents/rota.txt': 'x\n' });
+      main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: the file is in a folder macOS protects on studio', 'protected') : null);
+      show('/elsewhere/Documents/rota.txt', T);
+      await waitFor(() => expect(noticeCause()).toBe('protected'));
+      expect(block()!.getAttribute('role')).toBe('alert');
+      expect(block()!.querySelector('p')!.textContent).toBe('This file is in a folder macOS protects on studio. Opening it may show a privacy prompt on studio’s own screen.');
+      expect(within(block()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      expect(retry()).toBeNull();
+      expect(shown('/elsewhere/Documents/rota.txt', T)!.failure).toEqual({ code: 'internal', message: 'Not opened: the file is in a folder macOS protects on studio', refusal: 'protected' });
+    });
   });
 });

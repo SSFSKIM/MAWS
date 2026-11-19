@@ -31,6 +31,12 @@
 // hands it to the file's editor at once when one is drawn, or as soon as one is drawn while the body itself still has it.
 // A read on its way, a read that failed and a kind with no editor leave it on the body, inside the element ⌘S and the
 // comment key look in. Wherever the tab is drawn, beside the chat or in the main area, never on a tab's button.
+//
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; Interfaces §C, decisions 8, 11 and 20, "The
+// look"): a file that cannot be read shows the notice of its cause (`notice.ts`) where "Refused: " and the command's words
+// stood: the sentences, the path (with Copy path where the path is outside the folders), Retry where reading again can
+// help, and the command's own words last, small. A folder macOS protects on another machine keeps U6f's sentence and
+// button inside the same block, the classifier not asked.
 import { Popover } from 'radix-ui';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -38,7 +44,7 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ChevronDownIcon } from '../../../app/IconButton';
 import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
-import { OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
+import { NOTICE_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
 import { useRemoteStanding } from '../../../lane-b/remote-standing';
@@ -51,6 +57,8 @@ import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
+import { classifyFailure } from './notice'; // UX wave U6b-4b
+import { useNoticePlace } from './notice-place'; // UX wave U6b-4b
 import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 
 const CodeView = lazy(() => import('./CodeView'));
@@ -226,26 +234,67 @@ function NoSessionNotice({ path }: { path: string }) {
   );
 }
 
-// UX wave U6f (§E; decision 18, Decision Log 20): a UC-7 sentence (`said`) is drawn as it is; a file in a folder macOS
-// protects there offers Open it, and one behind a link into another such folder Open File…, each in the shape of the
-// failed frame's body (`rowButton`).
+// UX wave U6f (§E; decision 18, Decision Log 20): a file in a folder macOS protects there offers Open it, and one behind a
+// link into another such folder Open File…, each in the shape of the failed frame's body (`rowButton`), under U6f's own
+// sentence. UX wave U6b-4b: every other failure reads the notice of its cause; the block keeps `role="alert"` and
+// `data-refusal`, and its first paragraph is the headline in every case.
 function Refused({ entry }: { entry: ViewerEntry }) {
   const { path, tabId, appSessionId } = entry;
-  const message = entry.error ?? '';
+  const place = useNoticePlace(appSessionId);
+  const canRetry = useViewer.getState().canRetry(entry); // of the entry drawn, which every change of it draws again
+  const block = 'flex h-full flex-col items-center justify-center gap-1 p-6 text-center';
+  if (entry.needsOpen || entry.offersOpenFile) {
+    return (
+      <div role="alert" data-refusal data-notice-cause="protected" className={block}>
+        <p className="text-ui text-fg">{entry.error ?? ''}</p>
+        <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+        {entry.needsOpen ? (
+          <button type="button" data-open-protected="" className={`${rowButton} mt-1`} onClick={() => useViewer.getState().openProtected(tabId)}>
+            {VIEWER_COPY.openIt}
+          </button>
+        ) : appSessionId !== null ? (
+          <button type="button" className={`${rowButton} mt-1`} onClick={() => void openChosenFor(appSessionId)}>
+            {OPEN_FILE_COPY.row}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+  const failure = entry.failure ?? { code: 'internal' as const, message: entry.error ?? '', refusal: null };
+  const notice = classifyFailure(failure, { ...place, subject: 'file' });
+  const [headline, ...further] = notice.lines;
   return (
-    <div role="alert" data-refusal className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-      <p className="text-ui text-fg">{entry.said ? message : VIEWER_COPY.refused(message)}</p>
-      <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
-      {entry.needsOpen ? (
-        <button type="button" data-open-protected="" className={`${rowButton} mt-1`} onClick={() => useViewer.getState().openProtected(tabId)}>
-          {VIEWER_COPY.openIt}
-        </button>
-      ) : entry.offersOpenFile && appSessionId !== null ? (
-        <button type="button" className={`${rowButton} mt-1`} onClick={() => void openChosenFor(appSessionId)}>
-          {OPEN_FILE_COPY.row}
+    <div role="alert" data-refusal data-notice-cause={notice.cause} className={block}>
+      <p className="text-ui text-fg">{headline}</p>
+      {further.map((line) => (
+        <p key={line} className="text-ui text-fg-muted">
+          {line}
+        </p>
+      ))}
+      <div className="mt-1 flex max-w-full items-center justify-center gap-2">
+        <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+        {notice.copyPath ? <CopyPath path={path} /> : null}
+      </div>
+      {notice.retry ? (
+        <button type="button" data-notice-retry="" className={`${rowButton} mt-1 disabled:text-fg-faint`} disabled={!canRetry} onClick={() => useViewer.getState().retry(tabId)}>
+          {NOTICE_COPY.retry}
         </button>
       ) : null}
+      {notice.detail !== '' ? (
+        <p data-notice-detail="" className="mt-2 text-ui-sm text-fg-muted break-all">
+          {notice.detail}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+// The notice's Copy path: a small quiet button after the path (UX wave U6b-4b, "The look"; row 1 only).
+function CopyPath({ path }: { path: string }) {
+  return (
+    <button type="button" data-notice-copy="" className="shrink-0 rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={() => void navigator.clipboard?.writeText(path).catch(() => undefined)}>
+      {NOTICE_COPY.copyPath}
+    </button>
   );
 }
 

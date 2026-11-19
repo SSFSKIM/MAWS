@@ -371,7 +371,8 @@ describe('a relative path opens against the session’s working folder (U6b-4b, 
     render(<TestHost />);
     act(() => codeTranscriptActions.openFile('src/./a.ts', 4, X));
     expect(filesOf(X).map((tab) => paramsOf(tab.id))).toEqual([{ file: 'src/a.ts', line: 4, preview: true }]);
-    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe('Refused: path must be absolutesrc/a.ts'));
+    // UX wave U6b-4b (M3): the notice's last row, the command's words under it
+    await waitFor(() => expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual(['This file could not be opened.', 'src/a.ts', 'path must be absolute']));
     expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ appSessionId: bareOf(X), path: 'src/a.ts' })]);
     expect(screen.queryByRole('tree')).toBeNull(); // the preview's place, never the tree
     // the control: the same chip for the session in front is resolved against its folder

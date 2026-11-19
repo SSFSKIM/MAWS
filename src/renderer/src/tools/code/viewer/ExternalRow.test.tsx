@@ -67,6 +67,18 @@ describe('Open externally', () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith('files.openExternal', { appSessionId: LOCAL, path: '/r/doc.pdf', named: true });
   });
 
+  // UX wave U6b-4b (M3; decision 9, L11): the line under the button reads the first sentence of the refusal's cause
+  it.each([
+    ['outside the folders', { code: 'internal', message: "path outside the session's directories" }, 'This file is outside the folders this session works in.'],
+    ['gone', { code: 'internal', message: 'not found: /r/doc.pdf' }, 'No file at this path.'],
+    ['this Mac’s service not answering', { code: 'host_unavailable', message: 'files.openExternal: the files service is not running' }, "MAWS's service on this Mac is not answering."],
+  ] as const)('a refused open of a local session’s file (%s) reads the first sentence of its cause', async (_, error, sentence) => {
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error } as never);
+    render(<OpenExternally appSessionId={addressOf(TEST_MACHINE, 'app-l' as AppSessionId)} path="/r/doc.pdf" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(sentence);
+  });
+
   it('asks without named for a session on another machine that MAWS does not run there', () => {
     const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: true, message: null } } as never);
     const TERMINAL = addressOf(OTHER_MACHINE, 'app-t' as AppSessionId); // no lane B state for it: not a session MAWS runs there
@@ -123,6 +135,7 @@ describe('what a row says (rowWords)', () => {
     hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 1, pending: 0, readOnly: false, named: false, frame: null,
     locked: null, pin: null, agent: false, textEditable: false, // UX wave U6e's fields of the entry
     said: false, needsOpen: false, offersOpenFile: false, saveSaid: false, // UX wave U6f's
+    failure: null, retrying: false, // UX wave U6b-4b's
     ...over,
   });
   const openButton = () => screen.queryByRole('button', { name: 'Open externally' });

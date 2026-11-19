@@ -129,7 +129,7 @@ describe('files tree', () => {
       ['/r', ok('/r', [dir('/r/.git'), dir('/r/src'), dir('/r/empty'), { ...file('/r/link'), kind: 'symlink', target: '/etc/hosts' }, file('/r/.env')])],
       ['/r/src', ok('/r/src', [file('/r/src/a.ts')], true)],
       ['/r/empty', ok('/r/empty', [])],
-      ['/w', { status: 'error', message: "path outside the session's directories" }],
+      ['/w', { status: 'error', message: "path outside the session's directories", failure: { code: 'internal', message: "path outside the session's directories", refusal: null } }],
     ]);
     const rows = rowsOf({ roots, listing: (path) => listings.get(path), expanded: new Set(['/r', '/r/src', '/r/empty', '/w']), roles: new Map([['/r', 'directory' as const]]) });
     expect(rows.map((row) => [row.kind, row.depth, row.kind === 'notice' ? row.notice : row.path])).toEqual([
@@ -151,7 +151,7 @@ describe('files tree', () => {
   it('shows a failed listing as its message and nothing while a first listing loads', () => {
     const rows = rowsOf({
       roots: [dir('/r'), dir('/s')],
-      listing: (path) => (path === '/r' ? { status: 'error', message: 'not found: /r' } : { status: 'loading' }),
+      listing: (path) => (path === '/r' ? { status: 'error', message: 'not found: /r', failure: { code: 'internal', message: 'not found: /r', refusal: null } } : { status: 'loading' }),
       expanded: new Set(['/r', '/s']),
       roles: new Map(),
     });
@@ -375,7 +375,8 @@ describe('files store', () => {
     mainWith({ '/r': "path outside the session's directories" });
     useFiles.getState().list(S, '/r');
     await flush();
-    expect(useFiles.getState().listing(S, '/r')).toEqual({ status: 'error', message: "path outside the session's directories" });
+    // UX wave U6b-4b: the failure kept whole beside its message, for the notice
+    expect(useFiles.getState().listing(S, '/r')).toEqual({ status: 'error', message: "path outside the session's directories", failure: { code: 'internal', message: "path outside the session's directories", refusal: null } });
   });
 
   it('retries a refused watch when a holder joins it again', async () => {
@@ -489,15 +490,63 @@ describe('files tool', () => {
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-path')).toBe('/r/src/app.ts');
   });
 
-  it('shows a refused root as the refusal with its path, and retries it when expanded again', async () => {
+  it('shows a refused root as the notice’s first sentence for a folder with its path, and retries it when expanded again', async () => {
     render(<TestHost />);
     openTool();
     fireEvent.click(await screen.findByText('docs'));
     await waitFor(() => expect(document.querySelector('[data-notice="refused"]')).not.toBeNull());
-    expect(document.querySelector('[data-notice="refused"]')!.textContent).toBe("Refused: path outside the session's directories/docs");
+    // UX wave U6b-4b (L11): the folder's sentence, the command's words as the row's title
+    const row = document.querySelector('[data-notice="refused"]')!;
+    expect(row.textContent).toBe('This folder is outside the folders this session works in./docs');
+    expect(row.getAttribute('data-notice-cause')).toBe('outside');
+    expect(row.getAttribute('title')).toBe("path outside the session's directories");
     fireEvent.click(item('docs'));
     fireEvent.click(item('docs'));
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === '/docs')).toHaveLength(2));
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; L11): the Files list says the notice's
+  // sentences for a folder
+  it('a folder that is not there reads “No folder at this path.”, at the row’s height', async () => {
+    main = mainWith({ ...REPO, '/r/src': 'not found: /r/src' });
+    render(<TestHost />);
+    openTool();
+    fireEvent.click(await screen.findByText('src'));
+    await waitFor(() => expect(document.querySelector('[data-notice="error"]')).not.toBeNull());
+    const row = document.querySelector('[data-notice="error"]')!;
+    expect(row.textContent).toBe('No folder at this path.');
+    expect(row.getAttribute('data-notice-cause')).toBe('not-found');
+    expect(row.getAttribute('title')).toBe('not found: /r/src');
+  });
+
+  it('roots that could not be listed read the folder’s sentences and the command’s words, and Retry lists them again', async () => {
+    let up = false;
+    main = installFakeMain((name, input) => {
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list' && input.path === undefined) return up ? answer({ root: null, path: '', entries: [dir('/r')], truncated: false }) : fail('files.list: the files service is not running', 'host_unavailable');
+      if (name === 'files.list') return answer({ root: '/r', path: input.path, entries: [], truncated: false });
+      return fail(`unexpected ${name}`);
+    });
+    render(<TestHost />);
+    openTool();
+    const alert = await screen.findByRole('alert');
+    expect(alert.getAttribute('data-notice-cause')).toBe('unreachable');
+    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(["MAWS's service on this Mac is not answering.", 'files.list: the files service is not running']);
+    for (const p of alert.querySelectorAll('p')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.list)/);
+    up = true;
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(items()).toEqual(['r']));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('roots refused as outside read the folder’s sentence with no Retry', async () => {
+    main = mainWith({ ...REPO, '': "path outside the session's directories" });
+    render(<TestHost />);
+    openTool();
+    const alert = await screen.findByRole('alert');
+    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['This folder is outside the folders this session works in.', "path outside the session's directories"]);
+    expect(within(alert).queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   // UX wave U6b-1 (Decision 8): the reveal of `params.path`, which nothing in the window asked for, is gone
@@ -1518,6 +1567,15 @@ describe('the Files list’s menu for a session on another machine (U6f)', () =>
     expect(document.querySelector('[data-remote-chooser]')).toBeNull();
     expect(main.callsOf('files.listOutside')).toEqual([]);
     expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  // UX wave U6b-4b (L11): a folder there is said with the machine's name
+  it('a refused folder there reads the folder’s sentence that names the machine', async () => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: T }));
+    fireEvent.click(await screen.findByText('docs'));
+    await waitFor(() => expect(document.querySelector('[data-notice="refused"]')).not.toBeNull());
+    expect(document.querySelector('[data-notice="refused"] span')!.textContent).toBe('This folder is outside the folders this session works in on studio.');
   });
 
   it('for a terminal session there the row keeps U6e’s sentence', async () => {
