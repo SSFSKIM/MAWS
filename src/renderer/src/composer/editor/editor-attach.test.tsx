@@ -211,6 +211,35 @@ describe('the editor takes an attached block', () => {
     expect(handle.current!.serialize().display).toBe('[Pasted text #1 +1 lines]'); // into the box the send left
   });
 
+  // Decision Log 17 (S1's at-most-once): a send of the session carrying the block, accepted while this mount waits on its
+  // restore, took the block: the answer is `present` and nothing is put in. The control: with no send, it is put in.
+  it.each(['a send carrying it is accepted', 'no send'] as const)('waiting on its restore while %s', async (meanwhile) => {
+    const block = { id: 'attach-r', text: 'ls -la' };
+    const sender = mount(heldPort({ doc: { ...docOf([paragraph(textNode('with it '))]), content: [paragraph(textNode('with it '), pastedBlock(block.text, block.id))] }, attachments: [], updatedAt: '2026-11-17T09:00:00.000Z' }), { onSubmit: async () => true });
+    await act(async () => sender.handle.current!.restored());
+    expect(ofId(sender.handle.current!.doc(), block.id)).toHaveLength(1);
+    const { port, release, saved } = heldPort(null, { holdLoad: true });
+    const asked = mount(port);
+    let answer: string | null = null;
+    const done = asked.handle.current!.attachPasted(block, { at: 'end', save: true }).then((a) => (answer = a));
+    await act(async () => {});
+    if (meanwhile === 'a send carrying it is accepted') {
+      act(() => sender.handle.current!.submit());
+      await waitFor(() => expect(ofId(sender.handle.current!.doc(), block.id)).toHaveLength(0)); // sent, the box cleared
+    }
+    expect(answer).toBeNull();
+    await release();
+    await act(async () => void (await done));
+    if (meanwhile === 'no send') {
+      expect(answer).toBe('taken');
+      expect(ofId(asked.handle.current!.doc(), block.id)).toHaveLength(1);
+      return;
+    }
+    expect(answer).toBe('present');
+    expect(ofId(asked.handle.current!.doc(), block.id)).toHaveLength(0);
+    expect(saved.filter((draft) => ofId(draft?.doc as ComposerDoc, block.id).length > 0)).toEqual([]);
+  });
+
   it('answers closed while it takes no typing, and gone once it unmounted while waiting', async () => {
     const closed = mount(heldPort(null).port, { disabled: 'read only' });
     await act(async () => closed.handle.current!.restored());
