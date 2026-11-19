@@ -272,9 +272,21 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     shown.current = inView;
     if (asked === 0 || !inView) return;
     take();
-    const retry = new MutationObserver(take);
+    // at most one try a frame: a focus that something takes straight back (a modal's trap) changes a class each time, and
+    // a try per change would never let the page draw
+    let frame = 0;
+    const retry = new MutationObserver(() => {
+      if (frame === 0)
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          take();
+        });
+    });
     retry.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] });
-    return () => retry.disconnect();
+    return () => {
+      retry.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [asked, inView, take]);
   const onEditor = useCallback(
     (focus: (() => void) | null) => {
