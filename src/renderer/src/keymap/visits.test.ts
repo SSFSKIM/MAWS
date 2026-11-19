@@ -454,3 +454,41 @@ describe('history after the branch panel', () => {
   });
 });
 
+// The delta review's fix wave (H5): below 700 px the side column is a sheet over the main area.
+describe('a step under the narrow window’s side sheet', () => {
+  const windowSize = () => (window as unknown as { happyDOM: { setWindowSize(size: { width: number }): void } }).happyDOM;
+  async function sheetOverTheFile(width: number) {
+    windowSize().setWindowSize({ width });
+    // a chat and its file share the session's side column: its terminal, open while the file is in front
+    await visit('a');
+    layout().openTab({ kind: 'file', path: '/work/notes.md', line: null, appSessionId: S('a'), machine: TEST_MACHINE });
+    await turn();
+    layout().setPanelTabs(S('a'), { tabs: [{ id: 'terminal:probe', toolId: 'terminal', pinned: false }], activeTabId: 'terminal:probe' });
+    layout().showSurfaceTab(S('a'), 'terminal:probe');
+    await turn();
+    expect(layout().regions.panel.collapsed).toBe(false);
+  }
+
+  it('collapses a sheet that covers the main area when a step brings back a tab, and keeps its tabs; beside a wide window it stays', async () => {
+    const original = window.innerWidth;
+    try {
+      await sheetOverTheFile(600);
+      runAction('go.back');
+      expect(frontOf(layout())).toBe(tabOf('a'));
+      expect(layout().regions.panel.collapsed).toBe(true);
+      expect(layout().effectivePanelTabs(S('a')).map((t) => t.id)).toEqual(['terminal:probe']); // nothing of the column closed
+      // the control, in this test: the same step at 1280 px, where the column stands beside the main area, leaves it open
+      off();
+      resetShellStores();
+      useVisits.setState({ record: EMPTY_RECORD, opened: [] });
+      off = connectVisits();
+      await sheetOverTheFile(1280);
+      runAction('go.back');
+      expect(frontOf(layout())).toBe(tabOf('a'));
+      expect(layout().regions.panel.collapsed).toBe(false);
+    } finally {
+      windowSize().setWindowSize({ width: original });
+    }
+  });
+});
+
