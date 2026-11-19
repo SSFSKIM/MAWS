@@ -556,9 +556,9 @@ describe('a take-back’s save taken over an older save past main’s bound', ()
   });
 });
 
-// The delta review's fix wave, H1 and H2: each save is answered by its own draft, and a bridge that throws leaves the
-// queue able to take the next one.
-describe('the answer to each save', () => {
+// Fix wave 3 (the delta review's H1 and H2, rewritten to one queue): each draft goes in the session's order, the newest
+// in place of those waiting, and a bridge that throws leaves the queue able to take the next save.
+describe('one queue for each session’s saves', () => {
   function machineKeepingOne() {
     let kept: Draft | null = null;
     let answered = 0;
@@ -582,32 +582,34 @@ describe('the answer to each save', () => {
     };
   }
 
-  it('a later save that fails does not undo one the machine took', async () => {
+  it('a later save that fails leaves the one the machine took kept there, and the newer one held in this window', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const machine = machineKeepingOne();
     const port = portOf(machine.fake);
-    const first = port.save(draft('one'));
-    const later = port.save(draft('one two')); // waits while the first is out
+    port.save(draft('one'));
+    port.save(draft('one two')); // waits while the first is out
     await flush();
     await machine.take();
     await machine.lose();
-    expect(await Promise.all([first, later])).toEqual([true, false]);
+    expect(textOf(machine.kept())).toBe('one');
+    expect(textOf(unsavedRemoteDraft(REMOTE))).toBe('one two');
   });
 
-  it('a save passed over by a newer one borrows nothing of that one’s answer', async () => {
+  it('a save passed over by a newer one is never sent: the newest goes after the one out', async () => {
     const machine = machineKeepingOne();
     const port = portOf(machine.fake);
-    const first = port.save(draft('one'));
-    const passed = port.save(draft('one two')); // never sent: the next is newer
-    const newest = port.save(draft('one two three'));
+    port.save(draft('one'));
+    port.save(draft('one two')); // never sent: the next is newer
+    port.save(draft('one two three'));
     await flush();
     await machine.take();
     await machine.take();
-    expect(await Promise.all([first, passed, newest])).toEqual([true, false, true]);
+    expect((machine.fake.invoked('session.drafts.set') as Saved[]).map((input) => textOf(input.draft))).toEqual(['one', 'one two three']);
     expect(textOf(machine.kept())).toBe('one two three');
   });
 
-  it('a bridge that throws answers the save not taken, and the queue takes the next', async () => {
+  it('a bridge that throws is a failed write: the queue is not left out, and takes the next save', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     const machine = machineKeepingOne();
     let throws = true;
     const client = {
@@ -621,11 +623,15 @@ describe('the answer to each save', () => {
       },
     } as typeof machine.fake.client;
     const port = rememberingRemoteDrafts(local(), REMOTE, () => true, client);
-    expect(await port.save(draft('one'))).toBe(false);
-    const next = port.save(draft('one two'));
+    port.save(draft('one'));
+    await flush();
+    await flush();
+    expect(textOf(unsavedRemoteDraft(REMOTE))).toBe('one'); // not taken, still this window's
+    port.save(draft('one two'));
     await flush();
     await machine.take();
-    expect(await next).toBe(true);
     expect(textOf(machine.kept())).toBe('one two');
+    expect(unsavedRemoteDraft(REMOTE)).toBeUndefined();
   });
+});
 });

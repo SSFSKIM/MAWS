@@ -216,7 +216,7 @@ describe('a send that outlives its composer, on another machine', () => {
 
 // The branch panel's fix wave, G1 (scalpel-2#5): a box over the link says its save was kept only once the machine took it.
 describe('a box over the link that saves at once', () => {
-  it.each(['takes it', 'does not take it'] as const)('says nothing before the machine answers, then what it answered (the machine %s)', async (machine) => {
+  it.each(['takes it', 'does not take it'] as const)('says nothing before the machine answers, then what its read back holds (the machine %s)', async (machine) => {
     vi.spyOn(console, 'warn').mockImplementation(() => {}); // the queue says a save was not kept, as it does
     const store = over();
     store.put(EARLIER);
@@ -229,7 +229,7 @@ describe('a box over the link that saves at once', () => {
     expect(a.said).toBeNull();
     expect(a.lines()).toEqual([]);
     await store.held(SET)[0]!.answer(machine === 'takes it' ? undefined : { ok: false, error: { code: 'host_unavailable', message: 'the machine is offline' } });
-    expect(await a.done).toEqual(machine === 'takes it' ? added : refused('unsaved'));
+    expect(await a.done).toEqual(machine === 'takes it' ? added : unconfirmed); // fix wave 3: read back, the window still holding it
     expect(a.lines()).toHaveLength(1);
     box.unmount();
   });

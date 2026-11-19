@@ -119,11 +119,6 @@ function useSessionStatus(appSessionId: AppSessionId, client: MawsBridge) {
 // Where the draft lives: C10's intent while the session is unstarted (C4's drafts table has no row for it), C4's drafts
 // otherwise. The port is created once per editor and reads the current hook, so a session that starts while its tab is
 // open moves to C4's drafts without a remount.
-async function intentSave(intent: SetupIntentHook, draft: Draft | null): Promise<boolean> {
-  const result = await intent.patch({ draft });
-  if (!result.ok) console.warn('[composer] the unstarted session kept no draft', result.error);
-  return result.ok;
-}
 function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, client: MawsBridge): DraftPort {
   const current = useRef(hook);
   useLayoutEffect(() => void (current.current = hook));
@@ -136,12 +131,9 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
       save: async (draft: Draft | null, replaces?: string | null) => {
         const intent = current.current;
         if (!intent) return drafts.save(draft, replaces);
-        return intentSave(intent, draft);
-      },
-      // UX wave U6b-5a (the delta review's fix wave, H1): an attach's save, answered by its own write
-      saveNow: async (draft: Draft | null) => {
-        const intent = current.current;
-        return intent ? intentSave(intent, draft) : drafts.saveNow(draft);
+        const result = await intent.patch({ draft });
+        if (!result.ok) console.warn('[composer] the unstarted session kept no draft', result.error);
+        return result.ok;
       },
     };
   }, [appSessionId, client]);

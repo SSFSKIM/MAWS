@@ -38,9 +38,6 @@ export interface DraftPort {
   // UX wave U4a (decision 13; Interfaces D): `replaces`, when given, names what the save replaces (a take-back's settle
   // form, which the writer names until one save is acknowledged); the answer is whether the store took it
   save(draft: Draft | null, replaces?: string | null): Promise<boolean>;
-  // UX wave U6b-5a (the delta review's fix wave, H1): a save answered by its own write, in the session's order, never
-  // merged with another (an attach's, which says "Added" only on that answer); a port with none saves with `save`
-  saveNow?(draft: Draft | null): Promise<boolean>;
   // Whether an accepted submission clears the stored draft (C4's drafts: yes). C10's intent while unstarted: no, the
   // accepted first message is C10's to hold and the intent refuses a patch while its start runs (M4).
   clearsOnSend?(): boolean;
@@ -267,10 +264,9 @@ export class EditorController {
 
   // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged. The
   // answer is whether the port took it (UX wave U6b-5a: an attach that saves at once says so).
-  private saveDraft(draft: Draft | null, now = false): Promise<boolean> {
+  private saveDraft(draft: Draft | null): Promise<boolean> {
     const form = this.settleForm;
-    const plain = () => (now && this.drafts.saveNow ? this.drafts.saveNow(draft) : this.drafts.save(draft));
-    const saved = form === null ? plain() : this.drafts.save(draft, form.replaces).then((taken) => {
+    const saved = form === null ? this.drafts.save(draft) : this.drafts.save(draft, form.replaces).then((taken) => {
       if (taken && this.settleForm === form) {
         this.settleForm = null;
         form.taken();
@@ -846,7 +842,7 @@ export class EditorController {
     // the insertion's pending write is this save's only once it is taken: a save that fails leaves it to the writer, so
     // what the box holds is still saved at its pause or its unmount (the branch panel's fix wave)
     const revision = this.revision;
-    const taken = await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()), true);
+    const taken = await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()));
     if (taken && this.revision === revision) this.writer.cancel();
     return taken ? 'taken' : 'unsaved';
   }

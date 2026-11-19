@@ -30,7 +30,7 @@ import { takeWithheld } from '@shared/sessions/draft-fit';
 import { ipc } from '../ipc/client';
 import { available } from '../keymap/shell-navigation';
 import { isNotOffered, readerRowsOf } from '../lane-b/reader-rows';
-import { readRemoteDraft, saveRemoteDraftOnce, unsavedRemoteDraft } from '../lane-b/remote-drafts';
+import { readRemoteDraft, remoteDraftsSent, saveRemoteDraftOnce, unsavedRemoteDraft } from '../lane-b/remote-drafts';
 import { isRemoteLaneB } from '../lane-b/remote-session';
 import { firstSendPending } from '../sessions/remote-spawn';
 import { useSetup } from '../sessions/store';
@@ -230,7 +230,7 @@ class HandOver {
           case 'kept':
             // a save across which the authority changed may be overwritten by the one after it: ask that one, the
             // save unaccounted for until a believed read, as a store write in a round not believed (Decision Log 17 (i))
-            if (this.comings === comings && composerOf(this.session) === target) return { kind: 'added' };
+            if (this.comings === comings && composerOf(this.session) === target) return this.overLink ? this.readBack() : { kind: 'added' };
             this.unaccountedLanded = true;
             continue;
           case 'present':
@@ -301,6 +301,21 @@ class HandOver {
     if (replaces === DRAFT_CLAIM) this.unaccountedClaim = true;
     else this.unaccountedRevision = true;
     return null;
+  }
+
+  // Fix wave 3: a box over the link hands its save to the session's one queue, whose taking it in is no answer. Once the
+  // queue has sent what it was handed, the machine's draft is read back: "Added" only where it holds the block; a read
+  // that fails, times out or is not offered is unconfirmed; a newer document there without it, the queue holding
+  // nothing more to send, is not added (the person took it out).
+  private async readBack(): Promise<AttachOutcome> {
+    this.sent = true;
+    if ((await this.within(remoteDraftsSent(this.session))) === EXPIRED) return this.expired();
+    const read = await this.within(this.read());
+    if (read === EXPIRED) return this.expired();
+    if (!read.ok) return { kind: 'unconfirmed' };
+    if (holdsBlock(read.kept, this.block.id)) return { kind: 'added' };
+    if (unsavedRemoteDraft(this.session) !== undefined) return { kind: 'unconfirmed' }; // what may yet be sent
+    return this.refuse('changed');
   }
 
   // The rounds spent: one read more, and no write. Over the link only the machine's own answer, with no save of the
