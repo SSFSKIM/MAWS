@@ -46,7 +46,8 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.textContent).toBe('to human\nHello');
   });
 
-  it('keeps individual call rows when its group mod draws nothing and honors an expansion rewrite', async () => {
+  // UX wave U2b (M5, §E): the run is a full site: a group mod that draws nothing hides the run, its calls with it
+  it('hides the run, calls and all, when its group mod draws nothing, and honors an expansion rewrite', async () => {
     const b = builder(); b.turn('u'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' });
     const store = await mounted(b); const row = rowOf(store.rows(), 'group');
     const view = renderRow(row, { storeKey: store.key });
@@ -59,6 +60,7 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
     expect(Array.from(view.container.querySelectorAll('[data-cell-id]'), (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
     expect(view.container.querySelector('.transcript-run-line')?.getAttribute('aria-expanded')).toBe('true');
+    expect(view.container.querySelector('.transcript-group')!.closest('[inert]')).not.toBeNull(); // concealed: the mod drew nothing
     await waitFor(() => expect(asks().filter((x) => x.component === 'ToolUse').map((x) => x.instanceId)).toEqual(['t1', 't2']));
     expect(asks().filter((x) => x.component === 'ToolResult')).toHaveLength(0);
   });
@@ -90,27 +92,27 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.textContent).toContain('rewritten output'); expect(view.container.textContent).not.toContain('original');
   });
 
+  // UX wave U2b (M5's fix wave 1, §E): a closed call that the live derivation drew as a run asks its run's site; the
+  // ToolUse drawing beside a ToolResult is a call's that never joins a run (here a computer-use call, which stands alone)
   it.each([true, false])('asks ToolResult from original provenance and preserves the ToolUse drawing (rewrite=%s)', async (rewrite) => {
-    const b = builder(); b.turn('u'); b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', 'original', { structured: BASH_RESULT('original') }); b.end(['u']);
+    const b = builder(); b.turn('u'); b.toolUse('t', 'mcp__cua_repl__js', { code: 'pwd' }); b.result('t', 'original'); b.end(['u']);
     const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
     const toolUse = asks().find((x) => x.component === 'ToolUse')!;
-    await act(() => fake.reply('session.ui.render', answer({ ...toolUse.props, tool: 'RenamedShell', input: { command: 'echo drawn command' }, output: BASH_RESULT('ToolUse output') }, engine, true)));
+    await act(() => fake.reply('session.ui.render', answer({ ...toolUse.props, tool: 'RenamedShell', input: { code: 'echo drawn command' }, output: 'ToolUse output' }, engine, true)));
     fireEvent.click(screen.getByRole('button', { name: /RenamedShell/ }));
     view.rerenderRow(rowOf(store.rows(), 'cell'));
     await waitFor(() => expect(asks().some((x) => x.component === 'ToolResult')).toBe(true));
     const result = asks().find((x) => x.component === 'ToolResult')!;
-    expect(result.props).toEqual({ tool_use_id: 't', tool: 'Bash', output: BASH_RESULT('original'), isErrored: false });
+    expect(result.props).toEqual({ tool_use_id: 't', tool: 'mcp__cua_repl__js', output: 'original', isErrored: false });
     const stored = structuredClone(useTranscriptStore.getState().rows(store.key));
-    await act(() => fake.reply('session.ui.render', answer(rewrite ? { ...result.props, output: BASH_RESULT('ToolResult output') } : result.props, engine, rewrite)));
+    await act(() => fake.reply('session.ui.render', answer(rewrite ? { ...result.props, output: 'ToolResult output' } : result.props, engine, rewrite)));
     expect(view.container.textContent).toContain('RenamedShell');
-    expect(view.container.textContent).toContain('echo drawn command');
     expect(view.container.textContent).toContain(rewrite ? 'ToolResult output' : 'ToolUse output');
     expect(view.container.textContent).not.toContain(rewrite ? 'ToolUse output' : 'ToolResult output');
-    expect(view.container.textContent).not.toContain('pwd');
     expect(useTranscriptStore.getState().rows(store.key)).toEqual(stored);
-    expect(rowOf(stored, 'cell')).toMatchObject({ detail: { command: 'pwd' } });
   });
+
 
   it('lets each hooked read disclose its own native detail', async () => {
     fake = fakeClient({ 'session.ui.render': (request: CommandInput<'session.ui.render'>) => answer(request.props) }); holder.client = fake.client;

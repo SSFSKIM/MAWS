@@ -47,6 +47,13 @@ const CHECKOUTS_BUDGETS_MS = {
   'git.branches': GIT + MARGIN_MS,
   'git.diff': STATUS + GIT + MARGIN_MS, // the untracked scope: the status that confines it, then the diff (the others: one round)
   'git.log': GIT + MARGIN_MS,
+  // UX wave U5b-2: the branch read's rule (the remotes beside HEAD's branch and commit, the remote, its HEAD branch, the
+  // candidates), the merge base beside behind, then the rows beside the two counts
+  'git.branchCommits': 6 * GIT + MARGIN_MS,
+  'git.commitDiff': 2 * GIT + MARGIN_MS, // the commit, then onHead beside the patch and the counts
+  // the patch beside the counts, and beside them the root then the fresh status; the new files' reads (at most
+  // UNTRACKED_COUNT_FILES, each at most UNTRACKED_COUNT_BYTES) are the filesystem's, within the margin (P5)
+  'git.changesSince': 2 * GIT + MARGIN_MS,
   'git.lsFiles': GIT + MARGIN_MS, // ls-files, or a walk bounded by its entries
   // trust beside the gh probe, then the remotes, the default remote and its HEAD
   'scm.status': Math.max(TRUST, PROBE) + 3 * GIT + MARGIN_MS,

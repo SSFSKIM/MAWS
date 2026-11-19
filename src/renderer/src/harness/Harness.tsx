@@ -6,10 +6,13 @@
 // with `variant: 'child'` over that agent's own events (C8's drill-in). UX wave U1b: once the page is asked to raise one
 // of a fixture's asynchronous questions (`raise`, as a terminal session's bridge raises one), the transcript draws its
 // requests through the real card's renderer, so the waiting question's form stands in the row of its call (Proof 3,
-// `synthetic/questions`).
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+// `synthetic/questions`). UX wave U2b (M6): `foldsFile` hands the transcript the runs of a to-human folds file as its stored
+// summaries, as the session's slot hands it what the window read of the mod's file, so a scene measures the labelled
+// record lines.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import type { AppSessionId, AttentionId, MessageUuid } from '@shared/graph/ids';
+import { storedRunsOf, type StoredRun } from '@shared/owner/folds'; // UX wave U2b
 import { renderSessionRequest } from '../request-card'; // UX wave U1b
 import { useTranscriptStore } from '../stores/transcript';
 import { rowId } from '../transcript/model/keys';
@@ -37,6 +40,8 @@ const painted = async () => {
   await nextFrame();
 };
 
+const noMoments = () => undefined; // the harness has no folds store to tell of a moment
+
 export function Harness() {
   const params = new URLSearchParams(location.search);
   const [session, setSession] = useState<HarnessSession | null>(null);
@@ -54,6 +59,8 @@ export function Harness() {
   const [cards, setCards] = useState(false);
   const [realCards, setRealCards] = useState(false); // UX wave U1b: the real card's renderer, from the first `raise`
   const [effort, setEffort] = useState<string | null>(params.get('effort')); // W8
+  const [stored, setStored] = useState<readonly StoredRun[] | null>(null); // UX wave U2b: the folds file's runs, if one was handed in
+  const summaries = useMemo(() => (stored === null ? undefined : { stored, moved: noMoments }), [stored]); // `moved` as the product hands it, so its per-change watch is inside the measured reading
   const sessionRef = useRef<HarnessSession | null>(null);
   const listRef = useRef<TranscriptListHandle>(null);
   const frames = useRef(new FrameMetrics());
@@ -74,6 +81,7 @@ export function Harness() {
       setOpened(null);
       setChild(null);
       setError(null);
+      setStored(null);
       await painted();
       return { ms: performance.now() - started, rows: next.rows().length, events: next.eventCount };
     };
@@ -160,6 +168,12 @@ export function Harness() {
         return raiseQuestion(sessionOfKey(session.key), asked.call, asked.questions);
       },
       lower: (id) => lowerQuestion(sessionOfKey(current().key), id as AttentionId),
+      foldsFile: (text) => {
+        current();
+        const runs = storedRunsOf(text);
+        flushSync(() => setStored(runs ?? []));
+        return runs === null ? null : runs.length;
+      },
     };
     const frameMetrics = frames.current;
     window.__maws_harness = api;
@@ -234,7 +248,7 @@ export function Harness() {
       </div>
       {session ? (
         <div className="flex min-h-0 flex-1">
-          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : realCards ? renderSessionRequest : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} ownerLane={session.ownerLane} />
+          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : realCards ? renderSessionRequest : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} ownerLane={session.ownerLane} summaries={summaries} />
           {child && (
             <section className="flex w-[44%] min-w-0 flex-col border-l border-border" aria-label="Child transcript" data-harness-child="">
               <div className="flex items-center justify-between border-b border-border bg-bg-raised px-3 py-1 text-ui-sm text-fg-muted">

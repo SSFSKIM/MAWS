@@ -20,6 +20,7 @@ import { launchMaws, type MawsLaunch } from './support/launch';
 import { seedTranscript, SideJournal, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
 import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // P4-R7z
+import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '../src/shared/owner/folds'; // UX wave U2b
 
 const SKILLS_SESSION = 'a2a20000-0000-4000-8000-00000000000a';
 const SEND_SESSION = 'a2a20000-0000-4000-8000-00000000000b';
@@ -137,6 +138,10 @@ test.describe('sessions available on demand (P2-A)', () => {
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on open').toBe(false);
     value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } })); // P4-R8
     value(await invoke(page, 'settings.set', { engine: { launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } } })); // P4-A2
+    // UX wave U2b (the execution document, §M, "The switch"): new fold summaries off, the machine's switch in the index's
+    // own facts, before the launch is decided; a launch decided while it is off carries the value, whatever the lane
+    value(await invoke(page, 'mods.setFoldSummaries', { on: false }));
+    expect(value(await invoke(page, 'mods.list', {}))[0]!.summaries, 'the switch kept off').toBe(false);
     await control.click();
     await expect(control).toHaveText('Starting…');
     await expect(mainRegion(page).getByText(REPLY, { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -155,6 +160,8 @@ test.describe('sessions available on demand (P2-A)', () => {
     expect(resumed[resumed.indexOf('--setting-sources') + 1]).toBe('user,project,local');
     expect(resumed, 'nothing appended with every hook off').not.toContain('--append-system-prompt');
     expect((flags.env as Record<string, unknown> | undefined)?.[NATIVE_TO_HUMAN_ENV] ?? null).toBeNull();
+    // UX wave U2b: the summaries' value beside where the advertisement would stand, with the lane off as here
+    expect((flags.env as Record<string, unknown> | undefined)?.[FOLD_SUMMARIES_ENV], 'the launch made with the summaries’ switch off').toBe(FOLD_SUMMARIES_OFF);
     expect(writtenUsers(maws, appId).map((r) => (r.frame as { message?: { content?: unknown } }).message?.content), 'sent once').toEqual(['Reply with OK']);
 
     // stopped: what the engine reported is kept, labelled with when

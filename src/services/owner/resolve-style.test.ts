@@ -36,9 +36,12 @@ const style = (name: string | null, key: string | null) =>
 const ctx = (over: Partial<StyleContext> = {}): StyleContext => ({ configHome: home, cwd: project, systemRoot: system, ...over });
 const userSettings = (settings: object) => put(join(home, 'settings.json'), settings);
 
+// U2b: no to-human installation applies (the resolver reads them whatever the style)
+const NO_TO_HUMAN = { paths: [], hooksLoad: true };
+
 describe('which style the settings select, in the engine’s precedence', () => {
   it('is the default when nothing sets one', async () => {
-    expect(await resolveStyle(ctx())).toEqual({ name: 'default', shape: 'none', contract: null, unresolved: null, messageTool: false });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'default', shape: 'none', contract: null, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
   });
 
   it('managed, then MAWS’s own --settings, then local, then project, then user', async () => {
@@ -87,7 +90,7 @@ describe('the shape of the contract the selected style declares', () => {
     put(join(home, 'output-styles/Explanatory.md'), style('Explanatory', '1'));
     for (const name of ['default', 'Explanatory', 'Learning']) {
       userSettings({ outputStyle: name });
-      expect(await resolveStyle(ctx())).toEqual({ name, shape: 'none', contract: null, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx())).toEqual({ name, shape: 'none', contract: null, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
     }
   });
 
@@ -95,9 +98,9 @@ describe('the shape of the contract the selected style declares', () => {
     put(join(home, 'output-styles/report.md'), style('Report Mode', '1'));
     put(join(home, 'output-styles/terse.md'), style(null, '"1"'));
     userSettings({ outputStyle: 'Report Mode' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'Report Mode', shape: 'marks', contract: 1, unresolved: null, messageTool: false });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'Report Mode', shape: 'marks', contract: 1, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
     userSettings({ outputStyle: 'terse' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'terse', shape: 'marks', contract: 1, unresolved: null, messageTool: false });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'terse', shape: 'marks', contract: 1, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
   });
 
   it('a project style comes before a user style of the same name', async () => {
@@ -118,20 +121,20 @@ describe('the shape of the contract the selected style declares', () => {
   ] as const)('a style declaring %s has the %s shape', async (key, shape, contract) => {
     put(join(home, 'output-styles/report.md'), style('report', key));
     userSettings({ outputStyle: 'report' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape, contract, unresolved: null, messageTool: false });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape, contract, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
   });
 
   it('0, a value that is no integer, or no key has no shape', async () => {
     for (const key of ['0', '1.5', 'one', '', null]) {
       put(join(home, 'output-styles/report.md'), style('report', key));
       userSettings({ outputStyle: 'report' });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape: 'none', contract: null, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape: 'none', contract: null, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
     }
   });
 
   it('an unknown name is not compatible and says why', async () => {
     userSettings({ outputStyle: 'nowhere' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'nowhere', shape: 'none', contract: null, unresolved: expect.stringContaining('nowhere'), messageTool: false });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'nowhere', shape: 'none', contract: null, unresolved: expect.stringContaining('nowhere'), messageTool: false, toHuman: NO_TO_HUMAN });
   });
 
   describe('a plugin’s style, <plugin>:<style>', () => {
@@ -146,16 +149,16 @@ describe('the shape of the contract the selected style declares', () => {
     it('is found in an enabled plugin installed at user scope', async () => {
       install([{ ...user, installPath: installPath() }]);
       userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'marks', contract: 1, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'marks', contract: 1, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
       userSettings({ outputStyle: 'myplug:plain', enabledPlugins: { 'myplug@mkt': true } });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:plain', shape: 'none', contract: null, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:plain', shape: 'none', contract: null, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
     });
 
     it('declaring 4, as doperpowers 7.149.0’s to-human does, has the message-tool shape (P2-C2)', async () => {
       put(join(installPath(), 'output-styles/to-human.md'), style('to-human', '4'));
       install([{ ...user, installPath: installPath() }]);
       userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'message-tool', contract: 4, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'message-tool', contract: 4, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
     });
 
     it('is not found when the plugin is disabled, in the merged settings, or not installed', async () => {
@@ -175,7 +178,7 @@ describe('the shape of the contract the selected style declares', () => {
     it('is found in an enabled plugin installed at managed scope, in a project or none', async () => {
       install([{ ...user, scope: 'managed', installPath: installPath() }]);
       userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'marks', contract: 1, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'marks', contract: 1, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
       expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'marks', contract: 1 });
     });
 
@@ -207,8 +210,8 @@ describe('lookupStyle (the engine reported a name: the mismatch check’s next d
   it('looks the named style up directly, whatever the settings say', async () => {
     put(join(home, 'output-styles/report.md'), style('report', '1'));
     userSettings({ outputStyle: 'default' });
-    expect(await lookupStyle('report', ctx())).toEqual({ name: 'report', shape: 'marks', contract: 1, unresolved: null, messageTool: false });
-    expect(await lookupStyle('Learning', ctx())).toEqual({ name: 'Learning', shape: 'none', contract: null, unresolved: null, messageTool: false });
+    expect(await lookupStyle('report', ctx())).toEqual({ name: 'report', shape: 'marks', contract: 1, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
+    expect(await lookupStyle('Learning', ctx())).toEqual({ name: 'Learning', shape: 'none', contract: null, unresolved: null, messageTool: false, toHuman: NO_TO_HUMAN });
   });
 });
 
@@ -216,8 +219,8 @@ describe('lookupStyle (the engine reported a name: the mismatch check’s next d
 // only under its own style, declaring the tool, while its hooks load (test/support/to-human-plugin.ts installs both).
 describe('whether the to-human plugin registers its message tool under the style (messageTool)', () => {
   it('does under doperpowers:to-human declaring 6 or later, the to-human plugin enabled and hooks on', async () => {
-    installToHumanPlugin(home);
-    expect(await resolveStyle(ctx())).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true });
+    const at = installToHumanPlugin(home);
+    expect(await resolveStyle(ctx())).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true, toHuman: { paths: [at], hooksLoad: true } });
     installToHumanPlugin(home, { declared: 9 });
     expect(await resolveStyle(ctx())).toMatchObject({ contract: 9, messageTool: true });
     expect(await lookupStyle(PLUGIN_STYLE, ctx({ cwd: null }))).toMatchObject({ messageTool: true });
@@ -240,12 +243,12 @@ describe('whether the to-human plugin registers its message tool under the style
   // dc-acceptance-bd31, 2026-11-04: devcloud's /etc/claude-code/managed-settings.json enables the plugins it seats, and
   // the engine's startup plugin update rewrote their records to scope `managed`.
   it('does on a Linux host whose managed settings enable the plugins, installed at managed scope', async () => {
-    installToHumanPlugin(home, { scope: 'managed' });
-    expect(await resolveStyle(ctx({ platform: 'linux' }))).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true });
+    const at = installToHumanPlugin(home, { scope: 'managed' });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true, toHuman: { paths: [at], hooksLoad: true } });
     userSettings({ outputStyle: PLUGIN_STYLE, enabledPlugins: {} }); // enabled by policy alone
     expect(await resolveStyle(ctx({ platform: 'linux' }))).toMatchObject({ shape: 'none', messageTool: false });
     put(join(linux, 'managed-settings.json'), { enabledPlugins: { 'to-human@doperpowers': true, 'sminos@doperpowers': true, 'doperpowers@doperpowers': true }, prependPlugins: ['to-human@doperpowers', 'sminos@doperpowers', 'doperpowers@doperpowers'] });
-    expect(await resolveStyle(ctx({ platform: 'linux' }))).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true, toHuman: { paths: [at], hooksLoad: true } });
     expect(await lookupStyle(PLUGIN_STYLE, ctx({ platform: 'linux', cwd: null }))).toMatchObject({ messageTool: true });
     expect(await resolveStyle(ctx({ platform: 'darwin' }))).toMatchObject({ shape: 'none', messageTool: false }); // macOS's directory enables nothing
   });
@@ -273,9 +276,23 @@ describe('whether the to-human plugin registers its message tool under the style
   });
 
   it('does not under any other style declaring 6: the plugin keys its tool on its own style’s name', async () => {
-    installToHumanPlugin(home);
+    const at = installToHumanPlugin(home);
     put(join(home, 'output-styles/report.md'), style('report', '6'));
     userSettings({ outputStyle: 'report', enabledPlugins: { 'doperpowers@doperpowers': true, 'to-human@doperpowers': true } });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape: 'message-tool', contract: 6, unresolved: null, messageTool: false });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape: 'message-tool', contract: 6, unresolved: null, messageTool: false, toHuman: { paths: [at], hooksLoad: true } });
+  });
+
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A): the applicable to-human
+  // installations and whether their hooks load, read whatever the style, for the launch's advertisement and reservation
+  it('names the applicable to-human installations and whether their hooks load, under any style', async () => {
+    const at = installToHumanPlugin(home);
+    userSettings({ outputStyle: 'default', enabledPlugins: { 'to-human@doperpowers': true } });
+    expect(await resolveStyle(ctx())).toMatchObject({ name: 'default', messageTool: false, toHuman: { paths: [at], hooksLoad: true } });
+    expect(await resolveStyle(ctx({ flagSettings: { disableAllHooks: true } }))).toMatchObject({ toHuman: { paths: [at], hooksLoad: false } });
+    put(managed, { allowManagedHooksOnly: true });
+    expect(await resolveStyle(ctx())).toMatchObject({ toHuman: { paths: [at], hooksLoad: false } });
+    put(managed, {});
+    expect(await resolveStyle(ctx({ flagSettings: { enabledPlugins: { 'to-human@doperpowers': false } } }))).toMatchObject({ toHuman: { paths: [], hooksLoad: true } });
+    expect(await lookupStyle('Learning', ctx())).toMatchObject({ toHuman: { paths: [at], hooksLoad: true } });
   });
 });

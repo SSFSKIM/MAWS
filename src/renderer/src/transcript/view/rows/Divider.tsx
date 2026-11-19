@@ -20,10 +20,12 @@ import type { CellId, Row, RowId, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron, LineCounts } from './parts';
 import { Backdrop } from '../../../sessions/scrim'; // board 523 (U11a): the one scrim
+import { turnDurationMs } from '../../surface/adapters'; // UX wave U2b
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
 
-const completedMs = (row: DividerRowData) => row.summary.durationMs ?? (row.endedAt === null ? 0 : Date.parse(row.endedAt) - Date.parse(row.startedAt));
+// UX wave U2b: the one reading of a finished turn's duration, which its `TurnDuration` ask carries too (§E)
+const completedMs = turnDurationMs;
 
 // A working turn's duration, re-read from the store once a second while its process is live; without one (C5's
 // liveness rule) it is the latest event's time, following the events as they arrive and never the wall clock.

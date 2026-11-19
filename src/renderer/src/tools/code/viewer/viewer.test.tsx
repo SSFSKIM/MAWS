@@ -8,9 +8,13 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
-import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
+import { FILES_MOVED, FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf, machineOf } from '@shared/machine/address';
+import { failureWords } from '@shared/ipc/remote-unavailable'; // UX wave U6f
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
+import { forgetOpenedThere, openedThere } from '../files/elsewhere'; // UX wave U6f
+import { chooserCalls, createRemoteChooser, forgetStarts } from '../files/remote-chooser'; // UX wave U6f
 import { record } from '../../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
@@ -25,7 +29,7 @@ import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
-import { fakeHash, frameToken, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
+import { fakeHash, frameToken, installDisk, leaveRl2, OUTSIDE_REFUSAL, overRl2, refused, rosterSays } from '../../../test-support/code-disk';
 import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
@@ -2048,6 +2052,455 @@ describe('open file', () => {
     holding(`${A}x`); // no ':': no shorter key is tried
     expect(sessionOfTurn(turn)).toBeNull();
     useTranscriptStore.setState({ entries: {} });
+  });
+});
+
+// ---- UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M4; §E; decisions 11 to
+// 14 and 18; sequences W1 to W3, R7 and R9) ----------------------------------------------------------------------------
+// A session main runs on another machine over RL2 (studio, for which the person is one of the owners unless a case says
+// otherwise). The fake main stands for main's adapter: it answers a keyed read of an outside file as the act there does
+// (`named` and `outside`), and, where a case gives `answers`, in UC-7's words with `issues.refusal`.
+describe('a file outside the folders on another machine (U6f)', () => {
+  const THERE = 'app-there';
+  const T = addressOf(OTHER_MACHINE, THERE as AppSessionId);
+  const P = addressOf('ThirdMachineRef0000000' as typeof OTHER_MACHINE, 'app-profile' as AppSessionId); // another profile of this Mac: no RL2 roster entry, its sessions take the manager's path
+  const TERMINAL = addressOf(OTHER_MACHINE, 'app-terminal' as AppSessionId);
+  const OUT = '/elsewhere/notes.txt';
+  const REAL = '/elsewhere/real/notes.txt';
+  const PRIVATE = '/elsewhere/Documents';
+  const INSIDE = `${PRIVATE}/rota.txt`;
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    resetRemoteLaneBStore();
+    forgetOpenedThere();
+    forgetStarts();
+    overRl2(T);
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+  });
+
+  const tab = (path: string, appSessionId: AppSessionId = T): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${machineOf(appSessionId)}:${path}`, kind: 'file', path, line: null, appSessionId, machine: machineOf(appSessionId), pinned: false });
+  const shown = (path = OUT, appSessionId: AppSessionId = T) => useViewer.getState().entries.get(tab(path, appSessionId).id)!;
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const lead = () => document.querySelector<HTMLElement>('[data-path-lead]')!;
+  const label = () => document.querySelector<HTMLElement>('[data-read-only]');
+  const body = () => document.querySelector<HTMLElement>('[data-refusal]');
+  const saveFailure = () => document.querySelector<HTMLElement>('span[role="alert"]')?.textContent ?? null; // the bar's line below the path
+  const reads = (main: { callsOf: ReturnType<typeof installDisk>['callsOf'] }) => main.callsOf('files.read');
+  // The disk as studio's daemon answers it for an owner: `/elsewhere` outside the session's folders, and what admits a file
+  // there for the session (a counted name, an added record).
+  function disk(files: Record<string, string>, how: { names?: readonly string[]; added?: readonly string[] } = {}) {
+    const names = new Set(how.names ?? []);
+    const served = installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === THERE && names.has(path), added: how.added });
+    offs.push(connectCodeEvents()); // main's pushed events into the stores, once the bridge is installed
+    return served;
+  }
+  const show = (path = OUT, appSessionId: AppSessionId = T, agent = false) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={tab(path, appSessionId)} agent={agent} />);
+  };
+  const editable = async (path = OUT) => {
+    await waitFor(() => expect(shown(path)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+  };
+  const protectedThere = 'This file is in a folder macOS protects on studio. Opening it may show a privacy prompt on studio’s own screen.';
+  const protectedThrough = 'This path goes through a link into another folder macOS protects on studio. Choose the file with Open File… to open it.';
+  // studio's answer to a read inside a private folder that did not carry `open`, as main's adapter words it
+  const asksOpen = (only: (input: Record<string, unknown>) => boolean = () => true) => (name: string, input: Record<string, unknown>) =>
+    name === 'files.read' && input.open !== true && (input.path as string).startsWith(`${PRIVATE}/`) && only(input) ? refused('Not opened: the file is in a folder macOS protects on studio', 'protected') : null;
+
+  it('every read carries named (and agent with the agent’s mark); an entry with a pin saves by one files.writeOutside, never files.write; its path says where Save writes on studio, with no label', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    main.reals[OUT] = REAL;
+    show();
+    await editable();
+    expect(reads(main).length).toBeGreaterThan(0);
+    expect(reads(main).every((input) => input.named === true && !('open' in input) && !('agent' in input))).toBe(true);
+    expect(shown()).toMatchObject({ named: true, locked: null, pin: REAL });
+    expect(label()).toBeNull();
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    expect(lead().getAttribute('title')).toBe(`Save writes to ${REAL} on studio`);
+    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${REAL} on studio`);
+    typed('two ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    await settle();
+    expect(main.callsOf('files.writeOutside')).toEqual([]); // typing sends no save
+    expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('ok');
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: THERE, path: OUT, content: 'two one\n', expectedHash: fakeHash('one\n'), real: REAL }]);
+    expect(main.callsOf('files.write')).toEqual([]);
+    cleanup();
+    useViewer.getState().reset();
+    main.calls.splice(0);
+    show(OUT, T, true);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready' }));
+    expect(reads(main).every((input) => input.named === true && input.agent === true)).toBe(true);
+  });
+
+  it('a file inside the session’s folders there is read with named and answered unmarked; its save is files.write, as today', async () => {
+    const main = disk({ '/r/a.ts': 'inside\n' });
+    show('/r/a.ts');
+    await editable('/r/a.ts');
+    expect(reads(main).every((input) => input.named === true)).toBe(true);
+    expect(shown('/r/a.ts')).toMatchObject({ named: false, pin: null });
+    expect(lead().getAttribute('title')).toBe('/r/a.ts');
+    typed('+');
+    await waitFor(() => expect(shown('/r/a.ts').dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(shown('/r/a.ts').tabId))).toBe('ok');
+    expect(main.callsOf('files.write')).toEqual([{ appSessionId: THERE, path: '/r/a.ts', content: '+inside\n', expectedHash: fakeHash('inside\n') }]);
+    expect(main.callsOf('files.writeOutside')).toEqual([]);
+  });
+
+  // Decision 11's two kinds (Decision Log 25: the property the renderer guard's old entry held, in a test of its own)
+  it.each([
+    ['a session of another profile of this Mac', P, () => {}],
+    ['a terminal session on another machine', TERMINAL, () => overRl2(TERMINAL, {}, 'A')],
+  ] as const)('%s is read without named, agent or open and never answered outside; its save is files.write', async (_, session, arrange) => {
+    arrange();
+    const main = disk({ '/r/a.ts': 'theirs\n', [OUT]: 'outside\n' }, { names: [OUT] });
+    openedThere(OTHER_MACHINE).add('/r');
+    show('/r/a.ts', session, true);
+    await waitFor(() => expect(shown('/r/a.ts', session)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('+');
+    await waitFor(() => expect(shown('/r/a.ts', session).dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(shown('/r/a.ts', session).tabId))).toBe('ok');
+    cleanup();
+    show(OUT, session);
+    await waitFor(() => expect(shown(OUT, session).status).toBe('error'));
+    expect(reads(main).length).toBeGreaterThan(0);
+    expect(reads(main).every((input) => !('named' in input) && !('agent' in input) && !('open' in input))).toBe(true);
+    expect(shown('/r/a.ts', session)).toMatchObject({ named: false, pin: null, locked: null });
+    expect(shown(OUT, session)).toMatchObject({ named: false, pin: null, error: OUTSIDE_REFUSAL });
+    expect(main.callsOf('files.write')).toEqual([{ appSessionId: bareOf(session), path: '/r/a.ts', content: '+theirs\n', expectedHash: fakeHash('theirs\n') }]);
+    expect(main.callsOf('files.writeOutside')).toEqual([]);
+  });
+
+  it('a read’s failure that carries issues.refusal is drawn as its message alone, nothing of the file shown; one that carries none as “Refused: ” and its message', async () => {
+    const main = disk({ [OUT]: 'secret\n' }, { names: [OUT] });
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
+    show();
+    await waitFor(() => expect(body()).not.toBeNull());
+    expect(body()!.querySelector('p')!.textContent).toBe('Not opened: only studio’s owners can');
+    expect(shown()).toMatchObject({ said: true, kind: null, text: '' });
+    expect(document.body.textContent).not.toContain('secret');
+    cleanup();
+    main.answers.by = () => null;
+    show('/elsewhere/unnamed.txt');
+    await waitFor(() => expect(body()).not.toBeNull());
+    expect(body()!.querySelector('p')!.textContent).toBe(`Refused: ${OUTSIDE_REFUSAL}`);
+    expect(shown('/elsewhere/unnamed.txt').said).toBe(false);
+  });
+
+  it('a read that answers that the path moved (a claimed read’s FILES_MOVED) is drawn as a failed read', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', FILES_MOVED)) : null);
+    show();
+    await waitFor(() => expect(body()).not.toBeNull());
+    expect(body()!.querySelector('p')!.textContent).toBe(`Refused: Not opened: ${FILES_MOVED}`);
+    expect(shown()).toMatchObject({ status: 'error', kind: null, editable: false });
+  });
+
+  describe('“Read-only” (decision 12’s third column)', () => {
+    it('an added file whose standing has a sentence reads elsewhere: its panel holds the sentence and no Open File…', async () => {
+      disk({ [OUT]: 'added\n' }, { added: [OUT] });
+      rosterSays(T, { owner: false });
+      show();
+      await waitFor(() => expect(label()).not.toBeNull());
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      expect(label()!.getAttribute('data-read-only')).toBe('elsewhere');
+      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
+      fireEvent.click(label()!);
+      const panel = await waitFor(() => document.querySelector<HTMLElement>('[data-read-only-panel]')!);
+      expect(panel.textContent).toBe('Read-only: Only studio’s owners can save this file there.');
+      expect(within(panel).queryByRole('button')).toBeNull();
+      expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only: Only studio’s owners can save this file there.');
+    });
+
+    it('with no sentence it reads added, and the panel’s Open File… opens the chooser on that machine', async () => {
+      const main = disk({ [OUT]: 'added\n' }, { added: [OUT] });
+      show();
+      await waitFor(() => expect(label()).not.toBeNull());
+      expect(readOnlyReason(shown())).toBe('added');
+      fireEvent.click(label()!);
+      const panel = await waitFor(() => document.querySelector<HTMLElement>('[data-read-only-panel]')!);
+      fireEvent.click(within(panel).getByRole('button', { name: 'Open File…' }));
+      await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+      expect(main.callsOf('layout.openFile')).toEqual([]);
+      expect(main.callsOf('files.listOutside')).toEqual([{ appSessionId: THERE }]);
+    });
+
+    it('W1: an edited outside file whose read answers the ownership refusal keeps its document, stops being editable with the sentence, and Save sends nothing', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      rosterSays(T, { owner: false });
+      main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
+      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: OUT, kind: 'changed' }, OTHER_MACHINE)); // from studio, its bare id lifted with it
+      await waitFor(() => expect(shown().status).toBe('error'));
+      expect(shown()).toMatchObject({ dirty: true, editable: false, pin: OUT });
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      expect(existingViewState(shown().tabId)?.docOf?.()).toBe('mine one\n');
+      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: only studio’s owners can'); // UC-7's sentence, said once (Decision Log 30 d)
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    it('R9: studio replaced by an older build under unsaved edits: the standing’s update sentence is the title, Save sends nothing and no files.write', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { capabilities: ['rl2.channel'] }));
+      await waitFor(() => expect(label()?.getAttribute('data-read-only')).toBe('elsewhere'));
+      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Can’t save this file on studio yet. Update MAWS on studio and try again.');
+      // Fix wave (review finding 7; decision 14, B9): Save answers the refusal as the save's failure, nothing sent
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: update MAWS on studio and try again');
+      expect(shown()).toMatchObject({ dirty: true, saving: false });
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    it('offline, the edited document stays savable: its save waits for the machine, as decision 14 says', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }));
+      expect(readOnlyReason(shown())).toBeNull();
+      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('ok');
+      expect(main.callsOf('files.writeOutside')).toHaveLength(1);
+    });
+
+    // Fix wave (review finding 2): waiting offline is the owners'; a person known not to own the machine sends nothing
+    it('offline, an edited file of a person who does not own the machine sends no save and says why', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined, owner: false }));
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: only studio’s owners can');
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    // Decision Log 30 (d): the failure of a save the machine could not be reached for, as the bar draws it
+    it('a save that fails with studio offline reads exactly the refusal’s sentence, said once', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }));
+      main.answers.by = (name) => (name === 'files.writeOutside' ? refused('Not saved: studio is offline', 'offline') : null);
+      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('error');
+      expect(saveFailure()).toBe('Not saved: studio is offline');
+      expect(main.files[OUT]).toBe('one\n');
+    });
+  });
+
+  it('R7: a save the service refuses there is worded as U6e’s, with the way on', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.answers.by = (name) => (name === 'files.writeOutside' ? fail(failureWords('files.writeOutside', OUTSIDE_REFUSAL)) : null);
+    expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('error');
+    expect(shown().saveError).toBe('MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it');
+    expect(saveFailure()).toBe('Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it'); // no sentence of UC-7: U6e's prefix
+    expect(main.files[OUT]).toBe('one\n');
+  });
+
+  describe('a private folder there (decision 18; W3)', () => {
+    it('shows the sentence and Open it with no document; the press sends one read with open, and every later read and save of that entry carries it', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(body()).not.toBeNull());
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: true, said: true, kind: null, text: '' });
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+      const before = reads(main).length;
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' })); // a second press while it reads sends nothing more
+      await editable(INSIDE);
+      expect(reads(main).slice(before)).toEqual([{ appSessionId: THERE, path: INSIDE, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true, open: true }]);
+      expect(openedThere(OTHER_MACHINE).has(INSIDE)).toBe(true);
+      typed('+');
+      await waitFor(() => expect(shown(INSIDE).dirty).toBe(true));
+      expect(await act(() => useViewer.getState().save(shown(INSIDE).tabId))).toBe('ok');
+      expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: THERE, path: INSIDE, content: '+rota\n', expectedHash: fakeHash('rota\n'), real: INSIDE, open: true }]);
+      const sent = reads(main).length;
+      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: INSIDE, kind: 'changed' }, OTHER_MACHINE));
+      await waitFor(() => expect(reads(main).length).toBeGreaterThan(sent)); // the change is read again
+      await settle();
+      expect(reads(main).slice(before).every((input) => input.open === true)).toBe(true);
+    });
+
+    it('a path under a folder confirmed in the chooser carries open from its first read; an entry never opened so carries none', async () => {
+      const main = disk({ [INSIDE]: 'rota\n', [OUT]: 'notes\n' }, { names: [INSIDE, OUT] });
+      main.answers.by = asksOpen();
+      openedThere(OTHER_MACHINE).add(PRIVATE);
+      show(INSIDE);
+      await editable(INSIDE);
+      expect(reads(main).every((input) => input.open === true)).toBe(true);
+      cleanup();
+      main.calls.splice(0);
+      show(OUT);
+      await editable(OUT);
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+    });
+
+    it('a read that carried open and answers protected again draws the second sentence with Open File… and no Open it (Decision Log 20)', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = (name, input) => (name === 'files.read' && input.path === INSIDE ? refused('Not opened: the file is in a folder macOS protects on studio', 'protected') : null);
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await waitFor(() => expect(body()!.querySelector('p')!.textContent).toBe(protectedThrough));
+      expect(within(body()!).queryByRole('button', { name: 'Open it' })).toBeNull();
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: false });
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open File…' }));
+      await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+      expect(main.callsOf('layout.openFile')).toEqual([]);
+    });
+
+    // Decision Log 30 (c) as built (a): main's projection keeps no field of a refusal but its word, so Open it remembers the file
+    it('Open it remembers the file: its reads carry open after, and another file in that folder still asks', async () => {
+      const OTHER_INSIDE = `${PRIVATE}/minutes.txt`;
+      const main = disk({ [INSIDE]: 'rota\n', [OTHER_INSIDE]: 'minutes\n' }, { names: [INSIDE, OTHER_INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await editable(INSIDE);
+      expect(openedThere(OTHER_MACHINE).has(INSIDE)).toBe(true); // the control
+      cleanup();
+      main.calls.splice(0);
+      show(OTHER_INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+    });
+
+    // Fix wave (review finding 6): the second sentence follows what the request carried, not what is known when it answers
+    it('a read sent with no open, its folder confirmed while it is out, answers protected with the first sentence and Open it', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      const gate = main.hold('files.read');
+      show(INSIDE);
+      await waitFor(() => expect(reads(main)).toHaveLength(1));
+      expect(reads(main)[0]).not.toHaveProperty('open');
+      openedThere(OTHER_MACHINE).add(PRIVATE); // the chooser's confirmation lands meanwhile
+      gate.release();
+      await waitFor(() => expect(body()).not.toBeNull());
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(within(body()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: true, offersOpenFile: false });
+    });
+
+    // Fix wave (review finding 3): a link into a private folder chosen in the chooser, followed through the tab's first read
+    it('a file chosen through a link into a private folder opens with open on its first read, and asks nothing', async () => {
+      const GRANTED = `${PRIVATE}/rota.txt`;
+      const main = disk({ [GRANTED]: 'rota\n' }, { names: [GRANTED] });
+      const asks = asksOpen();
+      main.answers.by = (name, input) => {
+        if (name === 'files.listOutside') return { ok: true, value: { status: 'listed', path: '/home/someone', parent: '/home', home: '/home/someone', entries: [{ name: 'latest', path: '/home/someone/latest', kind: 'link', protected: false }], cursor: null } };
+        if (name === 'files.chooseOutside') return input.open === true ? { ok: true, value: { status: 'granted', path: GRANTED } } : { ok: true, value: { status: 'refused', reason: 'protected' } };
+        return asks(name, input);
+      };
+      const chooser = createRemoteChooser(T, { ...chooserCalls(), machine: () => 'studio', startAt: null });
+      await waitFor(() => expect(chooser.state().at).toBe('listed'));
+      chooser.select('/home/someone/latest');
+      const chosen = chooser.choose();
+      await waitFor(() => expect(chooser.state().at).toBe('asking'));
+      chooser.confirm();
+      expect(await chosen).toBe(GRANTED);
+      show(GRANTED);
+      await editable(GRANTED);
+      expect(reads(main).length).toBeGreaterThan(0);
+      expect(reads(main).every((input) => input.open === true)).toBe(true);
+      expect(body()).toBeNull();
+    });
+
+    it('W3: an answer for a tab closed meanwhile lands nowhere; a failure of the press leaves the sentence and the button', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      main.answers.by = (name, input) => (name === 'files.read' && input.open === true ? { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine studio is not reachable' } } : asksOpen()(name, input));
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await settle();
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(within(body()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      main.answers.by = asksOpen();
+      const gate = main.hold('files.read');
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await waitFor(() => expect(reads(main).at(-1)).toMatchObject({ open: true }));
+      cleanup();
+      act(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main })); // the tab closed
+      act(() => useViewer.getState().prune());
+      gate.release();
+      await settle();
+      expect(useViewer.getState().entries.has(tab(INSIDE).id)).toBe(false);
+    });
+
+    it('a framed file there asks layout.frameFile with the tab’s agent, and with open only for an entry in openedThere (Decision Log 26)', async () => {
+      const PDF = '/elsewhere/ledger.pdf';
+      const PRIVATE_PDF = `${PRIVATE}/minutes.pdf`;
+      const main = disk({ [PDF]: '%PDF-1.4 invented\n', [PRIVATE_PDF]: '%PDF-1.4 invented\n' }, { names: [PDF, PRIVATE_PDF] });
+      main.answers.by = asksOpen();
+      show(PDF, T, true);
+      await waitFor(() => expect(shown(PDF).frame?.status).toBe('ready'));
+      expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: THERE, path: PDF, agent: true }]);
+      cleanup();
+      show(PRIVATE_PDF);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await waitFor(() => expect(shown(PRIVATE_PDF).frame?.status).toBe('ready'));
+      expect(main.callsOf('layout.frameFile')[1]).toEqual({ appSessionId: THERE, path: PRIVATE_PDF, open: true });
+    });
+  });
+
+  it('W2: a tab shown again, remounted or restored reads as U6c has it, the same reads a named file of this Mac sends', async () => {
+    const count = async (session: AppSessionId) => {
+      useViewer.getState().reset();
+      const named = (appSessionId: string, path: string) => path === OUT && (appSessionId === THERE || appSessionId === MAIN_A);
+      const served = installDisk({ [OUT]: 'one\n' }, { outside: ['/elsewhere'], names: named });
+      const first = show(OUT, session);
+      await waitFor(() => expect(shown(OUT, session).status).toBe('ready'));
+      first.unmount();
+      const second = render(<FileViewer tab={tab(OUT, session)} />); // remounted: shown again
+      await settle();
+      second.unmount();
+      useViewer.getState().reset(); // a relaunch: the store holds nothing, the tab is restored
+      render(<FileViewer tab={tab(OUT, session)} />);
+      await waitFor(() => expect(shown(OUT, session).status).toBe('ready'));
+      await settle();
+      cleanup();
+      return served.callsOf('files.read').length;
+    };
+    expect(await count(T)).toBe(await count(A));
   });
 });
 

@@ -391,6 +391,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       index, settings: () => machineSettings.state(), engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: bus.register,
       attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
+      foldSummariesChanged: () => void bus.emit('mods.foldSummariesChanged', {}), // UX wave U2b (panel finding 3)
     });
     parts.push(['owner channel', ownerChannel.stop]);
     settling.push(ownerChannel.work);
@@ -577,6 +578,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       return false;
     },
     own: ownFolders(profile, process.execPath, deps.appBundles ?? (() => [])), // U6e (decision 8): no write reaches them
+    where: setupGuard.where, // UX wave U6f: the home and platform another machine's outside acts walk under, the folder list's
   });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);

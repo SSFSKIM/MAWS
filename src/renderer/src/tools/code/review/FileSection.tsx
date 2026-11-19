@@ -17,7 +17,8 @@ import { REVIEW_COPY } from '../copy';
 import type { DiffBlockData } from './FileBody';
 import { reviewLayout } from './measure';
 import { diffViewHunks, tooLarge, type ReviewFile } from './review-model';
-import { useReview, type DiffTarget, type ScopeDiff } from './review-store';
+import { useMachineMark } from '../../../app/machine-mark';
+import { commitFailure, fileDiffOf, useReview, type DiffTarget, type ScopeDiff } from './review-store';
 import type { StackSection } from './Stack';
 import type { ReviewMode } from './view-state';
 
@@ -95,7 +96,7 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
     if (hunks === null && failed !== null)
       return (
         <div role="status" className="flex items-start gap-2 px-3 py-2">
-          <p className="m-0 min-w-0 flex-1 text-ui-sm text-fg-muted">{REVIEW_COPY.unavailable(failed)}</p>
+          <p className="m-0 min-w-0 flex-1 text-ui-sm text-fg-muted">{target?.read === 'git.commitDiff' ? <CommitFileFailure target={target} path={file.path} /> : REVIEW_COPY.unavailable(failed)}</p>
           <button type="button" className={`${toggle} min-w-6`} onClick={() => target && useReview.getState().retryFile(target, file.path, untracked)}>
             {REVIEW_COPY.retry}
           </button>
@@ -167,6 +168,14 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
   );
 }
 
+// UX wave U5b-2 (§H, S22): a file of a commit's diff whose own read failed says what failed in the commit's words.
+function CommitFileFailure({ target, path }: { target: DiffTarget; path: string }) {
+  const load = useReview((s) => fileDiffOf(s, target, path));
+  const mark = useMachineMark(target.session ?? '');
+  if (load?.status !== 'error') return null;
+  return <>{commitFailure(load, mark.offline, mark.local ? null : mark.name, mark.name).message}</>;
+}
+
 function FoldMark({ folded }: { folded: boolean }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={`size-3.5 shrink-0 text-fg-muted ${folded ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -236,15 +245,15 @@ function Badge({ file }: { file: ReviewFile }) {
   );
 }
 
-// A new file shows its added lines alone; a pure rename, a binary and an untracked file (not counted before U5b-2's
-// working-tree read) show none; every other kind both sides.
+// A new file shows its added lines alone, an untracked one too once the working-tree read counted it (UX wave U5b-2,
+// l5-code-04; none while it is not counted); a pure rename and a binary show none; every other kind both sides.
 function Counts({ file }: { file: ReviewFile }) {
-  if (file.kind === 'binary' || file.kind === 'untracked') return null;
+  if (file.kind === 'binary' || (file.kind === 'untracked' && file.uncounted === true)) return null;
   if (file.kind === 'renamed' && file.added === 0 && file.removed === 0) return null;
   return (
     <span data-review-counts className="shrink-0 whitespace-nowrap font-mono text-ui-sm">
       <span className="text-success">{REVIEW_COPY.added(file.added)}</span>
-      {file.kind !== 'added' && (
+      {file.kind !== 'added' && file.kind !== 'untracked' && (
         <>
           {' '}
           <span className="text-danger">{REVIEW_COPY.removed(file.removed)}</span>

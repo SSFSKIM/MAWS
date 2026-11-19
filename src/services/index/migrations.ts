@@ -327,6 +327,10 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // writes either, and moves the size and mtime when it files a newer transcript.
   { table: 'sessions', column: 'launch_folder', definition: 'TEXT' },
   { table: 'sessions', column: 'agent_folder', definition: 'TEXT' },
+  // UX wave U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A and §F): the session's
+  // last reserved launch advertisement (JSON `{launchId, number, plugin, at}`), written before the launch is sent and
+  // bound to its id after. Build F and the installed build read the row by column name and never write this column
+  { table: 'owner_channel_sessions', column: 'advertised', definition: 'TEXT' },
 ];
 
 // A table added without moving `user_version` (P5 O8 M7b; the spec's Decision Log, the architect's rulings on M7b Task

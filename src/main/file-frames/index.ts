@@ -11,6 +11,10 @@
 // - On another machine: the file is copied here, up to `REMOTE_COPY_MAX_BYTES`, into a descriptor whose name is removed
 //   before the first page is asked (A5, A6), and the frame is served from that descriptor until the token goes. No byte
 //   of a copy ever exists under a name: no part file, no rename, nothing to sweep, and the folder is the profile's own.
+//   UX wave U6f (decision 15): the copy is read for the page that asked, so a file outside the session's folders there is
+//   drawn for a page the outside acts are offered to, and for no other caller; the tab's mark and its `open` (Decision
+//   Log 26: the person opened the protected folder there) ride that act alone. Main adds no `open` of its own, and on
+//   this Mac a frame's reads carry none.
 // - A token is recorded only once the admission read or the copy has completed, in one step that first checks the asking
 //   page still lives (sequence 7). It is released by its page, at the page's end and at the app's quit; a copy's release
 //   closes its descriptor, which is the copy's end.
@@ -50,8 +54,9 @@ type Copied = { ok: true; value: { written: number } | 'too-large' } | { ok: fal
 export interface FileFramesDeps {
   local: MachineRef;
   read: RawRead; // invokeOwn('files.read', input, { client, target: local })
-  // a session's file of `machine` paged into `sink` (remote lane B's `copyInto`, `fetchInto` beneath); null: no link reaches it
-  copy(machine: MachineRef, source: { appSessionId: AppSessionId; path: string }, sink: FileHandle, max: number, options: { label: string; seen(first: { mime: string; bytes: number }): void }): Promise<Copied | null>;
+  // a session's file of `machine` paged into `sink` (remote lane B's `copyInto`, `fetchInto` beneath); null: no link reaches
+  // it. UX wave U6f (decision 15): read for the page that asked (`client`), with the tab's `agent` mark
+  copy(machine: MachineRef, source: { appSessionId: AppSessionId; path: string }, sink: FileHandle, max: number, options: { label: string; seen(first: { mime: string; bytes: number }): void; client: ClientRef; agent?: true; open?: true }): Promise<Copied | null>;
   page(client: ClientRef): { id: number; send(name: 'layout.frameFailed', payload: { token: string }): void } | null; // pageOf, emitTo
   userData(): string;
   register: typeof registerMainHandler;
@@ -118,12 +123,12 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
   }
 
   // On another machine: the file copied into a nameless descriptor, then served from it.
-  async function fromMachine(client: ClientRef, machine: MachineRef, appSessionId: AppSessionId, path: string): Promise<FrameAnswer> {
+  async function fromMachine(client: ClientRef, machine: MachineRef, appSessionId: AppSessionId, path: string, ask: FrameAsk, open: true | undefined): Promise<FrameAnswer> {
     const sink = await namelessSink();
     let handedOn = false;
     try {
       let mime = '';
-      const copied = await deps.copy(machine, { appSessionId, path }, sink, REMOTE_COPY_MAX_BYTES, { label: `a file frame of ${appSessionId}`, seen: (first) => void (mime = first.mime) });
+      const copied = await deps.copy(machine, { appSessionId, path }, sink, REMOTE_COPY_MAX_BYTES, { label: `a file frame of ${appSessionId}`, seen: (first) => void (mime = first.mime), client, ...(ask.agent && { agent: ask.agent }), ...(open && { open }) });
       if (copied === null) return fail('host_unavailable', `layout.frameFile: machine ${machine} is not connected`);
       if (!copied.ok) throw new HostCommandError(copied.error);
       if (copied.value === 'too-large') {
@@ -146,10 +151,10 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
     }
   }
 
-  deps.register('layout.frameFile', ({ appSessionId, path, agent }, { client, target }) => {
+  deps.register('layout.frameFile', ({ appSessionId, path, agent, open }, { client, target }) => {
     const session = appSessionId as AppSessionId; // the router validated it against AppSessionIdSchema
-    // another machine's copy asks as "Open externally"'s does, with neither key (the entry's own reads there carry none)
-    return target === deps.local ? onThisMac(client, session, path, frameAskOf(agent)) : fromMachine(client, target, session, path);
+    // another machine's copy is read for this page since U6f, the tab's mark and its `open` riding the act alone
+    return target === deps.local ? onThisMac(client, session, path, frameAskOf(agent)) : fromMachine(client, target, session, path, frameAskOf(agent), open);
   });
   deps.register('layout.releaseFrame', ({ token }, { client }) => {
     if (!tokens.release(token, client)) fail('invalid_input', 'layout.releaseFrame: no frame of this window');

@@ -10,7 +10,9 @@ import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { appMcpConfig, type AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 import { profileSettings, userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
-import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09)
+import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09)
+import type { Advertisement } from '@shared/owner/draws'; // UX wave U2b
+import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '@shared/owner/folds'; // UX wave U2b
 
 export type Attestation = { accepted: true; directory: string };
 type Gateway = LaunchSpec['gateway'];
@@ -128,14 +130,18 @@ function cursorLabelOf(title: SessionRecord['title']): string | null {
 // settings env beside CUA_BROWSER_BACKENDS: the engine applies settings env to its process at startup, so a plugin's
 // hooks read it, and a toggle takes effect at the next launch. The supplement beside the plugin's style (P2-C2) is
 // appended and "off" passed as decided. P4-R7z: MAWS appends no contract of its own any more, and P4-R7y's SessionStart
-// alias and P4-A2's appended copy of it are gone; the caller's hooks pass as they are.
+// alias and P4-A2's appended copy of it are gone; the caller's hooks pass as they are. The UX wave, U2b
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A and §M): the variable carries the decided
+// advertisement, 9 where the mod draws the view and 8 where MAWS does, and TO_HUMAN_FOLD_SUMMARIES=off joins it in every
+// launch decided while the summaries' switch is off, whatever the lane; a caller's value of either name is replaced.
 export type AppendedText = 'supplement';
 const APPENDED: Record<AppendedText, string> = { supplement: TO_HUMAN_SUPPLEMENT };
 
 export interface OwnerChannelFlags {
-  laneOn: boolean;
+  advertisement: Advertisement; // MAWS_NATIVE_TO_HUMAN's value; null: none (the lane off)
   append: AppendedText | null; // --append-system-prompt <the supplement>
   snapshotOff: boolean; // --system-prompt-snapshot off
+  summariesOff: boolean; // TO_HUMAN_FOLD_SUMMARIES=off
 }
 
 export function withOwnerChannel(spec: LaunchSpec, flags: OwnerChannelFlags): LaunchSpec {
@@ -145,7 +151,9 @@ export function withOwnerChannel(spec: LaunchSpec, flags: OwnerChannelFlags): La
   const { env: callerEnv, ...settings } = extraSettings ?? {};
   const env: Record<string, unknown> = { ...(callerEnv as Record<string, unknown> | undefined) };
   delete env[NATIVE_TO_HUMAN_ENV];
-  if (flags.laneOn) env[NATIVE_TO_HUMAN_ENV] = String(TO_HUMAN_CONTRACT_VERSION);
+  if (flags.advertisement !== null) env[NATIVE_TO_HUMAN_ENV] = String(flags.advertisement);
+  delete env[FOLD_SUMMARIES_ENV];
+  if (flags.summariesOff) env[FOLD_SUMMARIES_ENV] = FOLD_SUMMARIES_OFF;
   const merged = { ...settings, ...(Object.keys(env).length > 0 ? { env } : {}) };
   return {
     ...rest,

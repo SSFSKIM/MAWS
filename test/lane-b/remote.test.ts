@@ -7,12 +7,14 @@
 // are a `main.tabs` value the suite moves.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import { createServer, get as httpGet, type Server } from 'node:http';
 import { connect as dialTcp, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { keyId, memoryOrgView, signRecord, SIGNING_DOMAINS, type Action, type ByteDuplex, type Grant, type SignedOrgState } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { OUTSIDE_FILES_CAPABILITY } from '@shared/files/outside';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -37,7 +39,7 @@ import { createRemoteLaneB, ENGINE_HOST_ACTS, MACHINE_ACTS, routeLaneB, type Rem
 import { PTY_ACTS } from '../../src/main/lane-b/remote-pty';
 import { dialDirect } from '../../src/main/machines/remote/carriers';
 import { dispatchOverLink } from '../../src/main/machines/remote/dispatch';
-import { createRemoteLink, type RemoteLink } from '../../src/main/machines/remote/link';
+import { createRemoteLink, type ActOutcome, type RemoteLink } from '../../src/main/machines/remote/link';
 import type { RemoteTiming } from '../../src/main/machines/remote/timing';
 import type { CommandBudgets } from '../../src/main/machines/budgets';
 import { COMMAND_BUDGETS_MS } from '../../src/services/command-budgets';
@@ -45,6 +47,7 @@ import { validateCommandOutput } from '@shared/ipc/validate';
 import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/session';
 import { OFFERS } from '../../src/endpoint/offers';
 import { registerFilesHandlers, type FilesHandlers } from '../../src/services/files/register';
+import { FILES_REFUSAL } from '../../src/services/files/service'; // UX wave U6f: the sentence the adapter recognises
 import { createUpload } from '../../src/services/files/upload';
 import { registerGitHandlers } from '../../src/services/git/register';
 import { WorktreeService } from '../../src/services/git/worktrees';
@@ -53,7 +56,7 @@ import { createGitRunner } from '../../src/services/git/runner';
 import { GitService } from '../../src/services/git/service';
 import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
-import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
+import { act as sendAct, CHECKOUT, done as doneOf, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type Remote, type StartOptions } from '../endpoint/sub-harness';
 import { FakePtyHost } from '../endpoint/fake-pty-host';
 import { fakeAssetHolds } from '../endpoint/fake-services';
 import { createDatasetHolds } from '../../src/main/dashboard/holds';
@@ -77,6 +80,7 @@ import { clientOf } from '../../src/main/ipc/clients';
 import { BRIDGE_SCRIPT } from '../../src/services/artifacts/scheme/bridge-script';
 import { fakeDocuments, fakeServices, scratchArtifacts, type FakeServices } from '../endpoint/fake-services';
 import { End } from './port-pair';
+import { FakeLink } from './fake-link'; // UX wave U6f: the device's link whose acts a real endpoint runs
 // P5 O7 M5c: the machine's connectors and delivery as the spine's root composes them; main's own connectors for this Mac
 import { oauthIdentityOf } from '@shared/connectors/oauth-types';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
@@ -298,7 +302,14 @@ type Device = {
 };
 type Lab = { f: Fixture; host: LaneBHost; pty: FakePtyHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
 /** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
-type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B'; budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */ };
+type DeviceOptions = {
+  link?: Partial<RemoteTiming>;
+  adapter?: Partial<RemoteLaneBTiming>;
+  member?: 'A' | 'B';
+  budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */;
+  /** UX wave U6f: every caller an app page, of a person the roster says owns the machine (the adapter's two seams). */
+  outside?: true;
+};
 /** P5 O7 M3: the endpoint's own seams (a forward's window), and the pty host's ring. */
 type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions' | 'services' /* P5 O7 M5b: the machine's document host */>; ring?: number };
 
@@ -413,6 +424,7 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       opened.push(url);
       return { opened: true };
     },
+    ...(options.outside === true && { isAppPage: () => true, owns: () => true }),
   });
   cleanups.push(() => adapter.stop());
   // The manager's path, as the RL2 link's `dispatch` takes it: the session a path-class read was made from as `call.session`
@@ -1221,6 +1233,62 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     l.host.emitMachine('files.changed', { appSessionId: 'app-1', path: repo.path('a.ts'), kind: 'created' });
     await sleep(200);
     expect(filesChanges(l.a, 'app-1')).toEqual([]);
+  });
+
+  // ---- The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, Decision Log
+  // 33 and 35): the branch read, the commit read and the working-tree read, the device half and the endpoint half joined
+  // by the capability's name and the rows' names alone, proven together through the real link and the real offer table.
+
+  it('asks the three git reads of a session there: each arrives at the machine’s endpoint naming the session, and answers what its git reads in the checkout', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    await repo.git('checkout', '-q', '-b', 'feature');
+    await repo.write('parser.ts', 'export const parse = 1;\n');
+    await repo.git('add', 'parser.ts');
+    await repo.git('commit', '-q', '-m', 'Add the parser');
+    await repo.write('notes.md', 'one\ntwo\nthree\n'); // a new file, three lines
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    const mergeBase = (await repo.git('rev-parse', 'main')).trim();
+    l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    checkoutServices(l, repo);
+    expect(l.a.link.peerCapabilities()).toContain('rl2.git-reads');
+    const from = { session: 'app-1' as AppSessionId };
+    const arrived = (name: string) => l.host.calls.filter((c) => c.owner === 'machine' && c.name === name);
+
+    const branch = await l.a.route('git.branchCommits', { directory: repo.root, limit: 50 }, from);
+    expect(branch).toMatchObject({ ok: true, value: { base: { ref: 'main', mergeBase }, upstream: null, commits: [{ sha: head, subject: 'Add the parser', pushed: false }], counts: { all: 1 }, behind: 0 } });
+    const diff = await l.a.route('git.commitDiff', { directory: repo.root, commit: head }, from);
+    expect(diff).toMatchObject({ ok: true, value: { commit: { sha: head }, onHead: true, files: [{ path: 'parser.ts', insertions: 1 }] } });
+    const since = await l.a.route('git.changesSince', { directory: repo.root, against: mergeBase }, from);
+    expect(since).toMatchObject({ ok: true, value: { files: [{ path: 'parser.ts', insertions: 1 }], untracked: [{ path: 'notes.md', insertions: 3, binary: false }] } });
+    for (const name of ['git.branchCommits', 'git.commitDiff', 'git.changesSince']) expect([name, arrived(name)]).toMatchObject([name, [{ name }]]);
+
+    // the session is what admits them there: the same read naming none is the checkout rule's `no-target`, unread
+    const before = arrived('git.commitDiff').length;
+    expect(await l.a.route('git.commitDiff', { directory: repo.root, commit: head }, {})).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'no-target' } } });
+    expect(arrived('git.commitDiff')).toHaveLength(before);
+  });
+
+  it('sends none of the three git reads to an endpoint that does not list `rl2.git-reads`, answering each `not-offered` (the older kind)', async () => {
+    endpointWithout('rl2.git-reads');
+    const l = await lab();
+    const repo = await gitRepo();
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    checkoutServices(l, repo);
+    expect(l.a.link.peerCapabilities()).not.toContain('rl2.git-reads');
+    const from = { session: 'app-1' as AppSessionId };
+    for (const [name, input] of [
+      ['git.branchCommits', { directory: repo.root, limit: 50 }],
+      ['git.commitDiff', { directory: repo.root, commit: head }],
+      ['git.changesSince', { directory: repo.root, against: 'HEAD' }],
+    ] as const) {
+      expect([name, await l.a.route(name, input, from)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    }
+    // nothing reached the machine: not the reads, nor the bounds read the checkout rule would make for one
+    expect(l.host.calls.filter((c) => c.name.startsWith('git.'))).toEqual([]);
   });
 
   // ---- P5 O7 M3: terminals and forwarded ports ----------------------------------------------------------------------
@@ -2585,5 +2653,269 @@ describe('a remote session’s record across a checkout feed’s reopening', { t
     release();
     await until(() => told().at(-1)?.title.text === 'renamed on the machine', 'the record, read again at the feed’s reopening', 5000);
     expect(told().at(-1)).toEqual(current);
+  });
+});
+
+// The UX wave (U6f, M3; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 4, §D,
+// R4): the marker of an answer the services' ledger did not keep, end to end. Each page the adapter asks of the link's fake
+// is run by the real endpoint over the real services' ledger (the harness's spine, `machine.op`'s code over a file); a
+// page whose answer is lost on the way is the same operation met again (a reseal), which the ledger answers with the
+// marker, read through the endpoint's own conversion; then `outcomeAsResult` and the adapter. Nothing returns the marker
+// but the ledger. The call before the act is refused with the files service's own sentence, which the adapter must know.
+describe('an outside read the ledger did not keep, through the real ledger and the endpoint’s conversion (U6f)', () => {
+  const APP_OUT = 'app-outside-ledger';
+  const FAR_FILE = '/srv/elsewhere/harbour-notes.txt';
+  async function served(lost: (n: number) => boolean) {
+    const f = await startEndpoint(org, started);
+    f.spine.set(APP_OUT, `eng-${APP_OUT}`, { appId: APP_OUT });
+    f.records.set({ lane: 'B', session: `eng-${APP_OUT}`, owners: [org.A], access: 'private' }, APP_OUT);
+    let runs = 0;
+    f.spine.handle('files.readOutside', () => {
+      const content = `the keeper's answer number ${++runs}`;
+      return { encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: null, utf8: null, named: true, outside: { real: FAR_FILE, writable: true } };
+    });
+    const r: Remote = await openRemote(f, org.a1, org.A);
+    const run = async (action: Action) => {
+      const from = r.inbox.length;
+      expect(await sendAct(r, action)).toBe('ok');
+      return doneOf(r, action, from);
+    };
+    const link = new FakeLink(); // the device's link, whose acts the endpoint above runs
+    link.relink(['rl2.executor.machine', 'rl2.outside-files']);
+    link.answers.set('files.read', () => ({ ok: false, error: { code: 'internal', message: FILES_REFUSAL } }));
+    let n = 0;
+    link.onAct = (handle) =>
+      void (async () => {
+        const action = r.device.action({ machine: f.ref, action: handle.request.action, args: handle.request.args as Record<string, unknown> });
+        if (lost(++n)) {
+          await run(action); // it ran, and its answer was lost on the way
+          handle.settle((await run(r.device.reseal(action))) as ActOutcome); // the same operation, met again
+        } else handle.settle((await run(action)) as ActOutcome);
+      })();
+    const adapter = createRemoteLaneB({
+      local: LOCAL,
+      layout: { get: () => null, onChange: () => () => {} },
+      remote: () => link as unknown as RemoteLink,
+      onRemote: () => () => {},
+      emit: () => {},
+      isAppPage: () => true,
+      owns: () => true,
+      log: () => {},
+    } as Parameters<typeof createRemoteLaneB>[0]);
+    cleanups.push(() => adapter.stop());
+    const read = () => adapter.dispatch(link as unknown as RemoteLink, 'files.read', { appSessionId: APP_OUT, path: FAR_FILE, named: true }, { client: endableClientRef('page:1.1'), target: link.machine });
+    return { f, link, read, runs: () => runs };
+  }
+
+  it('asks once more under a new operation after the marker, and answers the second read; the read ran once per operation', async () => {
+    const { link, read, runs } = await served((n) => n === 1);
+    expect(await read()).toMatchObject({ ok: true, value: { content: "the keeper's answer number 2", outside: { real: FAR_FILE, writable: true } } });
+    expect(link.acts.map((handle) => handle.request.action)).toEqual(['files.readOutside', 'files.readOutside']);
+    expect(new Set(link.acts.map((handle) => handle.opId)).size).toBe(2);
+    expect(runs()).toBe(2);
+  });
+
+  it('a second marker is the read’s failure, and no third operation is asked', async () => {
+    const { link, read, runs } = await served(() => true);
+    expect(await read()).toEqual({ ok: false, error: { code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: 'not-kept' } } });
+    expect(link.acts).toHaveLength(2);
+    expect(runs()).toBe(2);
+  });
+});
+
+
+// The UX wave (U6f, M3's fix wave; Decision Log 27, the review's Important 1, the architect's three conditions): a
+// session's file of the machine across a channel's end, through the real link and the real endpoint, the transmissions
+// read where they arrive (the endpoint's dispatch to the machine's services, `host.calls`). A copy asks the plain read with
+// today's keys alone and waits under the link's hold as it always has, so the link may carry it to any peer; a keyed read
+// carries `named` (and the tab's `agent` and `open`) and goes only on the channel whose peer's list was read for it, so it
+// is never carried; ended under it, it is read afresh on the next channel within the link's hold of a call (fix wave 2);
+// the act is bound to its channel as every outside act is.
+describe('a session’s file there across a channel’s end (U6f, Decision Log 27)', { timeout: 30_000 }, () => {
+  const APP_FILES = 'app-files';
+  const INSIDE = `${CHECKOUT}/notes.txt`;
+  const FAR = '/srv/elsewhere/far-notes.txt';
+  const TEXT = 'an invented line of a file there\n';
+  const answerOf = (input: Record<string, unknown>): FilesReadOutput => {
+    const offset = typeof input.offset === 'number' ? input.offset : 0;
+    const length = typeof input.length === 'number' ? input.length : 1024 * 1024;
+    const content = TEXT.slice(offset, offset + length);
+    return { encoding: 'utf8', content, bytes: TEXT.length, offset, length: content.length, truncated: offset + content.length < TEXT.length, mime: 'text/plain', hash: input.hash === true ? sha256(TEXT) : null, utf8: input.hash === true ? true : null };
+  };
+
+  async function served(options: LabOptions = {}) {
+    const l = await lab({ outside: true, ...options });
+    l.place(APP_FILES);
+    const machine = l.f.ref as MachineRef;
+    const page = l.a.page('page-files');
+    let held: Promise<void> | null = null;
+    // the machine's files service: a file inside the checkout read, any other refused as outside the folders
+    l.f.spine.handle('files.read', async (input) => {
+      const asked = input as Record<string, unknown>;
+      if (held !== null) await held;
+      if (asked.path !== INSIDE) throw new Error(FILES_REFUSAL);
+      return answerOf(asked);
+    });
+    let outsideRun: (() => void) | null = null;
+    l.f.spine.handle('files.readOutside', (input) => (outsideRun?.(), answerOf(input as Record<string, unknown>)));
+    const scratch = mkdtempSync(join(tmpdir(), 'maws-u6f-copy-'));
+    cleanups.push(() => rmSync(scratch, { recursive: true, force: true }));
+    let sinks = 0;
+    return {
+      l,
+      /** Each `files.read` that reached the machine, as it arrived. */
+      reads: () => l.host.calls.filter((c) => c.owner === 'machine' && c.name === 'files.read').map((c) => c.input as Record<string, unknown>),
+      /** Each `files.readOutside` act that reached the machine's ledger. */
+      acts: () => l.host.calls.filter((c) => c.name === 'machine.op' && (c.input as { name?: string }).name === 'files.readOutside'),
+      /** Every read reaching the machine from now waits there until released; one reaching it after is answered at once. */
+      holdNext(): () => void {
+        let release!: () => void;
+        held = new Promise<void>((resolve) => (release = resolve));
+        return () => {
+          held = null;
+          release();
+        };
+      },
+      onOutsideRun: (run: () => void) => void (outsideRun = run),
+      /** The page's keyed read, as the viewer asks it of a session there. */
+      keyed: (path: string, extra: Record<string, unknown> = {}) => l.a.route('files.read', { appSessionId: APP_FILES, path, offset: 0, length: 4096, named: true, ...extra }, { client: page.client }),
+      /** Today's read of the same file, with no key of this landing: what a tab of a build before it asked. */
+      todays: (path: string) => l.a.route('files.read', { appSessionId: APP_FILES, path, offset: 0, length: 4096 }, { client: page.client }),
+      /** A frame's copy (`copyInto`) for the page, into a descriptor of the suite's. */
+      async copy(path: string, extra: { agent?: true; open?: true } = {}) {
+        const sink = await openFile(join(scratch, `sink-${++sinks}`), 'w+');
+        try {
+          const result = await l.a.adapter.artifacts.copyInto(machine, { appSessionId: APP_FILES as AppSessionId, path }, sink, 8 * MiB, { label: 'a frame of the suite', seen: () => {}, client: page.client, ...extra });
+          const { size } = await sink.stat();
+          const bytes = Buffer.alloc(size);
+          await sink.read(bytes, 0, size, 0);
+          return { result, written: bytes.toString('utf8') };
+        } finally {
+          await sink.close();
+        }
+      },
+      /** The carrier cut with its last answers lost on the way; resolves at the next channel's peer list. */
+      async drop(): Promise<void> {
+        const was = l.a.link.peerCapabilities();
+        this.cut();
+        await until(() => l.a.link.state() === 'up' && l.a.link.peerCapabilities() !== null && l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);
+      },
+      /** The carrier cut with its last answers lost on the way. */
+      cut(): void {
+        const { carrier, tap } = l.a.carriers.at(-1)!;
+        tap.mute = true;
+        carrier.close('dropped');
+      },
+    };
+  }
+  /** Today's keys of a copy's read, and no other: what any build reads. */
+  const TODAYS = ['appSessionId', 'hash', 'length', 'offset', 'path'];
+
+  it('a copy of a file inside the folders asked with no channel current waits under the link’s hold, and lands once a channel comes, its read today’s', async () => {
+    const o = await served();
+    o.l.a.direct.dead = true;
+    o.l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => o.l.a.link.peerCapabilities() === null, 'no channel current');
+    let settled = false;
+    const copying = o.copy(INSIDE, { agent: true, open: true }).finally(() => (settled = true));
+    await sleep(300);
+    expect(settled, 'the copy waits for a channel').toBe(false);
+    expect(o.reads()).toEqual([]);
+    o.l.a.direct.dead = false;
+    o.l.a.link.probe('network');
+    expect(await copying).toEqual({ result: { ok: true, value: { written: TEXT.length } }, written: TEXT });
+    expect(o.reads().map((input) => Object.keys(input).sort())).toEqual([TODAYS]);
+    expect(o.acts()).toEqual([]);
+  });
+
+  it('a copy carried across a reconnect to a peer without the capability is sent there with today’s keys, byte for byte as on the first channel (condition 3a)', async () => {
+    const o = await served();
+    const release = o.holdNext();
+    const copying = o.copy(INSIDE, { agent: true, open: true });
+    await until(() => o.reads().length === 1, 'the copy’s read at the machine');
+    endpointWithout(OUTSIDE_FILES_CAPABILITY);
+    await o.drop();
+    release(); // the first channel's answer goes nowhere; the carried read is answered on this one
+    expect(o.l.a.link.peerCapabilities()).not.toContain(OUTSIDE_FILES_CAPABILITY);
+    expect(await copying).toEqual({ result: { ok: true, value: { written: TEXT.length } }, written: TEXT });
+    const [first, carried, ...rest] = o.reads();
+    expect(rest).toEqual([]);
+    expect(JSON.stringify(carried)).toBe(JSON.stringify(first));
+    expect(Object.keys(first!).sort()).toEqual(TODAYS);
+  });
+
+  // The architect's condition 2: at a brief drop the tab gets what today's carried read gives it, the answer and no error
+  // between, and at a lasting loss today's sentence at today's moment, each beside today's read (no key of this landing)
+  // made with it.
+  it('a keyed read made, the channel drops briefly: answered on the next channel, as today’s read beside it is; one fresh call with named there, never the old one carried', async () => {
+    const o = await served();
+    const release = o.holdNext();
+    const keyed = o.keyed(INSIDE, { agent: true });
+    const todays = o.todays(INSIDE);
+    await until(() => o.reads().length === 2, 'both reads at the machine');
+    const dropped = o.drop();
+    release(); // the first channel's answers go nowhere: its carrier is cut and muted
+    await dropped;
+    const [mine, theirs] = await Promise.all([keyed, todays]);
+    expect(mine).toMatchObject({ ok: true, value: { content: TEXT } });
+    expect(theirs).toMatchObject({ ok: true, value: { content: TEXT } });
+    const keyedArrivals = o.reads().filter((input) => input.named === true);
+    expect(keyedArrivals).toHaveLength(2); // the first on the checked channel, the fresh one on the next
+    for (const input of keyedArrivals) expect(input).toEqual({ appSessionId: APP_FILES, path: INSIDE, offset: 0, length: 4096, named: true, agent: true });
+  });
+
+  it('a keyed read made, the channel drops to a peer without the capability: answered there by a fresh call with today’s keys alone', async () => {
+    const o = await served();
+    const release = o.holdNext();
+    const reading = o.keyed(INSIDE, { agent: true, open: true });
+    await until(() => o.reads().length === 1, 'the read at the machine');
+    endpointWithout(OUTSIDE_FILES_CAPABILITY);
+    const dropped = o.drop();
+    release();
+    await dropped;
+    expect(await reading).toMatchObject({ ok: true, value: { content: TEXT } });
+    const [first, ...after] = o.reads();
+    expect(first).toMatchObject({ named: true, agent: true }); // to the peer that listed it, on the channel that was checked
+    expect(after.map((input) => JSON.stringify(input))).toEqual([JSON.stringify({ appSessionId: APP_FILES, path: INSIDE, offset: 0, length: 4096 })]);
+  });
+
+  it('a keyed read made, the channel lost for longer than the link holds a call: today’s sentence at the hold’s end, as today’s read beside it, and no error before', async () => {
+    const HOLD = 1500;
+    const o = await served({ link: { CALL_TIMEOUT_MS: HOLD }, adapter: { carriedCallMs: HOLD } });
+    const release = o.holdNext();
+    const made = Date.now();
+    const keyed = o.keyed(INSIDE);
+    const todays = o.todays(INSIDE);
+    await until(() => o.reads().length === 2, 'both reads at the machine');
+    o.l.a.direct.dead = true;
+    o.cut();
+    release();
+    let early = false;
+    void keyed.then(() => void (early = Date.now() - made < HOLD - 200));
+    const sentence = { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } };
+    expect(await todays).toEqual(sentence);
+    expect(await keyed).toEqual(sentence);
+    expect(early, 'the keyed read answered before the hold’s end').toBe(false);
+    expect(o.reads()).toHaveLength(2);
+  });
+
+  it('a files.readOutside sent while its channel drops is never sent again; the keyed read is read afresh on the next channel, by a new act (condition 3b; fix wave 2)', async () => {
+    const o = await served();
+    let runs = 0;
+    o.onOutsideRun(() => {
+      if (++runs > 1) return;
+      const { carrier, tap } = o.l.a.carriers.at(-1)!;
+      tap.mute = true; // its answer is lost on the way
+      setTimeout(() => carrier.close('dropped'), 20);
+    });
+    expect(await o.keyed(FAR)).toMatchObject({ ok: true, value: { content: TEXT } });
+    await sleep(300);
+    // two operations reached the machine's ledger, each run once: the lost one was never sent again, the second is new
+    const ops = o.acts().map((c) => (c.input as { opId: string }).opId);
+    expect(ops).toHaveLength(2);
+    expect(new Set(ops).size).toBe(2);
+    expect(runs).toBe(2);
+    // and a plain read before each act, the second on the next channel after its own check
+    expect(o.reads().filter((input) => input.path === FAR)).toHaveLength(2);
   });
 });

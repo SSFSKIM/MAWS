@@ -84,7 +84,7 @@ export async function runResume(
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
       launched = true;
       previousLaunchId = answer.session.launchId;
-      ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now() }); // P2-C (2026-10-09)
+      ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now(), launchedAt: answer.session.launchedAt /* U2b */ }); // P2-C (2026-10-09)
       end = await watch.untilReady();
       // C3 corrective: an engine that wrote nothing at all (`init_failed { no_output }`) touched nothing of the session,
       // so the resume launches once more, visibly (the host journals the retry's reconnect rows and a notice); never

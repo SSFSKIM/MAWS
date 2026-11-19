@@ -38,7 +38,7 @@ import { forgetKeptOperations } from './plugins/operation';
 import { REL } from '../test-support/relative-time';
 
 // P2-C's `mods.list` stood in (X20): no rows unless a case gives some
-const NO_MODS = (): BuiltInModsState => ({ read: { state: 'ready', rows: [] }, failure: null, setEnabled: async () => {}, setOverride: async () => {} });
+const NO_MODS = (): BuiltInModsState => ({ read: { state: 'ready', rows: [] }, failure: null, setEnabled: async () => {}, setOverride: async () => {}, setFoldSummaries: async () => {} });
 const mods = vi.hoisted(() => ({ hook: null as unknown as BuiltInModsState }));
 vi.mock('./plugins/builtin-mods', () => ({ useBuiltInMods: vi.fn() }));
 

@@ -16,6 +16,8 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { builder } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
+import type { Row } from '../model/rows';
+import { publishFollows } from './follow';
 import type { TranscriptSource } from '../source/types';
 
 afterEach(() => {
@@ -76,6 +78,37 @@ it('without the option, the same attached session draws its assistant text throu
   expect(assistantAsks(fake)).toHaveLength(1);
 });
 
+// UX wave U2b (panel finding 1): a message tool's message in the card's thread draws through MAWS too: its row asks the
+// surface nothing, by the same rule assistant text follows; without the option it asks `ToolUse` as before.
+async function attachedMessageCall() {
+  const b = builder();
+  b.turn('u');
+  b.toolUse('m1', 'mcp__to-human__message', { text: 'The table is sorted.' });
+  b.result('m1', 'sent');
+  b.end(['u']);
+  const store = await sessionStoreWith(b.events);
+  const id = store.key as AppSessionId;
+  const fake = fakeClient();
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+  return { store, fake };
+}
+const toolUseAsks = (fake: ReturnType<typeof fakeClient>) => (fake.invoked('session.ui.render') as { component: string }[]).filter((a) => a.component === 'ToolUse');
+
+it('forced local: an attached session’s message tool row asks the surface nothing (the card draws it through MAWS)', async () => {
+  const { store, fake } = await attachedMessageCall();
+  expect(store.rows().some((r) => r.kind === 'to_human')).toBe(true);
+  render(<Transcript storeKey={store.key} presentation="local" />);
+  expect(screen.getByText('The table is sorted.')).toBeTruthy();
+  expect(toolUseAsks(fake)).toHaveLength(0);
+});
+
+it('without the option, the same attached session’s message tool row asks ToolUse, as today', async () => {
+  const { store, fake } = await attachedMessageCall();
+  render(<Transcript storeKey={store.key} />);
+  expect(toolUseAsks(fake)).toHaveLength(1);
+});
+
 it('forced local: a need-input question has no “Resume this session to answer.” line (the card’s Reply is under it)', async () => {
   const { store } = await attachedSession('<need-input>Which size?\n<choice recommended>Larger</choice>\n<choice>Same</choice></need-input>');
   render(<Transcript storeKey={store.key} presentation="local" />);
@@ -106,4 +139,38 @@ it('forced local: a block with a mark reports local ink, which a surface clear k
   // after the card closes, a surface view of the same thread still treats the marked block as ink (accepted, D6)
   act(() => useTranscriptStore.getState().clearAssistantInk(store.key, 'surface'));
   expect(entry().state.ui.assistantInk.has(marked.id)).toBe(true);
+});
+
+// Panel finding 1, the follower: a browser activity under a message tool's call follows that call's row by asking the
+// call's site at its address; in the card's thread it asks nothing and is drawn, by the same rule.
+function followerOf(store: Awaited<ReturnType<typeof sessionStoreWith>>) {
+  const call = store.rows().find((r) => r.kind === 'to_human')!;
+  const activity = {
+    kind: 'browser_activity', id: 'browser:b_000000000001:1', turnId: call.turnId, at: call.at, toolUseId: 'm1', appSessionId: store.key, tabId: 'b_000000000001',
+    activity: { kind: 'navigated', url: 'http://127.0.0.1:17391/notes.html', title: 'Notes' },
+  } as unknown as Extract<Row, { kind: 'browser_activity' }>;
+  publishFollows('test', new Map([[activity.id, call]]));
+  return activity;
+}
+function One({ storeKey, row, presentation }: { storeKey: string; row: Row; presentation?: 'local' }) {
+  return (
+    <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null, presentation }}>
+      <RowView row={row} />
+    </TranscriptProvider>
+  );
+}
+
+it('forced local: a browser activity following a message tool row asks nothing and is drawn; without the option it asks its call’s ToolUse', async () => {
+  const { store, fake } = await attachedMessageCall();
+  const activity = followerOf(store);
+  try {
+    const local = render(<One storeKey={store.key} row={activity} presentation="local" />);
+    expect(local.container.textContent).not.toBe('');
+    expect(toolUseAsks(fake)).toHaveLength(0);
+    local.unmount();
+    render(<One storeKey={store.key} row={activity} />);
+    expect(toolUseAsks(fake)).toHaveLength(1);
+  } finally {
+    publishFollows('test', null);
+  }
 });

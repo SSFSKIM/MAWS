@@ -184,7 +184,7 @@ describe('ipc schema validates both directions', () => {
 
     // C4 (M6): the read-only git service, owned by main.
     it('carries the C4 git.* entries, every command owned by machine (P5 O3-E), with the diff and log bounds', () => {
-      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
+      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branchCommits' /* UX wave U5b-2 */, 'git.branches', 'git.changesSince' /* U5b-2 */, 'git.commitDiff' /* U5b-2 */, 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
       for (const [name, spec] of Object.entries(git.commands)) if (!name.startsWith('git.worktree.')) expect(spec.owner, name).toBe('machine'); // P5 O3-E: mawsd's with the spine
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
@@ -194,6 +194,38 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
     });
     // end C4
+
+    // UX wave U5b-2 (Interfaces §C): the three reads take a commit as a whole object id and nothing else, so nothing a
+    // caller sends reaches git as an option, a ref name or an abbreviation
+    it('holds the three reads to their bounds: a commit or an against that is not a whole hash is refused', () => {
+      const sha1 = 'a'.repeat(40);
+      const sha256 = 'b'.repeat(64);
+      expect(validateCommandInput('git.branchCommits', { directory: '/r', limit: 50 }).ok).toBe(true);
+      for (const limit of [0, 201, 1.5]) expect(validateCommandInput('git.branchCommits', { directory: '/r', limit }).ok, String(limit)).toBe(false);
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, path: 'a.ts', context: 20, patch: false }).ok).toBe(true);
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha256 }).ok).toBe(true);
+      expect(validateCommandInput('git.changesSince', { directory: '/r', against: 'HEAD' }).ok).toBe(true);
+      expect(validateCommandInput('git.changesSince', { directory: '/r', against: sha256, path: 'a.ts', context: 0 }).ok).toBe(true);
+      for (const bad of ['-' + 'a'.repeat(39), '--output=/tmp/x', 'a'.repeat(39), 'A'.repeat(40), 'main', 'HEAD~1', `${sha1}\n`, 'a'.repeat(41)]) {
+        expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: bad }).ok, bad).toBe(false);
+        expect(validateCommandInput('git.changesSince', { directory: '/r', against: bad }).ok, bad).toBe(false);
+      }
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: 'HEAD' }).ok).toBe(false); // only the working-tree read takes HEAD
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, context: 21 }).ok).toBe(false);
+    });
+
+    // UX wave U5b-2 (the branch read's one snapshot, Decision Log 52): a count is of commits, so none is below 0; an answer
+    // with a negative one is refused at the schema, whichever count it is
+    it('refuses a branch read whose count of commits is negative', () => {
+      const answer = (counts: { all: number; notPushed: number | null; pushed: number | null } | null, behind: number | null) => validateCommandOutput('git.branchCommits', { base: null, upstream: null, commits: [], counts, behind }).ok;
+      expect(answer({ all: 3, notPushed: 1, pushed: 2 }, 0)).toBe(true);
+      expect(answer({ all: 0, notPushed: 0, pushed: 0 }, null)).toBe(true);
+      expect(answer({ all: 3, notPushed: null, pushed: null }, null)).toBe(true);
+      expect(answer({ all: -1, notPushed: 0, pushed: 0 }, 0), 'all').toBe(false);
+      expect(answer({ all: 1, notPushed: 2, pushed: -1 }, 0), 'pushed').toBe(false);
+      expect(answer({ all: 1, notPushed: -1, pushed: 2 }, 0), 'notPushed').toBe(false);
+      expect(answer({ all: 1, notPushed: 1, pushed: 0 }, -1), 'behind').toBe(false);
+    });
 
     // E6 start: git.diff's untracked scope (the service requires its path and refuses a base)
     it('accepts the E6 untracked scope on git.diff', () => {
@@ -236,10 +268,16 @@ describe('ipc schema validates both directions', () => {
     // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
     // the spine, with library.read's reach and the upload).
     it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.grant' /* UX wave U6e */, 'files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.chooseOutside' /* UX wave U6f */, 'files.grant' /* UX wave U6e */, 'files.list', 'files.listOutside' /* UX wave U6f */, 'files.openExternal', 'files.read', 'files.readOutside' /* UX wave U6f */, 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
       // UX wave U6e: the grant is main's alone; the outside save is bridged, and takes files.write's input and the real path
       expect(MAIN_ONLY_COMMANDS).toContain('files.grant');
       expect(MAIN_ONLY_COMMANDS).not.toContain('files.writeOutside');
+      // UX wave U6f: the three acts another machine's page asks are bridged; `open` rides a read and a save, and no raw read
+      for (const name of ['files.readOutside', 'files.listOutside', 'files.chooseOutside']) expect(MAIN_ONLY_COMMANDS, name).not.toContain(name);
+      expect(validateCommandInput('files.read', { appSessionId: 'a', path: '/w/notes.md', named: true, open: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readOutside', { appSessionId: 'a', path: '/w/notes.md', agent: true, open: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readOutside', { appSessionId: 'a', path: '/w/notes.md', raw: true }).ok).toBe(false);
+      expect(validateCommandInput('files.readResolved', { path: '/w/notes.md', open: true }).ok).toBe(false);
       const save = { appSessionId: 'a', path: '/w/notes.md', content: 'x', expectedHash: 'a'.repeat(64) };
       expect(validateCommandInput('files.writeOutside', { ...save, real: '/w/notes.md' }).ok).toBe(true);
       expect(validateCommandInput('files.writeOutside', save).ok).toBe(false);
@@ -1836,10 +1874,14 @@ describe('ipc schema validates both directions', () => {
   // P2-C start (2026-10-09): the built-in mods (X20; the P2-C document, §9) and the binary's flag declaration
   describe('P2-C entries', () => {
     const row = { id: 'maws.to-human', name: 'To-human', description: 'd', version: 1, enabled: true, source: 'maws-contract' };
-    it('adds the mods namespace: two main commands (machine since P5 O3-D), no event', () => {
-      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'machine', 'mods.setSessionOverride': 'machine' });
+    it('adds the mods namespace: three main commands (machine since P5 O3-D; the UX wave U2b’s summaries switch), and the switch’s one event, empty', () => {
+      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'machine', 'mods.setSessionOverride': 'machine', 'mods.setFoldSummaries': 'machine' });
       expect([...NAMES.mods.commands]).toEqual(Object.keys(mods.commands));
-      expect(Object.keys(mods.events)).toEqual([]);
+      // UX wave U2b (panel finding 3): `mods.list` stays the one source of the value, so the event carries nothing
+      expect(Object.keys(mods.events)).toEqual(['mods.foldSummariesChanged']);
+      expect([...NAMES.mods.events]).toEqual(Object.keys(mods.events));
+      expect(validateEventPayload('mods.foldSummariesChanged', {}).ok).toBe(true);
+      expect(validateEventPayload('mods.foldSummariesChanged', { on: true }).ok).toBe(false);
     });
 
     it('lists the mods with or without a session, and answers rows of the registry’s shape', () => {
@@ -1866,9 +1908,9 @@ describe('ipc schema validates both directions', () => {
     });
 
     // M4 (2026-10-09): main's owner channel
-    it('adds the ownerChannel namespace: four main commands (machine since P5 O3-D) and its changed event', () => {
+    it('adds the ownerChannel namespace: five main commands (machine since P5 O3-D; the UX wave U2b’s folds) and its changed event', () => {
       expect(Object.fromEntries(Object.entries(ownerChannel.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
-        'ownerChannel.state': 'machine', 'ownerChannel.answered': 'machine', 'ownerChannel.cancel': 'machine', 'ownerChannel.markRead': 'machine',
+        'ownerChannel.state': 'machine', 'ownerChannel.answered': 'machine', 'ownerChannel.cancel': 'machine', 'ownerChannel.markRead': 'machine', 'ownerChannel.folds': 'machine',
       });
       expect([...NAMES.ownerChannel.commands]).toEqual(Object.keys(ownerChannel.commands));
       expect([...NAMES.ownerChannel.events]).toEqual(Object.keys(ownerChannel.events));

@@ -38,6 +38,7 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
+import { joinCapabilitySources, localGitReadsSource } from './machines/git-reads-peer'; // UX wave U5b-2 (M8)
 import { refuseUnservedSideThreads, SIDE_THREAD_COMMANDS } from './machines/side-thread-peer'; // UX wave U5a, Decision Log 52
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
@@ -85,7 +86,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import { pickFiles } from './files/pick';
-import { appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
+import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile, OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly } from './files/open-file'; // UX wave U6e; U6f's frame's open
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -443,6 +444,14 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   }
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
+  // UX wave U6f (decision 13; §D): whether the signed-in member owns each machine, as the roster says (`MachineState.owner`,
+  // which the connection manager makes from the org state main holds and says in every `machines.changed`, heard from
+  // before the manager starts); unknown until it is said, and an outside act is asked for an owner alone
+  const machineOwners = new Map<MachineRef, boolean | null>();
+  onEmitted('machines.changed', ({ machines: listed }) => {
+    machineOwners.clear();
+    for (const machine of listed) machineOwners.set(machine.ref, machine.owner ?? null);
+  });
   const relayOnly = relayOnlyDial(process.env, app.isPackaged);
   const machines = startMachines({
     local,
@@ -454,8 +463,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     register: registerMainHandler,
     dispatchLocal,
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
-    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says
-    localCapabilities: localProjectActsSource(hosts),
+    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says; UX wave U5b-2
+    // (M8): and the git reads, so the window asks this Mac what it asks another machine
+    localCapabilities: joinCapabilitySources(localProjectActsSource(hosts), localGitReadsSource(hosts)),
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     wake, // P5 O15 M2b: its wake notices reach every link, its unlocks probe them
@@ -506,6 +516,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     emitOwn: (name, payload) => void emit(name, payload),
     windowShown: windowShownOf,
     openUrl: (url, machine) => openForMachine(url, machine),
+    // UX wave U6f (the write rule's line 2): an outside act begins only for a live page of an app window, the predicate
+    // the guard below uses, of a person the roster says owns the machine
+    isAppPage: (client) => isAppPage(client, appUrl),
+    owns: (machine) => machineOwners.get(machine) ?? null,
     log: (line) => console.log(`[lane-b] ${line}`),
   });
   // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
@@ -521,9 +535,11 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   });
   // P5 O7 M5a (A10): "Open externally" on another machine's file opens a copy here; invoked on this app, or (a checkout
   // file, its address lowered) on the machine it names, which must be the one the input names
-  registerMainHandler('remote.openCopy', async (input, { target }) => {
+  // UX wave U6f (decision 15): the asking caller passed on, so a file outside the session's folders there is copied for
+  // an app page of an owner alone
+  registerMainHandler('remote.openCopy', async (input, { target, client }) => {
     if (target !== local && target !== input.machine) throw new CommandFailure(ipcError('invalid_input', `remote.openCopy: its source is on ${target}, not ${input.machine}`));
-    const result = await remoteLaneB.artifacts.openCopy(input);
+    const result = await remoteLaneB.artifacts.openCopy(input, client);
     if (!result.ok) throw new CommandFailure(result.error);
     return result.value;
   });
@@ -555,8 +571,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
   // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
-  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding
-  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly(appUrl));
+  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding;
+  // U6f: and the open, the listing and the pick of a file outside a session's folders on another machine
+  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl));
+  guardCommand(OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly(appUrl)); // UX wave U6f (Decision Log 26): a frame's open
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its

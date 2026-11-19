@@ -59,6 +59,7 @@ function ProbeComposer({ appSessionId }: { appSessionId: AppSessionId; paneIndex
 
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const card = () => screen.queryByRole('region', { name: 'Session card' });
+const bar = () => screen.queryByRole('region', { name: 'Chat' }); // UX wave U10b (§F.4): the float's bar
 const composers = () => screen.queryAllByTestId('composer').map((el) => el.dataset.session);
 // happy-dom lays nothing out: the panel body is 1000 × 700, and a probe column (the browser pane's spacer) lies at
 // (300, 220) in the window, `columnWidth()` wide and 560 high, under a layer at (300, 180).
@@ -138,60 +139,61 @@ describe('the floating card in the Shell', () => {
     expect(Number.parseInt(card()!.style.width)).toBe(before + 20);
   });
 
-  it('Close keeps a usable compact composer and unread title; the title brings the transcript back', async () => {
+  // UX wave U10b (O-43, §F.3, §F.4): Close leaves the bar, the composer's box alone with two buttons
+  it('Close keeps a usable composer in the bar and the unread mark on Open conversation; it brings the transcript back', async () => {
     const user = userEvent.setup();
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(card()).toBeNull();
     expect(composers()).toEqual([A]);
-    expect(within(screen.getByRole('region', { name: 'Compact session composer' })).getByTestId('composer')).toBeTruthy();
-    const pill = screen.getByRole('button', { name: 'Show session card' });
-    expect(pill.textContent).toBe('Alpha session');
-    expect(pill.querySelector('[aria-label="Unread"]')).toBeNull();
+    expect(within(bar()!).getByTestId('composer')).toBeTruthy();
+    const open = within(bar()!).getByRole('button', { name: 'Open conversation' });
+    expect(open.title).toBe('Alpha session');
+    expect(open.querySelector('[data-session-mark]')).toBeNull();
     act(() => useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
-    expect(pill.querySelector('[aria-label="Unread"]')).not.toBeNull();
-    await user.click(pill);
+    expect(open.querySelector('[data-session-mark]')?.getAttribute('data-session-mark')).toBe('unread');
+    await user.click(open);
     expect(card()).not.toBeNull();
     expect(composers()).toEqual([A]);
   });
 
   // UX wave U1b (acceptance 10): the compact composer's "Waiting for you · N" opens the card for its request, whose row then
   // takes the keyboard; the card's composer is not marked to take it as it mounts (its focus would land after the row's).
-  // The pill still hands the keyboard to the card's composer.
+  // The bar's Open conversation still hands the keyboard to the card's composer (UX wave U10b: the bar's names).
   it('the compact composer’s Waiting for you line opens the card without handing its composer the keyboard; the pill still does', async () => {
     const user = userEvent.setup();
     act(() => useAttention.getState().applySnapshot([itemFor(permission(), A, { id: at('att-card' as AttentionId) })], TEST_MACHINE));
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
-    const compact = screen.getByRole('region', { name: 'Compact session composer' });
+    const compact = screen.getByRole('region', { name: 'Chat' });
     focused.splice(0);
     await user.click(within(compact).getByRole('button', { name: 'Waiting for you · 1' }));
     expect(card()).not.toBeNull();
     expect(composers()).toEqual([A]);
     expect(focused).toEqual([]);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
-    await user.click(screen.getByRole('button', { name: 'Show session card' }));
+    await user.click(within(screen.getByRole('region', { name: 'Chat' })).getByRole('button', { name: 'Open conversation' }));
     expect(card()).not.toBeNull();
     expect(focused).toEqual([A]);
   });
 
-  // P3-F (F-shell, scalpel-4#5): Close unmounts the focused Close button with the card; the pill it leaves takes the
-  // keyboard, the layer's or the one a browser chrome's row hosts, so focus never drops to the body
+  // P3-F (F-shell, scalpel-4#5): Close unmounts the focused Close button with the card; what it leaves takes the
+  // keyboard, the bar's Open conversation (UX wave U10b, M7 decision 6) or the chip a browser chrome's row hosts, so
+  // focus never drops to the body
   it.each([
-    ['the layer’s', false],
-    ['a browser chrome’s row’s', true],
-  ])('after Close, %s pill has the keyboard', async (_, hosted) => {
+    ['the bar’s Open conversation', false, 'Open conversation'],
+    ['a browser chrome’s row’s chip', true, 'Show session card'],
+  ])('after Close, %s has the keyboard', async (_, hosted, name) => {
     const user = userEvent.setup();
     if (hosted) registerSlot('panelHost', () => <ChromePill surface="panel" />);
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(card()).toBeNull();
-    const pill = screen.getByRole('button', { name: 'Show session card' });
-    expect(pill.dataset.floatingPill).toBe(hosted ? 'inline' : 'floating');
-    expect(document.activeElement).toBe(pill);
+    expect(bar() === null).toBe(hosted);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name }));
   });
 
   // P3-F L129: the panel header's Float names what a click does: over a card closed to its pill it brings the card back
@@ -248,6 +250,7 @@ describe('the floating card in the Shell', () => {
     render(<Shell />);
     await act(async () => {});
     expect(card()).toBeNull();
+    expect(bar()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show session card' })).toBeNull();
     expect(region('main').inert).toBe(false);
     expect(region('main').parentElement!.style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
@@ -492,18 +495,64 @@ describe('the floating card in the Shell', () => {
     column.remove();
   });
 
-  // The coordinator's ruling on M2: over a page (a native view) the browser's chrome draws the pill in its tab row
-  it('draws no pill of its own while a browser chrome hosts it', () => {
+  // The coordinator's ruling on M2: over a page (a native view) the browser's chrome draws the chip in its tab row
+  it('draws no bar of its own while a browser chrome hosts the chip', () => {
     useLayout.getState().setPanel({ floating: true });
     useFloatingCard.setState({ closed: true });
     render(<Shell />);
-    const pill = () => screen.queryByRole('button', { name: 'Show session card' });
-    expect(pill()).not.toBeNull();
+    expect(bar()).not.toBeNull();
     let release = () => {};
     act(() => void (release = useFloatingCard.getState().hostPill()));
-    expect(pill()).toBeNull();
+    expect(bar()).toBeNull();
     act(() => release());
-    expect(pill()).not.toBeNull();
+    expect(bar()).not.toBeNull();
+  });
+});
+
+// UX wave U10b (O-43; its execution document §F, M7): over a side surface the side column's controls always hold Show
+// chat's place, so the bar always has Hide chat; hidden, Show chat stands directly before the float control, which keeps
+// its label and its act (B7).
+describe('the chat over a side surface (UX wave U10b)', () => {
+  const header = () => region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
+  const showChat = () => within(header()).queryByRole('button', { name: 'Show chat' });
+
+  it('Close leaves the bar, 484 px; Hide chat puts Show chat before the float control with the keyboard; Show chat brings the bar back with the keyboard in its composer', async () => {
+    const user = userEvent.setup();
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    expect(showChat(), 'no Show chat while the card shows').toBeNull();
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(bar()!.style.width).toBe('484px');
+    expect(showChat(), 'no Show chat while the bar shows').toBeNull();
+    await user.click(within(bar()!).getByRole('button', { name: 'Hide chat' }));
+    expect(bar()).toBeNull();
+    expect(card()).toBeNull();
+    const show = showChat()!;
+    expect(show.nextElementSibling?.getAttribute('aria-label'), 'directly before the float control, which keeps its label').toBe('Open session card');
+    expect(document.activeElement).toBe(show);
+    focused.splice(0);
+    await user.click(show);
+    expect(bar()).not.toBeNull();
+    expect(showChat()).toBeNull();
+    expect(focused, 'the bar’s editor takes the keyboard').toEqual([A]);
+  });
+
+  it.each([
+    ['the bar', false],
+    ['hidden', true],
+  ])('from %s, ⌥⌘B and the float control open the card with the keyboard in its composer', async (_, hidden) => {
+    const user = userEvent.setup();
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    for (const open of [() => act(() => runAction('panel.float')), () => user.click(within(header()).getByRole('button', { name: 'Open session card' }))]) {
+      await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+      if (hidden) await user.click(within(bar()!).getByRole('button', { name: 'Hide chat' }));
+      focused.splice(0);
+      await open();
+      expect(card()).not.toBeNull();
+      expect(focused).toEqual([A]);
+      expect(showChat()).toBeNull();
+    }
   });
 });
 

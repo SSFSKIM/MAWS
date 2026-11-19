@@ -10,13 +10,13 @@ import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, CellId, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
-import { readAnswerEnvelopes } from '@shared/engine/arrival'; // E1; UX wave U4b: the envelopes inside a joined message
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { continuedAfter, presentationOf } from './classify'; // P5 O9; UX wave U2: continuedAfter
 import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
 import { carriedOf } from '@shared/engine/arrival-schema'; // UX wave U3
+import { answerEnvelopeOf, splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704; E1's steer read as the split reads it
 import { headRole } from './head'; // UX wave U3
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -715,26 +715,15 @@ function apply(batch: Batch, event: SessionEvent): void {
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
-      recordAskSteer(batch, event); // E1
-      if (event.joined !== undefined && event.joined.length > 0 && event.messageUuid !== null && batch.join(event, event.joined)) return; // UX wave U4a
-      // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
-      if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
-      const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
-      if (own) {
-        const turn = batch.touch(own.id);
-        if (event.messageUuid !== null) index.messages.set(event.messageUuid, turn.id);
-        batch.push(turn, event);
-        return;
-      }
-      // *Turn boundaries on this engine*: a prompt with no turn yet is a pending turn of its own, after the running one
-      // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
-      // disk turn that never carries a `turn.started` still gathers its answer.
-      const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
-      const waited = runningTurn(state) !== null || state.order.some((other) => state.turns.get(other)!.state === 'open' && !state.turns.get(other)!.accepted); // UX wave U4a
-      const turn = batch.open(id, 'human', event.at, false);
-      if (waited) turn.waited = true; // UX wave U4a
-      if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
-      batch.push(turn, event);
+      // UX wave, ticket 704 (the architect's ruling B): a person's message is read apart once, here, before anything else
+      // reads it. A host of an older build sends a message the engine joined from the person's words and MAWS's answer
+      // envelopes whole; it is reduced as this build's producers will send it, the person's message and then each
+      // envelope as a message of its own under the same uuid (which records its answers and places nothing). No part is
+      // asked about again: the split returns none it would split.
+      const parts = splitPersonsMessage(event);
+      if (parts.length === 1 && parts[0] === event) return placePrompt(batch, event);
+      const { id, sessionId, at, seq, agentId, parentToolUseId } = event;
+      parts.forEach((part, n) => placePrompt(batch, { ...part, id: n === 0 ? id : (`${id}${SPLIT_PART}${n}` as EventId), sessionId, at, seq, agentId, parentToolUseId }));
       return;
     }
     case 'assistant.block.delta': {
@@ -983,24 +972,54 @@ function apply(batch: Batch, event: SessionEvent): void {
   }
 }
 
+// A person's message, or a part of one (ticket 704): its envelope's answers recorded, then placed as a prompt.
+function placePrompt(batch: Batch, event: Event<'user.message'>): void {
+  const { state } = batch;
+  const { index } = state;
+  recordAskSteer(batch, event); // E1
+  if (event.joined !== undefined && event.joined.length > 0 && event.messageUuid !== null && batch.join(event, event.joined)) return; // UX wave U4a
+  // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
+  if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
+  const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
+  if (own) {
+    const turn = batch.touch(own.id);
+    if (event.messageUuid !== null) index.messages.set(event.messageUuid, turn.id);
+    batch.push(turn, event);
+    return;
+  }
+  // *Turn boundaries on this engine*: a prompt with no turn yet is a pending turn of its own, after the running one
+  // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
+  // disk turn that never carries a `turn.started` still gathers its answer.
+  const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
+  const waited = runningTurn(state) !== null || state.order.some((other) => state.turns.get(other)!.state === 'open' && !state.turns.get(other)!.accepted); // UX wave U4a
+  const turn = batch.open(id, 'human', event.at, false);
+  if (waited) turn.waited = true; // UX wave U4a
+  if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
+  batch.push(turn, event);
+}
+
+// The id of a part beyond the first of a message the window split (ticket 704): the message's id and this suffix, which
+// no producer writes
+const SPLIT_PART = '~part';
+
 // E1 start (residue 13): a user message that is an async ask's steer (`[MAWS ask <askId>]` and the answered result's
 // fenced block) carries that ask's answers. They go on the turn holding the ask's call (copy-on-write: that turn is
 // cloned for this batch and given a new map, so a snapshot taken before the steer still reads `asked`), and that turn
 // re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
 // the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
 // its steer). The first steer naming an ask wins. The message itself is placed as any other prompt (its turn, its fold);
-// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers. UX wave U4b (the
-// joined answer, step 2): the engine joins a waiting envelope with the prompts waiting beside it into one message, so
-// every envelope the shared reader finds in the text answers its ask, not only a text that is all envelope.
+// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers. A message is a steer
+// only as the split reads one (`answerEnvelopeOf`; ticket 704, the ruling of 2026-11-16): a lone envelope, or one the
+// split read out of a message; never a text that only opens with the tag, an envelope spread over blocks, or a message
+// with any other block.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
-  const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
-  for (const steer of readAnswerEnvelopes(text).envelopes) {
-    const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
-    if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) continue;
-    const turn = batch.touch(owner);
-    turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
-    turn.version += 1;
-  }
+  const steer = answerEnvelopeOf(event.content);
+  if (steer === null || steer.answers === null) return; // MAWS's own envelope always carries its answers
+  const owner = batch.state.index.toolUses.get(steer.call as ToolUseId); // the askId is the call's tool use id (residue 2)
+  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.call)) return;
+  const turn = batch.touch(owner);
+  turn.askSteers = new Map(turn.askSteers).set(steer.call, steer.answers);
+  turn.version += 1;
 }
 // E1 end
 

@@ -73,6 +73,7 @@
     "src/pty-host/files.ts", // P5 O3-B: a launch's cleanup removes the pty host's socket fallback with the profile's processes
     "src/engine-host/transport.ts",
     "src/services/git/runner.ts",
+    "src/services/git/default-base.ts", // UX wave U5b-2 (M11): the hand-run This branch steps read the default-branch rule's base
     "src/services/index/migrations.ts",
     "src/services/index/browser-staging.ts", // P5 O3-A: migration 14's staging step, which migrations.ts imports
     "src/services/index/db.ts",

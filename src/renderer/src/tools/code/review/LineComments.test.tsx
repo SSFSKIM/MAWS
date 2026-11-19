@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message';
+import { commentsMessage, MESSAGE_COMMENTS_MAX, type MessageComment } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { addressOf } from '@shared/machine/address';
@@ -22,17 +22,21 @@ import { openComment } from '../../../side/register';
 import { passKey, resetPlaceNotes, useCommentCard, type PassComment } from '../../../side/card/store';
 import { useMachines } from '../../../stores/machines';
 import { useTranscriptStore, type TurnId } from '../../../transcript';
-import { builder } from '../../../transcript/model/test-events';
+import { builder, uuid } from '../../../transcript/model/test-events';
+import { rowsOf } from '../../../transcript/model/derive';
+import { applyEvents, createState } from '../../../transcript/model/reduce';
+import { renderRow, rowOf, spyActions } from '../../../transcript/view/rows/test-support';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
-import { registerCommentComposer } from '../anchor/anchor';
+import { commitLineAnchor, registerCommentComposer } from '../anchor/anchor';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
 import { UNPLACED_ROWS_SHOWN } from './UnplacedComments';
 import { reviewLayout } from './measure';
 import { REVIEW_SCOPE_BYTES_CAP } from './review-model';
 import { useReview } from './review-store';
+import { useBranchReads } from './branch-read';
 import { reviewTool } from './ReviewTool';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
@@ -119,6 +123,12 @@ function commentsMain() {
         return ok({ entries: [], paused: false });
       case 'session.intent.get':
         return ok(null);
+      case 'git.changesSince': // UX wave U5b-2: the reads, asked only where the machine serves them
+        return ok({ patch: state.patch, files: state.files, untracked: [] });
+      case 'git.branchCommits':
+        return ok({ base: { ref: 'origin/main', mergeBase: STATUS.head.padEnd(40, '0') }, upstream: null, commits: [], counts: { all: 0, notPushed: 0, pushed: 0 }, behind: 0 });
+      case 'git.commitDiff':
+        return ok({ commit: { sha: input.commit, shortSha: String(input.commit).slice(0, 7), author: 'Ada', authoredAt: '2026-11-14T10:00:00.000Z', subject: 'Quote the cells', parents: ['0000000000000000000000000000000000000001'] }, onHead: true, patch: input.patch === false ? '' : state.patch, files: input.patch === false ? [] : state.files });
       case 'side.comment.content':
         return state.content ? state.content() : ok({ content: BUILT });
       case 'session.send':
@@ -237,6 +247,7 @@ describe('comments on lines in Review', () => {
     offs.splice(0).forEach((off) => off());
     useCommentCard.setState({ open: null });
     resetPlaceNotes();
+    useBranchReads.getState().reset(); // UX wave U5b-2: a case that serves the reads holds the branch read
     vi.restoreAllMocks();
   });
 
@@ -598,7 +609,7 @@ describe('comments on lines in Review', () => {
   it('says which comments’ lines left the diff and which comments’ files it does not hold, each sentence over its own', async () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: REPORT_GONE(), files: [FILES()[0]] }; // Staged: report.ts alone, its line 12 rewritten
-    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null }));
+    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', read: 'git.diff', against: null }));
     await mountReview();
     await twoComments();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
@@ -764,7 +775,7 @@ describe('comments on lines in Review', () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: MOVED, files: [FILES(2)[0]] }; // Staged holds the file with two lines more above the commented one
     // Staged read and kept by another surface (a diff tab of it), so choosing it answers at once and the stack stays
-    const release = useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null });
+    const release = useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', read: 'git.diff', against: null });
     offs.push(release);
     await mountReview();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
@@ -789,7 +800,7 @@ describe('comments on lines in Review', () => {
   it('stands an open card whose file is not in the chosen scope under the toolbar, with the keyboard, and back under its line in the scope that has it', async () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: REPORT(), files: [FILES()[0]] }; // Staged has report.ts alone
-    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null }));
+    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', read: 'git.diff', against: null }));
     await mountReview();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
     addOn('src/other.ts', 'new', 2);
@@ -986,6 +997,215 @@ describe('comments on lines in Review', () => {
       leave();
       await painted(() => card() === null && unsentRows('/scratch/two.ts').length === 1);
       expect(lineRow('/scratch/two.ts', 'new', 8)!.nextElementSibling?.contains(unsentRows('/scratch/two.ts')[0])).toBe(true);
+    });
+  });
+
+  // UX wave U5b-2 (M9, S19): comments on two commits' diffs, made through the card's real store, each drawn only in its own
+  // commit; sent together after an amend, each anchor the producer's, and the one message naming both hashes.
+  it('keeps each commit’s comments its own on the same path and line, neither under a line in Uncommitted, and sends both after an amend; the message, derived as the transcript derives it, gives each chip its own commit (S19)', async () => {
+    const SHA_A = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const SHA_B = 'b2c3d4e5f60718293a4b5c6d7e8f901234567890';
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: T0, generation: 0, capabilities: ['rl2.git-reads'] }]));
+    const openCommit = (commit: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'commit', commit } }));
+    openCommit(SHA_A);
+    render(<TestHost />);
+    await drawn('src/report.ts');
+    addOn('src/report.ts', 'new', 12);
+    await painted(() => card() !== null);
+    type('Why quote it in this commit?');
+    leave();
+    await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+
+    openCommit(SHA_B);
+    await painted(() => scopeChip('commit')?.textContent === 'Commit b2c3d4e');
+    await drawn('src/report.ts');
+    expect(unsentRows()).toEqual([]); // commit A's comment is not under a line of commit B
+    addOn('src/report.ts', 'new', 12); // the same path and line, in commit B
+    await painted(() => card() !== null);
+    type('Quote only where a comma is.');
+    leave();
+    await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+    expect(unsentRows('src/report.ts')[0].textContent).toBe('Quote only where a comma is.');
+
+    fireEvent.click(scopeChip('uncommitted')!);
+    await painted(() => scopeChip('uncommitted')?.getAttribute('aria-pressed') === 'true');
+    await drawn('src/report.ts');
+    expect(unsentRows()).toEqual([]);
+
+    const amended = { ...STATUS, head: 'fedcba9876543210' };
+    main.state.status = amended;
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: amended, reason: 'head' }));
+    await waitFor(() => expect(main.callsOf('git.commitDiff')).toContainEqual({ directory: '/repo', commit: SHA_B, patch: false }));
+
+    fireEvent.click(scopeChip('commit')!);
+    await drawn('src/report.ts');
+    await painted(() => unsentRows('src/report.ts').length === 1);
+    fireEvent.click(within(unsentRows('src/report.ts')[0]).getByText('Quote only where a comma is.'));
+    await painted(() => card() !== null);
+    expect(sendButton().textContent).toBe('Send 2 comments');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+    const [{ comments }] = main.callsOf('side.comment.content') as { comments: MessageComment[] }[];
+    const anchors = [commitLineAnchor('src/report.ts', 12, 'new', SHA_A), commitLineAnchor('src/report.ts', 12, 'new', SHA_B)];
+    expect(comments.map((c) => c.anchor)).toEqual(anchors);
+
+    // the message the main conversation receives, as a user event through the transcript's own derivation
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: commentsMessage(comments, 'main'), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const row = rowOf(rowsOf(applyEvents(createState(null, null), b.events)), 'user');
+    expect(row.comments?.map((c) => c.anchor)).toEqual(anchors);
+    const actions = { ...spyActions(), openCommit: vi.fn() };
+    const drawnRow = renderRow(row, { storeKey: A, actions });
+    const chips = [...drawnRow.container.querySelectorAll<HTMLButtonElement>('button[data-chip="anchor"]')];
+    expect(chips.map((each) => each.textContent)).toEqual(['report.ts:12 · a1b2c3d', 'report.ts:12 · b2c3d4e']);
+    chips.forEach((each) => fireEvent.click(each));
+    expect(actions.openCommit.mock.calls).toEqual([
+      [A, SHA_A, 'src/report.ts'],
+      [A, SHA_B, 'src/report.ts'],
+    ]);
+  });
+
+  // UX wave U5b-2 fix 1 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §G, Decision Log 37): a
+  // comment made on a commit, while Review shows any other scope, is listed in the row under the toolbar under "This comment
+  // is on commit <sha7>.", whose hash opens that commit at the comment's file by the act R8's chip uses; the row keeps its
+  // controls; U5a's chip opening it stands its card there. Comments made through the card's real store and producers.
+  describe('a comment made on a commit, while another scope is shown (UX wave U5b-2)', () => {
+    const ON = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const ELSE = 'c3d4e5f60718293a4b5c6d7e8f901234567890ab';
+    const serve = () => act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: T0, generation: 0, capabilities: ['rl2.git-reads'] }]));
+    const openOn = (commit: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'commit', commit } }));
+    const onCommitWords = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words="on-commit"]')].map((each) => each.textContent);
+    const commitButton = () => document.querySelector<HTMLButtonElement>('[data-review-unplaced] [data-review-unplaced-commit]');
+    afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
+
+    // Review on commit ON, and a comment left on report.ts's line 12 there
+    async function commentOnCommit() {
+      openOn(ON);
+      await drawn('src/report.ts');
+      await drawn('src/other.ts');
+      addOn('src/report.ts', 'new', 12);
+      await painted(() => card() !== null);
+      type('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+    }
+    async function mounted() {
+      serve();
+      openReview();
+      render(<TestHost />);
+      await drawn('src/report.ts');
+    }
+
+    const scopes: [string, () => void][] = [
+      ['Uncommitted', () => fireEvent.click(scopeChip('uncommitted')!)],
+      ['This branch', () => fireEvent.click(scopeChip('branch')!)],
+      ['another commit', () => openOn(ELSE)],
+    ];
+    for (const [name, choose] of scopes)
+      for (const present of [true, false])
+        it(`lists it under “This comment is on commit a1b2c3d.” in ${name}, its file ${present ? 'in' : 'not in'} that scope`, async () => {
+          await mounted();
+          await commentOnCommit();
+          if (!present) {
+            main.state.patch = OTHER();
+            main.state.files = FILES().filter((file) => file.path === 'src/other.ts');
+          }
+          choose();
+          await drawn('src/other.ts');
+          await painted(() => onCommitWords().length === 1);
+          expect(sectionOf('src/report.ts') !== null).toBe(present);
+          expect(onCommitWords()).toEqual(['This comment is on commit a1b2c3d.']);
+          expect(commitButton()?.textContent).toBe('a1b2c3d');
+          expect(unplacedRows()).toHaveLength(1);
+          expect(unplacedRows()[0].textContent).toContain('Quote only where a comma is.');
+          expect(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' })).toBeTruthy();
+          expect(unsentRows()).toEqual([]); // drawn under no line, even where its file and line are in the scope
+        });
+
+    it('opens the newest comment from U5a’s chip in that row when it is a commit’s, and removes it there', async () => {
+      await mounted();
+      await drawn('src/other.ts');
+      addOn('src/other.ts', 'new', 2); // an older comment, in Uncommitted
+      await painted(() => card() !== null);
+      type('Name it for what it counts.');
+      leave();
+      await painted(() => card() === null);
+      await commentOnCommit();
+      fireEvent.click(scopeChip('uncommitted')!);
+      await painted(() => onCommitWords().length === 1 && unsentRows('src/other.ts').length === 1);
+      expect(chip()?.textContent).toBe('2 unsent comments');
+      fireEvent.click(chip()!);
+      await painted(() => card() !== null);
+      expect(lineLeft()!.contains(card())).toBe(true);
+      expect(cardRow()?.dataset.reviewCardRow).toBe('away');
+      expect(field().value).toBe('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unplacedRows().length === 1);
+      fireEvent.click(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' }));
+      await painted(() => lineLeft() === null);
+      expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it counts.']);
+    });
+
+    it('edits it in that row and sends it, its anchor the commit’s', async () => {
+      await mounted();
+      await commentOnCommit();
+      fireEvent.click(scopeChip('uncommitted')!);
+      await painted(() => unplacedRows().length === 1);
+      fireEvent.click(unplacedEdit(0));
+      await painted(() => card() !== null && lineLeft()!.contains(card()));
+      expect(field().value).toBe('Quote only where a comma is.');
+      type('Quote only where a comma or a quote is.');
+      fireEvent.click(sendButton());
+      await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+      expect(main.callsOf('side.comment.content')).toEqual([
+        { comments: [{ anchor: commitLineAnchor('src/report.ts', 12, 'new', ON), text: '`return quoted(value);`\nQuote only where a comma or a quote is.', screenshot: null }] },
+      ]);
+    });
+
+    // M9 fix 3 (Decision Log 39): a comment made on no commit, while a commit's scope is shown
+    it('opens a comment made on no commit from U5a’s chip in the row under “This comment is not on this commit.” while a commit’s scope is shown, and places it under its line again in Uncommitted', async () => {
+      await mounted();
+      addOn('src/report.ts', 'new', 12); // in Uncommitted
+      await painted(() => card() !== null);
+      type('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+      openOn(ON);
+      await drawn('src/report.ts');
+      const words = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words="not-on-commit"]')].map((each) => each.textContent);
+      await painted(() => words().length === 1);
+      expect(words()).toEqual(['This comment is not on this commit.']);
+      expect(document.querySelector('[data-review-unplaced] [data-review-unplaced-commit]')).toBeNull(); // no link in it
+      expect(unsentRows()).toEqual([]); // not under the commit's line, though its text is the quote
+      expect(unplacedRows()).toHaveLength(1);
+      expect(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' })).toBeTruthy();
+      expect(chip()?.textContent).toBe('1 unsent comment');
+      fireEvent.click(chip()!);
+      await painted(() => card() !== null);
+      expect(lineLeft()!.contains(card())).toBe(true);
+      expect(cardRow()?.dataset.reviewCardRow).toBe('away');
+      expect(field().value).toBe('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unplacedRows().length === 1);
+      fireEvent.click(scopeChip('uncommitted')!);
+      await drawn('src/report.ts');
+      await painted(() => unsentRows('src/report.ts').length === 1);
+      expect(lineLeft()).toBeNull();
+      expect(lineRow('src/report.ts', 'new', 12)!.nextElementSibling?.contains(unsentRows('src/report.ts')[0])).toBe(true);
+    });
+
+    it('opens Review on that commit at the comment’s file from the hash, by the act R8’s chip uses; there it stands under its line', async () => {
+      await mounted();
+      await commentOnCommit();
+      fireEvent.click(scopeChip('uncommitted')!);
+      await painted(() => commitButton() !== null);
+      const addTool = vi.spyOn(panelHost, 'addTool');
+      expect(commitButton()!.className.split(' ')).toEqual(expect.arrayContaining(['relative', 'after:absolute', 'after:inset-x-0', 'after:h-6'])); // a 24 px pressed area (D6)
+      fireEvent.click(commitButton()!);
+      expect(addTool.mock.calls).toEqual([['review', { appSessionId: A, params: { scope: 'commit', commit: ON, path: 'src/report.ts' } }]]);
+      await painted(() => scopeChip('commit')?.getAttribute('aria-pressed') === 'true' && unsentRows('src/report.ts').length === 1);
+      expect(onCommitWords()).toEqual([]);
     });
   });
 });

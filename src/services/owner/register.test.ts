@@ -1,15 +1,16 @@
 // Main's wiring of the owner channel's launch half: `mods.*` registered over the index with the app's switch from
 // settings, the config home from the engine's environment, and the host's event batches feeding the mismatch check.
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema/settings';
 import type { HostState } from '@shared/ipc/schema';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
 import type { HostEvents } from '../sessions/context';
@@ -33,6 +34,7 @@ describe('startOwnerChannel', () => {
   const streamings = new Set<() => void>();
   const settingsListeners = new Set<() => void>();
   const emitted: unknown[] = [];
+  let summariesSaid: { summaries: boolean }[] = []; // panel finding 3: the switch's value as each word that it changed found it
   beforeEach(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-owner-register-')));
     dir = tempDir();
@@ -46,13 +48,15 @@ describe('startOwnerChannel', () => {
     hostStates.clear();
     streamings.clear();
     settingsListeners.clear();
+    summariesSaid = [];
   });
   afterEach(() => {
     index.close();
     dir.dispose();
     rmSync(root, { recursive: true, force: true });
   });
-  const start = () =>
+  const noHost: HostDispatch = async () => ({ ok: false, error: { code: 'internal', message: 'no host' } });
+  const start = (dispatch: HostDispatch = noHost) =>
     startOwnerChannel({
       index,
       settings: () => settings,
@@ -65,12 +69,13 @@ describe('startOwnerChannel', () => {
       log: () => {},
       // M4
       attention: { setOwnerItems: (appSessionId, items, silent) => void projected.push({ appSessionId, items, silent }) },
-      dispatch: async () => ({ ok: false, error: { code: 'internal', message: 'no host' } }),
+      dispatch,
       onHostState: (listener) => (hostStates.add(listener), () => void hostStates.delete(listener)),
       onStreaming: (listener) => (streamings.add(listener), () => void streamings.delete(listener)),
       streaming: () => true,
       emit: (_name, payload) => void emitted.push(payload),
       onSettings: (listener) => (settingsListeners.add(listener), () => void settingsListeners.delete(listener)),
+      foldSummariesChanged: () => void summariesSaid.push({ summaries: index.ownerChannel.foldSummaries() }),
     });
 
   // P4-R7z: the to-human plugin's style (it declares 6, its message tool), the one that carries the lane
@@ -79,7 +84,7 @@ describe('startOwnerChannel', () => {
   it('registers mods.* and ownerChannel.* over the index, the app switch read from settings at each call', async () => {
     pluginStyle();
     start();
-    expect([...handlers.keys()].sort()).toEqual(['mods.list', 'mods.setSessionOverride', 'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state']);
+    expect([...handlers.keys()].sort()).toEqual(['mods.list', 'mods.setFoldSummaries', 'mods.setSessionOverride', 'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.folds', 'ownerChannel.markRead', 'ownerChannel.state']);
     expect(await handlers.get('mods.list')!({})).toMatchObject([{ id: 'maws.to-human', enabled: true, source: SUPPLEMENTED }]);
     settings = { ...settings, mods: { toHuman: { enabled: false } } };
     expect(await handlers.get('mods.list')!({})).toMatchObject([{ enabled: false, source: 'off' }]);
@@ -101,6 +106,7 @@ describe('startOwnerChannel', () => {
     const decision = (desired: typeof SUPPLEMENTED | 'off') => ({
       appSessionId: a, kind: 'resume' as const, laneOn: true, override: 'inherit' as const, desired, recorded: 'unrecorded' as const, appended: desired !== 'off', snapshotOff: false, offUnavailable: false,
       applied: desired, style: desired === 'off' ? 'default' : 'doperpowers:to-human', decidedBy: desired === 'off' ? 'default' : 'doperpowers:to-human', styleUnresolved: null,
+      advertised: desired === 'off' ? null : (8 as const), plugin: true, reserved: false, summariesOff: false, // U2b
     });
     launches.launched(decision('off'), { launchId: 'l1', at: '2026-10-09T09:00:00.000Z' });
     const block = {
@@ -127,7 +133,7 @@ describe('startOwnerChannel', () => {
     fire('session.eventBatch', { appSessionId: a, events: [block] });
     expect(projected.at(-1)!.items.map((item) => item.kind)).toEqual(['async_input']);
     launches.launched(
-      { appSessionId: a, kind: 'resume', laneOn: true, override: 'inherit', desired: 'off', recorded: SUPP, appended: false, snapshotOff: true, offUnavailable: false, applied: 'off', style: 'default', decidedBy: 'default', styleUnresolved: null },
+      { appSessionId: a, kind: 'resume', laneOn: true, override: 'inherit', desired: 'off', recorded: SUPP, appended: false, snapshotOff: true, offUnavailable: false, applied: 'off', style: 'default', decidedBy: 'default', styleUnresolved: null, advertised: null, plugin: true, reserved: false, summariesOff: false },
       { launchId: 'l2', at: '2026-10-09T11:00:00.000Z' },
     );
     expect(projected.at(-1)).toMatchObject({ appSessionId: a, items: [] });
@@ -161,7 +167,7 @@ describe('startOwnerChannel', () => {
     // and the mods row learn from the owner channel's own event
     expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { on: true, applied: null, pending: 'next-launch' } });
     launches.launched(
-      { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: SUPPLEMENTED, recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: SUPPLEMENTED, style: 'default', decidedBy: 'default', styleUnresolved: null },
+      { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: SUPPLEMENTED, recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: SUPPLEMENTED, style: 'default', decidedBy: 'default', styleUnresolved: null, advertised: 8, plugin: true, reserved: false, summariesOff: false },
       { launchId: 'l1', at: 't' },
     );
     expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { lane: { on: true, applied: SUPPLEMENTED, pending: null, mismatch: null } } });
@@ -186,5 +192,53 @@ describe('startOwnerChannel', () => {
     expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { marks: [{ question: { state: 'queued', text: 'Answering "Which backend?": SQLite' } }] } });
     channel.stop();
     expect(listeners.get('session.queue')).toEqual([]);
+  });
+
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A, §M; M4)
+  describe('who draws, the mod’s file of summaries and the summaries’ switch', () => {
+    const ENGINE = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+    it('publishes drawnBy with every state: not known before the live statuses are read (mod), MAWS once the read lists no process for it', async () => {
+      let answer!: () => void;
+      const channel = start(async (_owner, name) =>
+        name === 'engine.sessions' ? new Promise((resolve) => (answer = () => resolve({ ok: true, value: [] }))) : { ok: false, error: { code: 'internal', message: 'no host' } });
+      expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { drawnBy: 'mod' } }); // B12: not yet discovered
+      answer();
+      await channel.work.settled();
+      expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { drawnBy: 'maws' } }); // B1
+      expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { lane: { drawnBy: 'maws' } } });
+    });
+
+    it('answers ownerChannel.folds from the engine’s config home, by the session’s engine session id', async () => {
+      const b = index.sessions.upsertFromSummary(summary({ sessionId: ENGINE as SessionId, directory: root })).record.appId;
+      start();
+      expect(await handlers.get('ownerChannel.folds')!({ appSessionId: b })).toEqual({ runs: [] });
+      const folds = join(root, 'engine-config', 'to-human', 'folds');
+      mkdirSync(folds, { recursive: true });
+      writeFileSync(join(folds, `${ENGINE}.json`), JSON.stringify({ shape: 2, runs: [['toolu_1', 'toolu_3', 'Read the release notes; three breaking changes found']] }));
+      expect(await handlers.get('ownerChannel.folds')!({ appSessionId: b })).toEqual({ runs: [{ first: 'toolu_1', last: 'toolu_3', summary: 'Read the release notes; three breaking changes found' }] });
+      writeFileSync(join(folds, `${ENGINE}.json`), JSON.stringify({ shape: 1, runs: [['toolu_1', 'toolu_3', 'A file of a release before the contract']] }));
+      expect(await handlers.get('ownerChannel.folds')!({ appSessionId: b })).toEqual({ runs: null });
+    });
+
+    it('writes the switch with mods.setFoldSummaries; two writes together leave the later, which mods.list answers', async () => {
+      pluginStyle();
+      start();
+      expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: true }]);
+      await Promise.all([handlers.get('mods.setFoldSummaries')!({ on: true }), handlers.get('mods.setFoldSummaries')!({ on: false })]);
+      expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: false }]);
+      expect(await handlers.get('mods.list')!({ appSessionId: a })).toMatchObject([{ summaries: false }]);
+      await handlers.get('mods.setFoldSummaries')!({ on: true });
+      expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: true }]);
+    });
+
+    // Panel finding 3 (the coordinator's ruling): each write is said once, after it, so the lists that read again on
+    // `mods.foldSummariesChanged` read what it wrote
+    it('says each write of the switch once, after the write', async () => {
+      start();
+      await handlers.get('mods.setFoldSummaries')!({ on: false });
+      await handlers.get('mods.setFoldSummaries')!({ on: true });
+      expect(summariesSaid).toEqual([{ summaries: false }, { summaries: true }]);
+    });
   });
 });

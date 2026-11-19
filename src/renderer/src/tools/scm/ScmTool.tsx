@@ -1,34 +1,26 @@
-// The Source control tool (E6 execution document, Design §5, T3.4): X5's declaration. `id: 'source-control'` (the
-// interface ledger's `show_pane` value), pinnable, single-instance, `params { target? }`, `open` re-targeting. Its
-// state is a store handle (C8a's React Compiler rule): the selection, the diff's place, the collapsed groups, the commit
-// draft per session, the open sheet, the last commit and the notice. The git watch and the diffs are the mounted body's
-// (the host unmounts an unselected tool), so `dispose` has nothing to release. No summary: the summary card's row is
-// E6's edit of PushState (Design §6).
+// The Source control tool (E6 execution document, Design §5, T3.4; UX wave U5b-2, docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md,
+// M10 and §H): X5's declaration. `id: 'source-control'` (the interface ledger's `show_pane` value), pinnable,
+// single-instance; it mounts Source control's page, a page to read that changes nothing, and takes no params (a
+// `show_pane` for it that names a file opens Review there, tools/maws/panes/connect.ts). Its state is a store handle (C8a's
+// React Compiler rule) holding the page's own two folds, reset when the session or its working folder changes. The git
+// watch and the branch read are the mounted page's, so `dispose` has nothing to release. No summary: the summary card's
+// row is E6's edit of PushState (Design §6).
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../panel/tool';
 import { SCM_COPY } from './copy';
-import { ScmShell } from './ScmShell';
-import { createScmUi, forFolder, forSession, type ScmParams, type ScmUi } from './view-state';
+import { createPageUi, FOLDED, SourceControlPage, type PageUi } from './SourceControlPage';
 import { workingFolder } from '@shared/sessions/working-folder';
 
 export const SCM_TOOL_ID = 'source-control';
 
 export interface ScmState {
-  readonly ui: StoreApi<ScmUi>;
+  readonly ui: StoreApi<PageUi>;
 }
 
-// `params` is undefined for a tab restored from layout.json (X5); a request is applied by the body once the shown
-// session's status is known.
-function createState({ appSessionId, session, params }: PanelToolInit<ScmParams>): ScmState {
-  return { ui: createScmUi({ session: appSessionId, directory: session ? workingFolder(session).path : null, params: params ?? null }) };
-}
-
-// Re-targeting (X5): E1's `show_pane { pane: 'source-control', target }` and the summary's row pass `{ target? }`; the
-// body selects the target in whichever group lists it, since `addTool` activates the target session with the tab.
-function open(state: ScmState, params: ScmParams | undefined): void {
-  state.ui.setState({ request: params ?? {} });
+function createState({ appSessionId, session }: PanelToolInit): ScmState {
+  return { ui: createPageUi(appSessionId, session ? workingFolder(session).path : null) };
 }
 
 export function ScmIcon({ className }: { className?: string }) {
@@ -45,33 +37,30 @@ export function ScmIcon({ className }: { className?: string }) {
 function ScmBody({ state, ctx }: { state: ScmState; ctx: PanelToolContext }) {
   const { ui } = state;
   const shown = ctx.appSessionId;
-  const folder = ctx.session ? workingFolder(ctx.session) : null;
-  const directory = folder?.path ?? null;
-  // A pinned tool shown for another session starts over there (each session's draft comes back to it), and so does a
-  // session whose working folder changed (UX wave U8c-2: the agent moved; its draft stays); until then nothing renders,
-  // so nothing of the old checkout is shown, read or acted on for the new one.
+  const directory = ctx.session ? workingFolder(ctx.session).path : null;
+  // A pinned tool shown for another session starts over there, and so does a session whose working folder changed (UX
+  // wave U8c-2: the agent moved): the two folds go back to folded. Until then nothing renders, so nothing of the old
+  // checkout is shown or read for the new one.
   const synced = useStore(ui, (s) => s.session === shown && s.directory === directory);
   useEffect(() => {
-    if (!synced) ui.setState((s) => ({ ...forSession(s, shown), ...forFolder(s, directory) }));
+    if (!synced) ui.setState({ session: shown, directory, ...FOLDED });
   }, [ui, shown, directory, synced]);
 
-  if (shown === null || folder === null || directory === null) {
+  if (shown === null || directory === null) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{SCM_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  // M4 decision 6: while the session works away from its launch folder the page draws its reads and none of its acts
-  return <ScmShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} acts={!folder.moved} />;
+  return <SourceControlPage key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} visible={ctx.visible} />;
 }
 
-export const scmTool: PanelTool<ScmState, ScmParams> = {
+export const scmTool: PanelTool<ScmState> = {
   id: SCM_TOOL_ID,
   title: SCM_COPY.title,
   icon: ScmIcon,
   pinnable: true,
   multiInstance: false,
   createState,
-  open,
-  beforeClose: async () => true, // a draft message is state the host drops with the tab, as Review drops its selection
-  dispose: () => {}, // the watch and the diffs are the mounted body's, released when it unmounts
+  beforeClose: async () => true, // the folds are state the host drops with the tab
+  dispose: () => {}, // the watch and the branch read are the mounted page's, released when it unmounts
   render: ScmBody,
 };

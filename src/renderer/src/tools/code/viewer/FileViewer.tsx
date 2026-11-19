@@ -24,24 +24,34 @@
 // `'main'` in the main area), and only the PDF's fragment reads it. `inView` false: the tab's body is kept mounted while it
 // is not in view (Files' tree in its place, the panel collapsed), and a framed file draws no element (Decision Log 29). A tab
 // of the main area is in view while the main area is on screen (the shell's `useMainAreaOnScreen`, Decision Log 35).
+//
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 10, M2 decision 5; S3): a file
+// tab's body takes the keyboard under the tab's key (`takesKeyboard`): it is focusable, and when the request for the
+// keyboard names its key (Go to file's Enter, `files/finder.ts`) and it is in view, it takes the keyboard on itself and
+// hands it to the file's editor at once when one is drawn, or as soon as one is drawn while the body itself still has it.
+// A read on its way, a read that failed and a kind with no editor leave it on the body, inside the element ⌘S and the
+// comment key look in. Wherever the tab is drawn, beside the chat or in the main area, never on a tab's button.
 import { Popover } from 'radix-ui';
-import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ChevronDownIcon } from '../../../app/IconButton';
 import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
-import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
+import { OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
-import { openChosen } from '../files/open-chosen';
-import { ExternalRow, OpenExternally } from './ExternalRow';
+import { useRemoteStanding } from '../../../lane-b/remote-standing';
+import { useTakesRemoteRoute } from '../files/elsewhere';
+import { takeKeyboard, useKeyboardRequest } from '../files/finder';
+import { openChosenFor } from '../files/open-chosen';
+import { ExternalRow, OpenExternally, rowButton } from './ExternalRow';
 import { FrameBody } from './FrameBody';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
-import { readOnlyReason, useViewer, type ArtifactRead, type ViewerEntry } from './viewer-store';
+import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -94,8 +104,10 @@ function outsideOf(entry: ViewerEntry | null): string | null {
   return entry.locked ?? (entry.pin !== null ? 'writable' : 'outside');
 }
 
-type LabelledReason = 'maws' | 'added' | 'result' | 'outside';
-const labelled = (reason: ReturnType<typeof readOnlyReason>): reason is LabelledReason => reason === 'maws' || reason === 'added' || reason === 'result' || reason === 'outside';
+// UX wave U6f (§E): and `elsewhere`, an outside file of a session on another machine its standing does not let this
+// person save there, with the window's helper's sentence and no Open File…
+type LabelledReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'outside';
+const labelled = (reason: ReadOnlyReason | null): reason is LabelledReason => reason === 'maws' || reason === 'elsewhere' || reason === 'added' || reason === 'result' || reason === 'outside';
 
 // UX wave U6e (§D, K2, K5, K8, K10, K11, K13): "Read-only", in the normal text colour, a button whose accessible
 // description is the reason's sentence; a press (Enter or Space with the keyboard on it) opens the panel under it with the
@@ -104,11 +116,11 @@ const labelled = (reason: ReturnType<typeof readOnlyReason>): reason is Labelled
 // and hidden from assistive technology, so the button keeps one target and one accessible name.
 // The panel is never wider than the file's column: min(24rem, the column's width less 1rem), the column measured as it
 // opens and its edges the panel's boundary.
-function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSessionId: AppSessionId }) {
+// UX wave U6f: the sentence is the entry's (`readOnlyWords`), and Open File… opens the chooser the session's files call for.
+function ReadOnlyLabel({ reason, sentence, appSessionId }: { reason: LabelledReason; sentence: string; appSessionId: AppSessionId }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [column, setColumn] = useState<Element | null>(null);
   const [width, setWidth] = useState(0);
-  const sentence = EDITOR_COPY.readOnly[reason];
   const offersOpenFile = reason === 'added' || reason === 'result';
   const opened = (open: boolean) => {
     if (!open) return;
@@ -139,7 +151,7 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
           <p>{sentence}</p>
           {offersOpenFile ? (
             <Popover.Close asChild>
-              <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={() => void openChosen(appSessionId)}>
+              <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={() => void openChosenFor(appSessionId)}>
                 {OPEN_FILE_COPY.row}
               </button>
             </Popover.Close>
@@ -157,18 +169,22 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
 // whether the mounted body is in view; in view when absent.
 export function FileViewer({ tab, start, end, host, inView = true, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean; agent?: boolean }) {
   const mainOnScreen = useMainAreaOnScreen();
+  // UX wave U6f (§E): a session that takes the remote route, and its machine's standing as it moves (W1, R9)
+  const remote = useTakesRemoteRoute(tab.appSessionId ?? ('' as AppSessionId));
+  const standing = useRemoteStanding(tab.appSessionId ?? ('' as AppSessionId));
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const { appSessionId } = tab;
   const lead = (entry: ViewerEntry | null) => {
-    const reason = entry === null ? null : readOnlyReason(entry);
+    const reason = entry === null ? null : readOnlyReason(entry, standing);
     // UX wave U6b-2 at the chain merge (the architect's ruling): only a body that can be saved (the code view's text) says
-    // where Save writes; a framed file, an image or a row shows its plain path, its outside mark as it is
-    const savable = entry !== null && (entry.kind === 'code' || entry.kind === 'markdown');
-    const savesTo = savable && entry.pin !== null && entry.locked === null ? VIEWER_COPY.savesTo(entry.pin) : null;
+    // where Save writes; a framed file, an image or a row shows its plain path, its outside mark as it is. UX wave U6f:
+    // on another machine, it names the machine.
+    const savable = entry !== null && (entry.kind === 'code' || entry.kind === 'markdown') && reason !== 'elsewhere';
+    const savesTo = savable && entry.pin !== null && entry.locked === null ? (remote && standing !== null ? VIEWER_COPY.savesToOn(entry.pin, standing.machine) : VIEWER_COPY.savesTo(entry.pin)) : null;
     return (
       <>
         {start}
-        {labelled(reason) ? <ReadOnlyLabel reason={reason} appSessionId={appSessionId} /> : null}
+        {labelled(reason) ? <ReadOnlyLabel reason={reason} sentence={readOnlyWords(entry!, standing)!} appSessionId={appSessionId} /> : null}
         <PathLead path={tab.path} savesTo={savesTo} outside={outsideOf(entry)} />
       </>
     );
@@ -176,6 +192,7 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
   return (
     <FileBody
       tabId={tab.id}
+      takesKeyboard={tab.id}
       appSessionId={appSessionId}
       path={tab.path}
       line={tab.line}
@@ -190,20 +207,44 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
   );
 }
 
+const NO_SESSION = 'flex h-full flex-col items-center justify-center gap-1 p-6 text-center';
+
 function NoSession({ path }: { path: string }) {
   return (
-    <div data-file-viewer data-path={path} className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-      <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
-      <p className="text-ui text-fg">{VIEWER_COPY.noSession}</p>
+    <div data-file-viewer data-path={path} className={NO_SESSION}>
+      <NoSessionNotice path={path} />
     </div>
   );
 }
 
-function Refused({ path, message }: { path: string; message: string }) {
+function NoSessionNotice({ path }: { path: string }) {
+  return (
+    <>
+      <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+      <p className="text-ui text-fg">{VIEWER_COPY.noSession}</p>
+    </>
+  );
+}
+
+// UX wave U6f (§E; decision 18, Decision Log 20): a UC-7 sentence (`said`) is drawn as it is; a file in a folder macOS
+// protects there offers Open it, and one behind a link into another such folder Open File…, each in the shape of the
+// failed frame's body (`rowButton`).
+function Refused({ entry }: { entry: ViewerEntry }) {
+  const { path, tabId, appSessionId } = entry;
+  const message = entry.error ?? '';
   return (
     <div role="alert" data-refusal className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-      <p className="text-ui text-fg">{VIEWER_COPY.refused(message)}</p>
+      <p className="text-ui text-fg">{entry.said ? message : VIEWER_COPY.refused(message)}</p>
       <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+      {entry.needsOpen ? (
+        <button type="button" data-open-protected="" className={`${rowButton} mt-1`} onClick={() => useViewer.getState().openProtected(tabId)}>
+          {VIEWER_COPY.openIt}
+        </button>
+      ) : entry.offersOpenFile && appSessionId !== null ? (
+        <button type="button" className={`${rowButton} mt-1`} onClick={() => void openChosenFor(appSessionId)}>
+          {OPEN_FILE_COPY.row}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -227,9 +268,28 @@ interface FileBodyProps {
   inView?: boolean; // UX wave U6b-2 (Decision Log 29): false while the mounted body is not in view
   agent?: boolean; // UX wave U6e (decision 19): the tab holds the agent's mark, and its reads say so
   artifactView?: boolean; // UX wave U6b-4b (decision 4): an artifact's view, whose Markdown resolves no relative link
+  takesKeyboard?: string; // UX wave U6b-3b: the key the body takes the keyboard under (a file tab's id); the File artifact's view gives none
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, artifactView = false }: FileBodyProps) {
+// The app's own focus outline, inside the body's box.
+const TAKES_KEYBOARD = 'outline-accent focus-visible:outline-2 -outline-offset-2';
+
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, artifactView = false, takesKeyboard }: FileBodyProps) {
+  // UX wave U6b-3b: the request for the keyboard by this body's key, taken while it is in view; the editor, when one is
+  // drawn in it, is told through `editorFocus`.
+  const body = useRef<HTMLDivElement>(null);
+  const editorFocus = useRef<(() => void) | null>(null);
+  const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
+  useEffect(() => {
+    const element = body.current;
+    if (asked === 0 || !inView || takesKeyboard === undefined || element === null || !takeKeyboard({ into: 'file', key: takesKeyboard })) return;
+    element.focus({ preventScroll: true });
+    editorFocus.current?.();
+  }, [asked, inView, takesKeyboard]);
+  const onEditor = useCallback((focus: (() => void) | null) => {
+    editorFocus.current = focus;
+    if (focus !== null && body.current !== null && document.activeElement === body.current) focus(); // the body still has it
+  }, []);
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -241,11 +301,27 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
 
-  if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) return <NoSession path={path} />;
+  // The keyboard's place is the same element whatever the body draws, a failed read's notice among them, so a request
+  // taken while the read is on its way stays on the view when it fails, and one made after is taken (S3; B5).
+  const place = {
+    ref: body,
+    tabIndex: takesKeyboard === undefined ? undefined : -1,
+    'data-file-keyboard': takesKeyboard === undefined ? undefined : '',
+    'data-key': takesKeyboard,
+    'data-file-viewer': true,
+    'data-path': path,
+  };
+  const outline = takesKeyboard === undefined ? '' : TAKES_KEYBOARD;
+  if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) {
+    return (
+      <div {...place} className={`${NO_SESSION} ${outline}`}>
+        <NoSessionNotice path={path} />
+      </div>
+    );
+  }
   return (
     <div
-      data-file-viewer
-      data-path={path}
+      {...place}
       data-kind={entry?.kind ?? ''}
       data-frame={entry ? frameMarker(entry) : ''}
       data-editable={String(entry !== null && entry.editable && showsCode(entry))}
@@ -253,7 +329,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       data-theirs={entry?.theirs?.view ?? ''}
       data-loads={entry?.loads ?? 0}
       data-pending={entry?.pending ?? 0}
-      className="flex h-full min-h-0 flex-col bg-bg"
+      className={`flex h-full min-h-0 flex-col bg-bg ${outline}`}
     >
       <div className={bar}>
         {lead ? lead(entry) : <span className="flex-1" />}
@@ -268,7 +344,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {end}
         {entry ? below?.(entry) : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} artifactView={artifactView} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} artifactView={artifactView} onEditor={takesKeyboard === undefined ? undefined : onEditor} /> : <Loading />}</div>
     </div>
   );
 }
@@ -291,14 +367,14 @@ const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom, host, inView, artifactView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; artifactView: boolean }) {
+function Body({ entry, wrap, zoom, host, inView, artifactView, onEditor }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; artifactView: boolean; onEditor?(focus: (() => void) | null): void }) {
   if (entry.status === 'loading') return <Loading />;
-  if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
+  if (entry.status === 'error') return <Refused entry={entry} />;
   if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
   if (showsCode(entry)) {
     return (
       <Suspense fallback={<Loading />}>
-        <CodeView entry={entry} wrap={wrap} />
+        <CodeView entry={entry} wrap={wrap} onEditor={onEditor} />
       </Suspense>
     );
   }

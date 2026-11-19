@@ -7,7 +7,8 @@ import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
 import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
-import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
+import { entryDisplay } from './entry-text';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../../test/support/ask-steer';
 import { answerWords, firstToSend, newestToTake, rowText, stackRows, type Read, type StackRow } from './stack';
 
 const APP = 'app-1' as AppSessionId;
@@ -83,6 +84,39 @@ describe('the stack’s rows', () => {
       ['sending', 'Answer to Layout: Grid'],
       ['sending', 'entry q-t'],
     ]);
+  });
+});
+
+describe('a waiting message that holds an attachment beside an answer’s envelope (the architect’s rule, ticket 704)', () => {
+  // made by hand: what the composer sends when the person pastes an envelope beside an image or a PDF
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const pdf = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0xLjQ=' } };
+  const asks = { 'ask-1': [LAYOUT] };
+
+  it('is no answer row on a next-step, after-the-turn, held or sending row: its text is the message as an ordinary one', () => {
+    const withImage = [{ type: 'text', text: ANSWER }, image];
+    const withPdf = [pdf, { type: 'text', text: ANSWER }];
+    const rows = stackRows(
+      queue({ steers: [steer(U1, 1, withImage as never)], entries: [entry('q-1', 2, { content: withPdf as never }), entry('q-s', 3, { state: 'submitting', submittedAt: at(3), content: withImage as never })] }),
+      new Set(['q-s']),
+      read([], [], asks),
+    );
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined])).toEqual([['next', null], ['after', null], ['sending', undefined]]);
+    // what the stack draws of any message with an attachment: the attachment named, then the text
+    expect(rows.map(rowText)).toEqual([entryDisplay(withImage as never), entryDisplay(withPdf as never), entryDisplay(withImage as never)]);
+    expect(rowText(rows[0]!).startsWith('[Image #1] [MAWS ask ask-1]')).toBe(true);
+    const held = stackRows(queue({ paused: true, pauseReason: 'interrupt', entries: [entry('q-a', 1, { content: withImage as never })] }), NONE, read([], [], asks));
+    expect(held.map((row) => [row.kind, 'answer' in row && row.answer])).toEqual([['held', null]]);
+  });
+
+  it('the up-arrow can take it, as any ordinary waiting message', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 5), steer(U2, 9, [{ type: 'text', text: ANSWER }, image] as never)] }), NONE, read());
+    expect(newestToTake(rows)?.key).toBe(U2);
+  });
+
+  it('the envelope alone in one text block is still the answer row', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 1, [{ type: 'text', text: ANSWER }] as never)] }), NONE, read([], [], asks));
+    expect(rows.map((row) => 'answer' in row && row.answer)).toEqual(['Answer to Layout: Grid']);
   });
 });
 
@@ -243,6 +277,43 @@ describe('a grant’s row', () => {
     const [row] = stackRows(queue({ steers: [steer(U1, 1, ANSWER)] }), NONE, read());
     expect(row).toMatchObject({ kind: 'next', answer: answerWords(ANSWER, read().questions), grant: null });
     expect(rowText(row!)).toBe(answerWords(ANSWER, read().questions));
+  });
+
+  // ticket 704 at the chain's merge of rule R (the architect's ruling 1 of 2026-11-16): a waiting message's grant is read on
+  // its whole joined text, never on the part the split draws as the person's; the row is a grant's only where the sentence
+  // is everything the message holds (Decision Log 44, rule R's first step), so A + G + A is no grant's row, nor an answer's
+  it('an answer, the grant and the answer again, as one text or as text blocks: no grant’s row and no answer, whichever wait it is in', () => {
+    const joined = `${ANSWER}\n${GRANT}\n${ANSWER}`;
+    const blocks = [{ type: 'text' as const, text: ANSWER }, { type: 'text' as const, text: GRANT }, { type: 'text' as const, text: ANSWER }];
+    const rows = stackRows(queue({ steers: [steer(U1, 1, joined)], entries: [entry('q-1', 2, { content: blocks }), entry('q-u', 3, { content: joined, uncertain: true })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, 'grant' in row ? row.grant : undefined])).toEqual([
+      ['next', null, null],
+      ['after', null, null],
+      ['uncertain', undefined, null],
+    ]);
+    for (const row of rows) expect(rowText(row)).not.toMatch(/^You approved /);
+    // an attachment beside them keeps the message the person's own (Decision Log 44), as beside the grant alone
+    const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'iVBORw0KGgo=' } };
+    const [row] = stackRows(queue({ entries: [entry('q-i', 4, { content: [...blocks, image] })] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'after', answer: null, grant: null });
+  });
+
+  // made by hand: an envelope cut before its block beside the sentence is no grant's row, the sentence not being the
+  // whole message (Decision Log 44; the cascade reviews' A2, dropped by the architect's ruling 1 of 2026-11-16, pinned it)
+  it('an envelope cut before its block beside the sentence, in either order: no grant’s row', () => {
+    const cut = ANSWER.slice(0, ANSWER.indexOf('\n```json'));
+    const rows = stackRows(queue({ steers: [steer(U1, 1, `${GRANT}\n${cut}`)], entries: [entry('q-1', 2, { content: `${cut}\n${GRANT}` })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'grant' in row ? row.grant : undefined])).toEqual([['next', null], ['after', null]]);
+  });
+
+  // ticket 704, the earlier review's finding, made by hand: an earlier build's envelope whose question holds the sentence
+  // and another ask's whole opening line is bounded out and stays text (the reading past the bound, A, dropped by the
+  // architect's ruling 2 of 2026-11-16): an ordinary message's row, no answer and no grant
+  it('an earlier build’s envelope whose question holds the sentence and another ask’s opening line: no answer’s row, no grant', () => {
+    const inner = innerOpeningEnvelope('ask-1', GRANT);
+    const [row] = stackRows(queue({ steers: [steer(U1, 1, inner)] }), NONE, read());
+    expect(answerWords(inner, read().questions)).toBeNull();
+    expect(row).toMatchObject({ kind: 'next', answer: null, grant: null });
   });
 
   it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {

@@ -19,7 +19,7 @@ import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
 import { compactingRow } from './compacting'; // UX wave U3b (M4)
-import type { Row, RowKind, TurnId } from '../model/rows';
+import type { CellId, Row, RowId, RowKind, TurnId } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
 import { AnswerActionsStore, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
@@ -35,6 +35,10 @@ import { withBrowserActivityRows, type BrowserActivityAttachment } from '../mode
 import type { TranscriptState } from '../model/reduce';
 import type { AppSessionId } from '@shared/graph/ids'; // E13
 import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror'; // UX wave U2b
+import { labelsOf } from '../../owner/view/label'; // UX wave U2b (M7)
+import { foldMoments, momentWatch, type FoldMoments } from '../../stores/folds'; // UX wave U2b (M7)
+import type { StoredRun } from '@shared/owner/folds'; // UX wave U2b (M7)
+import { followsOf, publishFollows } from '../surface/follow'; // UX wave U2b (M5)
 import './transcript.css';
 
 // Leaving the end, and the logical end (the virtualiser's total against the committed sizer), are read within a pixel:
@@ -98,6 +102,9 @@ export interface TranscriptListProps {
   // UX wave U3b, additive: a row's first guess, `estimateRow` when omitted; a new function invalidates the measurements,
   // so it changes only with the rows
   estimate?: (row: Row) => number;
+  // UX wave U2b (M5, R6), additive: the ids of the rows the list has mounted (the virtual items, overscan included) and
+  // the rows they are of, told whenever the mounted ids change
+  onMounted?: (ids: readonly string[], rows: readonly Row[]) => void;
 }
 
 // A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
@@ -110,7 +117,7 @@ function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement)
   return false;
 }
 
-export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id, takeCarried, onLeave, estimate = estimateRow }: TranscriptListProps) {
+export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id, takeCarried, onLeave, estimate = estimateRow, onMounted }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const scrollbarPointer = useRef<number | null>(null);
@@ -431,6 +438,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     },
   }));
 
+  // UX wave U2b (R6): what is mounted, for the end of a jump's reveal
+  const mountedIds = virtualizer.getVirtualItems().map((item) => rows[item.index]?.id ?? '').join('\n');
+  useLayoutEffect(() => onMounted?.(mountedIds === '' ? [] : mountedIds.split('\n'), rows), [mountedIds, rows, onMounted]);
+
   return (
     <div className={`min-h-0 ${className ?? ''}`}>
       <div ref={scrollRef} id={id} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
@@ -502,6 +513,15 @@ export interface TranscriptProps {
   // UX wave U3b (decision 16, Interfaces §E), additive: since when the session compacts, by this window's clock (ms),
   // which the drawn list's last row then says; null or absent: no such row (the desk gives none)
   compacting?: number | null;
+  // UX wave U2b (M5, §A "What a window draws", §E), additive: the to-human mod draws the session's view in this window
+  // (its published `drawnBy` is `mod` and its surface is attached here): MAWS draws no mirror, no switch and no message
+  // of its own beside the mod's, and folds no turn once the session holds a message; absent, the store's stays
+  modDraws?: boolean;
+  // UX wave U2b (M7, §M), additive: what the record lines read where MAWS draws the view: the runs the mod's file holds,
+  // as the window last read them (none for a session another machine runs: its lines read their live call alone), and
+  // what to tell when a stretch closes or the turn ends (a round of reads). Absent (the desk, a child's transcript),
+  // every closed line reads `working record`
+  summaries?: { stored: readonly StoredRun[]; moved?: () => void };
 }
 
 const NO_ROWS: Row[] = [];
@@ -549,7 +569,7 @@ const queuedRows = (rows: Row[], { activity, withdrawn, tail, waiting }: Omit<Co
 const outsideMessages = new Map<string, Map<symbol, boolean>>();
 const outsideHolds = (key: string) => [...(outsideMessages.get(key)?.values() ?? [])].some(Boolean);
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null, modDraws, summaries }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -588,7 +608,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const outsideMessage = useMemo(() => holdsMessage(tail) || holdsMessage(placed), [tail, placed]);
   const storedView = useTranscriptStore((state) => {
     const ui = state.entries[storeKey]?.state.ui;
-    return ui ? `${ui.ownerLane ?? false} ${ui.tailMessage ?? 'unset'}` : null;
+    return ui ? `${ui.ownerLane ?? false} ${ui.tailMessage ?? 'unset'} ${ui.modDraws ?? 'unset'}` : null;
   });
   const [mount] = useState(() => Symbol('transcript mount'));
   useLayoutEffect(() => {
@@ -599,8 +619,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     if (!ui || storedView === null) return;
     const lane = ownerLane ?? ui.ownerLane ?? false;
     const tailMessage = outsideHolds(storeKey);
-    if (lane !== (ui.ownerLane ?? false) || tailMessage !== (ui.tailMessage ?? false)) useTranscriptStore.getState().setToHumanView(storeKey, { lane, tailMessage });
-  }, [storeKey, ownerLane, outsideMessage, storedView, mount]);
+    const draws = modDraws ?? ui.modDraws ?? false; // UX wave U2b (M5): who draws joins the flag in the same update
+    if (lane !== (ui.ownerLane ?? false) || tailMessage !== (ui.tailMessage ?? false) || draws !== (ui.modDraws ?? false)) useTranscriptStore.getState().setToHumanView(storeKey, { lane, tailMessage, modDraws: draws });
+  }, [storeKey, ownerLane, outsideMessage, storedView, mount, modDraws]);
   useLayoutEffect(
     () => () => {
       const parts = outsideMessages.get(storeKey);
@@ -615,12 +636,35 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const mirrored = useTranscriptStore((state) => mirrorsView(state.entries[storeKey]?.state.ui));
   const openStretches = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.openStretches);
   const storedMarks = useTranscriptStore((state) => (mirrored ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
+  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
+  // UX wave U2b (M7; §M): each closed line's words, from the rows the mirror runs over and the session's turns (read when
+  // the rows change, as the rows are), the stored runs and whether the turn runs
+  const labels = useMemo(
+    () => (mirrored && summaries !== undefined ? labelsOf(queued, { stored: summaries.stored, running: working, turns: useTranscriptStore.getState().entries[storeKey]?.state.turns }) : undefined),
+    [mirrored, summaries, queued, working, storeKey],
+  );
   const merged = useMemo(
-    () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail)) : queued),
-    [queued, mirrored, openStretches, storedMarks, tail],
+    () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail), labels) : queued),
+    [queued, mirrored, openStretches, storedMarks, tail, labels],
   );
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
+  // UX wave U2b (M7; §M, "The reads"; the review's finding 1): a round of reads of the mod's summaries at each close of
+  // a stretch and each end of a turn, the two moments at which the mod asks, told by their own identities (a stretch
+  // newly closed, a turn newly ended), so a batch that brings several, or ends a turn and starts the next, still starts
+  // one; what the loaded view first shows is the mount's own round's to read
+  const foldsMoved = summaries?.moved;
+  const watch = useRef<((moments: FoldMoments) => boolean) | null>(null);
+  useEffect(() => {
+    if (!mirrored || !loaded || foldsMoved === undefined) {
+      watch.current = null;
+      return;
+    }
+    watch.current ??= momentWatch();
+    // the turns and whether one runs, read from one entry of the store as the effect runs; `working` is its trigger
+    const entry = useTranscriptStore.getState().entries[storeKey];
+    if (watch.current(foldMoments(merged, entry?.state.turns, (entry?.working ?? false) && !atRest))) foldsMoved();
+  }, [mirrored, loaded, foldsMoved, merged, working, atRest, storeKey]);
   const shown = useMemo(() => {
     if (startAt === undefined) return merged;
     const start = startAt(merged, loaded);
@@ -637,7 +681,6 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const [answerActions] = useState(() => new AnswerActionsStore());
   useLayoutEffect(() => answerActions.publish(placement), [answerActions, placement]);
   const estimate = useCallback((row: Row) => estimateRow(row, placement.has(row.id)), [placement]);
-  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   // The UX wave, U9 (O-39, A3): a read with nothing to draw says so once it has been out 300 ms, on every route
@@ -670,6 +713,28 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   // last, after the tail, the projection and the first-row cut; and the transcript's one way to show one of them
   const requests = useTranscriptWaiting({ storeKey, agent: variant === 'child' ? (source.agentId ?? CHILD) : null, rows, list: listRef, idPrefix });
   const needsInput = requests.outOfView; // the jump button's request state (§D): the oldest waiting request out of view
+  // UX wave U2b (§E): which row each time separator and each browser activity under a call follows, over the rows drawn
+  useLayoutEffect(() => publishFollows(idPrefix, followsOf(requests.rows)), [idPrefix, requests.rows]);
+  useLayoutEffect(() => () => publishFollows(idPrefix, null), [idPrefix]);
+  // UX wave U2b (R6; decision 15): a jump's reveal ends when the row that holds its target (looked up again among the
+  // drawn rows at each change of them: a cell's is the run that holds it) has been in the list's mounted range since the
+  // jump and no longer is; a jump whose row has not yet mounted keeps it. The next jump replaces it in the store.
+  const revealed = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.revealed);
+  const reveal = useRef<{ id: RowId | CellId | undefined; seen: boolean; mounted: ReadonlySet<string>; rows: readonly Row[] }>({ id: undefined, seen: false, mounted: new Set(), rows: NO_ROWS });
+  const checkReveal = useCallback(() => {
+    const at = reveal.current;
+    const id = useTranscriptStore.getState().entries[storeKey]?.state.ui.revealed;
+    if (at.id !== id) Object.assign(at, { id, seen: false });
+    if (id === undefined) return;
+    const holder = at.rows.find((row) => row.id === id || (row.kind === 'group' && row.cells.some((cell) => cell.id === id)));
+    if (holder !== undefined && at.mounted.has(holder.id)) at.seen = true;
+    else if (at.seen) useTranscriptStore.getState().clearRevealed(storeKey, id);
+  }, [storeKey]);
+  const mountedChanged = useCallback((ids: readonly string[], drawn: readonly Row[]) => {
+    Object.assign(reveal.current, { mounted: new Set(ids), rows: drawn });
+    checkReveal();
+  }, [checkReveal]);
+  useLayoutEffect(checkReveal, [revealed, checkReveal]);
   // P4-B3 (its Decision Log 14): the place a card's float or dock carries to this mount (once), and where it leaves
   const takeCarried = useCallback(() => takeTranscriptCarry(storeKey), [storeKey]);
   const leave = useCallback((scroll: TranscriptScroll) => recordTranscriptScroll(storeKey, scroll), [storeKey]);
@@ -745,7 +810,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       <WaitingViewProvider view={requests.view} settling={requests.settling}>
       {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the word's 300 ms */}
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} data-hydration={failed !== null ? 'failed' : reading ? 'loading' : 'ready'} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
-        <TranscriptList id={listElementId(idPrefix)} rows={requests.rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} estimate={estimate} />
+        <TranscriptList id={listElementId(idPrefix)} rows={requests.rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} estimate={estimate} onMounted={mountedChanged} />
         {reach !== null ? (
           // A jump to a message older than what is loaded: its pages on their way, with the reader able to give up, or
           // how it ended when it did not land (the store's `reachMessage`)

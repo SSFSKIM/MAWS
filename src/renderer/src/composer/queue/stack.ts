@@ -9,15 +9,19 @@
 //
 // A waiting message that is MAWS's answer envelope reads as the answer (UX wave U4b, X-049;
 // docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 2 and 3): whether it is one, from
-// the reader's class (`readAnswerEnvelope`); each question's title as its ask's capsule shows it, from the ask's row
-// where the window holds it; each answer in the capsule's words (`askAnswerCopy`). Since board ticket 711 the host
-// writes the envelope's new form (each question by its place, a pick by `option <k>`); with the ask's questions in
-// hand it is read back through the one reader, `askAnswersFromSteer`, so the row says what the earlier form of the same
-// answers said. Without them (the window holds no row of the ask) the row has no title and shows the bare words, a
-// pick by its place, as every reader without the call shows it.
+// the reader's class, read as the split reads a person's message (`answerEnvelopeOf`; ticket 704); each question's
+// title as its ask's capsule shows it, from the ask's row where the window holds it; each answer in the capsule's words
+// (`askAnswerCopy`). Since board ticket 711 the host writes the envelope's new form (each question by its place, a pick
+// by `option <k>`); with the ask's questions in hand it is read back through the one reader, `askAnswersFromSteer`, so
+// the row says what the earlier form of the same answers said. Without them (the window holds no row of the ask) the
+// row has no title and shows the bare words, a pick by its place, as every reader without the call shows it.
+// A waiting message that holds an attachment beside the envelope is no answer row (the architect's rule, ticket 704): it
+// stays an ordinary message, which the up-arrow can take, with its ordinary controls. A `handed` row is no waiting
+// message and keeps its reading.
 import type { SendContent } from '@shared/engine/session-state-store';
-import { readAnswerEnvelope, readConsents } from '@shared/engine/arrival'; // U4b; U1c: readConsents
+import { readConsents } from '@shared/engine/arrival'; // U1c
 import { messageText } from '@shared/engine/peer-envelope';
+import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askAnswersFromSteer } from '@shared/maws/ask';
@@ -71,7 +75,10 @@ export const STACK_WORDS = {
 
 /** A waiting answer's words, from the reader's class; null for any message that is no answer envelope. */
 export function answerWords(text: string, questions: Read['questions']): string | null {
-  const envelope = readAnswerEnvelope(text);
+  return wordsOf(answerEnvelopeOf(text), questions);
+}
+
+function wordsOf(envelope: ReturnType<typeof answerEnvelopeOf>, questions: Read['questions']): string | null {
   if (envelope === null) return null;
   const asked = questions(envelope.call);
   // MAWS's own envelope always carries its answers; the class's null is another tool's shape. A new-form answer joins its
@@ -92,11 +99,17 @@ export function answerWords(text: string, questions: Read['questions']): string 
   return STACK_WORDS.answers(pairs.map(({ title, words }) => (title === '' ? words : `${title}: ${words}`)));
 }
 
-const textOf = (content: SendContent): string => messageText(content as string | ContentBlock[]);
+/** A waiting message's answer words: null for a message that is no answer envelope, or that holds an attachment beside one. */
+function waitingAnswer(content: SendContent, questions: Read['questions']): string | null {
+  return wordsOf(answerEnvelopeOf(content as string | ContentBlock[]), questions);
+}
+
 // UX wave U1c: the call a message's content grants, when its whole text is exactly one grant sentence. Decision Log 44: a
 // row is a grant's only when the sentence is everything the message holds; a message with any block that is not text (an
 // image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview. Decision Log 53: read
-// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`
+// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`. Ticket 704
+// (the architect's ruling 1 of 2026-11-16): the whole joined text, never the part the split draws as the person's; the
+// whole-sentence reading is rule R's first step (`personsLines`)
 const grantOf = (content: SendContent): BlockedCall | null => {
   if (typeof content !== 'string' && !(content as readonly ContentBlock[]).every((block) => block.type === 'text')) return null;
   const grants = readConsents(messageText(content as string | ContentBlock[]));
@@ -112,12 +125,12 @@ export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, rea
     .map((unread) => ({ kind: 'handed', key: unread.messageUuid, text: answerWords(unread.text, read.questions) ?? unread.text, createdAt: unread.at, grant: unread.grant ?? null })); // Decision Log 53
   const next: StackRow[] = queue.steers
     .filter((steer) => !read.started(steer.messageUuid))
-    .map((steer) => ({ kind: 'next', key: steer.messageUuid, messageUuid: steer.messageUuid, content: steer.content, createdAt: steer.createdAt, answer: answerWords(textOf(steer.content), read.questions), grant: grantOf(steer.content) }));
+    .map((steer) => ({ kind: 'next', key: steer.messageUuid, messageUuid: steer.messageUuid, content: steer.content, createdAt: steer.createdAt, answer: waitingAnswer(steer.content, read.questions), grant: grantOf(steer.content) }));
   const entries = queue.entries.flatMap((entry): StackRow[] => {
-    if (entry.state === 'submitting') return lasting.has(entry.queueId) ? [{ kind: 'sending', key: entry.queueId, text: answerWords(textOf(entry.content), read.questions) ?? entryDisplay(entry.content), createdAt: entry.createdAt, grant: grantOf(entry.content) }] : [];
+    if (entry.state === 'submitting') return lasting.has(entry.queueId) ? [{ kind: 'sending', key: entry.queueId, text: waitingAnswer(entry.content, read.questions) ?? entryDisplay(entry.content), createdAt: entry.createdAt, grant: grantOf(entry.content) }] : [];
     if (entry.state !== 'queued') return []; // released: the running turn
     if (entry.uncertain) return [{ kind: 'uncertain', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, grant: grantOf(entry.content) }];
-    return [{ kind: queue.paused ? 'held' : 'after', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, answer: answerWords(textOf(entry.content), read.questions), grant: grantOf(entry.content) }];
+    return [{ kind: queue.paused ? 'held' : 'after', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, answer: waitingAnswer(entry.content, read.questions), grant: grantOf(entry.content) }];
   });
   return [...handed, ...next, ...entries];
 }
