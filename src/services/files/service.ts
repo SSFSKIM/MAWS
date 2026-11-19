@@ -72,11 +72,13 @@ import {
   type FilesGrantOutput, // U6e
   type FilesWriteOutsideInput, // U6e
   FILES_MOVED, // U6e
+  type FilesAdmitInput, // U6b-4a
+  type FilesAdmitOutput, // U6b-4a
 } from '@shared/ipc/schema/files';
 import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
 import { machineHomes } from '@shared/machine/machine-home';
-import { rootsOf, under, type AllowlistRecord } from './allowlist';
+import { admittedFolder, rootsOf, under, type AllowlistRecord } from './allowlist';
 import type { FileGrants } from './grants';
 import { fileMime, isTextMime } from './mime';
 import type { Naming } from './named';
@@ -155,6 +157,7 @@ export interface FilesService {
   write(input: FilesWriteInput, remote?: boolean): Promise<FilesWriteOutput>; // E5
   writeOutside(input: FilesWriteOutsideInput, remote?: boolean, signal?: AbortSignal): Promise<FilesWriteOutput>; // U6e
   grant(appSessionId: AppSessionId, path: string, remote?: boolean): Promise<FilesGrantOutput>; // U6e
+  admit(input: FilesAdmitInput, remote?: boolean, signal?: AbortSignal): Promise<FilesAdmitOutput>; // U6b-4a
   watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; agent?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c; U6e: `agent`
@@ -516,6 +519,27 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { status: 'granted', path: real };
   }
 
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission of
+  // the path main hands another app, main's alone. Without a path, the session's working folder as U8c-2 admits it (UC-4)
+  // and its real path, a directory. With one, the outside save's admission (an editor writes, so a file is handed to one
+  // exactly when MAWS would save it), a regular file or a directory, and never one of MAWS's own folders. A caller on
+  // another machine is refused.
+  async function admit({ appSessionId, path }: FilesAdmitInput, remote = false, signal?: AbortSignal): Promise<FilesAdmitOutput> {
+    if (remote) throw new Refusal();
+    if (path === undefined) {
+      const record = records(appSessionId);
+      if (!record) throw new Error(`unknown app session: ${appSessionId}`);
+      const fact = await admittedFolder(record, 'path');
+      const real = fact === null ? null : await fs.promises.realpath(fact.folder).catch(() => null);
+      if (real === null || !(await fs.promises.stat(real).catch(() => null))?.isDirectory()) throw new Refusal();
+      return { path: real, kind: 'folder' };
+    }
+    const { real0 } = await precheck(appSessionId, path, OUTSIDE_SAVE, false, { signal });
+    const target = await fs.promises.lstat(real0).catch(() => null);
+    if (target === null || isOwn(real0) || !(target.isFile() || target.isDirectory())) throw new Refusal();
+    return { path: real0, kind: target.isFile() ? 'file' : 'folder' };
+  }
+
   // Runs `task` after every earlier task of the same key has settled, and before any later one starts.
   async function exclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
     const before = writing.get(key) ?? Promise.resolve();
@@ -612,6 +636,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     write,
     writeOutside, // U6e
     grant, // U6e
+    admit, // U6b-4a
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new

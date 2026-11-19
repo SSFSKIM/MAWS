@@ -75,6 +75,8 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   // client lives; the grant is main's alone (main-only), refused for a caller from another machine
   register('files.writeOutside', (input, context?: HandlerContext) => files.writeOutside({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(true, context)));
   register('files.grant', ({ appSessionId, path }, context?: HandlerContext) => files.grant(session(appSessionId), path, remote(context)));
+  // UX wave U6b-4a: Open in's admission, main-only; a file outside the folders waits for the transcript while main's call lives
+  register('files.admit', (input, context?: HandlerContext) => files.admit({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(input.path !== undefined, context)));
   register('files.watch', async ({ appSessionId, path }, context: HandlerContext) => {
     const { client } = context;
     follow(client);

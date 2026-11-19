@@ -130,10 +130,10 @@ describe('main’s root on mawsd', () => {
   // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 9): the sender's guard
   // stands for the outside save and the chooser before the router takes its first command, and refuses an asker that is
   // no app page (main itself here)
-  it('guards files.writeOutside and layout.openFile for an app page before the router is installed', async () => {
+  it('guards files.writeOutside, layout.openFile and layout.openIn for an app page before the router is installed', async () => {
     const { mainClient } = await import('./ipc/clients');
     const guards = router.guards.filter(({ names }) => names.includes('files.writeOutside'));
-    expect(guards.map(({ names, installed }) => ({ names, installed }))).toEqual([{ names: ['files.writeOutside', 'layout.openFile'], installed: 0 }]);
+    expect(guards.map(({ names, installed }) => ({ names, installed }))).toEqual([{ names: ['files.writeOutside', 'layout.openFile', 'layout.openIn'], installed: 0 }]); // UX wave U6b-4a: and Open in
     expect(guards[0]!.guard('files.writeOutside', {}, { client: mainClient, target: 'LocalMachineRef0000000' as never })).toMatchObject({ code: 'forbidden_sender' });
   });
 

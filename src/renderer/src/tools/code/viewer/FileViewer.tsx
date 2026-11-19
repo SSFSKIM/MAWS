@@ -33,6 +33,8 @@ import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
 import { readOnlyReason, useViewer, type ArtifactRead, type ViewerEntry } from './viewer-store';
+import { OpenInButton } from '../../../open-in/OpenInMenu'; // UX wave U6b-4a
+import { shownLine } from './shown-line'; // UX wave U6b-4a
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -142,7 +144,8 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
 
 // UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button); (M4) `end`,
 // what it puts at the bar's end (Move to main area). UX wave U6e: "Read-only" between the two (K2), drawn from the entry
-// as it is drawn (K11); `agent`, the tab holds the mark of an open the agent asked for (decision 19).
+// as it is drawn (K11); `agent`, the tab holds the mark of an open the agent asked for (decision 19). UX wave U6b-4a:
+// "Open in" at the head of the controls, handing the file at the line shown to an app.
 export function FileViewer({ tab, start, end, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; agent?: boolean }) {
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const { appSessionId } = tab;
@@ -165,7 +168,13 @@ export function FileViewer({ tab, start, end, agent = false }: { tab: FileTab; s
       line={tab.line}
       agent={agent}
       lead={lead}
-      controls={(entry) => <EditorControls entry={entry} />}
+      controls={(entry) => (
+        <>
+          {/* UX wave U6b-4a: Open in, the file at the line shown */}
+          <OpenInButton appSessionId={appSessionId} path={tab.path} line={() => shownLine(tab.id)} />
+          <EditorControls entry={entry} />
+        </>
+      )}
       below={(entry) => <SaveFailure entry={entry} />}
       end={end}
     />

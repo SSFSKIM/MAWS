@@ -533,6 +533,8 @@ describe('layout value shapes', () => {
       'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
       'layout.nativeEdit': 'main', // P4-B2 K6: the Edit menu's Undo or Redo no editor in the page claimed, run natively
       'layout.openFile': 'main', // UX wave U6e: Open File…, the system's chooser, then main's grant
+      'layout.openInApps': 'main', // UX wave U6b-4a: the apps Open in lists
+      'layout.openIn': 'main', // UX wave U6b-4a: the hand-off, after main's files.admit
     });
   });
 
