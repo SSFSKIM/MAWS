@@ -3953,8 +3953,8 @@ describe('files saves outside the folders', () => {
         try {
           const first = follow(files, out('notes.txt'), { file: guide() }, A, new AbortController().signal);
           await proving;
-          vi.advanceTimersByTime(NAMED_WAIT_MS + 1);
-          expect(await first, 'answered with its proof still held').toEqual(NOT_LINKED);
+          vi.advanceTimersByTime(NAMED_WAIT_MS); // to the deadline's own millisecond, no further
+          expect(await first, 'answered with its proof still held').toEqual(NOT_LINKED); // the proof is released after this
           const second = follow(files, out('result.txt'), { file: inRoot('docs', 'second.md') });
           await lined;
           await new Promise((resolve) => setImmediate(resolve)); // the second has taken its place in the line
@@ -3968,7 +3968,7 @@ describe('files saves outside the folders', () => {
         }
       });
 
-      it('answers not-linked once its patience runs out while its subagent’s search is held open, keeps its place in the count until the search ends, and records nothing after (X5.12, K13)', async () => {
+      it('answers not-linked once its patience runs out while its subagent’s search is held open, keeps its place in the count until its locator’s call has settled, and records nothing after (X5.12, K13)', async () => {
         const held: { located: () => void; answer: (naming: Naming) => void }[] = [];
         let nine!: () => void;
         const allIn = new Promise<void>((resolve) => (nine = resolve));
@@ -3982,7 +3982,7 @@ describe('files saves outside the folders', () => {
         try {
           const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), { agent: 'a1b2c3' }));
           await allIn;
-          vi.advanceTimersByTime(NAMED_WAIT_MS + 1);
+          vi.advanceTimersByTime(NAMED_WAIT_MS); // to the deadline's own millisecond, no further
           expect(await Promise.all(follows), 'answered with each search still held').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
           const seen = recordTouches();
           expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
@@ -3994,6 +3994,34 @@ describe('files saves outside the folders', () => {
           await new Promise((resolve) => setImmediate(resolve));
           expect(existsSync(linksFile), 'nothing recorded after the patience').toBe(false);
           expect(await follow(files, out('notes.txt'))).toEqual(LINKED); // the places are given back
+          expect(seen.length).toBeGreaterThan(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      // decision 7: the search that runs on in the search's own slot is bounded there, not counted here
+      it('gives back the place of a follow whose patience ran out once its locator’s call has settled, its search still under way (decision 7, K13)', async () => {
+        let called = 0;
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) => {
+          located!(); // the locator answered at once; the search itself never does
+          if ((called += 1) === FOLLOW_IN_FLIGHT_MAX) nine();
+          return new Promise<Naming>(() => {});
+        };
+        const files = followService({ agentNames });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), { agent: 'a1b2c3' }));
+          await allIn;
+          const seen = recordTouches();
+          expect(await follow(files, out('notes.txt')), 'within the patience, the nine follows’ own work holds their places').toEqual(NOT_LINKED);
+          expect(seen).toEqual([]);
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await Promise.all(follows), 'answered with each search still under way').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+          await new Promise((resolve) => setImmediate(resolve));
+          expect(await follow(files, out('notes.txt')), 'a Markdown follow, the nine places given back').toEqual(LINKED);
           expect(seen.length).toBeGreaterThan(0);
         } finally {
           vi.useRealTimers();
