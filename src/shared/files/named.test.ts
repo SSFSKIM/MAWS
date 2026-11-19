@@ -284,6 +284,25 @@ describe('the link form: linkPaths', () => {
     }
   });
 
+  // The branch's delta review (fix wave 2): a fail-closed discard keeps what the window's parse keeps. A table candidate the
+  // pass does not read is no block boundary, so a weak line after it starts no block of its own; and a head line it drops
+  // may be a reference definition, which the text cannot lose, so the text names nothing.
+  it.each(['/s', 'file:///s'])('a table candidate the pass does not read ends no paragraph and loses no definition (%s)', (destination) => {
+    const cases: [string, string][] = [
+      ['- a `x\n  T | u\n        -|-\n  2. # [r](@) `', 'a weak marker’s heading after the candidate (the delta review’s first)'],
+      ['- a `x\n  T | u\n        -|-\n  2) # [r](@) `', 'the same with `2)`'],
+      ['- a `x\n  T | u\n        -|-\n  10. # [r](@) `', 'the same with `10.`'],
+      ['> - a `x\n>   T | u\n>         -|-\n>   2. # [r](@) `', 'the same in a quote'],
+      ['- a `x\n  T | u\n        -|-\n  2. ***\n[r](@) `', 'a weak marker’s thematic break, then a lazy line'],
+      ['- [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)', 'a definition dropped as the candidate’s head (the delta review’s second)'],
+      ['- [a]: /x\n  [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)', 'the second of two definitions dropped as the head'],
+      ['> - [ref]: https://example.com/\n>         :---\n\n[outer [ref]](@)', 'a definition dropped as the head, in a quote'],
+    ];
+    for (const [shape, what] of cases) expect(linkPaths(shape.replace('@', destination)), what).toEqual([]);
+    // the control: after a blank line the weak line's heading is read
+    expect(linkPaths(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`)).toEqual(['/s']);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);

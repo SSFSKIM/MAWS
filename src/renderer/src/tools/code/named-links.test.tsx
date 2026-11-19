@@ -348,6 +348,23 @@ describe('the rule reads the blocks the window draws', () => {
       agree(`${markdown}\n\n[c](/c)`, ['/c']);
     }
   });
+
+  // The delta review (fix wave 2): a table candidate the pass does not read ends no paragraph and loses no definition
+  it.each(['/s', 'file:///s'])('a table candidate the pass does not read ends no paragraph and loses no definition (%s)', (destination) => {
+    for (const shape of [
+      '- a `x\n  T | u\n        -|-\n  2. # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  2) # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  10. # [r](@) `',
+      '> - a `x\n>   T | u\n>         -|-\n>   2. # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  2. ***\n[r](@) `',
+      '- [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)',
+      '- [a]: /x\n  [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)',
+      '> - [ref]: https://example.com/\n>         :---\n\n[outer [ref]](@)',
+    ]) {
+      agree(shape.replace('@', destination), []);
+    }
+    agree(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`, ['/s']);
+  });
 });
 
 // UX wave U6b-4b (R1): an inline `file:` link with an empty host is the path chip of its rest, and the rule names that
