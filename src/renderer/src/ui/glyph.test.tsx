@@ -7,7 +7,7 @@ import { drawnText } from '../test-support/drawn-text';
 import { NamedGlyph } from './glyph';
 import { POINTING_DELAY_MS } from './pointing';
 
-beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
   vi.useRealTimers();

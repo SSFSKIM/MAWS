@@ -10,7 +10,7 @@ import { Tip, Unavailable } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
-beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
   vi.useRealTimers();

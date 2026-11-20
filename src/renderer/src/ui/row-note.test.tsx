@@ -14,7 +14,7 @@ import { Unavailable } from './tip';
 
 const NOTE = 'Archived sessions can be restored from the sidebar.';
 
-beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
