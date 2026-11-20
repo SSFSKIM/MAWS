@@ -786,6 +786,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
   const outside = join(SCRATCH, 'outside', 'notes.txt');
   mkdirSync(join(SCRATCH, 'outside'), { recursive: true });
   writeFileSync(outside, 'Notes kept outside every project.\n');
+  mkdirSync(join(SCRATCH, 'profile-replay'), { recursive: true });
   const maws = await launchMaws({ userData: join(SCRATCH, 'profile-replay'), prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, MAWS_E2E_PICK_PATHS: outside, PATH: NO_GH_PATH }) });
   const { app, page } = maws;
   try {
@@ -1120,6 +1121,7 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
   trust(config);
   const usage = usageFixture();
   const server = await startBrowserServer();
+  mkdirSync(join(SCRATCH, 'profile-r2'), { recursive: true });
   const maws = await launchMaws({ userData: join(SCRATCH, 'profile-r2'), prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) });
   const { app, page } = maws;
   try {
@@ -1353,6 +1355,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
   trust(config);
   mkdirSync(join(SCRATCH, 'journals'), { recursive: true });
   const usage = usageFixture();
+  mkdirSync(join(SCRATCH, 'profile-r2run'), { recursive: true });
   const maws = await launchMaws({ userData: join(SCRATCH, 'profile-r2run'), prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) });
   const { app, page } = maws;
   const status = async (id: string) => value(await invoke(page, 'session.status', { appSessionId: id as never }));
