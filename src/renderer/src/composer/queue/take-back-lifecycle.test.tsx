@@ -142,7 +142,7 @@ const mountComposer = () =>
       </section>
     </QueryClientProvider>,
   );
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean }; getText(): string } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean }; getText(): string; isEditable: boolean } };
 const editorOf = () => within(screen.getByRole('region', { name: 'pane 0' })).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
 const listed = (entries: QueueEntry[]) => act(() => fake.event('session.queue', { appSessionId: A_ID, entries, paused: false, pauseReason: null }));
