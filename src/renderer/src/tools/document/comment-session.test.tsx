@@ -40,7 +40,7 @@ const P1 = at('p1' as ProjectId);
 const bare = bareOf;
 const SPACE = '55555555-5555-4555-8555-555555555555';
 const ARTIFACT = '66666666-6666-4666-8666-666666666666';
-const DIRECTORY: ArtifactSessionContext = { kind: 'directory', path: '/work/p1', projectId: P1 };
+const DIRECTORY: ArtifactSessionContext = { kind: 'directory', path: '/work/p1', projectId: P1, machine: TEST_MACHINE };
 const HOST_BOX = { width: 800, height: 900 };
 const PASSAGE = { x: 120, y: 200, width: 140, height: 20 };
 const passage = { threadId: 'k2m9x0qa', tabId: 'tab1', tabTitle: 'Main', quote: 'ships quarterly' };
@@ -126,7 +126,7 @@ describe('the comment target of a document on a tab', () => {
     await act(() => fake.reply('library.get', { row: row({ spaceId: SPACE }) }));
     expect(target(), 'the Space’s link not read yet').toBeNull();
     await act(() => fake.reply('library.spaces', { spaces: [{ id: SPACE, name: 'Research', linkedDir: '/work/p1', createdAt: 1, count: 1 }] }));
-    expect(target()).toEqual({ context: { kind: 'directory', path: '/work/p1', projectId: P1 } });
+    expect(target()).toEqual({ context: { kind: 'directory', path: '/work/p1', projectId: P1, machine: TEST_MACHINE } });
   });
 
   it('is none for an artifact with no durable context, or not in the library', async () => {
@@ -162,7 +162,7 @@ function editorReach(): CommentOverlayProps {
 }
 
 function Editor({ artifactId, reach, onOpen, given }: { artifactId: string; reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; given: { appSessionId: AppSessionId } | { context: ArtifactSessionContext } }) {
-  const comments = useDocumentComments({ artifactId, ...given, title: 'Q3 plan', mode: 'tab' });
+  const comments = useDocumentComments({ artifactId, machine: TEST_MACHINE, ...given, title: 'Q3 plan', mode: 'tab' });
   onOpen(comments.opened);
   return <div className="relative">{comments.overlay(reach)}</div>;
 }
@@ -182,7 +182,7 @@ function mount(given: Given) {
     move: (next: Given) => view.rerender(<Editor artifactId={artifactId} reach={reach} given={next} onOpen={onOpen} />),
   };
 }
-const OTHER: ArtifactSessionContext = { kind: 'directory', path: '/work/p2', projectId: null };
+const OTHER: ArtifactSessionContext = { kind: 'directory', path: '/work/p2', projectId: null, machine: TEST_MACHINE };
 const LATER = at('a4444444-4444-4444-8444-444444444444' as AppSessionId);
 const second = { threadId: 'p7q1w3ze', tabId: 'tab1', tabTitle: 'Main', quote: 'with design review' };
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
@@ -616,7 +616,7 @@ describe('a comment from a document with no chat beside it', () => {
     const { reach, comment, move } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    move({ context: { projectId: P1, path: '/work/p1', kind: 'directory' } });
+    move({ context: { projectId: P1, path: '/work/p1', kind: 'directory', machine: TEST_MACHINE } });
     expect(notice()!.dataset.commentContext).toBe('starting');
     await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));

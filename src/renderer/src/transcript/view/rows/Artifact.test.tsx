@@ -258,7 +258,7 @@ describe('the row of an agent’s delete', () => {
     const actions = withUndo(async () => null);
     const { container } = renderRow(DELETED, { storeKey: R, actions });
     await act(async () => {});
-    expect(artifactMachineOf(DRAFT)).toBe(OTHER_MACHINE);
+    expect(artifactMachineOf(DRAFT)).toBeNull();
     expect(reads).toEqual([OTHER_MACHINE]);
     expect(line(container)).toBeNull();
     fireEvent.click(undoButton());

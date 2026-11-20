@@ -3,6 +3,7 @@
 // the artifact target, drawn by the editor's host pinned where the editor locates the passage; Side thread and Send to
 // main carry the anchor, whose tag round-trips; the card resolves and reopens its thread; a sent comment is recorded in
 // the thread and an unsent one withdrawn.
+import { artifactKey } from '../../artifacts/machines';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -197,7 +198,7 @@ describe('the compose card in the margin and the draft rule', () => {
   // `slot`: where the overlay is drawn; a new slot remounts it under the same surface (the margin moving it, a tab switch)
   // UX wave U5a: the draft rule is every card host's (no opt-in)
   function MarginEditor({ reach, onSurface, slot = 'a' }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string }) {
-    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
+    const comments = useDocumentComments({ artifactId: ARTIFACT, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 plan' });
     onSurface(comments);
     return (
       <div className="ds-doc">
@@ -295,7 +296,7 @@ describe('the compose card in the margin and the draft rule', () => {
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
     let surface: DocumentComments | null = null;
     function Body({ hostId, onSurface }: { hostId?: string; onSurface(surface: DocumentComments): void }) {
-      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(hostId !== undefined && { hostId }) });
+      const comments = useDocumentComments({ artifactId: ARTIFACT, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 plan', ...(hostId !== undefined && { hostId }) });
       onSurface(comments);
       return (
         <div className="ds-doc">
@@ -314,7 +315,7 @@ describe('the compose card in the margin and the draft rule', () => {
     await act(async () => {});
     expect(reach.setActive, 'the card activates its thread in the editor it moved to').toHaveBeenLastCalledWith(passage.threadId);
     expect(field().value).toBe('Monthly?');
-    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(reach.discard).not.toHaveBeenCalled();
     expect(surface!.draft!()).toBe(passage.threadId);
   });
@@ -322,17 +323,17 @@ describe('the compose card in the margin and the draft rule', () => {
   it('records the typed draft as the artifact’s, which draft() names; an emptied field or the card closing clears it', async () => {
     const m = mountMargin();
     await opened(m);
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.surface().draft!()).toBeNull();
     await userEvent.type(field(), 'Monthly?');
-    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(m.surface().draft!()).toBe(passage.threadId);
     await userEvent.clear(field());
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.surface().draft!()).toBeNull();
     await userEvent.type(field(), 'Again');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.surface().draft!()).toBeNull();
   });
 
@@ -356,7 +357,7 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(field().value).toBe('Monthly?');
     expect(m.reach.focus).toHaveBeenCalledTimes(1);
     expect(m.reach.discard).not.toHaveBeenCalled();
-    expect(commentDraftOf(ARTIFACT)?.text).toBe('Monthly?');
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)?.text).toBe('Monthly?');
 
     await userEvent.clear(field());
     fireEvent.keyDown(field(), { key: 'Escape' });
@@ -462,10 +463,10 @@ describe('the compose card in the margin and the draft rule', () => {
     await userEvent.type(field(), 'Monthly?');
     m.view.unmount();
     await act(async () => {});
-    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(m.reach.discard).not.toHaveBeenCalled();
-    act(() => dropSubject('artifact', ARTIFACT));
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    act(() => dropSubject('artifact', artifactKey(ARTIFACT, TEST_MACHINE)));
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
   });
 });

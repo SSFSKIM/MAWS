@@ -8,6 +8,7 @@ import { useLayoutEffect, useRef } from 'react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
 import type { HtmlParser } from '../canon';
 import type { SystemOrigin } from '../model';
+import { scopeKeyOf } from '../scope-style';
 import { Canon } from './Canon';
 import { Check } from './Check';
 import { Law, type AskAdopt } from './Law';
@@ -59,7 +60,7 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
       </div>
     );
   }
-  const sections = { doc, tokens: system.tokens, resolved, view, artifactId, readOnly };
+  const sections = { doc, tokens: system.tokens, resolved, view, scopeKey: scopeKeyOf(host, `page:${artifactId}`), readOnly };
   return (
     <div className="dsp-page" data-ds-page={artifactId}>
       <header className="dsp-intro">

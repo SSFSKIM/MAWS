@@ -9,7 +9,7 @@ import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { CommandName } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
-import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetLibrary } from '../../library/store';
 import { useSettings } from '../../stores/settings';
 import { installFakeMain, ok } from '../../test-support/code';
@@ -58,7 +58,7 @@ afterEach(() => {
 describe('useDeckSystem', () => {
   it('ends the chain at the house system the window follows, and follows it', () => {
     const house = houseSource(HOUSE);
-    const { result } = renderHook(() => useDeckSystem({}), { wrapper: withHouse(house) });
+    const { result } = renderHook(() => useDeckSystem({}, TEST_MACHINE), { wrapper: withHouse(house) });
     expect(result.current).toEqual({ id: HOUSE });
     act(() => house.set(NEXT_HOUSE));
     expect(result.current).toEqual({ id: NEXT_HOUSE });
@@ -68,13 +68,13 @@ describe('useDeckSystem', () => {
 
   it("takes the deck's own system before the house, and answers null with no deck placed", () => {
     const house = houseSource(HOUSE);
-    expect(renderHook(() => useDeckSystem({ designSystemId: OWN }), { wrapper: withHouse(house) }).result.current).toEqual({ id: OWN });
-    expect(renderHook(() => useDeckSystem(null), { wrapper: withHouse(house) }).result.current).toBeNull();
+    expect(renderHook(() => useDeckSystem({ designSystemId: OWN }, TEST_MACHINE), { wrapper: withHouse(house) }).result.current).toEqual({ id: OWN });
+    expect(renderHook(() => useDeckSystem(null, TEST_MACHINE), { wrapper: withHouse(house) }).result.current).toBeNull();
   });
 
   it('keeps one value while the system it names stays the same', () => {
     const house = houseSource(HOUSE);
-    const { result, rerender } = renderHook(() => useDeckSystem({}), { wrapper: withHouse(house) });
+    const { result, rerender } = renderHook(() => useDeckSystem({}, TEST_MACHINE), { wrapper: withHouse(house) });
     const first = result.current;
     rerender();
     expect(result.current).toBe(first);
@@ -84,7 +84,7 @@ describe('useDeckSystem', () => {
 
 it('retains a deck’s system that exists on its machine but not in the local library', async () => {
   const main = installFakeMain((name, _, machine) => name === 'library.list' ? ok({ rows: machine === OTHER_MACHINE ? [row(OWN)] : [], counts }) : ok());
-  const { result } = renderHook(() => Reflect.apply(useDeckSystem, undefined, [{ designSystemId: OWN }, OTHER_MACHINE]));
+  const { result } = renderHook(() => useDeckSystem({ designSystemId: OWN }, OTHER_MACHINE));
   await waitFor(() => expect(main.targetsOf('library.list')).toContain(OTHER_MACHINE));
   expect(result.current).toEqual({ id: OWN });
 });

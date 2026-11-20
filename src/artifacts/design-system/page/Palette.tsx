@@ -29,8 +29,8 @@ function colorTokens(resolved: ResolvedTokens): Extract<ResolvedToken, { type: '
   return [...roles, ...extras] as Extract<ResolvedToken, { type: 'color' }>[];
 }
 
-export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; artifactId: string; readOnly: boolean }) {
-  const { doc, tokens, resolved, view, artifactId, readOnly } = props;
+export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; scopeKey: string; readOnly: boolean }) {
+  const { doc, tokens, resolved, view, scopeKey, readOnly } = props;
   const fromHex = (shown: Extract<ResolvedToken, { type: 'color' }>, text: string): string | null => {
     const next = colorFromHex(text.startsWith('#') ? text : `#${text}`);
     if (!next) return `“${text}” is not a hex colour (#rrggbb)`;
@@ -44,7 +44,7 @@ export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedT
       <h2 id="dsp-palette" className="dsp-heading">
         Palette
       </h2>
-      <PreviewScope view={view} artifactId={artifactId} medium="document" className="dsp-swatches">
+      <PreviewScope view={view} scopeKey={scopeKey} medium="document" className="dsp-swatches">
         {colorTokens(resolved).map((token) => {
           const name = cssNamesOf(token.path, 'color')[0]!;
           const hex = hexOf(token.value);

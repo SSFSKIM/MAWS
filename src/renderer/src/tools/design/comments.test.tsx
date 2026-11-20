@@ -64,7 +64,7 @@ describe('a design comment’s anchor', () => {
   it('is what the surface opens the card on', async () => {
     let opened: ((p: CommentedPassage) => void) | null = null;
     function Design() {
-      const comments = useDocumentComments({ artifactId: 'design-1', appSessionId: PARENT, title: 'Launch screens', artifactKind: 'design' });
+      const comments = useDocumentComments({ artifactId: 'design-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Launch screens', artifactKind: 'design' });
       opened = comments.opened;
       return null;
     }
@@ -227,7 +227,7 @@ describe('a design’s compose card keeps its draft', () => {
     expect(await state.closeGuard({ moving: true })).toBe(true);
     expect(handArtifactViewOver(scope, panelScope)).toBe(true);
     expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
-    expect(commentDraftOf(DESIGN)?.text).toBe('Taller?');
+    expect(commentDraftOf(DESIGN, TEST_MACHINE)?.text).toBe('Taller?');
     releaseArtifactEditorState(panelScope);
   });
 

@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { TrustDecision } from '@shared/sessions/intent'; // P3-F F4
@@ -40,7 +41,7 @@ import { useSessions } from '../stores/sessions';
 
 export type ArtifactSessionContext =
   | { kind: 'session'; appSessionId: AppSessionId }
-  | { kind: 'directory'; path: string; projectId: ProjectId | null }
+  | { kind: 'directory'; machine: MachineRef; path: string; projectId: ProjectId | null }
   | { kind: 'none' };
 
 export interface ArtifactContextFacts {
@@ -56,18 +57,18 @@ export interface ArtifactContextOf {
   sessions: readonly { appSessionId: AppSessionId; roles: readonly string[] }[];
 }
 
-export function artifactSessionContext(artifact: ArtifactContextOf, facts: ArtifactContextFacts): ArtifactSessionContext {
+export function artifactSessionContext(artifact: ArtifactContextOf, facts: ArtifactContextFacts, machine: MachineRef): ArtifactSessionContext {
   // P5 O7 M5a: a creator the machine withheld is no session (ipc/machine.ts)
   const own = artifact.createdBy.kind === 'session' ? (actorSessionOnPage(artifact.createdBy.appSessionId) === null ? null : artifact.createdBy.appSessionId) : (artifact.sessions.find((session) => session.roles.includes('created'))?.appSessionId ?? null);
   const record = own === null ? undefined : facts.records.get(own);
   if (own !== null && record !== undefined && (artifact.projectId === undefined || record.projectId === artifact.projectId)) return { kind: 'session', appSessionId: own };
   const linked = artifact.spaceId === undefined ? undefined : facts.spaces.find((space) => space.id === artifact.spaceId)?.linkedDir;
   if (linked !== undefined) {
-    const project = [...facts.projects].find(([, { directory }]) => directory === linked)?.[0] ?? null;
-    return { kind: 'directory', path: linked, projectId: project };
+    const project = [...facts.projects].find(([id, { directory }]) => directory === linked && isAddress(id) && machineOf(id) === machine)?.[0] ?? null;
+    return { kind: 'directory', machine, path: linked, projectId: project };
   }
-  const named = artifact.projectId === undefined ? undefined : facts.projects.get(artifact.projectId);
-  if (artifact.projectId !== undefined && named !== undefined) return { kind: 'directory', path: named.directory, projectId: artifact.projectId };
+  const named = artifact.projectId === undefined || !isAddress(artifact.projectId) || machineOf(artifact.projectId) !== machine ? undefined : facts.projects.get(artifact.projectId);
+  if (artifact.projectId !== undefined && named !== undefined) return { kind: 'directory', machine, path: named.directory, projectId: artifact.projectId };
   return { kind: 'none' };
 }
 
@@ -167,6 +168,8 @@ async function start(appSessionId: AppSessionId, client: MawsBridge, trust?: Sta
 export async function startArtifactSession(context: ArtifactSessionContext, previous: AppSessionId | null, client: MawsBridge = ipc, trust?: StartTrust): Promise<ArtifactSessionStart> {
   if (context.kind === 'none') return { status: 'refused', appSessionId: null, words: NO_SESSION_CONTEXT };
   if (context.kind === 'session') return resume(context.appSessionId, client, trust);
+  // Blank intent creation here is local; the remote spawn flow is not this no-turn start.
+  if (context.machine !== client.localMachine) return { status: 'refused', appSessionId: null, words: COULD_NOT_CREATE };
   if (previous !== null) {
     if (useSessions.getState().records.has(previous)) return resume(previous, client, trust);
     if (useSetup.getState().intents.has(previous)) return start(previous, client, trust);
@@ -177,9 +180,9 @@ export async function startArtifactSession(context: ArtifactSessionContext, prev
 }
 
 // The context of an artifact as the window knows it now (its index records, projects and the library's Spaces).
-export function useArtifactSessionContext(artifact: ArtifactContextOf | null, machine?: MachineRef): ArtifactSessionContext {
+export function useArtifactSessionContext(artifact: ArtifactContextOf | null, machine: MachineRef): ArtifactSessionContext {
   const spaces = useLibrarySpaces(machine).value;
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
-  return useMemo(() => (artifact === null ? { kind: 'none' } : artifactSessionContext(artifact, { records, projects, spaces: spaces ?? [] })), [artifact, records, projects, spaces]);
+  return useMemo(() => (artifact === null ? { kind: 'none' } : artifactSessionContext(artifact, { records, projects, spaces: spaces ?? [] }, machine)), [artifact, records, projects, spaces, machine]);
 }

@@ -17,6 +17,7 @@ import type { CommandName, EventName, EventSource, MawsBridge } from '@shared/ip
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices'; // P3-F (F7)
 import { useCommentCard } from '../../side/card/store'; // P4-B1; UX wave U5a: the unsent comment is the card's pass's
+import { artifactKey } from '../../artifacts/machines';
 import { holdArtifactEditorState, releaseArtifactEditorState } from '../../artifacts/registry'; // UX wave U5a
 import { docPage, dsOverrides } from '@artifacts/document/meta'; // UX wave U10b
 import { DocumentTabState, EXPORT_ACK_WAIT_MS, type DocumentTabDeps } from './tab-state';
@@ -483,7 +484,7 @@ describe('a document tab’s state', () => {
           'the pass',
           {
             host: 'artifact',
-            subject: A,
+            subject: artifactKey(A, TEST_MACHINE),
             appSessionId: 'a1111111-1111-4111-8111-111111111111' as AppSessionId,
             toMain: false,
             comments: [{ id: '1', anchor: { kind: 'artifact-comment', locator: 'ships quarterly', label: 'Launch plan', artifactId: A, threadId: 'k2m9x0qa' }, text, screenshot: null, rect: null, flight: null, refused: null }],

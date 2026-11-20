@@ -386,7 +386,7 @@ export class DocumentTabState {
    * UX wave U5a: the comment is the artifact's pass's, which ends with its last view, so only the last view's close asks.
    */
   closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
-    const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
+    const draft = ask?.moving || artifactViews(this.artifactId, this.machine) > 1 ? null : commentDraftOf(this.artifactId, this.machine); // P4-B3; UX wave U5a
     if (draft && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
     if (!handle || handle.state().unsaved === 0) return true;

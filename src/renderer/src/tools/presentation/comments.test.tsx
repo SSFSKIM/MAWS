@@ -58,7 +58,7 @@ describe('a deck comment’s anchor', () => {
   it('is what the surface opens the card on when the deck gives its kind', async () => {
     let opened: ((p: typeof passage) => void) | null = null;
     function Deck() {
-      const comments = useDocumentComments({ artifactId: 'deck-1', appSessionId: PARENT, title: 'Q3 review', artifactKind: 'presentation' });
+      const comments = useDocumentComments({ artifactId: 'deck-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 review', artifactKind: 'presentation' });
       opened = comments.opened;
       return null;
     }
@@ -172,13 +172,13 @@ describe('a deck’s compose card keeps its draft', () => {
     expect(await state.closeGuard({ moving: true })).toBe(true);
     expect(handArtifactViewOver(scope, panelScope)).toBe(true);
     expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
-    expect(commentDraftOf(DECK)).toEqual({ threadId: listThreads(doc)[0]!.id, text: 'Shorter?' });
+    expect(commentDraftOf(DECK, TEST_MACHINE)).toEqual({ threadId: listThreads(doc)[0]!.id, text: 'Shorter?' });
     // the source closes, its body and its state with it
     unmount();
     act(() => releaseArtifactEditorState(scope));
     await act(async () => {});
     expect(useCommentCard.getState().open).toMatchObject({ hostId: kept.state.commentHostId });
-    expect(commentDraftOf(DECK)?.text).toBe('Shorter?');
+    expect(commentDraftOf(DECK, TEST_MACHINE)?.text).toBe('Shorter?');
     expect(listThreads(doc)).toHaveLength(1); // not withdrawn
     panel.unmount();
     releaseArtifactEditorState(panelScope);

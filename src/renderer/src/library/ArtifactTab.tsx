@@ -41,6 +41,8 @@ import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
 import { useMachineUndoUnavailable, useUndoAct, useUnsentWhileDeleted } from './undo-delete'; // UX wave U10b
 import { unsentWhileDeleted } from '../artifacts/deleted-replicas'; // fix wave 4
+import { DesignSystemHostContext } from '@artifacts/design-system/apply';
+import { artifactHost } from '../artifacts';
 import type { MachineRef } from '@shared/machine/ref';
 import { artifactKey } from '../artifacts/machines';
 import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's Undo
@@ -158,7 +160,9 @@ function MountedEditor({ artifactId, machine, kind, editor, scope, visible, chil
       {children}
       <div className="relative min-h-0 flex-1">
         <DocumentSessionSpace surface={scope.surface} enabled={visible && kind === 'document'}>
-          <Body artifactId={artifactId} machine={machine} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
+          <DesignSystemHostContext.Provider value={artifactHost(machine)}>
+            <Body artifactId={artifactId} machine={machine} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
+          </DesignSystemHostContext.Provider>
         </DocumentSessionSpace>
       </div>
     </div>

@@ -44,7 +44,7 @@ describe('the withheld session', () => {
 
   it('is no session context for an artifact it created', () => {
     const facts = { records: new Map([[WITHHELD_THERE, { projectId: null }]]), spaces: [], projects: new Map() };
-    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: WITHHELD_THERE }, sessions: [] }, facts)).toEqual({ kind: 'none' });
+    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: WITHHELD_THERE }, sessions: [] }, facts, OTHER_MACHINE)).toEqual({ kind: 'none' });
   });
 
   it('reads as Claude in a library row, which names and links no session for it', () => {

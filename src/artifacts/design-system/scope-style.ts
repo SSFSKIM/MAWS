@@ -1,4 +1,4 @@
-// The scopes' stylesheets (D8): one `<style>` per (system, medium, overrides) in the document's head, shared by every
+// The scopes' stylesheets (D8): one `<style>` per (host, system, medium, overrides) in the document's head, shared by every
 // scope that shows that combination and removed when the last one goes. A live system rewrites its style on every
 // change, so every consumer restyles in the same frame and nothing is written to a consumer's artifact. Portable: it
 // needs only a DOM document.
@@ -25,7 +25,21 @@ interface Entry {
 }
 const entries = new Map<string, Entry>();
 
-/** The scope id of a (system, medium, overrides) combination: the same for every consumer of it, in any render. */
+const hostKeys = new WeakMap<object, number>();
+let nextHostKey = 0;
+
+/** The same system ID on two hosts can name different tokens, so it cannot share a stylesheet. */
+export function scopeKeyOf(host: object | null, system: string): string {
+  if (host === null) return system;
+  let key = hostKeys.get(host);
+  if (key === undefined) {
+    key = ++nextHostKey;
+    hostKeys.set(host, key);
+  }
+  return `${key}:${system}`;
+}
+
+/** The scope id of a (host-qualified system, medium, overrides) combination, shared by every consumer of it. */
 export function scopeIdOf(system: string, medium: Medium, overrides: TokenOverrides | undefined): string {
   return `ds-${stableHash(JSON.stringify([system, medium, safeOverrides(overrides)]))}`;
 }

@@ -15,8 +15,8 @@ const SPACES = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `space.${n}`);
 const RADII = ['sm', 'md', 'lg', 'full'].map((r) => `radius.${r}`);
 const SHADOWS = ['sm', 'md', 'lg'].map((s) => `shadow.${s}`);
 
-export function Measures(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; artifactId: string; readOnly: boolean }) {
-  const { doc, tokens, resolved, view, artifactId, readOnly } = props;
+export function Measures(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; scopeKey: string; readOnly: boolean }) {
+  const { doc, tokens, resolved, view, scopeKey, readOnly } = props;
   const at = (path: string) => byIdentity(resolved.tokens, path);
   const writeDimension = (shown: ResolvedToken) => (text: string) => {
     const value = dimensionOf(text);
@@ -34,7 +34,7 @@ export function Measures(props: { doc: Doc; tokens: TokenSet; resolved: Resolved
       <h2 id="dsp-measures" className="dsp-heading">
         Space, radius, shadow
       </h2>
-      <PreviewScope view={view} artifactId={artifactId} medium="document" className="dsp-measures">
+      <PreviewScope view={view} scopeKey={scopeKey} medium="document" className="dsp-measures">
         <div className="dsp-rulers">
           {SPACES.map((path) => {
             const token = at(path);

@@ -9,7 +9,7 @@ import { disabledWords } from '@shared/ipc/remote-unavailable';
 import type { MachineRef } from '@shared/machine/ref';
 import { useLinkPhase } from '../app/machine-mark';
 import { subscribeDeletedReplicas, unsentWhileDeleted } from '../artifacts/deleted-replicas';
-import { recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
+import { sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useMachines } from '../stores/machines';
@@ -66,7 +66,6 @@ export function useListed(artifactId: string, machine: MachineRef): boolean | nu
 export function useSessionArtifactListed(appSessionId: AppSessionId | null, artifactId: string): boolean | null {
   const local = ipc.localMachine;
   const machine = sessionArtifactMachine(appSessionId, artifactId, local);
-  useEffect(() => recordArtifactMachine(artifactId, machine, local), [artifactId, machine, local]);
   return useListed(artifactId, machine);
 }
 
