@@ -34,7 +34,7 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
   // a binding that answers other than its default: an override the table ignores (a fixed or retired action) or one
   // equal to the default changes nothing to reset
   const groups = keymapGroups(keymap);
-  const changed = groups.some((group) => group.rows.some((row) => row.display !== displayChord(row.id, ACTIONS[row.id].chord)));
+  const changed = groups.some((group) => group.rows.some((row) => row.differs));
   useDrawnRow('keyboard.bindings', 'default');
   useDrawnRow(changed ? 'keyboard.reset' : null, 'default');
 

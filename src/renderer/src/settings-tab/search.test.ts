@@ -103,8 +103,8 @@ describe('Search settings', () => {
     expect(ids('when a session finishes')).toEqual(['notifications.when']);
   });
 
-  it('finds Update by its words on the Binary row, where it is drawn, and the config home as the Binary row', () => {
-    expect(search('claude update terminal')).toEqual([{ id: 'engine.update', name: 'Update', under: 'Engine', target: 'engine.update' }]);
+  it('finds Update by its words and lands on the Binary row it is drawn on, and the config home as the Binary row', () => {
+    expect(search('claude update terminal')).toEqual([{ id: 'engine.update', name: 'Update', under: 'Engine', target: 'engine.binary' }]);
     expect(search('config home')).toEqual([{ id: 'engine.binary', name: 'Binary', under: 'Engine', target: 'engine.binary' }]);
     expect(ids('transcripts trust')).toEqual(['engine.binary']);
   });

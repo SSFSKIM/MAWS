@@ -52,15 +52,14 @@ const holdsTabbable = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement
 
 // The word cut's rule that every note has an owner the keyboard reaches: a row with a note and nothing in it that takes
 // the keyboard (an empty plugin list, a status with no facts, a disabled Stop all) takes Tab itself, so focus opens its
-// note. Read after every render: whatever decides a row's controls (a list read, a status, a busy press) renders the
-// row anew.
-function useTakesTab(row: RefObject<HTMLElement | null>, hasNote: boolean): boolean {
-  const [takes, setTakes] = useState(false);
+// note; any other row is a focus stop out of the Tab order (a search's landing). Set on the row after every render, as
+// the DOM its controls make is read: whatever decides a row's controls (a list read, a status, a busy press) renders
+// the row anew.
+function useTabStop(row: RefObject<HTMLElement | null>, hasNote: boolean) {
   useLayoutEffect(() => {
-    const next = hasNote && row.current !== null && !holdsTabbable(row.current);
-    if (next !== takes) setTakes(next);
+    const element = row.current;
+    if (element !== null) element.tabIndex = hasNote && !holdsTabbable(element) ? 0 : -1;
   });
-  return takes;
 }
 
 type Values = Readonly<Record<string, string | null>>;
@@ -103,7 +102,7 @@ export function Setting(props: DeclaredSetting | PlainSetting) {
         </RowNote>
       );
   }
-  const takesTab = useTakesTab(rowRef, note !== null);
+  useTabStop(rowRef, note !== null);
   // The pointer and the focus are tracked whether or not the state shows a note, so a note the keyboard's own change
   // brings (the memory budget turned off from its switch) opens at once; only the description waits for a note.
   const { 'aria-describedby': describedBy, ...tracking } = rowNote.rowProps;
@@ -115,7 +114,6 @@ export function Setting(props: DeclaredSetting | PlainSetting) {
       aria-describedby={note === null ? undefined : describedBy}
       data-settings-row={declared?.id}
       data-settings-state={stateName ?? undefined}
-      tabIndex={takesTab ? 0 : -1}
       {...tracking}
       className={`${SETTING_ROW} ${LANDING}`}
     >

@@ -6,7 +6,7 @@
 // machine daemon) or once a binding changed (Reset to defaults) are drawn when the populated page has it; the config
 // home is in the Binary row's note, and Update is drawn on the Binary row.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
@@ -135,12 +135,13 @@ describe('every row drawn from the table', () => {
       expect(shows('supervisor.daemon', 'default')).not.toBeNull();
     });
     const drawn = expectEveryRowDeclaredAndEveryDeclarationDrawn();
-    for (const declared of SETTINGS_ROWS) if (declared.id !== 'engine.configHome') expect(drawn.map((row) => row.id), declared.id).toContain(declared.id);
+    for (const declared of SETTINGS_ROWS) if (declared.id !== 'engine.configHome' && declared.landsOn === undefined) expect(drawn.map((row) => row.id), declared.id).toContain(declared.id);
     expect(drawn.map((row) => row.id)).not.toContain('engine.configHome'); // in the Binary row's note
     expect(drawn.filter((row) => row.id === 'browser.importedProfile')).toHaveLength(1);
     expect(drawn.filter((row) => row.id === 'browser.extension')).toHaveLength(RECORD.extensions.length);
     expect(drawn.find((row) => row.id === 'engine.binary')?.state).toBe('chosen');
-    expect(drawn.find((row) => row.id === 'engine.update')?.state).toBe('chosen');
+    // Update… is drawn on the Binary row (landsOn), in its chosen state's words
+    expect(within(document.querySelector<HTMLElement>('[data-settings-row="engine.binary"]')!).getByRole('button', { name: 'Update Claude Code…', description: (d) => d.includes('stay on your chosen binary') })).toBeTruthy();
     expect(drawn.find((row) => row.id === 'supervisor.status')?.state).toBe('waiting');
     expect(drawn.find((row) => row.id === 'artifacts.bySpace')?.state).toBe('spaces');
     expect(drawn.find((row) => row.id === 'gateway.defaultRoute')?.state).toBe('machine');
