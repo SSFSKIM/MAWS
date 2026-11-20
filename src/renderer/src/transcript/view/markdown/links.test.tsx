@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_ACTIONS, setHostActions, TranscriptProvider, useTranscriptContext, type TranscriptActions } from '../context';
+import { NO_ACTIONS, setHostActions, TranscriptProvider, turnFileLinks, useTranscriptContext, type TranscriptActions } from '../context';
 import { DEFAULT_ACTIONS } from '../default-actions';
 import { ARTIFACT_LINK_TITLE, openArtifactMention } from './Link';
 import { Markdown } from './Markdown';
@@ -42,6 +42,32 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     expect(actions.openExternal).toHaveBeenCalledWith('http://localhost:5173/', 'OtherMachineRef0000000/session-r');
   });
 
+  // UX wave U6b-4b (R3, decision 13): ⌘ reaches the opener as a third argument, so a loopback link of a session on this
+  // Mac can open in the system browser; a plain click passes none, as before
+  it('a ⌘-click on a web link asks the opener for the system browser; a plain click asks nothing more', () => {
+    const session = 'TestMachineRef00000000/app-web';
+    const { actions } = renderWith('Running at [localhost:5173](http://localhost:5173/).', live, session);
+    const link = screen.getByRole('link', { name: 'localhost:5173' });
+    fireEvent.click(link, { metaKey: true });
+    fireEvent.click(link);
+    expect(vi.mocked(actions.openExternal).mock.calls).toEqual([['http://localhost:5173/', session, { external: true }], ['http://localhost:5173/', session]]);
+  });
+
+  // N3.6: a Markdown surface outside any transcript has no session; its link reaches the host's opener as today
+  it('outside any Transcript, a loopback link reaches the host’s openExternal with no session, ⌘ or not', () => {
+    const openExternal = vi.fn();
+    setHostActions({ ...DEFAULT_ACTIONS, openExternal });
+    try {
+      render(<Markdown markdown="Running at [the app](http://localhost:5173/)." live={live} />);
+      const link = screen.getByRole('link', { name: 'the app' });
+      fireEvent.click(link);
+      fireEvent.click(link, { metaKey: true });
+      expect(openExternal.mock.calls).toEqual([['http://localhost:5173/', null], ['http://localhost:5173/', null, { external: true }]]);
+    } finally {
+      setHostActions(DEFAULT_ACTIONS);
+    }
+  });
+
   it('a scheme-less link is a path chip that opens the file, with a line when the path names one', () => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts) and [y](src/y.ts#L42).', live);
     fireEvent.click(screen.getByRole('button', { name: 'x.ts' }));
@@ -55,6 +81,24 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts#L3).', live);
     fireEvent.click(screen.getByRole('button', { name: 'x.ts' }), { metaKey: true });
     expect(actions.openFile).toHaveBeenCalledExactlyOnceWith('src/renderer/x.ts', 3, null, { main: true });
+  });
+
+  // UX wave U6b-4b (R1, L1): where the window turned the form on, an inline `file:` link with an empty host is the path
+  // link of its rest: the same line, the same session, and ⌘ for the main area; a `file:` link with a host is its text
+  it('a file: link with no host is the path link of its path, with its line; ⌘-click asks for the main area', () => {
+    turnFileLinks(true);
+    try {
+      const { actions } = renderWith('Open [x.ts](file:///work/x.ts#L12), [y](FILE:///work/y.ts:7) and [h](file://host/work/h.ts).', live, 'app-local-session');
+      const link = screen.getByRole('button', { name: 'x.ts' });
+      expect([link.dataset.chip, link.getAttribute('title')]).toEqual(['path', '/work/x.ts']);
+      fireEvent.click(link);
+      fireEvent.click(screen.getByRole('button', { name: 'y' }), { metaKey: true });
+      expect(vi.mocked(actions.openFile).mock.calls).toEqual([['/work/x.ts', 12, 'app-local-session', { main: false }], ['/work/y.ts', 7, 'app-local-session', { main: true }]]);
+      expect(screen.queryByRole('button', { name: 'h' })).toBeNull();
+      expect(screen.getByText('h').closest('[data-chip], a')).toBeNull();
+    } finally {
+      turnFileLinks(false);
+    }
   });
 
   // UX wave U6d: a path link takes the mention's element and look (its text in the monospace font, by its data-chip),

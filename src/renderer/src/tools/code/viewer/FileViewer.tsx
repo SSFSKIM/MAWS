@@ -31,6 +31,12 @@
 // hands it to the file's editor at once when one is drawn, or as soon as one is drawn while the body itself still has it.
 // A read on its way, a read that failed and a kind with no editor leave it on the body, inside the element ⌘S and the
 // comment key look in. Wherever the tab is drawn, beside the chat or in the main area, never on a tab's button.
+//
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; Interfaces §C, decisions 8, 11 and 20, "The
+// look"): a file that cannot be read shows the notice of its cause (`notice.ts`) where "Refused: " and the command's words
+// stood: the sentences, the path (with Copy path where the path is outside the folders), Retry where reading again can
+// help, and the command's own words last, small. A folder macOS protects on another machine keeps U6f's sentence and
+// button inside the same block, the classifier not asked.
 import { Popover } from 'radix-ui';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -38,12 +44,12 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ChevronDownIcon } from '../../../app/IconButton';
 import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
-import { OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
+import { NOTICE_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
 import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { useTakesRemoteRoute } from '../files/elsewhere';
-import { FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, takeKeyboard, useKeyboardRequest } from '../files/finder';
+import { describeElement, FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, traceKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosenFor } from '../files/open-chosen';
 import { ExternalRow, OpenExternally, rowButton } from './ExternalRow';
 import { FrameBody } from './FrameBody';
@@ -51,6 +57,8 @@ import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
+import { classifyFailure, type NoticeCause } from './notice'; // UX wave U6b-4b
+import { useNoticePlace } from './notice-place'; // UX wave U6b-4b
 import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 import { OpenInButton } from '../../../open-in/OpenInMenu'; // UX wave U6b-4a
 import { shownLine } from './shown-line'; // UX wave U6b-4a
@@ -235,26 +243,93 @@ function NoSessionNotice({ path }: { path: string }) {
   );
 }
 
-// UX wave U6f (§E; decision 18, Decision Log 20): a UC-7 sentence (`said`) is drawn as it is; a file in a folder macOS
-// protects there offers Open it, and one behind a link into another such folder Open File…, each in the shape of the
-// failed frame's body (`rowButton`).
+// UX wave U6f (§E; decision 18, Decision Log 20): a file in a folder macOS protects there offers Open it, and one behind a
+// link into another such folder Open File…, each in the shape of the failed frame's body (`rowButton`), under U6f's own
+// sentence. UX wave U6b-4b: every other failure reads the notice of its cause; the block keeps `role="alert"` and
+// `data-refusal`, and its first paragraph is the headline in every case.
 function Refused({ entry }: { entry: ViewerEntry }) {
   const { path, tabId, appSessionId } = entry;
-  const message = entry.error ?? '';
+  const place = useNoticePlace(appSessionId, entry.artifact?.artifactId ?? null); // the branch review: an artifact's view names its machine
+  const canRetry = useViewer.getState().canRetry(entry); // of the entry drawn, which every change of it draws again
+  if (entry.needsOpen || entry.offersOpenFile) {
+    return (
+      <NoticeBox cause="protected">
+        <p className="text-ui text-fg">{entry.error ?? ''}</p>
+        <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+        {entry.needsOpen ? (
+          <button type="button" data-open-protected="" className={`${rowButton} mt-1`} onClick={() => useViewer.getState().openProtected(tabId)}>
+            {VIEWER_COPY.openIt}
+          </button>
+        ) : appSessionId !== null ? (
+          <button type="button" className={`${rowButton} mt-1`} onClick={() => void openChosenFor(appSessionId)}>
+            {OPEN_FILE_COPY.row}
+          </button>
+        ) : null}
+      </NoticeBox>
+    );
+  }
+  const failure = entry.failure ?? { code: 'internal' as const, message: entry.error ?? '', refusal: null };
+  const notice = classifyFailure(failure, { ...place, subject: 'file' });
+  const [headline, ...further] = notice.lines;
   return (
-    <div role="alert" data-refusal className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-      <p className="text-ui text-fg">{entry.said ? message : VIEWER_COPY.refused(message)}</p>
-      <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
-      {entry.needsOpen ? (
-        <button type="button" data-open-protected="" className={`${rowButton} mt-1`} onClick={() => useViewer.getState().openProtected(tabId)}>
-          {VIEWER_COPY.openIt}
-        </button>
-      ) : entry.offersOpenFile && appSessionId !== null ? (
-        <button type="button" className={`${rowButton} mt-1`} onClick={() => void openChosenFor(appSessionId)}>
-          {OPEN_FILE_COPY.row}
+    <NoticeBox cause={notice.cause}>
+      <p className="text-ui text-fg">{headline}</p>
+      {further.map((line) => (
+        <p key={line} className="text-ui text-fg-muted">
+          {line}
+        </p>
+      ))}
+      <div className="mt-1 flex max-w-full items-center justify-center gap-2">
+        <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+        {notice.copyPath ? <CopyPath path={path} /> : null}
+      </div>
+      {notice.retry ? (
+        <button type="button" data-notice-retry="" className={`${rowButton} mt-1 disabled:text-fg-faint`} disabled={!canRetry} onClick={() => useViewer.getState().retry(tabId)}>
+          {NOTICE_COPY.retry}
         </button>
       ) : null}
+      {notice.detail !== '' ? (
+        <p data-notice-detail="" className="mt-2 text-ui-sm text-fg-muted break-all">
+          {notice.detail}
+        </p>
+      ) : null}
+    </NoticeBox>
+  );
+}
+
+// The notice's block (the branch review): its own scroll box, whose column is centred within at least the box's height,
+// so in a pane shorter than the notice it starts at the headline and scrolls, nothing above the scroll origin
+function NoticeBox({ cause, children }: { cause: NoticeCause | 'protected'; children: ReactNode }) {
+  return (
+    <div role="alert" data-refusal data-notice-cause={cause} className="h-full overflow-y-auto">
+      <div className="flex min-h-full flex-col items-center justify-center gap-1 p-6 text-center">{children}</div>
     </div>
+  );
+}
+
+// The notice's Copy path: a small quiet button after the path (UX wave U6b-4b, "The look"; row 1 only). Fix wave 1: for a
+// moment after a press its words say what the copy did, a clipboard that refused (or none at all) included, as the agents'
+// log's Copy path says it.
+const COPY_FEEDBACK_MS = 1500;
+function CopyPath({ path }: { path: string }) {
+  const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (copied === 'idle') return;
+    const timer = setTimeout(() => setCopied('idle'), COPY_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = () => {
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(path))
+      .then(
+        () => setCopied('copied'),
+        () => setCopied('failed'),
+      );
+  };
+  return (
+    <button type="button" data-notice-copy="" className="shrink-0 rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={copy}>
+      {copied === 'copied' ? NOTICE_COPY.copied : copied === 'failed' ? NOTICE_COPY.copyFailed : NOTICE_COPY.copyPath}
+    </button>
   );
 }
 
@@ -276,51 +351,75 @@ interface FileBodyProps {
   host?: 'side' | 'main'; // UX wave U6b-2: where the tab is drawn; the main area when absent
   inView?: boolean; // UX wave U6b-2 (Decision Log 29): false while the mounted body is not in view
   agent?: boolean; // UX wave U6e (decision 19): the tab holds the agent's mark, and its reads say so
+  artifactView?: boolean; // UX wave U6b-4b (decision 4): an artifact's view, whose Markdown resolves no relative link
   takesKeyboard?: string; // UX wave U6b-3b: the key the body takes the keyboard under (a file tab's id); the File artifact's view gives none
 }
 
 // The app's own focus outline, inside the body's box.
 const TAKES_KEYBOARD = 'outline-accent focus-visible:outline-2 -outline-offset-2';
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, takesKeyboard }: FileBodyProps) {
+// Decision Log 19: why the page may refuse the view the keyboard, as the trace says it.
+function refusalOf(element: HTMLElement): string {
+  if (!element.isConnected) return 'is out of the page';
+  if (element.closest('[inert]') !== null) return 'is under an inert ancestor';
+  if (element.closest('[hidden]') !== null) return 'is under a hidden ancestor';
+  if (element.getClientRects().length === 0) return 'has no box';
+  if (getComputedStyle(element).visibility !== 'visible') return 'is not visible';
+  return 'looks focusable';
+}
+
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, artifactView = false, takesKeyboard }: FileBodyProps) {
   // UX wave U6b-3b: the request for the keyboard by this body's key, taken while it is in view; the editor, when one is
   // drawn in it, is told through `editorFocus`. Decision Log 17: the page can refuse the focus (an inert or hidden
-  // ancestor while the view mounts), so the request is ended only once the keyboard is inside the body, its text
-  // included; until then it is tried again when the editor is drawn and when an attribute that can hide or free an
-  // element changes in the page. The person's own key or pointer press still drops it (`files/finder.ts`). Decision Log
-  // 18: so does the keyboard landing anywhere outside this view but the document's body, by any means (a native menu's
-  // command makes no press in the page), and the bound: a request still not taken `FILE_TAKE_BOUND_MS` after the view is
-  // ready (in view, its read settled, its editor drawn where it draws one) is given up, and the page no longer watched.
+  // ancestor while the view mounts), so the take is tried again when the editor is drawn and when an attribute that can
+  // hide or free an element changes in the page. Decision Log 18: the person's own key or pointer press drops the request
+  // (`files/finder.ts`), and so does the keyboard landing anywhere outside this view but the document's body, by any means
+  // (a native menu's command makes no press in the page). Decision Log 19: the request is held, landed or not, until
+  // `FILE_TAKE_BOUND_MS` after the view is ready (in view, its read settled, its editor drawn where it draws one), counted
+  // again each time it is ready again; so a view drawn again meanwhile (its editor made anew, an ancestor hidden for a
+  // moment), which leaves the keyboard on the document's body, takes it back. Each take that moves the keyboard, or that
+  // the page refuses, is traced (`traceKeyboard`).
   const body = useRef<HTMLDivElement>(null);
   const editorFocus = useRef<(() => void) | null>(null);
   const [editorDrawn, setEditorDrawn] = useState(false);
   const shown = useRef(inView);
   const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
-  const take = useCallback(() => {
-    const element = body.current;
-    if (!shown.current || takesKeyboard === undefined || element === null || !keyboardWaits({ into: 'file', key: takesKeyboard })) return;
-    if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
-    editorFocus.current?.();
-    if (element.contains(document.activeElement)) takeKeyboard({ into: 'file', key: takesKeyboard }); // landed: the request ends
-  }, [takesKeyboard]);
+  const take = useCallback(
+    (why: string) => {
+      const element = body.current;
+      if (!shown.current || takesKeyboard === undefined || element === null || !keyboardWaits({ into: 'file', key: takesKeyboard })) return;
+      const before = document.activeElement;
+      if (element.contains(before) && (editorFocus.current === null || before !== element)) return; // in place already
+      if (!element.contains(before)) element.focus({ preventScroll: true });
+      editorFocus.current?.();
+      const now = document.activeElement;
+      const landed = element.contains(now);
+      traceKeyboard(`file ${takesKeyboard}`, landed ? 'took' : 'refused', `${why}; from ${describeElement(before)} to ${describeElement(now)}${landed ? '' : `; the view ${refusalOf(element)}`}`);
+    },
+    [takesKeyboard],
+  );
   useEffect(() => {
     shown.current = inView;
     if (asked === 0 || !inView) return;
-    take();
-    // at most one try a frame: a focus that something takes straight back (a modal's trap) changes a class each time, and
-    // a try per change would never let the page draw
-    let frame = 0;
+    take('asked in view');
+    // One try a task for any number of changes, posted as a message, never waiting on a frame: a window that is covered
+    // or not in front draws no frames, so a try held for one would never run there (Decision Log 19). A task, not a
+    // microtask, so that a change the try itself makes cannot spin within one turn of the page.
+    let queued = false;
+    const tries = new MessageChannel();
+    tries.port1.onmessage = () => {
+      queued = false;
+      take('the page changed');
+    };
     const retry = new MutationObserver(() => {
-      if (frame === 0)
-        frame = requestAnimationFrame(() => {
-          frame = 0;
-          take();
-        });
+      if (queued) return;
+      queued = true;
+      tries.port2.postMessage(null);
     });
     retry.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] });
     return () => {
       retry.disconnect();
-      cancelAnimationFrame(frame);
+      tries.port1.close();
     };
   }, [asked, inView, take]);
   // Decision Log 18: the keyboard landing outside this view (the document's body aside) gives the request up
@@ -328,7 +427,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     if (asked === 0 || takesKeyboard === undefined) return;
     const elsewhere = (event: FocusEvent) => {
       const target = event.target;
-      if (target instanceof Node && target !== document.body && !(body.current?.contains(target) ?? false)) releaseKeyboard({ into: 'file', key: takesKeyboard });
+      if (target instanceof Element && target !== document.body && !(body.current?.contains(target) ?? false)) releaseKeyboard({ into: 'file', key: takesKeyboard }, `focus landed on ${describeElement(target)}`);
     };
     document.addEventListener('focusin', elsewhere, true);
     return () => document.removeEventListener('focusin', elsewhere, true);
@@ -337,11 +436,12 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     (focus: (() => void) | null) => {
       editorFocus.current = focus;
       setEditorDrawn(focus !== null);
+      if (takesKeyboard !== undefined) traceKeyboard(`file ${takesKeyboard}`, focus === null ? 'editor gone' : 'editor drawn', `the keyboard on ${describeElement(document.activeElement)}`);
       if (focus === null) return;
       if (body.current !== null && document.activeElement === body.current) focus(); // the body still has it
-      else take(); // a request still waiting, its take refused so far
+      else take('the editor drawn'); // a request still held
     },
-    [take],
+    [take, takesKeyboard],
   );
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
@@ -353,12 +453,12 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     [tabId, appSessionId, path, line, readOnly, agent, artifactId, revision],
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
-  // Decision Log 18: the bound on a request not taken, from the moment the view is ready
+  // Decision Log 18 and 19: the bound on the request, from the moment the view is ready, again each time it is
   const needsEditor = entry !== null && entry.status === 'ready' && entry.kind !== 'frame' && showsCode(entry);
   const ready = entry !== null && entry.status !== 'loading' && (!needsEditor || editorDrawn);
   useEffect(() => {
     if (asked === 0 || !inView || !ready || takesKeyboard === undefined) return;
-    const bound = setTimeout(() => releaseKeyboard({ into: 'file', key: takesKeyboard }), FILE_TAKE_BOUND_MS);
+    const bound = setTimeout(() => releaseKeyboard({ into: 'file', key: takesKeyboard }, 'the bound passed'), FILE_TAKE_BOUND_MS);
     return () => clearTimeout(bound);
   }, [asked, inView, ready, takesKeyboard]);
 
@@ -405,7 +505,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {end}
         {entry ? below?.(entry) : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} onEditor={takesKeyboard === undefined ? undefined : onEditor} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} artifactView={artifactView} onEditor={takesKeyboard === undefined ? undefined : onEditor} /> : <Loading />}</div>
     </div>
   );
 }
@@ -428,7 +528,7 @@ const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom, host, inView, onEditor }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; onEditor?(focus: (() => void) | null): void }) {
+function Body({ entry, wrap, zoom, host, inView, artifactView, onEditor }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; artifactView: boolean; onEditor?(focus: (() => void) | null): void }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused entry={entry} />;
   if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
@@ -439,7 +539,7 @@ function Body({ entry, wrap, zoom, host, inView, onEditor }: { entry: ViewerEntr
       </Suspense>
     );
   }
-  if (entry.kind === 'markdown') return <MarkdownView entry={entry} />;
+  if (entry.kind === 'markdown') return <MarkdownView entry={entry} artifactView={artifactView} />;
   if (showsImage(entry)) return <ImageView entry={entry} zoom={zoom} />;
   return <ExternalRow entry={entry} />;
 }

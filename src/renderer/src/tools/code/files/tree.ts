@@ -4,9 +4,12 @@
 import type { SessionRecord } from '@shared/graph/session';
 import type { FilesEntry, FilesListOutput } from '@shared/ipc/schema/files';
 import { workingFolder } from '@shared/sessions/working-folder';
+import type { FileFailure } from '../viewer/notice';
 import type { ChangedRow } from './changed';
 
-export type Listing = { status: 'loading' } | { status: 'ok'; value: FilesListOutput } | { status: 'error'; message: string };
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3): a listing that failed keeps the failure
+// whole beside its message, and so does its notice row, so the list says the notice's sentences for a folder.
+export type Listing = { status: 'loading' } | { status: 'ok'; value: FilesListOutput } | { status: 'error'; message: string; failure: FileFailure };
 export type RootRole = 'directory' | 'additional directory' | 'worktree' | 'working folder';
 export interface RootCandidate {
   path: string;
@@ -101,7 +104,7 @@ function restUnder(root: string, path: string): string | null {
 export type TreeRow =
   | { kind: 'root'; key: string; path: string; depth: 0; name: string; role: RootRole | null; expanded: boolean }
   | { kind: 'entry'; key: string; path: string; depth: number; entry: FilesEntry; expanded: boolean }
-  | { kind: 'notice'; key: string; path: string; depth: number; notice: 'empty' | 'truncated' | 'error' | 'refused'; message: string | null }
+  | { kind: 'notice'; key: string; path: string; depth: number; notice: 'empty' | 'truncated' | 'error' | 'refused'; message: string | null; failure: FileFailure | null }
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §C): the Changed group's
   // heading and rows, drawn as the list's first rows above the tree's own
   | { kind: 'changed-heading'; key: string; count: number; folded: boolean }
@@ -129,17 +132,17 @@ export function rowsOf({
     if (!found || found.status === 'loading') return;
     if (found.status === 'error') {
       const refused = found.message === REFUSAL;
-      rows.push({ kind: 'notice', key: `${dir}\n!`, path: dir, depth, notice: refused ? 'refused' : 'error', message: found.message });
+      rows.push({ kind: 'notice', key: `${dir}\n!`, path: dir, depth, notice: refused ? 'refused' : 'error', message: found.message, failure: found.failure });
       return;
     }
     const shown = found.value.entries.filter((entry) => !hidden(entry, isRoot));
-    if (shown.length === 0) rows.push({ kind: 'notice', key: `${dir}\n!`, path: dir, depth, notice: 'empty', message: null });
+    if (shown.length === 0) rows.push({ kind: 'notice', key: `${dir}\n!`, path: dir, depth, notice: 'empty', message: null, failure: null });
     for (const entry of shown) {
       const open = entry.kind === 'dir' && expanded.has(entry.path);
       rows.push({ kind: 'entry', key: entry.path, path: entry.path, depth, entry, expanded: open });
       if (open) children(entry.path, depth + 1, false);
     }
-    if (found.value.truncated) rows.push({ kind: 'notice', key: `${dir}\n…`, path: dir, depth, notice: 'truncated', message: null });
+    if (found.value.truncated) rows.push({ kind: 'notice', key: `${dir}\n…`, path: dir, depth, notice: 'truncated', message: null, failure: null });
   };
   for (const root of roots) {
     const open = expanded.has(root.path);

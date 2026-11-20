@@ -175,7 +175,8 @@ function EntryRow({ entry, selected, disabled, chooser, choose }: { entry: Outsi
 // The path field: the folder shown, scrolled to its end while nothing is typed in it; what the person types, until the
 // keyboard leaves it. Enter or Go asks for what it holds; Go keeps the keyboard in the field, so what it asks is what was
 // typed. Chromium returns a text field's scroll to its start as the keyboard leaves it, whether or not its value changes,
-// so the field scrolls to its end again on the next frame, once the keyboard is still elsewhere.
+// between the blur and the focusout React's onBlur listens to, so the field scrolls to its end again in onBlur itself, not
+// on a later frame, which a window that draws no frames does not reach (Decision Log 37).
 function PathField({ shown, disabled, go }: { shown: string; disabled: boolean; go(path: string): void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -185,10 +186,8 @@ function PathField({ shown, disabled, go }: { shown: string; disabled: boolean; 
   }, [shown, draft]);
   const left = () => {
     setDraft(null);
-    requestAnimationFrame(() => {
-      const input = field.current;
-      if (input !== null && document.activeElement !== input) input.scrollLeft = input.scrollWidth;
-    });
+    const input = field.current;
+    if (input !== null) input.scrollLeft = input.scrollWidth;
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();

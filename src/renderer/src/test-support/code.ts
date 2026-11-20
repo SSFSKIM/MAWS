@@ -5,11 +5,12 @@ import type { CommandName, EventName, EventPayload, PreloadBridge } from '@share
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import type { MachineRef } from '@shared/machine/ref';
 
-type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
+type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string; issues?: unknown } };
 export type Handler = (name: CommandName, input: Record<string, unknown>, machine?: MachineRef) => Answer | Promise<Answer>;
 
 export const ok = (value: unknown = undefined): Answer => ({ ok: true, value });
-export const fail = (message: string): Answer => ({ ok: false, error: { code: 'internal', message } });
+// UX wave U6b-4b (M3): with a code and issues, as the route answers (`host_unavailable`, `timeout`, `{ refusal }`)
+export const fail = (message: string, code = 'internal', issues?: unknown): Answer => ({ ok: false, error: issues === undefined ? { code, message } : { code, message, issues } });
 
 export function installFakeMain(handler: Handler) {
   const calls: { name: CommandName; input: Record<string, unknown> }[] = [];

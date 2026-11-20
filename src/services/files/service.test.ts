@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import fs, { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -20,6 +20,7 @@ import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { askSteerText } from '@shared/maws/ask';
 import { linkedReadBlock } from '@shared/maws/linked-read';
+import { normalizeLexically } from '@shared/files/named'; // UX wave U6b-4b
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
 import { openFileGrants, type FileGrants } from './grants';
@@ -2062,6 +2063,60 @@ describe('files saves outside the folders', () => {
       expect(readFileSync(out('linked.txt'), 'utf8')).toBe('linked.txt as it was\n');
       await transcriptOf(A, [message(`Make it warmer, and ${link(out('linked.txt'))}`)]);
       expect(await saveShown(files, A, out('linked.txt'), 'the person’s edit\n')).toEqual({ status: 'ok', hash: sha('the person’s edit\n') });
+    });
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): a `file:` link with an empty host is
+  // the scheme-less link's form, under the same rule; every other `file:` form adds no evidence
+  describe('the file: form of a link', () => {
+    const fileLink = (path: string) => `See [the file](file://${path}).`;
+
+    it('in the agent’s text, opens a file outside the folders and saves it (L2)', async () => {
+      await transcriptOf(A, [said(fileLink(out('named.txt')))]);
+      const files = outsideService();
+      expect(await shown(files, A, out('named.txt'))).toMatchObject({ named: true, outside: { real: out('named.txt'), writable: true } });
+      expect(await saveShown(files, A, out('named.txt'), 'saved\n')).toEqual({ status: 'ok', hash: sha('saved\n') });
+    });
+
+    // N1.7: refused for a session with no other evidence; the control, the person's choice, which no form takes away
+    it('a transcript whose only mention of the file is another `file:` form is refused; the person’s choice still opens it (N1.7)', async () => {
+      const path = out('unnamed.txt');
+      await transcriptOf(A, [said(`[r](file://host${path}) [r](file://localhost${path}) [r](file:${path}) <file://${path}>`), said(`[r][l]\n\n[l]: file://${path}`)]);
+      const files = outsideService();
+      await expect(shown(files, A, path)).rejects.toThrow(new Error(OUT));
+      expect(asked.transcript).toEqual([A]);
+      expect(await files.grant(A, path)).toEqual({ status: 'granted', path });
+      expect(await shown(files, A, path)).toMatchObject({ named: true, outside: { real: path, writable: true } });
+    });
+
+    it('written only in an MCP tool’s result, it opens read-only and is never saved by that name (N1.8)', async () => {
+      await transcriptOf(A, [called('t-mcp', 'mcp__docs__find', { query: 'notes' }), answered('t-mcp', [{ type: 'text', text: fileLink(out('result.txt')) }])]);
+      const files = outsideService();
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: false, why: 'result' } });
+      await expect(saveShown(files, A, out('result.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('result.txt as it was\n');
+      // the control: once the person chooses the same file, the same save is made
+      expect(await files.grant(A, out('result.txt'))).toEqual({ status: 'granted', path: out('result.txt') });
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: true } });
+      expect(await saveShown(files, A, out('result.txt'), 'pwned\n')).toEqual({ status: 'ok', hash: sha('pwned\n') });
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('pwned\n');
+    });
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, N2.2): the window resolves a relative
+  // link against the working folder before it reads; the transcript wrote the relative string, which names nothing
+  describe('a relative link', () => {
+    it('names no file outside the folders: the absolute path the window resolves it to is refused; the person’s choice opens it (N2.2)', async () => {
+      const path = out('unnamed.txt');
+      const written = relative(root, path); // `../outside/unnamed.txt`, as an agent working in the root would write it
+      expect(written.startsWith('..')).toBe(true);
+      expect(normalizeLexically(`${root}/${written}`)).toBe(path); // what the window asks for (open-file.ts, resolveRelative)
+      await transcriptOf(A, [said(`See [the file](${written}) and [the other](./${written}).`)]);
+      const files = outsideService();
+      await expect(shown(files, A, path)).rejects.toThrow(new Error(OUT));
+      expect(asked.transcript).toEqual([A]); // the search ran and found nothing
+      expect(await files.grant(A, path)).toEqual({ status: 'granted', path });
+      expect(await shown(files, A, path)).toMatchObject({ named: true, outside: { real: path, writable: true } });
     });
   });
 

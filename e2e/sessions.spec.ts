@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto'; // UX wave U6e: the files service's content hash
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { slugOf } from '../src/engine-host/fs/paths';
@@ -24,8 +24,9 @@ import { addressed, localRef } from './support/address';
 import { expectDrawnWholeAtBothWidths } from './support/editor-notice'; // UX wave U1c round: the notice drawn whole, at the panel's narrowest too
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
+import { startBrowserServer } from './support/browser-server'; // UX wave U6b-4b: the loopback page a link opens
 import { clickRevealed } from './support/hover';
-import { activeMainTab, backToTabs, mainTabById, mainTabs, mountedTabs, openAppDestination, sideColumn, sideTab } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
+import { activeMainTab, backToTabs, mainTabById, mainTabs, mountedTabs, openAppDestination, openSurface, sideColumn, sideTab, surface } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
 import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the linked PDF, drawn
 import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
@@ -1139,7 +1140,11 @@ test.describe('sessions', () => {
   // (Interfaces §G): the linked file opens beside the chat, the text file and then the PDF's row in the session's one
   // preview tab, and the main strip stays as it was, the session's tab in front. UX wave U6b-2 (docs/doperpowers/plans/
   // 2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B4): the linked PDF is drawn in its frame, as one inside the folder is, its
-  // Open externally the bar's; a PDF the transcript does not name is refused a frame as it is refused a read.
+  // Open externally the bar's; a PDF the transcript does not name is refused a frame as it is refused a read. UX wave
+  // U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; L1 to L5, L7): a `file:///` link to an outside
+  // file opens it as its path link does, and one with a host is text; a relative link opens against the working folder; a
+  // relative link to an outside file the transcript never writes whole shows the first notice in the window, and reads
+  // nothing.
   test("a file the transcript links opens from outside the session's folder, is edited, and is written only by Save; nothing else is", async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -1149,13 +1154,22 @@ test.describe('sessions', () => {
       const NOTES = 'Invented notes, kept outside the session’s folder.';
       const texts: Record<string, string | Buffer> = {
         'notes.txt': `${NOTES}\n`, 'report.pdf': minimalPdf(), 'unnamed.txt': 'never linked\n', 'unnamed.pdf': minimalPdf(), 'typed-only.txt': 'typed, never sent\n', key: 'an invented key\n', 'key,backup': 'an invented backup\n',
+        'by-url.txt': 'Invented, linked as a file: URL.\n', 'by-host.txt': 'Invented, linked with a host.\n', 'secret.md': 'Invented, reached only by a relative link.\n', // U6b-4b
       };
       for (const [name, text] of Object.entries(texts)) writeFileSync(file(name), text);
+      // UX wave U6b-4b: a file of the working folder a relative link names, and the relative way from that folder to an
+      // outside file the transcript never writes whole
+      const GUIDE = 'An invented guide, in the working folder.';
+      mkdirSync(join(repo.root, 'docs'));
+      writeFileSync(join(repo.root, 'docs', 'guide.md'), `${GUIDE}\n`);
+      const toSecret = relative(repo.root, file('secret.md'));
       const S = '5e551011-0000-4000-8000-0000000000e6';
       const T = '5e551011-0000-4000-8000-0000000000e7';
       const at = '2026-11-13T10:00:00.000Z';
       const row = (sessionId: string) => ({ cwd: repo.root, sessionId, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300' });
-      const reply = `Here are [the notes](${file('notes.txt')}), [the report](${file('report.pdf')}) and [the backup](${file('key,backup')}). The other one is ${file('unnamed.txt')}.`;
+      const reply =
+        `Here are [the notes](${file('notes.txt')}), [the report](${file('report.pdf')}) and [the backup](${file('key,backup')}). The other one is ${file('unnamed.txt')}.` +
+        ` Also [by URL](file://${file('by-url.txt')}), [by host](file://invented-host${file('by-host.txt')}), [the guide](docs/guide.md) and [the secret](${toSecret}).`; // U6b-4b
       await store.addTranscript(repo.root, S, [
         { ...row(S), type: 'user', uuid: 'u-u6c-s1', parentUuid: null, message: { role: 'user', content: 'Where are the files from outside?' } },
         { type: 'queue-operation', operation: 'enqueue', timestamp: at, sessionId: S, content: `Also [the typed one](${file('typed-only.txt')})` },
@@ -1254,6 +1268,70 @@ test.describe('sessions', () => {
       await expect.poll(opened, { timeout: 20_000 }).toEqual([file('report.pdf')]);
       expect(await created(page, maws.userData, s!), 'nothing created').toEqual(before);
 
+      // UX wave U6b-4b (L1, L2, R1): a `file:///` link to an outside file is a path link of that path and opens the file
+      // beside the chat, as its scheme-less link does; one with a host is the link's text with no chip; and no element of
+      // the page carries a `file:` address. The page's own body is what is read (N1.9: an element drawn in the window): the
+      // head holds the `<link>`s Vite's preload helper adds for each lazy chunk, whose hrefs are absolute `file:` URLs
+      // because the build's base is relative and the window loads its page from a file. The control below shows the
+      // selector still finds such an address on any element of the body, and passes over the head's links.
+      await expect(chip('by-url.txt'), 'the file: URL drawn as a path link').toBeVisible();
+      await expect(main.getByText('by host', { exact: true }), 'the link with a host is drawn, as text').toBeVisible();
+      await expect(chip('by-host.txt'), 'and is no chip').toHaveCount(0);
+      const addressed = page.locator('body').locator('[href^="file:"], [href^="maws-path:"]');
+      await expect(addressed, 'no file: or maws-path: address on any element of the window').toHaveCount(0);
+      await page.evaluate(() => {
+        const planted = (tag: string, href: string, into: HTMLElement) => {
+          const element = document.createElement(tag);
+          element.setAttribute('href', href);
+          element.setAttribute('data-e2e-planted', '');
+          into.append(element);
+        };
+        planted('a', 'file:///planted/notes.txt', document.querySelector('[data-region="main"]') ?? document.body);
+        planted('span', 'maws-path:/planted/notes.txt', document.body);
+        planted('link', 'file:///planted/chunk.js', document.head);
+      });
+      await expect(addressed, 'the control: an anchor and a span planted in the window are found').toHaveCount(2);
+      await page.evaluate(() => document.querySelectorAll('[data-e2e-planted]').forEach((element) => element.remove()));
+      await expect(addressed, 'the control removed').toHaveCount(0);
+      await chip('by-url.txt').click();
+      const byUrl = side.locator(`[data-file-viewer][data-path="${file('by-url.txt')}"]`);
+      await expect(byUrl.locator('.cm-content'), 'the outside file the file: link names, read by the rule').toHaveText('Invented, linked as a file: URL.', { timeout: 20_000 });
+      await asItWas();
+
+      // L4 (R2): a relative link opens the file of that name in the session's working folder
+      const guidePath = join(repo.root, 'docs', 'guide.md');
+      const guide = main.locator('[data-chip="path"][title="docs/guide.md"]');
+      await expect(guide, 'the relative link drawn as a path link').toBeVisible();
+      await guide.click();
+      await expect(side.locator(`[data-file-viewer][data-path="${guidePath}"]`), 'opened at the working folder’s path').toBeVisible({ timeout: 20_000 });
+      await expect(side.locator(`[data-file-viewer][data-path="${guidePath}"]`)).toContainText(GUIDE, { timeout: 20_000 });
+
+      // L5, L7: a relative link to an outside file the transcript never writes whole opens its tab at the path it names,
+      // whose notice says why in the window, in three sentences, with the path, Copy path and the service's words small;
+      // no line begins with "Refused"; nothing of the file is read
+      const toSecretChip = main.locator(`[data-chip="path"][title="${toSecret}"]`);
+      await expect(toSecretChip).toBeVisible();
+      await toSecretChip.click();
+      const secret = side.locator(`[data-file-viewer][data-path="${file('secret.md')}"]`);
+      const notice = secret.locator('[data-refusal]');
+      await expect(notice, 'the first notice').toHaveAttribute('data-notice-cause', 'outside', { timeout: 20_000 });
+      await expect(notice).toHaveAttribute('role', 'alert');
+      await expect
+        .poll(() => notice.locator('p').allTextContents(), { message: 'the three sentences, the path, the service’s words' })
+        .toEqual([
+          'This file is outside the folders this session works in.',
+          "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+          'Ask the agent to send the file to see it here.',
+          file('secret.md'),
+          "path outside the session's directories",
+        ]);
+      await expect(notice.locator('[data-notice-copy]'), 'Copy path, after the path').toHaveText('Copy path');
+      await expect(notice.locator('[data-notice-retry]'), 'no Retry: trying again cannot help').toHaveCount(0);
+      await expect(notice.locator('[data-notice-detail]')).toHaveText("path outside the session's directories");
+      expect((await notice.locator('p').allTextContents()).filter((line) => line.startsWith('Refused') || line.startsWith('files.')), 'no line in the command’s words first').toEqual([]);
+      await expect(secret.locator('.cm-content'), 'nothing of the file is read').toHaveCount(0);
+      await asItWas();
+
       // A5: every other way is refused, and the bytes are read back
       const refusal = { ok: false, error: { code: 'internal', message: "path outside the session's directories" } };
       const read = (appSessionId: string, name: string, named: boolean) => invoke(page, 'files.read', { appSessionId: appSessionId as never, path: file(name), ...(named ? { named: true as const } : {}) });
@@ -1278,6 +1356,165 @@ test.describe('sessions', () => {
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; acceptance L12, R3): a session on this
+  // Mac whose transcript links a page on this Mac's loopback, which the scene serves itself (e2e/support/browser-server.ts,
+  // on 127.0.0.1). The Browser e2e harness registers its own openExternal, so the scene runs in the app. A click on
+  // `http://localhost:<port>/…` opens a Browser tab at that address beside the chat and writes no `openExternal` line to
+  // main's open seam (MAWS_E2E_OPEN_LOG), and the page loads from the scene's server; ⌘-click on a loopback address not
+  // yet open writes the line and opens no tab; `app.localhost` opens and loads as `localhost` does; a link off this Mac
+  // writes the line and opens no tab. Waits on the session's tabs as main lists them for it, the server's requests and
+  // the seam's lines. The last plain click is the barrier for the absences before it: the window's commands reach main
+  // in order, so once its tab is listed, a tab the ⌘-click or the outside link had opened would be listed too.
+  const loopbackLaunch = async (opts: { sid: string; reply: string }) => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const at = '2026-11-18T10:00:00.000Z';
+    const row = { cwd: repo.root, sessionId: opts.sid, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300' };
+    await store.addTranscript(repo.root, opts.sid, [
+      { ...row, type: 'user', uuid: 'u-u6b4b-1', parentUuid: null, message: { role: 'user', content: 'Where does the app run?' } },
+      {
+        ...row, type: 'assistant', uuid: 'a-u6b4b-1', parentUuid: 'u-u6b4b-1',
+        message: { id: 'msg_u6b4b001', type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: opts.reply }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+      },
+    ]);
+    const openLog = join(store.configHome, 'open.log');
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store, env: { MAWS_E2E_OPEN_LOG: openLog } });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    const [id] = await indexed(page, [opts.sid]);
+    await (await sidebarRow(page, { appSessionId: id! })).click();
+    // main's open seam: one line per URL main would hand the system browser
+    const handedOut = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n').filter((line) => line.startsWith('openExternal ')) : []);
+    // the session's own tabs, as main lists them for it (fix wave 1: scoped to the session)
+    const sessionTabs = async () => value(await invoke(page, 'browser.tabs.list', { appSessionId: id! as never })).tabs.map((tab) => tab.url);
+    const tabsAt = async (url: string) => (await sessionTabs()).filter((at) => at === url);
+    return { page, handedOut, tabsAt, sessionTabs };
+  };
+
+  test('a loopback link of a session on this Mac opens in its in-app browser beside the chat; ⌘-click opens it in the system browser', async () => {
+    const server = await startBrowserServer();
+    try {
+      const port = new URL(server.origin).port;
+      const APP = `http://localhost:${port}/marker.html`;
+      const STATUS = `http://localhost:${port}/c.html`; // ⌘-clicked only, never open in the app
+      const ADMIN = `http://app.localhost:${port}/b.html`;
+      const DOCS = 'https://example.test/docs';
+      const { page, handedOut, tabsAt, sessionTabs } = await loopbackLaunch({
+        sid: '5e551011-0000-4000-8000-0000000000f1',
+        reply: `It runs at [the app](${APP}), with [the status](${STATUS}) and [the admin](${ADMIN}); [the docs](${DOCS}) are elsewhere.`,
+      });
+      const main = page.locator('[data-region="main"]');
+      const link = (name: string) => main.getByRole('link', { name, exact: true });
+      await expect(link('the app')).toBeVisible({ timeout: 20_000 });
+
+      // a click: a tab of the session's browser at the address, beside the chat, whose page loads from the scene's server;
+      // nothing handed to the system browser
+      await link('the app').click();
+      await expect.poll(async () => (await tabsAt(APP)).length, { timeout: 20_000, message: 'a Browser tab at the link’s address' }).toBe(1);
+      await expect(sideColumn(page).locator('[data-surface="browser"]'), 'the Browser surface beside the chat').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => server.hits('/marker.html'), { timeout: 20_000, message: 'the page loaded in the tab' }).toBeGreaterThan(0);
+      expect(handedOut(), 'nothing reached the system browser').toEqual([]);
+      const before = await sessionTabs();
+
+      // ⌘-click on a loopback address not open: the system browser; then a link off this Mac: the system browser too
+      await link('the status').click({ modifiers: ['Meta'] });
+      await expect.poll(handedOut, { timeout: 20_000, message: '⌘-click hands the link to the system browser' }).toEqual([`openExternal ${STATUS}`]);
+      await link('the docs').click();
+      await expect.poll(handedOut, { timeout: 20_000, message: 'a link off this Mac reaches the system browser' }).toEqual([`openExternal ${STATUS}`, `openExternal ${DOCS}`]);
+
+      // `app.localhost` is this Mac's loopback too: its tab, its page loaded; and the session's tabs are what they were
+      // and that one, so neither the ⌘-click nor the outside link opened a tab
+      await link('the admin').click();
+      await expect.poll(async () => (await tabsAt(ADMIN)).length, { timeout: 20_000, message: 'a Browser tab at app.localhost' }).toBe(1);
+      await expect.poll(() => server.hits('/b.html'), { timeout: 20_000, message: 'its page loaded' }).toBeGreaterThan(0);
+      expect((await sessionTabs()).sort(), 'the session’s tabs: those before, and app.localhost’s').toEqual([...before, ADMIN].sort());
+      expect(server.hits('/c.html'), 'the ⌘-clicked page was never asked for here').toBe(0);
+      expect(handedOut(), 'and nothing more handed out').toEqual([`openExternal ${STATUS}`, `openExternal ${DOCS}`]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  // UX wave U6b-4b (§G; L12, decision 14): a terminal opens a link only on ⌘-click, and a loopback link printed in a
+  // terminal of a session on this Mac opens in its in-app browser, while a link off this Mac reaches the system browser
+  // (main's open seam). The terminal draws on a canvas and the app has no harness, so the scene finds each link's cell
+  // itself: the shell prints each address at a row and column the scene chooses (a cursor move after clearing the
+  // screen), says the terminal's rows and columns (`stty size`), and the cell's point is taken from the box of the
+  // terminal's `.xterm-screen`. What the shell printed is read from the terminals' e2e seam (`window.__maws_terminals`).
+  // Waits on the printed lines, the session's tabs as main lists them, and the seam's lines.
+  test('a loopback link ⌘-clicked in a terminal of a session on this Mac opens in its in-app browser; another link in the system browser', async () => {
+    const server = await startBrowserServer();
+    try {
+      const port = new URL(server.origin).port;
+      const LOCAL = `http://127.0.0.1:${port}/marker.html`;
+      const ELSEWHERE = 'https://example.org';
+      const [LOCAL_ROW, ELSEWHERE_ROW, COLUMN] = [6, 9, 4]; // where the shell prints each, one-based as the cursor moves are
+      const { page, handedOut, tabsAt, sessionTabs } = await loopbackLaunch({ sid: '5e551011-0000-4000-8000-0000000000f2', reply: 'The app runs in the terminal.' });
+      await expect(page.locator('[data-region="main"]').getByText('The app runs in the terminal.')).toBeVisible({ timeout: 20_000 });
+      await openSurface(page, 'Terminal');
+      const shown = surface(page, 'terminal').locator('[data-terminal-id]:visible');
+      await expect(shown, 'one terminal in view').toHaveCount(1, { timeout: 20_000 });
+      const id = (await shown.getAttribute('data-terminal-id'))!;
+      await expect(surface(page, 'terminal').getByText('Starting shell…', { exact: true }), 'the shell has started').toHaveCount(0, { timeout: 20_000 });
+      const lines = () => page.evaluate((tid) => (window as unknown as { __maws_terminals?: { lines(id: string): string[] | null } }).__maws_terminals?.lines(tid) ?? [], id);
+      // The screen cleared first, so the typed line is gone before the addresses are placed; then the size, on a line marked
+      // with the try's own number, so a line an earlier try left is never read as this one's (fix wave 1). A try is
+      // accepted once its marked line and both addresses at their rows are on the screen together, read in one reading.
+      type Placed = { rows: number; cols: number; viewport: string[] };
+      const placed = (written: string[], attempt: number): Placed | null => {
+        const marked = written.map((line) => new RegExp(`^U6B4B-SIZE-${attempt} (\\d+) (\\d+)$`).exec(line.trim())).find((match) => match !== null);
+        if (!marked) return null;
+        const [rows, cols] = [Number(marked[1]), Number(marked[2])];
+        const viewport = written.slice(-rows); // the buffer's last `rows` lines are the screen
+        const at = (row: number) => viewport[row - 1]?.slice(COLUMN - 1);
+        return at(LOCAL_ROW) === LOCAL && at(ELSEWHERE_ROW) === ELSEWHERE ? { rows, cols, viewport } : null;
+      };
+      let attempt = 0;
+      let screen: Placed | null = null;
+      await expect(async () => {
+        attempt += 1;
+        const command = `printf '\\033[2J\\033[${LOCAL_ROW};${COLUMN}H%s\\033[${ELSEWHERE_ROW};${COLUMN}H%s\\033[12;1H' '${LOCAL}' '${ELSEWHERE}'; printf 'U6B4B-SIZE-${attempt} %s\\n' "$(stty size)"`;
+        await surface(page, 'terminal').locator('[data-testid="terminal-surface"]').filter({ visible: true }).click();
+        await page.keyboard.type(command);
+        await page.keyboard.press('Enter');
+        const tried = attempt;
+        await expect.poll(async () => (screen = placed(await lines(), tried)) !== null, { timeout: 5_000 }).toBe(true);
+      }).toPass({ timeout: 30_000 });
+      const { rows, cols } = screen!;
+      // A ⌘-click a few cells into the address, once the link under the pointer is hovered: xterm marks its screen
+      // `xterm-cursor-pointer` while a link is hovered (@xterm/xterm 6.0.0, the linkifier's hover), so the click waits on
+      // that state rather than on a time. A hover that has not taken is moved again.
+      const commandClick = async (row: number) => {
+        const screenOf = surface(page, 'terminal').locator(`[data-terminal-id="${id}"] .xterm-screen`);
+        const box = (await screenOf.boundingBox())!;
+        const [x, y] = [box.x + (COLUMN - 1 + 6.5) * (box.width / cols), box.y + (row - 0.5) * (box.height / rows)];
+        await expect(async () => {
+          await page.mouse.move(x - 3, y);
+          await page.mouse.move(x, y);
+          await expect(screenOf, 'the link under the pointer hovered').toHaveClass(/\bxterm-cursor-pointer\b/, { timeout: 2_000 });
+        }).toPass({ timeout: 20_000 });
+        await page.keyboard.down('Meta');
+        await page.mouse.click(x, y);
+        await page.keyboard.up('Meta');
+      };
+
+      await commandClick(LOCAL_ROW);
+      await expect.poll(async () => (await tabsAt(LOCAL)).length, { timeout: 20_000, message: 'a Browser tab at the printed loopback address' }).toBe(1);
+      await expect.poll(() => server.hits('/marker.html'), { timeout: 20_000, message: 'the page loaded in it' }).toBeGreaterThan(0);
+      expect(handedOut(), 'nothing reached the system browser').toEqual([]);
+      const tabsBefore = await sessionTabs();
+
+      await openSurface(page, 'Terminal'); // the Browser took the side column's place
+      await expect(surface(page, 'terminal').locator(`[data-terminal-id="${id}"]`)).toBeVisible();
+      await commandClick(ELSEWHERE_ROW);
+      await expect.poll(handedOut, { timeout: 20_000, message: 'the other link reaches the system browser' }).toEqual([`openExternal ${ELSEWHERE}`]);
+      expect(await sessionTabs(), 'the session’s tabs as they were: the other link opened none').toEqual(tabsBefore);
+      expect(tabsBefore.filter((url) => url === LOCAL), 'and the loopback one is there once').toHaveLength(1);
+    } finally {
+      await server.close();
     }
   });
 
