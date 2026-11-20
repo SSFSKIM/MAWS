@@ -26,22 +26,33 @@ type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 
 export function Tip({ content, description, children, ...guard }: { content: ReactNode; description?: string | null; children: Owner } & ClickGuard) {
   const descriptionId = useId();
-  const [open, setOpen] = useState(false); // what pointing and focus ask; shown only while there is content
+  // What pointing and focus ask, handed to Radix as is, so its close requests always arrive (it drops a close while
+  // its controlled `open` is already false); with no content, nothing is drawn while it holds.
+  const [open, setOpen] = useState(false);
   const shows = content !== null && content !== undefined && content !== '';
   const described = description !== undefined && description !== null && description !== '';
-  // the owner's own descriptions first, then this one, on the owner itself (its props win over the trigger's)
-  const describedBy = [children.props['aria-describedby'], described ? descriptionId : null].filter((ids) => ids).join(' ');
+  const own = children.props['aria-describedby'];
+  // The owner's own descriptions first, then this one, set on the owner itself (its props win over the trigger's). With
+  // no description of its own the owner is left alone, so an open tooltip describes it through Radix; with nothing to
+  // show either, the owner keeps only its own, never Radix's id of a tooltip that is not drawn.
+  const owner = described
+    ? cloneElement(children, { 'aria-describedby': [own, descriptionId].filter((ids) => ids).join(' ') })
+    : shows
+      ? children
+      : cloneElement(children, { 'aria-describedby': own });
   return (
     <Tooltip.Provider delayDuration={POINTING_DELAY_MS}>
-      <Tooltip.Root open={open && shows} onOpenChange={setOpen}>
+      <Tooltip.Root open={open} onOpenChange={setOpen}>
         <Tooltip.Trigger asChild {...guard}>
-          {cloneElement(children, { 'aria-describedby': describedBy === '' ? undefined : describedBy })}
+          {owner}
         </Tooltip.Trigger>
-        <Tooltip.Portal>
-          <Tooltip.Content side="top" sideOffset={4} collisionPadding={8} className={TIP}>
-            {content}
-          </Tooltip.Content>
-        </Tooltip.Portal>
+        {shows && (
+          <Tooltip.Portal>
+            <Tooltip.Content side="top" sideOffset={4} collisionPadding={8} className={TIP}>
+              {content}
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        )}
       </Tooltip.Root>
       {described && (
         <span id={descriptionId} hidden>

@@ -68,6 +68,21 @@ describe('Tip', () => {
   });
 });
 
+describe('Tip without a description of its own', () => {
+  it('leaves its owner described by the open tooltip on focus', async () => {
+    render(
+      <Tip content={FACT}>
+        <span tabIndex={0}>Blocked in macOS</span>
+      </Tip>,
+    );
+    const chip = screen.getByText('Blocked in macOS');
+    expect(chip.hasAttribute('aria-describedby')).toBe(false);
+    await user().tab();
+    expect(tooltip()).toBe(FACT);
+    expect(chip.getAttribute('aria-describedby')).toBe(screen.getByRole('tooltip').id);
+  });
+});
+
 describe('UnavailableButton', () => {
   it('leaves an available control as it is', () => {
     render(
@@ -101,6 +116,26 @@ describe('UnavailableButton', () => {
     expect(document.activeElement).toBe(button);
     expect(button.hasAttribute('aria-disabled')).toBe(false);
     expect(button.hasAttribute('aria-describedby')).toBe(false);
+    expect(tooltip()).toBeNull();
+  });
+
+  it('stays closed for a reason that arrives after focus has left the control', async () => {
+    const Commit = ({ reason }: { reason: string | null }) => (
+      <>
+        <UnavailableButton reason={reason}>
+          <button type="button">Commit</button>
+        </UnavailableButton>
+        <button type="button">After</button>
+      </>
+    );
+    const view = render(<Commit reason={null} />);
+    const keys = user();
+    await keys.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Commit' }));
+    await keys.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'After' }));
+    view.rerender(<Commit reason="Still busy" />);
+    expect(screen.getByRole('button', { name: 'Commit', description: 'Still busy' })).toBeTruthy();
     expect(tooltip()).toBeNull();
   });
 
