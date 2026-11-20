@@ -47,9 +47,9 @@ function useRail(session: DeckSession | null) {
   return useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().rail ?? null);
 }
 
-function DesignBody({ artifactId, state, scope, visible, onShown, compact }: DesignEditorBodyProps & { compact: boolean }) {
+function DesignBody({ artifactId, machine, state, scope, visible, onShown, compact }: DesignEditorBodyProps & { compact: boolean }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
-  const row = useLibraryRow(artifactId).value;
+  const row = useLibraryRow(artifactId, machine).value;
   const title = row?.title ?? 'Design';
   useEffect(() => state.setTitle(title), [state, title]);
   const session = snapshot.session;
@@ -61,26 +61,26 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
   const exportBoard = useSyncExternalStore(state.view.subscribe, () => state.view.snapshot().frame);
   const activeBoard = useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().currentSlide ?? null);
   const shownBoard = exportShown !== null && exportShown !== 'compare' ? exportShown.board : (exportBoard ?? activeBoard);
-  const exports = useMemo(() => designExports({ shown: exportShown, board: shownBoard }, (entry) => void runDesignExport(artifactId, entry, state.exportContext())), [exportShown, shownBoard, state, artifactId]);
+  const exports = useMemo(() => designExports({ shown: exportShown, board: shownBoard }, (entry) => void runDesignExport(artifactId, machine, entry, state.exportContext())), [exportShown, shownBoard, state, artifactId, machine]);
   const header = designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null, exports, previewing: exportShown !== null }, commands);
-  const sendTo = useSendToAction(sendToSubject(artifactId, 'design', row?.title, exportShown, shownBoard)); // P4-B5: a PNG sent pictures the board Export would
+  const sendTo = useSendToAction(sendToSubject(artifactId, machine, 'design', row?.title, exportShown, shownBoard)); // P4-B5: a PNG sent pictures the board Export would
   useEditorHost(scope, sendTo ? { ...header, actions: [...(header.actions ?? []), sendTo] } : header);
 
   // M4: comments go to the session the main area shows (its Side thread, or its conversation). P3-F (L230): with none
   // shown, to the design's own context, as the document's and the deck's (P3-F1); not offered only while that is unread
-  const target = useArtifactCommentTarget(artifactId);
+  const target = useArtifactCommentTarget(artifactId, machine);
   // P4-B2 (D16): X36's draft rule and the tab state's card host id, as the deck's
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design', hostId: state.commentHostId }); // UX wave U5a: X36's draft rule is every card host's
+  const comments = useDocumentComments({ artifactId, machine, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design', hostId: state.commentHostId }); // UX wave U5a: X36's draft rule is every card host's
   // M4: the history over the tab's api and replica, the pill counting the design's projection
   const handle = snapshot.handle;
   const history = useMemo(() => (state.designHistory && handle ? { api: state.designHistory, handle, countChanges: countDesignChanges } : undefined), [state.designHistory, handle]);
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
-  const system = useDeckSystem(placement);
-  const systemRows = useLibraryList({ kind: 'design_system' }).value?.rows;
+  const system = useDeckSystem(placement, machine);
+  const systemRows = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   const theme = useMemo(
-    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, id) }),
-    [systemRows, row?.designSystemId, artifactId],
+    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, machine, id) }),
+    [systemRows, row?.designSystemId, artifactId, machine],
   );
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
   const assetUrlAt = useCallback((ref: string, revision: number) => state.host.assetUrl(artifactId, ref, revision), [state, artifactId]); // M4: a version's assets
@@ -110,7 +110,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
     },
     [session],
   );
-  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4: an open's place (a link's board or version)
+  const reveal = useOpenRequest(artifactId, machine, scope.surface); // P4-B4: an open's place (a link's board or version)
 
   if (snapshot.failed !== null) return <Notice>{`This design could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.handle || !session) return <Notice>Opening the design…</Notice>;
@@ -132,7 +132,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         onCanvases={state.setCanvases}
         comments={target === null ? undefined : comments /* P3-F (L230) */}
         history={history}
-        versionExports={history ? (versionId) => designVersionExports(artifactId, versionId, state.exportContext(), history.api) : undefined}
+        versionExports={history ? (versionId) => designVersionExports(artifactId, machine, versionId, state.exportContext(), history.api) : undefined}
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
         reveal={reveal} /* P4-B4 */

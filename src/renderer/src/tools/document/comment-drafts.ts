@@ -4,13 +4,16 @@
 // decision 17): the comment lives in the card's pass (`side/card/store.ts`), which a document's host keeps at one unsent
 // comment (`holds: 'one'`); these are readers over it, so the editor's Comment (`DocumentComments.draft`), the tab's close
 // guard and the card read the same text. Kept outside React: the tab state reads it without a body on screen.
+import { artifactKey } from '../../artifacts/machines';
+import type { MachineRef } from '@shared/machine/ref';
 import { useCommentCard, type PassComment } from '../../side/card/store';
 
 /** The artifact's unsent comment (not in flight), whatever its text, and its pass; null when there is none. */
-export function unsentCommentOf(artifactId: string): { pass: string; comment: PassComment; threadId: string } | null {
+export function unsentCommentOf(artifactId: string, machine: MachineRef): { pass: string; comment: PassComment; threadId: string } | null {
+  const subject = artifactKey(artifactId, machine);
   let found: { pass: string; comment: PassComment; threadId: string } | null = null;
   for (const [key, pass] of useCommentCard.getState().passes) {
-    if (pass.host !== 'artifact' || pass.subject !== artifactId) continue;
+    if (pass.host !== 'artifact' || pass.subject !== subject) continue;
     for (const comment of pass.comments) {
       const { anchor } = comment;
       if (comment.flight === null && anchor.kind === 'artifact-comment' && anchor.threadId !== undefined) found = { pass: key, comment, threadId: anchor.threadId };
@@ -20,7 +23,7 @@ export function unsentCommentOf(artifactId: string): { pass: string; comment: Pa
 }
 
 /** The artifact's unsent comment with text in it: the thread it is on and the text; null when there is none. */
-export function commentDraftOf(artifactId: string): { threadId: string; text: string } | null {
-  const unsent = unsentCommentOf(artifactId);
+export function commentDraftOf(artifactId: string, machine: MachineRef): { threadId: string; text: string } | null {
+  const unsent = unsentCommentOf(artifactId, machine);
   return unsent && unsent.comment.text.trim() !== '' ? { threadId: unsent.threadId, text: unsent.comment.text } : null;
 }

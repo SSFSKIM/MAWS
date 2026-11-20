@@ -4,6 +4,7 @@
 // new ones before letting the old go, and a hold the host's restart took is taken again on the same immutable refs. The
 // live document is held by its own current descriptors and takes no preview hold. Retention is modelled as the store's
 // rule (holds.test.ts, retention.test.ts): a snapshot no longer current, no longer pinned and not held is collected.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -55,7 +56,7 @@ function world() {
     on: (() => () => {}) as unknown as MawsBridge['on'],
   };
   const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm: () => true, sessionTitle: () => undefined, sessions: () => [] };
-  const tab = new DashboardTabState({ artifactId: A, kind: 'dashboard', surface: 'panel' }, deps);
+  const tab = new DashboardTabState({ artifactId: A, machine: TEST_MACHINE, kind: 'dashboard', surface: 'panel' }, deps);
   tabs.push(tab);
   // the store's collection of retired snapshots no current descriptor or version names: only a hold keeps them
   const collect = (retired: string[]) => {

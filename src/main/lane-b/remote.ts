@@ -495,6 +495,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   // P5 O7 M5a: artifacts
   const artifacts = createRemoteArtifacts({
     remote: deps.remote,
+    local: deps.local, // the fix wave's review: a frame URL naming this Mac is served here alone
     onRemote: deps.onRemote,
     emit: deps.emit,
     machines: deps.artifactMachines ?? new ArtifactMachines(),

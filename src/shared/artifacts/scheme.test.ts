@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artifactUrl, parseArtifactUrl } from './scheme';
+import { artifactUrl, artifactUrlOn, machineOfArtifactUrl, parseArtifactUrl } from './scheme';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 
@@ -33,5 +33,27 @@ describe('maws-artifact: URLs (Decision Log 14)', () => {
     ]) {
       expect(parseArtifactUrl(url), url).toBeNull();
     }
+  });
+});
+
+// The fix wave's review: a viewer's frame names its machine in the query, which every other reader ignores.
+describe('a URL that names its machine', () => {
+  const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
+  const MACHINE = 'MiniMachineRef00000000';
+
+  it('reads the machine it names, and parses as the same file', () => {
+    const named = artifactUrlOn(ID, 4, 'index.html', MACHINE);
+    expect(named).toBe(`${artifactUrl(ID, 4, 'index.html')}?machine=${MACHINE}`);
+    expect(machineOfArtifactUrl(named)).toBe(MACHINE);
+    expect(machineOfArtifactUrl(`${named}#top`)).toBe(MACHINE);
+    expect(parseArtifactUrl(named)).toEqual(parseArtifactUrl(artifactUrl(ID, 4, 'index.html')));
+  });
+
+  it('names none for a bare URL, a short or malformed ref, or a machine word in the path', () => {
+    expect(machineOfArtifactUrl(artifactUrl(ID, 4, 'index.html'))).toBeNull();
+    expect(machineOfArtifactUrl(`${artifactUrl(ID, 4, 'index.html')}?machine=short`)).toBeNull();
+    expect(machineOfArtifactUrl(`${artifactUrl(ID, 4, 'index.html')}?machine=${MACHINE}%2F`)).toBeNull();
+    expect(machineOfArtifactUrl(artifactUrl(ID, 4, `machine=${MACHINE}`))).toBeNull();
+    expect(machineOfArtifactUrl(`https://example.test/?machine=${MACHINE}`)).toBeNull();
   });
 });

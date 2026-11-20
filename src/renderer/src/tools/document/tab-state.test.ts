@@ -14,9 +14,10 @@ import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { newDoc } from '@artifacts/yjs';
 import type { CommandName, EventName, EventSource, MawsBridge } from '@shared/ipc/schema';
-import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices'; // P3-F (F7)
 import { useCommentCard } from '../../side/card/store'; // P4-B1; UX wave U5a: the unsent comment is the card's pass's
+import { artifactKey } from '../../artifacts/machines';
 import { holdArtifactEditorState, releaseArtifactEditorState } from '../../artifacts/registry'; // UX wave U5a
 import { docPage, dsOverrides } from '@artifacts/document/meta'; // UX wave U10b
 import { DocumentTabState, EXPORT_ACK_WAIT_MS, type DocumentTabDeps } from './tab-state';
@@ -93,7 +94,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
     for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
   };
   const open = () => {
-    const state = new DocumentTabState({ artifactId: A, kind: 'document', surface: 'panel' }, deps);
+    const state = new DocumentTabState({ artifactId: A, machine: TEST_MACHINE, kind: 'document', surface: 'panel' }, deps);
     states.push(state);
     return state;
   };
@@ -483,7 +484,7 @@ describe('a document tab’s state', () => {
           'the pass',
           {
             host: 'artifact',
-            subject: A,
+            subject: artifactKey(A, TEST_MACHINE),
             appSessionId: 'a1111111-1111-4111-8111-111111111111' as AppSessionId,
             toMain: false,
             comments: [{ id: '1', anchor: { kind: 'artifact-comment', locator: 'ships quarterly', label: 'Launch plan', artifactId: A, threadId: 'k2m9x0qa' }, text, screenshot: null, rect: null, flight: null, refused: null }],
@@ -510,17 +511,17 @@ describe('a document tab’s state', () => {
 
   // P4-B3 (its Decision Log 39); UX wave U5a: with another view of the document open, the comment outlives this tab's
   // close (its pass ends with the artifact's last view), so this tab's guard does not ask about it.
-  it('does not ask about the unsent comment while another view of the document is open', async () => {
+  it.each([[TEST_MACHINE, true], [OTHER_MACHINE, false]] as const)('guards the last view of the copy, with a second view on %s', async (other, canClose) => {
     const w = world();
     const state = w.open();
     await ready(state);
     const views = { Panel: () => null, createState: () => null };
-    holdArtifactEditorState({ surface: 'panel', tabId: 'view-1' }, A, 'document', views);
-    holdArtifactEditorState({ surface: 'main', tabId: 'view-2' }, A, 'document', views);
+    holdArtifactEditorState({ surface: 'panel', tabId: 'view-1' }, A, TEST_MACHINE, 'document', views);
+    holdArtifactEditorState({ surface: 'main', tabId: 'view-2' }, A, other, 'document', views);
     try {
       unsent('Monthly?');
-      expect(await state.closeGuard()).toBe(true);
-      expect(w.confirm).not.toHaveBeenCalled();
+      expect(await state.closeGuard()).toBe(canClose);
+      expect(w.confirm).toHaveBeenCalledTimes(canClose ? 0 : 1);
     } finally {
       releaseArtifactEditorState({ surface: 'panel', tabId: 'view-1' });
       releaseArtifactEditorState({ surface: 'main', tabId: 'view-2' });

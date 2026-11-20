@@ -1,6 +1,7 @@
 // P4-B5 review: the design header's Send to sends what its Export would picture: the board selected (its frame, else the
 // active board) and, while the history previews a version, that version's board. Mounted as an `artifact` main tab
 // mounts it (as ./comments.test.tsx does), the header's registration read and its Send to chosen.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { Awareness } from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,11 +53,11 @@ async function mount(): Promise<DesignTabState> {
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
   off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
   const editor = artifactEditorFor('design')!;
-  const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, 'design', editor as never);
+  const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, TEST_MACHINE, 'design', editor as never);
   const Main = editor.Main;
   render(
     <EditorHostScopeContext.Provider value={scope}>
-      <Main artifactId={DESIGN} state={hold.state} scope={scope} visible onShown={() => {}} />
+      <Main artifactId={DESIGN} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
     </EditorHostScopeContext.Provider>,
   );
   await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());

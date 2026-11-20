@@ -21,7 +21,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
 import { consentMessage } from '../src/shared/engine/arrival';
-import { askedSteerStopJournal, asyncAsk, blockedTurnJournal, invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { askedSteerStopJournal, asyncAsk, blockedTurnJournal, invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopThenQueueJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
 import { askSteerText } from '../src/shared/maws/ask';
@@ -950,6 +950,76 @@ test('U4a, Stop: the square holds both waiting messages, the stack reads Held un
   const released = async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.priority === undefined && (f.message?.content === first || f.message?.content === second)).map((f) => f.message?.content);
   await expect.poll(released).toEqual([first, second]); // the oldest at once (seq 199), the next when its turn ends
   await expect(list).toHaveCount(0);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// Board ticket 790 (src/engine-host/queue.ts, `MessageQueue.stop`): a Stop with nothing waiting pauses the queue for
+// its phase alone. Once the stopped turn has ended the pause holds nothing and ends, so a message the person then queues
+// behind the next turn goes at that turn's end by itself: no Resume, and no row reads Held (`stopThenQueueJournal`; the
+// next turn runs until the test's own context read, recorded before its result).
+test('ticket 790, Stop with nothing waiting: the pause ends with the stopped turn, and a message queued behind the next turn goes at its end with no Resume, never reading Held', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'ticket-790-stop-then-queue';
+  await countRunning(page, id, stopThenQueueJournal(scratch, id));
+  const list = stackOf(page, 0);
+  type Row = { direction: string; frame: Record<string, unknown> };
+  const rows = async (): Promise<Row[]> =>
+    readFileSync((await statusOf(page, id)).journalPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Row);
+  const isInterrupt = (r: Row) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame.request as { subtype?: string }).subtype === 'interrupt';
+  await expect(list).toHaveCount(0);
+  await expect(control(page, 0)).toHaveAttribute('data-submit-state', 'stop');
+  await control(page, 0).click(); // the square, with nothing waiting: the interrupt alone
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  const controls = (await outFrames(page, id)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype);
+  expect(controls).toContain('interrupt');
+  expect(controls, 'nothing was waiting to withdraw').not.toContain('cancel_async_message');
+  await expect.poll(async () => (await queueOf(page, id)).paused, 'the pause held nothing and ended with the stopped turn').toBe(false);
+  await expect(list).toHaveCount(0);
+  // the app's own context read after the stopped turn, answered by the replay before the person's send, so the read the
+  // replay holds the next turn at is the test's
+  await expect
+    .poll(async () => {
+      const all = await rows();
+      return all.slice(all.findIndex(isInterrupt)).some((r) => r.direction === 'meta' && r.frame.event === 'replay_unrecorded_read' && r.frame.subtype === 'get_context_usage');
+    })
+    .toBe(true);
+
+  const [next, later] = ['Now reply exactly NEXT.', 'Then reply exactly LATER.'];
+  await messageIn(page, 0).click(); // the square's click took the keyboard
+  await page.keyboard.type(next);
+  await expect(messageIn(page, 0)).toHaveText(next);
+  await page.keyboard.press('Enter'); // idle: sent at once, the next turn
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  await expect.poll(async () => (await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === next)).toBe(true);
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  await page.keyboard.type(later);
+  await expect(messageIn(page, 0)).toHaveText(later);
+  await page.keyboard.press('Meta+Enter'); // for after the turn: MAWS's queue holds it
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  const row = list.locator('li');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute('data-queue-state', 'after');
+  await expect(row.locator('[data-mark]')).toHaveText('After the turn');
+  await expect(row).toContainText(later);
+  await expect(list, 'no pause line: the stack has no header while nothing is paused').not.toContainText('Queue paused');
+  expect((await queueOf(page, id)).paused).toBe(false);
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'kept for after the turn, not written while it runs').toBe(false);
+
+  // the turn ends (the replay plays its result after the test's read): the message goes by itself, its row leaves
+  value(await invoke(page, 'session.getContextUsage', { appSessionId: id as never, detail: 'summary' }));
+  await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.message?.content === later)).toHaveLength(1);
+  await expect(list).toHaveCount(0);
+  await expect(list.locator('li[data-queue-state="held"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Resume', exact: true }), 'no Resume to press').toHaveCount(0);
+  expect((await queueOf(page, id)).paused).toBe(false);
+  const all = await rows();
+  const results = all.flatMap((r, k) => (r.direction === 'in' && r.frame.type === 'result' ? [k] : []));
+  const written = all.findIndex((r) => r.direction === 'out' && r.frame.type === 'user' && (r.frame.message as { content?: unknown } | undefined)?.content === later);
+  expect(results.length, 'the stopped turn’s result and the next turn’s').toBeGreaterThanOrEqual(2);
+  expect(written, 'written after the next turn’s result').toBeGreaterThan(results[1]!);
   expect(editor.consoleErrors()).toEqual([]);
 });
 

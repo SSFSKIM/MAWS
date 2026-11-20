@@ -22,6 +22,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { create } from 'zustand';
 import type { PassageRect } from '@artifacts/document/editor/comments/surface';
+import type { MachineRef } from '@shared/machine/ref';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TrustState } from '@shared/sessions/trust'; // P3-F F4
 import { NO_SESSION_CONTEXT, startArtifactSession, useArtifactSessionContext, type ArtifactSessionContext, type ArtifactSessionEnd, type StartTrust } from '../../artifacts/session-context'; // P3-F F4: StartTrust
@@ -51,12 +52,12 @@ export type ArtifactCommentTarget = { appSessionId: AppSessionId } | { context: 
  * artifact's library row, or the Spaces an artifact in a Space needs, are still unread (comments are not offered then,
  * so the card never says "no context" of an artifact it has not read yet).
  */
-export function useArtifactCommentTarget(artifactId: string): ArtifactCommentTarget | null {
+export function useArtifactCommentTarget(artifactId: string, machine: MachineRef): ArtifactCommentTarget | null {
   const shown = useLayout((s) => shownSession(s.main));
-  const row = useLibraryRow(shown === null ? artifactId : null);
-  const spaces = useLibrarySpaces();
+  const row = useLibraryRow(shown === null ? artifactId : null, machine);
+  const spaces = useLibrarySpaces(machine);
   const artifact = shown === null ? (row.value ?? null) : null;
-  const context = useArtifactSessionContext(artifact);
+  const context = useArtifactSessionContext(artifact, machine);
   const rowUnread = row.value === undefined && row.status !== 'error';
   const spacesUnread = artifact?.spaceId !== undefined && spaces.value === undefined && spaces.status !== 'error';
   const waiting = shown === null && (rowUnread || spacesUnread);
@@ -69,9 +70,9 @@ export function useArtifactCommentTarget(artifactId: string): ArtifactCommentTar
     if (shown !== null) return { appSessionId: shown };
     if (waiting) return null;
     if (kind === 'session' && own !== null) return { context: { kind, appSessionId: own } };
-    if (kind === 'directory' && path !== null) return { context: { kind, path, projectId } };
+    if (kind === 'directory' && path !== null) return { context: { kind, machine, path, projectId } };
     return { context: { kind: 'none' } };
-  }, [shown, waiting, kind, own, path, projectId]);
+  }, [shown, waiting, kind, own, path, projectId, machine]);
 }
 
 // ---- the pending comment -----------------------------------------------------------------------------------------------
@@ -103,7 +104,7 @@ interface Starts {
   running: Promise<ArtifactSessionEnd> | null;
 }
 const starts = new Map<string, Starts>();
-const startKey = (artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>) => JSON.stringify([artifactId, context.path, context.projectId]);
+const startKey = (artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>) => JSON.stringify([context.machine, artifactId, context.path, context.projectId]);
 
 // P3-F F4: `trust`, the owner's answer to the trust card the last start met (a start already on its way is joined as is)
 function startIn(artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>, trust?: StartTrust): Promise<ArtifactSessionEnd> {

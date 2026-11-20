@@ -137,22 +137,23 @@ const nameOf = (machine: MachineRef | null, machines = useMachines.getState().ma
 export const machineNameOf = (machine: MachineRef): string => nameOf(machine);
 
 /** The same, read now (outside a render). */
-export function remoteGreyedOf(artifactId: string, needs: RemoteNeeds): string | null {
-  const machine = artifactMachineOf(artifactId);
+export function remoteGreyedOf(artifactId: string, needs: RemoteNeeds, on?: MachineRef): string | null {
+  const machine = on === undefined ? artifactMachineOf(artifactId) : on === ipc.localMachine ? null : on;
   return remoteGreyed(needs, { machine, name: nameOf(machine), rights: rightsOf(useRemoteLaneB.getState().links, machine), notOffered: useNotOffered.getState().refused });
 }
 
 /** A dashboard's live pause when its artifact's machine doesn't offer the connector surface it leases; null when it does
  * or the artifact is this Mac's (acceptance 6: the dashboard says it in the Connectors sheet's words). */
-export function leaseNotOfferedPause(artifactId: string): LivePause | null {
-  const machine = artifactMachineOf(artifactId);
+export function leaseNotOfferedPause(artifactId: string, on?: MachineRef): LivePause | null {
+  const machine = on === undefined ? artifactMachineOf(artifactId) : on === ipc.localMachine ? null : on;
   if (machine === null || !LEASE_NEEDS.commands.some((command) => useNotOffered.getState().refused.has(offerKey(machine, command)))) return null;
   return notOfferedPause(nameOf(machine));
 }
 
 /** The same, followed in a render. */
-export function useRemoteGreyed(artifactId: string | null, needs: RemoteNeeds): string | null {
-  const machine = useArtifactMachine(artifactId);
+export function useRemoteGreyed(artifactId: string | null, needs: RemoteNeeds, on?: MachineRef): string | null {
+  const hint = useArtifactMachine(on === undefined ? artifactId : null);
+  const machine = on === undefined ? hint : on === ipc.localMachine ? null : on;
   const rights = useRemoteLaneB((s) => rightsOf(s.links, machine));
   const notOffered = useNotOffered((s) => s.refused);
   const name = useMachines((s) => nameOf(machine, s.machines));
@@ -160,8 +161,9 @@ export function useRemoteGreyed(artifactId: string | null, needs: RemoteNeeds): 
 }
 
 /** The artifact's machine's name when it is another machine's; null for this Mac's. */
-export function useRemoteMachineName(artifactId: string | null): string | null {
-  const machine = useArtifactMachine(artifactId);
+export function useRemoteMachineName(artifactId: string | null, on?: MachineRef): string | null {
+  const hint = useArtifactMachine(on === undefined ? artifactId : null);
+  const machine = on === undefined ? hint : on === ipc.localMachine ? null : on;
   return useMachines((s) => (machine === null ? null : nameOf(machine, s.machines)));
 }
 

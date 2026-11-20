@@ -1,6 +1,7 @@
 // P3-C M4 fix wave 1 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Shell"; X32's lifetime rule): a deck
 // tab's state lives with the tab, not its body. Its close guard answers with no body mounted, its disposal waits for the
 // host's acknowledgement of every edit before closing the replica, and a restore it did not witness clears its undo.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { Awareness } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -56,7 +57,7 @@ class FakeHandle implements DocumentHandle {
 async function opened(confirmDiscard = vi.fn(async () => false), saveWaitMs = 30) {
   const handle = new FakeHandle();
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
-  const state = new DeckTabState({ artifactId: 'deck-1', kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard, saveWaitMs, savingShownMs: 10 });
+  const state = new DeckTabState({ artifactId: 'deck-1', machine: TEST_MACHINE, kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard, saveWaitMs, savingShownMs: 10 });
   await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
   return { handle, state, confirmDiscard };
 }
@@ -131,7 +132,7 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
   it('cancels its replica’s open when disposed before it synced', async () => {
     const signals: AbortSignal[] = [];
     const host = { open: vi.fn((_id: string, options?: { signal?: AbortSignal }) => (signals.push(options!.signal!), new Promise(() => {}))), identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
-    const state = new DeckTabState({ artifactId: 'deck-1', kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard: vi.fn(async () => false), saveWaitMs: 30, savingShownMs: 10 });
+    const state = new DeckTabState({ artifactId: 'deck-1', machine: TEST_MACHINE, kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard: vi.fn(async () => false), saveWaitMs: 30, savingShownMs: 10 });
     await vi.waitFor(() => expect(signals).toHaveLength(1));
     expect(signals[0]!.aborted).toBe(false);
     state.dispose();
@@ -249,7 +250,7 @@ describe('a deck moved between the panel and a main tab', () => {
     const off = registerPresentationEditor(() => ({ host, log: () => {}, confirmDiscard: async () => false, savingShownMs: 10 }));
     const panel = { surface: 'panel', tabId: 'p1' } as const;
     const main = { surface: 'main', tabId: 'artifact:deck-1' } as const;
-    const { state } = holdArtifactEditorState<DeckTabState>(panel, 'deck-1', 'presentation', artifactEditorFor('presentation') as never);
+    const { state } = holdArtifactEditorState<DeckTabState>(panel, 'deck-1', TEST_MACHINE, 'presentation', artifactEditorFor('presentation') as never);
     await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
     const session = state.snapshot().session!;
     session.select(['p']);
@@ -259,7 +260,7 @@ describe('a deck moved between the panel and a main tab', () => {
 
     stageArtifactEditorState(panel);
     releaseArtifactEditorState(panel); // the source lets go
-    adoptStagedArtifactEditorState('deck-1', main);
+    adoptStagedArtifactEditorState('deck-1', TEST_MACHINE, main);
     expect(heldArtifactEditorState(main)?.state).toBe(state);
     expect(state.surface).toBe('main');
     expect(state.snapshot().session).toBe(session);

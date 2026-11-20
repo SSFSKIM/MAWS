@@ -34,7 +34,9 @@ import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type 
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ConnectorOwnerAck, ConnectorServerRow } from '@shared/ipc/schema/connectors';
 import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
+import { ipc } from '../../../../ipc/client';
 import { artifactMachineOf } from '../../../../artifacts/machines';
+import type { MachineRef } from '@shared/machine/ref';
 import { machineNameOf, remoteGreyedOf, remoteRefusalWords, SERVER_NEEDS } from '../../../../artifacts/remote-surfaces';
 import { ArtifactCommandError } from '../../../../artifacts/command-error';
 import type { ArtifactSessionContext, ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
@@ -75,6 +77,7 @@ export interface ConnectorsView {
 }
 
 export interface ConnectorsTabDeps {
+  machine?: MachineRef;
   host: Pick<ArtifactHost, 'openConnectors' | 'connectorGrants' | 'grantConnectorTool' | 'revokeConnectorTool'>;
   startSession(context: ArtifactSessionContext, previous: AppSessionId | null): Promise<ArtifactSessionStart>;
   log?(line: string): void;
@@ -109,6 +112,12 @@ export class ConnectorsTab {
   private disposed = false;
   private serverReads = 0; // P3-HD M3c2: the latest rows read's serial
   private unlistenServers: (() => void) | null = null; // P3-HD M3c2
+
+  get machine(): MachineRef | undefined { return this.deps.machine; }
+
+  private remoteMachine(): MachineRef | null {
+    return this.machine === undefined ? artifactMachineOf(this.artifactId) : this.machine === ipc.localMachine ? null : this.machine;
+  }
 
   constructor(
     readonly artifactId: string,
@@ -222,14 +231,14 @@ export class ConnectorsTab {
    * once shown they are marked stale instead (P5 O7 M5c review 1).
    */
   serversMoved(): Promise<void> {
-    if (artifactMachineOf(this.artifactId) === null) return this.readServers();
+    if (this.remoteMachine() === null) return this.readServers();
     if (this.view.getState().serversAsked && !this.disposed) this.update({ serversStale: true });
     return Promise.resolve();
   }
 
   private async readServers(): Promise<void> {
     const { owner } = this.deps;
-    if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return; // P5 O7 M5c: the sheet says why
+    if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS, this.machine) !== null) return; // P5 O7 M5c: the sheet says why
     const serial = ++this.serverReads;
     const current = () => !this.disposed && serial === this.serverReads;
     try {
@@ -240,7 +249,7 @@ export class ConnectorsTab {
       if (!current()) return;
       this.deps.log?.(`the connector servers of ${this.artifactId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
       // P5 O7 M5c review 1: another machine's read failed, so its rows (if any) are older, and only Refresh reads again
-      this.update({ servers: { ...this.view.getState().servers, failed: true }, ...(artifactMachineOf(this.artifactId) === null ? {} : { serversStale: true }) });
+      this.update({ servers: { ...this.view.getState().servers, failed: true }, ...(this.remoteMachine() === null ? {} : { serversStale: true }) });
     }
   }
 
@@ -267,7 +276,7 @@ export class ConnectorsTab {
 
   private async ownerGesture(target: string, run: (owner: ConnectorsOwner) => Promise<ConnectorOwnerAck>): Promise<void> {
     const { owner } = this.deps;
-    if (!owner || this.disposed || this.view.getState().serverBusy !== null || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return;
+    if (!owner || this.disposed || this.view.getState().serverBusy !== null || remoteGreyedOf(this.artifactId, SERVER_NEEDS, this.machine) !== null) return;
     this.update({ serverBusy: target });
     let refused: ServersView['refused'];
     try {
@@ -276,7 +285,7 @@ export class ConnectorsTab {
     } catch (error) {
       this.deps.log?.(`a connector server action failed: ${error instanceof Error ? error.message : String(error)}`);
       // P5 O7 M5c: another machine's refusal in its own words (a right it lacks, a cancelled confirmation, the link down)
-      const machine = artifactMachineOf(this.artifactId);
+      const machine = this.remoteMachine();
       refused = machine !== null && error instanceof ArtifactCommandError ? { target, why: null, words: remoteRefusalWords(error.error, machineNameOf(machine)) } : { target, why: 'stale' };
     }
     if (this.disposed) return;
@@ -317,7 +326,7 @@ export class ConnectorsTab {
       this.deps.log?.(`a connector gesture on ${tool.server} · ${tool.tool} failed: ${error instanceof Error ? error.message : String(error)}`);
       refusal = { ok: false, state: 'failed', reason: 'routeFailed' };
       // P5 O7 M5c: another machine's refusal in its own words (a right it lacks, a cancelled confirmation, the link down)
-      const machine = artifactMachineOf(this.artifactId);
+      const machine = this.remoteMachine();
       if (machine !== null && error instanceof ArtifactCommandError) words = remoteRefusalWords(error.error, machineNameOf(machine));
     }
     if (this.disposed) return;

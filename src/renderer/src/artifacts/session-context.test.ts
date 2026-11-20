@@ -4,10 +4,11 @@
 // the gesture itself, which resumes or starts without a message, docks a trust or relay card and never answers it.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { record, status } from '../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { continueSetup } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
@@ -20,7 +21,7 @@ const MAIN_OWN = 'own-session' as AppSessionId;
 const OWN = at(MAIN_OWN);
 const LINKED = at('linked-session' as AppSessionId);
 const P1 = at('p1') as ProjectId; // the page holds addresses; the project's machine is read off it
-const P2 = 'p2' as ProjectId;
+const P2 = at('p2') as ProjectId;
 const SPACE = '55555555-5555-4555-8555-555555555555';
 
 const facts = (over: Partial<Parameters<typeof artifactSessionContext>[1]> = {}): Parameters<typeof artifactSessionContext>[1] => ({
@@ -35,8 +36,8 @@ const facts = (over: Partial<Parameters<typeof artifactSessionContext>[1]> = {})
 
 describe('the session an owner’s gesture on an artifact starts', () => {
   it('is the creating session while the window knows it in the artifact’s project', () => {
-    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: OWN }, projectId: P1, sessions: [] }, facts())).toEqual({ kind: 'session', appSessionId: OWN });
-    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: OWN }, sessions: [] }, facts())).toEqual({ kind: 'session', appSessionId: OWN });
+    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: OWN }, projectId: P1, sessions: [] }, facts(), TEST_MACHINE)).toEqual({ kind: 'session', appSessionId: OWN });
+    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: OWN }, sessions: [] }, facts(), TEST_MACHINE)).toEqual({ kind: 'session', appSessionId: OWN });
   });
 
   it('is an import’s created link, never a session that only touched it', () => {
@@ -45,24 +46,24 @@ describe('the session an owner’s gesture on an artifact starts', () => {
       [LINKED, { projectId: P1 }],
     ]);
     const touched = [{ appSessionId: LINKED, roles: ['viewed' as const, 'edited' as const] }];
-    expect(artifactSessionContext({ createdBy: { kind: 'human' }, sessions: [{ appSessionId: OWN, roles: ['created'] }, ...touched] }, facts({ records }))).toEqual({ kind: 'session', appSessionId: OWN });
-    expect(artifactSessionContext({ createdBy: { kind: 'human' }, sessions: touched }, facts({ records }))).toEqual({ kind: 'none' });
+    expect(artifactSessionContext({ createdBy: { kind: 'human' }, sessions: [{ appSessionId: OWN, roles: ['created'] }, ...touched] }, facts({ records }), TEST_MACHINE)).toEqual({ kind: 'session', appSessionId: OWN });
+    expect(artifactSessionContext({ createdBy: { kind: 'human' }, sessions: touched }, facts({ records }), TEST_MACHINE)).toEqual({ kind: 'none' });
   });
 
   it('falls to the Space’s linked directory, then the named project’s, when the own session is unknown or elsewhere', () => {
     const moved = facts({ records: new Map([[OWN, { projectId: P2 }]]) });
     const own = { createdBy: { kind: 'session' as const, appSessionId: OWN }, projectId: P1, sessions: [] };
-    expect(artifactSessionContext({ ...own, spaceId: SPACE }, moved)).toEqual({ kind: 'directory', path: '/work/research', projectId: P2 });
-    expect(artifactSessionContext(own, moved)).toEqual({ kind: 'directory', path: '/work/app', projectId: P1 });
-    expect(artifactSessionContext({ createdBy: { kind: 'human' }, projectId: P1, sessions: [] }, facts({ records: new Map() }))).toEqual({ kind: 'directory', path: '/work/app', projectId: P1 });
+    expect(artifactSessionContext({ ...own, spaceId: SPACE }, moved, TEST_MACHINE)).toEqual({ kind: 'directory', machine: TEST_MACHINE, path: '/work/research', projectId: P2 });
+    expect(artifactSessionContext(own, moved, TEST_MACHINE)).toEqual({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 });
+    expect(artifactSessionContext({ createdBy: { kind: 'human' }, projectId: P1, sessions: [] }, facts({ records: new Map() }), TEST_MACHINE)).toEqual({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 });
     const elsewhere = facts({ projects: new Map([[P1, { directory: '/work/app' }]]) });
-    expect(artifactSessionContext({ createdBy: { kind: 'human' }, spaceId: SPACE, sessions: [] }, elsewhere)).toEqual({ kind: 'directory', path: '/work/research', projectId: null });
+    expect(artifactSessionContext({ createdBy: { kind: 'human' }, spaceId: SPACE, sessions: [] }, elsewhere, TEST_MACHINE)).toEqual({ kind: 'directory', machine: TEST_MACHINE, path: '/work/research', projectId: null });
   });
 
   it('is none without a durable context: no creator known, no linked Space, no project', () => {
-    expect(artifactSessionContext({ createdBy: { kind: 'human' }, sessions: [] }, facts())).toEqual({ kind: 'none' });
-    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: OWN }, sessions: [] }, facts({ records: new Map() }))).toEqual({ kind: 'none' });
-    expect(artifactSessionContext({ createdBy: { kind: 'human' }, spaceId: 'unlinked', sessions: [] }, facts({ spaces: [{ id: 'unlinked' }] }))).toEqual({ kind: 'none' });
+    expect(artifactSessionContext({ createdBy: { kind: 'human' }, sessions: [] }, facts(), TEST_MACHINE)).toEqual({ kind: 'none' });
+    expect(artifactSessionContext({ createdBy: { kind: 'session', appSessionId: OWN }, sessions: [] }, facts({ records: new Map() }), TEST_MACHINE)).toEqual({ kind: 'none' });
+    expect(artifactSessionContext({ createdBy: { kind: 'human' }, spaceId: 'unlinked', sessions: [] }, facts({ spaces: [{ id: 'unlinked' }] }), TEST_MACHINE)).toEqual({ kind: 'none' });
   });
 });
 
@@ -73,6 +74,7 @@ function client(answers: Record<string, unknown>, during: Record<string, () => v
   const calls: Invoked[] = [];
   const listeners = new Map<string, Set<(payload: unknown, from: { machine: typeof TEST_MACHINE }) => void>>();
   const bridge = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push([name, input]);
       during[name]?.();
@@ -114,7 +116,7 @@ describe('the owner’s Start', () => {
     const created = at('created' as AppSessionId);
     const trust = { key: '/work/app', directory: '/work/app', trusted: false };
     const { bridge, calls } = client({ 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'needs_trust', appSessionId: created, trust } });
-    const answer = await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, null, bridge);
+    const answer = await startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, null, bridge);
     expect(answer).toMatchObject({ status: 'card', appSessionId: created });
     expect(calls).toEqual([
       ['session.create', { projectId: P1, location: { kind: 'directory', path: '/work/app' } }],
@@ -127,12 +129,12 @@ describe('the owner’s Start', () => {
     const earlier = at('earlier' as AppSessionId);
     useSetup.setState({ intents: new Map([[earlier, intent(earlier) as never]]) });
     const first = client({ 'session.start': { status: 'starting', appSessionId: earlier } });
-    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, earlier, first.bridge)).resolves.toMatchObject({ status: 'starting', appSessionId: earlier });
+    await expect(startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, earlier, first.bridge)).resolves.toMatchObject({ status: 'starting', appSessionId: earlier });
     expect(first.calls.map(([name]) => name)).toEqual(['session.start']);
     useSetup.setState({ intents: new Map() });
     useSessions.setState({ records: new Map([[earlier, { appId: earlier } as never]]) });
     const again = client({ 'session.acquire': { status: 'ready', appSessionId: earlier, launched: false, joined: false } });
-    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, earlier, again.bridge)).resolves.toEqual({ status: 'ready', appSessionId: earlier });
+    await expect(startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, earlier, again.bridge)).resolves.toEqual({ status: 'ready', appSessionId: earlier });
     expect(again.calls.map(([name]) => name)).toEqual(['session.acquire']);
   });
 
@@ -150,21 +152,21 @@ describe('the owner’s Start', () => {
       { 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'starting', appSessionId: created } },
       { 'session.start': () => early.emit('session.setup', setupEvent(created, 'failed', { kind: 'error', message: 'the engine would not start', resources: RESOURCES })) },
     );
-    const answer = await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, null, early.bridge);
+    const answer = await startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, null, early.bridge);
     expect(answer.status).toBe('starting');
     await expect((answer as Extract<typeof answer, { status: 'starting' }>).settled).resolves.toEqual({ status: 'refused', appSessionId: created, words: 'the engine would not start' });
     expect(early.listening('session.setup')).toBe(0);
 
     const later = client({ 'session.start': { status: 'starting', appSessionId: created } });
     useSetup.setState({ intents: new Map([[created, intent(created) as never]]) });
-    const second = (await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, later.bridge)) as Extract<ArtifactSessionStart, { status: 'starting' }>;
+    const second = (await startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, created, later.bridge)) as Extract<ArtifactSessionStart, { status: 'starting' }>;
     later.emit('session.setup', setupEvent(at('another' as AppSessionId), 'failed', null)); // another session's: not this one's end
     later.emit('session.setup', setupEvent(created, 'launching', null));
     later.emit('session.setup', setupEvent(created, 'failed', { kind: 'relay_unreachable', health: { ok: false } }));
     await expect(second.settled).resolves.toEqual({ status: 'card', appSessionId: created, words: 'The relay is unreachable · the session offers Run direct' });
 
     const ready = client({ 'session.start': { status: 'starting', appSessionId: created } });
-    const third = (await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, ready.bridge)) as Extract<ArtifactSessionStart, { status: 'starting' }>;
+    const third = (await startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, created, ready.bridge)) as Extract<ArtifactSessionStart, { status: 'starting' }>;
     ready.emit('session.setup', setupEvent(created, 'ready', { kind: 'ready', engineSessionId: 's', firstTurn: 'none' }));
     await expect(third.settled).resolves.toEqual({ status: 'ready', appSessionId: created });
     third.cancel();
@@ -177,11 +179,11 @@ describe('the owner’s Start', () => {
     const created = at('created' as AppSessionId);
     const trust = { directory: '/work/app', trustKey: '/work/app', keyKind: 'directory', configPath: '/config/.claude.json', trusted: false, source: null, isHome: false, found: [] };
     const asked = client({ 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'needs_trust', appSessionId: created, trust } });
-    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, null, asked.bridge)).resolves.toEqual({ status: 'card', appSessionId: created, words: 'Trust this folder in the session to continue', trust });
+    await expect(startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, null, asked.bridge)).resolves.toEqual({ status: 'card', appSessionId: created, words: 'Trust this folder in the session to continue', trust });
 
     // the decision with the start of the session the first one made; the trust card this surface docked goes as it is answered
     const decided = client({ 'session.start': { status: 'starting', appSessionId: created } });
-    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, decided.bridge, 'accepted')).resolves.toMatchObject({ status: 'starting', appSessionId: created });
+    await expect(startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, created, decided.bridge, 'accepted')).resolves.toMatchObject({ status: 'starting', appSessionId: created });
     expect(decided.calls).toEqual([['session.start', { appSessionId: created, message: null, options: { requireEmptyMessage: true, trust: 'accepted' } }]]);
     expect(useSetup.getState().cards.has(created)).toBe(false);
 
@@ -198,7 +200,7 @@ describe('the owner’s Start', () => {
     const message = { content: 'Draft the summary.', display: 'Draft the summary.' };
     useSetup.getState().dock(created, { kind: 'trust', trust: trust as never, message });
     const busy = client({ 'session.start': { status: 'refused', appSessionId: created, reason: 'busy', message: 'A prompt is waiting in this session' } });
-    await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, busy.bridge, 'accepted');
+    await startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, created, busy.bridge, 'accepted');
     expect(useSetup.getState().cards.get(created)).toMatchObject({ kind: 'trust', message });
 
     // a record's: its message never left the composer's draft (main keeps nothing for an acquisition), so the start goes
@@ -246,7 +248,19 @@ describe('the owner’s Start', () => {
     useSetup.setState({ intents: new Map([[earlier, intent(earlier) as never]]) });
     const words = 'A prompt is waiting in this session · open it to send or discard the prompt first';
     const { bridge, listening } = client({ 'session.start': { status: 'refused', appSessionId: earlier, reason: 'busy', message: words } });
-    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, earlier, bridge)).resolves.toEqual({ status: 'refused', appSessionId: earlier, words });
+    await expect(startArtifactSession({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: P1 }, earlier, bridge)).resolves.toEqual({ status: 'refused', appSessionId: earlier, words });
     expect(listening('session.setup')).toBe(0);
   });
+});
+
+
+it('does not turn a peer Space’s linked directory into a local session', async () => {
+  const remoteProject = addressOf(OTHER_MACHINE, 'peer-project') as ProjectId;
+  const localProject = at('local-project') as ProjectId;
+  const world = facts({ projects: new Map([[localProject, { directory: '/work/research' }], [remoteProject, { directory: '/work/research' }]]) });
+  const context = artifactSessionContext({ createdBy: { kind: 'human' }, spaceId: SPACE, sessions: [] }, world, OTHER_MACHINE);
+  const { bridge, calls } = client({ 'session.create': new Error('unexpected creation') });
+  await startArtifactSession(context, null, bridge);
+  expect(calls).toEqual([]);
+  expect(context).toEqual({ kind: 'directory', machine: OTHER_MACHINE, path: '/work/research', projectId: remoteProject });
 });

@@ -28,6 +28,7 @@ export interface ClearAndImplementHost {
   notice(key: string, text: string): void;
   touch(): void;
   released(): void; // reconsider the queue after the sequence gives up its hold
+  dropped(): void; // ticket 790: the sequence gave up its hold without releasing the queue (it failed)
   log(message: string): void;
 }
 
@@ -133,13 +134,17 @@ export class ClearAndImplementSequence {
     this.clear = null;
     this.pending = clear.plan;
     this.host.notice('plan:clear_failed', `Context clear ${reason}; implementation was not started. The plan is kept for retry.`);
+    this.host.dropped();
     this.host.touch();
   }
 
   private async runClear(clear: ClearAndImplement): Promise<void> {
     const client = this.host.client();
     if (!(await clear.delivered) || !client || !this.host.isReady()) {
-      if (this.clear === clear) this.clear = null;
+      if (this.clear === clear) {
+        this.clear = null;
+        this.host.dropped();
+      }
       return;
     }
     if (this.clear !== clear) return;
@@ -150,6 +155,7 @@ export class ClearAndImplementSequence {
       this.clear = null;
       this.pending = clear.plan;
       this.host.notice('plan:mode_restore_failed', `The mode before plan mode could not be restored: ${messageOf(error)}`);
+      this.host.dropped();
       this.host.touch();
       return;
     }

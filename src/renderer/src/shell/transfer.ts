@@ -76,7 +76,7 @@ function panelSessionForArtifact(mainTabId: string): AppSessionId | null {
   const state = layout();
   const tab = allTabs(state.main).find((t) => t.id === mainTabId);
   if (tab?.kind !== 'artifact') return null;
-  const project = libraryRow(library.getState(), tab.artifactId).value?.project?.id;
+  const project = libraryRow(library.getState(), tab.artifactId, tab.machine).value?.project?.id;
   const row = project === undefined ? undefined : rowOfProject(project);
   const sessions = allTabs(state.main).flatMap((t) => (t.kind === 'session' && (row === undefined || sessionRow(t.appSessionId) === row) ? [t.appSessionId] : []));
   return surfaceSession({ ...state, knownSession: (session) => state.knownSession(session) && sessions.includes(session) });
@@ -145,7 +145,7 @@ export function transferRefusal(request: TransferRequest): string | null {
     const tab = allTabs(layout().main).find((t) => t.id === request.mainTabId);
     if (tab?.kind === 'file') return fileToSideRefusal(tab); // UX wave U6b-1
     if (tab?.kind !== 'artifact') return TRANSFER_COPY.notArtifact;
-    if (libraryRow(library.getState(), tab.artifactId).value == null) return TRANSFER_COPY.loading;
+    if (libraryRow(library.getState(), tab.artifactId, tab.machine).value == null) return TRANSFER_COPY.loading;
     const session = panelSessionForArtifact(request.mainTabId);
     if (session === null) return TRANSFER_COPY.noProjectSession;
     if (!canShowArtifactInPanel(session)) return TRANSFER_COPY.noPanel;
@@ -239,7 +239,7 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, params: { target: artifactId, machine, carried: true }, activate: true });
   // A tab reserved before the layout is read has no instance yet (its id may change at the barrier): the staged state
   // is then left to the sweep, and the record makes its own.
-  if (instanceOf(panelTabId)) adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
+  if (instanceOf(panelTabId)) adoptStagedArtifactEditorState(artifactId, machine, { surface: 'panel', tabId: panelTabId });
   return true;
 }
 
@@ -269,11 +269,11 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
   // The hand-off, synchronous from here to the adoption.
   stageArtifactEditorState({ surface: 'panel', tabId: panelTabId });
   if (!handle.handOff()) {
-    adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
+    adoptStagedArtifactEditorState(artifactId, machine, { surface: 'panel', tabId: panelTabId });
     return false;
   }
   placeInMain({ kind: 'artifact', artifactId, machine }, at);
-  adoptStagedArtifactEditorState(artifactId, { surface: 'main', tabId: mainTabId });
+  adoptStagedArtifactEditorState(artifactId, machine, { surface: 'main', tabId: mainTabId });
   return true;
 }
 
@@ -285,7 +285,7 @@ type MainTarget = Extract<TabTarget, { kind: 'artifact' | 'file' }>;
 // that artifact's main viewer (a link's open whose tab went before its editor took it) goes, as the carried panel open
 // withdraws the panel's.
 function placeInMain(target: MainTarget, at: TabPlace): void {
-  if (target.kind === 'artifact') withdrawVersionRequest(target.artifactId, 'main');
+  if (target.kind === 'artifact') withdrawVersionRequest(target.artifactId, target.machine, 'main');
   const id = mainTabIdOf(target);
   const before = currentSet(layout().main).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
   layout().revealMain();

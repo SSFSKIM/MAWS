@@ -5,6 +5,8 @@
 import { displayTitle } from '../../sessions/title';
 import { artifactHost } from '../../artifacts';
 import { registerArtifactEditor } from '../../artifacts/registry';
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactClient } from '../../artifacts/machine-client';
 import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { DocumentMain } from './DocumentMain';
@@ -15,9 +17,9 @@ import { handCommentCardOver } from './comments'; // P4-B3
 import { actorSessionOnPage } from '../../ipc/machine';
 
 // P3-E (E2 M3; E's Decision Log 19): exported, so the dashboard's DocumentTabState is made with the same window's deps
-export const documentWindowDeps = (): DocumentTabDeps => ({
-  host: artifactHost(),
-  ipc,
+export const documentWindowDeps = (machine: MachineRef): DocumentTabDeps => ({
+  host: artifactHost(machine),
+  ipc: artifactClient(ipc, machine),
   log: (line) => console.warn(`[document] ${line}`),
   confirm: (message) => window.confirm(message),
   sessionTitle: (appSessionId) => {
@@ -33,11 +35,11 @@ export const documentWindowDeps = (): DocumentTabDeps => ({
 });
 
 /** Registers the document editor (App.tsx's P3-B block); returns the registration's removal. */
-export function registerDocumentEditor(deps: () => DocumentTabDeps = documentWindowDeps): () => void {
+export function registerDocumentEditor(deps: (machine: MachineRef) => DocumentTabDeps = documentWindowDeps): () => void {
   const offEditor = registerArtifactEditor<DocumentTabState>('document', {
     Panel: DocumentPanel,
     Main: DocumentMain,
-    createState: (target) => new DocumentTabState(target, deps()),
+    createState: (target) => new DocumentTabState(target, deps(target.machine)),
     dispose: (state) => state.dispose(),
     handOver: (from, to) => handCommentCardOver(from.artifactId, from.commentHostId, to.commentHostId), // P4-B3 (Decision Log 39)
   });

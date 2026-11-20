@@ -18,7 +18,7 @@ import { createContext, createElement, useContext, useEffect, useLayoutEffect, u
 import type { ArtifactHost } from '../host';
 import { applyV2, newDoc } from '../yjs';
 import type { Medium } from './css';
-import { holdScopeStyle, scopeIdOf, type ViewLease } from './scope-style';
+import { holdScopeStyle, scopeIdOf, scopeKeyOf, type ViewLease } from './scope-style';
 import { governingSystem, type DesignSystemRef } from './governing';
 import { builtinView, liveView, snapshotOfDoc, staticView, type DesignSystemView, type TokenOverrides } from './view';
 
@@ -213,7 +213,7 @@ type Status = 'loading' | 'ready' | 'missing';
 export function useDesignSystem(ref: DesignSystemRef | { builtin: 'maws' } | null): { view: DesignSystemView | null; status: Status } {
   const host = useContext(DesignSystemHostContext);
   const key = ref === null ? null : refKey(ref);
-  const [shown, setShown] = useState<{ key: string; view: DesignSystemView | null; status: Status } | null>(null);
+  const [shown, setShown] = useState<{ host: ArtifactHost | null; key: string; view: DesignSystemView | null; status: Status } | null>(null);
   useEffect(() => {
     if (key === null) return;
     const loan = lend(host, key);
@@ -222,11 +222,11 @@ export function useDesignSystem(ref: DesignSystemRef | { builtin: 'maws' } | nul
     Promise.resolve(loan.view).then(
       (view) => {
         if (!active) return;
-        const show = () => setShown({ key, view: snapshotOf(view), status: 'ready' });
+        const show = () => setShown({ host, key, view: snapshotOf(view), status: 'ready' });
         show();
         unsubscribe = view.subscribe(show);
       },
-      () => active && setShown({ key, view: null, status: 'missing' }),
+      () => active && setShown({ host, key, view: null, status: 'missing' }),
     );
     return () => {
       active = false;
@@ -235,7 +235,7 @@ export function useDesignSystem(ref: DesignSystemRef | { builtin: 'maws' } | nul
     };
   }, [host, key]);
   if (key === null) return { view: null, status: 'missing' };
-  return shown?.key === key ? { view: shown.view, status: shown.status } : { view: null, status: 'loading' };
+  return shown?.host === host && shown.key === key ? { view: shown.view, status: shown.status } : { view: null, status: 'loading' };
 }
 
 /** A view's current state as a fixed object that still renders and follows like the view; closing it does nothing. */
@@ -245,7 +245,7 @@ function snapshotOf(view: DesignSystemView): DesignSystemView {
 }
 
 /**
- * A `div` that renders its children in a system (D8): `data-ds-scope` names the combination of system, medium and
+ * A `div` that renders its children in a system (D8): `data-ds-scope` names the combination of host, system, medium and
  * overrides, whose one `<style>` (the `--ds-*` properties, the `.ds-type-*` classes, the system's faces, then the
  * overrides) every scope of that combination shares; it follows a live system and is removed with the last scope. With
  * no system, a plain `div`. While the system loads, or when it is missing, the scope has no style: the consumer's
@@ -261,10 +261,10 @@ export function DesignSystemScope(props: {
   const { system, medium, overrides, className, children } = props;
   const host = useContext(DesignSystemHostContext);
   const key = system === null ? null : refKey(system);
-  const scopeId = key === null ? null : scopeIdOf(key, medium, overrides);
+  const scopeId = key === null ? null : scopeIdOf(scopeKeyOf(system && 'builtin' in system ? null : host, key), medium, overrides);
   useLayoutEffect(() => {
     if (key === null || scopeId === null) return;
-    // The scope id stands for the system, the medium and the overrides' content: a new overrides object with the same
+    // The scope id stands for the host, the system, the medium and the overrides' content: a new overrides object with the same
     // entries is the same scope, and keeps its style. Held before paint, so a system already open styles the first frame.
     return holdScopeStyle(scopeId, medium, overrides, () => lend(host, key));
   }, [host, scopeId]);

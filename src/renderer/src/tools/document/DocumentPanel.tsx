@@ -56,10 +56,10 @@ export function DocumentPanel(props: DocumentEditorProps & DocumentShellAddition
 
 const NO_TARGET = { context: { kind: 'none' } } as const; // P3-F1: unused while the target is unread (no comments offered)
 
-export function DocumentBody({ artifactId, state, scope, visible, onShown, surface, renderChart, artifactKind, additionalActions, onDisplayedDocument, blockCommentQuote /* P3-E */ }: DocumentEditorProps & DocumentShellAdditions & { surface: 'panel' | 'main' }) {
+export function DocumentBody({ artifactId, machine, state, scope, visible, onShown, surface, renderChart, artifactKind, additionalActions, onDisplayedDocument, blockCommentQuote /* P3-E */ }: DocumentEditorProps & DocumentShellAdditions & { surface: 'panel' | 'main' }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   const title = snapshot.title || 'Document'; // until the artifact's row is read
-  const governing = useSystemFor(snapshot.placement);
+  const governing = useSystemFor(snapshot.placement, machine);
   // UX wave U10b (§B.5): the page in force, as the export decides it
   const kind = artifactKind === 'dashboard' ? 'dashboard' : 'document';
   const pageSystem = useExportSystem(governing);
@@ -83,10 +83,10 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     commands,
   );
   // P4-B5: Send to, the shown version's when one is previewed (none while two are compared, as Export)
-  const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
+  const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, machine, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
   const actions = [...(header.actions ?? []), ...(additionalActions ?? []), ...(sendTo ? [sendTo] : [])]; // P3-E: a dashboard's actions after B's; P4-B5: Send to last
-  const systemRow = useLibraryRow(governing && 'id' in governing ? governing.id : null).value;
-  const spaces = useLibrarySpaces().value;
+  const systemRow = useLibraryRow(governing && 'id' in governing ? governing.id : null, machine).value;
+  const spaces = useLibrarySpaces(machine).value;
   const home = snapshot.placement.spaceId ? spaces?.find((space) => space.id === snapshot.placement.spaceId)?.name : 'General';
   const systemName = governing && ('builtin' in governing ? 'MAWS' : systemRow?.title);
   const breadcrumb = snapshot.ready ? [home ?? 'Loading Space…', ...(systemName && snapshot.shown === null ? [`Design: ${systemName}`] : [])] : [];
@@ -95,8 +95,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   // Comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown, to
   // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);
   // not offered only while that is unread.
-  const target = useArtifactCommentTarget(artifactId);
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */, hostId: state.commentHostId /* P4-B3 M6: a move keeps the composing card */ });
+  const target = useArtifactCommentTarget(artifactId, machine);
+  const comments = useDocumentComments({ artifactId, machine, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */, hostId: state.commentHostId /* P4-B3 M6: a move keeps the composing card */ });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);
@@ -165,7 +165,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   const commentsView = useSettings((s) => s.state?.settings.artifacts.commentsView ?? 'expand');
   const onCommentsViewChange = useCallback((view: CommentsView) => void setCommentsView(view), []);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
-  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4
+  const reveal = useOpenRequest(artifactId, machine, scope.surface); // P4-B4
   // P4-B4 (the B3 merge's review): a place asked after a move's hand-off (a link, show_pane's at) is newer than the view
   // the move carried: the carried restore (its scheduled frame, its scroll held while the page settles) gives way to it
   const placed = reveal?.location !== undefined;
@@ -180,7 +180,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   if (!snapshot.ready || !snapshot.handle) return <Notice>Opening the document…</Notice>;
   if (snapshot.noContent) return <Notice>This document has no content yet: it was created before MAWS gave every new document its first page.</Notice>;
   return (
-    <SystemScope placement={snapshot.placement} handle={snapshot.handle}>
+    <SystemScope machine={machine} placement={snapshot.placement} handle={snapshot.handle}>
       <DocumentEditor
         artifactId={artifactId}
         handle={snapshot.handle}
@@ -211,10 +211,10 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
 
 // The governing system and the document's overrides, for the page's scope (SystemPage); nothing while D's apply API is
 // not provided.
-function SystemScope({ placement, handle, children }: { placement: { designSystemId?: string; spaceId?: string }; handle: NonNullable<ReturnType<DocumentTabState['snapshot']>['handle']>; children: ReactNode }) {
+function SystemScope({ placement, machine, handle, children }: { machine: DocumentEditorProps['machine']; placement: { designSystemId?: string; spaceId?: string }; handle: NonNullable<ReturnType<DocumentTabState['snapshot']>['handle']>; children: ReactNode }) {
   const overrides = useDocumentOverrides(handle.doc);
   const system = documentDesignSystem();
-  const governing = useSystemFor(placement); // P3-D: a hook (D's follows the defaults, the house and the live systems)
+  const governing = useSystemFor(placement, machine); // P3-D: a hook (D's follows the defaults, the house and the live systems)
   const value = useMemo(() => (system && governing ? { system, governing, overrides } : null), [system, governing, overrides]); // P3-D: `governing`
   return <PageSystemProvider value={value}>{children}</PageSystemProvider>;
 }

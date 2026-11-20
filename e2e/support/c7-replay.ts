@@ -130,13 +130,37 @@ export function rewindJournal(dir: string, name: string, replay: RewindReplay): 
 // holds at the interrupt (seq 190) through the turn, and after it at the next prompt (seq 199), which the released
 // entry is.
 export function queueInterruptJournal(dir: string, name: string): string {
-  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').map((row) => {
+  return writeJournal(dir, `${name}-queue-interrupt`, queueInterruptRows());
+}
+const queueInterruptRows = (): Row[] =>
+  rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').map((row) => {
     // App recording variant: the interrupt is a person cancelling, not the probe's diagnostic interrupt.
     if (row.direction !== 'out' || row.seq !== 190) return row;
     const frame = row.frame as { request: Record<string, unknown> };
     return { ...row, frame: { ...frame, request: { ...frame.request, reason: 'user-cancel', cancel_queued: false } } };
   }).filter((r) => ![146, 150, 191].includes(r.seq));
-  return writeJournal(dir, `${name}-queue-interrupt`, rows);
+
+// Board ticket 790: `queueInterruptJournal` with the next turn held open and a message released at its end. A Stop with
+// nothing waiting is the interrupt (seq 190) and the stopped turn ends (198); the person's next send is the next prompt
+// (199), whose turn runs until the test's own context read (`reads.jsonl` seq 56 and 57, placed before the turn's
+// result at 232), so a message can be queued behind it; then the result and the turn's `completed` (234), and in place
+// of the probe's `bash_command` and its exit (233, 235 to 238) one human turn for the message the queue releases.
+export function stopThenQueueJournal(dir: string, name: string): string {
+  const rows = queueInterruptRows().filter((r) => ![233, 235, 236, 237, 238].includes(r.seq));
+  const reads = rowsOf('spikes/protocol-probe/fixtures/reads.jsonl');
+  const result = rows.findIndex((r) => r.seq === 232);
+  const at = rows[result]!.at;
+  rows.splice(result, 0, ...[56, 57].map((seq, k) => ({ ...reads.find((r) => r.seq === seq)!, seq: 231 * 10 + k, at })));
+  const session = rows.find((r) => r.seq === 202)!.frame.session_id;
+  const ended = rowsOf('spikes/protocol-probe/fixtures/pass2/bash-context-echoed.jsonl').find((r) => r.seq === 30)!.frame;
+  const uuid = '00000000-0000-4000-8000-000000000790';
+  rows.push(
+    { seq: 240, direction: 'out', at, frame: { type: 'user', uuid, message: { role: 'user', content: 'the released message' }, parent_tool_use_id: null, origin: { kind: 'human' } } },
+    { seq: 241, direction: 'in', at, frame: { type: 'command_lifecycle', command_uuid: uuid, state: 'started', uuid: '10000000-0000-4000-8000-000000000790', session_id: session } },
+    { seq: 242, direction: 'in', at, frame: { ...ended, session_id: session, uuid: '20000000-0000-4000-8000-000000000790', user_message_uuid: uuid, user_message_uuids: [uuid] } },
+    { seq: 243, direction: 'in', at, frame: { type: 'command_lifecycle', command_uuid: uuid, state: 'completed', uuid: '30000000-0000-4000-8000-000000000790', session_id: session } },
+  );
+  return writeJournal(dir, `${name}-stop-then-queue`, rows);
 }
 
 // W10: `queue-and-interrupt` as the one Send meets it. The probe's second prompt, written into the running turn (seq

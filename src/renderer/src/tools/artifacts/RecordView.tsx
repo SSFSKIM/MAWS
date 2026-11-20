@@ -8,6 +8,7 @@
 // "Open in tab") moves the artifact to a main tab with its editor's state, as dragging the grip beside it or the panel
 // tab does, so its guard has nothing to ask (`shell/transfer.ts`).
 import { useEffect } from 'react';
+import type { MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
 import { ArtifactView } from '../../library/ArtifactTab';
@@ -17,7 +18,7 @@ import { ARTIFACTS_TOOL_COPY, TRANSFER_COPY } from './copy';
 
 const bar = 'h-7 shrink-0 rounded-sm px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
-export function ArtifactRecordView({ artifactId, scope, visible, onBack }: { artifactId: string; scope: EditorHostScope; visible: boolean; onBack(): void }) {
+export function ArtifactRecordView({ artifactId, machine, scope, visible, onBack }: { artifactId: string; machine: MachineRef; scope: EditorHostScope; visible: boolean; onBack(): void }) {
   const refusal = useTransferRefusal({ to: 'tab', panelTabId: scope.tabId });
   useEffect(() => () => endDragFrom('panel', scope.tabId), [scope.tabId]); // INV-5: the grip unmounting mid-drag
   return (
@@ -42,7 +43,7 @@ export function ArtifactRecordView({ artifactId, scope, visible, onBack }: { art
         </button>
       </div>
       <div className="min-h-0 flex-1">
-        <ArtifactView artifactId={artifactId} scope={scope} visible={visible} />
+        <ArtifactView artifactId={artifactId} machine={machine} scope={scope} visible={visible} />
       </div>
     </div>
   );

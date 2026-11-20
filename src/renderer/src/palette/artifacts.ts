@@ -7,7 +7,7 @@
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import type { MachineRef } from '@shared/machine/ref';
-import { recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
+import { sessionArtifactMachine } from '../artifacts/machines';
 import { focusedSession } from '../composer/ComposerAppKeys';
 import { ipc } from '../ipc/client';
 import { openArtifactTab, showOpenArtifactTab } from '../library/actions';
@@ -39,15 +39,14 @@ export async function searchArtifacts(client: MawsBridge, query: string, machine
 // artifact's, beside whose chat the side column would read the artifact on the wrong machine.
 export function openPaletteArtifact(artifactId: string, machine: MachineRef): void {
   const local = ipc.localMachine;
-  recordArtifactMachine(artifactId, machine, local);
   const session = focusedSession();
   // Steps 2 and 3 read the artifact on the machine the session's view reads it on (`sessionArtifactMachine`), so they are
   // taken only when that is the row's machine: a main tab of another machine's artifact with the same id is not reused
   // (Decision Log 16 (iii)), and the side column would read the wrong one.
   if (session !== null && sessionArtifactMachine(session, artifactId, local) === machine) {
-    if (showOpenArtifactTab(session, artifactId)) return;
+    if (showOpenArtifactTab(session, artifactId, undefined, machine)) return;
     if (canShowArtifactInPanel(session)) {
-      openArtifactInPanel(session, artifactId);
+      openArtifactInPanel(session, artifactId, undefined, undefined, machine);
       return;
     }
   }

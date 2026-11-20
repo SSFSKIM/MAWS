@@ -100,11 +100,11 @@ function deps(): DocumentTabDeps {
 // A body of the kind's surface in `scope`, over the state that scope holds (as the record view and the main tab mount it).
 function mountIn(scope: EditorHostScope) {
   const editor = artifactEditorFor('document')!;
-  const hold = holdArtifactEditorState<DocumentTabState>(scope, A, 'document', editor as never);
+  const hold = holdArtifactEditorState<DocumentTabState>(scope, A, TEST_MACHINE, 'document', editor as never);
   const Body = scope.surface === 'panel' ? editor.Panel : editor.Main;
   const tree = () => (
     <EditorHostScopeContext.Provider value={scope}>
-      <Body artifactId={A} state={hold.state} scope={scope} visible onShown={() => {}} />
+      <Body artifactId={A} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
     </EditorHostScopeContext.Provider>
   );
   const view = render(tree());
@@ -186,7 +186,7 @@ describe('a document moved between the panel and a main tab comes back where the
     act(() => {
       stageArtifactEditorState(from);
       source.view.unmount();
-      adoptStagedArtifactEditorState(A, to);
+      adoptStagedArtifactEditorState(A, TEST_MACHINE, to);
     });
     blockHeight = targetBlockHeight;
     return mountIn(to);
@@ -352,7 +352,7 @@ describe('a document moved between the panel and a main tab comes back where the
       editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, at, at + 9)));
     });
     const target = move(panel, main, source, 40);
-    act(() => void requestArtifactOpen(A, 'latest', 'main', { block: asked }));
+    act(() => void requestArtifactOpen(A, TEST_MACHINE, 'latest', 'main', { block: asked }));
     const moved = await ready();
     await settle();
     await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
@@ -431,7 +431,7 @@ describe('a document moved between the panel and a main tab comes back where the
       // another replica takes the chart away while the document moves: the carried place now follows a paragraph
       memory.write((doc) => tabBody(doc, 'tab1')!.delete(1, 1));
       await settle();
-      act(() => void adoptStagedArtifactEditorState(A, main));
+      act(() => void adoptStagedArtifactEditorState(A, TEST_MACHINE, main));
       mountIn(main);
       const moved = await ready();
       await settle();

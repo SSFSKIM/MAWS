@@ -63,7 +63,7 @@ const NO_LEASE: ConnectorInvalid = { ok: false, state: 'invalid', reason: 'lease
 const HELD_PER_WATCH = 4; // the latest refreshes held per watch whose start has not answered (it refreshes at most every 30 s)
 const CLOSED: ConnectorCallOutcome = { ok: false, state: 'paused', reason: 'closed' };
 
-export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>): ConnectorHost {
+export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>, machine?: MachineRef): ConnectorHost {
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
     const result = await ipc.invoke(name, input, ...opts);
     if (!result.ok) throw new ArtifactCommandError(result.error);
@@ -71,7 +71,7 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
   };
 
   // The artifact's machine: another machine's as the page's table says it, else this Mac's
-  const machineOf = (artifactId: string): MachineRef => artifactMachineOf(artifactId) ?? ipc.localMachine;
+  const machineOf = (artifactId: string): MachineRef => machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
   // P5 O7 M5c: a lease is its machine's; two machines' lease ids never meet
   const leaseKey = (machine: MachineRef, leaseId: string) => `${machine}\0${leaseId}`;
 

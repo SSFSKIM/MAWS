@@ -13,8 +13,7 @@
 // - P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5, "Which machine an artifact is on"; it lifts
 //   O6 M4's refusal of another machine's list): each read is one machine's. A list is read on the machine its filter's
 //   session or project names, else the machine asked (the library's machine menu, a remote session's All), else this
-//   Mac; the Spaces of the machine asked; a row on its artifact's machine (`artifacts/machines.ts`, which the rows a list
-//   answers fill). A machine's `library.changed`, and the `artifacts.resync` its artifacts feed says at each opening (a
+//   Mac; the Spaces of the machine asked; a row on its view's machine. A machine's `library.changed`, and the `artifacts.resync` its artifacts feed says at each opening (a
 //   re-read of what the feed may have missed), read again that machine's reads alone.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
@@ -23,7 +22,7 @@ import type { CommandName, CommandResult, InvokeRest, MawsBridge } from '@shared
 import type { LibraryCounts, LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
-import { artifactMachineOf } from '../artifacts/machines';
+import { artifactKey } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 
 export const UNWATCHED_KEPT = 16;
@@ -67,7 +66,7 @@ export const listKey = (filter?: LibraryFilter, machine?: MachineRef): string =>
   const normalized = normalize(filter);
   return `list:${listMachine(normalized, machine)}:${JSON.stringify(normalized)}`;
 };
-export const rowKey = (artifactId: string): string => `row:${artifactId}`;
+export const rowKey = (artifactId: string, machine: MachineRef): string => `row:${artifactKey(artifactId, machine)}`;
 export const spacesKey = (machine: MachineRef = ipc.localMachine): string => `spaces:${machine}`;
 // UX wave U10b (M9): this Mac's Spaces' instructions (its engine host's `spaces.instructions`; never another machine's)
 export const instructionsKey = (machine: MachineRef = ipc.localMachine): string => `instructions:${machine}`;
@@ -77,7 +76,7 @@ export const instructionsKey = (machine: MachineRef = ipc.localMachine): string 
 type Reader = (client: MawsBridge) => Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }>;
 
 const readers = new Map<string, Reader>(); // every key read, how to read it again
-const machineOfKey = new Map<string, () => MachineRef>(); // the machine each key is read on (a row's: its artifact's, as now known)
+const machineOfKey = new Map<string, MachineRef>();
 const watchers = new Map<string, number>();
 const unwatched: string[] = []; // keys nobody watches, oldest first
 const tickets = new Map<string, number>();
@@ -111,7 +110,7 @@ function forget(key: string): void {
 }
 
 // Watches `key` until the returned function is called: read now when no one else watches it, then at every change.
-function watch(key: string, reader: Reader, on: () => MachineRef, client: MawsBridge): () => void {
+function watch(key: string, reader: Reader, on: MachineRef, client: MawsBridge): () => void {
   const count = watchers.get(key) ?? 0;
   watchers.set(key, count + 1);
   const kept = unwatched.indexOf(key);
@@ -145,18 +144,18 @@ const ask =
 export const watchLibraryList = (filter?: LibraryFilter, client: MawsBridge = ipc, machine?: MachineRef): (() => void) => {
   const normalized = normalize(filter);
   const on = listMachine(normalized, machine);
-  return watch(listKey(normalized, machine), ask('library.list', { filter: normalized }, { machine: on }), () => on, client);
+  return watch(listKey(normalized, machine), ask('library.list', { filter: normalized }, { machine: on }), on, client);
 };
-export const watchLibraryRow = (artifactId: string, client: MawsBridge = ipc): (() => void) =>
-  watch(rowKey(artifactId), async (c) => {
-    const result = await c.invoke('library.get', { artifactId }); // on its artifact's machine (the client asks the table)
+export const watchLibraryRow = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc): (() => void) =>
+  watch(rowKey(artifactId, machine), async (c) => {
+    const result = await c.invoke('library.get', { artifactId }, { machine });
     return result.ok ? { ok: true, value: result.value.row } : result;
-  }, () => artifactMachineOf(artifactId) ?? client.localMachine, client);
+  }, machine, client);
 export const watchLibrarySpaces = (client: MawsBridge = ipc, machine: MachineRef = client.localMachine): (() => void) =>
   watch(spacesKey(machine), async (c) => {
     const result = await c.invoke('library.spaces', undefined, { machine });
     return result.ok ? { ok: true, value: result.value.spaces } : result;
-  }, () => machine, client);
+  }, machine, client);
 
 // UX wave U10b (M9, §E.2): this Mac's Spaces' instructions. Not a read of main's index, whose `library.changed` they do not
 // follow: read again at this Mac's `spaces.changed` (connectLibrary) and after this window's own write.
@@ -164,12 +163,12 @@ export const watchSpaceInstructions = (client: MawsBridge = ipc): (() => void) =
   watch(instructionsKey(client.localMachine), async (c) => {
     const result = await c.invoke('spaces.instructions', {});
     return result.ok ? { ok: true, value: result.value.instructions } : result;
-  }, () => client.localMachine, client);
+  }, client.localMachine, client);
 export const refreshSpaceInstructions = (client: MawsBridge = ipc): void => read(instructionsKey(client.localMachine), client);
 
 // Every watched read, or (`machine`) every one of that machine, read again (a change in its index, or a Retry).
 export function refreshLibrary(client: MawsBridge = ipc, machine?: MachineRef): void {
-  for (const key of watchers.keys()) if (machine === undefined || machineOfKey.get(key)?.() === machine) read(key, client);
+  for (const key of watchers.keys()) if (machine === undefined || machineOfKey.get(key) === machine) read(key, client);
 }
 
 // App.tsx's P3-L block: a machine's announcements of a committed index change, and (P5 O7 M5a) the re-read its artifacts
@@ -189,7 +188,7 @@ export function connectLibrary(client: MawsBridge = ipc): () => void {
 // ---- selectors and hooks -----------------------------------------------------------------------------------------------
 
 export const libraryList = (s: LibraryState, filter?: LibraryFilter, machine?: MachineRef) => (s.reads.get(listKey(filter, machine)) ?? IDLE) as LibraryRead<LibraryList>;
-export const libraryRow = (s: LibraryState, artifactId: string) => (s.reads.get(rowKey(artifactId)) ?? IDLE) as LibraryRead<LibraryRow | null>; // null: not in the library
+export const libraryRow = (s: LibraryState, artifactId: string, machine: MachineRef) => (s.reads.get(rowKey(artifactId, machine)) ?? IDLE) as LibraryRead<LibraryRow | null>; // null: not in the library
 export const librarySpaces = (s: LibraryState, machine?: MachineRef) => (s.reads.get(spacesKey(machine)) ?? IDLE) as LibraryRead<LibrarySpace[]>;
 // This Mac's Spaces' instructions by Space; empty until read, and when the engine host has never answered (an older one
 // knows no such command). One map per answer, so a selector over it is stable.
@@ -232,9 +231,9 @@ export function useLibraryList(filter?: LibraryFilter, machine?: MachineRef): Li
   return useLibrary((s) => (s.reads.get(key) ?? IDLE) as LibraryRead<LibraryList>);
 }
 
-export function useLibraryRow(artifactId: string | null): LibraryRead<LibraryRow | null> {
-  useEffect(() => (artifactId === null ? undefined : watchLibraryRow(artifactId)), [artifactId]);
-  return useLibrary((s) => (artifactId === null ? IDLE : libraryRow(s, artifactId)));
+export function useLibraryRow(artifactId: string | null, machine: MachineRef): LibraryRead<LibraryRow | null> {
+  useEffect(() => (artifactId === null ? undefined : watchLibraryRow(artifactId, machine)), [artifactId, machine]);
+  return useLibrary((s) => (artifactId === null ? IDLE : libraryRow(s, artifactId, machine)));
 }
 
 export function useLibrarySpaces(machine?: MachineRef): LibraryRead<LibrarySpace[]> {
@@ -253,7 +252,7 @@ export function useSpaceInstructionsRead(): SpaceInstructionsRead {
 }
 
 // An `artifact` tab's title for the strip and the toolbar: its row's, null until known (or when it is not in the library).
-export const useArtifactTitle = (artifactId: string | null): string | null => useLibraryRow(artifactId).value?.title ?? null;
+export const useArtifactTitle = (artifactId: string | null, machine: MachineRef): string | null => useLibraryRow(artifactId, machine).value?.title ?? null;
 
 // Tests.
 export function resetLibrary(): void {

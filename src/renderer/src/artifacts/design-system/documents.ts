@@ -10,6 +10,7 @@
 // bound to the governing system's view (the one the page's scope shares, one open per system), as main's export binds
 // them (src/render/design-systems/documents.ts), so the Export menu reads a document's page through the export's own
 // resolver.
+import type { MachineRef } from '@shared/machine/ref';
 import { useMemo } from 'react';
 import { DesignSystemScope, officeThemeXml, resolveDsVars, useDesignSystem, useGoverningSystem } from '@artifacts/design-system/apply';
 import type { TokenSet } from '@artifacts/design-system/tokens';
@@ -21,9 +22,9 @@ import type { DocumentDesignSystem, GoverningSystem } from '../../tools/document
 const NO_SPACES: Record<string, string> = {};
 
 /** The system governing a document so placed, followed (a hook). */
-export function useDocumentGoverningSystem(artifact: { designSystemId?: string; spaceId?: string }): GoverningSystem {
+export function useDocumentGoverningSystem(artifact: { designSystemId?: string; spaceId?: string }, machine: MachineRef): GoverningSystem {
   const defaults = useSettings((s) => s.state?.settings.artifacts);
-  const systems = useLibraryList({ kind: 'design_system' }).value?.rows;
+  const systems = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   // Until the library answers, every named system is taken as live: a document's own system draws at once.
   const listed = systems && new Set(systems.map((system) => system.id));
   const live = listed && ((id: string) => listed.has(id));

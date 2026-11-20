@@ -66,7 +66,7 @@ const CheckIcon = () => (
 async function make(input: Parameters<typeof createArtifact>[0]): Promise<void> {
   const result = await createArtifact(input);
   if (!result.ok) return toastFailure(result.error.message);
-  if (artifactEditorFor(result.value.kind)) openArtifactTab(result.value.id);
+  if (artifactEditorFor(result.value.kind)) openArtifactTab(result.value.id, undefined, ipc.localMachine);
 }
 
 async function addFile(spaceId: string | null): Promise<void> {
@@ -105,7 +105,7 @@ async function askClaude(words: string, space: LibrarySpace | undefined, instruc
 function useSystemChoice(spaceId: string | null) {
   const systems = useLibraryList({ kind: 'design_system' }).value?.rows;
   const defaultsRead = useSettings((s) => s.state !== null);
-  const governing = useDocumentGoverningSystem(spaceId === null ? {} : { spaceId });
+  const governing = useDocumentGoverningSystem(spaceId === null ? {} : { spaceId }, ipc.localMachine);
   const held = useContext(MakeChoiceContext);
   if (held === null) throw new Error('"Make something new" is drawn inside the Library page, which holds its choice');
   const [chosen, choose] = held;

@@ -26,7 +26,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
 // reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
 // `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
-async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */ } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */; holdsSequence?: () => boolean /* ticket 790 */; mainTurnOpen?: () => boolean /* ticket 790 */ } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
@@ -72,6 +72,8 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     holdAllDeadlineMs: opts.holdAllDeadlineMs,
     unsettled: opts.unsettled, // P2-C
     prepare: opts.prepare, // P4-A3
+    holdsSequence: opts.holdsSequence, // ticket 790
+    mainTurnOpen: opts.mainTurnOpen, // ticket 790
   });
   if (opts.recovered !== false) await queue.recover(); // what the session does before `ready`
   return { ...h, h, queue };
@@ -1100,7 +1102,7 @@ describe('F2 paused queue admission', () => {
     const sent = await t.queue.send('after Stop');
     expect(sent.disposition).toBe('sent');
     expect(t.writes.map((w) => w.message.content)).toEqual(['after Stop']);
-    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'after Stop', state: 'submitting' }] });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, entries: [{ content: 'after Stop', state: 'submitting' }] }); // ticket 790: the empty pause ended with it
   });
 
   it('l2-transcript-15: new text bypasses the interrupted queue without resuming the pre-existing held items', async () => {
@@ -1128,6 +1130,333 @@ describe('F2 paused queue admission', () => {
     await t.queue.pause(reason);
     expect((await t.queue.send('held')).disposition).toBe('queued');
     expect(t.writes).toEqual([]);
+  });
+});
+
+// Ticket 790: an interrupt pause holds what waited at the Stop. Once the Stop is over and it holds nothing, it ends, so
+// a message queued later behind a turn goes at that turn's end rather than waiting for a Resume nobody needs.
+describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
+  it('a Stop with nothing queued, then a message queued behind the next turn: the turn\'s end sends it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.pause('interrupt'); // the Stop's pause, as a state left latched by a build before this fix
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    t.h.turn = true; // the person's next turn runs
+    expect((await t.queue.send('after the turn')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes.map((w) => w.message.content)).toEqual(['after the turn']);
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(queueRows(t.rows)).toEqual(['pause:interrupt', 'resume:empty', 'release:turn_ended']);
+  });
+
+  it('stop() with nothing waiting ends its pause once its interrupt is answered and no turn runs, saved and announced; with a held steer it stays paused', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false; // the interrupted turn ended before the interrupt's answer
+    });
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+    expect(t.changes.at(-1)).toMatchObject({ paused: false });
+    expect(queueRows(t.rows)).toEqual(['pause:interrupt', 'resume:empty']);
+
+    const held = await harness();
+    held.h.turn = true;
+    await held.queue.steer('steer a', { priority: 'next' });
+    await held.queue.stop({ hold: true }, async () => {});
+    expect(held.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'steer a', state: 'queued' }] });
+    held.h.turn = false;
+    await held.queue.onTurnEnded(turnEnded());
+    expect(held.writes.map((w) => w.message.content)).toEqual(['steer a']); // the steer's own write, nothing released
+  });
+
+  it('a message being prepared, or saved as submitting but not yet written, when a Stop arrives is still held', async () => {
+    let finish!: () => void;
+    const prepared = new Promise<void>((resolve) => (finish = resolve));
+    const t = await harness({ prepare: async (content) => { await prepared; return { content, settle: () => {} }; } });
+    const sending = t.queue.send('racing');
+    await flush();
+    await t.queue.stop({ hold: true }, async () => {});
+    finish();
+    expect((await sending).disposition).toBe('queued');
+    expect(t.writes).toEqual([]);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'racing', state: 'queued' }] });
+
+    const s = await harness();
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    const save = s.store.saveQueue.bind(s.store);
+    vi.spyOn(s.store, 'saveQueue').mockImplementationOnce(async (id, queue) => {
+      await landed;
+      await save(id, queue);
+    });
+    const submitting = s.queue.send('racing');
+    await flush();
+    const stopping = s.queue.stop({ hold: true }, async () => {});
+    land();
+    await stopping;
+    expect((await submitting).disposition).toBe('queued');
+    expect(s.writes).toEqual([]);
+    expect(s.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'racing', state: 'queued' }] });
+  });
+
+  it('a send while the Stop withdraws a steer does not end the pause under it; the steer stays held', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.steer('steer a', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const stopping = t.queue.stop({ hold: true }, async () => {});
+    await flush();
+    await t.queue.send('typed during the Stop');
+    answer();
+    await stopping;
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes.map((w) => w.message.content)).toEqual(['steer a']);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    expect(t.queue.state.entries.map((e) => e.content)).toEqual(['typed during the Stop', 'steer a']);
+  });
+
+  it('removing or sending now the last held row ends the pause; one row left keeps it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const a = (await t.queue.send('a')).entry;
+    const b = (await t.queue.send('b')).entry;
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false;
+    });
+    await t.queue.remove(a.queueId);
+    expect(t.queue.isPaused).toBe(true);
+    await t.queue.promote(b.queueId);
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+
+    const r = await harness();
+    r.h.turn = true;
+    const only = (await r.queue.send('only')).entry;
+    await r.queue.stop({ hold: false }, async () => {
+      r.h.turn = false;
+    });
+    await r.queue.remove(only.queueId);
+    expect(r.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
+    expect(await r.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+  });
+
+  it('a host sequence the pause holds keeps it; other pauses that hold nothing stay as they are', async () => {
+    let staged = true;
+    const t = await harness({ holdsSequence: () => staged });
+    await t.queue.stop({ hold: true }, async () => {});
+    expect(t.queue.isPaused).toBe(true);
+    staged = false;
+    await t.queue.send('after the sequence');
+    expect(t.queue.isPaused).toBe(false);
+
+    const user = await harness();
+    await user.queue.pause('user');
+    await user.queue.send('held');
+    expect(user.queue.state).toMatchObject({ paused: true, pauseReason: 'user' });
+  });
+
+  // The branch review (second round): the phase waits for the interrupted main-lane turn alone. Work that holds the queue
+  // like a turn without being one (a staged clear and implement, an unstarted prompt) may end with no turn end at all.
+  it('a Stop answered while only a host sequence holds the queue does not wait for a turn end that never comes', async () => {
+    let staged = true;
+    const t = await harness({ holdsSequence: () => staged, mainTurnOpen: () => false });
+    t.h.turn = true; // the sequence holds the queue like an open turn; no main-lane turn is open
+    await t.queue.stop({ hold: true }, async () => {});
+    expect(t.queue.isPaused).toBe(true); // the sequence is held
+    staged = false; // its mode restore failed: it drops, with no turn end
+    t.h.turn = false;
+    await t.queue.send('fresh'); // sent at once
+    t.h.turn = true;
+    expect((await t.queue.send('follow-up')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [t.writes[0]!.uuid as MessageUuid] }));
+    expect(t.writes.map((w) => w.message.content)).toEqual(['fresh', 'follow-up']);
+  });
+
+  it('a host sequence that drops without releasing ends the empty pause it held, and releases nothing', async () => {
+    let staged = true;
+    const t = await harness({ holdsSequence: () => staged, mainTurnOpen: () => false });
+    await t.queue.stop({ hold: true }, async () => {});
+    expect(t.queue.isPaused).toBe(true);
+    staged = false;
+    await t.queue.onSequenceDropped();
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+    expect(t.writes).toEqual([]);
+  });
+
+  // The branch review: the Stop's phase lasts through the engine's interrupt and the interrupted turn's end, which the
+  // interrupt's answer can precede, so a message sent in between is held as a message sent before the Stop was.
+  it('a send while the interrupt is answered, or after its answer before the interrupted turn ends, is held', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    const stopping = t.queue.stop({ hold: true }, () => answered);
+    await flush();
+    expect((await t.queue.send('during the interrupt')).disposition).toBe('queued');
+    answer();
+    await stopping;
+    expect((await t.queue.send('after its answer')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    expect(t.writes).toEqual([]);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'during the interrupt' }, { content: 'after its answer' }] });
+
+    const empty = await harness();
+    empty.h.turn = true;
+    await empty.queue.stop({ hold: true }, async () => {});
+    expect(empty.queue.isPaused).toBe(true); // the interrupted turn has not ended yet
+    empty.h.turn = false;
+    await empty.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    expect(empty.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await empty.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+  });
+
+  it('a removal whose save has not committed still holds: a send meanwhile leaves the pause, and a failed removal restores its row held', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const held = (await t.queue.send('held')).entry;
+    await t.queue.pause('interrupt');
+    let fail!: () => void;
+    const failing = new Promise<void>((resolve) => (fail = resolve));
+    vi.spyOn(t.store, 'saveQueue').mockImplementationOnce(async () => {
+      await failing;
+      throw new Error('EIO');
+    });
+    const removing = t.queue.remove(held.queueId).catch((error: unknown) => error);
+    await flush();
+    expect((await t.queue.send('sent meanwhile')).disposition).toBe('queued');
+    fail();
+    expect(await removing).toMatchObject({ message: 'EIO' });
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes).toEqual([]);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'held' }, { content: 'sent meanwhile' }] });
+  });
+
+  it('the pause ends when what held it settles: the interrupt drops the only submission, or a late withdrawal gives its steer back', async () => {
+    const t = await harness();
+    const { entry } = await t.queue.send('one'); // written, not yet acknowledged
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false; // the interrupt drops the unstarted prompt: no turn runs
+    });
+    expect(t.queue.isPaused).toBe(true); // a submission not yet acknowledged may still be held back
+    t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'cancelled'));
+    await flush();
+    await flush();
+    expect(t.queue.state).toMatchObject({ entries: [], paused: false, pauseReason: null });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ entries: [], paused: false, pauseReason: null });
+
+    const late = await harness({ holdAllDeadlineMs: 1 });
+    late.h.turn = true;
+    await late.queue.steer('steer a', { priority: 'next' });
+    let answer!: () => void;
+    late.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    late.h.cancelled = false; // the engine had already taken it
+    await late.queue.stop({ hold: true }, async () => {
+      late.h.turn = false;
+    });
+    expect(late.queue.isPaused).toBe(true); // the withdrawal is still out
+    answer();
+    await flush();
+    await flush();
+    expect(late.queue.state).toMatchObject({ entries: [], paused: false, pauseReason: null });
+  });
+
+  it('a state file another build left with an interrupt pause and no rows loads unpaused, by recovery and by adoption', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
+    const recovered = await harness({ store });
+    expect(recovered.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+
+    const adoptedStore = new MemorySessionStateStore();
+    await adoptedStore.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
+    const adopted = await harness({ store: adoptedStore, recovered: false });
+    await adopted.queue.adopt({ written: new Set(), unended: [], ended: new Set() });
+    expect(adopted.queue.state).toMatchObject({ paused: false, pauseReason: null });
+
+    const kept = new MemorySessionStateStore();
+    await kept.saveQueue(ID, { entries: [{ queueId: 'q1', appSessionId: ID, content: 'held', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }], paused: true, pauseReason: 'interrupt' });
+    expect((await harness({ store: kept })).queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+  });
+
+  // The branch's third review: an adopted live process may still run the turn its old manager's Stop interrupted (the
+  // fold restored it open), so its empty pause lasts until that turn ends, as the live Stop's phase would have.
+  it('an adopted process whose restored turn is still open keeps the empty interrupt pause until that turn ends', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
+    const t = await harness({ store, recovered: false });
+    t.h.turn = true; // the fold left the interrupted turn open, a plain interrupt written while it ran
+    await t.queue.adopt({ written: new Set(), unended: [], ended: new Set(), interrupted: true });
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    expect((await t.queue.send('follow-up during the interrupted turn')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    expect(t.writes).toEqual([]); // held: it was sent while the Stop's phase lasted
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+  });
+
+  // The fix wave's review: a saved interrupt pause can outlive its turn (it holds a row), and a fresh instruction can then
+  // start an unrelated turn. Adopted during that turn, the pause has no Stop's phase to restore: the journal shows no
+  // interrupt written while the open turn ran, so removing the last held row ends it.
+  it('an adopted interrupt pause whose open turn was not the one interrupted restores no Stop phase', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [{ queueId: 'q1', appSessionId: ID, content: 'held', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }], paused: true, pauseReason: 'interrupt' });
+    const t = await harness({ store, recovered: false });
+    t.h.turn = true; // an unrelated turn, started after the interrupted one ended
+    await t.queue.adopt({ written: new Set(), unended: [], ended: new Set(), interrupted: false });
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    await t.queue.remove('q1');
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
+  });
+
+  // The fix wave's review: the Stop's turn is the one its interrupt request reaches. A turn that ends while the Stop saves
+  // its pause or withdraws steers, and a successor that starts before the interrupt goes out, make the successor the
+  // interrupted turn: the phase waits for its end, and a follow-up sent meanwhile is held.
+  it('a Stop takes its turn at the interrupt request: a successor started while it withdrew steers is the one it waits on', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.steer('steer a', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    t.h.cancelled = false; // the engine had already taken it
+    const stopping = t.queue.stop({ hold: true }, async () => {}); // answered while the successor runs
+    await flush();
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded()); // the turn ends while the Stop withdraws
+    t.h.turn = true; // the steer's own turn starts before the interrupt is written
+    answer();
+    await stopping;
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    expect((await t.queue.send('follow-up')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    expect(t.writes.map((w) => w.message.content)).toEqual(['steer a']);
+  });
+
+  // The branch's third review: the Stop's phase follows the turn it interrupted. When the inbound drain carries that
+  // turn's end and a successor's start (a steer the hold's deadline left with the engine) before the interrupt's answer
+  // resumes the Stop, the successor is not the interrupted turn: a message queued behind it goes at its end.
+  it('a Stop whose interrupted turn ended and a successor started before its answer was read does not wait on the successor', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false;
+      await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+      t.h.turn = true; // the successor's `started`, drained before the continuation
+    });
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect((await t.queue.send('follow-up')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes.map((w) => w.message.content)).toEqual(['follow-up']);
   });
 });
 
@@ -1582,12 +1911,15 @@ describe('a prepared submission', () => {
 
   it('l2-transcript-15: a prepared fresh send bypasses only the interrupt pause and leaves it paused', async () => {
     const p = preparer();
-    const { queue, writes } = await harness({ prepare: p.prepare });
+    const { queue, writes, h } = await harness({ prepare: p.prepare });
+    h.turn = true;
+    await queue.send('held'); // ticket 790: a pause that holds nothing ends at the send; this one holds a row
     await queue.pause('interrupt');
+    h.turn = false;
     expect((await queue.send('fresh')).disposition).toBe('sent');
     expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fresh' }, READ]]);
     expect(p.settled).toEqual([['fresh', true]]);
-    expect(queue.state.paused).toBe(true);
+    expect(queue.state).toMatchObject({ paused: true, entries: [{ content: 'held', state: 'queued' }, { content: 'fresh', state: 'submitting' }] });
   });
 
   it('is busy while it prepares: a send meanwhile waits behind it, in order', async () => {

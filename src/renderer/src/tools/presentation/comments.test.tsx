@@ -15,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -58,7 +58,7 @@ describe('a deck comment’s anchor', () => {
   it('is what the surface opens the card on when the deck gives its kind', async () => {
     let opened: ((p: typeof passage) => void) | null = null;
     function Deck() {
-      const comments = useDocumentComments({ artifactId: 'deck-1', appSessionId: PARENT, title: 'Q3 review', artifactKind: 'presentation' });
+      const comments = useDocumentComments({ artifactId: 'deck-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 review', artifactKind: 'presentation' });
       opened = comments.opened;
       return null;
     }
@@ -110,11 +110,11 @@ describe('a deck’s compose card keeps its draft', () => {
     act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
     off = registerPresentationEditor(() => ({ host, log: () => {}, confirmDiscard }));
     const editor = artifactEditorFor('presentation')!;
-    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, 'presentation', editor as never);
+    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, TEST_MACHINE, 'presentation', editor as never);
     const Main = editor.Main;
     const view = render(
       <EditorHostScopeContext.Provider value={scope}>
-        <Main artifactId={DECK} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Main artifactId={DECK} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(hold.state.snapshot().session).not.toBeNull());
@@ -161,24 +161,24 @@ describe('a deck’s compose card keeps its draft', () => {
     // the panel shows the deck too: the move's destination
     const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
     const editor = artifactEditorFor('presentation')!;
-    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, 'presentation', editor as never);
+    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, TEST_MACHINE, 'presentation', editor as never);
     const Panel = editor.Panel;
     const panel = render(
       <EditorHostScopeContext.Provider value={panelScope}>
-        <Panel artifactId={DECK} state={kept.state} scope={panelScope} visible onShown={() => {}} />
+        <Panel artifactId={DECK} machine={TEST_MACHINE} state={kept.state} scope={panelScope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(kept.state.snapshot().session).not.toBeNull());
     expect(await state.closeGuard({ moving: true })).toBe(true);
     expect(handArtifactViewOver(scope, panelScope)).toBe(true);
     expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
-    expect(commentDraftOf(DECK)).toEqual({ threadId: listThreads(doc)[0]!.id, text: 'Shorter?' });
+    expect(commentDraftOf(DECK, TEST_MACHINE)).toEqual({ threadId: listThreads(doc)[0]!.id, text: 'Shorter?' });
     // the source closes, its body and its state with it
     unmount();
     act(() => releaseArtifactEditorState(scope));
     await act(async () => {});
     expect(useCommentCard.getState().open).toMatchObject({ hostId: kept.state.commentHostId });
-    expect(commentDraftOf(DECK)?.text).toBe('Shorter?');
+    expect(commentDraftOf(DECK, TEST_MACHINE)?.text).toBe('Shorter?');
     expect(listThreads(doc)).toHaveLength(1); // not withdrawn
     panel.unmount();
     releaseArtifactEditorState(panelScope);

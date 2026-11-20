@@ -1,7 +1,6 @@
 // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5, "Which machine an artifact is on"): the
 // renderer's one answer to which machine an artifact is on. The rows and records a machine answers put their artifacts
-// on it; an artifact-keyed command whose input names no machine goes to the artifact's; a local answer takes an id back
-// to this Mac (the later answer wins); a caller's explicit machine, and a machine the input's addresses name, still win.
+// on it; an id-only command follows a unique remote hint. A caller’s explicit machine and an input’s address still win.
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName } from '@shared/ipc/schema';
@@ -49,7 +48,7 @@ describe('the renderer’s artifact table', () => {
     expect(sentTo(fake, 'library.saveAs')).toBe(OTHER_MACHINE);
   });
 
-  it('never holds this Mac’s ids: its artifacts go to this Mac', async () => {
+  it('routes this Mac’s artifacts to this Mac', async () => {
     const { fake, ipc } = client();
     await ipc.invoke('library.list', { filter: {} });
     expect(artifactMachineOf(id(2))).toBeNull();
@@ -57,10 +56,12 @@ describe('the renderer’s artifact table', () => {
     expect(sentTo(fake, 'artifacts.versions')).toBe(TEST_MACHINE);
   });
 
-  it('keeps the later answer for an id two machines answered', async () => {
+  it('does not let an observation overwrite the route of an explicitly named copy', async () => {
     const { fake, ipc } = client();
     recordArtifactMachine(id(2), OTHER_MACHINE, TEST_MACHINE);
-    await ipc.invoke('library.list', { filter: {} }); // this Mac lists artifact 2 after
+    await ipc.invoke('library.list', { filter: {} }); // this Mac also lists artifact 2
+    await ipc.invoke('library.get', { artifactId: id(2) }, { machine: OTHER_MACHINE });
+    expect(sentTo(fake, 'library.get')).toBe(OTHER_MACHINE);
     expect(artifactMachineOf(id(2))).toBeNull();
     await ipc.invoke('artifacts.versions', { artifactId: id(2) });
     expect(sentTo(fake, 'artifacts.versions')).toBe(TEST_MACHINE);

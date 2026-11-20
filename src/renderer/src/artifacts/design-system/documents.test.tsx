@@ -2,6 +2,7 @@
 // B's editor draws its page inside D's scope, in the system that governs the document as the chain resolves it from the
 // owner's and the Spaces' defaults (settings 14), the house system the window follows and the library's live systems;
 // and the page moves when any of those does. Mounted as L's record view mounts B's editor, under the app's provider.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { colorToCss, type ColorValue } from '@artifacts/design-system/color';
@@ -141,12 +142,12 @@ function deps(placement: { designSystemId?: string; spaceId?: string }): () => D
 function mount(placement: { designSystemId?: string; spaceId?: string }, house: HouseDesignSystem) {
   offs.push(registerDocumentEditor(deps(placement)));
   const editor = artifactEditorFor('document')!;
-  const hold = holdArtifactEditorState<DocumentTabState>(SCOPE, DOC, 'document', editor as never);
+  const hold = holdArtifactEditorState<DocumentTabState>(SCOPE, DOC, TEST_MACHINE, 'document', editor as never);
   const Panel = editor.Panel;
   render(
     <DesignSystemHostProvider host={systemHost()} house={house}>
       <EditorHostScopeContext.Provider value={SCOPE}>
-        <Panel artifactId={DOC} state={hold.state} scope={SCOPE} visible onShown={() => {}} />
+        <Panel artifactId={DOC} machine={TEST_MACHINE} state={hold.state} scope={SCOPE} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>
     </DesignSystemHostProvider>,
   );

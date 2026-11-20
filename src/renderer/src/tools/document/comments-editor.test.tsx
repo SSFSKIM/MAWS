@@ -17,7 +17,7 @@ import { getThread } from '@artifacts/document/threads';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -56,7 +56,7 @@ async function mount() {
   await whenSynced(opened);
   let current: Editor | null = null;
   function Surface() {
-    const comments = useDocumentComments({ artifactId: 'art-1', appSessionId: PARENT, title: 'Plan' });
+    const comments = useDocumentComments({ artifactId: 'art-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Plan' });
     return <DocumentEditor artifactId="art-1" handle={opened} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
   }
   const view = render(<Surface />);
@@ -108,7 +108,7 @@ it('withdraws a closing tab’s acknowledged unsent draft at the host, not only 
   memory.write((d) => createDocument(d, { title: 'Draft', body: schemaFor().nodeFromJSON(doc(para('p1', 'The plan ships quarterly.'))) }));
   let tabHandle: (DocumentHandle & { closed?: boolean }) | null = null;
   const state = new DocumentTabState(
-    { artifactId: A, kind: 'document', surface: 'panel' },
+    { artifactId: A, machine: TEST_MACHINE, kind: 'document', surface: 'panel' },
     {
       host: {
         ...owner,
@@ -135,7 +135,7 @@ it('withdraws a closing tab’s acknowledged unsent draft at the host, not only 
     await until(() => state.snapshot().ready, 'the tab to open');
     let current: Editor | null = null;
     function Surface() {
-      const comments = useDocumentComments({ artifactId: A, appSessionId: PARENT, title: 'Draft', holdReplica: state.hold });
+      const comments = useDocumentComments({ artifactId: A, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Draft', holdReplica: state.hold });
       return <DocumentEditor artifactId={A} handle={tabHandle!} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
     }
     const view = render(<Surface />);

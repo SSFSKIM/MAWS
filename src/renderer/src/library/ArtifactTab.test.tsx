@@ -125,7 +125,7 @@ describe('an artifact in a main tab', () => {
     act(() => openArtifactTab(A));
     await screen.findByText(`main editor for ${A} in main:${TAB}`);
     expect(editor.createState).toHaveBeenCalledTimes(1);
-    expect(editor.createState).toHaveBeenCalledWith({ artifactId: A, kind: 'document', surface: 'main' });
+    expect(editor.createState).toHaveBeenCalledWith({ artifactId: A, machine: TEST_MACHINE, kind: 'document', surface: 'main' });
     expect(headerTitle()).toBe('Editing 1');
     expect(within(chromeTabs()).getByRole('tab', { name: 'Launch notes' }), 'the row’s title labels the tab').toBeTruthy();
     expect(document.querySelector('[data-toolbar]')!.textContent).toContain('Launch notes');
@@ -378,7 +378,7 @@ describe('an artifact an agent deleted while it is open', () => {
     await deletedWhileOpen();
     const ref = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
     expect(artifactReplaceVerdict(ref)).toBeNull(); // the header says nothing unsaved (a parked replica's says read-only), nothing kept: replaceable
-    act(() => noteDeletedReplica({}, A, 1));
+    act(() => noteDeletedReplica({}, A, TEST_MACHINE, 1));
     expect(artifactReplaceVerdict(ref)).toEqual({ keep: expect.stringContaining('has unsaved changes') });
   });
 
@@ -406,9 +406,9 @@ describe('an artifact an agent deleted while it is open', () => {
   it('says the last edit is not saved while the editor’s replica holds one the host never acknowledged', async () => {
     await deletedWhileOpen();
     const replica = {};
-    act(() => noteDeletedReplica(replica, A, 1));
+    act(() => noteDeletedReplica(replica, A, TEST_MACHINE, 1));
     expect(notice()!.textContent).toContain(UNSENT);
-    act(() => noteDeletedReplica(replica, A, null));
+    act(() => noteDeletedReplica(replica, A, TEST_MACHINE, null));
     expect(notice()!.textContent).toContain(DELETED_BY_AGENT);
   });
 

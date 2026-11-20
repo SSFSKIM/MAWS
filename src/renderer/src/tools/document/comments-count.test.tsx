@@ -15,7 +15,7 @@ import { addThread, getThread } from '@artifacts/document/threads';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -56,7 +56,7 @@ it('stays at the count of sent comments through a card opened and closed unsent,
   await whenSynced(opened);
   let current: Editor | null = null;
   function Surface() {
-    const comments = useDocumentComments({ artifactId: 'art-1', appSessionId: PARENT, title: 'Plan' });
+    const comments = useDocumentComments({ artifactId: 'art-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Plan' });
     return <DocumentEditor artifactId="art-1" handle={opened} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
   }
   render(<Surface />);

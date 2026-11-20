@@ -625,7 +625,7 @@ describe('a parked replica leaves only on a current read that answers live (fix 
     await settle();
     expect(h.calls.filter((c) => c.name === 'artifacts.get').length).toBe(asked + 1);
     expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
-    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    expect(unsentWhileDeleted(ARTIFACT, TEST_MACHINE)).toBe(true);
     handle.close();
   });
 
@@ -1054,7 +1054,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
     expect(handle.state().refused).toBeUndefined();
     expect(savedOf(handle.state(), false, false)).toBe('readonly'); // the editor takes no edit
-    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    expect(unsentWhileDeleted(ARTIFACT, TEST_MACHINE)).toBe(true);
     const asked = opens(h);
     await settle(60_000);
     expect(opens(h)).toBe(asked); // no backoff while it waits
@@ -1067,7 +1067,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     await settle();
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
     expect(text(h.host.doc)).toBe('Typed just before. ');
-    expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
+    expect(unsentWhileDeleted(ARTIFACT, TEST_MACHINE)).toBe(false);
     handle.close();
   });
 
@@ -1081,7 +1081,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     h.answers.set('artifacts.get', deleted(true));
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: true }));
-    expect(unsentWhileDeleted(ARTIFACT)).toBe(false); // nothing typed: nothing kept
+    expect(unsentWhileDeleted(ARTIFACT, TEST_MACHINE)).toBe(false); // nothing typed: nothing kept
     h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the read `created` makes answers live
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false }));
@@ -1133,7 +1133,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     await settle(RECONNECT_BACKOFF_MS[0]);
     expect(handle.state().refused).toBe(`no artifact ${ARTIFACT}`);
     expect(handle.state().readOnly).toBe(false);
-    expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
+    expect(unsentWhileDeleted(ARTIFACT, TEST_MACHINE)).toBe(false);
   });
 
   // Fix wave 1 (review items 2 and 3): the host's word on the deletion is read once per change, and a read that a later
@@ -1202,7 +1202,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     await settle(RECONNECT_BACKOFF_MS[1]);
     expect(gets(h)).toBe(2);
     expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
-    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    expect(unsentWhileDeleted(ARTIFACT, TEST_MACHINE)).toBe(true);
     h.answers.delete('artifacts.open');
     h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: Undo landed, as the read after `created` says
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });

@@ -3,6 +3,7 @@
 // documents: the deck's own system, else its Space's default, else the owner's (settings 14), else the house system the
 // window follows, else the bundled floor; a system the library no longer lists is skipped, as a deleted one is on the
 // host. Shared by the editor's body and the presenter's route; the deck's own hook, never a call into B's file.
+import type { MachineRef } from '@shared/machine/ref';
 import { useMemo } from 'react';
 import { useGoverningSystem } from '@artifacts/design-system/apply';
 import { useLibraryList } from '../../library/store';
@@ -13,9 +14,9 @@ const UNPLACED = {};
 const FLOOR = { builtin: 'maws' as const };
 
 /** The system governing a deck so placed, followed (a hook); null while the deck's row is not read. */
-export function useDeckSystem(placement: { designSystemId?: string; spaceId?: string } | null) {
+export function useDeckSystem(placement: { designSystemId?: string; spaceId?: string } | null, machine: MachineRef) {
   const defaults = useSettings((s) => s.state?.settings.artifacts);
-  const systems = useLibraryList({ kind: 'design_system' }).value?.rows;
+  const systems = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   // Until the library answers, every named system is taken as live: a deck's own system draws at once.
   const listed = useMemo(() => systems && new Set(systems.map((system) => system.id)), [systems]);
   const live = listed && ((id: string) => listed.has(id));

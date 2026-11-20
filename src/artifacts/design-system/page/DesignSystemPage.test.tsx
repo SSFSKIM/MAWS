@@ -86,6 +86,24 @@ describe('the Design System page (D14)', () => {
     expect(view.container.querySelectorAll('.dsp-badge')).toHaveLength(4);
   });
 
+  it('previews copies on different hosts independently even when the system IDs match', () => {
+    const local = systemDoc();
+    const peer = systemDoc();
+    setToken(peer, 'color.accent.$root', { $value: '#123456' });
+    const view = render(
+      <>
+        <DesignSystemPage artifactId="ds1" handle={{ doc: local }} host={host} />
+        <DesignSystemPage artifactId="ds1" handle={{ doc: peer }} host={{ ...host }} />
+      </>,
+    );
+    const [localChip, peerChip] = [...view.container.querySelectorAll('[data-token="color.accent"] .dsp-chip')];
+    expect(getComputedStyle(localChip!).backgroundColor).toBe('#c9663f');
+    expect(getComputedStyle(peerChip!).backgroundColor).toBe('#123456');
+    act(() => setToken(local, 'color.accent.$root', { $value: '#abcdef' }));
+    expect(getComputedStyle(localChip!).backgroundColor).toBe('#abcdef');
+    expect(getComputedStyle(peerChip!).backgroundColor).toBe('#123456');
+  });
+
   it('writes the accent from its hex field and its colour picker, and the swatch’s scope restyles at once', () => {
     const doc = systemDoc();
     const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} />);

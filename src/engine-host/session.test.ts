@@ -1854,6 +1854,17 @@ describe('F2 session lifecycle regressions', () => {
   }
   const prompts = (t: ScriptedTransport) => t.writes.filter((w) => w.type === 'user').map((w) => oneId(w.message.content));
 
+  it('ticket 790: a Stop with nothing waiting leaves the queue unpaused, with the hold and without it', async () => {
+    const t = setup({ responder: defaultResponder({ interrupt: () => ({ response: { still_queued: [], cancelled: [] } }) }) });
+    await t.session.start();
+    await t.session.interrupt({ cancelEngineQueued: false, holdEngineQueued: true });
+    expect(t.session.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    await t.session.interrupt({ cancelEngineQueued: false });
+    expect(t.session.queue.isPaused).toBe(false);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
   it('Stop holds a staged clear continuation through the interrupted result until Resume', async () => {
     const { session, transport } = await staged();
     await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });

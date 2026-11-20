@@ -32,7 +32,7 @@
 //   `504` when nothing opened within OPEN_TIMEOUT_MS of the request, a refusal as the HTTP status it means (REFUSAL_STATUS),
 //   and the app's stop ends whatever is still in flight. A stream lost with its channel before its answer is opened again
 //   on the next, within the same bound (a GET or a HEAD asked twice is the same answer).
-import { artifactUrl } from '@shared/artifacts/scheme';
+import { artifactUrl, machineOfArtifactUrl } from '@shared/artifacts/scheme';
 import type { MachineRef } from '@shared/machine/ref';
 import type { RemoteLink, RemoteStream } from '../machines/remote/link';
 import type { StreamOpened, StreamRequest } from '../machines/remote/streams';
@@ -84,6 +84,8 @@ const plain = (status: number, body: string): Response => new Response(body, { s
 
 export interface RemoteSchemeDeps {
   machines: Pick<ArtifactMachines, 'machineOf'>;
+  /** This Mac: a URL that names it is this Mac's store's alone. */
+  local?: MachineRef;
   remote(machine: MachineRef): RemoteLink | null;
   openTimeoutMs?: number;
   idleMs?: number;
@@ -292,6 +294,10 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
     async respond(request, stage = 'placed') {
       const artifactId = artifactIdOfUrl(request.url);
       if (artifactId === null) return null;
+      // a URL that names its machine (a viewer's frame) is that copy's alone: this Mac's store answers this Mac's, 404
+      // included, and another machine's is fetched from it, whatever the table places and whoever refers to it
+      const named = machineOfArtifactUrl(request.url) as MachineRef | null;
+      if (named !== null) return stage === 'placed' && named !== deps.local ? fetchFrom(named, request, true) : null;
       const placed = deps.machines.machineOf(artifactId);
       if (stage === 'placed') return placed === null ? null : fetchFrom(placed, request, true);
       if (placed !== null) return null; // asked of its machine at the first stage

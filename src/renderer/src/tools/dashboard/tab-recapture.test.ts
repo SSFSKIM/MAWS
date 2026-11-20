@@ -2,6 +2,7 @@
 // source sheet, the dashboard tab recaptures the latest only once the displayed document has synced again after the
 // sheet's hold was taken (never relabelling the old descriptors as latest), holds it afresh and reopens the sheet on
 // that one capture; if the document does not sync again within the bound, the sheet says the snapshot is unavailable.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { removeDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -42,7 +43,7 @@ function world() {
     on: (() => () => {}) as unknown as MawsBridge['on'],
   };
   const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm: () => true, sessionTitle: () => undefined, sessions: () => [] };
-  const tab = new DashboardTabState({ artifactId: A, kind: 'dashboard', surface: 'panel' }, deps);
+  const tab = new DashboardTabState({ artifactId: A, machine: TEST_MACHINE, kind: 'dashboard', surface: 'panel' }, deps);
   return { doc, tab, holds, setState };
 }
 const settle = async () => {

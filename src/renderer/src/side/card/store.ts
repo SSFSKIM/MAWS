@@ -50,6 +50,7 @@ export interface OpenCard {
   claimMode: CardHostMode | null; // for an unclaimed card: the host mode that may claim it
   openedAt: number; // for CLAIM_DEADLINE_MS
   target: CardTarget | null; // targetOf(anchor); null when the anchor names none
+  subject?: string; // the in-memory pass identity, not part of the anchor
   rect: CardRect | null; // null: locate, else the corner
   phase: CardPhase;
   limit?: true; // Decision Log 52: opened by a pick its pass had no room for (the card says the limit)
@@ -178,14 +179,15 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
   const target = targetOf(anchor);
   const host = placement?.host ?? target?.kind ?? 'artifact-page';
   const hostId = placement?.hostId ?? null;
+  const entry = hostId === null ? undefined : hosts.get(hostId);
+  const identified = context.subject ?? entry?.subject;
   if (context.phase?.kind === 'thread') {
     const serial = ++serials;
-    show({ serial, parent: context.appSessionId, anchor, host, hostId, claimMode: context.claimMode ?? null, openedAt: Date.now(), target, rect: placement?.rect ?? null, phase: context.phase });
+    show({ serial, parent: context.appSessionId, anchor, host, hostId, claimMode: context.claimMode ?? null, openedAt: Date.now(), target, ...(identified !== undefined && { subject: identified }), rect: placement?.rect ?? null, phase: context.phase });
     claimBy(serial, hostId);
     return;
   }
-  const entry = hostId === null ? undefined : hosts.get(hostId);
-  const subject = entry?.subject ?? (host === 'review' ? context.appSessionId /* UX wave U5b: Review's pass is the session's */ : subjectOf(target)) ?? hostId ?? '';
+  const subject = identified ?? (host === 'review' ? context.appSessionId /* UX wave U5b: Review's pass is the session's */ : subjectOf(target)) ?? hostId ?? '';
   const key = passKey(host, subject, context.appSessionId);
   const left = leaving(useCommentCard.getState());
   const passes = new Map(left.passes);
@@ -244,7 +246,7 @@ function withoutScreenshot(anchor: Anchor): Anchor {
 const subjectOf = (target: CardTarget | null): string | null => (target?.kind === 'artifact' || target?.kind === 'artifact-page' ? target.artifactId : null);
 
 function cardOn(key: string, pass: CommentPass, comment: PassComment, hostId: string | null): OpenCard {
-  return { serial: ++serials, parent: pass.appSessionId, anchor: comment.anchor, host: pass.host, hostId, claimMode: null, openedAt: Date.now(), target: targetOf(comment.anchor), rect: comment.rect, phase: { kind: 'composing', pass: key, comment: comment.id } };
+  return { serial: ++serials, parent: pass.appSessionId, anchor: comment.anchor, host: pass.host, hostId, claimMode: null, openedAt: Date.now(), target: targetOf(comment.anchor), ...(pass.host === 'artifact' && { subject: pass.subject }), rect: comment.rect, phase: { kind: 'composing', pass: key, comment: comment.id } };
 }
 
 // The open card going: its comment stays in its pass unless nothing is typed in it (and it is not in flight), when it

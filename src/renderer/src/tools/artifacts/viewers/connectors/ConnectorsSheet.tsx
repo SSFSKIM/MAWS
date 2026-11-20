@@ -19,6 +19,7 @@
 // is drawn from the device's rights there and the machine's offer (../../../../artifacts/remote-surfaces.ts): a part the
 // machine doesn't offer, or whose `machine-admin` the device lacks, is greyed with why, never hidden.
 import { useEffect, useRef } from 'react';
+import { ipc } from '../../../../ipc/client';
 import { useStore } from 'zustand';
 import { connectorToolKey, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { ConnectorServerRow } from '@shared/ipc/schema/connectors';
@@ -32,15 +33,15 @@ import { sheetTools, type ConnectorsTab } from './tab';
 
 // The sheet for an artifact as the library knows it (null while its row is read: no context, so no Start yet).
 export function ArtifactConnectorsSheet({ tab, artifact }: { tab: ConnectorsTab; artifact: ArtifactContextOf | null }) {
-  return <ConnectorsSheet tab={tab} context={useArtifactSessionContext(artifact)} />;
+  return <ConnectorsSheet tab={tab} context={useArtifactSessionContext(artifact, tab.machine ?? ipc.localMachine)} />;
 }
 
 export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessionContext }) {
   const view = useStore(tab.view);
   const tools = sheetTools(view);
   const servers = tools.length > 0 || (view.servers.rows?.length ?? 0) > 0; // P3-F: its recovery rows need no tool
-  const leaseGreyed = useRemoteGreyed(tab.artifactId, LEASE_NEEDS); // P5 O7 M5c
-  const grantGreyed = useRemoteGreyed(tab.artifactId, GRANT_NEEDS);
+  const leaseGreyed = useRemoteGreyed(tab.artifactId, LEASE_NEEDS, tab.machine); // P5 O7 M5c
+  const grantGreyed = useRemoteGreyed(tab.artifactId, GRANT_NEEDS, tab.machine);
   const body = (
     <>
       {leaseGreyed !== null && (
@@ -164,8 +165,8 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
   const { rows, saved, withdrawnUnattributed, failed } = servers;
   const heading = `connectors-servers-${tab.artifactId}`;
   // P5 O7 M5c: greyed, the rows are neither read nor shown; once the lists hold what they need, they are read
-  const greyed = useRemoteGreyed(tab.artifactId, SERVER_NEEDS);
-  const elsewhere = useRemoteMachineName(tab.artifactId);
+  const greyed = useRemoteGreyed(tab.artifactId, SERVER_NEEDS, tab.machine);
+  const elsewhere = useRemoteMachineName(tab.artifactId, tab.machine);
   const asked = useStore(tab.view, (s) => s.serversAsked);
   const stale = useStore(tab.view, (s) => s.serversStale); // P5 O7 M5c review 1
   const wasGreyed = useRef(greyed);
@@ -293,7 +294,7 @@ function describe(tab: ConnectorsTab, row: ConnectorServerRow, unattributed: boo
 function ServerRow({ tab, row, unattributed }: { tab: ConnectorsTab; row: ConnectorServerRow; unattributed: boolean }) {
   const serverBusy = useStore(tab.view, (s) => s.serverBusy);
   const refused = useStore(tab.view, (s) => s.servers.refused);
-  const elsewhere = useRemoteMachineName(tab.artifactId); // P5 O7 M5c
+  const elsewhere = useRemoteMachineName(tab.artifactId, tab.machine); // P5 O7 M5c
   const target = row.kind === 'source' ? row.handle : row.kind === 'engineOnly' ? null : row.connectionId;
   const refusal = refused === null || refused.target !== target ? null : refused.why === null ? refused.words : refused.why === 'busy' && elsewhere !== null ? REMOTE_SURFACE_WORDS.busyOn(elsewhere) : S.refused(refused.why);
   const last = row.kind !== 'engineOnly' && row.last ? S.last(row.last) : null;

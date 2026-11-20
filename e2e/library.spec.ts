@@ -31,6 +31,9 @@ import { closeScene, launchScene, scratchProject, seedArtifact, seedRecord, show
 import { sidebarRow } from './support/sidebar'; // P4 W2-D
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
+// A viewer's frame URL with the query naming its machine (`artifactUrlOn`), this Mac's in these scenes
+const escaped = (text: string) => text.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+const namesMachine = (url: string) => new RegExp(`^${escaped(url)}\\?machine=[A-Za-z0-9_-]{16,64}$`);
 
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
   const result = (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Result<T>;
@@ -468,7 +471,7 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   await openArtifactInPanel(page, id);
   const viewer = panel.locator('[data-artifact-viewer]');
   const frame = viewer.locator('[data-artifact-frame="html"]');
-  await expect(frame).toHaveAttribute('src', artifactUrl(id, seqs[1]!, 'index.html'));
+  await expect(frame).toHaveAttribute('src', namesMachine(artifactUrl(id, seqs[1]!, 'index.html')));
   await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   const content = viewer.frameLocator('[data-artifact-frame="html"]');
   await expect(content.locator('#version')).toHaveText('VERSION_TWO');
@@ -481,7 +484,7 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   const picker = viewer.getByRole('combobox', { name: 'Version' });
   await expect(picker.locator('option')).toHaveText(['v1', 'v2 · latest']);
   await picker.selectOption('1');
-  await expect(frame).toHaveAttribute('src', artifactUrl(id, seqs[0]!, 'index.html'));
+  await expect(frame).toHaveAttribute('src', namesMachine(artifactUrl(id, seqs[0]!, 'index.html')));
   await expect(content.locator('#version')).toHaveText('VERSION_ONE');
   await picker.selectOption('2');
   await expect(content.locator('#version')).toHaveText('VERSION_TWO');
@@ -588,7 +591,7 @@ test('a PDF, a video and an audio file artifact play in their viewers from the l
   // the PDF: Chromium's viewer draws the page in the unsandboxed frame
   const pdfTab = await open('report.pdf', report.id);
   const pdfFrame = pdfTab.locator('[data-artifact-frame="pdf"]');
-  await expect(pdfFrame).toHaveAttribute('src', new RegExp(`^maws-artifact://${report.id}/\\d+/report\\.pdf$`));
+  await expect(pdfFrame).toHaveAttribute('src', new RegExp(`^maws-artifact://${report.id}/\\d+/report\\.pdf\\?machine=[A-Za-z0-9_-]{16,64}$`));
   await expect(pdfFrame).not.toHaveAttribute('sandbox');
   await expect.poll(() => darkPixels(launch!, pdfFrame), { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
 

@@ -7,6 +7,7 @@
 // P3-F (L233): what it exports is what the editor shows (the design's what-you-see rule, P3-E's Decision Log 31): while
 // the history previews one retained version, that version (main reads its state and its pinned system); while two
 // versions are compared nothing is offered rather than one side silently chosen; otherwise the live deck.
+import type { MachineRef } from '@shared/machine/ref';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactExportFonts, ArtifactExportFormat } from '@shared/maws/tools';
 import type { DeckShown } from '@artifacts/slides/editor/session';
@@ -35,20 +36,20 @@ export const DECK_EXPORTS: readonly DeckExport[] = [
 ];
 
 /** The deck as `shown` (L233: the version previewed, else the live deck) exported as `entry` asks, then saved where the owner chooses. */
-export async function exportDeck(artifactId: string, entry: DeckExport, shown: DeckShown = null, client: MawsBridge = ipc): Promise<void> {
+export async function exportDeck(artifactId: string, machine: MachineRef, entry: DeckExport, shown: DeckShown = null, client: MawsBridge = ipc): Promise<void> {
   if (shown === 'compare') return; // two versions compared: nothing is exported
   // P4 (W1, L302): a file of its own (`ownFile`), saved by its id, so an export of the same revision and format between
   // the two (the agent's `artifact_export`, another option) never swaps the file saved
-  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }), ...ownFileFor(artifactId) }); // P5 O7 M5a: no own file on another machine
+  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }), ...ownFileFor(machine, client.localMachine) }, { machine }); // P5 O7 M5a: no own file on another machine
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   const { revision, exportId } = exported.value;
-  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: entry.format, ...(exportId !== undefined && { exportId }) } } });
+  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: entry.format, ...(exportId !== undefined && { exportId }) } } }, { machine });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
 }
 
 /** The header's Export entries for a deck as the editor shows it; none is offered while two versions are compared. */
-export function deckExports(artifactId: string, shown: DeckShown, run: (entry: DeckExport) => void = (entry) => void exportDeck(artifactId, entry, shown)): EditorHostExport[] {
+export function deckExports(artifactId: string, machine: MachineRef, shown: DeckShown, run: (entry: DeckExport) => void = (entry) => void exportDeck(artifactId, machine, entry, shown)): EditorHostExport[] {
   const disabled = shown === 'compare';
   const item = (entry: DeckExport): EditorHostExport => ({ id: entry.id, label: entry.label, onSelect: () => run(entry), ...(disabled && { disabled }), ...(entry.fonts === 'named' && { description: 'Displays correctly only where the same fonts are installed.' }) });
   return [{ id: 'pptx', label: 'PowerPoint', onSelect: () => {}, disabled, children: DECK_EXPORTS.filter((entry) => entry.format === 'pptx').map(item) }, ...DECK_EXPORTS.filter((entry) => entry.format !== 'pptx').map(item)];

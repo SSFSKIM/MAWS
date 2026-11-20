@@ -14,7 +14,7 @@ import type { ArtifactHost } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -94,11 +94,11 @@ function deps(): DocumentTabDeps {
 function mount({ visible = true, onShown = vi.fn<() => void>() }: { visible?: boolean; onShown?: ReturnType<typeof vi.fn<() => void>> } = {}) {
   off = registerDocumentEditor(deps);
   const editor = artifactEditorFor('document')!;
-  const hold = holdArtifactEditorState<DocumentTabState>(scope, A, 'document', editor as never);
+  const hold = holdArtifactEditorState<DocumentTabState>(scope, A, TEST_MACHINE, 'document', editor as never);
   const Panel = editor.Panel;
   const tree = (shownNow: boolean) => (
     <EditorHostScopeContext.Provider value={scope}>
-      <Panel artifactId={A} state={hold.state} scope={scope} visible={shownNow} onShown={onShown} />
+      <Panel artifactId={A} machine={TEST_MACHINE} state={hold.state} scope={scope} visible={shownNow} onShown={onShown} />
     </EditorHostScopeContext.Provider>
   );
   const view = render(tree(visible));
@@ -114,7 +114,7 @@ describe('an open at a place', () => {
   it('reveals the block a link names in its tab and takes the request', async () => {
     const body = schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b9' }, content: [{ type: 'text', text: 'The answer' }] }] });
     memory.write((doc) => addTab(doc, { title: 'Findings', id: 't2', body }));
-    const serial = requestArtifactOpen(A, 'latest', 'panel', { block: 'b9' });
+    const serial = requestArtifactOpen(A, TEST_MACHINE, 'latest', 'panel', { block: 'b9' });
     mount();
     await shown();
     await until(() => screen.queryByRole('tab', { selected: true })?.textContent?.includes('Findings') === true, 'the block’s tab');
@@ -125,7 +125,7 @@ describe('an open at a place', () => {
 
   it('opens the history rail previewing a retained version a link names, after the request is taken', async () => {
     versions = [{ id: 3, seq: 1, at: Date.now(), actor: { kind: 'human' }, kind: 'named', label: 'Draft', assetRefs: [] }];
-    requestArtifactOpen(A, 'latest', 'panel', { version: 3 });
+    requestArtifactOpen(A, TEST_MACHINE, 'latest', 'panel', { version: 3 });
     mount();
     await shown();
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null, 'the history rail');
@@ -359,7 +359,7 @@ describe('the document editor in L’s registry', () => {
       await shown();
       expect(document.querySelector('.ds-doc')?.closest('[data-testid="system-scope"]')).not.toBeNull();
       expect(document.querySelector('[data-highlight-sample]')?.closest('[data-testid="system-scope"]')).not.toBeNull();
-      expect(systemFor).toHaveBeenLastCalledWith({ spaceId: SPACE });
+      expect(systemFor).toHaveBeenLastCalledWith({ spaceId: SPACE }, TEST_MACHINE);
       expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1' }, medium: 'document', overrides: {} });
       act(() => setDsOverrides(state.snapshot().handle!.doc, { '--ds-font-body': 'Georgia, serif' }));
       await until(() => scopes.at(-1)?.overrides?.['--ds-font-body'] === 'Georgia, serif', 'the overrides');

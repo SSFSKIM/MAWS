@@ -8,7 +8,8 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { recordArtifactMachine, resetArtifactMachines } from '../artifacts/machines';
+import { artifactMachineOf, resetArtifactMachines } from '../artifacts/machines';
+import { ipc } from '../ipc/client';
 import { surfaceTabs } from '../panel/surface-model';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
@@ -31,12 +32,12 @@ describe('the library’s writes', () => {
   it('each asks its command and answers its value', async () => {
     const main = installFakeMain((name) => (name.startsWith('spaces.') && name !== 'spaces.delete' ? ok({ space }) : name === 'artifacts.delete' || name === 'artifacts.markViewed' || name === 'spaces.delete' ? ok() : ok({ artifact })));
     expect(await createArtifact({ kind: 'document', title: 'Untitled document', spaceId: S })).toEqual({ ok: true, value: artifact });
-    await renameArtifact(A, 'Notes');
-    await setArtifactPinned(A, true);
-    await moveArtifactToSpace(A, null);
-    await duplicateArtifact(A);
-    await deleteArtifact(A);
-    await markArtifactViewed(A);
+    await renameArtifact(A, TEST_MACHINE, 'Notes');
+    await setArtifactPinned(A, TEST_MACHINE, true);
+    await moveArtifactToSpace(A, TEST_MACHINE, null);
+    await duplicateArtifact(A, TEST_MACHINE);
+    await deleteArtifact(A, TEST_MACHINE);
+    await markArtifactViewed(A, TEST_MACHINE);
     expect(await createSpace('Research', '/repo')).toEqual({ ok: true, value: space });
     await renameSpace(S, 'Reading');
     await linkSpaceDirectory(S, null);
@@ -62,9 +63,9 @@ describe('the library’s writes', () => {
         ? { ok: false, error: { code: 'invalid_input', message: 'in use', issues: { reason: 'designSystemInUse', data: { artifactIds: [A] } } } }
         : fail('host unavailable'),
     );
-    const refused = await deleteArtifact(A);
+    const refused = await deleteArtifact(A, TEST_MACHINE);
     expect(refused).toMatchObject({ ok: false, refusal: { reason: 'designSystemInUse', data: { artifactIds: [A] } }, error: { message: 'in use' } });
-    expect(await renameArtifact(A, 'x')).toMatchObject({ ok: false, refusal: null, error: { message: 'host unavailable' } });
+    expect(await renameArtifact(A, TEST_MACHINE, 'x')).toMatchObject({ ok: false, refusal: null, error: { message: 'host unavailable' } });
   });
 });
 
@@ -84,7 +85,7 @@ describe('opening an artifact', () => {
   // plain open asks nothing of it (the tab keeps the version it shows)
   it('asks the main tab’s editor for the place it names, at the latest; a plain open asks nothing', () => {
     resetOpenRequests();
-    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
     act(() => openArtifactTab(A));
     expect(asked.result.current).toBeNull();
     act(() => openArtifactTab(A, { block: 'b7' }));
@@ -173,11 +174,13 @@ describe('showing the main tab that already shows an artifact', () => {
   it('asks the tab’s editor for the place the link names; with none, asks nothing', () => {
     resetOpenRequests();
     openArtifactTab(A);
-    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
+    const other = renderHook(() => useOpenRequest(A, OTHER_MACHINE, 'main'));
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A));
     expect(asked.result.current).toBeNull();
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A, { block: 'b7' }));
     expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
+    expect(other.result.current, 'the other machine’s copy does not take the place').toBeNull();
   });
 
   it('for a session on another machine looks for that machine’s tab, and takes no tab of the same id on another machine', () => {
@@ -189,13 +192,48 @@ describe('showing the main tab that already shows an artifact', () => {
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(OTHER_MACHINE));
   });
 
-  it('for this Mac’s session looks on the machine the page’s table gives the artifact, else on this Mac', () => {
-    openArtifactTab(A); // this Mac's tab
-    recordArtifactMachine(A, OTHER_MACHINE, TEST_MACHINE);
-    expect(showOpenArtifactTab(LOCAL_SESSION, A), 'the table puts it on another machine').toBe(false);
+  it('for this Mac’s session uses the unique confirmed peer, else looks on this Mac', async () => {
+    installFakeMain((name) => name === 'artifacts.get' ? ok({ artifact }) : ok());
+    await ipc.invoke('artifacts.get', { artifactId: A }, { machine: OTHER_MACHINE });
     openArtifactTab(A, undefined, OTHER_MACHINE);
-    useLayout.getState().openTab({ kind: 'diagnostics' });
-    expect(showOpenArtifactTab('app-bare' as AppSessionId, A)).toBe(true);
+    openArtifactTab(A, undefined, TEST_MACHINE);
+    expect(showOpenArtifactTab(LOCAL_SESSION, A), 'only a remote copy is known').toBe(true);
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(OTHER_MACHINE));
+    await ipc.invoke('artifacts.get', { artifactId: A }, { machine: TEST_MACHINE });
+    expect(showOpenArtifactTab('app-bare' as AppSessionId, A)).toBe(true);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(TEST_MACHINE));
+  });
+});
+
+
+it('a bare open that guesses local does not mask a later confirmed peer copy', async () => {
+  installFakeMain((name) => name === 'artifacts.get' ? ok({ artifact }) : ok());
+  openArtifactTab(A);
+  await ipc.invoke('artifacts.get', { artifactId: A }, { machine: OTHER_MACHINE });
+  openArtifactTab(A);
+  expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
+});
+
+// The branch's third review: a bare link (no source machine) for an id the window has no copy of on record reuses the one
+// machine's tab the strip already holds for it (a tab restored at launch), without taking that tab as a confirmed copy.
+describe('a bare link with no route hint', () => {
+  beforeEach(() => resetArtifactMachines()); // the cases above leave copies on record
+  afterEach(() => resetArtifactMachines());
+
+  it('reuses the strip’s one restored tab of the id on another machine, and records no route', () => {
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    openArtifactTab(A);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${OTHER_MACHINE}:${A}`);
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toHaveLength(1);
+    expect(artifactMachineOf(A)).toBeNull();
+  });
+
+  it('opens this Mac’s copy when the strip holds tabs of the id on more than one machine', () => {
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: TEST_MACHINE });
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    openArtifactTab(A);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${A}`);
   });
 });

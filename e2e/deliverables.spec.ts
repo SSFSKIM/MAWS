@@ -872,7 +872,9 @@ test('delivered files: every kind draws in its body inside and outside the sessi
       return answers;
     }, PDF_VIEWER);
     expect(pressed.some((answer) => answer.endsWith(' pressed')), JSON.stringify(pressed)).toBe(true);
-    await expect.poll(() => seamLines(s)).toContain(`blocked-download ${await pageUrlOf(s.page, pdf.id)}`);
+    // the frame's URL names its machine (`?machine=`, ticket 783), which `pageUrlOf` leaves out
+    const pdfUrl = await pageUrlOf(s.page, pdf.id);
+    await expect.poll(() => seamLines(s).filter((line) => line.startsWith(`blocked-download ${pdfUrl}?machine=`)).length, { message: 'the viewer’s save cancelled as a download of its frame’s URL' }).toBeGreaterThan(0);
     await s.page.waitForTimeout(1_000);
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(userData, (name) => name.endsWith('.pdf') || name.endsWith('.crdownload'))).toEqual([]);

@@ -113,12 +113,12 @@ function deps(): DocumentTabDeps {
 // another body over the same state (a pane move's remount).
 function mountIn(scope: EditorHostScope) {
   const editor = artifactEditorFor('document')!;
-  const hold = holdArtifactEditorState<DocumentTabState>(scope, DOC, 'document', editor as never);
+  const hold = holdArtifactEditorState<DocumentTabState>(scope, DOC, TEST_MACHINE, 'document', editor as never);
   const Body = scope.surface === 'panel' ? editor.Panel : editor.Main;
   const tree = (slot: string) => (
     <EditorHostScopeContext.Provider value={scope}>
       <div key={slot}>
-        <Body artifactId={DOC} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Body artifactId={DOC} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </div>
     </EditorHostScopeContext.Provider>
   );
@@ -173,7 +173,7 @@ describe('a comment being sent when its document moves', () => {
     act(() => {
       stageArtifactEditorState(panel);
       source.view.unmount();
-      adoptStagedArtifactEditorState(DOC, main);
+      adoptStagedArtifactEditorState(DOC, TEST_MACHINE, main);
     });
     const target = mountIn(main);
     await replacementFormSendsNothing(before);
@@ -185,7 +185,7 @@ describe('a comment being sent when its document moves', () => {
     act(() => {
       stageArtifactEditorState(main);
       target.view.unmount();
-      adoptStagedArtifactEditorState(DOC, panel);
+      adoptStagedArtifactEditorState(DOC, TEST_MACHINE, panel);
     });
     mountIn(panel);
     await waitFor(() => expect(field()).not.toBe(again));
@@ -203,7 +203,7 @@ describe('an unsent comment when its document moves onto a view of it already op
   beforeEach(() => {
     resetPanelHost();
     const row: LibraryRow = { id: DOC, kind: 'document', title: 'Launch plan', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [] };
-    library.setState({ reads: new Map([[rowKey(DOC), { status: 'ready', value: row, error: null }]]) });
+    library.setState({ reads: new Map([[rowKey(DOC, TEST_MACHINE), { status: 'ready', value: row, error: null }]]) });
     offs.push(registerPanelTool(artifactsTool));
   });
 
@@ -226,15 +226,15 @@ describe('an unsent comment when its document moves onto a view of it already op
     await userEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     await waitFor(() => expect(field()).toBeTruthy());
     await userEvent.type(field(), TEXT);
-    expect(commentDraftOf(DOC)?.text).toBe(TEXT);
-    return commentDraftOf(DOC)!.threadId;
+    expect(commentDraftOf(DOC, TEST_MACHINE)?.text).toBe(TEXT);
+    return commentDraftOf(DOC, TEST_MACHINE)!.threadId;
   }
 
   // The card drawn in `container` with the text typed, the draft and its thread kept, nothing asked.
   function keptIn(container: HTMLElement, threadId: string): void {
     expect(container.contains(field()), 'the card is drawn by that view').toBe(true);
     expect(field().value).toBe(TEXT);
-    expect(commentDraftOf(DOC)).toEqual({ threadId, text: TEXT });
+    expect(commentDraftOf(DOC, TEST_MACHINE)).toEqual({ threadId, text: TEXT });
     expect(listThreads(memory.doc).map((t) => t.id), 'the thread is not withdrawn').toContain(threadId);
     expect(asked, 'no guard asked about the comment').toEqual([]);
   }
@@ -264,7 +264,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     expect(moved).toBe(true);
     record.view.unmount(); // the record went Back to the list
     await act(async () => {});
-    expect(commentDraftOf(DOC)?.text, 'kept while no body draws it').toBe(TEXT);
+    expect(commentDraftOf(DOC, TEST_MACHINE)?.text, 'kept while no body draws it').toBe(TEXT);
     // Comments go to the session in front; the library is not connected here, so with the document in front its own
     // context stays unread and its comments wait. A's pane in front again gives the card its session.
     act(() => useLayout.getState().focusPane(1));
@@ -295,7 +295,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     await act(async () => void (closes = await askEditorHostClose(main)!));
     expect(closes).toBe(true);
     expect(asked).toEqual([]);
-    expect(commentDraftOf(DOC)).toEqual({ threadId, text: TEXT });
+    expect(commentDraftOf(DOC, TEST_MACHINE)).toEqual({ threadId, text: TEXT });
   });
 
   it('a move the source’s guard refuses leaves the destination’s own comment on the destination', async () => {
@@ -303,7 +303,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     const source = recordInPanel();
     const kept = mountIn(main);
     const threadId = await typedUnsent(); // typed in main's card: main's draft, not the panel's
-    holdArtifactEditorState(source, DOC, 'document', artifactEditorFor('document') as never);
+    holdArtifactEditorState(source, DOC, TEST_MACHINE, 'document', artifactEditorFor('document') as never);
     act(() => void registerEditorHost(source, { title: 'Launch plan', closeGuard: async () => false })); // the record keeps itself
     let moved = true;
     await act(async () => void (moved = await moveArtifactToTab(source.tabId)));

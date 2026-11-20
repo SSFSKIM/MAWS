@@ -513,7 +513,7 @@ describe('the row actions', () => {
     const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
     expect(items.slice(items.indexOf('PDF'))).toEqual(['PDF', 'PNG', 'Save a copy…', 'Send to Google Drive…']); // U10b: the page's copy
     fireEvent.click(screen.getByRole('menuitem', { name: 'Send to Google Drive…' }));
-    await waitFor(() => expect(useDelivery.getState().sheet?.subject).toEqual({ artifactId: id(2), kind: 'html', title: 'Pricing page' }));
+    await waitFor(() => expect(useDelivery.getState().sheet?.subject).toEqual({ artifactId: id(2), machine: TEST_MACHINE, kind: 'html', title: 'Pricing page' }));
     expect(useDelivery.getState().sheet?.run.state.getState().target).toBe('drive');
     expect(main.callsOf('artifacts.export')).toEqual([]); // nothing runs before the owner's Send
     act(() => useDelivery.getState().sheet?.run.close());

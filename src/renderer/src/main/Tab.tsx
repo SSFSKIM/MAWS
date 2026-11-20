@@ -30,6 +30,7 @@ import { useViewer } from '../tools/code/viewer/viewer-store';
 // E2 end
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
+import { ipc } from '../ipc/client';
 import { useArtifactTitle } from '../library/store';
 // P3-L end
 // P3-F wave S (F16); P4-B3 (X38): the move to the panel, its drag and its one refusal
@@ -76,7 +77,7 @@ export function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
   const session = useSessionLabel(appSessionId, tab.kind === 'session' ? tab.title : undefined);
   const browserTitle = useBrowserTitle(tab.kind === 'browser' ? tab.appSessionId : null, tab.kind === 'browser' ? tab.browserTabId : null); // E4a
-  const artifactTitle = useArtifactTitle(tab.kind === 'artifact' ? tab.artifactId : null); // P3-L
+  const artifactTitle = useArtifactTitle(tab.kind === 'artifact' ? tab.artifactId : null, tab.kind === 'artifact' ? tab.machine : ipc.localMachine); // P3-L
   const channelTitle = useChannelTitle(tab.kind === 'channel' ? tab.project : null); // P5 O8 M7a
   switch (tab.kind) {
     case 'session':

@@ -1772,7 +1772,7 @@ describe('a framed file (UX wave U6b-2)', () => {
         : fail(`unexpected ${name}`),
     );
     const ID = '00000000-0000-4000-8000-0000000000aa';
-    render(<FileBody tabId={`artifact:${ID}:1`} appSessionId={null} path="/w/ledger.pdf" readOnly artifact={{ artifactId: ID, revision: 1 }} />);
+    render(<FileBody tabId={`artifact:${ID}:1`} appSessionId={null} path="/w/ledger.pdf" readOnly artifact={{ artifactId: ID, machine: TEST_MACHINE, revision: 1 }} />);
     expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
     await settle();
     expect(main.callsOf('layout.frameFile')).toEqual([]);
@@ -1837,11 +1837,55 @@ describe('a framed file (UX wave U6b-2)', () => {
     expect(main.callsOf('files.read')).toHaveLength(2);
   });
 
+  // Ticket 775: an event in the folder (one naming the folder alone, or the file itself) that leaves the file as it was keeps
+  // the frame, its token and the page's state; a change of the file asks a new one, as before.
+  it('an event that leaves the framed file as it was keeps its frame and token; a change asks a new one', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    show();
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r', kind: 'changed' })); // the folder alone
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    changed(main); // the file itself, its bytes as they were
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(3));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+    expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[0] });
+    expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`);
+    expect(main.released()).toEqual([]);
+    expect(document.querySelector('[data-updated]')).toBeNull();
+    main.files[PDF] = '%PDF-1.4 invented, revised\n';
+    changed(main);
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[1]!, 'ledger.pdf')}#navpanes=0`));
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+  });
+
+  // The branch's third review: an ask in flight may answer from a moment the file was briefly something else (main read
+  // it mid-write and found it unframed). A read that lands during that ask, even one that finds the file as it was, asks
+  // once more after the answer, so the tab does not end failed with no retry.
+  it('an unchanged event read that lands while an ask is out asks once more after it; an unframed answer is retried', async () => {
+    let frameCalls = 0;
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_input, issue) => (++frameCalls === 1 ? ok({ status: 'row', why: 'unframed' }) : issue()) });
+    offs.push(connectCodeEvents());
+    const first = main.hold('layout.frameFile');
+    show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    changed(main); // the file as it was
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    first.release();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[0] }));
+  });
+
   it('frameFailed for a token the entry no longer holds changes nothing', async () => {
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
     offs.push(connectCodeEvents());
     show();
     await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file asks a new token
     changed(main);
     await waitFor(() => expect(tokenOf()).toBe(main.issued[1]));
     await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
@@ -1994,6 +2038,7 @@ describe('a framed file (UX wave U6b-2)', () => {
     const first = main.hold('layout.frameFile');
     show();
     await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file
     changed(main);
     await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
     await waitFor(() => expect(entry()!.pending).toBe(0));
@@ -2025,6 +2070,7 @@ describe('a framed file (UX wave U6b-2)', () => {
       return invoke(name, input, ...rest);
     }) as typeof invoke;
     const next = main.hold('layout.frameFile');
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file
     changed(main);
     await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
     expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`);
@@ -3704,10 +3750,10 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     const main = disk({});
     overRl2(T); // the roster names the other machine studio
     main.answers.by = (name) => (name === 'library.read' ? unreachable('library.read: machine studio is not reachable') : null);
-    const artifactView = (tabId: string) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, revision: 3 }} />);
+    const artifactView = (tabId: string, machine: typeof TEST_MACHINE) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, machine, revision: 3 }} />);
     try {
       recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
-      artifactView(`artifact:${ARTIFACT}:3`);
+      artifactView(`artifact:${ARTIFACT}:3`, OTHER_MACHINE);
       await waitFor(() => expect(noticeCause()).toBe('unreachable'));
       expect(noticeLines()[0]).toBe('studio is not reachable.');
       expect(retry()).not.toBeNull();
@@ -3715,7 +3761,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       cleanup();
       useViewer.getState().reset();
       resetArtifactMachines();
-      artifactView(`artifact:${ARTIFACT}:3:r1`);
+      artifactView(`artifact:${ARTIFACT}:3:r1`, TEST_MACHINE);
       await waitFor(() => expect(noticeCause()).toBe('unreachable'));
       expect(noticeLines()[0]).toBe("MAWS's service on this Mac is not answering.");
     } finally {

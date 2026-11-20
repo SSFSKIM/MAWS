@@ -11,6 +11,7 @@
 // emptying; a failed read keeps it too, with the failure and a Try again above it.
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { ipc } from '../ipc/client';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
 import type { MachineRef } from '@shared/machine/ref';
 import { ChevronLeftIcon } from '../app/IconButton';
@@ -158,7 +159,7 @@ export function Library() {
       <LibraryHeader counts={list?.counts} />
       {narrowedTo && <SpaceBar space={narrowedTo} />}
       <MakeChoiceContext.Provider value={makeChoice}>
-        <Rows lines={linesOf(view, read, list, spaces, now)} />
+        <Rows machine={machine ?? ipc.localMachine} lines={linesOf(view, read, list, spaces, now)} />
       </MakeChoiceContext.Provider>
       <LibraryDialogs />
     </div>

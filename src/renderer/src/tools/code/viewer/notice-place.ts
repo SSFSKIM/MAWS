@@ -5,7 +5,7 @@
 // read by its artifact alone (no session the window knows) is read on the artifact's machine, which the place then names.
 import type { AppSessionId } from '@shared/graph/ids';
 import { isAddress, machineOf } from '@shared/machine/address';
-import { useArtifactMachine } from '../../../artifacts/use-artifact-machine';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../../ipc/client';
 import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
@@ -19,10 +19,9 @@ export interface NoticePlace {
 const elsewhere = (appSessionId: AppSessionId | null): appSessionId is AppSessionId =>
   appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
 
-export function useNoticePlace(appSessionId: AppSessionId | null, artifactId: string | null = null): NoticePlace {
-  const artifactMachine = useArtifactMachine(appSessionId === null ? artifactId : null); // another machine's artifact, else null
+export function useNoticePlace(appSessionId: AppSessionId | null, artifactMachine: MachineRef | null = null): NoticePlace {
   const machine = useMachines((s) =>
-    elsewhere(appSessionId) ? machineName(s.machines, machineOf(appSessionId), ipc.localMachine) : artifactMachine !== null ? machineName(s.machines, artifactMachine, ipc.localMachine) : null,
+    elsewhere(appSessionId) ? machineName(s.machines, machineOf(appSessionId), ipc.localMachine) : artifactMachine !== null && artifactMachine !== ipc.localMachine ? machineName(s.machines, artifactMachine, ipc.localMachine) : null,
   );
   const mine = useSessions((s) => (appSessionId === null ? null : (s.listed.get(appSessionId)?.mine ?? null)));
   return { machine, mine };

@@ -41,6 +41,9 @@ import { QUIET } from '../../sessions/ui';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import { closeCard, editComment /* UX wave U5a */, handCardTo /* P4-B3 */, noteThreadOf /* UX wave U5a */, useCommentCard, type CardHostMode, type OpenCard, type PassComment } from '../../side/card/store';
 import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactKey, sessionArtifactMachine } from '../../artifacts/machines';
+import { ipc } from '../../ipc/client';
 import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
 import { watchAnswers } from './answers'; // UX wave U5a (M7)
 import { commentDraftOf, unsentCommentOf } from './comment-drafts'; // P4-B1; UX wave U5a: readers over the pass
@@ -60,6 +63,7 @@ export function artifactCommentAnchor({ artifactId, title, threadId, tabTitle, q
 
 interface Options {
   artifactId: string;
+  machine: MachineRef;
   /** The session a comment goes to (its Side thread's parent, or the main conversation it steers). */
   appSessionId?: AppSessionId; // P3-F1: optional, `context` answering without it
   /**
@@ -91,6 +95,7 @@ interface Options {
 
 interface Binding {
   artifactId: string;
+  machine: MachineRef;
   hostId: string;
   mode: CardHostMode;
   visible: boolean;
@@ -106,42 +111,47 @@ interface Binding {
 // hands the host's drafts to that view's host.
 interface DraftThread {
   hostId: string;
+  threadId: string;
   sends: number; // on their way
   withdraw(): void; // the thread and its mark, in the editor's replica
   release: (() => void) | undefined; // the replica, held until the draft ends
 }
-const draftThreads = new Map<string, DraftThread>(); // draft thread id → its host and sends
+const draftThreads = new Map<string, DraftThread>();
+const draftKey = (subject: string, threadId: string) => JSON.stringify([subject, threadId]);
 
 const threadIdOf = (anchor: { kind: string; threadId?: string }): string | null => (anchor.kind === 'artifact-comment' ? (anchor.threadId ?? null) : null);
 
 const drafts = {
-  opened(hostId: string, threadId: string, withdraw: () => void, holdReplica: (() => () => void) | undefined): void {
-    draftThreads.set(threadId, { hostId, sends: 0, withdraw, release: holdReplica?.() });
+  opened(subject: string, hostId: string, threadId: string, withdraw: () => void, holdReplica: (() => () => void) | undefined): void {
+    draftThreads.set(draftKey(subject, threadId), { hostId, threadId, sends: 0, withdraw, release: holdReplica?.() });
     watchDrafts();
   },
 
   /** Kept on purpose (resolved from its card): never withdrawn. */
-  keep(threadId: string): void {
-    const draft = draftThreads.get(threadId);
-    draftThreads.delete(threadId);
+  keep(subject: string, threadId: string): void {
+    const key = draftKey(subject, threadId);
+    const draft = draftThreads.get(key);
+    draftThreads.delete(key);
     draft?.release?.();
   },
 
   /** The person dropped its comment: withdrawn at once, unless a send in it is on its way. */
-  discarded(threadId: string): void {
-    const draft = draftThreads.get(threadId);
-    if (draft && draft.sends === 0) end(threadId, draft);
+  discarded(subject: string, threadId: string): void {
+    const key = draftKey(subject, threadId);
+    const draft = draftThreads.get(key);
+    if (draft && draft.sends === 0) end(key, draft);
   },
 
   /** A send in `threadId` set out; the call returned settles it. */
-  sending(threadId: string, text: string, record: (threadId: string, body: string) => void): (went: boolean) => void {
-    const draft = draftThreads.get(threadId);
+  sending(subject: string, threadId: string, text: string, record: (threadId: string, body: string) => void): (went: boolean) => void {
+    const key = draftKey(subject, threadId);
+    const draft = draftThreads.get(key);
     if (draft) draft.sends += 1;
     return (went) => {
-      if (draft && draftThreads.get(threadId) === draft) draft.sends -= 1;
+      if (draft && draftThreads.get(key) === draft) draft.sends -= 1;
       if (went) {
-        if (draft && draftThreads.get(threadId) === draft) {
-          draftThreads.delete(threadId);
+        if (draft && draftThreads.get(key) === draft) {
+          draftThreads.delete(key);
           draft.release?.();
         }
         record(threadId, text);
@@ -155,8 +165,8 @@ const drafts = {
   },
 };
 
-function end(threadId: string, draft: DraftThread): void {
-  draftThreads.delete(threadId);
+function end(key: string, draft: DraftThread): void {
+  draftThreads.delete(key);
   try {
     draft.withdraw();
   } finally {
@@ -170,9 +180,9 @@ function settleDrafts(): void {
   for (const pass of useCommentCard.getState().passes.values())
     for (const comment of pass.comments) {
       const threadId = threadIdOf(comment.anchor);
-      if (threadId !== null) live.add(threadId);
+      if (pass.host === 'artifact' && threadId !== null) live.add(draftKey(pass.subject, threadId));
     }
-  for (const [threadId, draft] of [...draftThreads]) if (draft.sends === 0 && !live.has(threadId) && pendingThreadOf(draft.hostId) !== threadId) end(threadId, draft);
+  for (const [key, draft] of [...draftThreads]) if (draft.sends === 0 && !live.has(key) && pendingThreadOf(draft.hostId) !== draft.threadId) end(key, draft);
   if (draftThreads.size === 0) unwatchDrafts();
 }
 let stopWatching: (() => void) | null = null;
@@ -221,9 +231,10 @@ export function handCommentCardOver(artifactId: string, from: string, to: string
 }
 
 /** The surface DocumentEditor takes (`comments`), stable while the artifact and the session stay. */
-export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, hostId: kept /* P4-B3 */ }: Options): DocumentComments { // P3-F1: context
+export function useDocumentComments({ artifactId, machine, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind, hostId: kept /* P4-B3 */ }: Options): DocumentComments { // P3-F1: context
   const own = `document:${useId()}`;
   const hostId = kept ?? own;
+  const subject = artifactKey(artifactId, machine);
   const titleRef = useRef(title);
   useLayoutEffect(() => {
     titleRef.current = title;
@@ -241,17 +252,17 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
       // registered after, so the window's card closing for the notice keeps it)
       const session = appSessionId ?? (context?.kind === 'session' ? context.appSessionId : undefined);
       if (session === undefined) {
-        startCommentSession({ hostId, artifactId, threadId: passage.threadId, label: anchor.label, context: context?.kind === 'directory' ? context : { kind: 'none' }, open: (started) => openCommentComposer(anchor, { appSessionId: started, placement, destination: 'main' }) });
-        drafts.opened(hostId, passage.threadId, withdraw, holdReplica);
+        startCommentSession({ hostId, artifactId, threadId: passage.threadId, label: anchor.label, context: context?.kind === 'directory' ? context : { kind: 'none' }, open: (started) => openCommentComposer(anchor, { appSessionId: started, subject, placement, destination: 'main' }) });
+        drafts.opened(subject, hostId, passage.threadId, withdraw, holdReplica);
         return;
       }
       // P3-F1 end
       // UX wave U5a: the pass keeps one unsent comment; one with text returns the person to it, the new thread withdrawn
       // (the store opens the card on it and the new draft, held by nothing, goes)
-      drafts.opened(hostId, passage.threadId, withdraw, holdReplica);
-      openCommentComposer(anchor, { appSessionId: session /* P3-F1 */, placement });
+      drafts.opened(subject, hostId, passage.threadId, withdraw, holdReplica);
+      openCommentComposer(anchor, { appSessionId: session /* P3-F1 */, subject, placement });
     },
-    [artifactId, appSessionId, context /* P3-F1 */, hostId, artifactKind, holdReplica],
+    [artifactId, subject, appSessionId, context /* P3-F1 */, hostId, artifactKind, holdReplica],
   );
   // P3-F1 start: a comment waiting on its session belongs to the target it was made for; the target moving on (another
   // directory, a session found, a chat shown beside it) withdraws it and its draft, so its start, settling later, opens
@@ -265,14 +276,14 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
   }, [target, hostId]);
   // P3-F1 end
   return useMemo(() => {
-    const binding: Binding = { artifactId, hostId, mode, visible, holdReplica }; // UX wave U5a: the card names its session by one rule
+    const binding: Binding = { artifactId, machine, hostId, mode, visible, holdReplica }; // UX wave U5a: the card names its session by one rule
     // P4-B1 (C7, X36's one draft per artifact): the thread of the artifact's unsent comment with text (UX wave U5a: its
     // pass's, whichever view's card it was written in)
-    const draft = (): string | null => commentDraftOf(artifactId)?.threadId ?? null;
+    const draft = (): string | null => commentDraftOf(artifactId, machine)?.threadId ?? null;
     // P4-B2: or, with nothing typed yet, the card this host draws (a deck's pin whose only thread is the card's reveals
     // it). UX wave U5a: a comment with no card open is opened on this host first; its field takes the keyboard as it mounts
     const focusDraft = () => {
-      const unsent = unsentCommentOf(artifactId);
+      const unsent = unsentCommentOf(artifactId, machine);
       const { open } = useCommentCard.getState();
       const onIt = open?.hostId === hostId && open.phase.kind === 'composing' && unsent !== null && open.phase.comment === unsent.comment.id;
       if (unsent !== null && !onIt) return editComment(unsent.pass, unsent.comment.id, hostId);
@@ -291,7 +302,7 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
       draft,
       focusDraft, // P4-B1
     };
-  }, [opened, artifactId, hostId, mode, visible, holdReplica]);
+  }, [opened, artifactId, machine, hostId, mode, visible, holdReplica]);
 }
 
 // P4-B1 (D7): a card the margin will host opens with the margin placement (where its passage is, for the record), any
@@ -305,14 +316,15 @@ function placementOf(overlay: CommentOverlayProps | null, hostId: string, thread
 function targetKeyOf(appSessionId: AppSessionId | undefined, context: ArtifactSessionContext | undefined): string {
   if (appSessionId !== undefined) return JSON.stringify(['session', appSessionId]);
   if (context?.kind === 'session') return JSON.stringify(['session', context.appSessionId]);
-  if (context?.kind === 'directory') return JSON.stringify(['directory', context.path, context.projectId]);
+  if (context?.kind === 'directory') return JSON.stringify(['directory', context.machine, context.path, context.projectId]);
   return JSON.stringify(['none']);
 }
 
 const threadOf = (card: OpenCard | null): string | null => (card?.target?.kind === 'artifact' ? card.target.threadId : null);
 
 function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { binding: Binding }) {
-  const { artifactId, hostId, mode, visible, holdReplica } = binding;
+  const { artifactId, machine, hostId, mode, visible, holdReplica } = binding;
+  const subject = artifactKey(artifactId, machine);
   const pending = usePendingComment(hostId); // P3-F1
   const { doc, locate, layoutKey, setActive, resolve, reopen, record, focus, hosting, placement, flash } = editor; // P4-B1: hosting, placement; UX wave U5a: flash
   const inMargin = placement === 'margin'; // P4-B1
@@ -354,7 +366,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       }
       // P4-B1: the margin hosts the card in that thread's entry. UX wave U5a (§C): with no card, the line of where its
       // send went, in the entry of the thread it was on, until the line ends
-      const host = threadId ?? (mine === null ? (noteThreadOf('artifact', artifactId) ?? unsentCommentOf(artifactId)?.threadId ?? null) : null);
+      const host = threadId ?? (mine === null ? (noteThreadOf('artifact', subject) ?? unsentCommentOf(artifactId, machine)?.threadId ?? null) : null);
       if (host !== hosted) {
         hosted = host;
         hosting?.(host);
@@ -379,7 +391,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         }
       });
     };
-  }, [hostId, setActive, holdReplica, hosting, artifactId /* P4-B1 */]);
+  }, [hostId, setActive, holdReplica, hosting, artifactId, machine, subject /* P4-B1 */]);
 
   const frame = useMemo<CardFrame>(
     () => ({
@@ -390,7 +402,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       // no card of this host's, the unsent comment's, where its chip sits
       locate: async () => {
         const { open } = useCommentCard.getState();
-        const threadId = open?.hostId === hostId ? threadOf(open) : (unsentCommentOf(artifactId)?.threadId ?? null);
+        const threadId = open?.hostId === hostId ? threadOf(open) : (unsentCommentOf(artifactId, machine)?.threadId ?? null);
         return threadId === null ? null : locate(threadId);
       },
       actions: (card) => {
@@ -400,7 +412,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
             doc={doc}
             threadId={threadId}
             onResolve={() => {
-              drafts.keep(threadId); // resolved on purpose: it stays, listed under Resolved
+              drafts.keep(subject, threadId); // resolved on purpose: it stays, listed under Resolved
               resolve(threadId);
               closeCard(card.serial);
               focus();
@@ -413,7 +425,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         const threadId = threadOf(card);
         if (threadId === null) return () => {};
         const release = holdReplica?.();
-        const settle = drafts.sending(threadId, text, record);
+        const settle = drafts.sending(subject, threadId, text, record);
         return (went) => {
           try {
             settle(went);
@@ -426,10 +438,10 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       holds: 'one',
       onDiscarded: (comment: PassComment) => {
         const threadId = threadIdOf(comment.anchor);
-        if (threadId !== null) drafts.discarded(threadId);
+        if (threadId !== null) drafts.discarded(subject, threadId);
       },
     }),
-    [layoutKey, hostId, locate, doc, resolve, reopen, record, focus, holdReplica, artifactId],
+    [layoutKey, hostId, locate, doc, resolve, reopen, record, focus, holdReplica, artifactId, machine, subject],
   );
 
   return (
@@ -452,11 +464,11 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         host="artifact"
         mode={mode}
         layout={inMargin ? 'margin' : 'anchored'} // P4-B1
-        accepts={(card) => card.target?.kind === 'artifact' && card.target.artifactId === artifactId}
+        accepts={(card) => card.target?.kind === 'artifact' && card.target.artifactId === artifactId && (card.subject ?? artifactKey(artifactId, sessionArtifactMachine(card.parent, artifactId, ipc.localMachine))) === subject}
         frame={frame}
         visible={visible}
         restoreFocus={focus}
-        subject={artifactId} // UX wave U5a: the artifact's pass
+        subject={subject} // UX wave U5a: the artifact's pass
       />
     </>
   );

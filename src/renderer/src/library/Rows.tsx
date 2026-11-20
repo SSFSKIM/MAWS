@@ -7,6 +7,7 @@
 // keyboard (or its menu) stays mounted while the list scrolls away from it, so focus is never dropped by the scroll.
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import type { MachineRef } from '@shared/machine/ref';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { openArtifactTab } from './actions';
 import { LIBRARY_PAGE as P } from './copy';
@@ -66,7 +67,7 @@ function Note({ text, retry, tone = 'quiet' }: { text: string; retry?: () => voi
   );
 }
 
-export function Rows({ lines }: { lines: Line[] }) {
+export function Rows({ lines, machine }: { lines: Line[]; machine: MachineRef }) {
   const scroller = useRef<HTMLDivElement>(null);
   const getItemKey = useCallback((index: number) => lines[index].key, [lines]);
 
@@ -118,7 +119,7 @@ export function Rows({ lines }: { lines: Line[] }) {
   const onRowKeyDown = (row: LibraryRow) => (event: KeyboardEvent<HTMLElement>) => {
     if (event.target !== event.currentTarget || event.defaultPrevented) return;
     if (event.key === 'F10' && event.shiftKey) setMenuFor(row.id);
-    else if (event.key === 'Enter') openArtifactTab(row.id);
+    else if (event.key === 'Enter') openArtifactTab(row.id, undefined, machine);
     else if (MOVES[event.key] && rowLines.length > 0) {
       const at = rowLines.findIndex((r) => r.id === row.id);
       const next = rowLines[MOVES[event.key](at, rowLines.length - 1)];
@@ -143,6 +144,7 @@ export function Rows({ lines }: { lines: Line[] }) {
         return (
           <Row
             row={line.row}
+            machine={machine}
             stop={stop === line.row.id}
             menuOpen={menuFor === line.row.id}
             onMenuOpen={(open) => setMenuFor(open ? line.row.id : null)}

@@ -91,6 +91,7 @@ import { remoteStandingOf } from '../../../lane-b/remote-standing';
 import { useLayout } from '../../../stores/layout';
 import { useMachines } from '../../../stores/machines';
 import { allTabs } from '../../../stores/layout-model';
+import type { MachineRef } from '@shared/machine/ref';
 import { machineOf } from '@shared/machine/address';
 import { openedThere, outsideUnavailable, ownersOnly, takesRemoteRoute } from '../files/elsewhere'; // UX wave U6f
 import { useFiles, type WatchHold } from '../files/store';
@@ -107,6 +108,7 @@ export const VIEWER_ENTRIES_MAX = 20;
 // resolving its path), for an artifact no session made: no session, so no watch and no write.
 export interface ArtifactRead {
   artifactId: string;
+  machine: MachineRef;
   revision: number;
 }
 
@@ -410,7 +412,7 @@ const opensThere = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>): boolean 
 /** `open` for a request about the entry's path, under that test; also "Open externally"'s copy (ExternalRow.tsx). */
 export const opens = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>) => (opensThere(entry) ? { open: true as const } : {});
 const machineNameOf = (appSessionId: AppSessionId | null): string => (appSessionId === null ? '' : (remoteStandingOf(appSessionId)?.machine ?? ''));
-const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
+const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision && a?.machine === b?.machine;
 
 // What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
 // the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry; `named` (U6c) is set
@@ -445,7 +447,9 @@ const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, p
 // change. An image's and a head's bytes are compared; an external kind is read for its size and type alone, which two
 // different files can share, so it is taken as unchanged only on a revisit: after an event it lands, as before. A watched
 // head keeps today's rule: its re-read follows an event, and lands.
-// UX wave U6b-2: a framed kind is read for its size and type alone too (M5, decision 6).
+// UX wave U6b-2: a framed kind is read for its size and type alone too (M5, decision 6). Ticket 775: a framed file up to
+// FILES_READ_MAX_LENGTH is read with its hash, so an event that left it as it was keeps its frame (`commitChange`); one
+// past it, which no hash covers, keeps this rule.
 const sameUnhashed = (entry: ViewerEntry, read: LoadedFile, cause: LoadCause) =>
   read.hash === null &&
   (read.kind === 'image' || ((read.kind === 'external' || read.kind === 'frame') && cause === 'revisit') || (read.kind === 'head' && entry.named)) &&
@@ -481,6 +485,7 @@ export function createViewerStore(client: MawsBridge) {
   // answer, matching no slot, is released when it comes (the table's X row), so the next entry under the key asks at once.
   const asks = new Map<string, { id: number; again: boolean; obsolete: boolean; open: boolean }>(); // U6f: `open`, whether the ask carried it
   let lastFrameAsk = 0;
+  const frameAsked = new Map<string, string>(); // ticket 775: each entry's last frame ask's keys, which its frame was asked with
   let clock = 0;
   let unsubscribe: (() => void) | null = null;
   let unfollowStanding: (() => void) | null = null; // UX wave U6f: the machines' standing, for `editable` there
@@ -513,7 +518,10 @@ export function createViewerStore(client: MawsBridge) {
       const under = entry.artifact ? null : following(entry.appSessionId, entry.path);
       if (under !== null) return under.then(() => readChunk(entry, offset, length, hash, sent));
       sent?.(entry.artifact ? 0 : linkedCount(entry.appSessionId, entry.path));
-      if (entry.artifact) return settled(client.invoke('library.read', { ...entry.artifact, ...chunk }));
+      if (entry.artifact) {
+        const { machine, ...artifact } = entry.artifact;
+        return settled(client.invoke('library.read', { ...artifact, ...chunk }, { machine }));
+      }
       const { appSessionId } = entry;
       const local = appSessionId !== null && machineOf(appSessionId) === client.localMachine;
       const remote = appSessionId !== null && !local && takesRemoteRoute(appSessionId);
@@ -529,6 +537,7 @@ export function createViewerStore(client: MawsBridge) {
     // on arrival). The entry itself going (`gone`: removed, or replaced under its key) lets the slot go as well.
     const dropFrame = (tabId: string, gone = false) => {
       release(heldToken(get().entries.get(tabId)?.frame ?? null));
+      frameAsked.delete(tabId);
       const out = asks.get(tabId);
       if (gone) asks.delete(tabId);
       else if (out) {
@@ -663,9 +672,11 @@ export function createViewerStore(client: MawsBridge) {
     // withdraws a theirs shown earlier. U6c (M3 decision 2): `named` is the read's, also when it lands nothing else. U6e
     // (decision 6): so is the whole latest admission, under unsaved edits too, the document standing; the pin moves by
     // `pinAfter`; and `editable` is the baseline's text with the admission, so it moves both ways (W4).
-    const commitChange = (tabId: string, read: LoadedFile, cause: LoadCause) => {
+    // Ticket 775: true when the read's content landed (a framed file then asks a new token), false when it found what the
+    // entry shows or stood behind unsaved edits.
+    const commitChange = (tabId: string, read: LoadedFile, cause: LoadCause): boolean => {
       const entry = get().entries.get(tabId);
-      if (!entry) return;
+      if (!entry) return false;
       const pin = pinAfter(entry, read.real);
       const ready = { status: 'ready' as const, error: null, failure: null, said: false, needsOpen: false, offersOpenFile: false, removed: false, loadingMore: false, diskUnusable: null, pin, editable: editableWith(entry, pin) };
       const admissionMoved = pin !== entry.pin || ready.editable !== entry.editable;
@@ -673,23 +684,30 @@ export function createViewerStore(client: MawsBridge) {
       if (unsaved(entry)) {
         // E11 W-D: a disk version the editor cannot take is not offered, and the bar says why; a theirs shown earlier is
         // withdrawn, the disk no longer holding it (W-D review I1)
-        if (!isEditable(read)) return patch(tabId, { ...ready, theirs: null, diskUnusable: unusableReason(read) });
+        if (!isEditable(read)) {
+          patch(tabId, { ...ready, theirs: null, diskUnusable: unusableReason(read) });
+          return false;
+        }
         const differs = read.hash !== null && read.hash !== entry.hash && read.hash !== entry.theirs?.hash;
-        if (differs) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice', real: read.real } });
+        if (differs) {
+          patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice', real: read.real } });
+          return false;
+        }
         // P4 W2-C (tracker 2026-10-06): the disk back at the baseline withdraws a theirs shown earlier, so a save from the
         // merge view sends the baseline's hash and lands; safe because a save's conflict read supersedes older loads
-        if (read.hash !== null && read.hash === entry.hash && entry.theirs !== null) return patch(tabId, { ...ready, theirs: null });
-        if (!settledAlready) patch(tabId, ready);
-        return;
+        if (read.hash !== null && read.hash === entry.hash && entry.theirs !== null) patch(tabId, { ...ready, theirs: null });
+        else if (!settledAlready) patch(tabId, ready);
+        return false;
       }
       if ((read.hash !== null && read.hash === entry.hash) || sameUnhashed(entry, read, cause)) {
         if (!settledAlready) patch(tabId, ready);
-        return;
+        return false;
       }
       const { utf8, real: _real, ...file } = read; // the read's real path is the pin's, by `pinAfter` above
       void _real;
       const textEditable = isEditable({ ...file, utf8 });
       patch(tabId, { ...ready, ...file, textEditable, editable: editableWith(entry, pin, textEditable), epoch: entry.epoch + 1, updated: entry.updated + 1 });
+      return true;
     };
 
     // UX wave U6b-2 (the entry's frame table, event L): a read of a framed file landed, so main is asked for a token; a
@@ -708,6 +726,7 @@ export function createViewerStore(client: MawsBridge) {
       }
       const id = ++lastFrameAsk;
       const asking = frameAsk(entry);
+      frameAsked.set(tabId, JSON.stringify(asking));
       asks.set(tabId, { id, again: false, obsolete: false, open: 'open' in asking });
       patch(tabId, { frame: { status: 'asking', shown } });
       void settled(client.invoke('layout.frameFile', asking)).then((answer) => answered(tabId, id, answer));
@@ -743,10 +762,17 @@ export function createViewerStore(client: MawsBridge) {
       if (out.again) ask(tabId);
     };
 
-    // After a load committed: a framed file asks (event L); an entry that is no longer one gives its frame up.
-    const settleFrame = (tabId: string) => {
+    // After a load committed: a framed file asks (event L); an entry that is no longer one gives its frame up. Ticket 775: an
+    // event's re-read that found the file as the entry shows it (`landed` false) keeps a drawn frame that was asked with the
+    // keys it would ask with now, so its token and the page's state stay; one with no frame, a failed one, or one asked
+    // under other keys (the tab's mark moved) asks as before. So does one being asked: main may have read the file at a
+    // moment it was something else (unframed mid-write), so the read queues one more ask after the answer.
+    const settleFrame = (tabId: string, landed: boolean) => {
       const entry = get().entries.get(tabId);
-      if (entry?.kind === 'frame') ask(tabId);
+      if (entry?.kind === 'frame') {
+        const kept = !landed && entry.frame?.status === 'ready' && entry.appSessionId !== null && frameAsked.get(tabId) === JSON.stringify(frameAsk(entry));
+        if (!kept) ask(tabId);
+      }
       else if (entry?.frame) {
         dropFrame(tabId);
         patch(tabId, { frame: null });
@@ -792,7 +818,8 @@ export function createViewerStore(client: MawsBridge) {
       // one the editor takes. A change load of a head, an image or an external kind asks none (each would cost main a
       // whole-file read and a SHA-256 per change), and asks again, once, should the file have become editable text.
       const editableKind = (candidate: ViewerKind | null) => candidate === null || candidate === 'code' || candidate === 'markdown';
-      const hashed = reason === 'open' || editableKind(entry.kind);
+      // Ticket 775: a framed kind's too, so an event that left the file as it was is told by its hash and keeps the frame.
+      const hashed = reason === 'open' || editableKind(entry.kind) || entry.kind === 'frame';
       let first = await read(0, FILES_READ_DEFAULT_LENGTH, hashed);
       if (!live()) return null;
       if (!first.ok) return failed(first.error);
@@ -811,18 +838,21 @@ export function createViewerStore(client: MawsBridge) {
       // An open load puts the document on the entry, so the pin is the real path it read (decision 6).
       // U6b-4c: `answer`, the read whose admission the commit draws (the last that landed)
       const commit = ({ utf8, real, ...loaded }: LoadedFile, answer: FilesReadOutput): Landed | null => {
-        if (reason === 'change') commitChange(tabId, { ...loaded, utf8, real }, cause);
+        let landedContent = true;
+        // ticket 775: only an event's re-read keeps the frame; a revisit asks again, as U6b-2 decided (M5, decision 6)
+        if (reason === 'change') landedContent = commitChange(tabId, { ...loaded, utf8, real }, cause) || cause !== 'event';
         else {
           const textEditable = isEditable({ ...loaded, utf8 });
           patch(tabId, { ...opened, ...loaded, pin: real, textEditable, editable: editableWith(get().entries.get(tabId) ?? entry, real, textEditable) });
         }
-        settleFrame(tabId); // UX wave U6b-2
+        settleFrame(tabId, landedContent); // UX wave U6b-2
         return answer.outside?.writable === false ? landed() : null;
       };
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
-      if (kind === 'external' || kind === 'frame') return commit({ ...file, real: admissionOf(head).real, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null }, head);
+      // Ticket 775: a framed file keeps the whole file's hash its read answered (null past FILES_READ_MAX_LENGTH)
+      if (kind === 'external' || kind === 'frame') return commit({ ...file, real: admissionOf(head).real, text: '', base64: null, loaded: 0, complete: true, hash: kind === 'frame' ? head.hash : null, utf8: null }, head);
       if (kind === 'image') {
         let whole = head;
         if (head.truncated) {
@@ -1414,6 +1444,7 @@ export function createViewerStore(client: MawsBridge) {
 
       reset() {
         for (const entry of get().entries.values()) release(heldToken(entry.frame)); // UX wave U6b-2 (M5, decision 10)
+        frameAsked.clear();
         asks.clear(); // the store forgets everything (tests, a hot reload): an answer still out finds no slot and is released
         shownByAgent.clear();
         tabMarks.clear();

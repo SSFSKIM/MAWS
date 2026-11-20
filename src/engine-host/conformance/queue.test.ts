@@ -177,20 +177,20 @@ describe('queue release never follows an engine-initiated turn', () => {
       const frame = row.frame as { request: Record<string, unknown> };
       return { ...row, frame: { ...frame, request: { ...frame.request, reason: 'user-cancel' } } };
     }), againRow];
-    let afterInterrupt: { cancelled: number; busy: boolean; entries: QueueEntry[]; disposition: string | null } | null = null;
+    let afterInterrupt: { cancelled: number; busy: boolean; paused: boolean; entries: QueueEntry[]; disposition: string | null } | null = null;
     const run = await replayedSession('pass1', 'queue-and-interrupt', (row, { session, transport, ready, fixture }) => {
       if (row.seq === 146) void ready().then(() => session.send(contentOf(fixture, 146)));
       else if (row.seq === 190) {
         void session.interrupt({ cancelEngineQueued: true }).then(async (result) => {
-          afterInterrupt = { cancelled: result.cancelled.length, busy: session.queue.busy, entries: session.queue.state.entries, disposition: null };
+          afterInterrupt = { cancelled: result.cancelled.length, busy: session.queue.busy, paused: session.queue.isPaused, entries: session.queue.state.entries, disposition: null };
           afterInterrupt.disposition = (await session.send('again')).disposition;
-          expect(session.queue.isPaused).toBe(true);
+          expect(session.queue.isPaused).toBe(false); // ticket 790: the Stop held nothing, so its pause ended
           transport.kill('SIGTERM');
         });
       }
     }, { edit: cut });
     expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
-    expect(afterInterrupt).toEqual({ cancelled: 1, busy: false, entries: [], disposition: 'sent' });
+    expect(afterInterrupt).toEqual({ cancelled: 1, busy: false, paused: false, entries: [], disposition: 'sent' }); // ticket 790: the Stop held nothing once the drop settled
     const [submitted] = userOuts(run.journal.rows);
     const cancelled = run.journal.rows.findIndex((r) => (r.frame as { type?: string; state?: string; command_uuid?: string }).type === 'command_lifecycle' && (r.frame as { state: string }).state === 'cancelled');
     expect((run.journal.rows[cancelled]!.frame as { command_uuid: string }).command_uuid).toBe(submitted!.uuid);

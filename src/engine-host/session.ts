@@ -467,6 +467,9 @@ export class EngineSession {
       released: () => {
         void this.queue.onSequenceEnded().catch((error: unknown) => this.log(`queue release after sequence failed: ${messageOf(error)}`));
       },
+      dropped: () => {
+        void this.queue.onSequenceDropped().catch((error: unknown) => this.log(`queue settle after a dropped sequence failed: ${messageOf(error)}`)); // ticket 790
+      },
       log: this.log,
     });
     const writeFrame = (frame: Parameters<OutboundWriter['write']>[0], writeOpts?: WriteOptions) => (this.writer ? this.writer.write(frame, writeOpts) : Promise.reject(new Error('no engine process')));
@@ -484,6 +487,8 @@ export class EngineSession {
       sendNow: async (messageUuid) => (await interrupt(this.readyClient(), { send_now: true, message_uuid: messageUuid })).send_now, // UX wave U4a (decision 3)
       unsettled: opts.unsettledPrompts, // P2-C
       onPauseChange: (paused) => this.clearAndImplement.setPaused(paused),
+      holdsSequence: () => this.clearAndImplement.holding, // ticket 790
+      mainTurnOpen: () => this.processState !== 'exited' && this.normalizer.state.currentTurn !== null, // ticket 790: the turn a Stop interrupts
       onChange: (queue) => {
         this.emit('queue', queue);
         this.touch();
@@ -555,9 +560,7 @@ export class EngineSession {
     };
     let response: InterruptResponse;
     try {
-      await this.queue.pause('interrupt');
-      if (opts.holdEngineQueued) await this.queue.holdAll();
-      response = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
+      response = await this.queue.stop({ hold: opts.holdEngineQueued === true }, () => interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued })); // ticket 790
     } catch (error) {
       if (!(error instanceof ControlTimeout)) settleOwed();
       else if (owed && generation === this.owedInterrupt.generation) this.owedInterrupt.lateRequestId = error.requestId;
@@ -1434,7 +1437,7 @@ export class EngineSession {
   private async adopt(adopted: AdoptedLaunch): Promise<void> {
     const transport = this.transport!;
     // fix wave 1: partial reader state is never trusted; a fold or a queue restore that fails is a failed adoption
-    let evidence: { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string> };
+    let evidence: { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string>; interrupted: boolean };
     try {
       evidence = this.fold();
     } catch (error) {
@@ -1463,7 +1466,7 @@ export class EngineSession {
   // side-question log, the observed facts and the engine session ids. The outstanding set becomes the barrier. Answers
   // the queue's evidence: the user frames written, the steers no row ended, and the submissions a main-lane turn end
   // names (fix wave 1). A gap an earlier adoption journaled leaves the work unknown until a later Stop (fix wave 1).
-  private fold(): { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string> } {
+  private fold(): { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string>; interrupted: boolean } {
     const outstanding = new OutstandingSet();
     const unsettled = new UnsettledFold();
     const written = new Set<string>();
@@ -1505,7 +1508,10 @@ export class EngineSession {
       this.tracker.restoring = false;
     }
     this.outstanding = outstanding;
-    return { written, unended: unsettled.unsettled(), ended };
+    // ticket 790: a plain interrupt was written while the turn still open ran (the normaliser's stop asked, cleared at a
+    // main-lane end), so the old manager's Stop reached that turn
+    const interrupted = this.normalizer.state.currentTurn !== null && this.normalizer.state.sendNow.stopAsked;
+    return { written, unended: unsettled.unsettled(), ended, interrupted };
   }
 
   // fix wave 1: an adoption that failed before its first write: logged with its cause, never served, and its session host

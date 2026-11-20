@@ -16,7 +16,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { NO_SESSION_CONTEXT } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
@@ -64,7 +64,7 @@ describe('a design comment’s anchor', () => {
   it('is what the surface opens the card on', async () => {
     let opened: ((p: CommentedPassage) => void) | null = null;
     function Design() {
-      const comments = useDocumentComments({ artifactId: 'design-1', appSessionId: PARENT, title: 'Launch screens', artifactKind: 'design' });
+      const comments = useDocumentComments({ artifactId: 'design-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Launch screens', artifactKind: 'design' });
       opened = comments.opened;
       return null;
     }
@@ -117,11 +117,11 @@ describe('a design opened as its own tab', () => {
     const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
     off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
     const editor = artifactEditorFor('design')!;
-    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, 'design', editor as never);
+    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, TEST_MACHINE, 'design', editor as never);
     const Main = editor.Main;
     render(
       <EditorHostScopeContext.Provider value={scope}>
-        <Main artifactId={DESIGN} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Main artifactId={DESIGN} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());
@@ -187,11 +187,11 @@ describe('a design’s compose card keeps its draft', () => {
     act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
     off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard }));
     const editor = artifactEditorFor('design')!;
-    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, 'design', editor as never);
+    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, TEST_MACHINE, 'design', editor as never);
     const Main = editor.Main;
     render(
       <EditorHostScopeContext.Provider value={scope}>
-        <Main artifactId={DESIGN} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Main artifactId={DESIGN} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());
@@ -223,11 +223,11 @@ describe('a design’s compose card keeps its draft', () => {
     await comment();
     await userEvent.type(field(), 'Taller?');
     const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
-    const kept = holdArtifactEditorState<DesignTabState>(panelScope, DESIGN, 'design', artifactEditorFor('design')! as never);
+    const kept = holdArtifactEditorState<DesignTabState>(panelScope, DESIGN, TEST_MACHINE, 'design', artifactEditorFor('design')! as never);
     expect(await state.closeGuard({ moving: true })).toBe(true);
     expect(handArtifactViewOver(scope, panelScope)).toBe(true);
     expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);
-    expect(commentDraftOf(DESIGN)?.text).toBe('Taller?');
+    expect(commentDraftOf(DESIGN, TEST_MACHINE)?.text).toBe('Taller?');
     releaseArtifactEditorState(panelScope);
   });
 

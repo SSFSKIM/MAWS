@@ -39,12 +39,12 @@ afterEach(() => {
 });
 
 describe('the undelete', () => {
-  it('a session’s row sends it to the session’s machine, recorded for an artifact the window never listed', async () => {
+  it('a session’s row sends it to the session’s machine without inferring a copy', async () => {
     const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     expect(artifactMachineOf(DRAFT)).toBeNull();
     expect(await undeleteSessionArtifact(remote, DRAFT)).toBeNull();
     expect(sent).toEqual([{ input: { artifactId: DRAFT }, machine: OTHER_MACHINE }]);
-    expect(artifactMachineOf(DRAFT)).toBe(OTHER_MACHINE);
+    expect(artifactMachineOf(DRAFT)).toBeNull();
     sent = [];
     resetArtifactMachines();
     expect(await undeleteSessionArtifact(at('app-l' as AppSessionId), DRAFT)).toBeNull();

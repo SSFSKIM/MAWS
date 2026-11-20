@@ -4,6 +4,7 @@
 // owner picks another system, or their defaults (the artifact names none, so its Space's or the owner's governs), and
 // "Move and delete" moves every one (`artifacts.update {designSystemId}`) and deletes again. Moving is the owner's
 // confirmed intent here: they asked to delete. A refusal that names new artifacts shows the list again.
+import type { MachineRef } from '@shared/machine/ref';
 import { useState } from 'react';
 import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
@@ -22,20 +23,20 @@ function idsOf(refusal: ArtifactRefusal | null): string[] | null {
   return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
 }
 
-export function DeleteSystemSheet({ artifactId, name, onClose }: { artifactId: string; name: string; onClose(): void }) {
+export function DeleteSystemSheet({ artifactId, machine, name, onClose }: { artifactId: string; machine: MachineRef; name: string; onClose(): void }) {
   const [inUse, setInUse] = useState<string[] | null>(null);
   const [target, setTarget] = useState(THEIR_DEFAULTS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const all = useLibraryList();
-  const systems = useLibraryList({ kind: 'design_system' });
+  const all = useLibraryList(undefined, machine);
+  const systems = useLibraryList({ kind: 'design_system' }, machine);
   const titleOf = (id: string) => all.value?.rows.find((row) => row.id === id)?.title ?? id;
   // The library's row the owner is deleting, by its title: a copy keeps its law's title, which would name the original.
   const shown = all.value?.rows.find((row) => row.id === artifactId)?.title ?? name;
   const others = (systems.value?.rows ?? []).filter((row) => row.id !== artifactId).sort((a, b) => a.title.localeCompare(b.title, 'en'));
 
   const remove = async () => {
-    const result = await deleteArtifact(artifactId);
+    const result = await deleteArtifact(artifactId, machine);
     if (result.ok) return onClose();
     const ids = idsOf(result.refusal);
     if (ids) setInUse(ids);
@@ -52,7 +53,7 @@ export function DeleteSystemSheet({ artifactId, name, onClose }: { artifactId: s
   };
   const moveAndDelete = async () => {
     for (const id of inUse ?? []) {
-      const moved = await ipc.invoke('artifacts.update', { artifactId: id, designSystemId: target === THEIR_DEFAULTS ? null : target });
+      const moved = await ipc.invoke('artifacts.update', { artifactId: id, designSystemId: target === THEIR_DEFAULTS ? null : target }, { machine });
       if (!moved.ok && artifactRefusalOf(moved.error)?.reason !== 'notFound') return setError(C.moveFailed(titleOf(id), moved.error.message)); // one gone meanwhile needs no move
     }
     await remove();
@@ -79,7 +80,7 @@ export function DeleteSystemSheet({ artifactId, name, onClose }: { artifactId: s
                 type="button"
                 onClick={() => {
                   onClose();
-                  openArtifactTab(id);
+                  openArtifactTab(id, undefined, machine);
                 }}
                 className="w-full truncate rounded-sm px-2 py-1 text-left text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
               >

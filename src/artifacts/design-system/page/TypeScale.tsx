@@ -21,8 +21,8 @@ interface DeckScale {
   lineHeight?: unknown;
 }
 
-export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; artifactId: string; readOnly: boolean }) {
-  const { doc, tokens, resolved, view, artifactId, readOnly } = props;
+export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; scopeKey: string; readOnly: boolean }) {
+  const { doc, tokens, resolved, view, scopeKey, readOnly } = props;
   const roles = TYPE_ROLES.map((role) => ({ role, token: byIdentity(resolved.tokens, `type.${role}`) })).filter(
     (entry): entry is { role: (typeof TYPE_ROLES)[number]; token: Typography } => entry.token?.type === 'typography',
   );
@@ -77,7 +77,7 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
               {aliased ? <AliasOf reference={String(token.token.$value)} resolved={resolved} /> : null}
             </div>
             <div className="dsp-type-cell">
-              <PreviewScope view={view} artifactId={artifactId} medium="document" className="dsp-specimen">
+              <PreviewScope view={view} scopeKey={scopeKey} medium="document" className="dsp-specimen">
                 <p className={`ds-type-${role}`}>{SAMPLE}</p>
               </PreviewScope>
               <div className="dsp-type-fields">
@@ -87,7 +87,7 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
               </div>
             </div>
             <div className="dsp-type-cell">
-              <PreviewScope view={view} artifactId={artifactId} medium="deck" className="dsp-specimen dsp-specimen-deck">
+              <PreviewScope view={view} scopeKey={scopeKey} medium="deck" className="dsp-specimen dsp-specimen-deck">
                 <p className={`ds-type-${role}`}>{SAMPLE}</p>
               </PreviewScope>
               <div className="dsp-type-fields">

@@ -3,6 +3,7 @@
 // (the board from the tab's state, the version the history shows), every entry disabled while two versions are compared,
 // and an over-cap picture: the sheet states the fitting scale from main's refusal, the export runs at it when the owner
 // agrees and nothing is written when they do not.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useNotices } from '../../stores/notices';
@@ -50,7 +51,7 @@ describe('an export from the menu', () => {
   it('saves the board’s export where the owner chooses', async () => {
     const exportId = '00000000-0000-4000-8000-0000000000e7';
     const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: `/store/x/exports/7-png-${exportId}.png`, revision: 7, exportId }) : ok({ saved: true, path: '/Users/me/Downloads/Screens.png' })));
-    await act(() => exportDesign(A, { format: 'png', board: 'phone', versionId: 3 }, { ask: async () => true, boardName: (id) => id }));
+    await act(() => exportDesign(A, TEST_MACHINE, { format: 'png', board: 'phone', versionId: 3 }, { ask: async () => true, boardName: (id) => id }));
     expect(main.calls).toEqual([
       { name: 'artifacts.export', input: { artifactId: A, format: 'png', board: 'phone', versionId: 3 } },
       { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'png', exportId } } } }, // its own file (Decision Log 33)
@@ -67,7 +68,7 @@ describe('an export from the menu', () => {
       return tooLarge;
     });
     const asked: Parameters<DesignExportAsk>[0][] = [];
-    await act(() => exportDesign(A, { format: 'png', board: 'poster' }, { ask: async (sheet) => (asked.push(sheet), true), boardName: () => 'Poster' }));
+    await act(() => exportDesign(A, TEST_MACHINE, { format: 'png', board: 'poster' }, { ask: async (sheet) => (asked.push(sheet), true), boardName: () => 'Poster' }));
     expect(asked).toEqual([
       {
         title: 'Export “Poster” at 91.02%?',
@@ -87,17 +88,17 @@ describe('an export from the menu', () => {
     installFakeMain(() => tooLarge);
     const asked: string[] = [];
     const context = { board: 'poster', label: 'Festival poster (Draft)', shown: { versionId: 2, board: 'poster', label: 'Festival poster (Draft)' } };
-    await act(() => runDesignExport(A, entry('png'), context, { ask: async (sheet) => (asked.push(sheet.title), false) }));
+    await act(() => runDesignExport(A, TEST_MACHINE, entry('png'), context, { ask: async (sheet) => (asked.push(sheet.title), false) }));
     expect(asked).toEqual(['Export “Festival poster (Draft)” at 91.02%?']);
   });
 
   it('declined, nothing more is asked of main; any other refusal is told and nothing is saved', async () => {
     const main = installFakeMain(() => tooLarge);
-    await act(() => exportDesign(A, { format: 'png', board: 'poster' }, { ask: async () => false, boardName: () => 'Poster' }));
+    await act(() => exportDesign(A, TEST_MACHINE, { format: 'png', board: 'poster' }, { ask: async () => false, boardName: () => 'Poster' }));
     expect(main.calls).toHaveLength(1);
     expect(toasts()).toEqual([]);
     const other = installFakeMain(() => ({ ok: false, error: { code: 'invalid_input', message: 'board bad is held', issues: { reason: 'invalid', data: { board: 'bad' } } } }));
-    await act(() => exportDesign(A, { format: 'png', board: 'bad' }, { ask: async () => true, boardName: () => 'Bad' }));
+    await act(() => exportDesign(A, TEST_MACHINE, { format: 'png', board: 'bad' }, { ask: async () => true, boardName: () => 'Bad' }));
     expect(other.calls).toHaveLength(1);
     expect(toasts()).toEqual([['warning', 'Couldn’t export: board bad is held']]);
   });

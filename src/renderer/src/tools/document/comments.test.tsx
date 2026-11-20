@@ -3,6 +3,7 @@
 // the artifact target, drawn by the editor's host pinned where the editor locates the passage; Side thread and Send to
 // main carry the anchor, whose tag round-trips; the card resolves and reopens its thread; a sent comment is recorded in
 // the thread and an unsent one withdrawn.
+import { artifactKey } from '../../artifacts/machines';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +17,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
 import { sendComments } from '../../side/actions';
 import { dropSubject, resetPlaceNotes, useCommentCard } from '../../side/card/store';
@@ -123,19 +124,20 @@ function editorReach(doc: Doc): CommentOverlayProps {
   };
 }
 
-function Editor({ reach, onOpen, holdReplica }: { reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; holdReplica?: () => () => void }) {
-  const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', holdReplica });
+function Editor({ reach, onOpen, holdReplica, machine }: { machine: typeof TEST_MACHINE; reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; holdReplica?: () => () => void }) {
+  const options = { artifactId: ARTIFACT, machine, appSessionId: PARENT, title: 'Q3 plan', holdReplica };
+  const comments = useDocumentComments(options);
   onOpen(comments.opened);
   return <div className="relative">{comments.overlay(reach)}</div>;
 }
 
-function mount() {
+function mount(machine = TEST_MACHINE, shown = passage) {
   const doc = newDoc();
-  addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+  addThread(doc, { threadId: shown.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
   const reach = editorReach(doc);
   let open: ((p: typeof passage) => void) | null = null;
-  render(<Editor reach={reach} onOpen={(o) => (open = o)} />);
-  return { doc, reach, comment: () => act(() => open!(passage)) };
+  render(<Editor reach={reach} machine={machine} onOpen={(o) => (open = o)} />);
+  return { doc, reach, comment: () => act(() => open!(shown)) };
 }
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
@@ -196,7 +198,7 @@ describe('the compose card in the margin and the draft rule', () => {
   // `slot`: where the overlay is drawn; a new slot remounts it under the same surface (the margin moving it, a tab switch)
   // UX wave U5a: the draft rule is every card host's (no opt-in)
   function MarginEditor({ reach, onSurface, slot = 'a' }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string }) {
-    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
+    const comments = useDocumentComments({ artifactId: ARTIFACT, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 plan' });
     onSurface(comments);
     return (
       <div className="ds-doc">
@@ -294,7 +296,7 @@ describe('the compose card in the margin and the draft rule', () => {
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
     let surface: DocumentComments | null = null;
     function Body({ hostId, onSurface }: { hostId?: string; onSurface(surface: DocumentComments): void }) {
-      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(hostId !== undefined && { hostId }) });
+      const comments = useDocumentComments({ artifactId: ARTIFACT, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 plan', ...(hostId !== undefined && { hostId }) });
       onSurface(comments);
       return (
         <div className="ds-doc">
@@ -313,7 +315,7 @@ describe('the compose card in the margin and the draft rule', () => {
     await act(async () => {});
     expect(reach.setActive, 'the card activates its thread in the editor it moved to').toHaveBeenLastCalledWith(passage.threadId);
     expect(field().value).toBe('Monthly?');
-    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(reach.discard).not.toHaveBeenCalled();
     expect(surface!.draft!()).toBe(passage.threadId);
   });
@@ -321,17 +323,17 @@ describe('the compose card in the margin and the draft rule', () => {
   it('records the typed draft as the artifact’s, which draft() names; an emptied field or the card closing clears it', async () => {
     const m = mountMargin();
     await opened(m);
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.surface().draft!()).toBeNull();
     await userEvent.type(field(), 'Monthly?');
-    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(m.surface().draft!()).toBe(passage.threadId);
     await userEvent.clear(field());
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.surface().draft!()).toBeNull();
     await userEvent.type(field(), 'Again');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.surface().draft!()).toBeNull();
   });
 
@@ -355,7 +357,7 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(field().value).toBe('Monthly?');
     expect(m.reach.focus).toHaveBeenCalledTimes(1);
     expect(m.reach.discard).not.toHaveBeenCalled();
-    expect(commentDraftOf(ARTIFACT)?.text).toBe('Monthly?');
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)?.text).toBe('Monthly?');
 
     await userEvent.clear(field());
     fireEvent.keyDown(field(), { key: 'Escape' });
@@ -461,10 +463,10 @@ describe('the compose card in the margin and the draft rule', () => {
     await userEvent.type(field(), 'Monthly?');
     m.view.unmount();
     await act(async () => {});
-    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
     expect(m.reach.discard).not.toHaveBeenCalled();
-    act(() => dropSubject('artifact', ARTIFACT));
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
+    act(() => dropSubject('artifact', artifactKey(ARTIFACT, TEST_MACHINE)));
+    expect(commentDraftOf(ARTIFACT, TEST_MACHINE)).toBeNull();
     expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
   });
 });
@@ -493,7 +495,7 @@ describe('a comment on its way outlives its card', () => {
     for (const p of [passage, second]) addThread(doc, { threadId: p.threadId, tabId: 'tab1', blockId: 'p1', quote: p.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach = liveReach(doc);
     let open: ((p: typeof passage) => void) | null = null;
-    const view = render(<Editor reach={reach} onOpen={(o) => (open = o)} holdReplica={holdReplica} />);
+    const view = render(<Editor machine={TEST_MACHINE} reach={reach} onOpen={(o) => (open = o)} holdReplica={holdReplica} />);
     return { doc, reach, view, comment: (p: typeof passage = passage) => act(() => open!(p)) };
   }
   const bodies = (doc: Doc, threadId: string) => getThread(doc, threadId)?.messages.map((message) => message.body) ?? null;
@@ -622,4 +624,17 @@ describe('a comment on its way outlives its card', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(getThread(doc, passage.threadId)).toBeNull();
   });
+});
+
+
+it('opens a fresh comment on the other machine’s copy without consuming the local draft', async () => {
+  const local = mount(TEST_MACHINE);
+  const remote = mount(OTHER_MACHINE, { ...passage, threadId: 'peer-thread' });
+  local.comment();
+  await userEvent.type(field(), 'Only on the local copy');
+  remote.comment();
+  expect(useCommentCard.getState().open?.target).toMatchObject({ threadId: 'peer-thread' });
+  expect(field().value).toBe('');
+  local.comment();
+  expect(field().value).toBe('Only on the local copy');
 });
