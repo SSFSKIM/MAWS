@@ -1944,7 +1944,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
         const branch = state.hidden?.branches.get(id);
         const rewound = branch === undefined ? undefined : state.turns.get(branch.fromTurn)?.events.find((e) => e.kind === 'user.message' && e.messageUuid === event.targetMessageUuid); // the branch opens with the rewound message's turn
         const detail = rewound?.kind === 'user.message' ? ownWordsOf(messageText(rewound.content)) : event.prefillText === null ? null : ownWordsOf(event.prefillText);
-        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: detail === '' ? null : detail, hiddenRows, revealed });
+        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail, hiddenRows, revealed });
         break;
       }
       case 'api.retry':
