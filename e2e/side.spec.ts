@@ -765,10 +765,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // the prompt) and on the promotion's row by its anchor chip's attribute.
     const ids = segmentIds(firstPrompt);
     expect(ids, 'the exchange in one segment').toHaveLength(1);
-    expect(firstPrompt, 'the writer’s text, to the byte').toBe(promotionMessage([{ question: SIDE_QUESTION, response: 'ZEBRA' }, { question: SIDE_FOLLOW_UP, response: 'zebra' }], null, ids[0]!));
+    expect(firstPrompt, 'the writer’s text, to the byte').toBe(promotionMessage([{ question: SIDE_QUESTION, response: 'ZEBRA' }, { question: SIDE_FOLLOW_UP, response: `zebra, as [the app](${appPath}) has it` }], null, ids[0]!));
     const promotion = thread.locator('.transcript-row[data-kind="user"]').filter({ has: page.locator('[data-chip="anchor"][data-anchor-kind="none"]') });
     await expect(promotion, 'the promotion, one row of the thread').toHaveCount(1);
-    await expect(promotion.locator('[data-user-content]'), 'its exchange read as text, as before').toHaveText(`Side question ${PROMOTION_HEAD} Q: ${SIDE_QUESTION} A: ZEBRA Q: ${SIDE_FOLLOW_UP} A: zebra Continue from here.`, { useInnerText: true });
+    await expect(promotion.locator('[data-user-content]'), 'its exchange read as text, as before').toHaveText(`Side question ${PROMOTION_HEAD} Q: ${SIDE_QUESTION} A: ZEBRA Q: ${SIDE_FOLLOW_UP} A: zebra, as the app has it Continue from here.`, { useInnerText: true });
     await expect(promotion.locator('.transcript-pasted'), 'no chip: the segment drawn in place').toHaveCount(0);
     await expect(promotion, 'no tag').not.toContainText('pasted_content');
     expect(writtenControls(maws, promoted, 'rename_session').map((r) => r.frame.request)).toEqual([{ subtype: 'rename_session', title: 'Side question', source: 'host' }]);
