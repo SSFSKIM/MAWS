@@ -249,6 +249,31 @@ describe('<DesignSystemScope> (D8)', () => {
     expect(closed).toHaveBeenCalledTimes(1);
   });
 
+  it('styles copies on different hosts independently even when the system IDs match', async () => {
+    const local = systemDoc();
+    const peer = systemDoc();
+    setToken(peer, 'color.accent.$root', color('#123456'));
+    const first = fakeHost({ a: local });
+    const second = fakeHost({ a: peer });
+    const view = render(
+      <>
+        <DesignSystemHostContext.Provider value={first.host}>
+          <Shown refs={[{ id: 'a' }]} />
+        </DesignSystemHostContext.Provider>
+        <DesignSystemHostContext.Provider value={second.host}>
+          <Shown refs={[{ id: 'a' }]} />
+        </DesignSystemHostContext.Provider>
+      </>,
+    );
+    await flush();
+    const [localText, peerText] = [...view.container.querySelectorAll('p')];
+    expect(getComputedStyle(localText!).color).toBe('#c9663f');
+    expect(getComputedStyle(peerText!).color).toBe('#123456');
+    act(() => setToken(local, 'color.accent.$root', color('#abcdef')));
+    expect(getComputedStyle(localText!).color).toBe('#abcdef');
+    expect(getComputedStyle(peerText!).color).toBe('#123456');
+  });
+
   it('applies overrides after the system, in a scope of their own; unsafe ones are dropped', async () => {
     const doc = systemDoc();
     const { host } = fakeHost({ a: doc });
