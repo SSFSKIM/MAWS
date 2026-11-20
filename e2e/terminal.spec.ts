@@ -18,6 +18,7 @@ import { openSurface, pinSurfaceForSessions, showSessionCards, sideColumn, sideG
 import { addressed } from './support/address'; // UX wave U6b-5a
 import { launchReady, turnsJournal } from './support/c7-replay'; // UX wave U6b-5a
 import { menu } from './support/menu'; // UX wave U6b-5a
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
 import { ofKind, scene, show, type Scene } from './support/maws-tools'; // UX wave U6b-5a
 import { bareOf } from '../src/shared/machine/address'; // P5 O6 M2: the page's pty ids are addresses; the raw bridge's are bare
 
@@ -1093,6 +1094,73 @@ test('Attach selection to chat from a terminal kept open for every session, besi
     const kept = await chipsOf(alpha);
     await expect(kept).toHaveCount(1, { timeout: 15_000 });
     await expect(kept.first()).toHaveAttribute('title', 'attach-pinned');
+  });
+});
+
+// ---- UX wave U6b-5b: zoom (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; the child's probe 3) ----------
+// The window zoomed to 125 % by View's items (support/zoom.ts): the terminal's grid refits to the smaller room the
+// window's CSS pixels now give it, and the pty is told: what `stty size` prints (the pty's own size) has the columns of
+// the emulator's grid, read as the length of the first row a 600-character line wraps to, and fewer rows and columns
+// than at 100 %. Each read is a command typed into the shell, retried until the pty has the grid's size. Then a word the
+// shell prints, double-clicked where it is drawn, is the selection: Attach selection to chat makes it the composer's
+// block, the selection's text.
+type Grid = { pty: { rows: number; cols: number }; emulator: number };
+async function gridOf(page: Page, id: string, mark: string): Promise<Grid | null> {
+  await screenOf(page, id).click();
+  await page.keyboard.type(`clear; printf 'grid-${mark} %s\\n' "$(stty size)"; printf '%0600d\\n' 0`);
+  await page.keyboard.press('Enter');
+  const said = new RegExp(`^grid-${mark} (\\d+) (\\d+)$`);
+  let grid: Grid | null = null;
+  await expect
+    .poll(
+      async () => {
+        const lines = (await seamLines(page, id)) ?? [];
+        for (let at = lines.length - 2; at >= 0; at--) {
+          const sized = said.exec(lines[at]!.trim());
+          if (sized === null) continue;
+          const zeros = lines[at + 1]!.trim();
+          if (!/^0+$/.test(zeros)) return false;
+          grid = { pty: { rows: Number(sized[1]), cols: Number(sized[2]) }, emulator: zeros.length };
+          return true;
+        }
+        return false;
+      },
+      { timeout: 10_000, message: `the grid's read ${mark}` },
+    )
+    .toBe(true);
+  return grid;
+}
+
+test('zoom: the grid refits and a selection is under the pointer at 125 %', async () => {
+  test.setTimeout(120_000);
+  await scene({ titles: ['Zoom alpha'], label: 'u6b5b-zoom' }, async (s) => {
+    const { page } = s;
+    const id = s.ids[0]!;
+    await launchReady(page, id, turnsJournal(s.scratch.root, 'u6b5b-zoom', 1), { cwd: s.repo });
+    await show(s, id);
+    const box = s.pane.locator(`[data-composer="${await addressed(page, id)}"]`).getByRole('textbox', { name: 'Message' });
+    const terminal = await shownTerminal(page);
+    const before = (await gridOf(page, terminal, 'actual'))!;
+    expect(before.pty.cols, `at 100 % the pty has the grid's columns: ${JSON.stringify(before)}`).toBe(before.emulator);
+
+    await zoomTo(s.maws.app, page, 1.25);
+    let reads = 0;
+    let after: Grid | null = null;
+    await expect(async () => {
+      after = (await gridOf(page, terminal, `zoomed${++reads}`))!;
+      expect(after.pty.cols, `at 125 % the pty has the grid's columns: ${JSON.stringify(after)}`).toBe(after.emulator);
+      expect(after.pty.cols, 'fewer columns than at 100 %').toBeLessThan(before.pty.cols);
+      expect(after.pty.rows, 'fewer rows than at 100 %').toBeLessThan(before.pty.rows);
+    }).toPass({ timeout: 30_000 });
+    test.info().annotations.push({ type: 'zoom: the grid', description: JSON.stringify({ before, after }) });
+
+    await runIn(page, terminal, "clear; printf 'zoomed-%s\\n' 125", 'zoomed-125');
+    await selectPrinted(page, terminal);
+    await (await terminalMenu(page, terminal, 'word')).getByRole('menuitem', { name: 'Attach selection to chat' }).click();
+    const chips = box.locator('[data-pasted="text"]');
+    await expect(chips).toHaveCount(1);
+    await expect(chips.first(), 'the word under the pointer is the selection').toHaveAttribute('title', 'zoomed-125');
+    await zoomTo(s.maws.app, page, 1);
   });
 });
 

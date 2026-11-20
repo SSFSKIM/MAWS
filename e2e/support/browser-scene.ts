@@ -22,6 +22,7 @@ import { invoke, value } from './c7-replay';
 import { clearToasts, closeScene, launchScene, scratchProject, type Scene, type Scratch } from './maws-tools';
 import { REPO_ROOT } from './launch';
 import { startBrowserServer, type BrowserServer } from './browser-server';
+import { timesFactor } from './zoom'; // UX wave U6b-5b: decision 27's rule
 
 export type Surface = 'panel' | 'main';
 type Rect = { x: number; y: number; width: number; height: number };
@@ -242,13 +243,17 @@ export async function placedOn(s: Scene, tabId: string, pane: Locator, timeout =
 
 const within1 = (a: Rect, b: Rect) => Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1;
 
-// The tab's view is visible and lies on the pane's rect within 1 px, polled until it settles.
-export async function expectOnPane(s: Scene, tabId: string, pane: Locator, surface: Surface, timeout = 2_000): Promise<void> {
+// The tab's view is visible and lies on the pane's rect within 1 px, polled until it settles. UX wave U6b-5b (decision
+// 36; Interfaces §G): first main's acknowledgment of the rect the pane now measures (`placedOn`), and the view's bounds
+// read against that rect times the window's zoom `factor`, as main places it (decision 27's edges): a window point is
+// `factor` CSS pixels.
+export async function expectOnPane(s: Scene, tabId: string, pane: Locator, surface: Surface, timeout = 2_000, factor = 1): Promise<void> {
+  await placedOn(s, tabId, pane, timeout);
   await expect
     .poll(
       async () => {
         const [view, rect] = await Promise.all([viewOf(s, tabId), paneRect(pane)]);
-        return view !== null && view.visible && view.attached && view.owner?.surface === surface && view.bounds !== null && within1(view.bounds, rect) ? 'on the pane' : JSON.stringify({ view, rect });
+        return view !== null && view.visible && view.attached && view.owner?.surface === surface && view.bounds !== null && within1(view.bounds, timesFactor(rect, factor)) ? 'on the pane' : JSON.stringify({ view, rect, factor });
       },
       { timeout, intervals: [16, 16, 33, 50, 100] },
     )

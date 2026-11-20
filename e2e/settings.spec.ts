@@ -17,6 +17,7 @@ import { TESTED_ENGINE_VERSION } from '../src/engine-host/engine-compat';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { invoke, value } from './support/c7-replay'; // P5 O3-D M5b: the shape flip's raw reads
 import { SETTINGS_DEFAULTS_V21, splitSettings } from '@shared/settings/defaults'; // P5 O15 M2: a client file saved on the embedded shape
+import { formatChord } from '../src/shared/keymap/chord'; // UX wave U6b-5b: the zoom's chords as Settings draws them
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -141,6 +142,14 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
         await expect(row.getByRole('button'), `${title} has no control`).toHaveCount(0);
       }
       expect(Object.keys(readSettings(userData).keymap).filter((id) => ['terminal.attachSelection', 'go.back', 'go.forward'].includes(id)), 'no stored rebinding of the three').toEqual([]);
+      // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B14): Zoom In, Zoom Out and Actual
+      // Size, the same way (Actual Size has no chord), with the same control above; settings.json holds none of their ids.
+      for (const [title, chord] of [['Zoom In', formatChord('Cmd+=')], ['Zoom Out', formatChord('Cmd+-')], ['Actual Size', 'Unbound']] as const) {
+        const row = keyRow(page, title);
+        await expect(row.locator('kbd'), title).toHaveText(chord);
+        await expect(row.getByRole('button'), `${title} has no control`).toHaveCount(0);
+      }
+      expect(Object.keys(readSettings(userData).keymap).filter((id) => ['zoom.in', 'zoom.out', 'zoom.reset'].includes(id)), 'no stored rebinding of the zoom’s three').toEqual([]);
 
       // The default route and the relay-unreachable policy, one field each.
       const gateway = panel(page).getByRole('region', { name: 'Gateway' });

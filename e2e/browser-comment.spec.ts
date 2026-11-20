@@ -29,7 +29,7 @@ import { anchoredMessage, commentsMessage, readAnchoredMessage } from '../src/sh
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { addressed } from './support/address';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
-import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, placedOn, resizeWindow, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
+import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, resizeWindow, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
 import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/maws-tools';
@@ -37,7 +37,7 @@ import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
 import { hideSurface, sideColumn, sideTab } from './support/shell';
-import { holdForLook, PROBE_FACTORS, record, setAppZoom, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
+import { zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -1570,66 +1570,48 @@ test('11. both themes: the chrome with the toggle pressed over the outlined page
   });
 });
 
-// ---- UX wave U6b-5b M1: the zoom probe (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1) -----------------
-// Placement 4 (the comment's pin) at the factors 0.5, 0.8, 1.25 and 2, the app window's zoom set in main. The pin is the
-// docked card's caret, which the window draws at the pick's position (window points of the tab, from `pickPosition`)
-// read as CSS pixels. Where the picked element is drawn, in the window's CSS pixels, is the view's bounds plus the
-// element's box in the tab (points, the tab at its own 100 %), divided by the factor. "Off": the caret stands at the
-// position undivided. It records and asserts nothing about where the pin lands. Runs only under MAWS_ZOOM_PROBE=1.
-test('zoom probe: the pin', async () => {
-  zoomProbe();
-  await commentScene({ titles: ['U6b-5b: zoom probe, the pin'] }, async (s) => {
+// ---- UX wave U6b-5b: zoom (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B11) -------------------------
+// Placement 4 at 50 %, 80 % and 125 %, the window zoomed by View's items (support/zoom.ts): the pin, the docked card's
+// caret, stands on the picked element where the window draws it, the view's bounds plus the element's box in the tab
+// (window points, the tab at its own 100 %) divided by the factor, in the window's CSS pixels. Each pick waits on the
+// zoom's line being gone, on main's acknowledgment of the pane's rect (`expectOnPane`), and on the card for that pick
+// being drawn; the caret's place is polled. M1 measured it at the pick's position undivided.
+test('zoom: the pin on the picked element at 50 %, 80 % and 125 %', async () => {
+  await commentScene({ titles: ['U6b-5b: zoom, the pin'] }, async (s) => {
     const [id] = s.ids as [AppSessionId];
     const t = await openCommentPage(s, id);
-    // the window as large as its display allows: today's view does not grow with the factor (placement 1), so at 200 %
-    // the tab's page is half the pane's height in points and a target below its fold is out of the page's viewport
-    // (the Mac run of 2026-11-19: no hover outline at 200 %, the button at 275 CSS pixels in a page about 200 tall)
-    await s.maws.app.evaluate(({ BrowserWindow, screen }) => {
-      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
-      win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
-    });
     let picks = 0;
-    for (const f of PROBE_FACTORS) {
-      await setAppZoom(s.maws.app, s.page, f);
-      const fullPane = await placedOn(s, t.tabId, paneIn(t.panel)); // main has the rect the pane now measures
-      const view = (await viewOf(s, t.tabId))!;
-      // the target in the page's viewport, scrolled there where it is not; one the page cannot show is recorded as such
+    for (const f of [0.5, 0.8, 1.25] as const) {
+      await zoomTo(s.maws.app, s.page, f);
+      await zoomLineGone(s.page);
+      await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel', 5_000, f);
+      const bounds = (await viewOf(s, t.tabId))!.bounds!;
       const target = t.page.locator('#increment');
       await target.evaluate((el) => el.scrollIntoView({ block: 'center', inline: 'center' }));
-      const viewport = await t.page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
       const button = await rectOf(target);
-      if (button.x < 0 || button.y < 0 || button.x + button.width > viewport.width || button.y + button.height > viewport.height) {
-        record([{ probe: 'pin', placement: 4, factor: f, established: false, why: 'the target does not fit the tab page’s viewport at this factor', viewport, button, viewBounds: view.bounds }]);
-        continue;
-      }
       await arm(s, t);
       await t.page.mouse.move(centre(button).x, centre(button).y);
       await expect(t.page.locator('maws-comment-overlay')).toBeVisible();
       await t.page.mouse.down();
       await t.page.mouse.up();
-      // the card for this pick: the pick reached the window, and the card (the previous one was closed) is drawn with
-      // its caret, whose place is recorded, not required
-      const picked = await lastPicked(s, ++picks);
+      await lastPicked(s, ++picks);
       const card = cardOf(s, INCREMENT_LABEL);
       await expect(card).toBeVisible();
       const caret = t.panel.locator('[data-card-dock] [data-card-caret]');
       await expect(caret).toBeVisible();
-      const caretAttr = await caret.getAttribute('data-card-caret');
-      const caretBox = (await caret.boundingBox())!;
-      const caretX = caretBox.x + caretBox.width / 2;
-      const bounds = view.bounds!;
-      const drawnAt = { x: (bounds.x + button.x + button.width / 2) / f, y: (bounds.y + button.y + button.height) / f };
-      const undivided = picked.position ? { x: fullPane.x + picked.position.x, y: fullPane.y + picked.position.y } : null;
-      record([
-        {
-          probe: 'pin', placement: 4, factor: f, pane: fullPane, viewBounds: bounds, viewport, button, position: picked.position ?? null,
-          caretCentreX: caretX, caretTopY: caretBox.y, caretAttr, drawnAt, undivided,
-          off: undivided !== null && Math.abs(caretX - undivided.x) <= 1.5 && Math.abs(caretX - drawnAt.x) > 1.5,
-        },
-      ]);
-      await holdForLook(s.page, `the pin at ${f}`);
+      const drawnX = (bounds.x + button.x + button.width / 2) / f; // the element's centre where the window draws it
+      await expect
+        .poll(
+          async () => {
+            const box = (await caret.boundingBox())!;
+            const x = box.x + box.width / 2;
+            return Math.abs(x - drawnX) <= 1.5 ? 'on the element' : JSON.stringify({ caret: x, drawnX, bounds, button });
+          },
+          { message: `at ${f} the pin on the picked element` },
+        )
+        .toBe('on the element');
       await dismiss(s, t, card);
     }
-    await setAppZoom(s.maws.app, s.page, 1);
+    await zoomTo(s.maws.app, s.page, 1);
   });
 });

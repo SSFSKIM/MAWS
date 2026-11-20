@@ -36,6 +36,7 @@ import { PerfSeam } from './support/document-scale';
 import { asDocumentReplay } from './support/document-replay';
 import { allowNext, idle, mcpCalls, mcpResultOf, PASS3, replay, scene, show } from './support/maws-tools';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
 import { normalized, wordsAlong, wordsOfBox, type Extent, type Word } from './support/text-run';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -968,4 +969,29 @@ test('the PPTX under LibreOffice draws each corpus slide as the app’s own canv
   expect(failures).toEqual([]);
   expect(compared).toBeGreaterThan(50);
   expect(rotated).toBeGreaterThan(0);
+});
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B12; the child's probe 5): a deck's
+// export made with the app's window at 150 % is the export made at 100 %: the PNG of the cover slide at its own size and
+// at a width asked, and the PDF's pages and page size, each read from the files written. The window is zoomed by View's
+// items (support/zoom.ts), which wait on the window's zoom store reading the factor.
+test('zoom: an export made at 150 % has the page sizes of one made at 100 %', async () => {
+  test.setTimeout(240_000);
+  const page = await ready();
+  const id = await createDeck(page, 'Zoomed export', DECK);
+  const sizes = async () => {
+    const pdf = execFileSync(join(POPPLER, 'pdfinfo'), [(await exportAs(page, id, 'pdf')).path], { encoding: 'utf8' });
+    return {
+      png: pngSize(readFileSync((await exportAs(page, id, 'png')).path)),
+      pngAt960: pngSize(readFileSync((await exportAs(page, id, 'png', { width: 960 })).path)),
+      pdfPages: /Pages:\s+(\d+)/.exec(pdf)?.[1] ?? null,
+      pdfPageSize: /Page size:\s+([^\n]+)/.exec(pdf)?.[1]?.trim() ?? null,
+    };
+  };
+  const actual = await sizes();
+  expect(actual, 'at 100 %, as the formats scene reads them').toMatchObject({ png: [1920, 1080], pngAt960: [960, 540], pdfPages: '2' });
+  expect(actual.pdfPageSize).toMatch(/^1440 x 810 pts/);
+  await zoomTo(launch!.app, page, 1.5);
+  expect(await sizes(), 'at 150 %').toEqual(actual);
+  await zoomTo(launch!.app, page, 1);
 });

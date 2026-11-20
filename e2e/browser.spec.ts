@@ -23,10 +23,10 @@ import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
-import { appWindowState, edgeDeltas, holdForLook, PROBE_FACTORS, record, sameRect, setAppZoom, timesFactor, uncovered, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
+import { zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
 import {
   address, attachShot, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
-  placedOn, preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
+  preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
 test.describe.configure({ timeout: 180_000 });
@@ -1417,158 +1417,137 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
   });
 });
 
-// ---- UX wave U6b-5b M1: the zoom probe (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1) -----------------
-// Placements 1 (the view), the pointer, 5 (the traffic lights) and 6 (the device box) at the factors 0.5, 0.8, 1.25 and 2,
-// the app window's zoom set in main as nothing of the product does yet. It records and asserts nothing about where they
-// land (support/zoom-probe.ts); each line says what the document calls "off" for it beside what was read. Runs only
-// under MAWS_ZOOM_PROBE=1; under MAWS_ZOOM_PROBE_HOLD=1 it stops at each factor for the look, on a page of numbered
-// cells whose presses the next line records.
+// ---- UX wave U6b-5b: zoom (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B11, B12) ---------------------
+// The window zoomed by View's items (support/zoom.ts) to 50 %, 80 %, 125 % and 200 %, on a window as large as its
+// display's work area (so the panel keeps its separator at 200 %). At each factor, once the zoom's line is gone (a toast
+// over the pane puts the page's still in the view's place) and main has acknowledged the rect the pane now measures
+// (`expectOnPane` calls `placedOn` first, decision 36): the view covers the pane's rect times the factor, each edge
+// within a point, so a press lands on the page wherever the frame draws it and on the app everywhere else; with the
+// Browser options menu open over it the page yields to its still, which lies on the pane, and the view comes back on
+// its frame after; the traffic lights stand centred in the toolbar's height and clear of its first control. Mark up's
+// still of the pane at 150 % is the whole view at the same pixels per point as at 100 %, laid on the pane. At the
+// Mobile size, in a room the panel's Expand surface makes ample: the page reads 375 wide (376 where its element's
+// edges round over, as at 200 %), the chip says what the page reads, and the chip's menu offers exactly the sizes whose
+// width over the factor fits the room (decision 35). Every read is polled; no time is asserted.
 
-// macOS's standard window buttons, in points (three 14-point circles, 20 points apart): assumed, not read, since
-// Electron reports only the group's position; the look confirms where they stand
+// macOS's standard window buttons, in points (three 14-point circles, 54 points from the first's left to the last's
+// right): Electron reports only the group's position; M1's look confirmed where they stand
 const LIGHTS = { diameter: 14, span: 54 };
+const ZOOM_FACTORS = [0.5, 0.8, 1.25, 2] as const;
+const lightsOf = (s: Scene) =>
+  s.maws.app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+    return typeof win.getWindowButtonPosition === 'function' ? win.getWindowButtonPosition() : null;
+  });
 
-test('zoom probe: the view, the lights, the device box', async () => {
-  zoomProbe();
-  const scratch = scratchProject({ titles: ['U6b-5b: zoom probe'] });
-  const server = await startBrowserServer();
-  const s = await launchBrowserScene(scratch, server);
-  try {
+test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with a menu over it; the lights in the title bar; Mark up’s still at 150 %; the Mobile size, its chip and its menu at each', async () => {
+  test.setTimeout(360_000);
+  await browserScene(['U6b-5b: zoom'], async (s) => {
     const [id] = s.ids as [AppSessionId];
+    const { app } = s.maws;
     await show(s, id);
     const panel = await openBrowser(s);
-    const CELLS = s.server.url('/cells.html');
-    await address(panel, CELLS);
-    const t = await tabAt(s, id, CELLS);
-    const cells = await pageAt(s, CELLS);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pageA = await pageAt(s, A);
     const pane = paneIn(panel); // the page element: what the placement measures
-    const box = panel.locator('[data-browser-page-box]'); // its room
-    const chip = panel.locator('[data-browser-viewport-chip]');
+    await expectOnPane(s, t, pane, 'panel');
+    await app.evaluate(({ BrowserWindow, screen }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+      win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+    });
     await expectOnPane(s, t, pane, 'panel');
 
-    // placements 1 and 5 and the pointer, the page filling its room
-    for (const f of PROBE_FACTORS) {
-      await setAppZoom(s.maws.app, s.page, f);
-      const rect = await placedOn(s, t, pane); // main has the rect the pane now measures
-      const view = (await viewOf(s, t))!;
-      const bounds = view.bounds!;
-      const drawn = timesFactor(rect, f); // the frame as drawn, in window points
-      const edges = edgeDeltas(drawn, bounds);
-      const { lights, factor } = await appWindowState(s.maws.app);
-      const toolbar = await s.page.locator('[data-toolbar]').evaluate((el) => el.getBoundingClientRect().height);
-      const lightsCentre = lights && lights.y + LIGHTS.diameter / 2;
-      record([
-        { probe: 'view', placement: 1, factor: f, appFactor: factor, pane: rect, bounds, paneTimesFactor: drawn, placed: view.placed, off: sameRect(bounds, rect) && !sameRect(bounds, drawn) },
-        { probe: 'pointer', factor: f, frameNotView: uncovered(drawn, bounds), viewNotFrame: uncovered(bounds, drawn), edges, off: Math.max(...Object.values(edges).map(Math.abs)) > 1 },
-        {
-          probe: 'lights', placement: 5, factor: f, lights, assumed: LIGHTS,
-          toolbarPt: toolbar * f, lightsCentrePt: lightsCentre, toolbarCentrePt: (toolbar * f) / 2,
-          lightsRightPt: lights && lights.x + LIGHTS.span, clearPt: 78 * f,
-          off: lights === null || Math.abs(lightsCentre! - (toolbar * f) / 2) > 1 || lights.x + LIGHTS.span > 78 * f,
-        },
-      ]);
-      await cells.evaluate(() => void ((window as unknown as { __cellsPressed: number[] }).__cellsPressed = []));
-      await holdForLook(s.page, `the view, the lights and the title bar at ${f}: press each corner of the frame`);
-      record([{ probe: 'look: the cells pressed', factor: f, cells: await cells.evaluate(() => (window as unknown as { __cellsPressed: number[] }).__cellsPressed) }]);
+    // the view, the cover's still under a menu, and the lights, at each factor
+    for (const f of ZOOM_FACTORS) {
+      await zoomTo(app, s.page, f);
+      await zoomLineGone(s.page);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+
+      await panel.getByRole('button', { name: 'Browser options', exact: true }).click();
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered, { message: `covered under the Browser options menu at ${f}` }).toBe(true);
+      const still = pane.locator('img');
+      await expect(still).toBeVisible();
+      const [picture, frame] = [await rectOf(still), await rectOf(pane)];
+      for (const key of ['x', 'y', 'width', 'height'] as const) expect(near(picture[key], frame[key]), `at ${f} the still's ${key} on the pane's: ${JSON.stringify({ picture, frame })}`).toBe(true);
+      await closeMenus(s);
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+
+      const lights = await lightsOf(s);
+      expect(lights, 'the window reports its buttons’ position').not.toBeNull();
+      const toolbar = await rectOf(s.page.locator('[data-toolbar]'));
+      const first = await rectOf(s.page.locator('[data-toolbar]').getByRole('button', { name: 'Toggle sidebar', exact: true }));
+      const centre = (toolbar.y + toolbar.height / 2) * f;
+      expect(Math.abs(lights!.y + LIGHTS.diameter / 2 - centre), `at ${f} the lights' centre on the title bar's: ${JSON.stringify({ lights, toolbar })}`).toBeLessThanOrEqual(1);
+      expect(lights!.x + LIGHTS.span, `at ${f} the lights clear of the first control: ${JSON.stringify({ lights, first })}`).toBeLessThanOrEqual(first.x * f);
     }
 
-    // placement 6: Mobile chosen at 100 %, then at each factor the five numbers with the room ample, and the menu's
-    // offer with the room just under and just over 375 CSS pixels. The window is first made as wide as its display's
-    // work area, since the panel can be at most the window's CSS width less 360 (shell-geometry.ts) and a narrow
-    // window at 200 % shows the panel as a sheet, with no separator: a sample the window cannot give is said so, not read
-    await setAppZoom(s.maws.app, s.page, 1);
-    const workArea = await s.maws.app.evaluate(({ BrowserWindow, screen }) => {
-      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
-      const area = screen.getDisplayMatching(win.getBounds()).workArea;
-      win.setBounds({ x: area.x, y: area.y, width: area.width, height: area.height });
-      return area;
-    });
+    // Mark up's still at 100 % and at 150 %: the layer on the pane, its picture the whole view at the same pixels per point
+    const markUp = sideGroup(s.page, 'upper').locator('[data-side-strip]').getByRole('button', { name: 'Mark up', exact: true });
+    const layer = s.page.getByRole('region', { name: 'Mark-up' });
+    const stillOf = async (f: number) => {
+      await zoomTo(app, s.page, f);
+      await zoomLineGone(s.page);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+      const bounds = (await viewOf(s, t))!.bounds!;
+      await markUp.click();
+      await expect(layer).toBeVisible();
+      const image = layer.locator('img');
+      await expect(image).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+      await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { message: 'the still decoded' }).toBe(true);
+      const natural = await image.evaluate((el: HTMLImageElement) => ({ width: el.naturalWidth, height: el.naturalHeight }));
+      const [l, p] = [await rectOf(layer), await rectOf(pane)];
+      for (const key of ['x', 'y', 'width', 'height'] as const) expect(near(l[key], p[key]), `at ${f} the layer's ${key} on the pane's`).toBe(true);
+      await s.page.keyboard.press('Escape');
+      await expect(layer).toHaveCount(0);
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+      return { width: natural.width / bounds.width, height: natural.height / bounds.height, natural, bounds };
+    };
+    const atActual = await stillOf(1);
+    const atLarger = await stillOf(1.5);
+    for (const side of ['width', 'height'] as const) {
+      expect(Math.abs(atLarger[side] - atActual[side]) / atActual[side], `the still's ${side} at 150 % covers the view as at 100 %: ${JSON.stringify({ atActual, atLarger })}`).toBeLessThanOrEqual(0.02);
+    }
+
+    // the Mobile size in an ample room, at each factor
+    await zoomTo(app, s.page, 1);
     await (await viewportItem(s, panel, 'mobile')).click();
     await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
-    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
-    // the room's width once two reads in a row agree (a drag's layout lands after the pointer's last event)
-    const settledRoom = async (): Promise<number> => {
-      let last = Number.NaN;
-      await expect.poll(async () => {
-        const previous = last;
-        last = (await rectOf(box)).width;
-        return last === previous;
-      }, { message: 'the room settled' }).toBe(true);
-      return last;
+    await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
+    const chip = panel.locator('[data-browser-viewport-chip]');
+    const box = panel.locator('[data-browser-page-box]'); // the room
+    const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
+    const chipAgainstPage = async () => {
+      const [text, page] = [(await chip.textContent())?.trim(), await reads()];
+      return text === page ? 'the same' : `chip ${text}, page ${page}`;
     };
-    // the room dragged towards `width` CSS pixels by the panel's separator, and the width it settled at (the panel's
-    // own bounds may stop it short); null when the panel has no separator (a sheet), which the caller checks first
-    const roomTo = async (width: number): Promise<number | null> => {
-      if ((await resizer.count()) === 0) return null;
-      const before = await settledRoom();
-      if (Math.abs(before - width) < 1) return before;
-      const handle = await rectOf(resizer);
-      const [hx, hy] = [handle.x + handle.width / 2, handle.y + handle.height / 2];
-      await s.page.mouse.move(hx, hy);
-      await s.page.mouse.down();
-      await s.page.mouse.move(hx + before - width, hy, { steps: 4 });
-      await s.page.mouse.up();
-      return settledRoom();
-    };
-    const offered = async (): Promise<boolean> => {
-      const item = await viewportItem(s, panel, 'mobile');
-      const disabled = (await item.getAttribute('aria-disabled')) === 'true';
-      await closeMenus(s);
-      return !disabled;
-    };
-    for (const f of PROBE_FACTORS) {
-      await setAppZoom(s.maws.app, s.page, f);
-      // the ample room: dragged to 440 where the panel has a separator; as the sheet has it where it is a sheet; and
-      // by the panel's Expand surface where either is under 375, restored after the five numbers are read
-      const sheet = (await resizer.count()) === 0;
-      const sheetRoom = sheet ? await settledRoom() : null;
-      let room = sheet ? sheetRoom! : (await roomTo(440))!;
-      const expanded = room < 375;
-      if (expanded) {
-        await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
-        room = await settledRoom();
+    for (const f of ZOOM_FACTORS) {
+      await zoomTo(app, s.page, f);
+      await zoomLineGone(s.page);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+      const room = (await rectOf(box)).width;
+      expect(room, `at ${f} the room holds Mobile's ${375 / f} CSS pixels`).toBeGreaterThanOrEqual(375 / f);
+      await expect.poll(chipAgainstPage, { message: `at ${f} the chip reads the page’s innerWidth × innerHeight` }).toBe('the same');
+      const width = await pageA.evaluate(() => window.innerWidth);
+      // 375 over the factor is a whole CSS pixel at 50 % and 125 %; elsewhere the element is rounded and its placed
+      // edges can make the page one pixel wider
+      if (Number.isInteger(375 / f)) expect(width, `at ${f} the page reads 375`).toBe(375);
+      else expect([375, 376], `at ${f} the page reads 375 or 376`).toContain(width);
+      // the menu offers a size exactly when its width over the factor fits the room; a room within a pixel of a
+      // threshold is said, not judged
+      for (const [size, wide] of [['mobile', 375], ['tablet', 768]] as const) {
+        const needs = wide / f;
+        const item = await viewportItem(s, panel, size);
+        const offered = (await item.getAttribute('aria-disabled')) !== 'true';
+        await closeMenus(s);
+        if (Math.abs(needs - room) <= 1) test.info().annotations.push({ type: 'zoom: an offer at its threshold', description: JSON.stringify({ f, size, needs, room, offered }) });
+        else expect(offered, `at ${f} ${size} (${needs} CSS pixels) against a room of ${room}`).toBe(needs <= room);
       }
-      await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
-      const rect = await placedOn(s, t, pane);
-      const view = (await viewOf(s, t))!;
-      const [element, inner, text] = [(await rectOf(pane)).width, await cells.evaluate(() => window.innerWidth), (await chip.textContent())?.trim() ?? null];
-      const ample = room >= 375;
-      if (expanded) {
-        await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Restore surface', exact: true }).click();
-        await settledRoom();
-      }
-      // the offer's samples, just under and just over 375: by the separator only; a sheet's one room is recorded as
-      // one sample, and the threshold stays unestablished there
-      const offers: { room: number; offered: boolean; predicted: boolean }[] = [];
-      if (sheet) offers.push({ room: sheetRoom!, offered: await offered(), predicted: sheetRoom! >= 375 });
-      else {
-        for (const target of [370, 380]) {
-          const at = (await roomTo(target))!;
-          offers.push({ room: at, offered: await offered(), predicted: at >= 375 });
-        }
-      }
-      // the offer's verdict needs one sample on each side of 375 CSS pixels; without them it is not established
-      const straddles = offers.some((o) => o.room < 375) && offers.some((o) => o.room >= 375);
-      record([
-        {
-          probe: 'device box', placement: 6, factor: f, workArea, sheet, sheetRoom, ampleBy: expanded ? 'Expand surface' : sheet ? 'the sheet' : 'the separator', room, ample, straddles, placed: rect,
-          element: { read: element, predicted: Math.min(375, room) },
-          frameDrawnPt: { read: element * f, predicted: Math.min(375, room) * f },
-          view: { read: view.bounds?.width ?? null, predicted: Math.min(375, room) },
-          innerWidth: { read: inner, predicted: Math.min(375, room) },
-          chip: { read: text, predicted: `${Math.min(375, Math.round(room))} × …` },
-          offers,
-          // the five numbers are read against the pin's predictions only with the room ample; the offer only when straddled
-          off: { viewNotItsFrame: ample ? view.bounds !== null && Math.abs(view.bounds.width - element * f) > 1 : null, offerIgnoresFactor: straddles ? offers.every((o) => o.offered === o.predicted) : null },
-        },
-      ]);
     }
-    await setAppZoom(s.maws.app, s.page, 1);
-  } finally {
-    await closeScene(s);
-    await server.close();
-    rmSync(scratch.root, { recursive: true, force: true });
-  }
+    await zoomTo(app, s.page, 1);
+  });
 });
 
 // ---- UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G6; acceptance B4) --------

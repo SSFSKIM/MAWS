@@ -21,11 +21,13 @@ import { FOLDS_SHAPE, foldsFileOf } from '../src/shared/owner/folds'; // UX wave
 import { synthesise } from '../test/support/synth-transcript'; // the harness's `synthetic/<turns>` seed, for the folds file's runs
 import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
-import { invoke, launchReady, value } from './support/c7-replay';
+import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
+import { idle, scene, show } from './support/maws-tools'; // UX wave U6b-5b
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
-import { unfoldSessionCard } from './support/shell';
+import { openSurface, unfoldSessionCard } from './support/shell';
 import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
@@ -3059,4 +3061,55 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(createdGroup.locator('.transcript-diff-line[data-diff="add"]')).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: testInfo.outputPath('transcript-create-diff-1280x820.png'), animations: 'disabled' });
   await testInfo.attach('Recorded create diff', { path: testInfo.outputPath('transcript-create-diff-1280x820.png'), contentType: 'image/png' });
+});
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; the child's probe 4; docs/tech-debt-
+// tracker.md's row of 2026-10-27, "At a zoom other than 100% a follower sits at the browser's reachable maximum"): in
+// the product app over the replay, a session's transcript filled past its viewport at 100 %, then the window zoomed by
+// View's items (support/zoom.ts) to 110 % and to 80 %. At each, five turns stream in, and with each a page key is
+// pressed in Files' field in the side column, which the transcript witnesses as a key that may scroll (the tracker's
+// case: a witnessed key consumed elsewhere). After each turn's rows have grown the list, the follower is still at the
+// end: no "Jump to latest" control, and the scroller within the 3 px the list itself reads as the end. Every read is
+// polled; no time is asserted. A failure here is the tracker's row made reachable; its fix is U3's, on a ruling.
+test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key is pressed in a side surface', async () => {
+  test.setTimeout(300_000);
+  await scene({ titles: ['Zoom follow'], label: 'u6b5b-follow' }, async (s) => {
+    const { page } = s;
+    const id = s.ids[0]!;
+    await launchReady(page, id, turnsJournal(s.scratch.root, 'u6b5b-follow', 45), { cwd: s.repo });
+    await show(s, id);
+    const scroller = s.pane.locator('[data-transcript-scroller]');
+    const jump = s.pane.getByRole('button', { name: 'Jump to latest' });
+    const heights = () => scroller.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, gap: el.scrollHeight - el.clientHeight - el.scrollTop }));
+    let sent = 0;
+    // one turn: sent, its rows awaited by the list's growth, then `during` (a key, while the stream lands) has run
+    const turn = async (during?: () => Promise<void>) => {
+      const before = (await heights()).scroll;
+      value(await invoke(page, 'session.send', { appSessionId: id, content: `turn ${++sent}` }));
+      await during?.();
+      await idle(s, id);
+      await expect.poll(async () => (await heights()).scroll, { message: `turn ${sent}'s rows grew the list` }).toBeGreaterThan(before);
+    };
+    // the transcript filled past its viewport, so following is a scroll the list keeps doing
+    while (sent < 30) {
+      await turn();
+      const { scroll, client } = await heights();
+      if (scroll > client + 400) break;
+    }
+    const filled = await heights();
+    expect(filled.scroll, `the transcript overflows its viewport: ${JSON.stringify(filled)}`).toBeGreaterThan(filled.client + 400);
+
+    await openSurface(page, 'Files');
+    const field = s.panel.locator('[data-files-filter]');
+    await expect(field).toBeVisible();
+    for (const f of [1.1, 0.8] as const) {
+      await zoomTo(s.maws.app, page, f);
+      for (let k = 0; k < 5; k++) {
+        await turn(() => field.press(k % 2 === 0 ? 'PageUp' : 'PageDown'));
+        await expect(jump, `at ${f}, after turn ${sent}, still following`).toHaveCount(0);
+        await expect.poll(async () => (await heights()).gap, { message: `at ${f}, after turn ${sent}, the follower at the end` }).toBeLessThanOrEqual(3);
+      }
+    }
+    await zoomTo(s.maws.app, page, 1);
+  });
 });
