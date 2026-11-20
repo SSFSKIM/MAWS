@@ -3247,6 +3247,73 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     expect(reads(main).length - readsBefore).toBeLessThanOrEqual(1);
   });
 
+  // The branch panel (scalpel-4, finding 1): the agent's open still reading when the person's own open takes the tab back
+  // and that read refuses; the click's open then finds only the agent's superseded read pending, which lands nowhere
+  it('W1 (f): a click whose open finds only a superseded read pending reads the file after the follow (the branch panel)', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const agentsRead = main.hold('files.read'); // the agent's open, its read held
+    render(<FileViewer tab={fileTab(OUT)} agent />);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    act(() => void openFile(A, OUT, null, { main: true })); // the person's own open: the agent's mark goes, and the file is read again
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT))); // that read refused, the agent's still out
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    await act(async () => agentsRead.release());
+    await settle();
+    expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true });
+  });
+
+  // The branch panel (scalpel-4, finding 3): a Save made under session A answers after the tab moved to B, whose read waits
+  // on a follow of B's own: that read lands, and the tab shows B's answer, not A's writable state
+  it('a Save of the tab’s earlier session that answers while the tab’s read for its new session waits on a follow leaves that read to land (the branch panel)', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip);
+    const { rerender } = render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    const write = main.hold('files.writeOutside');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.callsOf('files.writeOutside')).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    act(() => follow(B, OUT, { file: '/r/docs/other.md' })); // B's click on a link that holds nothing for it
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />); // the tab moves to B, its save out
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, pending: 1 })); // B's read, waiting on the follow
+    await act(async () => write.release());
+    await waitFor(() => expect(shown()).toMatchObject({ saving: false, dirty: false }));
+    await act(async () => followed.release());
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error', editable: false }));
+    expect(noticeLines()).toEqual(outsideHere(OUT));
+    expect(main.files[OUT]).toBe('two one\n');
+  });
+
+  // The branch panel (scalpel-4, finding 4): an unwatched outside file read in chunks changes after its first; the
+  // continuation, sent before the follow found the link, answers another version, read-only. The load ends there, and
+  // once the follow has found the link the file is read once more, whole
+  it('W1 (g): a first open whose continuation found the file changed, read-only before the follow found the link, is read once more after it, whole and editable (the branch panel)', async () => {
+    const lines = (letter: string) => `${letter.repeat(99)}\n`.repeat(Math.ceil(FILES_READ_DEFAULT_LENGTH / 100) + 10);
+    const main = disk({ [DOC]: LINKED, [OUT]: lines('a') }, { results: [OUT] });
+    const chip = await linkIn();
+    const first = main.hold('files.read');
+    const second = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    await act(async () => {
+      first.release();
+      main.files[OUT] = lines('b'); // changed before the continuation arrives
+    });
+    await waitFor(() => expect(reads(main)).toHaveLength(2)); // the continuation, answered as the changed file, read-only
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    await act(async () => second.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', complete: true, text: lines('b'), locked: null, editable: true }));
+    expect(reads(main)).toHaveLength(4); // the two of the first open, and the whole file once more in two
+  });
+
   it('X5.14: with unsaved edits and the record gone, Save is refused and the edits stand; pressed while the click’s follow is under way, refused again; after it answers linked, Save writes', async () => {
     const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
     const chip = await linkIn();

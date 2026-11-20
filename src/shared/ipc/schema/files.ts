@@ -22,7 +22,7 @@
 // unasked (`open`).
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
-import { AppSessionIdSchema, SessionIdSchema } from '@shared/graph/ids';
+import { AppSessionIdSchema } from '@shared/graph/ids';
 import type { CommandSpec } from './common';
 
 // Declared before the registry, which reads them when this module loads.
@@ -215,7 +215,7 @@ const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, pat
 export const FilesFollowInputSchema = SessionPathSchema.extend({
   from: z.union([
     z.strictObject({ file: z.string() }), // the shown Markdown file's path, as its tab holds it
-    z.strictObject({ agent: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), engineSessionId: SessionIdSchema.optional() }), // the subagent whose transcript holds the link, and its conversation
+    z.strictObject({ agent: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), engineSessionId: z.string().min(1).optional() }), // the subagent whose transcript holds the link, and its conversation (an engine session id)
   ]),
 });
 export type FilesFollowInput = z.infer<typeof FilesFollowInputSchema>;

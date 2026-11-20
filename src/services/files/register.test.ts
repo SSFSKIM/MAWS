@@ -302,11 +302,16 @@ describe('main answers files.* on the services bus', () => {
       writeFileSync(join(root, 'repo', 'guide.md'), `See [the notes](${join(outside(), 'notes.txt')}).\n`);
     });
 
-    it('follows a link for this machine’s page with its client’s signal, and refuses another machine’s request, claimed or not, recording nothing', async () => {
+    it('follows a link for this machine’s page, its search ending with its client, and refuses another machine’s request, claimed or not, recording nothing', async () => {
       const added: unknown[][] = [];
       const signals: (AbortSignal | undefined)[] = [];
       const links = { add: (...args: unknown[]) => void added.push(args.slice(0, 3)), get: () => null };
-      const agentNames = vi.fn(async (_appSessionId: string, _agent: { id: string; engineSessionId: string }, _path: string, signal?: AbortSignal, located?: () => void) => (signals.push(signal), located?.(), 'counted' as const));
+      // the first search answers at once; the second waits until what it was given to wait with ends
+      const agentNames = vi.fn((_appSessionId: string, _agent: { id: string; engineSessionId: string }, _path: string, signal?: AbortSignal, located?: () => void) => {
+        signals.push(signal);
+        located?.();
+        return signals.length === 1 ? Promise.resolve('counted' as const) : new Promise<false>((resolve) => signal?.addEventListener('abort', () => resolve(false)));
+      });
       await install(undefined, undefined, { links, agentNames, log: () => {} });
       const path = join(outside(), 'notes.txt');
       const byFile = { appSessionId: 'A', path, from: { file: join(root, 'repo', 'guide.md') } };
@@ -317,11 +322,14 @@ describe('main answers files.* on the services bus', () => {
       expect(added).toEqual([]);
       expect(await invoke('files.follow', byFile)).toEqual({ ok: true, value: { status: 'linked' } });
       expect(added).toEqual([['A', path, { file: join(root, 'repo', 'guide.md') }]]);
-      expect(await invoke('files.follow', { appSessionId: 'A', path, from: { agent: 'a1b2c3', engineSessionId: 'engine-session-1' } })).toEqual({ ok: true, value: { status: 'linked' } });
-      expect(signals).toHaveLength(1);
-      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      const byAgent = { appSessionId: 'A', path, from: { agent: 'a1b2c3', engineSessionId: 'engine-session-1' } };
+      expect(await invoke('files.follow', byAgent)).toEqual({ ok: true, value: { status: 'linked' } });
+      void invoke('files.follow', byAgent);
+      await vi.waitFor(() => expect(signals).toHaveLength(2));
+      expect(signals[1]).toBeInstanceOf(AbortSignal);
+      expect(signals[1]!.aborted).toBe(false);
       close();
-      expect(signals[0]!.aborted).toBe(true);
+      expect(signals[1]!.aborted, 'the client ended: the search’s wait ends with it').toBe(true);
     });
   });
 
