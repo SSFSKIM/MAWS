@@ -70,6 +70,7 @@ const profiles = join(runs, 'profiles');
 mkdirSync(profiles, { recursive: true });
 const only = argv.only ? new Set(String(argv.only).split(',')) : null;
 const LAUNCH_MS = 120_000; // a launch that has not exited by then is ended and reported as such
+const DRAIN_MS = 10_000; // after the exit, how long the launch's stdio may stay open (Chromium's helpers share its pipes)
 
 // One launch of main.mjs. `kill`: 'now' sends SIGKILL at the `ZOOMED` line, a number of ms that long after it.
 function launch(label, args, { kill = null } = {}) {
@@ -79,6 +80,7 @@ function launch(label, args, { kill = null } = {}) {
     let err = '';
     let killedAt = null;
     const guard = setTimeout(() => child.kill('SIGKILL'), LAUNCH_MS);
+    let drain = null;
     child.stdout.on('data', (chunk) => {
       out += chunk;
       if (kill !== null && killedAt === null && /(^|\n)ZOOMED\n/.test(out)) {
@@ -88,8 +90,17 @@ function launch(label, args, { kill = null } = {}) {
       }
     });
     child.stderr.on('data', (chunk) => (err += chunk));
-    child.on('exit', (code, signal) => {
+    // the record is read at `close`, once stdio has ended: `exit` can come before the last lines are delivered (the
+    // branch review, sweep#3). A helper still holding the pipes past DRAIN_MS has its streams ended, which closes.
+    child.on('exit', () => {
+      drain = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+      }, DRAIN_MS);
+    });
+    child.on('close', (code, signal) => {
       clearTimeout(guard);
+      clearTimeout(drain);
       const results = out.split('\n').filter((l) => l.startsWith('RESULT ')).map((l) => JSON.parse(l.slice(7)));
       writeFileSync(join(runs, `${label}.log`), scrub(`${out}\n--- stderr ---\n${err}`));
       resolve({ label, code, signal, killedAfterMs: killedAt, results, stderrTail: err.split('\n').slice(-6).join(' ').slice(0, 600) });

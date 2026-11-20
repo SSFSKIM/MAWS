@@ -235,7 +235,7 @@ describe('ExtensionPopups: the app window’s zoom (U6b-5b, placement 2)', () =>
     loaded(view!); // the popup holds the keyboard
     expect(h.popups.current(h.w.id)).not.toBeNull(); // the control: open before the change
     zoom.factor = 1;
-    h.popups.placeAgain(h.w.id);
+    h.popups.zoomed(h.w.id);
     expect(h.popups.current(h.w.id)).toBeNull();
     expect(h.w.children).not.toContain(view);
     expect(view!.webContents.close).toHaveBeenCalledTimes(1);
@@ -248,7 +248,7 @@ describe('ExtensionPopups: the app window’s zoom (U6b-5b, placement 2)', () =>
 
   it('a change of the factor with no popup open changes nothing', () => {
     const h = harness({ zoom: { factor: 2 } });
-    h.popups.placeAgain(h.w.id);
+    h.popups.zoomed(h.w.id);
     expect(h.states).toEqual([]);
     h.popups.open(h.placedTab(), PROBE, ANCHOR);
     expect(h.states).toHaveLength(1); // the control: the same listener hears an open

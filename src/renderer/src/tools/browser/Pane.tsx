@@ -49,6 +49,7 @@ import { EmptyState, SuspendedPage } from './pages/EmptyState';
 import { ErrorPage } from './pages/ErrorPage';
 import { ShownElsewhere } from './pages/ShownElsewhere';
 import { paneRect, Placement, type PlacementMode } from './placement';
+import type { PaneRect } from './cover';
 import { onShowRequest, useBrowser } from './store';
 import { pageBox, type Room } from './viewport'; // U12a
 import { useZoom } from '../../stores/zoom'; // UX wave U6b-5b: the device size in the window's CSS pixels
@@ -86,6 +87,22 @@ const roomOf = (box: HTMLElement): Room => {
   return { width: Math.max(0, Math.floor(width)), height: Math.max(0, Math.floor(height)) };
 };
 const sameRoom = (a: Room | null, b: Room) => a !== null && a.width === b.width && a.height === b.height;
+// UX wave U6b-5b: the page's element as the pane last measured and sent it (see `placed` in PlacedPane)
+interface Placed {
+  rect: PaneRect;
+  inset: { x: number; y: number };
+  scale: number;
+}
+const samePlaced = (a: Placed | null, b: Placed) =>
+  a !== null && a.rect.x === b.rect.x && a.rect.y === b.rect.y && a.rect.width === b.rect.width && a.rect.height === b.rect.height && a.inset.x === b.inset.x && a.inset.y === b.inset.y && a.scale === b.scale;
+const NO_INSET = { x: 0, y: 0 };
+// UX wave U6b-5b (the branch review, scalpel-3#1): the display's device pixels per window point. The window's
+// devicePixelRatio is Blink's layout zoom, that scale times the app's factor (`LocalFrame::DevicePixelRatio`,
+// third_party/blink/renderer/core/frame/local_frame.cc). A Mac's scale is a whole number. It is sampled with the rect, and
+// the two can disagree for a moment after a change of factor (the page's zoom and the event reach the window by two
+// channels); each of the two reports the pane again as it arrives (the window's resize; the factor's change), so the
+// sample after both is right.
+const displayScale = () => Math.max(1, Math.round(window.devicePixelRatio / useZoom.getState().factor));
 
 function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface: 'panel' | 'main'; onOwns?(owns: boolean): void; onRoom?(room: Room | null): void }) {
   const element = useRef<HTMLDivElement>(null);
@@ -95,8 +112,10 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
   const { tabId, appSessionId } = tab;
   const owner = tab.placedIn?.paneId ?? null;
   const [ownerAtMount] = useState(owner);
-  // UX wave U6b-5b (decision 35): the page's element's origin as last sent to main, which the chip's reading needs
-  const [placedAt, setPlacedAt] = useState<{ x: number; y: number } | null>(null);
+  // UX wave U6b-5b (decision 35): the page's element as last sent to main and the display's scale, which the chip's
+  // reading needs (both edges and the scale: the branch review, scalpel-3#1 and #2), and the element's inset in the
+  // column, from which the comment dock draws its pin (scalpel-3#3)
+  const [placed, setPlaced] = useState<Placed | null>(null);
 
   useEffect(() => {
     const pane = element.current;
@@ -113,7 +132,11 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
         // freezing every view in the window, which would also make the opened Browser sheet unusable.
         if (surface === 'main' && (geometry.sheet || geometry.mainHidden)) return null;
         const rect = paneRect(pane.getBoundingClientRect());
-        if (rect) setPlacedAt((previous) => (previous?.x === rect.x && previous.y === rect.y ? previous : { x: rect.x, y: rect.y }));
+        if (rect) {
+          const column = pane.closest('[data-browser-column]')?.getBoundingClientRect();
+          const next = { rect, inset: column ? { x: rect.x - column.left, y: rect.y - column.top } : NO_INSET, scale: displayScale() };
+          setPlaced((previous) => (samePlaced(previous, next) ? previous : next));
+        }
         return rect;
       },
       send: (report) => {
@@ -182,17 +205,21 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
   const appZoom = useZoom((s) => s.factor); // UX wave U6b-5b (decision 35)
   const sized = mode !== 'elsewhere' && room !== null ? pageBox(tab.viewport, tab.zoom, room, appZoom) : null;
   // the page's element moved or resized with the room or its size: reported at once (a move inside a box that grew is no
-  // resize of the element's own, which its observer would miss)
+  // resize of the element's own, which its observer would miss); and at a change of the app's factor, which samples the
+  // display's scale again (`displayScale`)
   const [sizedWidth, sizedHeight] = [sized?.width ?? null, sized?.height ?? null];
-  useEffect(() => placement.current?.report(), [room, sizedWidth, sizedHeight]);
-  const heldRoom = useMemo(() => (mode !== 'owner' || room === null ? null : placedAt === null ? room : { ...room, at: placedAt }), [mode, room, placedAt]);
+  useEffect(() => placement.current?.report(), [room, sizedWidth, sizedHeight, appZoom]);
+  const heldRoom = useMemo<Room | null>(() => (mode !== 'owner' || room === null ? null : placed === null ? room : { ...room, placed: placed.rect, scale: placed.scale }), [mode, room, placed]);
   useEffect(() => onRoom?.(heldRoom), [heldRoom, onRoom]);
   useEffect(() => () => onRoom?.(null), [onRoom]);
 
   // P2-E2: the card's dock, registered for the tab while this pane holds its view (where main sends its picks)
   const hostId = useId();
   useEffect(() => (mode === 'owner' ? registerDock(tabId, hostId) : undefined), [mode, tabId, hostId]);
-  const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: { x: 0, y: 0 }, key: tabId }), [tabId]);
+  // the pin is in the view's own pixels and the dock draws from the column: the view's inset in it, which a centred device
+  // size changes with the room and the app's factor (the branch review, scalpel-3#3)
+  const inset = placed?.inset ?? NO_INSET;
+  const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: inset, key: tabId }), [tabId, inset]);
   const accepts = (card: OpenCard) => card.target?.kind === 'browser' && card.target.pageUrl === tab.url;
   // after Close, Escape or a send: the Comment toggle of the chrome over this pane, which armed the pick, or its address
   // field while the toggle is disabled (the agent took the page)

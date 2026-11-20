@@ -42,7 +42,7 @@ export interface ExtensionUiDeps {
 
 export interface ExtensionUi {
   removing(partition: string): void; // a profile's removal begins: its popups and options tabs close
-  placeAgain(windowId: number): void; // UX wave U6b-5b: the window's zoom changed: its popup stands again under its button
+  zoomed(windowId: number): void; // UX wave U6b-5b: the window's zoom changed: its popup closes (the branch review, sweep#1)
   seam: ExtensionsInspector;
   stop(): void;
 }
@@ -92,7 +92,7 @@ export function startExtensionUi({ store, views, partitions, leaveInternal, reco
       popups.closeAll(partition);
       pages.close(partition, null);
     },
-    placeAgain: (windowId) => popups.placeAgain(windowId),
+    zoomed: (windowId) => popups.zoomed(windowId),
     seam: {
       popup: () => {
         const found = open();

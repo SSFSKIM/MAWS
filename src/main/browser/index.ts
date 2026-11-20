@@ -101,7 +101,7 @@ export interface Browser {
   partitions: Partitions;
   // E4b end
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
-  placeAgain(win: BrowserWindow): void; // UX wave U6b-5b (S3 step 4): the window's views and its popup, at its new zoom
+  placeAgain(win: BrowserWindow): void; // UX wave U6b-5b (S3 step 4): the window's views at its new zoom; its popup closes (sweep#1)
 }
 
 export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, machineHost = false, remote, zoomOf }: BrowserDeps): Browser {
@@ -333,7 +333,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
     extensions: extensionUi, // cua #90
     placeAgain: (win) => {
       views.placeAgain(win);
-      extensionUi.placeAgain(win.id);
+      extensionUi.zoomed(win.id);
     },
     // At will-quit, once the hosts' drain has settled (P4 W2-B): nothing more is sampled or placed, tabs.json is written,
     // every page closed.

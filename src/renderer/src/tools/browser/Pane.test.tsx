@@ -615,10 +615,19 @@ describe('a device size (U12a)', () => {
   it('tells its surface the display’s scale, the window’s device pixel ratio over the app’s factor', async () => {
     const ratio = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
     const onRoom = vi.fn();
+    room = { left: 0, top: 40, right: 150, bottom: 340 }; // a room that cuts Mobile at 125 % and at 200 % alike
     try {
       Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2.5 });
       act(() => useZoom.setState({ factor: 1.25 }));
       render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" onRoom={onRoom} />);
+      await frames();
+      expect(onRoom).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 2 }));
+      // the page's zoom reaches the window before the event: sampled then, the ratio over the old factor is off...
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 4 });
+      await resizeRoom({ ...room });
+      expect(onRoom).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 3 }));
+      // ...and the event's change of factor samples it again, the element and the room unchanged
+      act(() => useZoom.setState({ factor: 2 }));
       await frames();
       expect(onRoom).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 2 }));
     } finally {

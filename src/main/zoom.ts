@@ -68,7 +68,7 @@ export interface ZoomWindow {
 export interface ZoomDeps {
   layout: Pick<LayoutStore, 'get' | 'publish'>;
   windows(): readonly ZoomWindow[]; // the app windows (`appWindows`)
-  placeAgain(win: ZoomWindow): void; // S3 step 4: the in-app browser's views of the window and its popup, at the new factor
+  placeAgain(win: ZoomWindow): void; // S3 step 4: the in-app browser's views of the window at the new factor; its popup closes
   emit(name: 'layout.zoomChanged', payload: { factor: number }): void;
   register: typeof registerMainHandler;
 }
