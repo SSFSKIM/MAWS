@@ -87,6 +87,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C7 start
 import { pickFiles } from './files/pick';
 import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile, OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly } from './files/open-file'; // UX wave U6e; U6f's frame's open
+import { createOpenIn } from './open-in/open-in'; // UX wave U6b-4a
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -106,6 +107,8 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P5 O3-C: appInterest
 import { revealPath } from './settings/reveal';
+import { skillFile } from './customization/skill-file'; // UX wave U11: a skill's Open in
+import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { knownSessionDirectories } from '@shared/sessions/directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { ipcError } from '@shared/ipc/errors'; // P5 O7 M5a: remote.openCopy's refusal
@@ -573,7 +576,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
   // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding;
   // U6f: and the open, the listing and the pick of a file outside a session's folders on another machine
-  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl));
+  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl)); // UX wave U6b-4a: and Open in; U11: a skill's Open in
   guardCommand(OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly(appUrl)); // UX wave U6f (Decision Log 26): a frame's open
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
@@ -799,6 +802,24 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U6e (decision 3): Open File…, the chooser through the same port, then the grant as main's own call
   registerMainHandler('layout.openFile', (input, ctx) =>
     openChosenFile(input, ctx, { port: clientPort, isAppPage: (client) => isAppPage(client, appUrl), grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
+  );
+  // UX wave U6b-4a: Open in, the apps this Mac has and the hand-off with the path this Mac's daemon admits (main's own call)
+  const openIn = createOpenIn({ run: execRunner, admit: (input) => invokeOwn('files.admit', input, { client: mainClient, target: local }) as Promise<CommandResult<'files.admit'>>, env: process.env });
+  registerMainHandler('layout.openInApps', async () => ({ apps: await openIn.apps() }));
+  registerMainHandler('layout.openIn', (input) => openIn.open(input));
+  // UX wave U11 (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 2 and 11): a skill's file goes
+  // to "Open in"'s launcher only when main's own read of that place's inventory lists it; this Mac's inventory, as
+  // Customize's page is this Mac's
+  registerMainHandler('customization.skillFile', (input) =>
+    skillFile(input, {
+      inventory: async (cwd) => {
+        const answer = (await invokeOwn('customization.inventory', { cwd }, { client: mainClient, target: local })) as CommandResult<'customization.inventory'>;
+        if (!answer.ok) return { ok: false, message: answer.error.message };
+        const { skills, skillsRead, warnings } = answer.value;
+        return { ok: true, skills, complete: skillsRead === true, problem: [...warnings].reverse().find((warning) => warning !== CUSTOMIZATION_INVENTORY_COVERAGE) ?? null }; // the latest: a stop, the environment, a folder
+      },
+      launcher: openIn,
+    }),
   );
   shutdown.add('usage', () => usage.stop());
   // C7 end

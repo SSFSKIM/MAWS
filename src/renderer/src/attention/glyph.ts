@@ -84,9 +84,10 @@ export function wordGlyph(state: string): Glyph | null {
     case 'failed':
       return glyph('✕', 'danger', 'Failed');
     case 'done':
-    case 'stopped':
     case 'retired':
       return glyph('✓', 'faint', 'Done');
+    case 'stopped': // the owner's decision (2026-11-19): kept listed after its process ended, reopenable; only the word differs
+      return glyph('✓', 'faint', 'Stopped');
     default:
       return null;
   }

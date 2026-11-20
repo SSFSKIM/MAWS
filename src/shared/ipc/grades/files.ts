@@ -22,4 +22,5 @@ export const grades = {
   'files.grant': 'internal', // UX wave U6e: main's record of the person's choice in its chooser
   // UX wave U6e's files.writeOutside, and U6f's readOutside, listOutside and chooseOutside: the terminal's grade
   ...outsideGrades(pty[TERMINAL_ACT]),
+  'files.admit': 'internal', // UX wave U6b-4a: main's admission of the path "Open in" hands another app
 } as const satisfies CommandGrades<'files'>;

@@ -13,6 +13,10 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { project, status } from '../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { registerSessionCreator } from '../keymap/actions-runtime';
+import { useComposerStore } from '../stores/composer';
+import { useSettings } from '../stores/settings';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mountCustomize } from '../test-support/customize-page';
@@ -47,6 +51,9 @@ let installed: (typeof installedLedger)[];
 let listAnswer: Promise<unknown> | null; // plugins.list's answer, when a test holds it
 let servers: { name: string; scope: string; path: string; transport: string }[];
 let opSeq: number;
+let extraSkills: object[]; // UX wave U11's skill actions
+let skillFileAnswer: unknown;
+let envAnswer: Promise<unknown> | null; // plugins.env's answer, when a test holds it
 
 const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
 const emit = (name: EventName, payload: unknown) => {
@@ -62,7 +69,7 @@ const ACTION_OF: Partial<Record<CommandName, string>> = { 'plugins.install': 'in
 function answer(name: CommandName, input: unknown): unknown {
   switch (name) {
     case 'plugins.env':
-      return { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: `${HOME}/.claude.json` };
+      return envAnswer ?? { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: `${HOME}/.claude.json` };
     case 'plugins.list':
       return listAnswer ?? { plugins: installed };
     case 'marketplaces.list':
@@ -72,7 +79,11 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'mods.list':
       return [];
     case 'customization.inventory':
-      return { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }], servers, warnings: [], serversRead: true };
+      return { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }, ...extraSkills], servers, warnings: [], serversRead: true };
+    case 'layout.openInApps': // UX wave U11's skill actions: the rows this Mac has
+      return { apps: [{ id: 'zed', name: 'Zed' }, { id: 'terminal', name: 'Terminal' }, { id: 'finder', name: 'Finder' }] };
+    case 'customization.skillFile':
+      return typeof skillFileAnswer === 'function' ? (skillFileAnswer as () => unknown)() : skillFileAnswer;
     case 'catalog.home':
       return home();
     case 'catalog.query':
@@ -121,6 +132,9 @@ beforeEach(() => {
   listAnswer = null;
   servers = [{ name: 'tides', scope: 'user', path: `${HOME}/.claude.json`, transport: 'http' }];
   opSeq = 0;
+  extraSkills = [];
+  skillFileAnswer = { status: 'opened' };
+  envAnswer = null;
   shelf = [ledger, berth];
   const bridge: PreloadBridge = {
     localMachine: TEST_MACHINE,
@@ -219,14 +233,14 @@ describe('the head', () => {
   it('draws the tools of each view and Show: the search, then the actions as one group', async () => {
     servers = [];
     const table: [view: 'mine' | 'discover', show: 'all' | 'plugins' | 'skills' | 'connectors', search: string, present: string[], absent: string[]][] = [
-      ['mine', 'all', 'Search my items', ['Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
-      ['mine', 'plugins', 'Search plugins', ['Filter', 'Sort by', 'Add'], ['Add custom connector…', 'Refresh', 'Sources']],
-      ['mine', 'skills', 'Search skills', ['Refresh'], ['Filter', 'Add', 'Add custom connector…', 'Sources']],
-      ['mine', 'connectors', 'Search connectors', ['Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
-      ['discover', 'plugins', 'Search all sources', ['Refresh', 'Sources', 'Add'], ['Filter', 'Add custom connector…']],
-      ['discover', 'skills', 'Search all sources', ['Refresh', 'Sources'], ['Add', 'Add custom connector…']],
-      ['discover', 'connectors', 'Search all sources', ['Refresh', 'Sources'], ['Add', 'Add custom connector…']],
-      ['discover', 'all', 'Search all sources', ['Refresh', 'Sources'], ['Add', 'Add custom connector…', 'Filter']],
+      ['mine', 'all', 'Search my items', ['New skill…', 'Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
+      ['mine', 'plugins', 'Search plugins', ['Filter', 'Sort by', 'Add'], ['New skill…', 'Add custom connector…', 'Refresh', 'Sources']],
+      ['mine', 'skills', 'Search skills', ['New skill…', 'Refresh'], ['Filter', 'Add', 'Add custom connector…', 'Sources']],
+      ['mine', 'connectors', 'Search connectors', ['Add custom connector…', 'Refresh'], ['New skill…', 'Filter', 'Sort by', 'Add', 'Sources']],
+      ['discover', 'plugins', 'Search all sources', ['Refresh', 'Sources', 'Add'], ['New skill…', 'Filter', 'Add custom connector…']],
+      ['discover', 'skills', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
+      ['discover', 'connectors', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
+      ['discover', 'all', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Filter']],
     ];
     mountCustomize({ view: 'mine', show: 'all' });
     for (const [view, show, search, present, absent] of table) {
@@ -243,6 +257,25 @@ describe('the head', () => {
       const actions = line!.querySelector<HTMLElement>('[data-customize-actions]')!;
       for (const name of present) expect(within(actions).queryByRole('button', { name }), `${at}: ${name} among the actions`).not.toBeNull();
     }
+  });
+
+  // the rows' shared shape (PluginRow, SkillItem): the content layer stands above the full-row open button so its tooltips
+  // show, and a click on it opens the detail through the row's own click, as the e2e:discover scenes click a row's name
+  it('a click on a row’s name opens its detail, its tooltip kept; the row’s own controls do not open it', async () => {
+    mountCustomize({ view: 'mine', show: 'plugins' });
+    const plugin = await pluginRow('buoy-log@harbour-market');
+    const pluginName = within(plugin).getByText('Buoy log');
+    expect(pluginName.getAttribute('title')).toBe('buoy-log@harbour-market');
+    fireEvent.click(pluginName);
+    await waitFor(() => expect(tools()).toBeNull()); // the detail, in the list's place
+    chooseShow('Skills');
+    const skillName = (await found('[data-skill-row="tide-tables"] [data-skill-name]'));
+    fireEvent.click(skillName);
+    await found('[data-skill-detail="tide-tables"]');
+    chooseShow('All');
+    const menu = within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: /^More actions for / });
+    fireEvent.click(menu);
+    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
   });
 
   it('draws no tools while a plugin’s or a skill’s detail is open; pressing the view shown or a Show value returns to the list', async () => {
@@ -588,4 +621,179 @@ describe('the keyboard when the detailed plugin leaves the list', () => {
       fireEvent.keyDown(document.activeElement!, { key: '/' });
       expect(document.activeElement).toBe(within(tools()!).getByRole('searchbox', { name: search }));
     });
+});
+
+// UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 3 to 5): "New
+// skill…" opens a chat in the page's place whose composer holds the first message, not sent; a plugin's skill's detail
+// says that the plugin's updates replace its file.
+describe('a skill’s actions', () => {
+  const made: (ProjectId | null)[] = [];
+  let off: () => void;
+  beforeEach(() => {
+    made.length = 0;
+    off = registerSessionCreator(async (projectId) => (made.push(projectId), at(`app-new-${made.length}` as AppSessionId)));
+  });
+  afterEach(() => {
+    off();
+    useComposerStore.setState({ prefills: new Map() });
+  });
+  const prefill = (n: number) => useComposerStore.getState().prefills.get(at(`app-new-${n}` as AppSessionId))?.text;
+  // the configuration home the first message names is plugins.env's, read with the page
+  const envRead = async () => {
+    await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
+    await act(async () => undefined);
+  };
+
+  it('on a project’s page, New skill… offers this project and the person’s own, each a chat in the project with its folder named', async () => {
+    mountCustomize({ view: 'mine', show: 'skills' });
+    await envRead();
+    const press = async () => fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
+    await press();
+    const rows = await screen.findAllByRole('menuitem');
+    expect(rows.map((row) => row.textContent)).toEqual(['In this project', 'Created by you']);
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
+    await press();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Created by you' }));
+    await waitFor(() => expect(prefill(2)).toBe(`Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`));
+    expect(made).toEqual([A, A]);
+    expect(invoked('session.send')).toEqual([]); // filled, never sent
+  });
+
+  it('on the user configuration’s page, New skill… is one button that makes the person’s own, in a chat with no project', async () => {
+    useCustomizeProject.setState({ projectId: null }, true);
+    mountCustomize({ view: 'mine', show: 'all' });
+    await envRead();
+    fireEvent.click(await within(tools()!).findByRole('button', { name: 'New skill…' }));
+    await waitFor(() => expect(prefill(1)).toBe(`Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`));
+    expect(screen.queryByRole('menuitem')).toBeNull();
+    expect(made).toEqual([null]);
+  });
+
+  it('a project’s skill’s detail has no plugin line', async () => {
+    mountCustomize({ view: 'mine', show: 'skills' });
+    fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
+    await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-note]')).toBeNull();
+  });
+
+  const SKILL = `${QUAY}/.claude/skills/tide-tables/SKILL.md`;
+  const openDetail = async (show: 'skills' | 'all', name = 'tide-tables') => {
+    mountCustomize({ view: 'mine', show });
+    fireEvent.click(await screen.findByRole('button', { name: `View ${name}` }));
+    return found(`[data-skill-detail="${name}"]`);
+  };
+  const choose = async (detail: HTMLElement, row: string) => {
+    fireEvent.keyDown(within(detail).getByRole('button', { name: 'Open in' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: row }));
+  };
+
+  it('Open in on a skill’s detail lists the editors and Finder this Mac has, no terminal, and hands the row’s file with the page’s place', async () => {
+    const detail = await openDetail('skills');
+    fireEvent.keyDown(within(detail).getByRole('button', { name: 'Open in' }), { key: 'Enter' });
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual(['Zed', 'Finder']));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Zed' }));
+    await waitFor(() => expect(invoked('customization.skillFile')).toEqual([{ cwd: QUAY, path: SKILL, app: 'zed' }]));
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  it('from All too, and a refusal reads under the head until the detail is left', async () => {
+    skillFileAnswer = { status: 'refused', reason: 'missing', message: null };
+    const detail = await openDetail('all');
+    await choose(detail, 'Finder');
+    expect((await screen.findByRole('alert')).textContent).toBe("This skill's file is no longer here. Refresh, then try again.");
+    expect(invoked('customization.skillFile')).toEqual([{ cwd: QUAY, path: SKILL, app: 'finder' }]);
+    fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
+    await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  it('until the configuration home is known, Created by you waits, disabled, and In this project works', async () => {
+    envAnswer = new Promise(() => {});
+    mountCustomize({ view: 'mine', show: 'skills' });
+    fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
+    expect((await screen.findByRole('menuitem', { name: 'Created by you' })).getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'In this project' }));
+    await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
+  });
+
+  it('a reply that arrives after its detail closed, or after a later choice, writes no refusal', async () => {
+    const replies: ((value: unknown) => void)[] = [];
+    skillFileAnswer = () => new Promise((resolve) => replies.push(resolve));
+    const MISSING = { status: 'refused', reason: 'missing', message: null };
+    let detail = await openDetail('skills');
+    await choose(detail, 'Finder');
+    await waitFor(() => expect(replies).toHaveLength(1));
+    fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
+    await act(async () => replies[0]!(MISSING));
+    fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
+    detail = await found('[data-skill-detail="tide-tables"]');
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+    // two choices: the first's late refusal does not stand over the second's success
+    await choose(detail, 'Zed');
+    await choose(detail, 'Finder');
+    await waitFor(() => expect(replies).toHaveLength(3));
+    await act(async () => replies[2]!({ status: 'opened' }));
+    await act(async () => replies[1]!(MISSING));
+    expect(document.querySelector('[data-skill-refusal]')).toBeNull();
+  });
+
+  // the review's second round (U11 decision 13)
+  const rejected = (message: string) => {
+    const promise = Promise.reject(new Error(message));
+    promise.catch(() => undefined);
+    return promise;
+  };
+  const CREATOR = { name: 'skill-creator', description: 'Makes skills', source: 'plugin', path: `${HOME}/plugins/cache/skill-creator/skills/skill-creator/SKILL.md`, plugin: 'skill-creator@official', pluginName: 'skill-creator' };
+  const PLAIN = `Let's create a new skill in ${HOME}/skills/, for all my projects. First ask me what it should do.`;
+
+  it('calls skill-creator only on a current listing: not after a refresh of the plugin list fails, nor while one is being read', async () => {
+    useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' } });
+    extraSkills = [CREATOR];
+    installed = [buoyLog, { ...buoyLog, id: 'skill-creator@official', name: 'skill-creator', installPath: `${HOME}/plugins/cache/skill-creator` }];
+    useCustomizeProject.setState({ projectId: null }, true);
+    mountCustomize({ view: 'mine', show: 'all' });
+    await envRead();
+    const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
+    await pluginRow('skill-creator@official'); // the listing has answered
+    expect(invoked('plugins.list')).toHaveLength(1); // and no other read of it is on its way
+    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(1)).toBe(`/skill-creator:skill-creator ${PLAIN}`));
+    // pressed in the same task as a Refresh whose read is still on its way: the last render still shows the listing that
+    // was current, and the press reads the listing as it is now
+    let fail: (error: Error) => void = () => undefined;
+    listAnswer = new Promise((_, reject) => (fail = reject));
+    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(2)).toBe(PLAIN));
+    // that read fails: the list shown is the last one read, which confirms nothing now
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(2));
+    await act(async () => fail(new Error('listing failed')));
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(3)).toBe(PLAIN));
+    act(() => useSettings.setState({ state: null }));
+  });
+
+  it('when the configuration home’s first read fails, New skill… says why it waits, and Refresh reads it again', async () => {
+    useCustomizeProject.setState({ projectId: null }, true);
+    envAnswer = rejected('engine unavailable');
+    mountCustomize({ view: 'mine', show: 'skills' });
+    await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
+    const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
+    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(true));
+    expect(newSkill().getAttribute('title')).toBe('Your Claude configuration folder is not known yet. Refresh to try again.');
+    envAnswer = null;
+    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
+    fireEvent.click(newSkill());
+    await waitFor(() => expect(prefill(1)).toBe(PLAIN));
+  });
+
+  it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {
+    extraSkills = [{ name: 'chart-reader', description: 'Reads charts', source: 'plugin', path: `${HOME}/plugins/cache/quay-ledger/skills/chart-reader/SKILL.md`, plugin: 'quay-ledger@harbour-market', pluginName: 'quay-ledger' }];
+    await openDetail('skills', 'chart-reader');
+    expect((await found('[data-skill-note]')).textContent).toBe('Comes with the plugin quay-ledger@harbour-market. An update of the plugin replaces this file, and any edit in it.');
+  });
 });

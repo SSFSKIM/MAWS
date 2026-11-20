@@ -15,6 +15,11 @@ export const CustomizationSkillSchema = z.strictObject({
   // .claude-plugin/plugin.json, which `/<pluginName>:<name> ` runs; null when that name could not be read; absent on a
   // person's or a project's skill, and from an engine host of an earlier build
   pluginName: z.string().max(256).nullable().optional(),
+  // UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 12): the file
+  // the inventory read, by its real path and its identity (`<device>:<inode>`), which main holds a skill's Open in to;
+  // absent from an engine host of an earlier build, whose skills main opens nothing for
+  realPath: AbsolutePath.optional(),
+  fileId: z.string().max(64).optional(),
 });
 export const CustomizationServerSchema = z.strictObject({
   name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: z.enum(['stdio', 'http', 'sse', 'ws', 'unknown']),
@@ -61,6 +66,9 @@ export const CustomizationInventorySchema = z.strictObject({
   // where there is nothing.
   pluginServers: z.array(CustomizationPluginServerSchema).optional(),
   plugins: z.array(z.strictObject({ plugin: z.string().min(1).max(256), pluginName: z.string().max(256).nullable(), installScope: InstallScope })).optional(),
+  // UX wave U11's skill actions (decision 12): every skill folder that applies was read without a warning (the coverage note
+  // aside) and the read ran to its end, so a skill not listed is not there; absent from an engine host of an earlier build
+  skillsRead: z.boolean().optional(),
 });
 export type CustomizationInventory = z.infer<typeof CustomizationInventorySchema>;
 export type CustomizationSkill = z.infer<typeof CustomizationSkillSchema>;
@@ -69,8 +77,21 @@ export type CustomizationEndpoint = z.infer<typeof CustomizationEndpointSchema>;
 export type CustomizationPluginServer = z.infer<typeof CustomizationPluginServerSchema>;
 export type CustomizationPluginEndpoint = z.infer<typeof CustomizationPluginEndpointSchema>;
 
+// UX wave U11, a skill's actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 2, 6 and
+// 11): a skill's SKILL.md handed to a row of "Open in" (an editor, or Finder, which reveals it) only when the inventory
+// main reads itself for `cwd` lists exactly `path`; the window's string is a request, never the path opened. `missing`:
+// not listed, or no regular file there now; `unreadable`: the inventory could not be read (`message`, its reason);
+// `launch`: the row is not installed or did not open (`message`, the launcher's sentence).
+export const SKILL_FILE_APPS = ['vscode', 'vscodeInsiders', 'cursor', 'windsurf', 'zed', 'xcode', 'finder'] as const; // no terminal: a skill is a file
+export const SkillFileOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('opened') }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['missing', 'unreadable', 'launch']), message: z.string().max(4096).nullable() }),
+]);
+export type SkillFileOutput = z.infer<typeof SkillFileOutputSchema>;
+
 export const commands = {
   'customization.inventory': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: CustomizationInventorySchema, owner: 'engine-host' },
   'customization.serverEndpoints': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: z.strictObject({ servers: z.array(CustomizationEndpointSchema), pluginServers: z.array(CustomizationPluginEndpointSchema).optional() /* UX wave U11h (§A): absent from an earlier build */ }), owner: 'engine-host' }, // P4-AGG M4, main-only
+  'customization.skillFile': { input: z.strictObject({ cwd: AbsolutePath.nullable(), path: AbsolutePath, app: z.enum(SKILL_FILE_APPS) }), output: SkillFileOutputSchema, owner: 'main' }, // UX wave U11
 } as const satisfies Record<string, CommandSpec<z.ZodType, z.ZodType>>;
 export const events = {} as const;

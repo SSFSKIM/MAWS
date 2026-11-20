@@ -104,6 +104,8 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   });
   register('files.listOutside', (input, context?: HandlerContext) => files.listOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context)));
   register('files.chooseOutside', (input, context?: HandlerContext) => files.chooseOutside({ ...input, appSessionId: session(input.appSessionId) }, claimedOf(context)));
+  // UX wave U6b-4a: Open in's admission, main-only; a file outside the folders waits for the transcript while main's call lives
+  register('files.admit', (input, context?: HandlerContext) => files.admit({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(input.path !== undefined, context)));
   register('files.watch', async ({ appSessionId, path }, context: HandlerContext) => {
     const { client } = context;
     follow(client);

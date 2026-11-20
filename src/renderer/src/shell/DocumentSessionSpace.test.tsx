@@ -4,7 +4,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { resetShellStores } from '../test-support/shell-stores';
 import { mainShowing, ref } from '../test-support/panel';
 import { useLayout } from '../stores/layout';
-import { floatPanel, useFloatingCard } from './floating';
+import { dockPanel, floatPanel, useFloatingCard } from './floating';
 import { DocumentSessionSpace } from './DocumentSessionSpace';
 
 let width = 1200;
@@ -60,4 +60,16 @@ it('gives the page the bar’s height and margin at the end of its scroll while 
   expect(room(), 'the bar over the other surface').toBe('');
   act(() => useFloatingCard.setState({ closed: true, hidden: true, rect: null, host: null }));
   expect(room(), 'hidden: nothing floats').toBe('');
+});
+
+// Ticket 760: the render that floats the panel reserves the column at the floated width, before any frame lets the observer
+// report it (the stub here never fires), so no frame shows the document across the whole panel.
+it('reserves the column in the render that floats the panel, with no resize reported', () => {
+  dockPanel();
+  width = 348;
+  render(<DocumentSessionSpace surface="panel" enabled><p>Next steps</p></DocumentSessionSpace>);
+  const column = () => document.querySelector<HTMLElement>('[data-document-session-column]');
+  expect(column()).toBeNull();
+  act(() => { width = 1028; floatPanel(); });
+  expect(column()?.style.width).toBe('420px');
 });
