@@ -5070,6 +5070,9 @@ const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-
 // A peer of before U2b's first landing draws its own report (the bar's component is in its source); a later peer draws
 // MAWS's mirror, whose record line is the stretch's fold row, closed
 const drawsOwnReport = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/owner/report/ReportBar.tsx'));
+// A peer that knows `drawnBy` (its src/shared/owner/state.ts names it) is of U2b: it decides a launch at 9 and carries
+// the summaries' value itself, so a scene about a peer that launches at 8 is not about it
+const knowsDrawnBy = (build: Build) => sourceHas(build, 'src/shared/owner/state.ts', 'drawnBy');
 const recordLine = (page: Page) => page.locator(`[data-region="main"] [data-row-id="record-fold:closed:${TO_HUMAN_ROWS.call}"]`).getByRole('button');
 // The resume journal of the scene's stub: the handshake, the scene's turn once its prompt is sent, then held at a prompt
 // no one sends (e2e/support/to-human-replay.ts)
@@ -5131,6 +5134,7 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
   test.setTimeout(420_000);
   const { here, peer } = builds();
   test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  test.skip(knowsDrawnBy(peer), `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of U2b, so its own launch advertises 9 and carries the summaries' value, and the scene is about a peer that launches at 8`);
   await withScratch('xb-to-human-to', async (s) => {
     const said: string[] = [`${here.label} (wire ${wireOf(here)}) launches a session at 9 and turns new summaries off; ${peer.label} (wire ${wireOf(peer)}) opens the profile, draws its report and launches it again; ${here.label} reads it back`];
     trustIn(s, [s.repo]);
@@ -5218,8 +5222,7 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
 // §H, rows 3 and 4, on a unit mawsd of the other build (as (update, render) and (pre-O17 app, unit mawsd) do: a private
 // mawsd of another build would be restarted by the app's build check). The owner channel's commands are the machine's
 // (`owner: 'machine'`), so the daemon answers them and its own build decides the lane. A peer that knows `drawnBy`
-// (its src/shared/owner/state.ts names it) is of this landing, and neither row is about it.
-const knowsDrawnBy = (build: Build) => sourceHas(build, 'src/shared/owner/state.ts', 'drawnBy');
+// (its src/shared/owner/state.ts names it, knowsDrawnBy above) is of this landing, and neither row is about it.
 const unitPeer = (peer: Build): string | null =>
   !takesStubEngine(peer) ? `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: its engine host cannot run the stub`
   : knowsDrawnBy(peer) ? `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of this landing, so §H's rows 3 and 4 are not about it`
