@@ -41,14 +41,13 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { artifactUrl } from '@shared/artifacts/scheme';
+import { artifactUrl, artifactUrlOn } from '@shared/artifacts/scheme';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
-import { artifactKey, drawnCopyIs } from '../../../artifacts/machines';
-import { useDrawnCopyIs } from '../../../artifacts/use-artifact-machine';
+import { artifactKey } from '../../../artifacts/machines';
 import type { MachineRef } from '@shared/machine/ref';
 import { LEASE_NEEDS, useRemoteGreyed } from '../../../artifacts/remote-surfaces'; // P5 O7 M5c
 import { connectorsOwner } from '../../../artifacts/connector-owner'; // P3-HD M3c2
@@ -364,13 +363,10 @@ interface BodyProps {
 }
 
 function Body({ artifactId, machine, content, body, title, session, reloads, picking, onPick, onFrame, onReady, connectors, inView }: BodyProps) {
-  const url = artifactUrl(artifactId, content.revision, content.name);
+  // The frame's URL names the viewer's machine and main serves that copy alone (ticket 806's frame bytes), so the page
+  // the connector port reaches is the copy whose machine's authority the port carries.
+  const url = artifactUrlOn(artifactId, content.revision, content.name, machine);
   const frameTitle = VIEWERS_COPY.frameTitle(title);
-  // The frame's URL names the artifact alone and main draws whichever copy it placed the id on: the page gets this
-  // machine's connector authority only while the copy drawn is this machine's (`drawnCopyIs`), asked again as the port
-  // is handed, so one machine's page never holds another's connectors (ticket 806 puts the machine in the URL).
-  const bound = useDrawnCopyIs(artifactId, machine, ipc.localMachine);
-  const attach = connectors && bound ? (port: MessagePort) => (drawnCopyIs(artifactId, machine, ipc.localMachine) ? connectors.attach(port) : refusePort(port)) : undefined;
   switch (body) {
     case 'html':
       return (
@@ -382,7 +378,7 @@ function Body({ artifactId, machine, content, body, title, session, reloads, pic
           picking={picking}
           onPick={onPick}
           onFrame={onFrame}
-          onPagePort={attach}
+          onPagePort={connectors ? (port) => connectors.attach(port) : undefined}
         />
       );
     case 'pdf':
@@ -394,11 +390,6 @@ function Body({ artifactId, machine, content, body, title, session, reloads, pic
       return <DrawnFile tabId={fileTabId(artifactId, machine, content.revision, reloads)} session={session} artifact={{ artifactId, machine, revision: content.revision }} path={content.path} onReady={onReady} inView={inView} />;
   }
 }
-
-const refusePort = (port: MessagePort): (() => void) => {
-  port.close();
-  return () => {};
-};
 
 // The file viewer's entry for a drawn revision: one per artifact revision and Reload (`reloads` is a serial shared by
 // every view, so a Reload reads afresh even while another view holds the revision's entry).

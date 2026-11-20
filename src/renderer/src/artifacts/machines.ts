@@ -22,17 +22,6 @@ export function artifactMachineOf(artifactId: string): MachineRef | null {
 /** Whether any copy of the artifact is on record, this Mac's included. */
 export const artifactCopiesKnown = (artifactId: string): boolean => table.has(artifactId);
 
-/**
- * Whether the page main draws for the artifact's bare id can be taken as `machine`'s copy, by the copies on record here.
- * Main draws it from the latest other machine it heard the id on, else from this Mac (src/main/artifacts/machines.ts):
- * this Mac's copy while no other machine's is on record, another machine's while it is the only other one. A page that
- * fails this is handed no connector port (ByteViewer). Ticket 806 puts the machine in the frame's URL.
- */
-export function drawnCopyIs(artifactId: string, machine: MachineRef, local: MachineRef): boolean {
-  const others = [...(table.get(artifactId) ?? [])].filter((known) => known !== LOCAL);
-  return machine === local ? others.length === 0 : others.every((known) => known === machine);
-}
-
 // Machine refs cannot contain a colon; keep the artifact id intact.
 export const artifactKey = (artifactId: string, machine: MachineRef): string => `${machine}:${artifactId}`;
 

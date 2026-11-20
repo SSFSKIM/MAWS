@@ -77,6 +77,8 @@ export const offline = (machine: string) => `${machine} is offline`;
 
 export interface RemoteArtifactsDeps {
   remote(machine: MachineRef): RemoteLink | null;
+  /** This Mac (the scheme's responder serves a URL naming it from this Mac's store alone). */
+  local?: MachineRef;
   onRemote(listener: (machines: readonly MachineRef[]) => void): () => void;
   emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
   machines: ArtifactMachines;
@@ -134,7 +136,7 @@ const idOf = (value: unknown): string | null => (isObject(value) && typeof value
 export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifacts {
   const tempDir = deps.tempDir ?? tmpdir;
   const feed = createRemoteArtifactFeed({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, machines: deps.machines, ...(deps.heard !== undefined && { heard: deps.heard }), retryMs: deps.feedRetryMs, log: deps.log });
-  const scheme = createRemoteScheme({ machines: deps.machines, remote: deps.remote, log: deps.log }); // P5 O7 M5b
+  const scheme = createRemoteScheme({ machines: deps.machines, remote: deps.remote, ...(deps.local !== undefined && { local: deps.local }), log: deps.log }); // P5 O7 M5b
   const documents = deps.docChannel === undefined ? null : createRemoteDocuments({ channel: deps.docChannel, openMs: deps.documentOpenMs ?? DOCUMENT_OPEN_MS, log: deps.log }); // P5 O7 M5b
 
   /** The artifacts an answer names, each on the machine that answered. */

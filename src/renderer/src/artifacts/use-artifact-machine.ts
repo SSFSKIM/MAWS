@@ -2,12 +2,8 @@
 // renderer's client imports and the node project compiles.
 import { useSyncExternalStore } from 'react';
 import type { MachineRef } from '@shared/machine/ref';
-import { artifactMachineOf, drawnCopyIs, subscribeArtifactMachines } from './machines';
+import { artifactMachineOf, subscribeArtifactMachines } from './machines';
 
 /** The artifact's machine when it is another machine's; null for this Mac's. */
 export const useArtifactMachine = (artifactId: string | null): MachineRef | null =>
   useSyncExternalStore(subscribeArtifactMachines, () => (artifactId === null ? null : artifactMachineOf(artifactId)));
-
-/** `drawnCopyIs`, followed as the table changes. */
-export const useDrawnCopyIs = (artifactId: string, machine: MachineRef, local: MachineRef): boolean =>
-  useSyncExternalStore(subscribeArtifactMachines, () => drawnCopyIs(artifactId, machine, local));

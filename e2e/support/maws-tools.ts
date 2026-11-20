@@ -394,9 +394,11 @@ export async function headerAction(page: Page, root: Locator, name: string): Pro
 }
 
 // The frame Playwright reached for a store URL (the frame's own document, cross-origin).
+// A viewer's frame names its machine in the URL's query (`?machine=`), which `pageUrlOf` leaves out: compared without it.
 export async function frameAt(page: Page, url: string) {
   let found: ReturnType<Page['frames']>[number] | undefined;
-  await expect.poll(() => (found = page.frames().find((f) => f.url() === url)) !== undefined, { message: `a frame at ${url}` }).toBe(true);
+  const bare = (at: string) => at.split('?')[0];
+  await expect.poll(() => (found = page.frames().find((f) => bare(f.url()) === bare(url))) !== undefined, { message: `a frame at ${url}` }).toBe(true);
   return found!;
 }
 
