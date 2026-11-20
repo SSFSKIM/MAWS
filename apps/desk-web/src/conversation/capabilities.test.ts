@@ -74,7 +74,7 @@ describe('capabilities', () => {
     const terminal = at({ group: 'ended', presence: { record: null, bridge: false }, transcript: 'served' });
     expect(terminal.resume).toEqual({ can: true, reason: null });
     // Under every sminos in the field: one from before threads, a thread with no wake, a thread its machine wakes (§H).
-    expect(terminal.send.note).toBe('recorded: mini wakes it for this, or holds it until its human reopens it');
+    expect(terminal.send.note).toBe('recorded: mini wakes it for this, or holds it until it runs again');
     expect(terminal.steer).toEqual({ can: false, reason: 'maws-45 is not running' });
     const seat = at({ group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false }, transcript: 'served' });
     expect(seat.send.note).toBe('resumes the seat to read it');

@@ -12,6 +12,20 @@ import { URL, fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+// A pid a script wrote to a file, read once the file holds it: a file `>` has just opened exists and is empty.
+const waitFor = async (file) => {
+  for (let i = 0; i < 100 && !(existsSync(file) && /^\d+\s*$/.test(readFileSync(file, 'utf8'))); i++) await sleep(50);
+  return Number(readFileSync(file, 'utf8'));
+};
+// A slot under way: its script's pid, and the slot's record of its group, which gate-copy.sh writes after it started the
+// group and asked ps for the leader's start. On a loaded runner the script can be running before the record is there,
+// and a slot cut then has left reap nothing to stop it by.
+const underWay = async (dir, number, pidFile) => {
+  const pid = await waitFor(pidFile);
+  const record = join(dir, `temp/maws-copy/${number}.pgid`);
+  for (let i = 0; i < 100 && !(existsSync(record) && /^\d+\t.*\n$/.test(readFileSync(record, 'utf8'))); i++) await sleep(50);
+  return pid;
+};
 
 // A checkout holding the job's scripts, and a pnpm that runs the slot's SCRIPT as a shell command.
 function checkout(t) {
@@ -34,8 +48,7 @@ test('a slot cut at its bound leaves nothing running: the next slot stops its pr
   // The group writes its pid, then outlives the step's shell, as Playwright does when Actions ends the step.
   const pidFile = join(dir, 'temp/leftover.pid');
   const first = slot(1, `sleep 300 & echo $! > ${pidFile}; wait`);
-  for (let i = 0; i < 100 && !existsSync(pidFile); i++) await sleep(50);
-  const leftover = Number(readFileSync(pidFile, 'utf8'));
+  const leftover = await underWay(dir, 1, pidFile);
   first.kill('SIGKILL'); // the step's shell, ended at the step's timeout
   await new Promise((resolve) => first.on('exit', resolve));
   assert.ok(alive(leftover), 'the group outlives its step');
@@ -55,8 +68,7 @@ test('the verdict stops the last slot when it was cut, and a slot that finished 
   const { dir, slot, verdict } = checkout(t);
   const pidFile = join(dir, 'temp/leftover.pid');
   const only = slot(1, `sleep 300 & echo $! > ${pidFile}; wait`);
-  for (let i = 0; i < 100 && !existsSync(pidFile); i++) await sleep(50);
-  const leftover = Number(readFileSync(pidFile, 'utf8'));
+  const leftover = await underWay(dir, 1, pidFile);
   only.kill('SIGKILL');
   await new Promise((resolve) => only.on('exit', resolve));
   const result = verdict('to-human', 'failure');
@@ -70,7 +82,6 @@ test('the verdict stops the last slot when it was cut, and a slot that finished 
   assert.doesNotMatch(red.stdout, /cut at its bound/);
 });
 
-const waitFor = async (file) => { for (let i = 0; i < 100 && !existsSync(file); i++) await sleep(50); return Number(readFileSync(file, 'utf8')); };
 // A process in a session and group of its own, as detached-transport.ts spawns a private host, in the slot's checkout.
 const detached = (pidFile) => `perl -MPOSIX -e 'POSIX::setsid(); open my $f, ">", "${pidFile}"; print $f $$; close $f; exec "sleep", "300"' & sleep 300`;
 
@@ -78,7 +89,7 @@ test("a cut slot's detached descendant, outside its group, is stopped too", asyn
   const { dir, env, slot } = checkout(t);
   const pidFile = join(dir, 'temp/detached.pid');
   const first = slot(1, detached(pidFile));
-  const host = await waitFor(pidFile);
+  const host = await underWay(dir, 1, pidFile);
   t.after(() => { try { process.kill(host, 'SIGKILL'); } catch { /* gone */ } });
   first.kill('SIGKILL');
   await new Promise((resolve) => first.on('exit', resolve));
