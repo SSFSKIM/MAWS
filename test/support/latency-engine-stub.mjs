@@ -8,9 +8,11 @@
 // `--version` answers the pinned version. Otherwise it reads stream-json on stdin and answers each `control_request`
 // from CONTROLS, the engine's recorded answer for that subtype with the host's own request_id. CONTROLS holds what
 // `Session` sends from launch to ready for the bench's launch (src/engine-host/session.ts: initialize; then
-// set_max_thinking_tokens; the gateway check's get_status; ready's get_context_usage; no auto-mode fallback, grant
-// reapply or surface attach for a `default`-mode direct launch with no resume, whose initialize answer advertises no
-// surface), what it sends after each human turn (get_status, get_context_usage), and the other reads
+// set_max_thinking_tokens; the gateway check's get_status; ready's get_context_usage and mcp_status (ticket 619: no
+// servers, as the engine answers a launch that configures none, unless MAWS_LATENCY_STUB_MCP_SERVERS names some); no
+// auto-mode fallback, grant reapply or surface attach for a `default`-mode direct launch with no resume, whose
+// initialize answer advertises no surface), what it sends after each human turn (get_status, get_context_usage), and
+// the other reads
 // spikes/protocol-probe/fixtures/reads.jsonl recorded. A subtype it does not hold is one stderr line and exit 70, so a
 // missing answer is a launch failure, not a hang. `end_session` ends the process, as the engine's answer to it is its
 // exit; so does stdin's end.
@@ -95,7 +97,7 @@ const answers = new Map(Object.entries(CONTROLS).map(([subtype, [fixture, seq]])
   if (!response || response.frame.response.subtype !== 'success') throw new Error(`${fixture} records no success answer to seq ${seq}`);
   return [subtype, response.frame.response];
 }));
-if (process.env.MAWS_LATENCY_STUB_MCP_SERVERS) answers.set('mcp_status', { subtype: 'success', response: { mcpServers: JSON.parse(process.env.MAWS_LATENCY_STUB_MCP_SERVERS) } }); // P5 O17 M7
+answers.set('mcp_status', { subtype: 'success', response: { mcpServers: process.env.MAWS_LATENCY_STUB_MCP_SERVERS ? JSON.parse(process.env.MAWS_LATENCY_STUB_MCP_SERVERS) : [] } }); // P5 O17 M7; ticket 619: asked at ready
 
 // One text turn of queue-and-interrupt.jsonl (seq 199 is its prompt): queued, started, init, status, the user echo,
 // message_start, the text block (its recorded delta at 227 replaced; the thinking block at 207-225 left out, so the text

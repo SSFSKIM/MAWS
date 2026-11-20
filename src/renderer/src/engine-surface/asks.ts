@@ -7,11 +7,14 @@
 // trip) is skipped with no side effect and no answer: the plugin was already told no, so filling the draft or the
 // clipboard then would act on a refused call. The age is the event's `at` (the host's clock, this machine's) against
 // now; a request handled just inside the margin can still race the refusal, and then its answer finds nothing pending.
+// Ticket 627: a session on another machine over RL2 takes no answer from here (the window's helper says so), so its asks
+// are left unanswered, as that machine's mod sees them, with no refused round trip on each.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SURFACE_ANSWER_MS, type SurfaceAnswer } from '@shared/engine/surface';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { shownHere } from '../app/plugin-toasts';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
 import { ipc } from '../ipc/client';
 import { useComposerStore } from '../stores/composer';
 import { toast } from '../stores/notices';
@@ -59,6 +62,7 @@ export function connectSurfaceAsks(client: MawsBridge = ipc): () => void {
   return client.on('session.eventBatch', ({ appSessionId, events }) => {
     for (const event of events) {
       if (event.kind !== 'plugin.ask' || expired(event, Date.now())) continue;
+      if (remoteUnavailableOf(appSessionId as AppSessionId, 'session.ui.answer') !== null) continue;
       void answerOf(appSessionId as AppSessionId, event).then(async (answer) => {
         if (answer === null) return;
         const result = await client.invoke('session.ui.answer', { appSessionId, requestId: event.requestId, answer });

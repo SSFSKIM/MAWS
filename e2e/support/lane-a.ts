@@ -1,9 +1,9 @@
 // A terminal session MAWS can drive, for `e2e:lane-a` (P5 O9 M5, docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md,
 // "The fake bridge in e2e"): no `claude` runs. The session's transcript is seeded in the launch's engine store, a live
-// terminal holds it (a registry record naming this test runner's pid, its `procStart` as the engine renders it, as
+// terminal holds it (a registry record naming a stand-in process, its `procStart` as the engine renders it, as
 // sessions.spec.ts's foreign-live scene writes one), and the fake bridge (test/support/fake-bridge.ts) serves its
 // socket under the launch's scratch sminos home, with a catalog as the bridge pushes one.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,19 +33,29 @@ export const CATALOG = {
 export interface TerminalSession {
   bridge: FakeBridge;
   pid: number;
-  close(): Promise<void>; // the bridge's socket goes and the terminal's record with it
+  close(): Promise<void>; // the terminal's process ends, then its bridge's socket goes and its record with it
 }
 
-// The test runner's process as the engine's registry names a live process: its pid and its start time.
-function liveProcess(): { pid: number; procStart: string } {
-  const pid = process.pid;
+// The terminal's engine process, stood in for by a child of this runner (a shell that waits on its input, so it ends
+// with the runner), as the engine's registry names a live process: its pid and its start time. Ending it is the
+// process going, which main tells from a bridge that goes while its process runs (ticket 701).
+function liveProcess(): { child: ChildProcess; pid: number; procStart: string } {
+  const child = spawn('/bin/sh', ['-c', 'read -r _'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  const pid = child.pid!;
   const procStart = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
-  return { pid, procStart };
+  return { child, pid, procStart };
+}
+
+async function ended(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exit = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  child.kill();
+  await exit;
 }
 
 // A terminal holding `sessionId` (its transcript already in `store`), its bridge serving under `sminosHome`.
 export async function terminalSession(opts: { store: StoreFixture; sminosHome: string; sessionId: string; cwd: string; bridge?: Partial<FakeBridgeOptions>; bridged?: boolean }): Promise<TerminalSession> {
-  const { pid, procStart } = liveProcess();
+  const { child, pid, procStart } = liveProcess();
   const bridge = opts.bridged === false ? null : await startFakeBridge({ home: opts.sminosHome, session: opts.sessionId, pid, sessionInfo: { session: opts.sessionId, cwd: opts.cwd, model: 'claude-opus-4-5', version: '2.1.300' }, ...opts.bridge });
   bridge?.emit({ type: 'catalog', ...CATALOG });
   await opts.store.addRegistryRecord(pid, { pid, sessionId: opts.sessionId, cwd: opts.cwd, kind: 'interactive', procStart, status: 'idle' });
@@ -56,6 +66,7 @@ export async function terminalSession(opts: { store: StoreFixture; sminosHome: s
     },
     pid,
     async close() {
+      await ended(child);
       await bridge?.close();
       await opts.store.removeRegistryRecord(pid);
     },

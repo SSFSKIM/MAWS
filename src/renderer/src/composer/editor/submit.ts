@@ -18,7 +18,7 @@ import type { SessionControls } from '../../session/controls/types'; // P5 O9 M4
 import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
-import { beginRemoteSend, isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2; M4: beginRemoteSend
+import { beginRemoteSend, isOverRl2, isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2; M4: beginRemoteSend; ticket 627: isOverRl2
 import { isRemoteLaneA } from '../../lane-a/remote-session'; // board 525
 import { readerGradeOf } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript';
@@ -79,9 +79,9 @@ export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s:
 // The prompt's row in MAWS's history; P2-F (L118): also written by a record card's continuation once the host accepted
 // the composer message the card held (its display and pasted segments as the composer serialized them).
 // P5 O7 M2: none for a lane B session on another machine, whose prompt history is that machine's (its link offers the
-// read, `session.history.list`, and no write).
+// read, `session.history.list`, and no write); ticket 627: nor for a terminal (lane A) session there over RL2.
 export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s: Pick<Serialized, 'display' | 'pastedContents'>, project: string | null = null): void {
-  if (isRemoteLaneB(appSessionId)) return;
+  if (isOverRl2(appSessionId)) return;
   const input = { appSessionId, display: s.display, pastedContents: s.pastedContents, ...(project === null ? {} : { project }) };
   void client.invoke('session.history.append', input).then((result) => {
     if (!result.ok) console.warn('[composer] session.history.append failed', result.error);

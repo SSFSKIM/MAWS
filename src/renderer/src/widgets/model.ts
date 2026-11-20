@@ -15,6 +15,7 @@ import { useSessions } from '../stores/sessions';
 import { isGatewayModel } from '@shared/sessions/models';
 import { MODEL } from './copy';
 import { transportWords } from './read';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable'; // ticket 627
 
 // A catalogue row: C3's `list_models` entry, or (unstarted) C10's catalogue entry through C7's setup-intent seam, where
 // the capability keys may be absent.
@@ -187,7 +188,11 @@ export async function setEffort(input: { appSessionId: AppSessionId; effort: Eff
 }
 
 // `session.applyFlagSettings` with the settings verbatim; a `fastMode` key is remembered until the init frame reports it.
+// Ticket 627: a session on another machine over RL2 takes none: the window's helper's sentence, and nothing is sent (the
+// selector greys its switch with it; a typed `/fast off` says it).
 export async function applyFlagSettings(input: { appSessionId: AppSessionId; settings: Record<string, unknown> }): Promise<ControlAnswer> {
+  const unavailable = remoteUnavailableOf(input.appSessionId, 'session.applyFlagSettings');
+  if (unavailable !== null) return { ok: false, error: unavailable, caption: null };
   const before = statusOf(input.appSessionId);
   const basis = before ? fastFact(before) : null;
   const result = await ipc.invoke('session.applyFlagSettings', input);

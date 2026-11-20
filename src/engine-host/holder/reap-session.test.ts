@@ -190,7 +190,7 @@ describe('what the reap reads off the session', () => {
     expect(s.session.mcpCommands()).toBeNull();
     fail = false;
     const [one, two] = await Promise.all([s.session.stdioServers(), s.session.stdioServers()]);
-    expect(s.transport.requestsOf('mcp_status')).toHaveLength(2);
+    expect(s.transport.requestsOf('mcp_status')).toHaveLength(3); // ticket 619: and the session's own at ready
     expect(one).toEqual({ connected: 1, pending: 1 });
     expect(two).toBe(one);
     expect(s.session.mcpCommands()).toEqual([['/usr/bin/node', '/tmp/a.mjs', 'user'], ['uvx'], ['/x/d']]);

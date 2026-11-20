@@ -13,6 +13,8 @@ import { addressOf } from '@shared/machine/address';
 import { OTHER_MACHINE } from '../../../../../test/support/machine';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
 import { remoteSessionState } from '../../lane-b/test-support/remote-session';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { leaveRl2, overRl2 } from '../../test-support/code-disk'; // ticket 627
 
 const PATH = '/repo/hello.txt';
 const ASK: AskRowData = {
@@ -46,6 +48,22 @@ describe('the delivery row’s actions', () => {
     const tooLarge = fakeClient({ 'remote.openCopy': { opened: false, message: 'too large to copy from mini' } });
     expect(await mawsTranscriptActionsOver(tooLarge.client).openDelivered(REMOTE, PATH)).toBe('Not opened: too large to copy from mini');
     resetRemoteLaneBStore();
+  });
+
+  // Ticket 627: a terminal (lane A) session over RL2 reads its files through no lane B adapter, so neither opens a copy
+  // nor reveals here: each says the declared sentence and sends nothing; a lane B session's Reveal likewise
+  it('Open externally and Reveal in Finder on a terminal session over RL2: the sentence, and nothing sent', async () => {
+    const TERMINAL = addressOf(OTHER_MACHINE, 'app-a' as AppSessionId);
+    overRl2(TERMINAL, {}, 'A');
+    const f = fakeClient({ 'files.openExternal': { opened: true, message: null }, 'files.reveal': { revealed: true, message: null }, 'remote.openCopy': { opened: true, message: null } });
+    const actions = mawsTranscriptActionsOver(f.client);
+    expect(await actions.openDelivered(TERMINAL, PATH)).toBe(`Refused: ${REMOTE_UNAVAILABLE['files.openExternal']}`);
+    expect(await actions.revealDelivered(TERMINAL, PATH)).toBe(`Refused: ${REMOTE_UNAVAILABLE['files.reveal']}`);
+    const LANE_B = addressOf(OTHER_MACHINE, 'app-b' as AppSessionId);
+    overRl2(LANE_B, {}, 'B');
+    expect(await actions.revealDelivered(LANE_B, PATH)).toBe(`Refused: ${REMOTE_UNAVAILABLE['files.reveal']}`);
+    expect([f.invoked('files.openExternal'), f.invoked('files.reveal'), f.invoked('remote.openCopy')]).toEqual([[], [], []]);
+    leaveRl2();
   });
 
   it('Reveal in Finder: files.reveal with the session and path; null when revealed, the refusal otherwise', async () => {

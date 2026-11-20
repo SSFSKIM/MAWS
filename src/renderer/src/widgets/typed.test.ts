@@ -13,7 +13,11 @@ import { ipc } from '../ipc/client';
 import { useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { resetModelRequests } from './model';
+import { applyFlagSettings, resetModelRequests } from './model';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
+import { leaveRl2, overRl2 } from '../test-support/code-disk'; // ticket 627
 import { TYPED_APPLY } from './typed';
 
 const ROOT = join(__dirname, '../../../..');
@@ -142,6 +146,18 @@ describe('fast', () => {
     expect(await TYPED_APPLY.fast!(READY, 'off')).toBe(true);
     await toastSoon().toEqual([['info', 'Fast mode · off · set · the next init frame confirms it']]);
     expect(controls('session.applyFlagSettings')).toEqual([{ appSessionId: READY_ID, settings: { fastMode: false } }]);
+  });
+
+  // Ticket 627: `/fast off` (and the selector's switch) for a session on another machine says the declared sentence and
+  // sends nothing, in either lane
+  it('applies no flag settings for a session on another machine: the sentence, and nothing sent', async () => {
+    for (const lane of ['B', 'A'] as const) {
+      const elsewhere = addressOf(OTHER_MACHINE, `app-${lane}` as AppSessionId);
+      overRl2(elsewhere, {}, lane);
+      expect(await applyFlagSettings({ appSessionId: elsewhere, settings: { fastMode: false } })).toEqual({ ok: false, error: REMOTE_UNAVAILABLE['session.applyFlagSettings'], caption: null });
+    }
+    expect(controls('session.applyFlagSettings')).toEqual([]);
+    leaveRl2();
   });
 
   it('opens instead for /fast on (its lane warning first) and on a model without fast mode', async () => {
