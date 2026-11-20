@@ -53,7 +53,7 @@ export function EngineSection({ settings }: { settings: Settings }) {
     if (path) await writeEngine({ binaryPath: path });
   };
 
-  const path = binary ? homeAbbreviated(binary.path) : null;
+  const path = binary ? homeAbbreviated(binary.path) : null; // the note's; the version's tooltip says the exact path
   return (
     <Setting
       row="engine.binary"
@@ -68,7 +68,7 @@ export function EngineSection({ settings }: { settings: Settings }) {
     >
       {binary === null && <span className="min-w-0 truncate text-ui-sm text-fg-muted">{info.isError ? info.error.message : ENGINE.binaryReading}</span>}
       {binary?.version && (
-        <TipWord tip={path}>
+        <TipWord tip={binary.path}>
           <span tabIndex={0} className={WORD_OWNER}>
             <Chip>{binary.version}</Chip>
           </span>
@@ -89,13 +89,14 @@ export function EngineSection({ settings }: { settings: Settings }) {
 }
 
 // W13: the user's own updater, in a terminal tab; MAWS's launches never update themselves. The word cut: a button on the
-// Binary row, drawn as the `engine.update` row (the search's result for it lands here, and the focus shows its words).
+// Binary row, drawn as the `engine.update` row, whose search result lands on the Binary row (rows.ts `landsOn`); the
+// focus shows its words.
 function UpdateButton({ state }: { state: 'installed' | 'chosen' }) {
   useDrawnRow('engine.update', state);
   const words = settingsRow('engine.update').states[state]!.note!;
   return (
     <Tip content={words} description={words}>
-      <button type="button" aria-label={ENGINE.updateName} data-settings-row="engine.update" data-settings-state={state} className={TEXT_ACTION} onClick={() => openEngineUpdate()}>
+      <button type="button" aria-label={ENGINE.updateName} className={TEXT_ACTION} onClick={() => openEngineUpdate()}>
         {ENGINE.updateAction}
       </button>
     </Tip>

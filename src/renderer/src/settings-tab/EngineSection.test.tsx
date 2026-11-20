@@ -42,7 +42,9 @@ const row = (label: string) => screen.getByRole('group', { name: label });
 const names = () => b.calls.map((c) => c.name);
 // the row's note: hidden at rest, its words the row's description (the shared row note, ui/row-note.tsx)
 const noteOf = (label: string) => row(label).querySelector<HTMLElement>('[data-row-note]')!;
-const path = (label: string, words: string) => vi.waitFor(() => expect(noteOf(label).textContent).toContain(words));
+// a row's words as the accessibility tree reads them: its description holds them, whether the note is open or not
+const describes = (label: string, words: string) => screen.getByRole('group', { name: label, description: (description) => description.includes(words) });
+const path = (label: string, words: string) => vi.waitFor(() => expect(describes(label, words)).toBe(row(label)));
 
 afterEach(() => {
   unsubscribe();
@@ -107,7 +109,7 @@ describe('the binary row and the update', () => {
     await path('Binary', '~/.local/share/claude/versions/2.1.287');
     expect(screen.getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual(['Binary']);
     await path('Binary', 'Config home · ~/.claude · read-only to MAWS');
-    expect(noteOf('Binary').textContent).toContain('Where the engine keeps transcripts, settings and trust.');
+    expect(describes('Binary', 'Where the engine keeps transcripts, settings and trust.')).toBe(row('Binary'));
   });
 
   it('a binary that is missing says why, in the warning colour', async () => {
@@ -129,7 +131,7 @@ describe('the binary row and the update', () => {
   it('with a chosen binary, the notes say new sessions stay on it until Use installed', async () => {
     renderSection({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude' } });
     await path('Binary', '/opt/claude');
-    expect(noteOf('Binary').textContent).toContain('New sessions start on the binary you chose. Running sessions keep the binary they started on. MAWS was verified against Claude Code 2.1.283.');
+    expect(describes('Binary', 'New sessions start on the binary you chose. Running sessions keep the binary they started on. MAWS was verified against Claude Code 2.1.283.')).toBe(row('Binary'));
     expect(within(row('Binary')).getByRole('button', { name: 'Update Claude Code…', description: 'Runs claude update in a terminal tab. New sessions stay on your chosen binary until Use installed. Running sessions keep theirs.' })).toBeTruthy();
   });
 });

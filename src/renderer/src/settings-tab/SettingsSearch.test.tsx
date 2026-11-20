@@ -19,7 +19,10 @@ import { settingsBridge, type SettingsBridge } from '../test-support/settings-br
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { grantsOf, REGISTERED, VIEW } from './org/test-support';
 import { scrollTopToLand } from './SettingsSearch';
+import { openEngineUpdate } from './engine-update';
 import { SettingsView } from './SettingsView';
+
+vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn(() => 'terminal:update') })); // the panel host is not under test here
 
 const NOTES: AppMcpServer = { name: 'notes', type: 'http', url: 'https://mcp.example.com/mcp' };
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
@@ -228,11 +231,23 @@ describe('Search settings: choosing a result', () => {
     expect(binary.querySelector('[data-row-note]')!.hasAttribute('data-open')).toBe(true);
     expect(binary.textContent).toContain("claude on your shell's PATH");
     expect(within(binary).queryByRole('button', { name: /^(More|Less)$/ })).toBeNull();
-    // Update's words find its button, now on the Binary row (G126, G127), and land on it
+  });
+
+  it('finds Update by its words and lands on the Binary row it sits on, so a second Enter starts no update (G126, G127)', async () => {
+    vi.mocked(openEngineUpdate).mockClear();
+    renderView();
+    const binary = row('Binary');
+    await within(binary).findByText('2.1.287');
     type('runs claude update');
     expect(optionTexts()).toEqual(['Update · Engine']);
     press('Enter');
-    expect(document.activeElement).toBe(within(binary).getByRole('button', { name: 'Update Claude Code…' }));
+    expect(document.activeElement).toBe(binary);
+    expect(binary.dataset.settingsMark).toBe('on');
+    const user = userEvent.setup();
+    await user.keyboard('{Enter}');
+    expect(openEngineUpdate).not.toHaveBeenCalled();
+    await user.click(within(binary).getByRole('button', { name: 'Update Claude Code…' })); // a deliberate press still runs it
+    expect(openEngineUpdate).toHaveBeenCalledOnce();
   });
 
   it('lands on the row that reveals a row not drawn: the memory budget off, "stateful" chooses its switch', () => {
@@ -344,6 +359,24 @@ describe('Search settings: the row under its section’s heading', () => {
     type('archive sessions');
     press('Enter');
     expect(body.scrollTop).toBe(1000); // the heading at the body's top: 1100 - 100
+  });
+
+  it('measures the landed row with the note its focus opens, so a note near the bottom is not left below the fold', () => {
+    renderView();
+    const body = document.querySelector<HTMLElement>('[data-settings-body]')!;
+    const at = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === body) return at(100, 600);
+      if (this.matches('section[aria-labelledby="settings-sessions"]')) return at(1100, 900);
+      if (this.matches('[data-settings-row="sessions.archive"]')) return at(1500, 34);
+      if (this.parentElement?.matches('[data-settings-row="sessions.archive"] [data-row-note][data-open]')) return at(1534, 200); // the opened note's words
+      return at(0, 0);
+    });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 600 });
+    type('archive sessions');
+    press('Enter');
+    // row and note: 1400 to 1634 in the body's content, past the heading's view (1000 to 1600), so the pair is centred
+    expect(body.scrollTop).toBe(1400 - (600 - 234) / 2);
   });
 });
 

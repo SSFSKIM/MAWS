@@ -31,7 +31,10 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   // U11a M9: the section's two rows of the table (rows.ts), the bindings and their reset
-  const changed = Object.keys(keymap).length > 0; // a chord equal to its default is no override
+  // a binding that answers other than its default: an override the table ignores (a fixed or retired action) or one
+  // equal to the default changes nothing to reset
+  const groups = keymapGroups(keymap);
+  const changed = groups.some((group) => group.rows.some((row) => row.display !== displayChord(row.id, ACTIONS[row.id].chord)));
   useDrawnRow('keyboard.bindings', 'default');
   useDrawnRow(changed ? 'keyboard.reset' : null, 'default');
 
@@ -76,7 +79,7 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
       {/* U11a M10: the table rounds its first and last rows' corners itself rather than clipping, so a binding the search
           lands on draws its mark 8 px around it (SettingsSearch.tsx `MARK`) */}
       <div role="table" aria-label={KEYBOARD.table} data-settings-row="keyboard.bindings" data-settings-state="default" tabIndex={-1} className={`mt-1 border border-border ${TABLE_CORNERS} ${LANDING}`}>
-        {keymapGroups(keymap).map((group) => (
+        {groups.map((group) => (
           <div key={group.label} role="rowgroup" aria-label={group.label}>
             <div role="row" className="border-t border-border bg-bg-raised px-2.5 py-1 text-ui-sm font-semibold tracking-wide text-fg-muted uppercase first:border-t-0">
               <span role="columnheader">{group.label}</span>

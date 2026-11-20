@@ -15,7 +15,7 @@ import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { homeAbbreviated } from '../tools/session-info/model';
 import { VOICE } from './copy';
-import { Chip, INPUT, Setting, TEXT_ACTION, UnboundCap, writeSettings } from './parts';
+import { Chip, INPUT, Setting, TEXT_ACTION, TipWord, UnboundCap, WORD_OWNER, writeSettings } from './parts';
 
 // main caches a probe for 10 s per locale; reading it no more often keeps the section and the toolbar in step
 const STATUS_STALE_MS = 10_000;
@@ -95,9 +95,14 @@ function HelperState({ status, error }: { status: VoiceStatus | null; error: str
   const { helper } = status;
   return (
     <>
-      <span className="min-w-0 truncate text-warning" title={helper.path}>
+      <span className="min-w-0 text-warning [overflow-wrap:anywhere]">
         {helper.state === 'failed' ? VOICE.helperFailed(helper.message) : VOICE.helperMissing}{' '}
-        <span className="font-mono">{homeAbbreviated(helper.path)}</span>
+        {/* the exact path is the abbreviated one's tooltip and description, which the keyboard reaches */}
+        <TipWord tip={helper.path}>
+          <span tabIndex={0} className={`font-mono ${WORD_OWNER}`}>
+            {homeAbbreviated(helper.path)}
+          </span>
+        </TipWord>
       </span>
       {status.backend === 'scripted' && <Chip>{VOICE.scripted}</Chip>}
     </>

@@ -17,7 +17,7 @@ import { useSettings } from '../stores/settings';
 import { accessibleText } from '../test-support/accessible-text';
 import { formatClock } from '@shared/app/date-format';
 import { hostStatus, SUPERVISOR_STARTED } from '../test-support/host-status';
-import { settingsBridge } from '../test-support/settings-bridge';
+import { BINARY, settingsBridge } from '../test-support/settings-bridge';
 import { importBridge, RECORD } from '../test-support/browser-import';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { SettingsView } from './SettingsView';
@@ -58,6 +58,13 @@ async function tabTo(from: HTMLElement, owner: HTMLElement) {
   await userEvent.setup().tab();
   expect(document.activeElement).toBe(owner);
 }
+// What Tab stops at before `element`, in the page's order: Tab from there must land on `element`.
+const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function stopBefore(element: HTMLElement): HTMLElement {
+  const stops = [...document.querySelectorAll<HTMLElement>(TABBABLE)].filter((el) => el.closest('[hidden]') === null);
+  return stops[stops.indexOf(element) - 1]!;
+}
+const noteOpen = (of: HTMLElement) => of.querySelector('[data-row-note]')!.hasAttribute('data-open');
 
 describe('a row’s note opens in the row, for the pointer and the keyboard (G13 to G15)', () => {
   it('no row has More or Less; a plain note is out of the resting text and is the row’s description, both sentences', () => {
@@ -90,6 +97,46 @@ describe('a row’s note opens in the row, for the pointer and the keyboard (G13
     expect(accessibleText(mod)).toBe('Messages to you');
     expect(within(mod).getByRole('switch', { name: 'To-human' })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Messages to you', description: 'Agents message you and ask questions you answer in place; a session reads as their report. The view follows at once; the instructions, the next time each session starts.' })).toBe(mod);
+  });
+});
+
+describe('a row whose note has no control to take the keyboard takes Tab itself', () => {
+  it('Plugins in sessions with no plugin listed: Tab stops on the row, which opens its note', async () => {
+    renderView();
+    const plugins = row('Plugins in sessions');
+    await within(plugins).findByText('Your settings turn on no plugins.');
+    await vi.waitFor(() => expect(plugins.tabIndex).toBe(0));
+    await tabTo(stopBefore(plugins), plugins);
+    expect(noteOpen(plugins)).toBe(true);
+    expect(accessibleText(plugins)).toContain('A change applies at a session');
+  });
+
+  it('a starting supervisor with no daemon: Status and a disabled Stop all each take Tab, and their notes open (G130, G136)', async () => {
+    renderView({ 'host.status': () => hostStatus({ state: 'starting', supervisor: null, daemon: null }) });
+    const status = row('Status');
+    await within(status).findByText('Starting');
+    await vi.waitFor(() => expect(status.tabIndex).toBe(0));
+    await tabTo(stopBefore(status), status);
+    expect(noteOpen(status)).toBe(true);
+    const stopAll = row('Stop all');
+    expect(within(stopAll).getByRole('button', { name: 'Stop all sessions…' })).toHaveProperty('disabled', true);
+    await vi.waitFor(() => expect(stopAll.tabIndex).toBe(0));
+    await tabTo(stopBefore(stopAll), stopAll);
+    expect(noteOpen(stopAll)).toBe(true);
+    // a row with a control of its own stays out of the Tab order, the control its owner
+    expect(row('Exit when idle').tabIndex).toBe(-1);
+  });
+
+  it('turning the memory budget off from its switch opens the off note at once, the switch keeping the keyboard (G140)', async () => {
+    renderView();
+    const budget = row('Release idle sessions over a memory limit');
+    const toggle = within(budget).getByRole('switch');
+    act(() => toggle.focus());
+    await userEvent.setup().keyboard(' ');
+    await vi.waitFor(() => expect(budget.dataset.settingsState).toBe('off'));
+    expect(document.activeElement).toBe(toggle);
+    expect(noteOpen(budget)).toBe(true);
+    expect(screen.getByRole('group', { name: 'Release idle sessions over a memory limit', description: 'Session info still shows the memory they use.' })).toBe(budget);
   });
 });
 
@@ -130,7 +177,7 @@ describe('a fact sent to a tooltip has an owner the keyboard reaches', () => {
     expect(tooltip()).toBe('Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.');
   });
 
-  it('the Binary row’s path is its version’s tooltip and is in its note, with the config home (G125, G128)', async () => {
+  it('the Binary row’s exact path is its version’s tooltip and description; its note reads it short, with the config home (G125, G128)', async () => {
     renderView();
     const binary = row('Binary');
     const version = await within(binary).findByText('2.1.287');
@@ -139,8 +186,10 @@ describe('a fact sent to a tooltip has an owner the keyboard reaches', () => {
     const described = (words: string) => (description: string) => description.includes(words);
     await vi.waitFor(() => expect(screen.getByRole('group', { name: 'Binary', description: described('~/.local/share/claude/versions/2.1.287') })).toBe(binary));
     expect(screen.getByRole('group', { name: 'Binary', description: described('Config home · ~/.claude · read-only to MAWS') })).toBe(binary);
-    act(() => version.closest<HTMLElement>('[tabindex="0"]')!.focus());
-    expect(tooltip()).toBe('~/.local/share/claude/versions/2.1.287');
+    const owner = version.closest<HTMLElement>('[tabindex="0"]')!;
+    expect(document.getElementById(owner.getAttribute('aria-describedby')!)!.textContent).toBe(BINARY.path);
+    act(() => owner.focus());
+    expect(tooltip()).toBe(BINARY.path);
   });
 
   it('Status reads its state and its sessions; when, which process and when it exits are its tooltip, with the daemon (G129, G133)', async () => {

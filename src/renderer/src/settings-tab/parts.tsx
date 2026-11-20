@@ -4,7 +4,7 @@
 // declaration (rows.ts). The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G13 to G15): a row is
 // its label and its control at rest; its note opens in the row on pointing or keyboard focus (the shared row note,
 // ui/row-note.tsx) and is its description at all times, with no More and no Less; a line stands at rest.
-import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type RefObject, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
 import type { MawsBridge, SettingsPatch } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
@@ -45,6 +45,24 @@ const SETTING_NOTE = `${SECOND_COLUMN} -mt-0.5 mb-0.5 text-ui-sm leading-normal 
 // outline, so that a second Enter acts on no control of it; Tab then enters its controls. Out of the Tab order.
 export const LANDING = 'rounded-sm outline-accent focus-visible:outline-2';
 
+// What takes the keyboard inside a row: an enabled control or a focusable word (an `aria-disabled` control stays in the
+// Tab order, so it counts). The note's own contents and the row itself do not.
+const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const holdsTabbable = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement>(TABBABLE)].some((el) => el !== row && el.closest('[data-row-note]') === null && !el.closest('[hidden]'));
+
+// The word cut's rule that every note has an owner the keyboard reaches: a row with a note and nothing in it that takes
+// the keyboard (an empty plugin list, a status with no facts, a disabled Stop all) takes Tab itself, so focus opens its
+// note. Read after every render: whatever decides a row's controls (a list read, a status, a busy press) renders the
+// row anew.
+function useTakesTab(row: RefObject<HTMLElement | null>, hasNote: boolean): boolean {
+  const [takes, setTakes] = useState(false);
+  useLayoutEffect(() => {
+    const next = hasNote && row.current !== null && !holdsTabbable(row.current);
+    if (next !== takes) setTakes(next);
+  });
+  return takes;
+}
+
 type Values = Readonly<Record<string, string | null>>;
 // A row of the table: its words are its declaration's, in the state it shows; a repeating row is drawn under its own
 // `label`. `lineEnd` follows the line at rest (Direct login's command and its Copy); `noteEnd` follows the note's words
@@ -57,6 +75,7 @@ type PlainSetting = { row?: undefined; label: string; note?: ReactNode; children
 export function Setting(props: DeclaredSetting | PlainSetting) {
   const id = useId();
   const rowNote = useRowNote();
+  const rowRef = useRef<HTMLDivElement>(null);
   const declared = props.row === undefined ? null : settingsRow(props.row);
   const stateName = props.row === undefined ? null : (props.state ?? 'default');
   useDrawnRow(declared?.id ?? null, stateName);
@@ -84,8 +103,22 @@ export function Setting(props: DeclaredSetting | PlainSetting) {
         </RowNote>
       );
   }
+  const takesTab = useTakesTab(rowRef, note !== null);
+  // The pointer and the focus are tracked whether or not the state shows a note, so a note the keyboard's own change
+  // brings (the memory budget turned off from its switch) opens at once; only the description waits for a note.
+  const { 'aria-describedby': describedBy, ...tracking } = rowNote.rowProps;
   return (
-    <div role="group" aria-labelledby={id} data-settings-row={declared?.id} data-settings-state={stateName ?? undefined} tabIndex={-1} {...(note !== null ? rowNote.rowProps : {})} className={`${SETTING_ROW} ${LANDING}`}>
+    <div
+      ref={rowRef}
+      role="group"
+      aria-labelledby={id}
+      aria-describedby={note === null ? undefined : describedBy}
+      data-settings-row={declared?.id}
+      data-settings-state={stateName ?? undefined}
+      tabIndex={takesTab ? 0 : -1}
+      {...tracking}
+      className={`${SETTING_ROW} ${LANDING}`}
+    >
       <span id={id} className={bare ? 'sr-only' : 'min-w-0 text-fg-muted [overflow-wrap:anywhere]'}>
         {props.label ?? declared!.label}
       </span>

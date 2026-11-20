@@ -52,7 +52,7 @@ export function searchSettings(query: string, { rows, shown, bindings, orgGroups
     if (findsAll(words, text([sectionName]))) results.push({ id: `section:${section}`, name: sectionName, under: null, target: `section:${section}` });
     for (const row of rows) {
       if (row.section !== section) continue;
-      const result = { id: row.id, name: row.label, under: sectionName, target: row.id };
+      const result = { id: row.id, name: row.label, under: sectionName, target: row.landsOn ?? row.id };
       const state = shown.get(row.id);
       if (state !== undefined) {
         const now = row.states[state] ?? {};

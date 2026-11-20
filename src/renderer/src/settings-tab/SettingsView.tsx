@@ -15,6 +15,7 @@
 // dialog naming the page (G1), and no group headings, a gap parting its two runs (G3); the wait for the settings is
 // the quiet spinner (G7).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import type { Settings } from '@shared/ipc/schema';
 import { SessionsSection } from './SessionsSection';
 import { AppearanceSection } from './AppearanceSection';
@@ -34,7 +35,7 @@ import { OrgSection } from './org/OrgSection'; // P5 O8 M1; M4a: the Org page, s
 import { UsageSection } from './UsageSection'; // UX wave U7b (O-47): the usage panel, after Gateway
 import { openCustomize } from '../customize/open';
 import type { SettingsResult } from './search';
-import { landingOf, MARK, RowMark, scrollTopToLand, SettingsSearch } from './SettingsSearch';
+import { landedBox, landingOf, MARK, RowMark, scrollTopToLand, SettingsSearch } from './SettingsSearch';
 
 export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'usage', 'engine', 'supervisor', 'org'] as const; // UX wave U7b: 'usage'
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -114,15 +115,15 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
     const root = body.current;
     const landing = root === null ? null : landingOf(root, result.target);
     if (root === null || landing === null) return;
+    flushSync(() => landing.focus({ preventScroll: true })); // its note opens now, so the scroll below brings it into view too
     const section = landing.closest<HTMLElement>('section[aria-labelledby]');
     const landed = ORDER.find((s) => section?.getAttribute('aria-labelledby') === sectionHeadingId(s));
     if (section !== null && landed !== undefined) {
       const origin = root.getBoundingClientRect().top - root.scrollTop;
-      const box = landing.getBoundingClientRect();
+      const box = landedBox(landing);
       root.scrollTop = scrollTopToLand({ sectionTop: section.getBoundingClientRect().top - origin, rowTop: box.top - origin, rowHeight: box.height, viewHeight: root.clientHeight });
       setActive(landed);
     }
-    landing.focus({ preventScroll: true });
     mark.mark(landing);
   };
   // ⌘F, not ⇧⌘F (Files) nor any other chord on F, from the view itself: a sheet opened from Settings is portaled out of

@@ -230,7 +230,8 @@ describe('the usage panel', () => {
   // W6: from the retired Accounts tab's suite (C11 M5 pins), now the popover's
   it('shows each account’s saved sessions and a reset that passed as 0 % with no reading since', async () => {
     const panel = await openPanel();
-    expect(card(panel, '1@example.test').textContent).toContain('1 saved session');
+    expect(describedBy(emailOf(panel, '1@example.test'))).toContain('1 saved session'); // the email's tooltip and description (G115)
+    expect(accessibleText(card(panel, '1@example.test'))).not.toContain('saved session');
     expect(card(panel, '1@example.test').textContent).not.toContain('Routing here');
     const twoFive = within(card(panel, '2@example.test')).getByRole('meter', { name: 'Five-hour usage' });
     expect(twoFive.getAttribute('aria-valuenow')).toBe('0');

@@ -72,7 +72,7 @@ function expectEveryRowDeclaredAndEveryDeclarationDrawn(): Drawn[] {
     expect(Object.keys(declared!.states), row.id).toContain(row.state);
   }
   const ids = new Set(drawn.map((row) => row.id));
-  for (const declared of SETTINGS_ROWS) expect(ids.has(declared.id) || (declared.revealedBy !== undefined && ids.has(declared.revealedBy)), declared.id).toBe(true);
+  for (const declared of SETTINGS_ROWS) expect(ids.has(declared.id) || [declared.revealedBy, declared.landsOn].some((at) => at !== undefined && ids.has(at)), declared.id).toBe(true); // a control drawn on another row (landsOn) is in the page as that row
   // nothing in the body outside the Org page is drawn outside the table
   const org = document.querySelector('section[aria-labelledby="settings-org"]')!;
   for (const group of document.querySelectorAll('[data-settings-body] [role="group"][aria-labelledby]')) if (!org.contains(group)) expect(group.hasAttribute('data-settings-row'), group.textContent ?? '').toBe(true);
@@ -99,6 +99,7 @@ describe('the row table', () => {
       expect(row.id.startsWith(`${row.section}.`), row.id).toBe(true);
       expect(Object.keys(row.states).length, row.id).toBeGreaterThan(0);
       if (row.revealedBy !== undefined) expect(SETTINGS_ROWS.find((r) => r.id === row.revealedBy)?.section, row.id).toBe(row.section);
+      if (row.landsOn !== undefined) expect(SETTINGS_ROWS.find((r) => r.id === row.landsOn)?.section, row.id).toBe(row.section);
       if (row.repeats) expect(row.revealedBy, row.id).toBeDefined();
     }
     expect(SETTINGS_ROWS.some((row) => row.section === 'org')).toBe(false); // the Org page's rows are not the table's

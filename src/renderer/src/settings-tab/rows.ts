@@ -18,6 +18,7 @@ export interface SettingsRow {
   keywords?: readonly string[]; // other words people use
   revealedBy?: string; // the row whose control makes this one drawn
   repeats?: true; // drawn once per thing made at run time
+  landsOn?: string; // a control drawn on another row: its result lands on that row, never on the control itself
 }
 
 // `note`: what the row keeps for the pointer and the keyboard; `line`: what stands at rest under the control, a
@@ -80,9 +81,9 @@ export const SETTINGS_ROWS: readonly SettingsRow[] = [
   { id: 'usage.accounts', section: 'usage', label: USAGE.claudeTitle, states: NO_NOTE, keywords: ['limit', 'account', 'route', 'codex'] },
 
   { id: 'engine.binary', section: 'engine', label: ENGINE.binary, states: ENGINE.binaryNotes },
-  // the word cut (G126 to G128): Update… is a button on the Binary row, drawn and landed on as this row, its words its
-  // tooltip; the config home is in the Binary row's note
-  { id: 'engine.update', section: 'engine', label: ENGINE.update, states: ENGINE.updateNotes },
+  // the word cut (G126 to G128): Update… is a button on the Binary row, drawn as this row, its words its tooltip; its
+  // result lands on the Binary row, so a second Enter starts no update; the config home is in the Binary row's note
+  { id: 'engine.update', section: 'engine', label: ENGINE.update, states: ENGINE.updateNotes, landsOn: 'engine.binary' },
   { id: 'engine.configHome', section: 'engine', label: ENGINE.configHome, states: NO_NOTE, keywords: [ENGINE.configHomeNote], revealedBy: 'engine.binary' },
 
   { id: 'supervisor.status', section: 'supervisor', label: SUPERVISOR.status, states: SUPERVISOR.statusNotes },

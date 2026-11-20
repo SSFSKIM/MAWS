@@ -104,6 +104,12 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull(); // nothing left to reset
   });
 
+  it('draws no Reset to defaults for saved overrides that change no binding: one equal to its default, one the table ignores (G44)', () => {
+    renderSection({ 'attention.next': 'Cmd+Shift+J', 'composer.submit': 'Cmd+Enter' }); // Send is fixed: its override is never read
+    expect(chordOf('Next Needs-you')).toBe('⌘⇧J');
+    expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull();
+  });
+
   it('draws no Reset to defaults while every binding is its default, and a row’s Change waits for the pointer or the keyboard', () => {
     renderSection();
     expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull();

@@ -50,6 +50,8 @@ const region = (name: string) => screen.getByRole('region', { name });
 const labelsIn = (section: HTMLElement) => [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby')!)!.textContent);
 // the word cut: a row's note, hidden at rest, its words the row's description
 const noteOf = (of: HTMLElement) => of.querySelector<HTMLElement>('[data-row-note]')!;
+// a row's words as the accessibility tree reads them: its description, whether its note is open or not
+const describes = (label: string, words: string) => screen.getByRole('group', { name: label, description: (description) => description.includes(words) });
 const describedBy = (label: string, words: string) => screen.getByRole('group', { name: label, description: (d) => d.includes(words) });
 // the machine's settings answered (by a daemon before the machine route), so the Gateway section's read does not fail
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
@@ -184,8 +186,8 @@ describe('settings tab writes one field per row', () => {
   it('Engine and Sessions: the binary, the config home, and the subagent model as one field', async () => {
     renderView();
     // W13: the installed binary, no pin; the word cut (G125, G128): its path and the config home in the Binary row's note
-    await vi.waitFor(() => expect(noteOf(row('Binary')).textContent).toContain('~/.local/share/claude/versions/2.1.287'));
-    await vi.waitFor(() => expect(noteOf(row('Binary')).textContent).toContain('Config home · ~/.claude · read-only to MAWS'));
+    await vi.waitFor(() => expect(describes('Binary', '~/.local/share/claude/versions/2.1.287')).toBe(row('Binary')));
+    await vi.waitFor(() => expect(describes('Binary', 'Config home · ~/.claude · read-only to MAWS')).toBe(row('Binary')));
 
     const field = within(row('Subagent model')).getByRole('combobox') as HTMLInputElement;
     expect(field.placeholder).toBe('inherit'); // W3: the engine's word for no override
@@ -213,7 +215,7 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));
     expect(b.calls.find((c) => c.name === 'layout.pickFiles')!.input).toEqual({ kind: 'files', directory: null, multiple: false });
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
-    await vi.waitFor(() => expect(noteOf(row('Binary')).textContent).toContain('/opt/claude/2.1.290/claude'));
+    await vi.waitFor(() => expect(describes('Binary', '/opt/claude/2.1.290/claude')).toBe(row('Binary')));
     expect(within(row('Binary')).queryByText(/re-pin|refuse/)).toBeNull(); // W13: a version never refuses
     // C12; P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write (P5 O7 M9: and Gateway its default route)
     const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name).filter((name) => name !== 'plugins.list' && name !== 'fs.state' && name !== 'machineSettings.get'); // P5 O7 M9: Gateway's default route, read again at each settings change
@@ -725,17 +727,21 @@ describe('settings view lists Voice', () => {
   });
 
   it('draws the Helper and Recognition rows while the probe reads, with their words of waiting, and not once it answers ready', async () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     expect(row('Helper').textContent).toContain('Reading…'); // before the probe's first answer
     expect(row('Recognition').textContent).toContain('Reading…'); // stays (G58)
     await vi.waitFor(() => expect(screen.queryByRole('group', { name: 'Helper' })).toBeNull());
   });
 
-  it('a missing helper shows its path and how to build it', async () => {
+  it('a missing helper shows its path, the exact one its tooltip on a word the keyboard reaches, and how to build it', async () => {
+    const exact = '/Users/tester/build/voice-helper/maws-voice-helper';
     renderView(SETTINGS_DEFAULTS_V21, null, {
-      'voice.status': status({ helper: { state: 'missing', path: '/repo/build/voice-helper/maws-voice-helper' }, permission: null, supportsOnDevice: null }),
+      'voice.status': status({ helper: { state: 'missing', path: exact }, permission: null, supportsOnDevice: null }),
     });
-    await vi.waitFor(() => expect(row('Helper').textContent).toContain('/repo/build/voice-helper/maws-voice-helper'));
+    const shown = await within(await screen.findByRole('group', { name: 'Helper' })).findByText('~/build/voice-helper/maws-voice-helper');
+    expect(shown.tabIndex).toBe(0);
+    expect(shown.hasAttribute('title')).toBe(false);
+    expect(document.getElementById(shown.getAttribute('aria-describedby')!)!.textContent).toBe(exact);
     expect(row('Helper').textContent).toContain('pnpm build:helper'); // import.meta.env.DEV holds under vitest
     expect(row('Microphone').textContent).toBe('MicrophoneUnknown'); // the word cut (G55)
     expect(row('Recognition').textContent).toBe('RecognitionUnknown');
