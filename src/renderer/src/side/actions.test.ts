@@ -75,7 +75,10 @@ describe('a side thread whose setup waits on a card', () => {
     fake = needsTrust();
     window.maws = fake.client as unknown as PreloadBridge;
     await expect(promoteSide(A, 'Now fix it.')).resolves.toEqual({ ok: true });
-    const display = promotionMessage([{ question: 'Word?', response: 'ZEBRA' }], 'Now fix it.');
+    // ticket 733a: the thread's session does not exist yet, so the segment's id is random
+    const docked = useSetup.getState().cards.get(CHILD) as { message: { display: string } };
+    const id = /<pasted_content id="([0-9a-f]{4})">/.exec(docked.message.display)?.[1] ?? '';
+    const display = promotionMessage([{ question: 'Word?', response: 'ZEBRA' }], 'Now fix it.', id);
     expect(useSetup.getState().cards.get(CHILD)).toMatchObject({ kind: 'trust', message: { content: display, display } });
   });
 });

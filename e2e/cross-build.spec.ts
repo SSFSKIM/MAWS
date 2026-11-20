@@ -137,6 +137,9 @@
 // commit's side thread, to the peer), no new stored form: the git reads an older daemon lacks, its acting pane over this
 // build's daemon, and a commit's comment in a message's words and a side thread's lineage; their block is at the end of
 // this file, and their row is in U13a's UC-14 coverage table.
+// Ticket 733a: (composed forms, to the peer), a form's content inside a pasted segment and an attached read's JSON
+// inside one, in a session's transcript, drawn by the three older builds and by this one; its block is at the end of this
+// file, and its two rows are in U13a's UC-14 coverage table.
 // UX wave U2b: (to-human, from the peer) and (to-human, to the peer), the to-human view across the cutover (who draws, the
 // launch's reservation, the summaries' switch); their block is at the end of this file, and their rows are in U13a's
 // UC-14 coverage table.
@@ -195,7 +198,10 @@ import { stubSpec, type StubEngine } from './support/stub-engine'; // P5 O16 M3c
 import { askFixture } from './support/maws-tools'; // board ticket 711: the recorded ask with ids the model chose
 import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
 import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's anchor on a commit's line
-import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
+import { commentsMessage, PROMOTION_HEAD, promotionMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment; ticket 733a: a promotion
+import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 733a: the engine's frame, as its parser reads it
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a: a segment's id
+import { linkedReadBlock } from '../src/shared/maws/linked-read'; // ticket 733a: an attached read, as this build's host writes it
 import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
 import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
 import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // UX wave U2b: the advertisement's variable
@@ -209,6 +215,10 @@ import type { MachineRef } from '../src/shared/machine/ref'; // UX wave U6f
 import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
 import { exchangeJournal } from './support/to-human-replay'; // UX wave U2b: the live launch's turn (the cross-build scenes' fix)
 import { zoomOfPage, zoomTo } from './support/zoom'; // UX wave U6b-5b: the window's zoom
+// Ticket 733a (its document, Design 3): the ids of the pasted segments a text holds, in order. A form composed for the
+// main conversation, and a read the host attaches, carry the session's own (`pastedTagId` of its engine id); a thread's
+// first message, composed before its session exists, a random one, so a scene reads that id from what was sent.
+const segmentIds = (text: string) => [...text.matchAll(PASTED_BLOCK)].map((match) => match[1]!);
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1921,6 +1931,15 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
 //   | UX wave U5b-2: Review's and Source control's  | no new stored form; the reads, lineage and the        | no new stored form; the same block, below          |
 //   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
+//   | ticket 733a: a form with a segment (a         | (composed forms, to the peer): the peer draws the     | no older build writes a segment into a form; this  |
+//   | promotion's exchange, a plan, a comment's     | promotion as a side question, its exchange behind a   | build's reading of what they wrote is held by      |
+//   | quoted line), the user message kept in the    | pasted chip that opens to it, never the tags; (a      | composed-rows.test.ts "a row of no form carries no |
+//   | session's journal and transcript              | commit's comment, to the peer): the quoted line       | ranges; the pin's writers' rows are the pin's      |
+//   |                                               | behind that chip                                      | rows"; the return: this build draws it in place    |
+//   | ticket 733a: an attached read whose JSON      | (composed forms, to the peer): the peer recognises no | the return: the file chip, "<title>, read at       |
+//   | stands in a segment, a text block of the      | read; the bubble's text recorded whole (the words,    | revision N"; a read an older build attached is     |
+//   | user message                                  | the reminder's tags and lead as text, the JSON behind | held by user-text.test.ts "a read written before   |
+//   |                                               | a pasted chip that opens to it)                       | this landing is the same chip"                     |
 //   | `owner_channel_sessions.advertised` (UX wave  | (to-human, to the peer): the peer opens the index,    | (to-human, from the peer): a launch the peer       |
 //   | U2b): the launch's reservation, an added      | lists the session, draws its own bar and record row,  | decided at 8 reads as MAWS's to draw (`drawnBy`    |
 //   | nullable column                               | launches the session again (8, no summaries value),   | `maws`, the mirror); the return of (to-human, to   |
@@ -3067,11 +3086,12 @@ function trustIn(s: Scratch, folders: string[]): void {
   const state = (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}) as { projects?: Record<string, unknown> };
   writeFileSync(path, `${JSON.stringify({ ...state, projects: { ...state.projects, ...Object.fromEntries(folders.map((folder) => [folder, { hasTrustDialogAccepted: true }])) } }, null, 2)}\n`);
 }
-// One row appended to a transcript, chained to its last: a person's message (`text`), or the engine's prompt snapshot
-function appendTurn(path: string, sid: string, cwd: string, gitBranch: string, text: string | { snapshot: string }): void {
+// One row appended to a transcript, chained to its last: a person's message (`text`, or its text blocks: ticket 733a), or
+// the engine's prompt snapshot
+function appendTurn(path: string, sid: string, cwd: string, gitBranch: string, text: string | readonly { type: 'text'; text: string }[] | { snapshot: string }): void {
   const rows = existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown }) : [];
   const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
-  const said = typeof text === 'string' ? { type: 'user', message: { role: 'user', content: text } } : { type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: [text.snapshot] } };
+  const said = typeof text === 'string' || Array.isArray(text) ? { type: 'user', message: { role: 'user', content: text } } : { type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: [(text as { snapshot: string }).snapshot] } };
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `${JSON.stringify({ parentUuid, isSidechain: false, ...said, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd, gitBranch, sessionId: sid, version: '2.1.283' })}\n`);
 }
@@ -4779,7 +4799,8 @@ test('(file frame, both ways) this build’s window on the peer’s unit mawsd d
 //                                          anchor schema: the key its tag reader and its lineage refuse. A session's
 //                                          transcript holds a comment on a commit's line, its text written by this build's
 //                                          `commentsMessage`; the peer, on its own daemon, draws the message's words with
-//                                          the full hash and the quoted line as code, and no chip.
+//                                          the full hash and no anchor chip. From ticket 733a the quoted line stands in a
+//                                          pasted segment, which the peer draws as a paste's chip that opens to the line.
 //   (a commit's side thread, to the peer)  the same probe. This build, on its own daemon, opens a commit from Source
 //                                          control in Review, comments on a line with "Send to main" unticked, and the
 //                                          side thread starts on the replay, its first message the tag with the hash.
@@ -4958,14 +4979,17 @@ test('(source control, from the peer) the peer’s app on this build’s unit ma
   });
 });
 
-test('(a commit’s comment, to the peer) a comment this build wrote on a commit’s line, in a session’s transcript, is drawn by the peer as the message’s words and the quoted line, with no chip', async () => {
+test('(a commit’s comment, to the peer) a comment this build wrote on a commit’s line, in a session’s transcript, is drawn by the peer as the message’s words with the quoted line behind its pasted chip, and no anchor chip', async () => {
   const { here, peer } = builds();
   test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
   test.setTimeout(180_000);
   await withScratch('xb-u5b-comment', async (s) => {
     const sha = u5bRepo(s);
     const anchor = commitAnchor(U5B_APP, 3, sha);
-    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'main');
+    // ticket 733a: a comment to the main conversation goes with the session's own segment id (Design 3, "The tag id")
+    const tag = pastedTagId(s.engineId);
+    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT, tag), screenshot: false }], 'main');
+    expect(segmentIds(text), 'this build wrote the quoted line in one segment').toEqual([tag]);
     appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', text);
     const said = [`${here.label} (wire ${wireOf(here)}) wrote a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) draws the session`];
 
@@ -4976,10 +5000,16 @@ test('(a commit’s comment, to the peer) a comment this build wrote on a commit
     const bubble = run.page.locator('[data-region="main"] [data-bubble]').filter({ hasText: U5B_COMMENT });
     await expect(bubble, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
     await expect(bubble, 'its words name the commit by its full hash').toContainText(`commit ${sha}`);
-    await expect(bubble.locator('code'), 'the quoted line, as code').toHaveText([U5B_CHANGED]);
-    await expect(bubble.locator('[data-chip="anchor"]'), 'no chip').toHaveCount(0);
+    // ticket 733a (Design 8): the peer reads no anchor whose tag carries `commit`, so to it the message is a person's text,
+    // and the quoted line's segment is the chip a paste gets, which opens to the line as it was sent (its code span)
+    const quoted = bubble.locator('.transcript-pasted');
+    await expect(quoted.locator('button'), 'the quoted line behind its pasted chip').toHaveText('Pasted text #1 · 1 lines');
+    await quoted.locator('button').click();
+    await expect(quoted.locator('pre'), 'opened: the line as sent').toHaveText(`\`${U5B_CHANGED}\``);
+    await expect(bubble, 'never the tags').not.toContainText('pasted_content');
+    await expect(bubble.locator('[data-chip="anchor"]'), 'no anchor chip').toHaveCount(0);
     expect(run.maws.consoleErrors()).toEqual([]);
-    said.push(`  ${peer.label}: the words with commit ${sha.slice(0, 7)}…, the quoted line as code, no chip`);
+    said.push(`  ${peer.label}: the words with commit ${sha.slice(0, 7)}…, the quoted line behind "Pasted text #1 · 1 lines", which opens to it, no anchor chip`);
     await s.quit(run);
     record(said);
   });
@@ -5030,7 +5060,11 @@ test('(a commit’s side thread, to the peer) a side thread this build opened fr
     await expect(pane.getByText(U5B_THREAD_REPLY), 'the side thread answered on the replay').toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await statusOf(page, child)).turn, { timeout: 20_000, message: 'its turn ended' }).toBeNull();
     const written = s.journal(child).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => (r.frame.message as { content: unknown }).content);
-    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'thread') }]]);
+    // ticket 733a: the quoted line in one segment of a random id, since main composed the message before the thread's
+    // session existed (Design 3, "The tag id"); the bytes compared at the id that was sent
+    const ids = segmentIds(written.length === 1 ? String((written[0] as { text?: unknown }[])[0]?.text ?? '') : '');
+    expect(ids, 'its first message: the quoted line in one segment').toHaveLength(1);
+    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT, ids[0]!), screenshot: false }], 'thread') }]]);
     const lineage = value(await invoke(page, 'session.get', { appSessionId: child }))?.lineage;
     expect(lineage, 'stored without commit and path').toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: U5B_PARENT, anchor: { kind: 'file-line', locator: anchor.locator, label: anchor.label, line: 3, side: 'new' }, openedBy: 'comment' });
     // what the engine left in its store for the parent's first turn (the replay writes none), for the peer to open
@@ -5065,6 +5099,109 @@ test('(a commit’s side thread, to the peer) a side thread this build opened fr
       await s.quit(run);
       record(said);
     });
+  });
+});
+
+// ---- Ticket 733a: what MAWS composes, framed, read by the three older builds (UC-14) ---------------------------------
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, §F S3 and Design 8) stores nothing new,
+// but what it sends is kept in the engine's transcript and the host's journal, which an older build opens. The content
+// a model, a command or a page wrote now stands inside a pasted segment in MAWS's own forms (a promoted side question's
+// exchange, a plan, a comment's quoted line), and an attached read's JSON stands inside one in its block. This build
+// draws a form's segment in place. The older builds read the forms by the same constants and tag and draw the segment as
+// a person's paste, a chip that opens to it; they recognise no read whose JSON stands in a segment, so the read's block
+// is drawn in the person's bubble, after their words. The scene seeds a session's transcript with this build's writers'
+// bytes (a promotion, and a message that links an artifact with its read attached, as the host sends it), opens it in the
+// peer and then here, and records what each draws, whole. Its peers are master at b89d6d1d7, build F (f1852de3a) and the
+// build in use (2c7044231), every one before this landing, the runs of record one with each; a peer that draws the forms
+// in place (its src/shared/engine/composed-content.ts exists) skips, saying so.
+//   (composed forms, to the peer)  the peer draws the promotion's row as a side question (its "Side question" chip),
+//                                  its exchange behind a pasted chip that opens to the exchange, never the tags; and the
+//                                  message with the read: its bubble's text, whole, recorded and asserted, with no file
+//                                  chip, the pasted chip opening to the read's JSON. Then this build draws both from the
+//                                  same transcript, the control: the exchange as text, and the words with the read's
+//                                  file chip. Each waits on its row by the bubble's words, as the comment's scene does.
+const drawsFormsInPlace = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/shared/engine/composed-content.ts'));
+const drawsFormsInPlaceWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has src/shared/engine/composed-content.ts: it draws ticket 733a's forms as this build does; the runs of record are master at b89d6d1d7, --peer-exact f1852de3a and --peer-exact 2c7044231`;
+const XB_EXCHANGES = [
+  { question: 'Which colour are the invented harbour’s lamps?', response: 'Amber, on every pier.' },
+  { question: 'And on the breakwater?', response: 'Green.' },
+];
+const XB_EXCHANGE = XB_EXCHANGES.map(({ question, response }) => `Q: ${question}\nA: ${response}`).join('\n\n'); // the segment's body
+const XB_ARTIFACT = 'a7c3e9d1-5b2f-4e8a-9c6d-1f0e2d3c4b5a'; // an invented store id
+const XB_TITLE = 'Harbour notes';
+const XB_READ = { status: 'read', artifactId: XB_ARTIFACT, kind: 'document', title: XB_TITLE, revision: 3, markdown: '# Harbour notes\n\nThe lamps are amber.\n' };
+const XB_WORDS = `Tighten the opening of [${XB_TITLE}](maws-artifact:${XB_ARTIFACT}).`;
+const XB_WORDS_DRAWN = `Tighten the opening of ${XB_TITLE}.`; // the link drawn as its words
+const XB_READ_CHIP = `${XB_TITLE}, read at revision 3`; // the file chip this build draws for the read (transcript/model/user-text.ts)
+
+test('(composed forms, to the peer) a promotion and a message with an attached read, written by this build into a session’s transcript, are drawn by the peer with each segment as a pasted chip that opens to it, never the tags, its bubble’s text recorded whole; this build draws them in place and as the read’s chip', async () => {
+  const { here, peer } = builds();
+  test.skip(drawsFormsInPlace(peer), drawsFormsInPlaceWhy(peer));
+  test.setTimeout(300_000);
+  await withScratch('xb-733a-forms', async (s) => {
+    // what this build sends: a thread's first message with a random segment id, a read with the session's own
+    const promotion = promotionMessage(XB_EXCHANGES, null, pastedTagId(null));
+    const block = linkedReadBlock(JSON.stringify(XB_READ, null, 2), pastedTagId(s.engineId));
+    expect(block, 'this build attaches the read').not.toBeNull();
+    expect(segmentIds(promotion), 'the exchange in one segment').toHaveLength(1);
+    expect(segmentIds(block!), 'the read in one segment').toEqual([pastedTagId(s.engineId)]);
+    expect(block!, 'the segment holds the read as one line of JSON').toContain(`\n${JSON.stringify(XB_READ)}\n`);
+    const transcript = transcriptIn(s, s.repo, s.engineId);
+    appendTurn(transcript, s.engineId, s.repo, 'main', promotion);
+    appendTurn(transcript, s.engineId, s.repo, 'main', [{ type: 'text', text: XB_WORDS }, { type: 'text', text: block! }]);
+    const said = [`${here.label} (wire ${wireOf(here)}) wrote a promotion and a message with an attached read; ${peer.label} (wire ${wireOf(peer)}) draws the session, then ${here.label}`];
+
+    // The rows of `page`'s session: the promotion by its head, the message by its words
+    const rowsOf = (page: Page) => {
+      const main = page.locator('[data-region="main"]');
+      return { promoted: main.locator('[data-bubble]').filter({ hasText: PROMOTION_HEAD }), read: main.locator('[data-bubble]').filter({ hasText: 'Tighten the opening of' }) };
+    };
+
+    // the peer: the segments as pasted chips, the read not recognised
+    const run = await s.launch({}, peer.root);
+    await s.ready(run.page, () => true, 60_000);
+    const id = await s.record(run.page);
+    await (await sidebarRow(run.page, { appSessionId: id })).click();
+    const theirs = rowsOf(run.page);
+    await expect(theirs.promoted, 'the promotion drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(theirs.read, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
+    const drawn = { promotion: await theirs.promoted.locator('[data-user-content]').innerText(), read: await theirs.read.locator('[data-user-content]').innerText() };
+    record([`  ${peer.label}: the promotion's bubble reads ${JSON.stringify(drawn.promotion)}`, `  ${peer.label}: the message's bubble reads ${JSON.stringify(drawn.read)}`]); // before any assertion, so a failing run keeps it
+    await expect(theirs.promoted.locator('[data-chip="anchor"][data-anchor-kind="none"]'), 'read as a side question').toHaveText('Side question');
+    const exchange = theirs.promoted.locator('.transcript-pasted');
+    await expect(theirs.promoted.locator('[data-user-content]'), 'the head, the exchange behind its chip, the typed words').toHaveText(`Side question ${PROMOTION_HEAD} Pasted text #1 · ${XB_EXCHANGE.split('\n').length} lines Continue from here.`, { useInnerText: true });
+    await exchange.locator('button').click();
+    await expect(exchange.locator('pre'), 'opened: the exchange as sent').toHaveText(XB_EXCHANGE);
+    await expect(theirs.promoted, 'never the tags').not.toContainText('pasted_content');
+    const json = theirs.read.locator('.transcript-pasted');
+    await expect(
+      theirs.read.locator('[data-user-content]'),
+      'the words, then the read’s block as text: the reminder’s tags and its lead, the JSON behind a pasted chip',
+    ).toHaveText(`${XB_WORDS_DRAWN} <system-reminder> The user's message links the MAWS artifact ${XB_TITLE}. Its content as mcp__maws__artifact_read returns it, read when the message was sent: Pasted text #1 · 1 lines </system-reminder>`, { useInnerText: true });
+    await expect(theirs.read.locator('[data-chip="file"]'), 'no read recognised').toHaveCount(0);
+    await json.locator('button').click();
+    await expect(json.locator('pre'), 'opened: the read as sent').toHaveText(JSON.stringify(XB_READ));
+    await expect(theirs.read, 'never the tags').not.toContainText('pasted_content');
+    expect(run.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${peer.label}: the promotion read as a side question, its exchange behind "Pasted text #1", which opens to it; the read not recognised, its block drawn after the words with its JSON behind "Pasted text #1", which opens to it; no tag drawn`);
+    await s.quit(run);
+    await endProfileProcesses(s.userData); // this build's app starts a mawsd and an engine host of its own build
+
+    // this build, the control: the exchange in place and the read as its chip
+    const back = await s.launch();
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    await (await sidebarRow(back.page, { appSessionId: id })).click();
+    const ours = rowsOf(back.page);
+    await expect(ours.promoted, 'the promotion drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(ours.promoted.locator('[data-user-content]'), 'the exchange read as text').toHaveText(`Side question ${PROMOTION_HEAD} ${XB_EXCHANGE} Continue from here.`, { useInnerText: true });
+    await expect(ours.promoted.locator('.transcript-pasted'), 'no chip: the segment drawn in place').toHaveCount(0);
+    await expect(ours.read, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(ours.read.locator('[data-chip="file"]'), 'the read, as its chip').toHaveText(XB_READ_CHIP);
+    await expect(ours.read.locator('[data-user-content]'), 'the words and the read’s chip, nothing of the block').toHaveText(`${XB_WORDS_DRAWN} ${XB_READ_CHIP}`, { useInnerText: true });
+    expect(back.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${here.label}: the exchange drawn in place under the "Side question" chip; the words with the chip "${XB_READ_CHIP}"`);
+    await s.quit(back);
+    record(said);
   });
 });
 

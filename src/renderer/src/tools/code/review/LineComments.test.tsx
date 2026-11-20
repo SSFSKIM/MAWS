@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commentsMessage, MESSAGE_COMMENTS_MAX, type MessageComment } from '@shared/anchor/message';
+import { commentInPlace /* ticket 733a */, commentsMessage, MESSAGE_COMMENTS_MAX, type MessageComment } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { addressOf } from '@shared/machine/address';
@@ -219,6 +219,15 @@ async function mountReview() {
 // The library draws a widget or an extend row only where its table's wrapper has a width.
 const WRAPPERS = '.unified-diff-table-wrapper, .old-diff-table-wrapper, .new-diff-table-wrapper';
 
+
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3): a quoted line stands inside a
+// pasted segment; a comment's words read in place are what they were before
+const wordsInPlace = (input: unknown) => {
+  const { comments } = input as { comments: { text: string }[] };
+  for (const comment of comments) if (comment.text.includes('`')) expect(comment.text).toMatch(/^(Before the change:\n)?\n\n<pasted_content id="[0-9a-f]{4}">\n/);
+  return { ...(input as object), comments: comments.map((comment) => ({ ...comment, text: commentInPlace(comment.text).text })) };
+};
+
 describe('comments on lines in Review', () => {
   const offs: (() => void)[] = [];
   beforeAll(async () => {
@@ -293,7 +302,7 @@ describe('comments on lines in Review', () => {
     expect(sendButton().textContent).toBe('Send 2 comments');
     fireEvent.click(sendButton());
     await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
-    expect(main.callsOf('side.comment.content')).toEqual([
+    expect(main.callsOf('side.comment.content').map(wordsInPlace)).toEqual([
       {
         comments: [
           { anchor: { kind: 'file-line', locator: '/repo/src/other.ts#L2', label: 'other.ts:2', path: '/repo/src/other.ts', line: 2 }, text: '`export const b = 2;`\nName it for what it counts.', screenshot: null },
@@ -436,7 +445,7 @@ describe('comments on lines in Review', () => {
     await painted(() => lineLeft()?.contains(card()) ?? false);
     fireEvent.click(sendButton());
     await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
-    expect(main.callsOf('side.comment.content')).toEqual([
+    expect(main.callsOf('side.comment.content').map(wordsInPlace)).toEqual([
       { comments: [{ anchor: { kind: 'file-line', locator: '/repo/src/report.ts#L12', label: 'report.ts:12', path: '/repo/src/report.ts', line: 12 }, text: '`return quoted(value);`\nQuote only where a comma is.', screenshot: null }] },
     ]);
     await painted(() => card() === null && pass() === null && lineLeft() === null);
@@ -1158,7 +1167,7 @@ describe('comments on lines in Review', () => {
       type('Quote only where a comma or a quote is.');
       fireEvent.click(sendButton());
       await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
-      expect(main.callsOf('side.comment.content')).toEqual([
+      expect(main.callsOf('side.comment.content').map(wordsInPlace)).toEqual([
         { comments: [{ anchor: commitLineAnchor('src/report.ts', 12, 'new', ON), text: '`return quoted(value);`\nQuote only where a comma or a quote is.', screenshot: null }] },
       ]);
     });

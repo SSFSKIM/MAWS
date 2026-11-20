@@ -10,6 +10,7 @@
 // every comment with text, as one message, one flight, settled by §D's table.
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import { commentsMessage, promotionMessage, quotedComment /* UX wave U5b */ } from '@shared/anchor/message';
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryKey } from '@shared/ipc/schema/lane-a';
@@ -71,7 +72,9 @@ export async function promoteSide(parent: AppSessionId, text: string | null, cli
   const exchanges = promotable(sidePaneOf(useSidePane.getState(), parent).exchanges ?? []);
   const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'btw', exchanges, text } });
   if (!result.ok) return { ok: false, error: result.error.message };
-  const adopted = await adoptFork(parent, result.value, threadMessage(promotionMessage(exchanges, text)));
+  // ticket 733a: the thread's session does not exist yet, so its segment's id is random (Design 3, "The tag id"); main
+  // composes what is sent with an id of its own, and this copy is only what a declined setup hands back
+  const adopted = await adoptFork(parent, result.value, threadMessage(promotionMessage(exchanges, text, pastedTagId(null))));
   if (!adopted.ok) return adopted;
   revealNewThread(parent, adopted.appSessionId);
   return { ok: true };
@@ -212,7 +215,8 @@ export async function sendPass(pass: string, client: MawsBridge = ipc): Promise<
   const flight = launchFlight(pass);
   if (flight === null) return;
   const settlements = flightSettlements(flight);
-  const comments = flight.comments.map((comment) => ({ anchor: comment.anchor, text: wordsAsSent(comment), screenshot: comment.screenshot }));
+  const tagId = quoteTagId(flight.appSessionId, flight.toMain);
+  const comments = flight.comments.map((comment) => ({ anchor: comment.anchor, text: wordsAsSent(comment, tagId), screenshot: comment.screenshot }));
   const outcome = await sendComments(flight.appSessionId, comments, flight.toMain, { reveal: () => revealsThread(flight) }, client);
   for (const settle of settlements) settle(outcome.ok);
   land(flight, outcome);
@@ -221,12 +225,20 @@ export async function sendPass(pass: string, client: MawsBridge = ipc): Promise<
 // UX wave U5b (fix 1): a comment's words with its line quoted, as far as the commands' cap on a comment's text allows
 // (SIDE_QUESTION_CAP), so a comment whose words alone fit is never refused for its quote. What does not fit is left
 // out, the span first, then the caption; the words go as typed.
-function wordsAsSent({ anchor, quote, text }: PassComment): string {
+function wordsAsSent({ anchor, quote, text }: PassComment, tagId: string): string {
   const words = text.trim();
-  const quoted = quotedComment(anchor, quote ?? null, words);
+  const quoted = quotedComment(anchor, quote ?? null, words, tagId);
   if (quoted.length <= SIDE_QUESTION_CAP) return quoted;
-  const captioned = quotedComment(anchor, null, words);
+  const captioned = quotedComment(anchor, null, words, tagId);
   return captioned.length <= SIDE_QUESTION_CAP ? captioned : words;
+}
+
+// Ticket 733a (Design 3, "The tag id"): a quoted line's segment takes the id of the conversation it is written into, the
+// session's engine id for a comment to main where the window holds it; a thread's first message is composed before its
+// session exists, and a session whose id the window does not hold gives none: four random digits.
+function quoteTagId(parent: AppSessionId, toMain: boolean): string {
+  const { engine, records } = useSessions.getState();
+  return pastedTagId(toMain ? (engine.get(parent)?.engineSessionId ?? records.get(parent)?.engineSessionId ?? null) : null);
 }
 
 // A side thread the flight opened is revealed in the parent's pane unless a card on one of its comments becomes it; a

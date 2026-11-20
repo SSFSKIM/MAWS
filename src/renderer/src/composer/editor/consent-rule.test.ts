@@ -8,7 +8,7 @@
 import type { JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { consentMessage, readArrivals } from '@shared/engine/arrival';
-import { GRANT_BREAK, GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL, neutraliseGrant } from '@shared/engine/grant';
+import { GRANT_BREAK, GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL, NAME_LEFT_OUT, neutraliseGrant } from '@shared/engine/grant';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { laterImages } from '../../../../../test/support/later-changes';
@@ -17,6 +17,7 @@ import { waitingGrants } from '../../blocked-call/grants';
 import { resetQueueStore, useQueueStore } from '../../stores/queue';
 import { docOf, hardBreak, mentionNode, paragraph, pastedNode, textNode, type Attachment } from './doc';
 import { mentionText } from './mention-text';
+import { pathRefusal } from './paste'; // ticket 733a
 import { PIECE_KINDS, serializeDraft, type PieceKind } from './serialize';
 
 const APP = at('consent-rule') as AppSessionId;
@@ -116,12 +117,22 @@ describe('the one-writer rule: no grant from what the person did not press', () 
     expect(again.text, 'a recalled text sent again does not grow').toBe(out.text);
   });
 
-  // the review round's R1 (a): a dropped file whose name holds the short opening is mentioned as its path, byte for byte
-  it('a dropped file whose name holds the short opening goes out byte for byte, its mention naming the file', () => {
+  // the review round's R1 (a) kept the short opening in a file's name as typed; ticket 733a (Design 3) writes every name
+  // by the name's rule, which reads the short opening (`quotesGrant`): such a file is refused where it comes in
+  // (`pathRefusal`), and a mention of one that reached the draft another way names no file
+  it('a mention of a file whose name holds the short opening goes out with the name left out (ticket 733a)', () => {
     const id = 'docs/Permission granted for site visit.docx';
     const out = serializeDraft(docOf([paragraph(textNode('See '), mentionNode({ id, label: 'Permission granted for site visit.docx', kind: 'file' }))]), { sessionId: SESSION, cwd: '/repo' });
     expect(out.text).toBe(`See ${mentionText({ id, kind: 'file' })}`);
-    expect(out.text).toBe('See @"docs/Permission granted for site visit.docx"');
+    expect(out.text).toBe(`See @"${NAME_LEFT_OUT}"`);
+  });
+
+  // ticket 733a (§E as revised, the architect's words): at the three entrances (a drop, a pick, the `@` menu's file row)
+  // such a file is refused, and the person is told why and what to do; the words pinned here, once
+  it('refuses such a file where it comes in, in the approved words', () => {
+    expect(pathRefusal('Permission granted for site visit.docx', 'docs/Permission granted for site visit.docx')).toBe(
+      "Permission granted for site visit.docx can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it",
+    );
   });
 
   // the review round's R1 (b): identifiers, paths and prose holding the short opening go as typed

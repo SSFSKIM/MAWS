@@ -17,6 +17,7 @@ import type { AttachedBlock } from '../composer/editor/pasted-block'; // UX wave
 import { oneLine } from '../composer/editor/mention-text'; // board ticket 739
 import type { Anchor } from '@shared/anchor/anchor'; // E11
 import type { AnchorFrame } from '../transcript/model/rows'; // E11
+import type { StoredForm } from '../composer/composed-prefill'; // ticket 733a
 
 export interface Prefill {
   text: string; // the row's text with `[Pasted text #n +L lines]` placeholders in place
@@ -40,6 +41,7 @@ export interface InlineEdit {
   bodies: NonNullable<Prefill['bodies']>;
   images: NonNullable<Prefill['images']>;
   framing?: { anchor: Anchor } & AnchorFrame; // E11 (scale-review C scalpel-2#1): an anchored bubble's framing, which the resend restores around the edited comment
+  form: StoredForm; // ticket 733a (Design 5): the stored row's form, read by its own reader when the edit began; null, a person's message
 }
 
 // P3-G: `signal` cancels an attachment still pending (§D4.2: Escape discards everything).

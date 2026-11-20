@@ -37,6 +37,7 @@ import type { ArtifactStore } from './documents/store'; // P3-A
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
 import { withLinkedReads, type Admission, type ReadAnswer } from './linked-reads'; // P4-A3
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a
 import type { SendContent } from '@shared/engine/session-state-store'; // P4-A3
 import type { McpToolDefinition } from './tool-server/server';
 import { toolHoldFor } from './tool-server/e2e-hold'; // P5 O16 M3c
@@ -132,7 +133,7 @@ export class SessionMaws {
   // migrates and answers exactly as the agent's read would.
   async withLinkedReads(content: SendContent): Promise<Prepared> {
     try {
-      const outcome = await withLinkedReads(content, (link, admit) => this.readLinked(link, admit));
+      const outcome = await withLinkedReads(content, (link, admit) => this.readLinked(link, admit), pastedTagId(this.host.sessionId())); // ticket 733a: the session's tag id
       return { content: outcome.content, settle: (written) => outcome.settle(written) };
     } catch (error) {
       this.host.log(`linked reads not attached: ${error instanceof Error ? error.message : String(error)}`); // the message goes as written

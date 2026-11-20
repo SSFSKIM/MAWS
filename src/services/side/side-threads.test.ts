@@ -204,7 +204,7 @@ describe('a side thread’s title', () => {
   });
 
   it('is "Side question" for a promotion, whatever its message', () => {
-    expect(sideThreadTitle({ openedBy: 'btw' }, promotionMessage([{ question: 'q', response: 'r' }], null))).toBe('Side question');
+    expect(sideThreadTitle({ openedBy: 'btw' }, promotionMessage([{ question: 'q', response: 'r' }], null, 'a1b2'))).toBe('Side question');
     expect(sideThreadTitle({ openedBy: 'btw' }, null)).toBe('Side question');
   });
 });

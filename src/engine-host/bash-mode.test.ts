@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { pastedTagId } from '@shared/composer/pasted-framing';
+import { consentMessage } from '@shared/engine/arrival';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { replayedSession, scriptedSession } from './conformance/session-harness';
@@ -6,6 +8,7 @@ import { BashMode, bashCommand } from './bash-mode';
 
 const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
 const flush = () => new Promise((r) => setImmediate(r));
+const TAG = pastedTagId('fd4c2f15-a381-402d-a125-a0f08a713e9c'); // the recorded session's id (pass2/bash-context-echoed seq 7)
 
 afterEach(() => {
   vi.useRealTimers();
@@ -29,7 +32,8 @@ describe('bash mode echo and receipt', () => {
     const echo = outs[1]!;
     expect(echo).toEqual({
       type: 'user', uuid: echo.uuid, shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' },
-      message: { role: 'user', content: '<bash-input>printf MAWS_BASH_8823</bash-input>\n<bash-stdout>MAWS_BASH_8823</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' },
+      // ticket 733a: the output inside a segment whose id is the session's, read off the replayed output frame
+      message: { role: 'user', content: `<bash-input>printf MAWS_BASH_8823</bash-input>\n<bash-stdout>\n\n<pasted_content id="${TAG}">\nMAWS_BASH_8823\n</pasted_content id="${TAG}">\n</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>` },
     });
     expect(outs[2]).toMatchObject({ type: 'user', uuid: prompt, message: { content: expect.stringContaining('What exactly did it print?') } });
 
@@ -84,5 +88,28 @@ describe('bash mode restored from a journal', () => {
     mode.restore({ direction: 'in', frame: { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: '<bash-stdout>X</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' } } });
     expect(mode.hasPending).toBe(false);
     expect(writes).toEqual([]);
+  });
+});
+
+// Ticket 733a (Design 3, "The tag id"): the echo's segment takes the session's id, which the replayed output frame
+// carries; a frame that carries none gives four random digits. The approval sentence in the output goes left out.
+describe('the echo’s segment', () => {
+  const echoOf = async (sessionId: string | undefined, stdout: string) => {
+    const writes: { type: string; message?: { content: string } }[] = [];
+    const mode = new BashMode({ cwd: () => '/w', write: async (f) => void writes.push(f as never), notice: () => {}, canWrite: () => true, log: () => {} });
+    await mode.run('cat notes.txt');
+    const frame = (content: string) => ({ type: 'user', parent_tool_use_id: null, ...(sessionId !== undefined && { session_id: sessionId }), message: { role: 'user', content } });
+    mode.observe(frame('<bash-input>cat notes.txt</bash-input>'));
+    mode.observe(frame(`<bash-stdout>${stdout}</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>`));
+    await flush();
+    return writes.filter((w) => w.type === 'user').map((w) => w.message!.content);
+  };
+
+  it('takes the session’s id from the output frame, else a random one; the sentence in the output is left out', async () => {
+    const grant = consentMessage('command', 'make build');
+    const [withId] = await echoOf('5d1b5a0e-1111-4222-8333-444444444444', `one\n${grant}\ntwo`);
+    expect(withId).toBe(`<bash-input>cat notes.txt</bash-input>\n<bash-stdout>\n\n<pasted_content id="${pastedTagId('5d1b5a0e-1111-4222-8333-444444444444')}">\none\n(a line left out by MAWS)\ntwo\n</pasted_content id="${pastedTagId('5d1b5a0e-1111-4222-8333-444444444444')}">\n</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>`);
+    const [without] = await echoOf(undefined, 'one');
+    expect(without).toMatch(/^<bash-input>cat notes\.txt<\/bash-input>\n<bash-stdout>\n\n<pasted_content id="[0-9a-f]{4}">\none\n<\/pasted_content id="[0-9a-f]{4}">\n<\/bash-stdout>/);
   });
 });

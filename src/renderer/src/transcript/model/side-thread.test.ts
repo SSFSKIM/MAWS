@@ -4,7 +4,8 @@
 // landed in, updated in place by every later summary, and the same whether the stream carried each summary or a
 // snapshot only the latest.
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage, promotionMessage } from '@shared/anchor/message';
+import { anchoredMessage } from '@shared/anchor/message';
+import { pinPromotionMessage } from '../../../../../test/support/pin-forms'; // ticket 733a
 import type { Anchor } from '@shared/anchor/anchor';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -71,7 +72,7 @@ describe('the anchored prompt', () => {
     const sent: [string, { destination: 'thread' | 'main' | null; screenshot: boolean }][] = [
       [anchoredMessage({ anchor: ANCHOR, text: comment, destination: 'thread', screenshot: false }), { destination: 'thread', screenshot: false }],
       [anchoredMessage({ anchor: ANCHOR, text: comment, destination: 'main', screenshot: true }), { destination: 'main', screenshot: true }],
-      [promotionMessage([{ question: 'Why?', response: 'Because.' }], comment), { destination: null, screenshot: false }],
+      [pinPromotionMessage([{ question: 'Why?', response: 'Because.' }], comment), { destination: null, screenshot: false }], // ticket 733a: an earlier build's promotion (this build's is resent through its form, composed-prefill.ts)
     ];
     for (const [text, frame] of sent) {
       const parsed = userTextOf(text);

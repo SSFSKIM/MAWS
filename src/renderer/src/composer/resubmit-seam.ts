@@ -30,15 +30,17 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { machineOf } from '@shared/machine/address';
 import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
-import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
+import { inlineEditOf, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import type { TranscriptEntry } from '../stores/transcript';
 import { useTranscriptStore } from '../transcript';
 import { focusedSession } from './ComposerAppKeys';
-import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
-import { bodiesByPlaceholder, prefillToDoc } from './editor/recall';
+import { newestUserUuid, type UserRow } from './edit-prefill';
+import { composedPrefill, storedRowEdit } from './composed-prefill'; // ticket 733a
+import { handBackEdit } from './hand-back'; // ticket 733a, the branch's review
+import { prefillToDoc } from './editor/recall';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { anchoredTextOf } from '../transcript/model/user-text';
 import { precheck, submitSerialized, type Dispatch } from './editor/submit';
@@ -72,29 +74,33 @@ const inFlight = (appSessionId: AppSessionId) => {
 // The record at `state` with nothing with the host.
 const at = (appSessionId: AppSessionId, state: ResubmitState) => record(appSessionId).state === state && !record(appSessionId).sending;
 
-// The bubble `row` of the session's transcript, in place: `edit` rewinds and resends, `blocked` sends anew. Refused
-// while the session's rewind is in flight or unconfirmed, or its edit is being sent (what goes is the edit in hand).
-export function startInlineEdit(appSessionId: AppSessionId, row: UserRow & { messageUuid: MessageUuid }, kind: InlineEdit['kind']): boolean {
+// The message `messageUuid` of the session's transcript, its bubble in place: `edit` rewinds and resends, `blocked` sends
+// anew. Refused while the session's rewind is in flight or unconfirmed, or its edit is being sent (what goes is the edit
+// in hand). Ticket 733a (Design 5): the row is the transcript store's, read by its message id, never one a caller hands
+// over (a surface mod's rewrite is a drawing, not the message); a message the store does not hold opens no edit. The
+// row's form, read by its own reader, goes with the edit and says what its resend is.
+export function startInlineEdit(appSessionId: AppSessionId, messageUuid: MessageUuid, kind: InlineEdit['kind']): boolean {
   if (inFlight(appSessionId)) {
     toast({ level: 'info', text: record(appSessionId).sending ? 'Your edited message is being sent' : 'A rewind is in progress', actions: [], dismissible: true });
     return false;
   }
   const rows = useTranscriptStore.getState().rows(appSessionId);
-  const prefill = rowPrefill(row);
+  const row = rows.find((r): r is UserRow => r.kind === 'user' && r.messageUuid === messageUuid);
+  if (row === undefined) return false;
+  const opened = storedRowEdit(row);
   dispose(appSessionId);
   const framing = row.anchor && row.anchorFrame ? { framing: { anchor: row.anchor, ...row.anchorFrame } } : {}; // E11: the bubble edits the comment alone
-  setInlineEdit(appSessionId, { messageUuid: row.messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [], ...framing });
+  setInlineEdit(appSessionId, { messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, ...opened, ...framing });
   setResubmit(appSessionId, 'idle');
   return true;
 }
 
 // The action receives only the row, so the registered default's session is the focused pane's active tab (a click on the
 // bubble's Edit has just moved focus into that pane); a surface drawing another session's transcript (the comment card's
-// thread, P2-F F-C1) binds `editRowOf` to its own. Either acts only when that session's transcript holds the row's message.
+// thread, P2-F F-C1) binds `editRowOf` to its own. Either edits that session's stored row of the message, when it holds one.
 export function editRowOf(appSessionId: AppSessionId | null, row: UserRow, kind: InlineEdit['kind']): void {
   if (appSessionId === null || row.messageUuid === null) return;
-  if (!useTranscriptStore.getState().rows(appSessionId).some((r) => r.kind === 'user' && r.messageUuid === row.messageUuid)) return;
-  startInlineEdit(appSessionId, { ...row, messageUuid: row.messageUuid }, kind);
+  startInlineEdit(appSessionId, row.messageUuid, kind);
 }
 
 export const editAndResubmitRow = (row: UserRow): void => editRowOf(focusedSession(), row, 'edit');
@@ -165,30 +171,30 @@ function end(appSessionId: AppSessionId): void {
   setResubmit(appSessionId, 'idle');
 }
 
-// The edit's text as the composer takes it: each pasted placeholder with the body it named when the edit began.
-const editPrefill = (edit: InlineEdit) => ({ text: edit.text, bodies: edit.bodies, images: edit.images });
-
 // Cancel, Keep editing's way out, or the dock line's ×. Refused while the rewind is in flight or unconfirmed, or the
-// edit is being sent. After a rewind (the bubble is gone) the edited text goes into the composer rather than nowhere.
+// edit is being sent. After a rewind (the bubble is gone) the edited text goes into the composer rather than nowhere,
+// each pasted placeholder with the body it named when the edit began; ticket 733a: as its form's reader says (`handBackEdit`).
 export function cancelInlineEdit(appSessionId: AppSessionId): boolean {
   if (inFlight(appSessionId) && !starting.has(appSessionId)) return false; // P2-A: a session still starting for the edit may be left
   const edit = editOf(appSessionId);
   const rewound = record(appSessionId).state === 'rewound_awaiting_send';
   end(appSessionId);
-  if (rewound && edit) prefillComposer(appSessionId, editPrefill(edit));
+  if (rewound && edit) handBackEdit(appSessionId, edit);
   return true;
 }
 
 // What the edit sends: its text through the composer's serialiser as a prompt as written (a leading `!` or `#` is
 // text, never the composer's bash or memory mode), the pasted bodies framed as the terminal frames them and the images
-// re-attached, so a resend is the message as typed; an anchored bubble's comment goes back in its framing.
+// re-attached, so a resend is the message as typed; an anchored bubble's comment goes back in its framing. Ticket 733a
+// (Design 5): a row of one of MAWS's forms goes with what a model, a command or a page wrote in it as its form's reader
+// says (`composedPrefill`).
 function serialized(appSessionId: AppSessionId, edit: InlineEdit) {
   const status = useSessions.getState().engine.get(appSessionId) ?? null;
   const session = useSessions.getState().records.get(appSessionId);
   const sessionId = status?.engineSessionId ?? session?.engineSessionId ?? null;
   // UX wave U8c-2 (M4 decision 1): the composer's folder, the agent's as the record says; the status's only without a record
   const cwd = session ? workingFolder(session).cwd : (status?.cwd ?? '');
-  return framed(serializeDraft(prefillToDoc(editPrefill(edit)), { sessionId, cwd, literal: true }), edit.framing);
+  return framed(serializeDraft(prefillToDoc(composedPrefill(edit)), { sessionId, cwd, literal: true }), edit.framing);
 }
 
 // E11 (scale-review C scalpel-2#1): the edited comment (X10's anchored message) framed again with the lead, the
@@ -447,7 +453,7 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
   if (result.ok && result.value.reason === 'target_not_found') {
     // the target left the conversation (an earlier rewind applied): the edit cannot apply, and its text is not lost
     end(appSessionId);
-    prefillComposer(appSessionId, editPrefill(edit));
+    handBackEdit(appSessionId, edit); // ticket 733a: as its form's reader says
     toast({ level: 'info', text: REWOUND_COPY, actions: [], dismissible: true });
     return 'refused';
   }

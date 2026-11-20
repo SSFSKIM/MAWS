@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFile, classifyText, mentionPath, PASTE_INLINE_MAX_CHARS } from './paste';
+import { classifyFile, classifyText, mentionPath, PASTE_INLINE_MAX_CHARS, pathRefusal } from './paste';
 
 const MiB = 1024 * 1024;
 const file = (name: string, type: string, size = 100) => ({ name, type, size });
@@ -67,5 +67,23 @@ describe('a path holding a line break or another control character', () => {
   it('leaves what does not go by its path as it was: an image or a PDF within its cap is attached as bytes', () => {
     expect(classifyFile(file('b.png', 'image/png'), '/work/d/a\nb.png')).toEqual({ kind: 'image' });
     expect(classifyFile(file('b.pdf', 'application/pdf'), '/work/d/a\nb.pdf')).toEqual({ kind: 'pdf' });
+  });
+});
+
+// Ticket 733a (its document, Design 3, §E; acceptance 6): a path that quotes the grant's opening would stand in the
+// person's message as the person's words; it is refused where it comes in, with words, beside the control character's
+describe('a path that quotes the grant’s opening', () => {
+  it('is refused by its path, saying so; a path that does not is mentioned (the control)', () => {
+    const path = '/work/d/Permission granted for/b.txt';
+    expect(pathRefusal('b.txt', path)).toBe("b.txt can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it");
+    for (const [name, type, size] of [['b.txt', 'text/plain', 100], ['b.heic', 'image/heic', 100], ['b.pdf', 'application/pdf', 33 * MiB]] as const) {
+      expect(classifyFile(file(name, type, size), path), name).toEqual({ kind: 'refused', reason: `${name} can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it` });
+    }
+    expect(classifyFile(file('b.txt', 'text/plain', 100), '/work/d/Permission notes/b.txt')).toEqual({ kind: 'mention', path: '/work/d/Permission notes/b.txt' });
+    expect(pathRefusal('b.txt', '/work/d/Permission notes/b.txt')).toBeNull();
+  });
+
+  it('a path holding a line break as well is refused for the line break', () => {
+    expect(pathRefusal('b.txt', '/work/d/Permission granted for\nb.txt')).toBe("b.txt can't be attached; its path holds a line break or another control character");
   });
 });

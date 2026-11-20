@@ -464,7 +464,7 @@ describe('the Side pane and side questions', () => {
     b.turn('u0', 'The parent’s copied history');
     b.end(['u0']);
     b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
-    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'Why is this null-checked twice?', response: 'Defensive.' }, { question: 'Second?', response: 'Yes.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'Why is this null-checked twice?', response: 'Defensive.' }, { question: 'Second?', response: 'Yes.' }], null, 'a1b2'), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     const rows = rowsOf(applyEvents(createState(null, null), b.events));
     expect(promotionQuestionOf(rows)).toBe('Why is this null-checked twice?');
     expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events.slice(0, 3))))).toBeNull();
@@ -474,7 +474,7 @@ describe('the Side pane and side questions', () => {
   it('renders a promoted thread’s header from its own transcript’s rows, and none for a thread a comment opened', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
-    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'Why is this null-checked twice?', response: 'Defensive.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'Why is this null-checked twice?', response: 'Defensive.' }], null, 'a1b2'), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     const btw: Anchor = { kind: 'none', locator: 'btw', label: 'Side question' };
     withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { openedBy: 'btw', anchor: btw }), thread(TWO, '2026-10-06T02:00:00.000Z'));
     const rows = rowsOf(applyEvents(createState(null, null), b.events));
@@ -497,10 +497,10 @@ describe('the Side pane and side questions', () => {
   it('a thread promoted inside a promoted thread names its own question, the last promotion prompt, after a disk read', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
-    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'The outer question?', response: 'Outer.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'The outer question?', response: 'Outer.' }], null, 'a1b2'), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     b.end(['u1']);
     b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
-    b.emit('user.message', { messageUuid: uuid('u2'), content: promotionMessage([{ question: 'The inner question?', response: 'Inner.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: promotionMessage([{ question: 'The inner question?', response: 'Inner.' }], null, 'a1b2'), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events)))).toBe('The inner question?');
   });
 });

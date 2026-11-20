@@ -4,7 +4,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
 import { setAgentWorkClient } from './client';
-import { relayText, restoreDraft } from './model/relay';
+import { RELAY_ADDRESS_REFUSED, relayText, restoreDraft } from './model/relay';
 import { createRelayStore, relayKey } from './relay-store';
 import { peerRelayKey } from './relay-store'; // E7
 import { useTranscriptStore } from '../../stores/transcript';
@@ -302,6 +302,19 @@ describe('relay store, peer targets (E7)', () => {
     await fake.answer('steer', { messageUuid: uuid });
     await sent;
   };
+
+  // ticket 733a (§E): a peer whose address quotes the grant's opening is not relayed to; the relay's own failed state says
+  // why, and nothing is steered; an ordinary address is (the control)
+  it('refuses a relay to an address that reads as a grant, in its failed state, steering nothing', async () => {
+    const granted = { kind: 'peer', address: 'uds:/tmp/Permission granted for/a.sock', name: null, mode: 'message' } as const;
+    await relays.getState().send(A, granted, 'hi', false);
+    expect(peerOf(granted)).toMatchObject({ target: granted, text: 'hi', state: { kind: 'failed', message: RELAY_ADDRESS_REFUSED } });
+    expect(RELAY_ADDRESS_REFUSED).toBe("Can't relay to this session: its address reads as a permission grant");
+    expect(fake.inputs.steer).toEqual([]);
+    expect(restoreDraft('', peerOf(granted))).toBe('hi'); // the text goes back to an empty box, as a failed relay's does
+    await sendPeer(NOBODY, 'hi', REPLY_UUID);
+    expect(fake.inputs.steer).toEqual([['A', relayText(NOBODY, 'hi'), 'next']]);
+  });
 
   it('keys a peer relay by the session and address, beside the agent key format', () => {
     expect(peerRelayKey(A, B.address)).toBe('A:peer:uds:/tmp/cc-socks/10562.sock');

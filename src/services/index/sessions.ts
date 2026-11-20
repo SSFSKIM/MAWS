@@ -23,6 +23,7 @@ import type { SessionRecordPatch } from '@shared/engine/status';
 import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { countLines } from '@shared/composer/pasted-framing';
 import { pastedPlaceholder, replacePasted } from '@shared/composer/pasted-content';
+import { planPromptOpened } from '@shared/engine/host-prompts'; // ticket 733a
 import { locate, type ProjectStore } from './projects';
 import { FolderReads, factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
 
@@ -143,7 +144,7 @@ function pastedPlaceholders(text: string): string {
 
 export function promptTitle(raw: string): string | null {
   const collapse = (text: string) => text.replace(/\s+/g, ' ').trim();
-  const prompt = pastedPlaceholders(raw);
+  const prompt = pastedPlaceholders(planPromptOpened(raw)); // ticket 733a: a plan prompt's segment read in place
   let name = '';
   let args = '';
   const rest = OPENS_WITH_MARKUP.test(prompt)
