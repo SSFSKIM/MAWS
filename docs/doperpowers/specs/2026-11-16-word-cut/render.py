@@ -32,7 +32,7 @@ LEGEND = (
 )
 M0_LEGEND = (
     "Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master "
-    f"`{data.get('master', '')}`, every row's basis is `pattern`, and **Source** is the file and line on master.\n"
+    f"`{data.get('master', '')}`, every row's basis is `pattern` (or `consent` for a consent text), and **Source** is the file and line on master.\n"
 )
 MILESTONE = {'settings': 'M1', 'session': 'M2', 'beside': 'M3', 'window': 'M4', 'typed': 'M4', 'customize': 'M4', 'artifacts': 'M5', 'editors': 'M5'}
 
