@@ -8,11 +8,14 @@
 // owner that already has its own `aria-describedby` passes that fact as `description`: a tip with `content` alone
 // leaves the owner's ids as they are, and Radix's id of the open tooltip is then not added to them.
 //
-// With no `content` the tip never reaches Radix's open machinery: the trigger's pointermove and focus are cancelled
-// before Radix's own handlers (which skip a prevented event), so it arms no delay, opens nothing and closes no other
-// tooltip; the owner keeps its place in the tree, so a tip that comes and goes never remounts its control. Content that
-// arrives while its owner is already pointed at or focused shows on the next pointing or focus; it is in the owner's
-// description at once. The content is not hoverable, so leaving the trigger closes the tip at once, whatever is drawn.
+// The open state is the tip's own, handed to Radix as a controlled `open` that is true only while there is content.
+// Focus opens it through Radix at once; the pointing delay is the tip's own timer, armed on pointer enter and dropped
+// on leave, on a press and whenever the content goes away, so no pending opening outlives the content (Radix's own
+// delay, once armed, would fire its open and dismiss the other tooltips whatever the content). Radix's pointermove is
+// cancelled before its handler (which skips a prevented event), and so is its focus while there is no content: a tip
+// with no content opens nothing and closes no other tooltip. One tip shows at a time. Content that arrives while its
+// owner is already pointed at or focused shows on the next pointing or focus; it is in the owner's description at
+// once. The content stays hoverable (WCAG 1.4.13): Radix keeps it open while the pointer crosses into it.
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
@@ -23,7 +26,7 @@
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
 import { Tooltip } from 'radix-ui';
-import { cloneElement, useId, type MouseEvent, type ReactElement, type ReactNode, type SyntheticEvent } from 'react';
+import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -31,9 +34,44 @@ const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-ove
 type ClickGuard = { 'aria-disabled'?: true; onClickCapture?(event: MouseEvent): void };
 type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 
+// The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
+let showing: { close(): void } | null = null;
+
 export function Tip({ content, description, children, ...guard }: { content: ReactNode; description?: string | null; children: Owner } & ClickGuard) {
   const descriptionId = useId();
   const shows = content !== null && content !== undefined && content !== '';
+  const [open, setOpen] = useState(false);
+  if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
+  const showsNow = useRef(shows);
+  const pointing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopPointing = () => {
+    if (pointing.current !== null) clearTimeout(pointing.current);
+    pointing.current = null;
+  };
+  useLayoutEffect(() => {
+    showsNow.current = shows;
+    if (!shows && pointing.current !== null) {
+      clearTimeout(pointing.current);
+      pointing.current = null;
+    }
+  }, [shows]);
+  useEffect(
+    () => () => {
+      if (pointing.current !== null) clearTimeout(pointing.current);
+    },
+    [],
+  );
+  const drawn = open && shows;
+  useEffect(() => {
+    if (!drawn) return;
+    const me = { close: () => setOpen(false) };
+    if (showing !== me) showing?.close();
+    showing = me;
+    return () => {
+      if (showing === me) showing = null;
+    };
+  }, [drawn]);
+
   const described = description !== undefined && description !== null && description !== '';
   const own = children.props['aria-describedby'];
   // The owner's own descriptions first, then this one, set on the owner itself (its props win over the trigger's). With
@@ -44,11 +82,24 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
     : shows
       ? children
       : cloneElement(children, { 'aria-describedby': own });
-  const silent = shows ? {} : SILENT;
   return (
-    <Tooltip.Provider delayDuration={POINTING_DELAY_MS} disableHoverableContent>
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild {...guard} {...silent}>
+    <Tooltip.Provider delayDuration={POINTING_DELAY_MS}>
+      <Tooltip.Root open={drawn} onOpenChange={(next) => setOpen(next && showsNow.current)}>
+        <Tooltip.Trigger
+          asChild
+          {...guard}
+          onPointerMove={cancel}
+          onFocus={shows ? undefined : cancel}
+          onPointerEnter={() => {
+            stopPointing();
+            pointing.current = setTimeout(() => {
+              pointing.current = null;
+              if (showsNow.current) setOpen(true);
+            }, POINTING_DELAY_MS);
+          }}
+          onPointerLeave={stopPointing}
+          onPointerDown={stopPointing}
+        >
           {owner}
         </Tooltip.Trigger>
         {shows && (
@@ -67,10 +118,9 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
     </Tooltip.Provider>
   );
 }
-// A contentless tip's trigger: the events that would open it, cancelled before Radix's handlers read them (neither has
-// a default action a control relies on).
+// Cancelled before Radix's trigger handlers read it (neither pointermove nor focus has a default action a control
+// relies on).
 const cancel = (event: SyntheticEvent) => event.preventDefault();
-const SILENT = { onPointerMove: cancel, onFocus: cancel };
 
 const swallow = (event: MouseEvent) => {
   event.preventDefault();

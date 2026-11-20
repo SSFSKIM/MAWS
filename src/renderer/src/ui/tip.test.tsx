@@ -141,6 +141,34 @@ describe('UnavailableButton', () => {
     expect(tooltip()).toBeNull();
   });
 
+  it('drops a pointing still in its delay when the reason goes away, and a later reason waits for new pointing', async () => {
+    const tips = () => screen.queryAllByRole('tooltip').map((tip) => tip.textContent);
+    const Pair = ({ reason }: { reason: string | null }) => (
+      <>
+        <Chip />
+        <UnavailableButton reason={reason}>
+          <button type="button">Commit</button>
+        </UnavailableButton>
+      </>
+    );
+    const view = render(<Pair reason="Still busy" />);
+    const keys = user();
+    await keys.tab(); // the chip's tooltip opens on focus
+    expect(tips()).toEqual([FACT]);
+    await keys.hover(screen.getByRole('button', { name: 'Commit' }));
+    wait(POINTING_DELAY_MS / 2);
+    view.rerender(<Pair reason={null} />); // cleared before the delay has run
+    wait(POINTING_DELAY_MS * 2);
+    expect(tips()).toEqual([FACT]);
+    view.rerender(<Pair reason="Still busy" />); // back, with no new pointing or focus
+    wait(POINTING_DELAY_MS * 2);
+    expect(tips()).toEqual([FACT]);
+    await keys.unhover(screen.getByRole('button', { name: 'Commit' }));
+    await keys.hover(screen.getByRole('button', { name: 'Commit' })); // new pointing
+    wait(POINTING_DELAY_MS);
+    expect(tips()).toEqual(['Still busy']); // one tip at a time
+  });
+
   it('pointing at an available control leaves another control’s open tooltip open', async () => {
     render(
       <>
