@@ -578,27 +578,31 @@ it('a reversed scrollbar drag before its scroll event is kept through a measured
 });
 
 // One observer delivery that grows a row above the reader and the overflowing last row is followed once, against the
-// whole delivery's total: the iOS compensation for the row above is not retired early by a partial one.
+// whole delivery's total: the iOS compensation for the row above is not retired early by a partial one. Board ticket
+// 789: the follow commits that total before the frame paints, so the end it pins holds the compensation, which is not
+// replayed over the reader's drag after it.
 it('iOS keeps above-reader compensation when the same delivery grows the last row past the old sizer', async () => {
   const s = await scene(true);
   s.reportContentSize();
+  const end = s.scroller.scrollHeight;
   act(() => { fireEvent.touchStart(s.scroller, { touches: [{ identifier: 1, clientY: 100 }] }); });
   let held = 0;
-  // One delivery, its microtasks, and the drag, all before React re-renders the sizer (the outer act holds the render).
+  // One delivery, its microtasks, and the drag, all before the virtualiser's own re-render (the outer act holds it).
   await act(async () => {
-    s.extendDOMEnd(182);
+    s.reachDOMEnd(end + 182); // the grown last row overflows the sizer from where it stood
     s.resizeRow('first', 40);
     s.resizeRow('last', 182);
     await Promise.resolve();
+    expect(s.scroller.scrollTop, 'the whole delivery is followed').toBe(end + 40 + 182 - 200);
     fireEvent.touchMove(s.scroller, { touches: [{ identifier: 1, clientY: 120 }] });
     s.move(-20);
     held = s.scroller.scrollTop;
   });
-  s.extendDOMEnd(0);
+  s.reachDOMEnd(0);
   s.reportContentSize();
   act(() => { fireEvent.touchEnd(s.scroller, { touches: [] }); });
   await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-  expect(s.scroller.scrollTop).toBe(held + 40);
+  expect(s.scroller.scrollTop).toBe(held);
 });
 
 it('a browser clamp during remeasurement is not reader intent, even before the smaller sizer commits', async () => {
