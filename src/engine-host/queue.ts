@@ -321,22 +321,25 @@ export class MessageQueue {
   // Resume. The phase lasts until the interrupted turn has ended (the interrupt's answer can precede that turn's end), so
   // whatever reaches the queue meanwhile, a message being queued or submitted as the Stop arrives among it, stays held.
   // A pause that failed to save ends nothing.
-  // The interrupted turn is the one open when the interrupt is answered, unless a main-lane turn ended since the Stop
-  // began: then that end was the interrupted turn's, and a turn open now is a successor (a steer the hold's deadline left
-  // with the engine, started in the same inbound drain), which the phase does not wait for.
+  // The interrupted turn is the one the interrupt request reaches: open when the interrupt is answered, unless a main-lane
+  // turn ended since the request went out (then that end was the interrupted turn's, and a turn open now is a successor,
+  // a steer the hold's deadline left with the engine started in the same inbound drain, which the phase does not wait
+  // for). A turn that ended while the pause was saved or the steers withdrawn ended before the request, and a successor
+  // started then is the one the request reaches.
   async stop<T>(opts: { hold: boolean }, interrupt: () => Promise<T>): Promise<T> {
     this.stopping++;
-    const endsBefore = this.turnEnds;
+    let endsAtRequest: number | null = null;
     let paused = false;
     try {
       await this.pause('interrupt');
       paused = true;
       if (opts.hold) await this.holdAll();
+      endsAtRequest = this.turnEnds;
       return await interrupt();
     } finally {
       this.stopping--;
       if (paused) {
-        if (this.turnEnds === endsBefore && (this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
+        if (this.turnEnds === endsAtRequest && (this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
         else await this.settleEmptyPause();
       }
     }
