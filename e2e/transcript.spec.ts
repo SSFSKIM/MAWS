@@ -3126,7 +3126,12 @@ function followJournal(dir: string, fill: number, streams: number, holds: number
 // end. The clamp is tried at six growths a turn, so that it lands more than 1 px short (the list's leaving threshold,
 // the row's condition) at least once at each zoom, which the scene asserts; a pass is then the row's fix proven, a
 // failure after such a clamp the row itself. Every read is polled; no time is asserted. The fix is U3's, on a ruling.
+// Marked expected to fail (the architect's ruling, 2026-11-20): today's code releases following at such a clamp
+// (docs/tech-debt-tracker.md, the row of 2026-10-27, "At a zoom other than 100% a follower sits at the browser's
+// reachable maximum"), so e2e:transcript stays green while the fault stays asserted; when the scene starts to pass, the
+// clamp is fixed, the row closes and the mark comes off.
 test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key is pressed in a side surface', async () => {
+  test.fail(true, "docs/tech-debt-tracker.md, the row of 2026-10-27 (\"At a zoom other than 100% a follower sits at the browser's reachable maximum\"): a witnessed key during a clamp that lands more than 1 px short of the end releases following. Expected to fail until U3's fix; when this passes, close the row and remove the mark.");
   test.setTimeout(300_000);
   const FILL = 24;
   const HOLDS = 6;
