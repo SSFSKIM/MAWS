@@ -1437,7 +1437,7 @@ export class EngineSession {
   private async adopt(adopted: AdoptedLaunch): Promise<void> {
     const transport = this.transport!;
     // fix wave 1: partial reader state is never trusted; a fold or a queue restore that fails is a failed adoption
-    let evidence: { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string> };
+    let evidence: { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string>; interrupted: boolean };
     try {
       evidence = this.fold();
     } catch (error) {
@@ -1466,7 +1466,7 @@ export class EngineSession {
   // side-question log, the observed facts and the engine session ids. The outstanding set becomes the barrier. Answers
   // the queue's evidence: the user frames written, the steers no row ended, and the submissions a main-lane turn end
   // names (fix wave 1). A gap an earlier adoption journaled leaves the work unknown until a later Stop (fix wave 1).
-  private fold(): { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string> } {
+  private fold(): { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string>; interrupted: boolean } {
     const outstanding = new OutstandingSet();
     const unsettled = new UnsettledFold();
     const written = new Set<string>();
@@ -1508,7 +1508,10 @@ export class EngineSession {
       this.tracker.restoring = false;
     }
     this.outstanding = outstanding;
-    return { written, unended: unsettled.unsettled(), ended };
+    // ticket 790: a plain interrupt was written while the turn still open ran (the normaliser's stop asked, cleared at a
+    // main-lane end), so the old manager's Stop reached that turn
+    const interrupted = this.normalizer.state.currentTurn !== null && this.normalizer.state.sendNow.stopAsked;
+    return { written, unended: unsettled.unsettled(), ended, interrupted };
   }
 
   // fix wave 1: an adoption that failed before its first write: logged with its cause, never served, and its session host

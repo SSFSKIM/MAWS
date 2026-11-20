@@ -181,7 +181,9 @@ export class MessageQueue {
   // frames' uuids it holds) is the uncertain head of a paused queue, as at a recovery, since its write never happened.
   // No `recovered` row: this launch's own first recovery wrote it. A submission a main-lane turn end in the journal names
   // (`ended`, fix wave 1) completed under the old manager after its last save: settled here, never left live or resent.
-  async adopt(evidence: { written: ReadonlySet<string>; unended: readonly MessageUuid[]; ended: ReadonlySet<string> }): Promise<void> {
+  // Ticket 790: `interrupted`, the journal shows a plain interrupt written while the turn still open ran (the old manager's
+  // Stop reached it); absent, it does not.
+  async adopt(evidence: { written: ReadonlySet<string>; unended: readonly MessageUuid[]; ended: ReadonlySet<string>; interrupted?: boolean }): Promise<void> {
     await queueTransaction(this.deps.store, this.deps.appSessionId, async () => {
       const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
       if (this.exitedUnloaded) return;
@@ -215,8 +217,9 @@ export class MessageQueue {
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session went on without them.`);
       }
       // ticket 790: as at a recovery, except that the live process may still run the turn the old manager's Stop
-      // interrupted (the fold restored it open): the Stop's phase lasts until that turn ends, as it would have there
-      if (this.paused && this.pauseReason === 'interrupt' && (this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true;
+      // interrupted: the Stop's phase lasts until that turn ends, as it would have there. Only on the journal's word that the
+      // open turn is the one interrupted: a pause that outlived its turn (it held a row) says nothing of a later turn.
+      if (this.paused && this.pauseReason === 'interrupt' && evidence.interrupted === true && (this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true;
       this.endEmptyInterruptPause();
       await this.persist();
       this.deps.onPauseChange?.(this.releasePaused);
