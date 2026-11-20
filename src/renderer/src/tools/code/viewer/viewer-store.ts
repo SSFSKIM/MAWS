@@ -763,13 +763,14 @@ export function createViewerStore(client: MawsBridge) {
     };
 
     // After a load committed: a framed file asks (event L); an entry that is no longer one gives its frame up. Ticket 775: an
-    // event's re-read that found the file as the entry shows it (`landed` false) keeps a frame that is drawn or being asked with the
+    // event's re-read that found the file as the entry shows it (`landed` false) keeps a drawn frame that was asked with the
     // keys it would ask with now, so its token and the page's state stay; one with no frame, a failed one, or one asked
-    // under other keys (the tab's mark moved) asks as before.
+    // under other keys (the tab's mark moved) asks as before. So does one being asked: main may have read the file at a
+    // moment it was something else (unframed mid-write), so the read queues one more ask after the answer.
     const settleFrame = (tabId: string, landed: boolean) => {
       const entry = get().entries.get(tabId);
       if (entry?.kind === 'frame') {
-        const kept = !landed && (entry.frame?.status === 'ready' || entry.frame?.status === 'asking') && entry.appSessionId !== null && frameAsked.get(tabId) === JSON.stringify(frameAsk(entry));
+        const kept = !landed && entry.frame?.status === 'ready' && entry.appSessionId !== null && frameAsked.get(tabId) === JSON.stringify(frameAsk(entry));
         if (!kept) ask(tabId);
       }
       else if (entry?.frame) {
