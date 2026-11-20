@@ -949,12 +949,13 @@ export class EditorController {
       insertText: (text, options) => {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
+        // board ticket 739: text nodes and hard breaks, never a string the editor would parse as markup
         if (!options?.separated) {
-          at.insertContent(text).run();
+          at.insertContent(inlineContent(text)).run();
           return;
         }
         at.run(); // P3-G: the caret first, so the text before it can be read
-        editor().chain().insertContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text).run();
+        editor().chain().insertContent(inlineContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text)).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),
