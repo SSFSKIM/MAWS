@@ -33,6 +33,7 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-20) M2 — Zoom: reviewed clean (`31e832468` to `97b9eba20`). The task review found five Important items and the re-review one more. All were fixed red-first (Decision Log 19). At the fixes' heads, on the build VM: tsc node and web exit 0; eslint exits 0 on the changed files; vitest passes over the renderer's browser tools (655), main's browser (1,144) and the step-5 set at `8df3835e9` (2,754, none failed); the desk's web app passes 801; the gate's script tests pass 588 of 588.
 - [x] (2026-11-20) M3 built, `6b4f6aae1` and `e20ffca4a`, with master's last merge at `ea3310be2` (its fix `98f8e8c41`). At `e20ffca4a`, on the build VM: the e2e typecheck and eslint exit 0, and the gate's script tests pass 588 of 588. At `98f8e8c41`, the acceptance run (step 7): typecheck 0 and lint 0. The unit suite fails 11 of 2,935 files, each one on the build brief's list with its record or passing alone; `src/artifacts/document/markdown-runs.test.ts`, new to that list, passes alone 5 of 5. `src/shared/machine` fails only the two `git-reads` cases (board ticket 756). No scene has run. The unit suite exited 1. Its one failure not on the brief's list, `markdown-runs.test.ts`, timed out under load and passes alone; the controller set it aside as the VM's load and gave it to the architect for the brief's list (Decision Log 22). The task review returned six Important findings and the re-review two more; all were fixed (`f66f29155`, `945b3c59d`), and the second re-review approved. The architect ruled the transcript's zoom scene `test.fail()` against the row of 2026-10-27 (`0ad253794`; Decision Log 23).
 - [x] (2026-11-20) M3 — The scenes, the cross-build row, the record, and the acceptance run: reviewed clean (`2ab89eaf1` to `0ad253794`).
+- [x] (2026-11-20) The branch review (the xhigh panel) and its fix wave: five findings fixed red-first, three tracker rows, task review approved (`f39cc1289` to `8bcafe7ed`; Decision Log 24). Master `3f8fd97f8` merged; class 1a on the merged head.
 - [ ] (2026-11-20) U6b-5a's later heads merged before the gate: `72429dc03` (`a4160daf4`) and `17f422d11` (`abbb768b9`, with master `5e8534042`; the tracker keeps both sides' rows). Proof on the build VM at `0ad253794`, over the scope those merges touch: `pnpm typecheck` exits 0. The step-5 vitest set, with `App.test.tsx`, `src/shared/machine` and `src/main/window.test.ts`, passes 302 files and 4,494 cases; the only failures are the two `git-reads` cases (board ticket 756). The desk's web app builds, and its 93 files and 801 cases pass. The gate's script tests pass 588 of 588. Class 1a runs on this head. The architect owns the Mac runs (rows 6 and 7), the branch review (row 9) and the pull request.
 
 ## Words used in this document
@@ -719,10 +720,13 @@ Found while this document was written and reviewed; each changed a decision abov
       - scalpel-1#1: a zoom menu action reaches every app renderer, so one click steps twice with two windows;
       - scalpel-1#2: a crashed renderer misses a zoom change;
       - scalpel-2#1: an intermediate device width before the post-zoom pane report.
-    - **Mac scenes owed by this wave:**
-      - browser-chrome: a popup open at 125 %, zoomed through View, is gone;
-      - the browser scene's chip against `innerWidth`, at the display's own scale;
-      - browser-comment: the Mobile pin in a wider column at 125 %.
+    - **The Mac scenes this wave owes, all written in it after its task review (`4f2a3c4b4` red, `8bcafe7ed`) and none yet run:**
+      - browser-chrome: "zoom: an extension popup open across a change of the zoom closes". The popup is opened at 125 % and View ▸ Actual Size is used. The scene first witnesses that the zoom line lies apart from the pane, so the cover cannot be what closes it. Its premise needs a work area of about 1,440 × 1,100 points.
+      - The U12a scene and the four-factor zoom scene in `e2e/browser.spec.ts`. Their chip and guest readings are now taken from `readsAsBlink`: one sample of the page's two sides and the chip's text and name, against the view's native bounds, Electron's display scale and the tab's zoom (`blinkInner`, `displayScale` in `e2e/support/zoom.ts`). No constant readout is left.
+      - browser-comment: "zoom: the pin of a page at the Mobile size, centred in a wider column, at 125 % and after a zoom to 150 %". It witnesses an inset above 2 px, and the card stays open through the zoom.
+      - The comment scenes' `dismiss` now takes the factor, without which the M3 pin scene failed at 0.5, 0.8 and 1.25.
+    - **The pin's inset is main's rounded native origin, back in CSS pixels** (`round(x × a) ÷ a` less the column's left), not the CSS origin the pane sent.
+    - The task review approved after one round. Master at `3f8fd97f8` (batch 6, docs only past `17f422d11`) is merged before the gate.
 
 ## Outcomes & Retrospective
 
