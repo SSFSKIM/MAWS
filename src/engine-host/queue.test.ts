@@ -1731,7 +1731,7 @@ describe('a prepared submission', () => {
     expect((await queue.send('fresh')).disposition).toBe('sent');
     expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fresh' }, READ]]);
     expect(p.settled).toEqual([['fresh', true]]);
-    expect(queue.state).toMatchObject({ paused: true, entries: [{ content: 'held', state: 'queued' }] });
+    expect(queue.state).toMatchObject({ paused: true, entries: [{ content: 'held', state: 'queued' }, { content: 'fresh', state: 'submitting' }] });
   });
 
   it('is busy while it prepares: a send meanwhile waits behind it, in order', async () => {
