@@ -449,7 +449,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await shot(page, { id: 'overview-scrolled', title: 'Overview, further down', how: 'Overview, scrolled to its end', state: 'The plan card and the sessions that do not wait', folders: ['overview', 'request-card', 'attention'] }, async () => {
       if ((await page.locator('[data-region="main"] [data-overview-panel]').count()) === 0) await menu(app, 'tab.overview');
       await page.locator('[data-region="main"] [data-overview-panel]').first().evaluate((panel) => {
-        const scrollers = [panel, ...panel.querySelectorAll('*')].filter((el) => el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== 'visible');
+        const scrollers = [panel, ...Array.from(panel.querySelectorAll('*'))].filter((el) => el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== 'visible');
         for (const el of scrollers) el.scrollTop = el.scrollHeight;
       });
     });
