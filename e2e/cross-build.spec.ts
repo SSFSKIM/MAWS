@@ -1896,10 +1896,15 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | U6b-4c: `sessions/file-links.json`, a profile | (a followed link, both ways), for F and for M: the    | the return: both files read and savable again, the |
 //   | file the peer does not know; the tab of a     | peer draws its Files tree beside the chat and no      | one beside the chat saving once more; the links    |
 //   | followed file (a Files tab, a main `file`     | viewer, the main tab's refusal, refuses no value,     | file as this build left it. An older window on     |
-//   | tab)                                          | writes its pin, and leaves the links file's bytes as  | this build's daemon sends no follow and drops      |
-//   |                                               | they were. On the wire, `files.follow`: (outside      | `outside.linked`:                                  |
-//   |                                               | file, on the peer's daemon) shows the peer's          | test/cross-build/files-schema.test.ts and          |
-//   |                                               | unknown_command and the first notice                  | src/shared/ipc/schema.test.ts                      |
+//   | tab)                                          | writes its pin, and leaves the links file's bytes as  | this build's daemon is not staged; at the schema   |
+//   |                                               | they were. On the wire, `files.follow`: (outside      | (test/cross-build/files-schema.test.ts,            |
+//   |                                               | file, on the peer's daemon), for F and for M: the     | src/shared/ipc/schema.test.ts): F's and M's        |
+//   |                                               | click shows the first notice and a direct             | readers drop the whole `outside` object (F also    |
+//   |                                               | `files.follow` through the page's bridge answers      | `named`), while a wave reader from before U6b-4c   |
+//   |                                               | unknown_command; that the click sends the follow      | that knows `outside` drops only `outside.linked`   |
+//   |                                               | before its read is held by the unit (viewer.test.tsx, | and keeps `why: 'result'`, the file read-only      |
+//   |                                               | W1 (b) and K11), since the page cannot observe its    |                                                    |
+//   |                                               | own click's call                                      |                                                    |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -4188,8 +4193,11 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
 
       // UX wave U6b-4c (§H): a link in a shown Markdown file is followed first (`files.follow`), which the peer's daemon
       // does not know: the follow settles as one that found nothing, the read is sent, and the peer's refusal shows
-      // U6b-4b's first notice (master's daemon too: its transcript links the guide, not the file the guide links). The
-      // peer's answer to the follow is asked again through the page's bridge. A link to a file inside the folders opens.
+      // U6b-4b's first notice (master's daemon too: its transcript links the guide, not the file the guide links). The proof
+      // is split: the page cannot observe what its own click sends (its bridge is contextBridge's and cannot be wrapped,
+      // and neither main nor either peer's mawsd logs an unknown command), so that the click sends the follow before its
+      // read is held by the unit (viewer.test.tsx, W1 (b) and K11, over the fake disk's older daemon), and the peer's
+      // answer to the follow by the direct call through the page's bridge below. A link to a file inside the folders opens.
       const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
       const openGuide = async () => {
         await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();

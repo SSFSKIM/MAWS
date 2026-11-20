@@ -28,7 +28,8 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { openChosen } from '../files/open-chosen';
 import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
-import { follow, resetFollows } from '../follow'; // UX wave U6b-4c
+import { follow, linkedCount, resetFollows } from '../follow'; // UX wave U6b-4c
+import { ipc } from '../../../ipc/client'; // UX wave U6b-4c: a follow asked directly, as a page could
 import { MarkdownView } from './MarkdownView'; // UX wave U6b-4c
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
@@ -3086,6 +3087,28 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     render(<FileViewer tab={fileTab(OUT)} />);
     await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
     expect(main.linked(MAIN_A, OUT)).toBeNull();
+  });
+
+  it('K6: a link typed into the Source view and not saved draws no chip, and a follow of the path it names finds nothing; the saved link is still drawn and followed', async () => {
+    const DRAFT = '/elsewhere/draft.txt';
+    const main = disk({ [DOC]: `Saved: ${LINKED}\n`, [OUT]: 'the notes\n', [DRAFT]: 'a draft\n' }); // the daemon finds the saved link alone
+    await linkIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed(`Draft: [the draft](${DRAFT})\n`);
+    await waitFor(() => expect(shown(DOC)!.dirty).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
+    await waitFor(() => expect(document.querySelector('[data-markdown-view]')).not.toBeNull());
+    expect(screen.queryByTitle(DRAFT), 'the rendered view draws the saved text: no chip for the typed link').toBeNull();
+    expect(screen.getByTitle(OUT), 'the control: the saved link’s chip').toBeTruthy();
+    expect(await ipc.invoke('files.follow', { appSessionId: A, path: DRAFT, from: { file: DOC } }), 'a direct follow of the typed link’s path').toEqual({ ok: true, value: { status: 'not-linked' } });
+    act(() => follow(A, DRAFT, { file: DOC }));
+    await settle();
+    expect(linkedCount(A, DRAFT)).toBe(0);
+    expect(main.linked(MAIN_A, DRAFT)).toBeNull();
+    click(screen.getByTitle(OUT)); // the control: the saved link follows and is recorded
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    expect(linkedCount(A, OUT)).toBe(1);
   });
 
   it('K8: an open the agent asked for never follows, and a file only a link record admits is refused to it; the person’s own click then opens it', async () => {
