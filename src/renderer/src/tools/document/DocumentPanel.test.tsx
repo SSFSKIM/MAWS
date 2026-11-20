@@ -99,7 +99,7 @@ function mount({ visible = true, onShown = vi.fn<() => void>() }: { visible?: bo
   const Panel = editor.Panel;
   const tree = (shownNow: boolean) => (
     <EditorHostScopeContext.Provider value={scope}>
-      <Panel artifactId={A} state={hold.state} scope={scope} visible={shownNow} onShown={onShown} />
+      <Panel artifactId={A} machine={TEST_MACHINE} state={hold.state} scope={scope} visible={shownNow} onShown={onShown} />
     </EditorHostScopeContext.Provider>
   );
   const view = render(tree(visible));

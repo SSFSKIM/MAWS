@@ -147,7 +147,7 @@ function mount(placement: { designSystemId?: string; spaceId?: string }, house: 
   render(
     <DesignSystemHostProvider host={systemHost()} house={house}>
       <EditorHostScopeContext.Provider value={SCOPE}>
-        <Panel artifactId={DOC} state={hold.state} scope={SCOPE} visible onShown={() => {}} />
+        <Panel artifactId={DOC} machine={TEST_MACHINE} state={hold.state} scope={SCOPE} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>
     </DesignSystemHostProvider>,
   );

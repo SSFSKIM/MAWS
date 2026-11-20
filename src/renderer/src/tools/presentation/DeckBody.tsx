@@ -80,15 +80,15 @@ function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact
   const showable = useDeckCount(opened, (doc) => showSlides(doc).length); // P3-F: the slides a show would show
   // M9; P3-F (L233): each entry exports what the editor shows when it is chosen
   const shown = useShown(opened);
-  const exports = useMemo(() => deckExports(artifactId, shown, (entry) => void exportDeck(artifactId, entry, opened?.snapshot().shown ?? null)), [artifactId, shown, opened]);
+  const exports = useMemo(() => deckExports(artifactId, machine, shown, (entry) => void exportDeck(artifactId, machine, entry, opened?.snapshot().shown ?? null)), [artifactId, machine, shown, opened]);
   const commands = useMemo<DeckHeaderCommands | undefined>(
-    () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
-    [opened, artifactId],
+    () => (opened ? { present: () => void presentDeck(artifactId, machine, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
+    [opened, artifactId, machine],
   );
   const [toolbarElement, setToolbarElement] = useState<HTMLDivElement | null>(null);
   const toolbarHost = useMemo(() => toolbarElement ? { element: toolbarElement, menuLabel: 'Deck actions' } : null, [toolbarElement]);
   const header = deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands);
-  const sendTo = useSendToAction(sendToSubject(artifactId, 'presentation', row?.title, shown)); // P4-B5
+  const sendTo = useSendToAction(sendToSubject(artifactId, machine, 'presentation', row?.title, shown)); // P4-B5
   useEditorHost(scope, { ...header, toolbarHost, ...(sendTo && { actions: [...(header.actions ?? []), sendTo] }) });
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown,
@@ -101,10 +101,10 @@ function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
   // M6: the Theme panel's systems (the library's live design systems) and the deck's own choice
-  const systemRows = useLibraryList({ kind: 'design_system' }).value?.rows;
+  const systemRows = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   const theme = useMemo(
-    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, id) }),
-    [systemRows, row?.designSystemId, artifactId],
+    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, machine, id) }),
+    [systemRows, row?.designSystemId, artifactId, machine],
   );
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
   const assetUrlAt = useCallback((ref: string, revision: number) => state.host.assetUrl(artifactId, ref, revision), [state, artifactId]); // M8 fix wave 1 (R2)

@@ -132,7 +132,7 @@ function mount() {
   const state = hold.state as DashboardTabState;
   const view = (visible: boolean) => (
     <EditorHostScopeContext.Provider value={scope}>
-      <editor.Panel artifactId={A} state={state} scope={scope} visible={visible} onShown={() => {}} />
+      <editor.Panel artifactId={A} machine={TEST_MACHINE} state={state} scope={scope} visible={visible} onShown={() => {}} />
     </EditorHostScopeContext.Provider>
   );
   const rendered = render(view(true));

@@ -81,6 +81,7 @@ export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactI
   if (!canShowArtifactInPanel(appSessionId)) return;
   // P5 O7 M5a: a session's artifacts are on its machine (UX wave U6d: the rule a mention's look for its main tab shares)
   const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
+  recordArtifactMachine(artifactId, machine, ipc.localMachine);
   const params: ArtifactsParams = { target: artifactId, machine, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
 }

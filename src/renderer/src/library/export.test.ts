@@ -57,14 +57,14 @@ describe('the export formats', () => {
 describe('exporting', () => {
   it('reports the DOCX comment author returned by main beside the saved result', async () => {
     installFakeMain((name) => name === 'artifacts.export' ? ok({ path: '/x.docx', revision: 7, commentAuthorName: 'Kim Min' }) : ok({ saved: true, path: '/Downloads/Review.docx' }));
-    await act(() => exportArtifact(A, 'docx'));
+    await act(() => exportArtifact(A, TEST_MACHINE, 'docx'));
     expect(toasts()).toEqual([['info', 'Saved to /Downloads/Review.docx · Comments credited to Kim Min; change in Settings › Artifacts.']]);
   });
 
   it('exports the version asked and saves that export where the owner chooses', async () => {
     // P4 (W1, tracker 2026-10-19 L302): the export is a file of its own, which the save names by its id
     const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: `/store/x/exports/7-pdf-${E}.pdf`, revision: 7, exportId: E }) : ok({ saved: true, path: '/Users/me/Downloads/Plan.pdf' })));
-    await act(() => exportArtifact(A, 'pdf', 3));
+    await act(() => exportArtifact(A, TEST_MACHINE, 'pdf', 3));
     expect(main.calls).toEqual([
       { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', versionId: 3, ownFile: true } },
       { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pdf', exportId: E } } } },
@@ -74,20 +74,20 @@ describe('exporting', () => {
 
   it('the live revision when no version is named; a refused export is told and nothing is saved; a cancelled save says nothing', async () => {
     const refused = installFakeMain(() => ({ ok: false, error: { code: 'invalid_input', message: 'MAWS cannot export a file artifact as pdf yet', issues: { reason: 'exportUnavailable', data: {} } } }));
-    await act(() => exportArtifact(A, 'pdf'));
+    await act(() => exportArtifact(A, TEST_MACHINE, 'pdf'));
     expect(refused.calls).toEqual([{ name: 'artifacts.export', input: { artifactId: A, format: 'pdf', ownFile: true } }]);
     expect(toasts()).toEqual([['warning', 'Couldn’t export: MAWS cannot export a file artifact as pdf yet']]);
 
     useNotices.setState({ notices: [] });
     installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/p', revision: 2 }) : ok({ saved: false })));
-    await act(() => exportArtifact(A, 'png'));
+    await act(() => exportArtifact(A, TEST_MACHINE, 'png'));
     expect(toasts()).toEqual([]);
   });
 
   it('saves a copy of the stored file, at a revision when one is named', async () => {
     const main = installFakeMain(() => ok({ saved: true, path: '/Users/me/Downloads/budget.csv' }));
-    await act(() => saveArtifactCopy(A, 4));
-    await act(() => saveArtifactCopy(A));
+    await act(() => saveArtifactCopy(A, TEST_MACHINE, 4));
+    await act(() => saveArtifactCopy(A, TEST_MACHINE));
     expect(main.callsOf('library.saveAs')).toEqual([
       { artifactId: A, source: { content: { revision: 4 } } },
       { artifactId: A, source: { content: {} } },
@@ -109,7 +109,7 @@ describe('another machine’s artifact', () => {
       sentTo.push([name, machine]);
       return name === 'artifacts.export' ? ok({ path: '/studio/x.pdf', revision: 4 }) : ok({ saved: true, path: '/Downloads/Deck.pdf' });
     });
-    await act(() => exportArtifact(A, 'pdf'));
+    await act(() => exportArtifact(A, OTHER_MACHINE, 'pdf'));
     expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: A, format: 'pdf' }]);
     expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: A, source: { export: { revision: 4, format: 'pdf' } } }]);
     expect(sentTo).toEqual([['artifacts.export', OTHER_MACHINE], ['library.saveAs', OTHER_MACHINE]]);
@@ -118,7 +118,7 @@ describe('another machine’s artifact', () => {
 
   it('this Mac’s artifact still exports to an own file', async () => {
     const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/x.pdf', revision: 4, exportId: E }) : ok({ saved: false })));
-    await act(() => exportArtifact(A, 'pdf'));
+    await act(() => exportArtifact(A, TEST_MACHINE, 'pdf'));
     expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: A, format: 'pdf', ownFile: true }]);
   });
 });

@@ -124,10 +124,10 @@ afterEach(() => {
 
 function mount(kind: 'html' | 'file', over: { visible?: boolean } = {}) {
   const editor = byteViewer(kind) as ArtifactEditor<ByteViewerState>;
-  const state = editor.createState!({ artifactId: ID, kind, surface: 'panel' });
+  const state = editor.createState!({ artifactId: ID, machine: TEST_MACHINE, kind, surface: 'panel' });
   const onShown = vi.fn();
   const Body = editor.Panel;
-  const draw = (visible: boolean) => <Body artifactId={ID} state={state} scope={SCOPE} visible={visible} onShown={onShown} />;
+  const draw = (visible: boolean) => <Body artifactId={ID} machine={TEST_MACHINE} state={state} scope={SCOPE} visible={visible} onShown={onShown} />;
   const view = render(draw(over.visible ?? true));
   return { onShown, view, state, show: (visible: boolean) => view.rerender(draw(visible)) };
 }
@@ -528,7 +528,7 @@ describe('Comment on an HTML page', () => {
     view.unmount(); // the tab goes inactive: its body unmounts, the registration stays
     expect(state.view.getState().pickingIn).toBeNull();
     const Body = byteViewer('html').Panel;
-    render(<Body artifactId={ID} state={state} scope={SCOPE} visible onShown={() => {}} />);
+    render(<Body artifactId={ID} machine={TEST_MACHINE} state={state} scope={SCOPE} visible onShown={() => {}} />);
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
     expect(action('Comment').pressed).toBe(false);
   });

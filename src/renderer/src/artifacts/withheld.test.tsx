@@ -2,6 +2,7 @@
 // reserved WITHHELD_SESSION in an artifact answer's actor fields for every session the member can't view. The page shows
 // it as the untitled agent ("Claude") and treats it as no session wherever an actor's session is looked up: no title, no
 // session to open or resume, no link.
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { cleanup, render, screen } from '@testing-library/react';
 import { WITHHELD_SESSION } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -39,7 +40,7 @@ describe('the withheld session', () => {
     // even a record the window held under that id (none can exist: the id is never minted) names nothing
     window.maws = preloadOf(fakeClient()); // the window's artifact host listens on it
     useSessions.setState({ records: new Map([[WITHHELD_HERE, record(WITHHELD_HERE)]]) });
-    expect(documentWindowDeps().sessionTitle(WITHHELD_SESSION)).toBeUndefined();
+    expect(documentWindowDeps(TEST_MACHINE).sessionTitle(WITHHELD_SESSION)).toBeUndefined();
   });
 
   it('is no session context for an artifact it created', () => {
@@ -49,7 +50,7 @@ describe('the withheld session', () => {
 
   it('reads as Claude in a library row, which names and links no session for it', () => {
     const row = libraryRow(1, { title: 'Shared deck', lastEditor: { kind: 'session', appSessionId: WITHHELD_THERE } });
-    render(<Row row={row} stop menuOpen={false} onMenuOpen={() => {}} onFocus={() => {}} onFocusWithin={() => {}} onKeyDown={() => {}} />);
+    render(<Row row={row} machine={OTHER_MACHINE} stop menuOpen={false} onMenuOpen={() => {}} onFocus={() => {}} onFocusWithin={() => {}} onKeyDown={() => {}} />);
     expect(screen.getByText(/by Claude/)).toBeTruthy();
     expect(document.body.textContent).not.toContain(WITHHELD_SESSION);
   });

@@ -2,11 +2,13 @@
 // Rename and Delete, the design-system-in-use answer to a Delete, the Spaces' New, Rename, Instructions and Delete. Opening one
 // replaces the one shown; the tab's `LibraryDialogs` draws it. P4-B5: Send to is the app's own sheet (../delivery/).
 import { create } from 'zustand';
+import type { MachineRef } from '@shared/machine/ref';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
 import { toast } from '../stores/notices';
 
 export interface ArtifactRef {
   id: string;
+  machine: MachineRef;
   title: string;
 }
 

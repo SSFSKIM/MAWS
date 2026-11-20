@@ -118,7 +118,7 @@ function mountIn(scope: EditorHostScope) {
   const tree = (slot: string) => (
     <EditorHostScopeContext.Provider value={scope}>
       <div key={slot}>
-        <Body artifactId={DOC} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Body artifactId={DOC} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </div>
     </EditorHostScopeContext.Provider>
   );

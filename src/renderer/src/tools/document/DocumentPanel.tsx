@@ -83,7 +83,7 @@ export function DocumentBody({ artifactId, machine, state, scope, visible, onSho
     commands,
   );
   // P4-B5: Send to, the shown version's when one is previewed (none while two are compared, as Export)
-  const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
+  const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, machine, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
   const actions = [...(header.actions ?? []), ...(additionalActions ?? []), ...(sendTo ? [sendTo] : [])]; // P3-E: a dashboard's actions after B's; P4-B5: Send to last
   const systemRow = useLibraryRow(governing && 'id' in governing ? governing.id : null, machine).value;
   const spaces = useLibrarySpaces(machine).value;

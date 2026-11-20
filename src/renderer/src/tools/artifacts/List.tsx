@@ -214,7 +214,7 @@ function Lines({ rows, error, scope, appSessionId, initialOffset, onOpen }: { ro
   );
 }
 
-function ListRow({ row, appSessionId, onOpen, onFocus }: { row: LibraryRow; appSessionId?: AppSessionId; onOpen(artifactId: string, machine: MachineRef): void; onFocus(within: boolean): void }) {
+function ListRow({ row, appSessionId, onOpen, onFocus }: { row: LibraryRow; appSessionId?: AppSessionId; onOpen(artifactId: string): void; onFocus(within: boolean): void }) {
   const now = useNow();
   const by = actorDisplay(row.lastEditor, row.lastEditorTitle).name;
   const link = row.sessions.find((session) => session.appSessionId === appSessionId);

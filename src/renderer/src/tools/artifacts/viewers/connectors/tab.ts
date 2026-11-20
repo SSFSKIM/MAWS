@@ -35,6 +35,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ConnectorOwnerAck, ConnectorServerRow } from '@shared/ipc/schema/connectors';
 import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
 import { artifactMachineOf } from '../../../../artifacts/machines';
+import type { MachineRef } from '@shared/machine/ref';
 import { machineNameOf, remoteGreyedOf, remoteRefusalWords, SERVER_NEEDS } from '../../../../artifacts/remote-surfaces';
 import { ArtifactCommandError } from '../../../../artifacts/command-error';
 import type { ArtifactSessionContext, ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
@@ -75,6 +76,7 @@ export interface ConnectorsView {
 }
 
 export interface ConnectorsTabDeps {
+  machine?: MachineRef;
   host: Pick<ArtifactHost, 'openConnectors' | 'connectorGrants' | 'grantConnectorTool' | 'revokeConnectorTool'>;
   startSession(context: ArtifactSessionContext, previous: AppSessionId | null): Promise<ArtifactSessionStart>;
   log?(line: string): void;
@@ -109,6 +111,8 @@ export class ConnectorsTab {
   private disposed = false;
   private serverReads = 0; // P3-HD M3c2: the latest rows read's serial
   private unlistenServers: (() => void) | null = null; // P3-HD M3c2
+
+  get machine(): MachineRef | undefined { return this.deps.machine; }
 
   constructor(
     readonly artifactId: string,
@@ -229,7 +233,7 @@ export class ConnectorsTab {
 
   private async readServers(): Promise<void> {
     const { owner } = this.deps;
-    if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return; // P5 O7 M5c: the sheet says why
+    if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS, this.machine) !== null) return; // P5 O7 M5c: the sheet says why
     const serial = ++this.serverReads;
     const current = () => !this.disposed && serial === this.serverReads;
     try {
@@ -267,7 +271,7 @@ export class ConnectorsTab {
 
   private async ownerGesture(target: string, run: (owner: ConnectorsOwner) => Promise<ConnectorOwnerAck>): Promise<void> {
     const { owner } = this.deps;
-    if (!owner || this.disposed || this.view.getState().serverBusy !== null || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return;
+    if (!owner || this.disposed || this.view.getState().serverBusy !== null || remoteGreyedOf(this.artifactId, SERVER_NEEDS, this.machine) !== null) return;
     this.update({ serverBusy: target });
     let refused: ServersView['refused'];
     try {

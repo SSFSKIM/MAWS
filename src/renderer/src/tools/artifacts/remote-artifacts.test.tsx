@@ -188,7 +188,7 @@ describe('opening an artifact of another machine', () => {
     recordArtifactMachine(DECK.id, OTHER_MACHINE, TEST_MACHINE);
     setHostActions({ ...NO_ACTIONS, openArtifactTab });
     try {
-      render(<MarkdownView entry={{ tabId: 'remote-md', appSessionId: null, artifact: { artifactId: DECK.id, revision: 1 }, text: `[Studio notes](maws-artifact:${LOOSE.id})` } as never} />);
+      render(<MarkdownView entry={{ tabId: 'remote-md', appSessionId: null, artifact: { artifactId: DECK.id, machine: OTHER_MACHINE, revision: 1 }, text: `[Studio notes](maws-artifact:${LOOSE.id})` } as never} />);
       fireEvent.click(screen.getByRole('button', { name: 'Studio notes' }));
     } finally {
       setHostActions(NO_ACTIONS);

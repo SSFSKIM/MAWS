@@ -22,8 +22,8 @@ export interface ConnectorsOwner {
   onServersChanged(listener: (artifactId: string) => void): () => void;
 }
 
-export function createConnectorsOwner(bridge: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>): ConnectorsOwner {
-  const machineOf = (artifactId: string): MachineRef => artifactMachineOf(artifactId) ?? bridge.localMachine;
+export function createConnectorsOwner(bridge: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>, machine?: MachineRef): ConnectorsOwner {
+  const machineOf = (artifactId: string): MachineRef => machine ?? artifactMachineOf(artifactId) ?? bridge.localMachine;
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
     const result = await bridge.invoke(name, input, ...opts);
     if (!result.ok) throw new ArtifactCommandError(result.error);
@@ -41,9 +41,6 @@ export function createConnectorsOwner(bridge: Pick<MawsBridge, 'invoke' | 'on' |
   };
 }
 
-let owner: ConnectorsOwner | null = null;
-// The window's one owner adapter, over the validated IPC client.
-export function connectorsOwner(): ConnectorsOwner {
-  owner ??= createConnectorsOwner(ipc);
-  return owner;
+export function connectorsOwner(machine: MachineRef): ConnectorsOwner {
+  return createConnectorsOwner(ipc, machine);
 }

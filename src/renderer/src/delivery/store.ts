@@ -21,6 +21,7 @@ import { createSendToRun, type SendToRun } from './run';
 // PNG, the board its Export would picture.
 export interface SendToSubject {
   artifactId: string;
+  machine?: MachineRef;
   kind: ArtifactKind;
   title: string;
   versionId?: number;
@@ -64,18 +65,21 @@ export function latestReceipt(state: Pick<DeliveryState, 'receipts'>, artifactId
 
 // The target of the artifact's latest send still running (null: none). P4-B5 review: each run marks and clears its own,
 // so a second run's `busy`, or another target's send ending first, leaves a running one's mark.
-export function sendingTo(state: Pick<DeliveryState, 'sending'>, artifactId: string): DeliveryTarget | null {
-  const runs = state.sending[artifactId];
+export function sendingTo(state: Pick<DeliveryState, 'sending'>, artifactId: string, machine: MachineRef | null = null): DeliveryTarget | null {
+  const runs = state.sending[sendingKey(artifactId, machine)];
   return runs ? (Object.values(runs).at(-1) ?? null) : null;
 }
 
-export function markSending(artifactId: string, runId: string, target: DeliveryTarget | null): void {
+const sendingKey = (artifactId: string, machine: MachineRef | null) => (machine === null ? artifactId : `${machine}\0${artifactId}`);
+
+export function markSending(artifactId: string, runId: string, target: DeliveryTarget | null, machine: MachineRef | null = null): void {
+  const key = sendingKey(artifactId, machine);
   useDelivery.setState((s) => {
-    const runs = { ...s.sending[artifactId] };
+    const runs = { ...s.sending[key] };
     if (target === null) delete runs[runId];
     else runs[runId] = target;
-    const sending = { ...s.sending, [artifactId]: runs };
-    if (Object.keys(runs).length === 0) delete sending[artifactId];
+    const sending = { ...s.sending, [key]: runs };
+    if (Object.keys(runs).length === 0) delete sending[key];
     return { sending };
   });
 }
@@ -87,7 +91,7 @@ export const defaultTarget = (kind: ArtifactKind): DeliveryTarget => (kind === '
 // one shown (its run cancelled where it may be).
 export function openSendTo(subject: SendToSubject, target: DeliveryTarget = defaultTarget(subject.kind), client: MawsBridge = ipc): void {
   useDelivery.getState().sheet?.run.close();
-  const remote = artifactMachineOf(subject.artifactId); // P5 O7 M5c: the run is its artifact's machine's
+  const remote = subject.machine === undefined ? artifactMachineOf(subject.artifactId) : subject.machine === client.localMachine ? null : subject.machine; // P5 O7 M5c: the run is its artifact's machine's
   const run = createSendToRun({
     client,
     artifactId: subject.artifactId,
@@ -95,7 +99,7 @@ export function openSendTo(subject: SendToSubject, target: DeliveryTarget = defa
     elsewhere: remote === null ? null : machineNameOf(remote),
     title: subject.title,
     target,
-    onSending: (runId, sending) => markSending(subject.artifactId, runId, sending),
+    onSending: (runId, sending) => markSending(subject.artifactId, runId, sending, remote),
     onReceipt: (receipt) => keep(receipt, remote),
   });
   useDelivery.setState({ sheet: { subject, run } });

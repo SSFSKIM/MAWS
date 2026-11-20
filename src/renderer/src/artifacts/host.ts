@@ -596,7 +596,7 @@ export function createArtifactHost({ ipc, ports, machine, log = (line) => consol
           if (released) return;
           released = true;
           lostOnResync.delete(invalidate);
-          call('artifacts.releaseDatasets', { holdId }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
+          call('artifacts.releaseDatasets', { holdId }, { machine }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
         },
       };
     },

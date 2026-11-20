@@ -5,7 +5,7 @@ import type { MachineRef } from '@shared/machine/ref';
 
 type ArtifactClient = Pick<MawsBridge, 'invoke' | 'on'>;
 const onArtifactMachine = (name: CommandName): boolean =>
-  name.startsWith('artifacts.') || name.startsWith('library.') || name === 'presentations.present';
+  (name.startsWith('artifacts.') && name !== 'artifacts.copyAsset') || name.startsWith('library.') || name === 'presentations.present';
 
 export function artifactClient(client: ArtifactClient, machine: MachineRef): ArtifactClient {
   return {

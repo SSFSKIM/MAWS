@@ -104,7 +104,7 @@ function mountIn(scope: EditorHostScope) {
   const Body = scope.surface === 'panel' ? editor.Panel : editor.Main;
   const tree = () => (
     <EditorHostScopeContext.Provider value={scope}>
-      <Body artifactId={A} state={hold.state} scope={scope} visible onShown={() => {}} />
+      <Body artifactId={A} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
     </EditorHostScopeContext.Provider>
   );
   const view = render(tree());

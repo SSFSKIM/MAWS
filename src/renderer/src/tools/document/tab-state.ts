@@ -43,6 +43,7 @@ import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import type { CloseAsk } from '../../panel/editor-host'; // P4-B3
+import { ipc } from '../../ipc/client';
 import { ownFileFor } from '../../library/export'; // P5 O7 M5a
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
@@ -322,7 +323,7 @@ export class DocumentTabState {
       // P4 (W1, L302): a file of its own, saved by its id, so Letter and A4 or the agent's export of the same revision and
       // format between the two never swaps the file saved. UX wave U10b: a size only where the row carries one (a
       // dashboard's), else the export prints on the document's own page
-      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), ...(pageSize && { pageSize }), ...ownFileFor(this.artifactId) }); // P5 O7 M5a: no own file on another machine
+      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), ...(pageSize && { pageSize }), ...ownFileFor(this.machine, ipc.localMachine) }); // P5 O7 M5a: no own file on another machine
       if (!exported.ok) throw new Error(exported.error.message);
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });
@@ -385,7 +386,7 @@ export class DocumentTabState {
    * UX wave U5a: the comment is the artifact's pass's, which ends with its last view, so only the last view's close asks.
    */
   closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
-    const draft = ask?.moving || artifactViews(this.artifactId, this.machine) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
+    const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
     if (draft && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
     if (!handle || handle.state().unsaved === 0) return true;

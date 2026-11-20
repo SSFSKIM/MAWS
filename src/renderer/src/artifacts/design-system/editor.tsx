@@ -159,7 +159,7 @@ function OpenBody(props: { artifactId: string; machine: MachineRef; handle: Docu
         askAdopt={askAdopt}
         title={title ?? undefined}
       />
-      {deleting && visible && <DeleteSystemSheet artifactId={artifactId} name={name} onClose={() => state.endDelete()} />}
+      {deleting && visible && <DeleteSystemSheet artifactId={artifactId} machine={machine} name={name} onClose={() => state.endDelete()} />}
     </>
   );
 }

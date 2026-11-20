@@ -61,9 +61,9 @@ function DesignBody({ artifactId, machine, state, scope, visible, onShown, compa
   const exportBoard = useSyncExternalStore(state.view.subscribe, () => state.view.snapshot().frame);
   const activeBoard = useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().currentSlide ?? null);
   const shownBoard = exportShown !== null && exportShown !== 'compare' ? exportShown.board : (exportBoard ?? activeBoard);
-  const exports = useMemo(() => designExports({ shown: exportShown, board: shownBoard }, (entry) => void runDesignExport(artifactId, entry, state.exportContext())), [exportShown, shownBoard, state, artifactId]);
+  const exports = useMemo(() => designExports({ shown: exportShown, board: shownBoard }, (entry) => void runDesignExport(artifactId, machine, entry, state.exportContext())), [exportShown, shownBoard, state, artifactId, machine]);
   const header = designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null, exports, previewing: exportShown !== null }, commands);
-  const sendTo = useSendToAction(sendToSubject(artifactId, 'design', row?.title, exportShown, shownBoard)); // P4-B5: a PNG sent pictures the board Export would
+  const sendTo = useSendToAction(sendToSubject(artifactId, machine, 'design', row?.title, exportShown, shownBoard)); // P4-B5: a PNG sent pictures the board Export would
   useEditorHost(scope, sendTo ? { ...header, actions: [...(header.actions ?? []), sendTo] } : header);
 
   // M4: comments go to the session the main area shows (its Side thread, or its conversation). P3-F (L230): with none
@@ -77,10 +77,10 @@ function DesignBody({ artifactId, machine, state, scope, visible, onShown, compa
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
-  const systemRows = useLibraryList({ kind: 'design_system' }).value?.rows;
+  const systemRows = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   const theme = useMemo(
-    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, id) }),
-    [systemRows, row?.designSystemId, artifactId],
+    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, machine, id) }),
+    [systemRows, row?.designSystemId, artifactId, machine],
   );
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
   const assetUrlAt = useCallback((ref: string, revision: number) => state.host.assetUrl(artifactId, ref, revision), [state, artifactId]); // M4: a version's assets
@@ -132,7 +132,7 @@ function DesignBody({ artifactId, machine, state, scope, visible, onShown, compa
         onCanvases={state.setCanvases}
         comments={target === null ? undefined : comments /* P3-F (L230) */}
         history={history}
-        versionExports={history ? (versionId) => designVersionExports(artifactId, versionId, state.exportContext(), history.api) : undefined}
+        versionExports={history ? (versionId) => designVersionExports(artifactId, machine, versionId, state.exportContext(), history.api) : undefined}
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
         reveal={reveal} /* P4-B4 */

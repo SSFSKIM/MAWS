@@ -134,19 +134,18 @@ function disposeHold(hold: ArtifactEditorHold, key: string): void {
   } catch (error) {
     console.error(`[artifacts] disposing the ${hold.kind} editor's state for ${key} failed`, error);
   }
-  endCommentsOnceUnshown(hold.artifactId, hold.machine);
+  endCommentsOnceUnshown(hold.artifactId);
 }
 
 /** UX wave U5a: how many tabs show the artifact now (a close guard asks about its unsent comment only for the last). */
-export const artifactViews = (artifactId: string, machine: MachineRef): number => [...holds.values(), ...staged.values()].filter((each) => each.artifactId === artifactId && each.machine === machine).length;
+export const artifactViews = (artifactId: string): number => [...holds.values(), ...staged.values()].filter((each) => each.artifactId === artifactId).length;
 
 // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §F, decision 17): an artifact no tab shows
 // any more ends its unsent comments' passes, for both of its card hosts' kinds (a document withdraws their threads
 // through the replica each one holds). Asked once the task's moves are done (a move holds the state staged meanwhile).
-function endCommentsOnceUnshown(artifactId: string, machine: MachineRef): void {
+function endCommentsOnceUnshown(artifactId: string): void {
   queueMicrotask(() => {
-    // Card subjects still use bare ids; do not drop another machine’s draft on closing this copy.
-    if (artifactViews(artifactId, machine) > 0 || [...holds.values(), ...staged.values()].some((hold) => hold.artifactId === artifactId)) return;
+    if (artifactViews(artifactId) > 0) return;
     dropSubject('artifact', artifactId);
     dropSubject('artifact-page', artifactId);
   });

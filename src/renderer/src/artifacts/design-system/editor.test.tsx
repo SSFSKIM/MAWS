@@ -65,8 +65,8 @@ const listed = (input: Record<string, unknown>) => {
 function mount(editor: RegisteredArtifactEditor, state: OpenedSystem, props: { visible?: boolean; onShown?: () => void } = {}) {
   const Body = editor.Panel;
   const onShown = props.onShown ?? vi.fn();
-  const view = render(<Body artifactId={DS} state={state} scope={SCOPE} visible={props.visible ?? true} onShown={onShown} />);
-  return { view, onShown, rerender: (visible: boolean) => view.rerender(<Body artifactId={DS} state={state} scope={SCOPE} visible={visible} onShown={onShown} />) };
+  const view = render(<Body artifactId={DS} machine={TEST_MACHINE} state={state} scope={SCOPE} visible={props.visible ?? true} onShown={onShown} />);
+  return { view, onShown, rerender: (visible: boolean) => view.rerender(<Body artifactId={DS} machine={TEST_MACHINE} state={state} scope={SCOPE} visible={visible} onShown={onShown} />) };
 }
 const action = (label: string) => editorHostOf(SCOPE)!.actions!.find((a) => a.label === label)!;
 
@@ -255,7 +255,7 @@ describe('the delete request’s lifetime', () => {
     const editor = { ...createDesignSystemEditor({ host: () => hosts[next]! }) };
     const Panel = editor.Panel;
     const first = holdArtifactEditorState(PANEL, 'first', TEST_MACHINE, 'design_system', editor).state;
-    const view = render(<Panel artifactId="first" state={first} scope={PANEL} visible onShown={() => {}} />);
+    const view = render(<Panel artifactId="first" machine={TEST_MACHINE} state={first} scope={PANEL} visible onShown={() => {}} />);
     await act(async () => {});
     act(() => editorHostOf(PANEL)!.actions!.find((a) => a.id === 'design-system.delete')!.onSelect());
     expect(screen.getByRole('dialog', { name: 'Delete “First”?' })).toBeTruthy();
@@ -263,7 +263,7 @@ describe('the delete request’s lifetime', () => {
     next = 'second';
     const second = holdArtifactEditorState(PANEL, 'second', TEST_MACHINE, 'design_system', editor).state; // the registry disposes the first
     expect(second).not.toBe(first);
-    render(<Panel artifactId="second" state={second} scope={PANEL} visible onShown={() => {}} />);
+    render(<Panel artifactId="second" machine={TEST_MACHINE} state={second} scope={PANEL} visible onShown={() => {}} />);
     await act(async () => {});
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(editorHostOf(PANEL)!.title).toBe('Second');
@@ -274,11 +274,11 @@ describe('the delete request’s lifetime', () => {
     const editor = createDesignSystemEditor({ host: () => named('First') });
     const state = holdArtifactEditorState(PANEL, 'first', TEST_MACHINE, 'design_system', editor).state;
     const Panel = editor.Panel;
-    const view = render(<Panel artifactId="first" state={state} scope={PANEL} visible={false} onShown={() => {}} />);
+    const view = render(<Panel artifactId="first" machine={TEST_MACHINE} state={state} scope={PANEL} visible={false} onShown={() => {}} />);
     await act(async () => {});
     act(() => state.requestDelete());
     expect(screen.queryByRole('dialog')).toBeNull();
-    view.rerender(<Panel artifactId="first" state={state} scope={PANEL} visible onShown={() => {}} />);
+    view.rerender(<Panel artifactId="first" machine={TEST_MACHINE} state={state} scope={PANEL} visible onShown={() => {}} />);
     expect(screen.getByRole('dialog', { name: 'Delete “First”?' })).toBeTruthy();
     act(() => releaseArtifactEditorState(PANEL));
     expect(state.deleting()).toBe(false);

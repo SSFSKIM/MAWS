@@ -3,7 +3,7 @@
 // the library of the artifact's machine lists the artifact (null until that read has answered), and the sentence Undo is
 // disabled with on another machine (UC-7's `disabledWords`). The act is disabled while it runs, so a second press sends
 // nothing; an act that ends without its effect leaves its sentence until the next press.
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { disabledWords } from '@shared/ipc/remote-unavailable';
 import type { MachineRef } from '@shared/machine/ref';

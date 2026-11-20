@@ -252,7 +252,7 @@ function NoSessionNotice({ path }: { path: string }) {
 // `data-refusal`, and its first paragraph is the headline in every case.
 function Refused({ entry }: { entry: ViewerEntry }) {
   const { path, tabId, appSessionId } = entry;
-  const place = useNoticePlace(appSessionId, entry.artifact?.artifactId ?? null); // the branch review: an artifact's view names its machine
+  const place = useNoticePlace(appSessionId, entry.artifact?.machine ?? null); // the branch review: an artifact's view names its machine
   const canRetry = useViewer.getState().canRetry(entry); // of the entry drawn, which every change of it draws again
   if (entry.needsOpen || entry.offersOpenFile) {
     return (
@@ -451,9 +451,10 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
   const zoom = useMediaZoom(`${tabId}\n${path}`);
   const artifactId = artifact?.artifactId;
   const revision = artifact?.revision;
+  const artifactMachine = artifact?.machine;
   useEffect(
-    () => useViewer.getState().mount(tabId, { appSessionId, path, line, readOnly, agent, ...(artifactId !== undefined && revision !== undefined && { artifact: { artifactId, revision } }) }),
-    [tabId, appSessionId, path, line, readOnly, agent, artifactId, revision],
+    () => useViewer.getState().mount(tabId, { appSessionId, path, line, readOnly, agent, ...(artifactId !== undefined && revision !== undefined && artifactMachine !== undefined && { artifact: { artifactId, revision, machine: artifactMachine } }) }),
+    [tabId, appSessionId, path, line, readOnly, agent, artifactId, revision, artifactMachine],
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
   // Decision Log 18 and 19: the bound on the request, from the moment the view is ready, again each time it is

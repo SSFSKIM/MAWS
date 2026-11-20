@@ -18,7 +18,7 @@ import { RowContextMenu, RowMenu } from './RowMenu';
 import { setLibraryView, showSpace } from './view';
 import { SEND_TO_COPY } from '../delivery/copy'; // P4-B5
 import { latestReceipt, useDelivery } from '../delivery/store'; // P4-B5
-import { useArtifactMachine } from '../artifacts/use-artifact-machine'; // P5 O7 M5c
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client'; // P4-B5
 
 const SHOWN_SESSIONS = 3;
@@ -29,6 +29,7 @@ const onControl = (event: MouseEvent<HTMLElement>) =>
 
 export interface RowProps {
   row: LibraryRow;
+  machine: MachineRef;
   stop: boolean; // the list's one tab stop
   menuOpen: boolean;
   onMenuOpen(open: boolean): void;
@@ -78,9 +79,8 @@ const Dot = () => (
 
 // P4-B5: the row's receipt of the latest Send to (main's, this main's life): "Sent to Notion · 2 minutes ago", opening
 // the delivery where the service named one.
-function Receipt({ artifactId, now, tabIndex }: { artifactId: string; now: number; tabIndex: number }) {
-  const machine = useArtifactMachine(artifactId); // P5 O7 M5c: the receipts of the row's machine
-  const receipt = useDelivery((s) => latestReceipt(s, artifactId, machine));
+function Receipt({ artifactId, machine, now, tabIndex }: { artifactId: string; machine: MachineRef; now: number; tabIndex: number }) {
+  const receipt = useDelivery((s) => latestReceipt(s, artifactId, machine === ipc.localMachine ? null : machine));
   if (!receipt) return null;
   const words = `${SEND_TO_COPY.actionSent(receipt.target)} · ${formatAgo(Math.max(0, now - receipt.at))}`;
   return (
@@ -99,12 +99,12 @@ function Receipt({ artifactId, now, tabIndex }: { artifactId: string; now: numbe
   );
 }
 
-export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, onKeyDown }: RowProps) {
+export function Row({ row, machine, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, onKeyDown }: RowProps) {
   const now = useNow();
   const by = actorDisplay(row.lastEditor, row.lastEditorTitle).name;
   const tabIndex = stop ? 0 : -1; // the row's own controls are reachable by Tab from the list's stop row only
   return (
-    <RowContextMenu row={row}>
+    <RowContextMenu row={row} machine={machine}>
       <article
         aria-label={row.title}
         tabIndex={tabIndex}
@@ -120,7 +120,7 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
         onKeyDown={onKeyDown}
         onClick={(event) => {
           if (onControl(event)) return;
-          openArtifactTab(row.id);
+          openArtifactTab(row.id, undefined, machine);
         }}
         className="group grid cursor-default grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-md px-2 py-2 outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 @2xl:grid-cols-[2rem_minmax(0,1fr)_auto_auto]"
       >
@@ -167,7 +167,7 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
           {row.builtIn && <span className="shrink-0">Built in</span>}
           {row.builtIn && !row.seedOnly && <Dot />}
           {!row.seedOnly && <span className="truncate">{ROW_COPY.edited(formatAgo(Math.max(0, now - row.lastEditedAt)), by)}</span>}
-          <Receipt artifactId={row.id} now={now} tabIndex={tabIndex} />
+          <Receipt artifactId={row.id} machine={machine} now={now} tabIndex={tabIndex} />
         </span>
         {row.snippet && (
           <span data-part="snippet" className="col-start-2 row-start-3 truncate text-ui-sm text-fg-faint">
@@ -180,7 +180,7 @@ export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, o
           </span>
         )}
         <span className="col-start-3 row-span-2 row-start-1 flex self-center @2xl:col-start-4">
-          <RowMenu row={row} open={menuOpen} onOpenChange={onMenuOpen} tabIndex={tabIndex} />
+          <RowMenu row={row} machine={machine} open={menuOpen} onOpenChange={onMenuOpen} tabIndex={tabIndex} />
         </span>
       </article>
     </RowContextMenu>

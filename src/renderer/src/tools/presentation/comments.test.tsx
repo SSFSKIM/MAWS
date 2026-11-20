@@ -115,7 +115,7 @@ describe('a deck’s compose card keeps its draft', () => {
     const Main = editor.Main;
     const view = render(
       <EditorHostScopeContext.Provider value={scope}>
-        <Main artifactId={DECK} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Main artifactId={DECK} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(hold.state.snapshot().session).not.toBeNull());
@@ -166,7 +166,7 @@ describe('a deck’s compose card keeps its draft', () => {
     const Panel = editor.Panel;
     const panel = render(
       <EditorHostScopeContext.Provider value={panelScope}>
-        <Panel artifactId={DECK} state={kept.state} scope={panelScope} visible onShown={() => {}} />
+        <Panel artifactId={DECK} machine={TEST_MACHINE} state={kept.state} scope={panelScope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(kept.state.snapshot().session).not.toBeNull());

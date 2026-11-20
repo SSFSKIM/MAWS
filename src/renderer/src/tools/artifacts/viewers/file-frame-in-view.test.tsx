@@ -6,6 +6,7 @@
 // main tab) or while it is in the main area and the main area is not on screen (the side column a sheet over a narrow
 // window), its frame element is not in the document; shown again it is a new element from the same token. Every id, path
 // and byte here is invented.
+import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { cleanup, render, waitFor, act } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -75,9 +76,9 @@ afterEach(() => {
 
 function mount(scope: EditorHostScope, visible: boolean) {
   const editor = byteViewer('file') as ArtifactEditor<ByteViewerState>;
-  const state = editor.createState!({ artifactId: ID, kind: 'file', surface: scope.surface === 'main' ? 'main' : 'panel' });
+  const state = editor.createState!({ artifactId: ID, machine: TEST_MACHINE, kind: 'file', surface: scope.surface === 'main' ? 'main' : 'panel' });
   const Body = editor.Panel;
-  const draw = (shown: boolean) => <Body artifactId={ID} state={state} scope={scope} visible={shown} onShown={() => {}} />;
+  const draw = (shown: boolean) => <Body artifactId={ID} machine={TEST_MACHINE} state={state} scope={scope} visible={shown} onShown={() => {}} />;
   const view = render(draw(visible));
   return (shown: boolean) => view.rerender(draw(shown));
 }

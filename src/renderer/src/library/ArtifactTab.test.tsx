@@ -378,7 +378,7 @@ describe('an artifact an agent deleted while it is open', () => {
     await deletedWhileOpen();
     const ref = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
     expect(artifactReplaceVerdict(ref)).toBeNull(); // the header says nothing unsaved (a parked replica's says read-only), nothing kept: replaceable
-    act(() => noteDeletedReplica({}, A, 1));
+    act(() => noteDeletedReplica({}, A, TEST_MACHINE, 1));
     expect(artifactReplaceVerdict(ref)).toEqual({ keep: expect.stringContaining('has unsaved changes') });
   });
 

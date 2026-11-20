@@ -11,7 +11,7 @@ import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { useArtifactMachine } from '../artifacts/use-artifact-machine';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
@@ -36,16 +36,15 @@ const reportFailure = async (pending: Promise<{ ok: true } | { ok: false; error:
 
 // P5 O7 M5a: a row of another machine's library moves between that machine's Spaces (the act goes there); a new Space
 // would be this Mac's, so it is not offered there.
-function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
-  const machine = useArtifactMachine(row.id);
-  const spaces = useLibrarySpaces(machine ?? undefined).value ?? [];
-  const ref: ArtifactRef = { id: row.id, title: row.title };
+function RowMenuItems({ M, row, machine }: { M: Menu; row: LibraryRow; machine: MachineRef }) {
+  const spaces = useLibrarySpaces(machine).value ?? [];
+  const ref: ArtifactRef = { id: row.id, machine, title: row.title };
   return (
     <>
-      <M.Item className={MENU_ITEM} onSelect={() => openArtifactTab(row.id)}>
+      <M.Item className={MENU_ITEM} onSelect={() => openArtifactTab(row.id, undefined, machine)}>
         {R.open}
       </M.Item>
-      <M.Item className={MENU_ITEM} onSelect={() => void reportFailure(setArtifactPinned(row.id, !row.pinned))}>
+      <M.Item className={MENU_ITEM} onSelect={() => void reportFailure(setArtifactPinned(row.id, machine, !row.pinned))}>
         {row.pinned ? R.unpin : R.pin}
       </M.Item>
       <M.Item className={MENU_ITEM} onSelect={() => openLibraryDialog({ kind: 'rename', artifact: ref })}>
@@ -60,7 +59,7 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
         </M.SubTrigger>
         <M.Portal>
           <M.SubContent sideOffset={4} className={MENU}>
-            <M.RadioGroup value={row.space?.id ?? NO_SPACE} onValueChange={(next) => void reportFailure(moveArtifactToSpace(row.id, next === NO_SPACE ? null : next))}>
+            <M.RadioGroup value={row.space?.id ?? NO_SPACE} onValueChange={(next) => void reportFailure(moveArtifactToSpace(row.id, machine, next === NO_SPACE ? null : next))}>
               {spaces.map((space) => (
                 <M.RadioItem key={space.id} value={space.id} className={MENU_ITEM}>
                   <Indicator M={M} />
@@ -72,7 +71,7 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
                 {R.noSpace}
               </M.RadioItem>
             </M.RadioGroup>
-            {machine === null && (
+            {machine === ipc.localMachine && (
               <>
                 <M.Separator className="my-1 h-px bg-border" />
                 <M.Item className={MENU_ITEM} onSelect={() => openLibraryDialog({ kind: 'newSpace', moveArtifact: ref })}>
@@ -84,10 +83,10 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
           </M.SubContent>
         </M.Portal>
       </M.Sub>
-      <M.Item className={MENU_ITEM} onSelect={() => void reportFailure(duplicateArtifact(row.id))}>
+      <M.Item className={MENU_ITEM} onSelect={() => void reportFailure(duplicateArtifact(row.id, machine))}>
         {R.duplicate}
       </M.Item>
-      <ExportItems M={M} row={row} />
+      <ExportItems M={M} row={row} machine={machine} />
       <M.Separator className="my-1 h-px bg-border" />
       <M.Item className={`${MENU_ITEM} text-danger`} onSelect={() => openLibraryDialog({ kind: 'delete', artifact: ref })}>
         {R.delete}
@@ -97,7 +96,7 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
 }
 
 // M5b: Export ›, its formats and a File artifact's or (U10b) an html page's Save a copy…; nothing when the kind has neither.
-function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
+function ExportItems({ M, row, machine }: { M: Menu; row: LibraryRow; machine: MachineRef }) {
   const formats = useExportFormats(row.kind);
   const copies = savesCopy(row.kind);
   if (formats.length === 0 && !copies) return null;
@@ -112,12 +111,12 @@ function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
       <M.Portal>
         <M.SubContent sideOffset={4} className={MENU}>
           {formats.map((format) => (
-            <M.Item key={format} className={MENU_ITEM} onSelect={() => void exportArtifact(row.id, format)}>
+            <M.Item key={format} className={MENU_ITEM} onSelect={() => void exportArtifact(row.id, machine, format)}>
               {VIEWERS_COPY.exportFormats[format]}
             </M.Item>
           ))}
           {copies && (
-            <M.Item className={MENU_ITEM} onSelect={() => void saveArtifactCopy(row.id)}>
+            <M.Item className={MENU_ITEM} onSelect={() => void saveArtifactCopy(row.id, machine)}>
               {VIEWERS_COPY.saveCopy}
             </M.Item>
           )}
@@ -125,7 +124,7 @@ function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
             <>
               <M.Separator className="my-1 h-px bg-border" />
               {(formats.includes('md') ? (['drive', 'notion'] as const) : (['drive'] as const)).map((target) => (
-                <M.Item key={target} className={MENU_ITEM} onSelect={() => openSendTo({ artifactId: row.id, kind: row.kind, title: row.title }, target)}>
+                <M.Item key={target} className={MENU_ITEM} onSelect={() => openSendTo({ artifactId: row.id, machine, kind: row.kind, title: row.title }, target)}>
                   {SEND_TO_COPY.item(SERVICE[target])}
                 </M.Item>
               ))}
@@ -146,7 +145,7 @@ function Indicator({ M }: { M: Menu }) {
 }
 
 // The row's "…" button and its menu; `open` is the row's, so Shift+F10 on the row opens it too.
-export function RowMenu({ row, open, onOpenChange, tabIndex }: { row: LibraryRow; open: boolean; onOpenChange(open: boolean): void; tabIndex: number }) {
+export function RowMenu({ row, machine, open, onOpenChange, tabIndex }: { row: LibraryRow; machine: MachineRef; open: boolean; onOpenChange(open: boolean): void; tabIndex: number }) {
   return (
     <DropdownMenu.Root modal={false} open={open} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>
@@ -162,7 +161,7 @@ export function RowMenu({ row, open, onOpenChange, tabIndex }: { row: LibraryRow
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
-          <RowMenuItems M={DropdownMenu} row={row} />
+          <RowMenuItems M={DropdownMenu} row={row} machine={machine} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -170,13 +169,13 @@ export function RowMenu({ row, open, onOpenChange, tabIndex }: { row: LibraryRow
 }
 
 // The same items at the pointer, on the row's context menu.
-export function RowContextMenu({ row, children }: { row: LibraryRow; children: ReactNode }) {
+export function RowContextMenu({ row, machine, children }: { row: LibraryRow; machine: MachineRef; children: ReactNode }) {
   return (
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className={MENU}>
-          <RowMenuItems M={ContextMenu as unknown as Menu} row={row} />
+          <RowMenuItems M={ContextMenu as unknown as Menu} row={row} machine={machine} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -194,7 +193,7 @@ export function RenameSheet({ dialog }: SheetOf<'rename'>) {
   const trimmed = title.trim();
   const submit = async () => {
     setBusy(true);
-    const result = await renameArtifact(artifact.id, trimmed);
+    const result = await renameArtifact(artifact.id, artifact.machine, trimmed);
     setBusy(false);
     if (result.ok) close();
     else setError(result.error.message);
@@ -216,7 +215,7 @@ export function DeleteSheet({ dialog }: SheetOf<'delete'>) {
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
-    const result = await deleteArtifact(artifact.id);
+    const result = await deleteArtifact(artifact.id, artifact.machine);
     setBusy(false);
     if (result.ok) return close();
     if (result.refusal?.reason === 'designSystemInUse') {
@@ -242,7 +241,7 @@ export function InUseSheet({ dialog }: SheetOf<'inUse'>) {
   const [titles, setTitles] = useState<Map<string, string> | null>(null);
   useEffect(() => {
     let live = true;
-    void Promise.all(artifactIds.map(async (artifactId) => [artifactId, await ipc.invoke('library.get', { artifactId })] as const)).then((answers) => {
+    void Promise.all(artifactIds.map(async (artifactId) => [artifactId, await ipc.invoke('library.get', { artifactId }, { machine: dialog.artifact.machine })] as const)).then((answers) => {
       if (!live) return;
       setTitles(new Map(answers.map(([artifactId, result]) => [artifactId, (result.ok && result.value.row?.title) || artifactId])));
     });
@@ -264,7 +263,7 @@ export function InUseSheet({ dialog }: SheetOf<'inUse'>) {
                   type="button"
                   onClick={() => {
                     close();
-                    openArtifactTab(artifactId);
+                    openArtifactTab(artifactId, undefined, dialog.artifact.machine);
                   }}
                   className="w-full truncate rounded-sm px-2 py-1 text-left text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
                 >

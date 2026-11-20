@@ -1,3 +1,4 @@
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { newDoc, stateV2, transact } from '@artifacts/yjs';
 import { writeBoardEntry, writeCanvasKeys } from '@artifacts/design/model';
@@ -29,7 +30,7 @@ function versionState() {
 it('exports a card’s retained design and its own board, never another preview’s or a missing live board', async () => {
   const source = { versionState: vi.fn(async () => versionState()) };
   const main = installFakeMain((name) => name === 'artifacts.export' ? ok({ path: '/store/x', revision: 12 }) : ok({ saved: false }));
-  const entries = designVersionExports(A, 7, { shown: 'compare', board: 'live-only', label: 'Live board' }, source);
+  const entries = designVersionExports(A, TEST_MACHINE, 7, { shown: 'compare', board: 'live-only', label: 'Live board' }, source);
   await entries[0]!.onSelect();
   expect(main.calls).toEqual([
     { name: 'artifacts.export', input: { artifactId: A, format: 'png', board: 'old-board', versionId: 7 } },
@@ -37,7 +38,7 @@ it('exports a card’s retained design and its own board, never another preview�
   ]);
   expect(source.versionState).toHaveBeenCalledWith(7);
 
-  const shared = designVersionExports(A, 9, { shown: null, board: 'shared', label: 'Renamed live board' }, source);
+  const shared = designVersionExports(A, TEST_MACHINE, 9, { shown: null, board: 'shared', label: 'Renamed live board' }, source);
   await shared[1]!.onSelect();
   expect(main.calls[2]).toEqual({ name: 'artifacts.export', input: { artifactId: A, format: 'pdf', boards: ['shared'], versionId: 9 } });
   await entries[2]!.onSelect();
@@ -46,7 +47,7 @@ it('exports a card’s retained design and its own board, never another preview�
 
 it('reports a failed retained-state read rather than exporting the live design', async () => {
   const main = installFakeMain(() => ok(undefined));
-  const entries = designVersionExports(A, 7, { shown: null, board: 'phone', label: 'Phone' }, { versionState: async () => { throw new Error('Version unavailable'); } });
+  const entries = designVersionExports(A, TEST_MACHINE, 7, { shown: null, board: 'phone', label: 'Phone' }, { versionState: async () => { throw new Error('Version unavailable'); } });
   await entries[0]!.onSelect();
   expect(main.calls).toEqual([]);
   expect(useNotices.getState().notices.map((n) => n.text).join(' ')).toContain('Version unavailable');

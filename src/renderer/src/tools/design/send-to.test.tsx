@@ -57,7 +57,7 @@ async function mount(): Promise<DesignTabState> {
   const Main = editor.Main;
   render(
     <EditorHostScopeContext.Provider value={scope}>
-      <Main artifactId={DESIGN} state={hold.state} scope={scope} visible onShown={() => {}} />
+      <Main artifactId={DESIGN} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
     </EditorHostScopeContext.Provider>,
   );
   await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy());

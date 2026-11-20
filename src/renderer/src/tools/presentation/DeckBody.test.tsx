@@ -57,7 +57,7 @@ async function mount(doc: Doc) {
   const onShown = vi.fn();
   render(
     <EditorHostScopeContext.Provider value={scope}>
-      <DeckPanel artifactId={DECK} state={state} scope={scope} visible onShown={onShown} />
+      <DeckPanel artifactId={DECK} machine={TEST_MACHINE} state={state} scope={scope} visible onShown={onShown} />
     </EditorHostScopeContext.Provider>,
   );
   await waitFor(() => expect(state.snapshot().session).not.toBeNull());

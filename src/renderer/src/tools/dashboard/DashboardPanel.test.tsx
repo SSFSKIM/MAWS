@@ -96,7 +96,7 @@ function mount() {
   const onShown = vi.fn();
   render(
     <EditorHostScopeContext.Provider value={scope}>
-      <editor.Panel artifactId={A} state={hold.state} scope={scope} visible onShown={onShown} />
+      <editor.Panel artifactId={A} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={onShown} />
     </EditorHostScopeContext.Provider>,
   );
   return { state: hold.state as DashboardTabState, onShown };

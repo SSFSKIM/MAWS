@@ -91,6 +91,7 @@ import { remoteStandingOf } from '../../../lane-b/remote-standing';
 import { useLayout } from '../../../stores/layout';
 import { useMachines } from '../../../stores/machines';
 import { allTabs } from '../../../stores/layout-model';
+import type { MachineRef } from '@shared/machine/ref';
 import { machineOf } from '@shared/machine/address';
 import { openedThere, outsideUnavailable, ownersOnly, takesRemoteRoute } from '../files/elsewhere'; // UX wave U6f
 import { useFiles, type WatchHold } from '../files/store';
@@ -107,6 +108,7 @@ export const VIEWER_ENTRIES_MAX = 20;
 // resolving its path), for an artifact no session made: no session, so no watch and no write.
 export interface ArtifactRead {
   artifactId: string;
+  machine: MachineRef;
   revision: number;
 }
 
@@ -410,7 +412,7 @@ const opensThere = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>): boolean 
 /** `open` for a request about the entry's path, under that test; also "Open externally"'s copy (ExternalRow.tsx). */
 export const opens = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>) => (opensThere(entry) ? { open: true as const } : {});
 const machineNameOf = (appSessionId: AppSessionId | null): string => (appSessionId === null ? '' : (remoteStandingOf(appSessionId)?.machine ?? ''));
-const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
+const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision && a?.machine === b?.machine;
 
 // What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
 // the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry; `named` (U6c) is set
@@ -513,7 +515,10 @@ export function createViewerStore(client: MawsBridge) {
       const under = entry.artifact ? null : following(entry.appSessionId, entry.path);
       if (under !== null) return under.then(() => readChunk(entry, offset, length, hash, sent));
       sent?.(entry.artifact ? 0 : linkedCount(entry.appSessionId, entry.path));
-      if (entry.artifact) return settled(client.invoke('library.read', { ...entry.artifact, ...chunk }));
+      if (entry.artifact) {
+        const { machine, ...artifact } = entry.artifact;
+        return settled(client.invoke('library.read', { ...artifact, ...chunk }, { machine }));
+      }
       const { appSessionId } = entry;
       const local = appSessionId !== null && machineOf(appSessionId) === client.localMachine;
       const remote = appSessionId !== null && !local && takesRemoteRoute(appSessionId);

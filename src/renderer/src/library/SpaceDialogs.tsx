@@ -136,7 +136,7 @@ export function NewSpaceSheet({ dialog }: SheetOf<'newSpace'>) {
       return setError(made.error.message);
     }
     if (moveArtifact) {
-      const moved = await moveArtifactToSpace(moveArtifact.id, made.value.id);
+      const moved = await moveArtifactToSpace(moveArtifact.id, moveArtifact.machine, made.value.id);
       if (!moved.ok) toastFailure(moved.error.message);
     }
     close();

@@ -1772,7 +1772,7 @@ describe('a framed file (UX wave U6b-2)', () => {
         : fail(`unexpected ${name}`),
     );
     const ID = '00000000-0000-4000-8000-0000000000aa';
-    render(<FileBody tabId={`artifact:${ID}:1`} appSessionId={null} path="/w/ledger.pdf" readOnly artifact={{ artifactId: ID, revision: 1 }} />);
+    render(<FileBody tabId={`artifact:${ID}:1`} appSessionId={null} path="/w/ledger.pdf" readOnly artifact={{ artifactId: ID, machine: TEST_MACHINE, revision: 1 }} />);
     expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
     await settle();
     expect(main.callsOf('layout.frameFile')).toEqual([]);
@@ -3704,7 +3704,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     const main = disk({});
     overRl2(T); // the roster names the other machine studio
     main.answers.by = (name) => (name === 'library.read' ? unreachable('library.read: machine studio is not reachable') : null);
-    const artifactView = (tabId: string) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, revision: 3 }} />);
+    const artifactView = (tabId: string) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, machine: TEST_MACHINE, revision: 3 }} />);
     try {
       recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
       artifactView(`artifact:${ARTIFACT}:3`);

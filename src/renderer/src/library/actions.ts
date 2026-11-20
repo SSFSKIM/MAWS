@@ -35,12 +35,12 @@ const local = (client: MawsBridge) => ({ machine: client.localMachine });
 // ---- artifacts ---------------------------------------------------------------------------------------------------------
 
 export const createArtifact = (input: CommandInput<'artifacts.create'> & { kind: ArtifactKind }, client: MawsBridge = ipc) => run(client, 'artifacts.create', input, artifactOf, local(client));
-export const renameArtifact = (artifactId: string, title: string, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, title }, artifactOf);
-export const setArtifactPinned = (artifactId: string, pinned: boolean, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, pinned }, artifactOf);
+export const renameArtifact = (artifactId: string, machine: MachineRef, title: string, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, title }, artifactOf, { machine });
+export const setArtifactPinned = (artifactId: string, machine: MachineRef, pinned: boolean, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, pinned }, artifactOf, { machine });
 // null: out of every Space
-export const moveArtifactToSpace = (artifactId: string, spaceId: string | null, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, spaceId }, artifactOf);
-export const duplicateArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.duplicate', { artifactId }, artifactOf);
-export const deleteArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.delete', { artifactId }, nothing);
+export const moveArtifactToSpace = (artifactId: string, machine: MachineRef, spaceId: string | null, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, spaceId }, artifactOf, { machine });
+export const duplicateArtifact = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc) => run(client, 'artifacts.duplicate', { artifactId }, artifactOf, { machine });
+export const deleteArtifact = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc) => run(client, 'artifacts.delete', { artifactId }, nothing, { machine });
 // UX wave U10b (M5, §C.4): undo an agent's delete on the artifact's machine. Resolves null once the artifact is live
 // again, else the sentence an act that ended without its effect leaves: this Mac's store's sentence after "Not restored:";
 // another machine's as main words it (`refusalWords`, `failureWords`: "Not restored: <machine> is offline", …).
