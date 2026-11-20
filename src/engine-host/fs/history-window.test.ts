@@ -8,7 +8,7 @@ import { CRON_HISTORY_BYTES, eventBytes, FOLLOW_RELEASED, type WindowBudget } fr
 import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId, TaskId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
-import { longTranscript as transcript, LONG_SESSION as SESSION, LONG_DIR as DIR } from '../../../test/support/long-transcript';
+import { longTranscript as transcript, turnLines, LONG_SESSION as SESSION, LONG_DIR as DIR } from '../../../test/support/long-transcript';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { agentSlice, UNKNOWN_CURSOR } from './follow';
 import { FsService, type InterestSource } from './service';
@@ -202,6 +202,37 @@ describe('a long transcript is read in windows', () => {
       expect(ids(whole)).toEqual(ids(unbounded.filter((event) => event !== left))); // everything else, in order, once
     });
 
+    // ticket 777, the review's second round: the seam's last row alone past the budget is left out like any other, and
+    // the pages before the seam go on past it, the earlier process's exit at their end once
+    it('pages before a live launch’s seam past its last row alone over the budget, ending with the earlier process’s exit', async () => {
+      const big = `the long reply ${'z'.repeat(20_000)}`;
+      await fixture.addTranscript(DIR, SESSION, [...transcript(4), ...turnOf(5, 'd4', [big]).slice(0, -1), ...turnOf(6, 'a5-0', ['six'])]);
+      const fs = await start();
+      const maxBytes = 8 * 1024;
+      const { whole: unbounded } = await allPages(fs);
+      const seam = (await fs.historySeam(APP, async () => ['u6'] as MessageUuid[]))!;
+      const pages: SessionEvent[][] = [];
+      const omitted: number[] = [];
+      for (let earlier: EventId | undefined = seam; earlier !== undefined; ) {
+        const page = await fs.eventsSnapshot(APP, null, { before: earlier, maxBytes }, true);
+        expect(answerBytes(page)).toBeLessThanOrEqual(maxBytes);
+        if (page.omitted) {
+          omitted.push(page.omitted.events);
+          expect(page.events, 'the page that left the row out holds nothing, so a reader reads on past it').toEqual([]);
+        }
+        pages.unshift(page.events);
+        earlier = page.earlier;
+      }
+      const read = pages.flat();
+      const left = unbounded.find((event) => event.kind === 'assistant.block.complete' && event.block.type === 'text' && event.block.text === big)!;
+      const before = unbounded.slice(0, unbounded.findIndex((event) => event.kind === 'turn.started' && event.userMessageUuid === 'u6'));
+      expect(before.at(-1)!.id).toBe(left.id); // the seam's last row is the one past the budget
+      expect(omitted).toEqual([1]);
+      expect(read.filter((event) => event.kind === 'process.exited')).toHaveLength(1);
+      expect(read.at(-1)!.kind).toBe('process.exited');
+      expect(ids(read.slice(0, -1))).toEqual(ids(before.filter((event) => event !== left)));
+    });
+
     it('bounds the first N events the same way', async () => {
       await fixture.addTranscript(DIR, SESSION, transcript(12));
       const fs = await start();
@@ -260,6 +291,57 @@ describe('a long transcript is read in windows', () => {
     expect(emitted.filter((e) => (e.name === 'session.eventBatch' || e.name === 'fs.followState') && e.payload.appSessionId === APP)).toEqual([]);
     await fs.unfollow(APP, null); // the session's unfollow stops its quiet follow too
     expect(fs.state().followed).toEqual([]);
+  });
+
+  // UX wave, ticket 777: a live launch's stream is that launch's alone; the session's history before it is the
+  // transcript's, up to the seam where the launch's messages begin in it, else to its end (none written yet).
+  it('answers the cursor before a live launch\'s seam, whose pages are the transcript\'s rows before it and none of the launch\'s', async () => {
+    // turn 21 never ended on disk (an SDK process's, which writes no turn_duration); a later process wrote turn 22
+    const unended = turnLines(21, 'd20', 21).lines.slice(0, 3);
+    await fixture.addTranscript(DIR, SESSION, [...transcript(20), ...unended, ...turnLines(22, 'a21', 22).lines]);
+    const fs = await start();
+    const pagesBefore = async (cursor: EventId): Promise<SessionEvent[]> => {
+      const pages: SessionEvent[][] = [];
+      for (let earlier: EventId | undefined = cursor; earlier !== undefined; ) {
+        const page = await fs.eventsSnapshot(APP, null, { before: earlier }, true);
+        pages.unshift(page.events);
+        earlier = page.earlier;
+      }
+      return pages.flat();
+    };
+    const newest = await fs.eventsSnapshot(APP, null, {}, true);
+    const whole = [...(await pagesBefore(newest.earlier!)), ...newest.events];
+    // the earlier process ended before the launch: the seam's page closes what it left open, as a holder-less read does
+    const closed = (events: readonly SessionEvent[], upTo: number) => {
+      // after an exit the log holds (this holder-less read's own, at its end), none again
+      if (whole[upTo - 1]!.kind === 'process.exited') return expect(ids(events)).toEqual(ids(whole.slice(0, upTo)));
+      const closer = events.at(-1)!;
+      expect(closer).toMatchObject({ kind: 'process.exited', reason: 'unknown', at: whole[upTo - 1]!.at, seq: null, agentId: null });
+      expect(ids(events.slice(0, -1))).toEqual(ids(whole.slice(0, upTo)));
+    };
+    // none of the launch's messages in the transcript: the seam is its end, and the pages reach its last event
+    const end = await fs.historySeam(APP, async () => []);
+    expect(end).not.toBeNull();
+    closed(await pagesBefore(end!), whole.length);
+    expect(await fs.historySeam(APP, async () => ['elsewhere' as MessageUuid])).toBe(end);
+    // the launch began at turn 15 (its prompt, then its reply): the rows before that turn, whole
+    const seam = await fs.historySeam(APP, async () => ['u15', 'a15', 'u16'] as MessageUuid[]);
+    const first = whole.findIndex((event) => event.kind === 'turn.started' && event.userMessageUuid === 'u15');
+    expect(first).toBeGreaterThan(0);
+    closed(await pagesBefore(seam!), first);
+    expect(userTexts(await pagesBefore(seam!)).at(-1)).toBe('prompt 14');
+    // a launch from turn 22: the pages end with turn 21, which the earlier process left open, closed by the seam's exit
+    const after21 = whole.findIndex((event) => event.kind === 'turn.started' && event.userMessageUuid === 'u22');
+    closed(await pagesBefore((await fs.historySeam(APP, async () => ['u22'] as MessageUuid[]))!), after21);
+    // the earliest of the launch's messages the transcript holds decides, in whatever order the journal names them
+    expect(await fs.historySeam(APP, async () => ['elsewhere', 'a15', 'u15'] as MessageUuid[])).toBe(seam);
+    // a launch from the transcript's first message (a session always run here) has none before it, only the session's
+    // start the log opens with
+    expect(whole[0]!.kind).toBe('session.started');
+    expect(await fs.historySeam(APP, async () => ['u1'] as MessageUuid[])).toBeNull();
+    // a seam cursor whose event this log does not hold (a transcript the session was rebound to since) is one it never gave
+    await expect(fs.eventsSnapshot(APP, null, { before: 'history-seam:elsewhere' as EventId }, true)).rejects.toThrow(UNKNOWN_CURSOR);
+    expect(emitted.filter((e) => (e.name === 'session.eventBatch' || e.name === 'fs.followState') && e.payload.appSessionId === APP)).toEqual([]);
   });
 
   it('stops a follow once its session has been out of every client\'s interest for the release time', async () => {
