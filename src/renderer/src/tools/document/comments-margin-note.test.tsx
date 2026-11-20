@@ -17,7 +17,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { resetPlaceNotes, SENT_NOTE_MS, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
@@ -70,7 +70,7 @@ async function mount() {
   await whenSynced(opened);
   let current: Editor | null = null;
   function Surface() {
-    const comments = useDocumentComments({ artifactId: 'art-1', appSessionId: PARENT, title: 'Plan' });
+    const comments = useDocumentComments({ artifactId: 'art-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Plan' });
     return (
       <DocumentEditor
         artifactId="art-1"

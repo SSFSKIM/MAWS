@@ -1,6 +1,7 @@
 // P3-H H4: the owner's Connectors sheet over a tab's connectors: one row per tool the page declared or the artifact holds
 // a grant for, the permission in words, Allow / Allow once / Revoke as the grant stands, and the owner's Start when a
 // tool found no live session (or, with no durable context, how to give it one).
+import { TEST_MACHINE } from '../../../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorGrant, ConnectorGrantOutcome } from '@shared/artifacts/connectors';
@@ -96,7 +97,7 @@ describe('the Connectors sheet', () => {
     port.send({ id: 1, op: 'declare', tools: [READ] });
     port.send({ id: 2, op: 'call', request: READ });
     await flush();
-    const context = { kind: 'directory' as const, path: '/work/app', projectId: null };
+    const context = { kind: 'directory' as const, path: '/work/app', projectId: null, machine: TEST_MACHINE };
     render(<ConnectorsSheet tab={tab} context={context} />);
     expect(within(row('fixture · read_series')).getByText(/No live session for this artifact has this server/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
@@ -112,7 +113,7 @@ describe('the Connectors sheet', () => {
     port.send({ id: 1, op: 'declare', tools: [READ] });
     port.send({ id: 2, op: 'call', request: READ });
     await flush();
-    render(<ConnectorsSheet tab={tab} context={{ kind: 'directory', path: '/work/app', projectId: null }} />);
+    render(<ConnectorsSheet tab={tab} context={{ kind: 'directory', path: '/work/app', projectId: null, machine: TEST_MACHINE }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
     await flush();
     expect(screen.getByRole('status').textContent).toBe(words);
@@ -120,7 +121,7 @@ describe('the Connectors sheet', () => {
     expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
     await flush();
-    expect(startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION);
+    expect(startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null, machine: TEST_MACHINE }, SESSION);
   });
 
   it('says how to give the artifact a session when it has no durable context, with no Start', async () => {

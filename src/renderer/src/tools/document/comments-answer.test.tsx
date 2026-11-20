@@ -12,7 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { digest } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { openCard, resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -69,7 +69,7 @@ function reachOf(doc: Doc, placement?: 'margin'): CommentOverlayProps {
 }
 
 function Surface({ reach, visible = true, slot = 'a' }: { reach: CommentOverlayProps; visible?: boolean; slot?: string }) {
-  const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', hostId: HOST, visible });
+  const comments = useDocumentComments({ artifactId: ARTIFACT, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Q3 plan', hostId: HOST, visible });
   return (
     <div className="doc-editor-body">
       <div key={slot} className="relative">

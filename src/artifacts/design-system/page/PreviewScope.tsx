@@ -5,9 +5,9 @@ import type { Medium } from '../css';
 import { holdScopeStyle, scopeIdOf } from '../scope-style';
 import type { DesignSystemView } from '../view';
 
-export function PreviewScope(props: { view: DesignSystemView; artifactId: string; medium: Medium; className?: string; style?: CSSProperties; children: ReactNode }) {
-  const { view, artifactId, medium, className, style, children } = props;
-  const scopeId = scopeIdOf(`page:${artifactId}`, medium, undefined);
+export function PreviewScope(props: { view: DesignSystemView; scopeKey: string; medium: Medium; className?: string; style?: CSSProperties; children: ReactNode }) {
+  const { view, scopeKey, medium, className, style, children } = props;
+  const scopeId = scopeIdOf(scopeKey, medium, undefined);
   useLayoutEffect(() => holdScopeStyle(scopeId, medium, undefined, () => ({ view, release: () => {} })), [scopeId, medium, view]);
   return (
     <div data-ds-scope={scopeId} className={className} style={style}>

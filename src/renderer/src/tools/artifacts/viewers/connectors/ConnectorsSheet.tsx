@@ -19,6 +19,7 @@
 // is drawn from the device's rights there and the machine's offer (../../../../artifacts/remote-surfaces.ts): a part the
 // machine doesn't offer, or whose `machine-admin` the device lacks, is greyed with why, never hidden.
 import { useEffect, useRef } from 'react';
+import { ipc } from '../../../../ipc/client';
 import { useStore } from 'zustand';
 import { connectorToolKey, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { ConnectorServerRow } from '@shared/ipc/schema/connectors';
@@ -32,7 +33,7 @@ import { sheetTools, type ConnectorsTab } from './tab';
 
 // The sheet for an artifact as the library knows it (null while its row is read: no context, so no Start yet).
 export function ArtifactConnectorsSheet({ tab, artifact }: { tab: ConnectorsTab; artifact: ArtifactContextOf | null }) {
-  return <ConnectorsSheet tab={tab} context={useArtifactSessionContext(artifact, tab.machine)} />;
+  return <ConnectorsSheet tab={tab} context={useArtifactSessionContext(artifact, tab.machine ?? ipc.localMachine)} />;
 }
 
 export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessionContext }) {

@@ -20,7 +20,7 @@ export async function dashboardSessionContext(artifactId: string, machine: Machi
   const [row, spaces] = await Promise.all([client.invoke('library.get', { artifactId }, { machine }), client.invoke('library.spaces', undefined, { machine })]);
   if (!row.ok || row.value.row === null) return { kind: 'none' };
   const { records, projects } = useSessions.getState();
-  return artifactSessionContext(row.value.row, { records, projects, spaces: spaces.ok ? spaces.value.spaces : [] });
+  return artifactSessionContext(row.value.row, { records, projects, spaces: spaces.ok ? spaces.value.spaces : [] }, machine);
 }
 
 export const dashboardLiveDeps: DashboardLiveDeps = {

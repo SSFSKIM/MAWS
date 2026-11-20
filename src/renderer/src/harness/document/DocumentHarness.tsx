@@ -115,8 +115,8 @@ export function DocumentHarness({ stacked = false }: { stacked?: boolean } = {})
   }, [generation]);
 
   useEffect(() => registerCommentComposer(openComment), []);
-  const commentsA = useDocumentComments({ artifactId: 'harness-doc', appSessionId: COMMENT_SESSION, title: TITLE });
-  const commentsB = useDocumentComments({ artifactId: 'harness-doc', appSessionId: COMMENT_SESSION, title: TITLE });
+  const commentsA = useDocumentComments({ artifactId: 'harness-doc', machine: ipc.localMachine, appSessionId: COMMENT_SESSION, title: TITLE });
+  const commentsB = useDocumentComments({ artifactId: 'harness-doc', machine: ipc.localMachine, appSessionId: COMMENT_SESSION, title: TITLE });
 
   const onEditorA = useCallback((editor: Editor | null) => setEditors((all) => ({ ...all, a: editor })), []);
   const onEditorB = useCallback((editor: Editor | null) => setEditors((all) => ({ ...all, b: editor })), []);

@@ -70,13 +70,13 @@ function DesignBody({ artifactId, machine, state, scope, visible, onShown, compa
   // shown, to the design's own context, as the document's and the deck's (P3-F1); not offered only while that is unread
   const target = useArtifactCommentTarget(artifactId, machine);
   // P4-B2 (D16): X36's draft rule and the tab state's card host id, as the deck's
-  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design', hostId: state.commentHostId }); // UX wave U5a: X36's draft rule is every card host's
+  const comments = useDocumentComments({ artifactId, machine, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design', hostId: state.commentHostId }); // UX wave U5a: X36's draft rule is every card host's
   // M4: the history over the tab's api and replica, the pill counting the design's projection
   const handle = snapshot.handle;
   const history = useMemo(() => (state.designHistory && handle ? { api: state.designHistory, handle, countChanges: countDesignChanges } : undefined), [state.designHistory, handle]);
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
-  const system = useDeckSystem(placement);
+  const system = useDeckSystem(placement, machine);
   const systemRows = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   const theme = useMemo(
     () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, machine, id) }),

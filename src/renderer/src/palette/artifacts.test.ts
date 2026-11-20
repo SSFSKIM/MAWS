@@ -74,9 +74,9 @@ describe('Enter on an artifact', () => {
     resetArtifactMachines();
   });
 
-  it('first tells the page’s table which machine the artifact is on', () => {
+  it('does not record a copy simply because the palette opened it', () => {
     openPaletteArtifact(DOC, OTHER_MACHINE);
-    expect(artifactMachineOf(DOC)).toBe(OTHER_MACHINE);
+    expect(artifactMachineOf(DOC)).toBeNull();
     openPaletteArtifact(DOC, TEST_MACHINE);
     expect(artifactMachineOf(DOC)).toBeNull(); // this Mac's
   });

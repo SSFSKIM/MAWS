@@ -70,6 +70,7 @@ let commentHosts = 0; // P4-B2
 
 export class DeckTabState {
   readonly artifactId: string;
+  readonly machine: ArtifactEditorTarget['machine'];
   // The surface whose tab holds it: the one it was made for, then (P4-B3) the one a move handed it to (`moveTo`).
   surface: ArtifactEditorTarget['surface'];
   readonly host: ArtifactHost;
@@ -99,6 +100,7 @@ export class DeckTabState {
     private readonly deps: DeckTabDeps,
   ) {
     this.artifactId = target.artifactId;
+    this.machine = target.machine;
     this.surface = target.surface;
     this.host = deps.host;
     const ipc = deps.ipc;
@@ -220,7 +222,7 @@ export class DeckTabState {
    * whose card goes with the state to the view the move keeps.
    */
   closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
-    const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B2; UX wave U5a: the last view's close asks
+    const draft = ask?.moving || artifactViews(this.artifactId, this.machine) > 1 ? null : commentDraftOf(this.artifactId, this.machine); // P4-B2; UX wave U5a: the last view's close asks
     if (draft && !(await this.deps.confirmDiscard(this.title, 'comment'))) return false;
     const handle = this.current.handle;
     if (!handle) return true;

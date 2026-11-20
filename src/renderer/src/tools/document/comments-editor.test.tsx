@@ -56,7 +56,7 @@ async function mount() {
   await whenSynced(opened);
   let current: Editor | null = null;
   function Surface() {
-    const comments = useDocumentComments({ artifactId: 'art-1', appSessionId: PARENT, title: 'Plan' });
+    const comments = useDocumentComments({ artifactId: 'art-1', machine: TEST_MACHINE, appSessionId: PARENT, title: 'Plan' });
     return <DocumentEditor artifactId="art-1" handle={opened} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
   }
   const view = render(<Surface />);
@@ -135,7 +135,7 @@ it('withdraws a closing tab’s acknowledged unsent draft at the host, not only 
     await until(() => state.snapshot().ready, 'the tab to open');
     let current: Editor | null = null;
     function Surface() {
-      const comments = useDocumentComments({ artifactId: A, appSessionId: PARENT, title: 'Draft', holdReplica: state.hold });
+      const comments = useDocumentComments({ artifactId: A, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Draft', holdReplica: state.hold });
       return <DocumentEditor artifactId={A} handle={tabHandle!} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
     }
     const view = render(<Surface />);

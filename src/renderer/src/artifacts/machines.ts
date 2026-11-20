@@ -33,7 +33,7 @@ export function sessionArtifactMachine(appSessionId: AppSessionId | null, artifa
   return remote ?? artifactMachineOf(artifactId) ?? local;
 }
 
-/** Remember each copy separately, including this Mac's: it makes an id-only route ambiguous. */
+/** Record a confirmed copy, including this Mac’s. A destination guessed at open is not evidence. */
 export function recordArtifactMachine(artifactId: string, machine: MachineRef, local: MachineRef): void {
   const machines = table.get(artifactId) ?? new Set<MachineRef | null>();
   // Null is the local hint's representation; retain the fact it was seen without returning it as a remote route.

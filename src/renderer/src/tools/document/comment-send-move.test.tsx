@@ -226,15 +226,15 @@ describe('an unsent comment when its document moves onto a view of it already op
     await userEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     await waitFor(() => expect(field()).toBeTruthy());
     await userEvent.type(field(), TEXT);
-    expect(commentDraftOf(DOC)?.text).toBe(TEXT);
-    return commentDraftOf(DOC)!.threadId;
+    expect(commentDraftOf(DOC, TEST_MACHINE)?.text).toBe(TEXT);
+    return commentDraftOf(DOC, TEST_MACHINE)!.threadId;
   }
 
   // The card drawn in `container` with the text typed, the draft and its thread kept, nothing asked.
   function keptIn(container: HTMLElement, threadId: string): void {
     expect(container.contains(field()), 'the card is drawn by that view').toBe(true);
     expect(field().value).toBe(TEXT);
-    expect(commentDraftOf(DOC)).toEqual({ threadId, text: TEXT });
+    expect(commentDraftOf(DOC, TEST_MACHINE)).toEqual({ threadId, text: TEXT });
     expect(listThreads(memory.doc).map((t) => t.id), 'the thread is not withdrawn').toContain(threadId);
     expect(asked, 'no guard asked about the comment').toEqual([]);
   }
@@ -264,7 +264,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     expect(moved).toBe(true);
     record.view.unmount(); // the record went Back to the list
     await act(async () => {});
-    expect(commentDraftOf(DOC)?.text, 'kept while no body draws it').toBe(TEXT);
+    expect(commentDraftOf(DOC, TEST_MACHINE)?.text, 'kept while no body draws it').toBe(TEXT);
     // Comments go to the session in front; the library is not connected here, so with the document in front its own
     // context stays unread and its comments wait. A's pane in front again gives the card its session.
     act(() => useLayout.getState().focusPane(1));
@@ -295,7 +295,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     await act(async () => void (closes = await askEditorHostClose(main)!));
     expect(closes).toBe(true);
     expect(asked).toEqual([]);
-    expect(commentDraftOf(DOC)).toEqual({ threadId, text: TEXT });
+    expect(commentDraftOf(DOC, TEST_MACHINE)).toEqual({ threadId, text: TEXT });
   });
 
   it('a move the source’s guard refuses leaves the destination’s own comment on the destination', async () => {

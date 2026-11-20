@@ -36,6 +36,8 @@ export type CommentPlacement =
 // P4-B1 (X21) end
 export interface CommentContext {
   appSessionId: AppSessionId;
+  /** Renderer-only subject when the anchor alone cannot identify the copy. */
+  subject?: string;
   placement?: CommentPlacement;
   // P3-F1 (the P3 interface ledger's X23 row of fix 2): the destination the form starts on (E3's `CommentDestination`),
   // Side thread when absent; Send to main for a session started blank for the comment, which has no conversation to fork

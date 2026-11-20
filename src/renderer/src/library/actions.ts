@@ -11,7 +11,7 @@ import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shar
 import { tabId } from '@shared/ipc/schema/layout';
 import type { Space } from '@shared/artifacts/entity';
 import type { MachineRef } from '@shared/machine/ref';
-import { artifactMachineOf, recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
+import { artifactMachineOf, sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { isOpen } from '../stores/layout-model';
@@ -49,10 +49,9 @@ export async function undeleteArtifact(artifactId: string, machine: MachineRef, 
   if (result.ok) return null;
   return machine === client.localMachine ? ARTIFACT.notRestored(result.error.message) : result.error.message;
 }
-// The transcript's row: on the session's machine, the artifact's machine recorded as `openArtifactInPanel` records it.
+// The transcript's row follows the same session route as openArtifactInPanel.
 export function undeleteSessionArtifact(appSessionId: AppSessionId, artifactId: string, client: MawsBridge = ipc): Promise<string | null> {
   const machine = sessionArtifactMachine(appSessionId, artifactId, client.localMachine);
-  recordArtifactMachine(artifactId, machine, client.localMachine);
   return undeleteArtifact(artifactId, machine, client);
 }
 // Decision Log 15: once per open, by the surface that showed the artifact's content to the owner, never by the list.
@@ -84,7 +83,6 @@ export async function setSpaceInstructions(spaceId: string, text: string, client
 // Use the chosen row or the link source's machine, when known. Bare links use the window's route hints.
 export function openArtifactTab(artifactId: string, location?: ArtifactLocation, machine?: MachineRef): void {
   const on = machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
-  recordArtifactMachine(artifactId, on, ipc.localMachine);
   if (location !== undefined) requestArtifactOpen(artifactId, on, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();

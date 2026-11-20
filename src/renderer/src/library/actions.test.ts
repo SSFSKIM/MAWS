@@ -8,7 +8,8 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { recordArtifactMachine, resetArtifactMachines } from '../artifacts/machines';
+import { resetArtifactMachines } from '../artifacts/machines';
+import { ipc } from '../ipc/client';
 import { surfaceTabs } from '../panel/surface-model';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
@@ -191,13 +192,24 @@ describe('showing the main tab that already shows an artifact', () => {
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(OTHER_MACHINE));
   });
 
-  it('for this Mac’s session looks on the machine the page’s table gives the artifact, else on this Mac', () => {
-    recordArtifactMachine(A, OTHER_MACHINE, TEST_MACHINE);
+  it('for this Mac’s session uses the unique confirmed peer, else looks on this Mac', async () => {
+    installFakeMain((name) => name === 'artifacts.get' ? ok({ artifact }) : ok());
+    await ipc.invoke('artifacts.get', { artifactId: A }, { machine: OTHER_MACHINE });
     openArtifactTab(A, undefined, OTHER_MACHINE);
-    expect(showOpenArtifactTab(LOCAL_SESSION, A), 'only a remote copy is known').toBe(true);
     openArtifactTab(A, undefined, TEST_MACHINE);
-    useLayout.getState().openTab({ kind: 'diagnostics' });
+    expect(showOpenArtifactTab(LOCAL_SESSION, A), 'only a remote copy is known').toBe(true);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(OTHER_MACHINE));
+    await ipc.invoke('artifacts.get', { artifactId: A }, { machine: TEST_MACHINE });
     expect(showOpenArtifactTab('app-bare' as AppSessionId, A)).toBe(true);
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(TEST_MACHINE));
   });
+});
+
+
+it('a bare open that guesses local does not mask a later confirmed peer copy', async () => {
+  installFakeMain((name) => name === 'artifacts.get' ? ok({ artifact }) : ok());
+  openArtifactTab(A);
+  await ipc.invoke('artifacts.get', { artifactId: A }, { machine: OTHER_MACHINE });
+  openArtifactTab(A);
+  expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
 });

@@ -23,7 +23,6 @@ import { TranscriptLink } from '../../transcript/view/markdown/Link';
 import { NO_ACTIONS, setHostActions, TranscriptProvider, useTranscriptContext } from '../../transcript/view/context';
 import { MarkdownView } from '../code/viewer/MarkdownView';
 import { registerArtifactEditor, releaseArtifactEditorState, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
-import { connectArtifactTabMachines } from '../../artifacts/tab-machines';
 import { ArtifactTab } from '../../library/ArtifactTab';
 import { openArtifactTab } from '../../library/actions';
 import { connectLibrary, resetLibrary } from '../../library/store';
@@ -154,7 +153,7 @@ describe('opening an artifact of another machine', () => {
       panelHost.addTool = original;
     }
     expect(added).toMatchObject([{ params: { target: LOOSE.id, machine: OTHER_MACHINE } }]);
-    expect(artifactMachineOf(LOOSE.id)).toBe(OTHER_MACHINE);
+    expect(artifactMachineOf(LOOSE.id)).toBeNull();
   });
 
   it('the library’s Open opens a main tab on the artifact’s machine', async () => {
@@ -163,10 +162,9 @@ describe('opening an artifact of another machine', () => {
     expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'artifact')).toMatchObject([{ artifactId: LOOSE.id, machine: OTHER_MACHINE }]);
   });
 
-  it('a main tab restored with another machine’s artifact puts the artifact on that machine', () => {
-    offs.push(connectArtifactTabMachines());
+  it('a restored main tab keeps its explicit machine without confirming a copy there', () => {
     act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: DECK.id, machine: OTHER_MACHINE }));
-    expect(artifactMachineOf(DECK.id)).toBe(OTHER_MACHINE);
+    expect(artifactMachineOf(DECK.id)).toBeNull();
   });
 
   // fix wave 1 (the task review): a link names only the artifact; its source (the row's session, the Markdown artifact
@@ -182,7 +180,7 @@ describe('opening an artifact of another machine', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Notes from the studio' }), { metaKey: true });
     expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'artifact')).toMatchObject([{ artifactId: LOOSE.id, machine: OTHER_MACHINE }]);
-    expect(artifactMachineOf(LOOSE.id)).toBe(OTHER_MACHINE);
+    expect(artifactMachineOf(LOOSE.id)).toBeNull();
   });
 
   it('a link in another machine’s Markdown artifact opens its unlisted target on that machine', () => {

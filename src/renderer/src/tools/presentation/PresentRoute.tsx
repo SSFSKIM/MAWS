@@ -35,7 +35,7 @@ export function presentParams(search: string): PresentParams | null {
 
 export function PresentRoute({ params, close = () => window.close() }: { params: PresentParams; close?: () => void }) {
   return (
-    <DesignSystemHostProvider>
+    <DesignSystemHostProvider host={artifactHost(ipc.localMachine)}>
       <Show params={params} close={close} />
     </DesignSystemHostProvider>
   );
@@ -76,7 +76,7 @@ function Show({ params, close }: { params: PresentParams; close: () => void }) {
 
   const row = useLibraryRow(artifactId, ipc.localMachine).value;
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
-  const system = useDeckSystem(placement);
+  const system = useDeckSystem(placement, ipc.localMachine);
   const assetUrl = useMemo(() => (ref: string) => artifactHost(ipc.localMachine).assetUrl(artifactId, ref), [artifactId]);
   const embeds = useMemo(() => (slideId: string, elementId: string, raw: string) => embedUrl(artifactId, slideId, elementId, raw), [artifactId]);
 

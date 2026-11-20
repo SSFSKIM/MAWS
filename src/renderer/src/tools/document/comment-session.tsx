@@ -55,7 +55,7 @@ export type ArtifactCommentTarget = { appSessionId: AppSessionId } | { context: 
 export function useArtifactCommentTarget(artifactId: string, machine: MachineRef): ArtifactCommentTarget | null {
   const shown = useLayout((s) => shownSession(s.main));
   const row = useLibraryRow(shown === null ? artifactId : null, machine);
-  const spaces = useLibrarySpaces();
+  const spaces = useLibrarySpaces(machine);
   const artifact = shown === null ? (row.value ?? null) : null;
   const context = useArtifactSessionContext(artifact, machine);
   const rowUnread = row.value === undefined && row.status !== 'error';
@@ -70,9 +70,9 @@ export function useArtifactCommentTarget(artifactId: string, machine: MachineRef
     if (shown !== null) return { appSessionId: shown };
     if (waiting) return null;
     if (kind === 'session' && own !== null) return { context: { kind, appSessionId: own } };
-    if (kind === 'directory' && path !== null) return { context: { kind, path, projectId } };
+    if (kind === 'directory' && path !== null) return { context: { kind, machine, path, projectId } };
     return { context: { kind: 'none' } };
-  }, [shown, waiting, kind, own, path, projectId]);
+  }, [shown, waiting, kind, own, path, projectId, machine]);
 }
 
 // ---- the pending comment -----------------------------------------------------------------------------------------------
@@ -104,7 +104,7 @@ interface Starts {
   running: Promise<ArtifactSessionEnd> | null;
 }
 const starts = new Map<string, Starts>();
-const startKey = (artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>) => JSON.stringify([artifactId, context.path, context.projectId]);
+const startKey = (artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>) => JSON.stringify([context.machine, artifactId, context.path, context.projectId]);
 
 // P3-F F4: `trust`, the owner's answer to the trust card the last start met (a start already on its way is joined as is)
 function startIn(artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>, trust?: StartTrust): Promise<ArtifactSessionEnd> {

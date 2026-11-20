@@ -31,7 +31,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
-import { artifactKey, recordArtifactMachine, sessionArtifactMachine } from '../../artifacts/machines';
+import { artifactKey, sessionArtifactMachine } from '../../artifacts/machines';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { ipc } from '../../ipc/client';
@@ -81,7 +81,6 @@ export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactI
   if (!canShowArtifactInPanel(appSessionId)) return;
   // P5 O7 M5a: a session's artifacts are on its machine (UX wave U6d: the rule a mention's look for its main tab shares)
   const machine = on ?? sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
-  recordArtifactMachine(artifactId, machine, ipc.localMachine);
   const params: ArtifactsParams = { target: artifactId, machine, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
 }
@@ -191,7 +190,6 @@ export class ArtifactsHandle {
     // P4-B3: a move between surfaces carries its viewer's state and asks for nothing (any ask left for it goes); P4-B4: every
     // other open asks for its version and a link's place
     const machine = params.machine ?? sessionArtifactMachine(this.state.appSessionId, target, ipc.localMachine);
-    recordArtifactMachine(target, machine, ipc.localMachine);
     const serial = params.carried ? null : requestArtifactOpen(target, machine, params.at ?? 'latest', this.editorScope.surface, params.location);
     if (serial === null) withdrawVersionRequest(target, machine, this.editorScope.surface);
     const { view } = this.state;

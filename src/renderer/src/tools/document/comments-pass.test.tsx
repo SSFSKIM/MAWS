@@ -102,7 +102,7 @@ async function openTab(confirm: () => boolean = () => false) {
   };
   let current: Editor | null = null;
   function Surface() {
-    const comments = useDocumentComments({ artifactId: A, appSessionId: PARENT, title: 'Draft', holdReplica, hostId: state.commentHostId });
+    const comments = useDocumentComments({ artifactId: A, machine: TEST_MACHINE, appSessionId: PARENT, title: 'Draft', holdReplica, hostId: state.commentHostId });
     return <DocumentEditor artifactId={A} handle={tabHandle!} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
   }
   const view = render(<Surface />);
@@ -139,7 +139,7 @@ describe('a document’s unsent comment', () => {
     const threadId = await tab.comment('ships quarterly', 'Monthly?');
     tab.hide();
     await act(() => ticks(4));
-    expect(commentDraftOf(A)).toEqual({ threadId, text: 'Monthly?' });
+    expect(commentDraftOf(A, TEST_MACHINE)).toEqual({ threadId, text: 'Monthly?' });
     expect(getThread(tab.handle().doc, threadId)).not.toBeNull();
     tab.show();
     await act(() => ticks(4));
