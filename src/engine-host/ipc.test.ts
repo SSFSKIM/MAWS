@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, EventId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import { OPERATION_COMMANDS } from '@shared/engine/operations';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -34,6 +34,10 @@ import { readFileSync } from 'node:fs';
 import { ProcessTable } from './process-table';
 // C12 end
 import { FileSessionStateStore } from './store/file-session-state-store';
+import { FsService } from './fs/service'; // UX wave, ticket 777
+import { DEBOUNCE_MS, SETTLE_MS } from './fs/watcher'; // UX wave, ticket 777
+import { longTranscript, turnLines, LONG_DIR, LONG_SESSION } from '../../test/support/long-transcript'; // UX wave, ticket 777
+import { StoreFixture } from '../../test/support/store-fixture'; // UX wave, ticket 777
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 // E1 start
 import * as mawsSchema from '@shared/ipc/schema/maws';
@@ -583,6 +587,82 @@ describe('session.events for an app session with no process here answers from di
   });
 });
 // C4 end
+
+// UX wave, ticket 777: a live launch's stream is that launch's alone. A session whose history is only in its transcript
+// (first run elsewhere), resumed here, answers its live snapshot with a cursor into the transcript's rows before the
+// launch, so a window pages up into them; the launch's own messages, which the transcript also comes to hold, stay the
+// stream's and are on no page.
+describe('session.events of a live launch reaches the transcript before it (ticket 777)', () => {
+  let fixture: StoreFixture;
+  let fs: FsService | null = null;
+  beforeEach(async () => {
+    fixture = await StoreFixture.create();
+  });
+  afterEach(async () => {
+    fs?.stop();
+    fs = null;
+    await fixture.dispose();
+  });
+
+  it('a transcript-only history, resumed: the live answer carries a cursor, and the pages before it are the rows before the launch, none twice', async () => {
+    const path = await fixture.addTranscript(LONG_DIR, LONG_SESSION, longTranscript(6));
+    fs = new FsService({ paths: fixture.paths, emit: () => true });
+    await fs.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
+    const id = 'app-resumed' as AppSessionId;
+    fs.bind([{ sessionId: LONG_SESSION, appSessionId: id }]);
+    const service = fs;
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      diskEvents: (appSessionId, request, quiet) => service.eventsSnapshot(appSessionId, null, request, quiet),
+      diskSeam: (appSessionId, journal) => service.historySeam(appSessionId, journal),
+      checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })),
+    });
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const prompts = (events: readonly SessionEvent[]) => events.flatMap((e) => (e.kind === 'user.message' && typeof e.content === 'string' ? [e.content.split(' ').slice(0, 2).join(' ')] : []));
+    const pagesBefore = async (cursor: EventId): Promise<SessionEvent[]> => {
+      const pages: SessionEvent[][] = [];
+      for (let earlier: EventId | undefined = cursor; earlier !== undefined; ) {
+        const page = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
+        pages.unshift(page.events);
+        earlier = page.earlier;
+      }
+      return pages.flat();
+    };
+    const before = Array.from({ length: 6 }, (_, i) => `prompt ${i + 1}`);
+
+    // the handshake only: none of the launch's messages is in the transcript, which is all from before it
+    const first = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(first.earlier).toBeDefined();
+    expect(prompts(await pagesBefore(first.earlier!))).toEqual(before);
+
+    // the launch's first turn: in the stream, and appended to the transcript as the engine writes it
+    const turn = turnLines(7, 'd6', 7);
+    transport!.push({ type: 'user', message: { role: 'user', content: JSON.parse(turn.lines[0]!).message.content }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'u7', isReplay: true });
+    transport!.push({ type: 'assistant', message: { id: 'msg_7', model: 'm', role: 'assistant', content: [{ type: 'text', text: 'reply 7' }] }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'a7' });
+    await fixture.appendLines(path, turn.lines);
+    await until(() => host.events(id).some((e) => e.kind === 'user.message' && e.messageUuid === 'u7'), 'the launch\'s prompt');
+    let second = first;
+    const deadline = Date.now() + 5_000;
+    while (second.earlier === first.earlier && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50)); // the transcript's follow reads the appended turn
+      second = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    }
+    expect(second.earlier).not.toBe(first.earlier);
+    const older = await pagesBefore(second.earlier!);
+    expect(prompts(older)).toEqual(before);
+    expect(prompts(second.events)).toEqual(['prompt 7']);
+    const launched = new Set(second.events.flatMap((e) => ('messageUuid' in e && e.messageUuid ? [e.messageUuid] : [])));
+    expect(launched.has('u7' as never) && launched.has('a7' as never)).toBe(true);
+    expect(older.filter((e) => ('messageUuid' in e && e.messageUuid !== null && launched.has(e.messageUuid)) || (e.kind === 'turn.started' && e.userMessageUuid !== null && launched.has(e.userMessageUuid)))).toEqual([]);
+    // a page after a seq goes on in the stream, with no cursor into the transcript
+    expect((await host.call('session.events', { appSessionId: id, afterSeq: second.lastSeq, limit: null })).earlier).toBeUndefined();
+    transport!.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+});
 
 // C7 start: the catalogue's publication and the queue's pause reason through the host's handlers (C7 M1)
 describe('catalog answers and publishes from handshake state through the host (C7)', () => {
