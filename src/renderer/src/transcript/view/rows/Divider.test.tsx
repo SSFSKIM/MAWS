@@ -80,6 +80,8 @@ describe('divider row', () => {
     expect(line.getBoundingClientRect().top).toBe(400);
     expect(offset).toBe(folding ? 880 : 1240);
     vi.unstubAllGlobals();
+    // the row tests share one motion (context.tsx, NO_MOTION): the fold this click started runs out here, not in the next case
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the 150 ms close
   });
 
   it('a second click while a fold runs takes it back, and the turn stays open (W8)', async () => {
