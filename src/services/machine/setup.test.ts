@@ -6,7 +6,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { guardedFiles } from '@shared/machine/git-reads';
+import { GitLayoutError, guardedFiles } from '@shared/machine/git-reads';
 import { isolatedGitEnv } from '../../../test/support/git-env';
 import { createGitRunner } from '../git/runner';
 import { locate, mainWorktree, warmLinkedWorktreeRead } from '../index/projects';
@@ -49,7 +49,12 @@ beforeAll(() => {
   mkdirSync(at('one two'));
   git(home, 'init', '-q', '--separate-git-dir', at('tab.git'), at('one\ttwo'));
   appendFileSync(at('tab.git/config'), '[core]\n\tworktree = ../one\ttwo\n'); // a literal TAB (`git config` would write `\\t`)
-  directories.push(at('one\ttwo'), main, join(main, 'src'), at('wt'), at('edited'), join(main, 'mod'), at('sepwt'), at('sep-linked'), at('bare-linked'), at('plain'));
+  // ticket 756: the same TAB quoted, which every git keeps as written
+  mkdirSync(at('three\tfour'));
+  mkdirSync(at('three four'));
+  git(home, 'init', '-q', '--separate-git-dir', at('quoted.git'), at('three\tfour'));
+  appendFileSync(at('quoted.git/config'), '[core]\n\tworktree = "../three\tfour"\n');
+  directories.push(at('one\ttwo'), at('three\tfour'), main, join(main, 'src'), at('wt'), at('edited'), join(main, 'mod'), at('sepwt'), at('sep-linked'), at('bare-linked'), at('plain'));
   writeFileSync(at('other/README.md'), 'edited in the main checkout\n'); // `edited`'s main no longer holds HEAD's bytes
 });
 afterAll(() => rmSync(home, { recursive: true, force: true }));
@@ -59,7 +64,10 @@ const files = () => guardedFiles({ home, platform: 'darwin' }, () => false);
 describe('a remote setup’s reads before trust', () => {
   it('key each folder’s trust as git does', async () => {
     const run = createGitRunner({ env: { PATH: process.env.PATH, HOME: home } });
-    for (const directory of directories) {
+    // ticket 756: an unquoted TAB in `core.worktree` is a space to an older git (2.43) and a TAB to a newer one, so its
+    // folder is keyed by neither: the read refuses the layout
+    await expect(trustKeyOf(at('one\ttwo'), run, setupRepoDirs(files()))).rejects.toThrow(GitLayoutError);
+    for (const directory of directories.filter((folder) => folder !== at('one\ttwo'))) {
       expect([directory, await trustKeyOf(directory, run, setupRepoDirs(files()))]).toEqual([directory, await trustKeyOf(directory, run)]);
     }
     await expect(trustKeyOf(at('bare.git'), run, setupRepoDirs(files()))).rejects.toThrow(/no work tree/);

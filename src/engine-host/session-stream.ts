@@ -231,6 +231,12 @@ export class SessionStream {
     return (await this.fromJournal(afterSeq, limit, bound)) ?? { ...page(this.ring, afterSeq, limit, false, bound), historyUnavailable: true };
   }
 
+  // UX wave, ticket 777: what the ring holds now, read without the journal, and whether it holds the launch from its
+  // first row (nothing evicted, no adopted range before it): the launch's messages a live answer's seam is placed by
+  get held(): { events: readonly SessionEvent[]; whole: boolean } {
+    return { events: this.ring, whole: this.evictedThrough === null };
+  }
+
   dispose(): void {
     this.flush();
     this.cursor = null;

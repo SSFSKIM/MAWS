@@ -18,7 +18,9 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, U4A_SESSION_COMMANDS /* UX wave U4a */ } from '@shared/ipc/schema/session';
+import type { SessionEvent } from '@shared/graph/events'; // UX wave, ticket 777
+import { utf8Length } from '@shared/graph/history-window'; // UX wave, ticket 777
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, U4A_SESSION_COMMANDS /* UX wave U4a */, EventsSnapshot } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -48,7 +50,7 @@ import { queueTransaction } from './store/queue-transaction';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from './transport';
 import { renderAnswerOf, rosterOf } from './surface-wire'; // R2
 // C4 start
-import { agentSlice, type HistoryPage, type HistoryRequest } from './fs/follow';
+import { agentSlice, messageOf, type HistoryPage, type HistoryRequest } from './fs/follow';
 // C4 end
 // E1 start
 import type { commands as MawsCommands } from '@shared/ipc/schema/maws';
@@ -184,6 +186,9 @@ export interface EngineIpcDeps {
   // FsService.eventsSnapshot, which starts following it); absent, such a session is unknown here as before. A window
   // of it (follow.ts `snapshot`); `quiet`: the session's live process writes the transcript, read for older pages only.
   diskEvents?: (appSessionId: AppSessionId, request: HistoryRequest, quiet: boolean) => Promise<HistoryPage>;
+  // UX wave, ticket 777: the cursor before a launch's seam in the session's transcript (FsService.historySeam), given the
+  // launch's message uuids in order; null when the transcript holds nothing before it. Absent, a live answer has none.
+  diskSeam?: (appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[] | null>) => Promise<EventId | null>;
   // C4 end
   // W7: whether a foreign process holds the app session's engine session now, or held it at or after `since` (C4's
   // registry); absent, never
@@ -421,6 +426,33 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
   handle('session.status', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).status()));
+  // UX wave, ticket 777: the stream is one launch's, and the session's history from before it is in the transcript. An
+  // answer that starts at the launch's first row carries the cursor whose pages are the transcript's rows before the
+  // seam, where the launch's messages begin in it (Follow.seamCursor), so a window pages up from the launch into them
+  // as it pages any transcript; none of the launch's own messages is on them. The launch's messages are the page's and
+  // those the stream took after it, read once the transcript has been. A page the journal could not give back in full
+  // does not start there, nor can a page cut short that names no message of the launch place the seam; and a bounded
+  // answer carries the cursor only within its bound. A failed read of the transcript costs only the cursor.
+  // A scheduled turn's prompt is named by its started command before its message streams (the engine's
+  // `command_lifecycle`, which the transcript's prompt row carries the uuid of).
+  const uuidsOf = (events: readonly SessionEvent[]): MessageUuid[] =>
+    events.flatMap((event) => (event.agentId !== null ? [] : event.kind === 'command.lifecycle' ? [event.commandUuid] : (messageOf(event) ?? [])));
+  const withEarlier = async (id: AppSessionId, page: EventsSnapshot, maxBytes: number | null): Promise<EventsSnapshot> => {
+    if (!deps.diskSeam || page.historyUnavailable === true) return page;
+    const held = uuidsOf(page.events);
+    const stream = streamOf(id);
+    // the page's messages and those the ring holds once the transcript is read, never the journal past the ring; a page
+    // cut short that names none places the seam only while the ring holds the launch whole
+    const journal = async (): Promise<readonly MessageUuid[] | null> => {
+      const now = stream.held;
+      if (held.length === 0 && !page.complete && !now.whole) return null;
+      return [...held, ...uuidsOf(now.events)];
+    };
+    const earlier = await deps.diskSeam(id, journal).catch(() => null);
+    if (earlier === null) return page;
+    const answer = { ...page, earlier };
+    return maxBytes === null || utf8Length(JSON.stringify(answer)) <= maxBytes ? answer : page;
+  };
   handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
     await adopted(appSessionId); // P5 O16 M4
     const id = appSessionId as AppSessionId;
@@ -446,7 +478,8 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     // uncapped: the page is bounded already, and a cap would cut the child's own events once they pass it.
     const page = await streamOf(appSessionId).snapshot(afterSeq, limit, maxBytes ?? null);
     const agent = request.agentId ?? null;
-    return agent === null ? page : { ...page, events: agentSlice(page.events, agent, null) };
+    if (agent !== null) return { ...page, events: agentSlice(page.events, agent, null) };
+    return afterSeq === null ? withEarlier(id, page, maxBytes ?? null) : page;
   });
   handle('session.stop', async ({ appSessionId, reason, ifIdle }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)

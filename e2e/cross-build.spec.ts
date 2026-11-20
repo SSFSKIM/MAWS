@@ -5212,10 +5212,12 @@ test('(composed forms, to the peer) a promotion and a message with an attached r
 // earlier builds read past (`owner_channel_sessions.advertised`), and the summaries' switch a key of the index's own
 // facts they never read (`index_meta`, `toHuman.foldSummaries`). Four scenes, each over a session whose transcript holds
 // a message and work, its lane on under the to-human plugin's style (test/support/to-human-plugin.ts), and a fifth with
-// no session, (to-human, the switch said to the peer), below them. A window reads a running session's history from its
-// stream alone (session.events answers it from the launch's journal, with no `earlier` cursor into the transcript), so
-// where a scene draws the session while a launch of it runs, that launch plays the turn (`exchangeJournal`): the prompt
-// the scene sends, the work and the message. What the peer draws follows its source (`drawsOwnReport`): a build of
+// no session, (to-human, the switch said to the peer), below them. An engine host of before ticket 777 answers a running
+// session's history from its stream alone (the launch's journal, with no `earlier` cursor into the transcript), so where
+// a scene draws the session while such a host runs a launch of it, that launch plays the turn (`exchangeJournal`): the
+// prompt the scene sends, the work and the message; this build's host pages the window into the transcript before the
+// launch, so where it serves the launch (on its daemon, or once the peer's supervisor hands the launch over to it) the
+// launch plays nothing. What the peer draws follows its source (`drawsOwnReport`): a build of
 // before U2b's first landing (f1852de3a, 2c7044231) draws its own report, its bar and record row; a later one (master
 // since that landing) draws MAWS's mirror, the record line, and no bar:
 //   (to-human, from the peer) the peer starts the session (its launch decided at 8) and quits with keep; this build's
@@ -5298,7 +5300,10 @@ test('(to-human, from the peer) a lane-on session the peer started and kept is d
     await startResume(first, peer, id);
     const peerLaunch = spawnEnvs(s, id).at(-1)!;
     expect(peerLaunch.env[NATIVE_TO_HUMAN_ENV], `${peer.label}'s launch advertises 8, the lane on`).toBe('8');
-    await playExchange(first, id); // the peer's launch carries the turn this build's window draws
+    // ticket 777: the peer's supervisor hands its launch over to this build's, which answers the launch's history with a
+    // cursor into the transcript before it, so the window draws the seeded turn and the launch plays nothing. (A turn
+    // the stub played would be a second turn of the same words and the same call id, which a real engine also writes to
+    // the transcript: two turns drawn, as the Mac run of 33c31a734 drew them.)
     expect(first.maws.consoleErrors()).toEqual([]);
     await s.quit(first);
 
@@ -5486,10 +5491,13 @@ test('(to-human, the peer on this daemon) the peer’s window on this build’s 
       await startResume(run, peer, id);
       const launched = spawnEnvs(s, id).at(-1)!;
       expect(launched.env[NATIVE_TO_HUMAN_ENV], `${here.label}'s daemon decides the launch at 8: the installation declares nothing`).toBe('8');
-      await playExchange(run, id); // the running launch carries what the window draws
+      // ticket 777: this build's engine host answers the running launch's history with a cursor into the transcript
+      // before the launch, so the window pages the seeded turn in above the launch, which plays nothing
+      const live = value(await invoke(run.page, 'session.events', { appSessionId: id, afterSeq: null, limit: null }));
+      expect(live.earlier, `${here.label}'s engine host answers the live launch with a cursor into the transcript`).toBeDefined();
       await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
       const main = run.page.locator('[data-region="main"]');
-      await expect(main.getByText(TO_HUMAN_ROWS.said, { exact: false }).first(), `${peer.label} draws the message`).toBeVisible({ timeout: 20_000 });
+      await expect(main.getByText(TO_HUMAN_ROWS.said, { exact: false }).first(), `${peer.label} draws the message, from the transcript`).toBeVisible({ timeout: 20_000 });
       if (drawsOwnReport(peer)) {
         await expect(peerBar(run.page), `${peer.label} draws its bar, once`).toHaveCount(1, { timeout: 20_000 });
         await expect(peerRecordRow(run.page), `${peer.label} draws its record row, once`).toHaveCount(1);

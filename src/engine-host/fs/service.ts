@@ -14,7 +14,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { ForeignHolder } from '@shared/graph/session';
 import type { HostEmit } from '@shared/host/runtime';
 import type { ClientId, ClientRef } from '@shared/ipc/client'; // P5 O7 M8: an agent's follow held per client
@@ -416,13 +416,33 @@ export class FsService {
     if (agentId !== null) return this.agentEvents(appSessionId, agentId, request);
     const replay = this.replays?.snapshot(appSessionId);
     if (replay) return replay;
+    return snapshotOf(await this.historyFollow(appSessionId, quiet), request);
+  }
+
+  // UX wave, ticket 777: the cursor before a live launch's seam in its session's transcript (Follow.seamCursor), read
+  // through the quiet follow its older pages come from, given the backfill the same SNAPSHOT_WAIT_MS a window is; null
+  // when the transcript holds nothing before the seam or was not read through in that time, and for a replay.
+  // `journal`, the launch's message uuids, is read once the transcript has been: a message of the launch it already
+  // holds has reached the stream by then, so the seam is never past it; null when they cannot place it.
+  async historySeam(appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[] | null>): Promise<EventId | null> {
+    if (this.replays?.snapshot(appSessionId)) return null;
+    const follow = await this.historyFollow(appSessionId, true);
+    await backfilled(follow);
+    if (!follow.backfillDone) return null;
+    const launched = await journal();
+    return launched === null ? null : follow.seamCursor(launched);
+  }
+
+  // The session's own follow, started if none follows it (quiet: a live process writes the transcript, and only its
+  // older pages are read).
+  private async historyFollow(appSessionId: AppSessionId, quiet: boolean): Promise<Follow> {
     const sessionId = this.sessionOf(appSessionId);
     const followed = this.follows.get(followKey(appSessionId, null));
     const entry = followed ?? (quiet
       ? await this.ensureFollow(appSessionId, null, () => this.quietFollow(appSessionId, sessionId), historyKey(appSessionId))
       : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId)));
     entry.usedAt = Date.now();
-    return snapshotOf(entry.follow, request);
+    return entry.follow;
   }
 
   // Main's interest (process-table.ts): a follow whose session no client has held open for FOLLOW_RELEASE_MS is stopped
@@ -1288,12 +1308,15 @@ function historyKey(appSessionId: AppSessionId): string {
 
 // A fresh follow gets SNAPSHOT_WAIT_MS to finish its backfill before the read answers (an empty page while it reads).
 async function snapshotOf(follow: Follow, request: HistoryRequest): Promise<HistoryPage> {
-  if (!follow.backfillDone) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([follow.started, new Promise((resolve) => (timer = setTimeout(resolve, SNAPSHOT_WAIT_MS)))]);
-    clearTimeout(timer);
-  }
+  await backfilled(follow);
   return follow.snapshot(request);
+}
+
+async function backfilled(follow: Follow): Promise<void> {
+  if (follow.backfillDone) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([follow.started, new Promise((resolve) => (timer = setTimeout(resolve, SNAPSHOT_WAIT_MS)))]);
+  clearTimeout(timer);
 }
 
 function countSlugs(files: Iterable<ListedTranscript>): number {

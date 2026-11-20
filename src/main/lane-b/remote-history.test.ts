@@ -15,7 +15,7 @@ const event = (seq: number, idx = 0, text = `${seq}.${idx}`, withSeq = true): Se
   ({ id: `${APP}:L1:${seq}:${idx}`, sessionId: 'eng-1', at: '2026-10-31T00:00:00.000Z', seq: withSeq ? seq : null, agentId: null, parentToolUseId: null, kind: 'notice.posted', level: 'info', text, key: null }) as unknown as SessionEvent;
 
 /** A machine whose journal holds `rows`, answering `session.events` as the engine host does, and `too-large` past `max` bytes. */
-function machine(rows: SessionEvent[][], max = 4000) {
+function machine(rows: SessionEvent[][], max = 4000, earlier?: string) {
   const link = new FakeLink();
   const asked: Array<{ afterSeq: number | null; limit: number | null; agentId?: unknown }> = [];
   link.answers.set('session.events', (input) => {
@@ -32,7 +32,8 @@ function machine(rows: SessionEvent[][], max = 4000) {
     }
     // an agent's slice of the page, as C3 answers one: the page's rows, its own events among them
     const events = taken.flat().filter((e) => input.agentId === undefined || e.agentId === input.agentId);
-    const output = { events, lastSeq: taken.at(-1)?.[0].seq ?? afterSeq ?? 0, complete: taken.length === after.length };
+    // ticket 777: a live launch's answer from its first row carries the cursor into the transcript before it
+    const output = { events, lastSeq: taken.at(-1)?.[0].seq ?? afterSeq ?? 0, complete: taken.length === after.length, ...(afterSeq === null && earlier !== undefined && { earlier }) };
     if (JSON.stringify(output).length > max) return { ok: false, error: { code: 'too-large' } };
     return { ok: true, output };
   });
@@ -114,6 +115,16 @@ describe('readEventsInPages', () => {
     expect(asked.slice(3).every((a) => a.limit !== null && a.limit <= 8)).toBe(true);
   });
 
+  // ticket 777: the cursor into the transcript before the launch, which only the read from the launch's first row carries
+  it('keeps the launch’s cursor into the transcript before it when the launch is read in pages', async () => {
+    const big = 'x'.repeat(700);
+    const rows = Array.from({ length: 12 }, (_, i) => [event(i + 1, 0, big)]);
+    const { link } = machine(rows, 4000, 'history-seam:before');
+    expect(await read(link)).toEqual({ ok: true, value: { events: rows.flat(), lastSeq: 12, complete: true, earlier: 'history-seam:before' } });
+    const after = await read(link, [], { appSessionId: APP, afterSeq: 3, limit: null });
+    expect((after as { value: { earlier?: string } }).value.earlier).toBeUndefined();
+  });
+
   it('leaves out a row that alone can’t cross the channel, telling its place as a gap, and reads on after it', async () => {
     const rows = [[event(1)], [event(2, 0, 'y'.repeat(5000))], [event(3)]];
     const { link } = machine(rows);
@@ -181,7 +192,7 @@ describe('readEventsInPages within a byte budget', () => {
   const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 
   /** The engine host's two readers under a budget: the transcript's windows (newest, or before a cursor) and the live stream's pages. */
-  function budgeted(source: { transcript?: SessionEvent[]; rows?: SessionEvent[][] }) {
+  function budgeted(source: { transcript?: SessionEvent[]; rows?: SessionEvent[][]; earlier?: string }) {
     const link = new FakeLink();
     link.peers = ['rl2.executor.machine', 'rl2.events-budget'];
     const asked: Array<Record<string, unknown>> = [];
@@ -207,7 +218,7 @@ describe('readEventsInPages within a byte budget', () => {
         }
         taken.push(row);
       }
-      return { ok: true, output: { events: taken.flat(), lastSeq: taken.at(-1)?.[0].seq ?? (input.afterSeq as number | null) ?? 0, complete: taken.length === rows.length } };
+      return { ok: true, output: { events: taken.flat(), lastSeq: taken.at(-1)?.[0].seq ?? (input.afterSeq as number | null) ?? 0, complete: taken.length === rows.length, ...(input.afterSeq === null && source.earlier !== undefined && { earlier: source.earlier }) } };
     });
     return { link, asked, answer: link.answers.get('session.events')! };
   }
@@ -250,6 +261,18 @@ describe('readEventsInPages within a byte budget', () => {
     expect(said.gaps).toEqual([{ launchId: 'L1', at: { seq: 11 } }]);
     expect(asked.length).toBeGreaterThan(3);
     expect(asked.slice(1).map((a) => a.afterSeq)).toEqual([...asked.slice(1).map((a) => a.afterSeq)].sort((x, y) => (x as number) - (y as number)));
+  });
+
+  // ticket 777: the launch's first page carries the cursor into the transcript before it; the assembled answer keeps it
+  it('keeps a live launch’s cursor into the transcript before it, whether its answer took one page or several', async () => {
+    const one = budgeted({ rows: [[event(1)], [event(2)]], earlier: 'history-seam:before' });
+    expect(await within(one.link, { appSessionId: APP, afterSeq: null, limit: null })).toEqual({ ok: true, value: { events: [event(1), event(2)], lastSeq: 2, complete: true, earlier: 'history-seam:before' } });
+    const rows = Array.from({ length: 10 }, (_, i) => [event(i + 1, 0, 'r'.repeat(900))]);
+    const several = budgeted({ rows, earlier: 'history-seam:before' });
+    const answer = (await within(several.link, { appSessionId: APP, afterSeq: null, limit: null })) as { ok: true; value: { events: SessionEvent[]; earlier?: string } };
+    expect(several.asked.length).toBeGreaterThan(1);
+    expect(answer.value.events).toEqual(rows.flat());
+    expect(answer.value.earlier).toBe('history-seam:before');
   });
 
   it('reads again without the budget when the engine host behind the endpoint refuses it (`invalid_input`)', async () => {

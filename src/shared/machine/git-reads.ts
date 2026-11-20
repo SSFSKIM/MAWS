@@ -98,9 +98,14 @@ export function guardedFiles(where: Home, opened: (folder: string) => boolean): 
 
 // ---- the config ---------------------------------------------------------------------------------------------------------
 
-/** A config's entries in file order, each named as `git config --list` names it; `value` null for a key with no `=`. */
+/**
+ * A config's entries in file order, each named as `git config --list` names it; `value` null for a key with no `=`.
+ * `variesByGit`: the value holds, outside quotes and between words, whitespace other than a space (a TAB, a lone CR),
+ * which gits read differently: a newer one keeps it as written, an older one (2.43, Ubuntu 24.04's) folds each to a
+ * space (config.c `parse_value`; ticket 756). A `\v` or `\f` is no whitespace to git's ctype and is kept by both.
+ */
 export interface GitConfig {
-  entries: { name: string; value: string | null }[];
+  entries: { name: string; value: string | null; variesByGit?: true }[];
   /** The last value of `name` (its section and key in any case), null for a key with no `=`; undefined when unset. */
   get(name: string): string | null | undefined;
   /** `name` read as git reads a boolean; undefined when unset or not one. */
@@ -211,13 +216,15 @@ export function parseConfig(text: string): GitConfig {
     }
     if (peek() !== '=') throw bad();
     i++;
-    entries.push({ name, value: parseValue() });
+    const { value, varies } = parseValue();
+    entries.push(varies ? { name, value, variesByGit: true } : { name, value });
   }
   return configOf(entries);
 
-  function parseValue(): string {
+  function parseValue(): { value: string; varies: boolean } {
     let value = '';
     let spaces = ''; // whitespace outside quotes, kept as written (a TAB stays one) only once a word follows it
+    let varies = false; // such whitespace other than a space was kept
     let quoted = false;
     let comment = false;
     for (;;) {
@@ -226,11 +233,11 @@ export function parseConfig(text: string): GitConfig {
       if (c === '' || c === '\n') {
         if (quoted) throw bad();
         if (c === '\n') i++;
-        return value;
+        return { value, varies };
       }
       i++;
       if (comment) continue;
-      if (!quoted && (c === ' ' || c === '\t')) {
+      if (!quoted && (c === ' ' || c === '\t' || c === '\r')) {
         if (value.length > 0) spaces += c;
         continue;
       }
@@ -240,6 +247,7 @@ export function parseConfig(text: string): GitConfig {
       }
       if (spaces !== '') {
         value += spaces;
+        varies ||= /[^ ]/.test(spaces);
         spaces = '';
       }
       if (c === '\\') {
@@ -349,6 +357,8 @@ async function repoAt(gitDir: string, folder: string | null, files: GitFiles): P
   let workTree: string | null;
   if (linked) workTree = folder;
   else if (typeof worktree === 'string') {
+    // ticket 756: a value gits read differently names no folder every git names, so it names none here: no root, no key
+    if (config.entries.findLast((entry) => entry.name === 'core.worktree')?.variesByGit === true) throw new GitLayoutError(`core.worktree names no folder: ${gitDir}`);
     workTree = await files.real(named(worktree, gitDir));
     if (workTree === null) throw new GitLayoutError(`core.worktree names no folder: ${gitDir}`);
   } else workTree = config.bool('core.bare') === true ? null : folder;
