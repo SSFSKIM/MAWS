@@ -134,3 +134,36 @@ describe('a rewind to a joined answer and prompt (ticket 704)', () => {
     expect(boundary.map((event) => event.prefillText)).toEqual([null]);
   });
 });
+
+// The rewind of a prompt sminos delivered for the owner (u3b-fork-delivered, seq 25): the engine's prefill is the whole
+// framed text; the composer gets the owner's words alone, read as the boundary's detail reads them (`ownWordsOf`), and
+// from sminos's wake release (T2) without the note after them either
+describe('a rewind to a prompt sminos delivered for the owner', () => {
+  const response = (loadUxwaveJournal('u3b-fork-delivered').find((r) => r.seq === 25)!.frame as { response: { response: Record<string, unknown> } }).response.response;
+  const TARGET_DELIVERED = response.targetMessageUuid as MessageUuid;
+  const WORDS = 'UXW delivered: reply with only the word DELIVERED.';
+  const NOTE = '[sminos] A note from sminos on this machine, not from the sender above: it woke this session to deliver the message.';
+
+  async function rewound(answer: Record<string, unknown>) {
+    const s = scriptedSession({ responder: handshakeResponder({ rewind_conversation: () => ({ response: answer }) }) });
+    await s.session.start();
+    const outcome = await rewind(s.session, { targetMessageUuid: TARGET_DELIVERED, lastSeenMessageUuid: TARGET_DELIVERED, files: false });
+    return { outcome: outcome.prefillText, boundary: ofKind(s.events, 'boundary.rewind').map((event) => event.prefillText) };
+  }
+
+  it('the recorded response: the outcome’s prefill and the boundary’s lose the frame line', async () => {
+    expect(response.prefillText).toBe(`[sminos message from human id=14411ef3]\n${WORDS}`);
+    expect(await rewound(response)).toEqual({ outcome: WORDS, boundary: [WORDS] });
+  });
+
+  it('made by hand: with sminos’s note after the words, both lose the frame line and the note', async () => {
+    expect(await rewound({ ...response, prefillText: `${response.prefillText as string}\n\n${NOTE}` })).toEqual({ outcome: WORDS, boundary: [WORDS] });
+  });
+
+  it('a typed prompt, and a peer’s framed text, are left as they are; a frame line with no words leaves none', async () => {
+    expect(await rewound({ ...response, prefillText: WORDS })).toEqual({ outcome: WORDS, boundary: [WORDS] });
+    const peer = `[sminos message from planner id=14411ef3]\n${WORDS}`;
+    expect(await rewound({ ...response, prefillText: peer })).toEqual({ outcome: peer, boundary: [peer] });
+    expect(await rewound({ ...response, prefillText: '[sminos message from human id=14411ef3]\n' })).toEqual({ outcome: null, boundary: [null] });
+  });
+});

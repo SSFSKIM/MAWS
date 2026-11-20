@@ -5,10 +5,11 @@
 // derives `boundary.rewind` from the correlated response row and nothing here synthesises an event. Only after a
 // successful conversation rewind, and only when asked, `rewind_files` restores the target's file checkpoint. Both
 // requests share one 8 s budget (a bounded X2 handler), the second taking what the first left. The outcome's prefill is
-// the person's words of the engine's text, null when none are left (UX wave, ticket 704: a message the engine joined
-// holds MAWS's answer envelope beside them).
+// the person's words of the engine's text, as the boundary's detail reads them (`ownWordsOf`), null when none are left:
+// a message the engine joined holds MAWS's answer envelope beside them (UX wave, ticket 704), and a prompt sminos
+// delivered for the person opens with sminos's frame line and, from sminos's wake release (T2), may end with its note.
 import type { MessageUuid } from '@shared/graph/ids';
-import { personsWords } from '@shared/engine/persons-message';
+import { ownWordsOf } from '@shared/engine/arrival';
 import type { RewindFilesOutcome, RewindOutcome } from '@shared/engine/rewind-outcome';
 import { REQUEST_TIMEOUT_MS, rewindConversation, rewindFiles as rewindFilesControl } from './controls';
 import type { EngineSession } from './session';
@@ -37,7 +38,7 @@ export async function rewind(
     { timeoutMs: deadline - Date.now() },
   );
   const outcome: RewindOutcome = {
-    rewound: response.rewound, reason: response.reason ?? null, error: response.error ?? null, prefillText: response.prefillText === null ? null : personsWords(response.prefillText),
+    rewound: response.rewound, reason: response.reason ?? null, error: response.error ?? null, prefillText: response.prefillText === null ? null : ownWordsOf(response.prefillText) || null,
     precedingAssistantUuid: response.precedingAssistantUuid as MessageUuid | null, files: null,
   };
   if (!response.rewound || !args.files) return outcome;

@@ -903,6 +903,12 @@ describe('ownWordsOf', () => {
     expect(ownWordsOf('[sminos message from human id=0a1b2c3d]')).toBe('[sminos message from human id=0a1b2c3d]');
   });
 
+  it('reads words it already read as they are, those its interrupt-marker guard kept a frame line before included', () => {
+    for (const text of ['[sminos message from human id=0a1b2c3d]\nDraft the note.\n\n[sminos] A note from sminos on this machine.', '[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]', 'Check the gauges.']) {
+      expect(ownWordsOf(ownWordsOf(text)), text).toBe(ownWordsOf(text));
+    }
+  });
+
   it('reads the recorded rewind of a delivered prompt (u3b-fork-delivered, seq 25) as its words', () => {
     const row = loadUxwaveJournal('u3b-fork-delivered').find((entry) => entry.seq === 25)!;
     const prefill = (row.frame as { response: { response: { prefillText: string } } }).response.response.prefillText;
