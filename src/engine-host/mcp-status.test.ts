@@ -100,20 +100,10 @@ describe('session.mcpStatus through the engine host', () => {
     await s.ipc.table.get(s.id)!.exited;
   });
 
-  it('asks again while a server is pending, and stops once none is', async () => {
-    const s = await readySession((asked) => (asked < 3 ? servers(['notes', 'connected'], ['tracker', 'pending']) : servers(['notes', 'connected'], ['tracker', 'connected'])));
-    await expect.poll(s.servers, { timeout: 8_000 }).toEqual(listed(servers(['notes', 'connected'], ['tracker', 'connected'])));
-    const asked = s.asked();
-    expect(asked).toBe(3);
-    await new Promise((r) => setTimeout(r, 1_200));
-    expect(s.asked(), 'none pending: nothing is asked again').toBe(asked);
-    s.transport.exit(0);
-    await s.ipc.table.get(s.id)!.exited;
-  }, 15_000);
-
-  it('keeps the servers a page’s read answered', async () => {
+  it('asks once at ready, and keeps the servers a later read answered (a page’s)', async () => {
     const s = await readySession((asked) => (asked === 1 ? servers(['notes', 'connected']) : servers(['notes', 'failed'])));
     await expect.poll(s.servers).toEqual(listed(servers(['notes', 'connected'])));
+    expect(s.asked()).toBe(1);
     await s.handlers.get('session.mcpStatus')!({ appSessionId: s.id });
     expect(s.servers()).toEqual(listed(servers(['notes', 'failed'])));
     s.transport.exit(0);

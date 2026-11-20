@@ -50,6 +50,7 @@ const defaultResponder = (overrides: Responder = {}): Responder => ({
   initialize: () => ({ response: INIT_RESPONSE }),
   get_status: () => ({ response: ROUTED_STATUS }),
   get_context_usage: () => ({ error: 'Context sampling is not available in this scripted scenario' }),
+  mcp_status: () => ({ response: { mcpServers: [] } }), // ticket 619: asked once the session is ready
   apply_flag_settings: () => ({}),
   set_max_thinking_tokens: () => ({}),
   set_permission_mode: (r) => ({ response: { mode: r.mode } }),
