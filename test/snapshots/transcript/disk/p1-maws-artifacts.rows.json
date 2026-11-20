@@ -21,66 +21,6 @@
     "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
   },
   {
-    "at": "2026-10-06T12:53:04.362Z",
-    "autoDenied": 0,
-    "caption": "Created and edited dashboard.html, loaded 4 tools, screenshot of Dashboard v1 (64 × 64), listed 1 artifact",
-    "counts": {
-      "added": 11,
-      "removed": 1
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T12:53:28.782Z",
-    "expanded": true,
-    "files": [
-      {
-        "added": 11,
-        "cellId": "cell:toolu_017fEuQoDr5PsVNdajLN45hU",
-        "change": "create",
-        "path": "/private/tmp/maws-e2-repo-5uEyLu/dashboard.html",
-        "removed": 1
-      }
-    ],
-    "firstDeniedCell": null,
-    "id": "divider:turn:21025d7d-f733-48bb-9a87-6da34b929707",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "created and edited dashboard.html",
-      "loaded 4 tools",
-      "screenshot of Dashboard v1 (64 × 64)",
-      "listed 1 artifact"
-    ],
-    "startedAt": "2026-10-06T12:53:04.362Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 3,
-        "mcp": 0,
-        "other": 2,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": null,
-      "denials": [],
-      "durationMs": null,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 6,
-        "reviewed": 0
-      },
-      "terminalReason": null,
-      "toolCalls": 6,
-      "usage": null
-    },
-    "toolCalls": 6,
-    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
-  },
-  {
     "at": "2026-10-06T12:53:07.404Z",
     "blockIndex": 1,
     "id": "text:msg_011Cfm1sux7MVNrG4bmMtNiA:1",
@@ -548,6 +488,66 @@
     "messageUuid": "c7b7aad7-6f1f-4aef-9dbb-1adcbc8f9efe",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
+    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
+  },
+  {
+    "at": "2026-10-06T12:53:04.362Z",
+    "autoDenied": 0,
+    "caption": "Created and edited dashboard.html, loaded 4 tools, screenshot of Dashboard v1 (64 × 64), listed 1 artifact",
+    "counts": {
+      "added": 11,
+      "removed": 1
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T12:53:28.782Z",
+    "expanded": true,
+    "files": [
+      {
+        "added": 11,
+        "cellId": "cell:toolu_017fEuQoDr5PsVNdajLN45hU",
+        "change": "create",
+        "path": "/private/tmp/maws-e2-repo-5uEyLu/dashboard.html",
+        "removed": 1
+      }
+    ],
+    "firstDeniedCell": null,
+    "id": "divider:turn:21025d7d-f733-48bb-9a87-6da34b929707",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "created and edited dashboard.html",
+      "loaded 4 tools",
+      "screenshot of Dashboard v1 (64 × 64)",
+      "listed 1 artifact"
+    ],
+    "startedAt": "2026-10-06T12:53:04.362Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 3,
+        "mcp": 0,
+        "other": 2,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 6,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 6,
+      "usage": null
+    },
+    "toolCalls": 6,
     "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
   }
 ]

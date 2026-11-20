@@ -107,7 +107,10 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
       out.push(time);
     }
     out.push(...rows);
-    previousAt = rows.at(-1)!.at;
+    // board ticket 789: a turn's line ends it but carries its prompt's time. The gap runs from a closed turn's recorded
+    // end, whichever of its rows the fold draws, and from a running turn's last other row
+    const line = rows.find((row) => row.kind === 'divider');
+    previousAt = line?.kind === 'divider' && line.endedAt !== null ? line.endedAt : (rows.findLast((row) => row.kind !== 'divider') ?? rows.at(-1)!).at;
   };
   const emitLoose = (after: TurnId | null) => {
     for (const row of looseRows(state, looseAfter.get(after) ?? [], after)) {
@@ -192,23 +195,38 @@ export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail:
   const ofMessage = (row: RowOf<'user'>) => row.messageUuid ?? row.beside ?? null;
   const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && ofMessage(row) !== null && withdrawn.has(ofMessage(row)!) && (row.dropped || row.pending !== undefined)));
   const read = waiting === 'stacked' && kept.some(isUnread) ? kept.filter((row) => !isUnread(row)) : kept;
-  return tail.length === 0 ? read : [...read, ...tail];
+  const composed = tail.length === 0 ? read : [...read, ...tail];
+  // board ticket 789: the running turn's line is the last row, below a prompt waiting for the engine and the messages
+  // held for the next turn; it is the last line of the list read from its end
+  let at = composed.length - 1;
+  while (at >= 0 && composed[at]!.kind !== 'divider') at -= 1;
+  const line = composed[at];
+  if (line?.kind !== 'divider' || line.state !== 'working' || at === composed.length - 1) return composed;
+  return [...composed.slice(0, at), ...composed.slice(at + 1), line];
 }
 
 // P5 O9: rows a mount keeps outside the store (a terminal session's reply its interrupt cut before the engine wrote it,
-// `lane-a/stream/overlay.ts`), each after the last row of its turn, in their order; one whose turn is not drawn, last.
+// `lane-a/stream/overlay.ts`), each after the last row of its turn, in their order, the turn's line aside (it ends the
+// turn: board ticket 789); one whose turn is not drawn, last.
 export function withPlacedRows(rows: Row[], placed: readonly Row[]): Row[] {
   if (placed.length === 0) return rows;
   const after = new Map<TurnId, Row[]>();
   const loose: Row[] = [];
-  const last = new Map<TurnId, number>();
-  rows.forEach((row, i) => row.turnId !== null && last.set(row.turnId, i));
+  const last = new Map<TurnId, number>(); // a turn's last row but its line
+  const lines = new Set<TurnId>(); // the turns that draw a line
+  rows.forEach((row, i) => {
+    if (row.turnId === null) return;
+    if (row.kind === 'divider') lines.add(row.turnId);
+    else last.set(row.turnId, i);
+  });
   for (const row of placed) {
-    if (row.turnId === null || !last.has(row.turnId)) loose.push(row);
+    if (row.turnId === null || (!last.has(row.turnId) && !lines.has(row.turnId))) loose.push(row);
     else after.set(row.turnId, [...(after.get(row.turnId) ?? []), row]);
   }
   const out: Row[] = [];
   rows.forEach((row, i) => {
+    // a turn whose line is all it draws takes them before its line
+    if (row.turnId !== null && row.kind === 'divider' && !last.has(row.turnId)) out.push(...(after.get(row.turnId) ?? []));
     out.push(row);
     if (row.turnId !== null && last.get(row.turnId) === i) out.push(...(after.get(row.turnId) ?? []));
   });
@@ -1049,7 +1067,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // The divider summarises a work area. UX wave U2 (O-15, l2-transcript-04): a turn in which nothing was done has no
   // line, whoever started it (an arrival's line already names a turn the person did not start); a turn the engine
   // accepted keeps one while it runs and when stopped, even with only partial text or no output. A pending prompt has
-  // none until it starts.
+  // none until it starts. Board ticket 789 (the owner, 2026-11-20): the line ends its turn, after the turn's last row, as
+  // the engine's terminal draws its spinner and its duration: while the turn runs it is the turn's last row, and when the
+  // turn ends its closing line stays there.
+  let line: RowOf<'divider'> | null = null;
   if (workRows.length > 0 || (turn.accepted && (turn.state === 'open' || dividerState === 'stopped'))) {
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
@@ -1069,14 +1090,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     // ruling on M5, (G) narrowed)
     const restarts = new Set(turn.events.flatMap((event) => (event.kind === 'tool.use' && presentationOf(event.toolName) !== 'subagent' ? [event.toolUseId as string] : [])));
     const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, restarts, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started', sent)));
-    rows.push({
+    line = {
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && cause !== null && { cause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
       ...(opener !== undefined && { opener }), // UX wave U3
       caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
-    });
+    };
   }
   rows.push(...(expanded ? allRows : allRows.filter((row) => staysInView(row) || answerAlone))); // with no divider there is no work: every row is persistent
+  if (line !== null) rows.push(line);
   markLoneOutputs(rows, user !== null && turnCommandLine(turn) !== null ? user : null);
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
@@ -1820,13 +1842,11 @@ export function turnCommandLine(turn: TurnState): { command: string; args: strin
 // UX wave U3b (Interfaces B; the branch panel's finding 2): a command's output stands alone unless the row drawn directly
 // before it is its command's bubble (`bubble`, null where the turn's opening message is no command), read on the turn's
 // drawn rows: a typed /compact draws its bubble, the compaction's boundary, then its output, which stands alone. The
-// turn's own line counts as the bubble's: it stands under the bubble while the command runs or after it was stopped, and
-// the output under it is still the command's (no name drawn, then taken away when the turn ends).
+// turn's own line ends the turn (board ticket 789), so it never stands between them.
 function markLoneOutputs(rows: Row[], bubble: RowOf<'user'> | null): void {
   rows.forEach((row, i) => {
     if (row.kind !== 'local_command') return;
-    const before = rows[i - 1]?.kind === 'divider' ? rows[i - 2] : rows[i - 1];
-    if (bubble === null || before !== bubble) rows[i] = { ...row, lone: true };
+    if (bubble === null || rows[i - 1] !== bubble) rows[i] = { ...row, lone: true };
   });
 }
 

@@ -54,7 +54,7 @@ describe('a message tool’s call', () => {
   it('draws the message where the call sits, between the turn’s other rows, and no cell', () => {
     const b = stagesTurn(MAWS);
     const rows = expanded(reduce(b.events));
-    expect(kinds(rows)).toEqual(['user', 'divider', 'assistant_text', 'cell', 'to_human', 'cell', 'assistant_text']);
+    expect(kinds(rows)).toEqual(['user', 'assistant_text', 'cell', 'to_human', 'cell', 'assistant_text', 'divider']);
     const call = b.events.find((event) => event.kind === 'tool.use' && event.toolUseId === 'm1')!;
     expect(ofKind(rows, 'to_human')).toEqual([{ id: rowId.toHuman(tool('m1')), turnId: T1, at: call.at, kind: 'to_human', toolUseId: 'm1', text: 'Stage 1 is done: **37** labels missing.', pending: false }]);
     expect(allCells(rows).map((cell) => cell.toolName)).toEqual(['Bash', 'Bash']);
@@ -131,7 +131,7 @@ describe('a message tool’s call', () => {
     b.end(['u1']);
     const state = lane ? laneOn(reduce(b.events)) : reduce(b.events);
     const rows = folded(state);
-    expect(kinds(rows)).toEqual(['user', 'divider', 'to_human', 'assistant_text']);
+    expect(kinds(rows)).toEqual(['user', 'to_human', 'assistant_text', 'divider']);
     expect(ofKind(rows, 'divider')[0]).toMatchObject({ state: 'completed', expanded: false });
     const [message] = ofKind(rows, 'to_human');
     expect(message).toMatchObject({ toolUseId: 'm1', text: 'Stage 1 is done.', pending: false });
@@ -152,7 +152,7 @@ describe('a message tool’s call', () => {
     const inForce = withUi(state, { ...state.ui, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 });
     const rows = rowsOf(inForce);
     expect(ofKind(rows, 'divider')[0]).toMatchObject({ state: 'completed', expanded: true });
-    expect(kinds(rows)).toEqual(['user', 'divider', 'to_human', 'cell']);
+    expect(kinds(rows)).toEqual(['user', 'to_human', 'cell', 'divider']);
   });
 
   // A subagent's text draws in its own transcript and never in its parent's (the parent shows the agent's row); its
@@ -176,7 +176,7 @@ describe('a message tool’s call', () => {
     const events = b.events.map((event, i) => (i >= childFrom && i < childTo ? { ...event, agentId: AGENT } : event));
 
     const parentRows = expanded(reduce(events));
-    expect(kinds(parentRows)).toEqual(['user', 'divider', 'subagent', 'assistant_text']);
+    expect(kinds(parentRows)).toEqual(['user', 'subagent', 'assistant_text', 'divider']);
     expect(ofKind(parentRows, 'divider')[0]).toMatchObject({ toolCalls: 0 });
 
     const childState = reduce(events.slice(childFrom, childTo), AGENT);
@@ -186,7 +186,7 @@ describe('a message tool’s call', () => {
     // its running turn collapsed by the reader, the commentary folds and the message stays in view: a child transcript
     // has no owner lane, and a message is the human's without one
     const collapsed = withUi(childState, { ...childState.ui, collapsedTurns: new Set(childState.order), version: childState.ui.version + 1, global: childState.ui.global + 1 });
-    expect(kinds(folded(collapsed))).toEqual(['divider', 'to_human']);
+    expect(kinds(folded(collapsed))).toEqual(['to_human', 'divider']);
   });
 });
 

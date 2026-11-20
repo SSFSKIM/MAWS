@@ -21,6 +21,29 @@
     "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
   },
   {
+    "at": "2026-09-28T09:22:35.135Z",
+    "durationMs": 389,
+    "id": "think:msg_011CfVbMbZP2PJVi7LgUwh8j:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "f00041c9-0c99-4c22-aa40-fef4f03aec64",
+    "recordedMs": null,
+    "text": "The user is asking me again what word they asked me to remember. I should check my memory to confirm. Looking at the memory I just saved, the word is ZEBRA. I should reply with just that word.",
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
+    "at": "2026-09-28T09:22:35.525Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbMbZP2PJVi7LgUwh8j:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ZEBRA",
+    "messageUuid": "e7b5c5bd-b11b-484f-8687-ccbdf81315fa",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
     "at": "2026-09-28T09:22:34.610Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
-  },
-  {
-    "at": "2026-09-28T09:22:35.135Z",
-    "durationMs": 389,
-    "id": "think:msg_011CfVbMbZP2PJVi7LgUwh8j:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "f00041c9-0c99-4c22-aa40-fef4f03aec64",
-    "recordedMs": null,
-    "text": "The user is asking me again what word they asked me to remember. I should check my memory to confirm. Looking at the memory I just saved, the word is ZEBRA. I should reply with just that word.",
-    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
-  },
-  {
-    "at": "2026-09-28T09:22:35.525Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfVbMbZP2PJVi7LgUwh8j:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "ZEBRA",
-    "messageUuid": "e7b5c5bd-b11b-484f-8687-ccbdf81315fa",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
   },
   {

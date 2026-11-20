@@ -21,62 +21,6 @@
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },
   {
-    "at": "2026-10-06T10:59:45.543Z",
-    "autoDenied": 0,
-    "caption": "Ran an agent, loaded 1 tool",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T10:59:55.284Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:22be2241-f79e-4248-a05b-7553331810d5",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran an agent",
-      "loaded 1 tool"
-    ],
-    "startedAt": "2026-10-06T10:59:45.551Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 1,
-      "costUsd": 0.0563969,
-      "denials": [],
-      "durationMs": 9731,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 1,
-      "usage": {
-        "cacheCreationInputTokens": 23666,
-        "cacheReadInputTokens": 45511,
-        "inputTokens": 28,
-        "outputTokens": 851,
-        "thinkingTokens": 484
-      }
-    },
-    "toolCalls": 1,
-    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
-  },
-  {
     "agents": [
       {
         "agentId": "a1ba7eb1ffe9f0ffa",
@@ -186,6 +130,62 @@
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },
   {
+    "at": "2026-10-06T10:59:45.543Z",
+    "autoDenied": 0,
+    "caption": "Ran an agent, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T10:59:55.284Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:22be2241-f79e-4248-a05b-7553331810d5",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran an agent",
+      "loaded 1 tool"
+    ],
+    "startedAt": "2026-10-06T10:59:45.551Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.0563969,
+      "denials": [],
+      "durationMs": 9731,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 23666,
+        "cacheReadInputTokens": 45511,
+        "inputTokens": 28,
+        "outputTokens": 851,
+        "thinkingTokens": 484
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
     "at": "2026-10-06T10:59:56.253Z",
     "blockIndex": 1,
     "id": "text:msg_011CfksFTREyiUmuxiGA1ysF:1",
@@ -209,6 +209,46 @@
     "placeholders": [],
     "steer": false,
     "text": "Call ListAgents again and reply with the listing verbatim.",
+    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
+  },
+  {
+    "at": "2026-10-06T11:00:00.390Z",
+    "id": "agents:toolu_01VXfwtV7Aw7rweu8K86J74p",
+    "kind": "agent_list",
+    "notes": [],
+    "pending": false,
+    "raw": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
+    "sections": [
+      {
+        "count": 1,
+        "rows": [
+          {
+            "extras": [
+              "general-purpose",
+              "completed",
+              "started 9s ago"
+            ],
+            "name": "scout",
+            "ref": "15083b"
+          }
+        ],
+        "title": "Subagents"
+      }
+    ],
+    "self": "repo-y2xidi-73 [48fa39]",
+    "toolUseId": "toolu_01VXfwtV7Aw7rweu8K86J74p",
+    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
+  },
+  {
+    "at": "2026-10-06T11:00:01.557Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfksFr6W84EVgq3p8gRg7:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
+    "messageUuid": "3216c175-03ba-4d78-8069-62993e9651d3",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
     "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
   },
   {
@@ -262,46 +302,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
-  },
-  {
-    "at": "2026-10-06T11:00:00.390Z",
-    "id": "agents:toolu_01VXfwtV7Aw7rweu8K86J74p",
-    "kind": "agent_list",
-    "notes": [],
-    "pending": false,
-    "raw": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
-    "sections": [
-      {
-        "count": 1,
-        "rows": [
-          {
-            "extras": [
-              "general-purpose",
-              "completed",
-              "started 9s ago"
-            ],
-            "name": "scout",
-            "ref": "15083b"
-          }
-        ],
-        "title": "Subagents"
-      }
-    ],
-    "self": "repo-y2xidi-73 [48fa39]",
-    "toolUseId": "toolu_01VXfwtV7Aw7rweu8K86J74p",
-    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
-  },
-  {
-    "at": "2026-10-06T11:00:01.557Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfksFr6W84EVgq3p8gRg7:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
-    "messageUuid": "3216c175-03ba-4d78-8069-62993e9651d3",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
   },
   {

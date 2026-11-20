@@ -21,6 +21,57 @@
     "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"
   },
   {
+    "agent": null,
+    "at": "2026-09-28T10:07:04.306Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "touch granted.txt",
+      "cwd": null,
+      "description": "Create granted.txt file",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:07:04.979Z",
+    "expanded": true,
+    "id": "cell:toolu_01B8ysbTCaVhMVdCnwXUqfG9",
+    "kind": "cell",
+    "label": "Ran `touch granted.txt` in 0s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:07:04.306Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01B8ysbTCaVhMVdCnwXUqfG9",
+    "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"
+  },
+  {
+    "at": "2026-09-28T10:07:06.159Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVekSMUWrZ6N8DfaANFN:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "DONE.",
+    "messageUuid": "c4bbf1aa-e569-4d3c-94ab-3ca6e5b971c7",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"
+  },
+  {
     "at": "2026-09-28T10:07:02.701Z",
     "autoDenied": 0,
     "caption": "Ran a command",
@@ -73,57 +124,6 @@
       }
     },
     "toolCalls": 1,
-    "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-28T10:07:04.306Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "touch granted.txt",
-      "cwd": null,
-      "description": "Create granted.txt file",
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T10:07:04.979Z",
-    "expanded": true,
-    "id": "cell:toolu_01B8ysbTCaVhMVdCnwXUqfG9",
-    "kind": "cell",
-    "label": "Ran `touch granted.txt` in 0s",
-    "paths": [],
-    "startedAt": "2026-09-28T10:07:04.306Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_01B8ysbTCaVhMVdCnwXUqfG9",
-    "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"
-  },
-  {
-    "at": "2026-09-28T10:07:06.159Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfVekSMUWrZ6N8DfaANFN:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "DONE.",
-    "messageUuid": "c4bbf1aa-e569-4d3c-94ab-3ca6e5b971c7",
-    "model": "claude-sonnet-5",
-    "phase": "answer",
     "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"
   },
   {

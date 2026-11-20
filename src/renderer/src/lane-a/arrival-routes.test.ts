@@ -117,15 +117,16 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
       '● task completed: Monitor "uxw busy monitor" stream ended',
       '● task: Background command "uxw stall" appears to be waiting for interactive input',
     ]);
-    // An end told while idle stands above the divider of the turn it opened, which it names; the stopped task's,
+    // An end told while idle stands at the head of the turn it opened, above that turn's line, which names it; the stopped task's,
     // delivered with the person's next prompt, directly above that prompt.
     const at = (line: string) => rows.indexOf(line);
     expect(rows[at('● task completed: Background command "uxw ok" completed (exit code 0)') + 1]).toBe('turn engine, opened by task: Background command "uxw ok" completed (exit code 0)');
     // UX wave U2 (O-15; the U2a document's C5): the turn the failed one opened only answers, so it has no line
     expect(rows).not.toContain('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
     expect(rows[at('● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session') + 1]).toMatch(/^prompt: Use the Agent tool/);
-    // A hand-back's turn is the engine's ("Continued for"), opened by its report, which names the agent by its title
-    expect(rows[at('› Report from uxw agent: PONG') - 1]).toBe('turn engine, opened by subagent: Report from uxw agent: PONG');
+    // A hand-back's turn is the engine's ("Continued for"), opened by its report, which names the agent by its title;
+    // the turn's line ends the turn (board ticket 789)
+    expect(rows[at('› Report from uxw agent: PONG') + 1]).toBe('turn engine, opened by subagent: Report from uxw agent: PONG');
   });
 
   it('the notification a hand-back claimed while the session was idle makes no row and no turn, and still ends its agent (rule 5, decision 13)', async () => {
@@ -157,7 +158,7 @@ describe('sminos’s deliveries, from the file and another machine’s rows (Acc
       expect(rows).toContain('prompt: UXW owner idle: reply with only the word ONE.');
       expect(rows).toContain('steer: UXW owner busy: also say THREE.');
       expect(rows.filter((row) => row.startsWith('›'))).toEqual(['› Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.', '› Message from @session:7ef6ac00: UXW peer busy: also say FOUR.']);
-      expect(rows[rows.indexOf('› Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.') - 1]).toBe('turn peer, opened by peer: Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.');
+      expect(rows[rows.indexOf('› Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.') + 1]).toBe('turn peer, opened by peer: Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.');
       expect(rows[rows.indexOf('prompt: UXW owner idle: reply with only the word ONE.') + 1]).toBe('turn human');
       expect(rows.join('\n')).not.toMatch(/\[sminos message from|From /);
     }
@@ -240,13 +241,13 @@ async function both(text: string) {
 describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
   it('a peer’s row the bridge submitted is one turn, a peer’s, holding the line: no bubble, no second turn of the person’s waiting beside it', async () => {
     const drawing = await both(transcript(submitted(`${PEER_FRAME}\nCould you rerun the lint?`), said('Rerunning it.'), ended()));
-    expect(drawing).toEqual({ rows: ['turn peer, opened by peer: Message from @session:5b2c9e10: Could you rerun the lint?', '› Message from @session:5b2c9e10: Could you rerun the lint?'], pending: 0, users: [] });
+    expect(drawing).toEqual({ rows: ['› Message from @session:5b2c9e10: Could you rerun the lint?', 'turn peer, opened by peer: Message from @session:5b2c9e10: Could you rerun the lint?'], pending: 0, users: [] });
   });
 
   it('a peer’s row the bridge appended into a running turn is its line there, its mirror line nothing', async () => {
     const text = `${PEER_FRAME}\nThe fixtures are ready.`;
     const drawing = await both(transcript(typed('Run the slow job.'), call('toolu_demo1'), appended(text), mirror(text), result('toolu_demo1'), said('Done.'), ended()));
-    expect(drawing.rows).toEqual(['prompt: Run the slow job.', 'turn human', '› Message from @session:5b2c9e10: The fixtures are ready.']);
+    expect(drawing.rows).toEqual(['prompt: Run the slow job.', '› Message from @session:5b2c9e10: The fixtures are ready.', 'turn human']);
     expect(drawing.users).toEqual(['Run the slow job.']);
   });
 
@@ -266,7 +267,7 @@ describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
 
   it('a background session’s prompt that opens with a peer’s frame is the peer’s line in a peer’s turn; with a frame from `human`, the owner’s bubble without it (decision 19)', async () => {
     const peer = await both(transcript(typed(`${OWNED}\nThe migration is merged.`, { sessionKind: 'bg' }), said('Thanks, picking it up.'), ended()));
-    expect(peer).toEqual({ rows: ['turn peer, opened by peer: Message from @river: The migration is merged.', '› Message from @river: The migration is merged.'], pending: 0, users: [] });
+    expect(peer).toEqual({ rows: ['› Message from @river: The migration is merged.', 'turn peer, opened by peer: Message from @river: The migration is merged.'], pending: 0, users: [] });
     const queued = await both(transcript(typed(`${OWNED}\nThe migration is merged.`, { sessionKind: 'bg', promptSource: 'queued' }), said('Thanks.'), ended()));
     expect(queued.rows).toEqual(peer.rows);
     const own = await both(transcript(typed('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.', { sessionKind: 'bg' }), said('Going on.'), ended()));

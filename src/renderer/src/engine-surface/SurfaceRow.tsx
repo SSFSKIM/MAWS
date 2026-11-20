@@ -51,7 +51,11 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
   const parsed = useMemo(() => current?.rewritten && !ignored ? parseTranscriptProps(component, current.props, drawn.props) : drawn.props, [component, current, drawn.props, ignored]);
   const refused = !ignored && parsed === null;
   const accepted = !ignored && !refused ? current : null;
-  const rewritten = accepted?.rewritten && parsed !== null && !equal(parsed, drawn.props) ? parsed : null;
+  // A rewrite is a hook's change of the props its answer was asked with. The engine flags every answer whose props crossed
+  // the wire, changed or not, and an answer stays the site's while a newer ask is in flight: measured against the row's
+  // props now, the answer to a run's opening would read as a rewrite of the reader's close and open it again (board
+  // ticket 788).
+  const rewritten = accepted?.rewritten && parsed !== null && !equal(parsed, accepted.asked ?? drawn.props) ? parsed : null;
   useEffect(() => {
     if (refused && !warned.has(component)) {
       warned.add(component);

@@ -66,9 +66,10 @@ it.each([false, true])('probes folded assistant text, preserves ink in order at 
   const off = connectEngineSurface(fake.client);
   render(<Transcript storeKey={store.key} />);
   const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
-  expect(asks.filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text)).toEqual(['Update', 'Answer']);
+  // the folded commentary's probe goes with the turn's line, which ends the turn (board ticket 789): after the answer's
+  expect(asks.filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text)).toEqual(['Answer', 'Update']);
   expect(asks.some((a) => a.component === 'ToolUse')).toBe(false);
-  // User, folded commentary probe, answer: respond to all outstanding sites in their request order.
+  // User, answer, folded commentary probe: respond to all outstanding sites in their request order.
   for (const ask of asks) await act(() => fake.reply('session.ui.render', {
     hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
     tree: ask.component === 'AssistantMessage' ? { type: 'Box', children: [{ type: 'Text', children: ['label'] }, { type: 'engine', ref: 0 }] } : { type: 'engine', ref: 0 },

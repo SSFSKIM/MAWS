@@ -24,6 +24,7 @@ import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
 import { AnswerActionsStore, listElementId, rowElementId, sessionOfStoreKey, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
+import { keepInPlace } from './keep-in-place'; // board ticket 789
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
 import { useSourcePages } from './source-pages'; // the long-transcript window
@@ -87,6 +88,9 @@ export interface TranscriptListHandle {
   scrollToEnd(): void;
   readonly following: boolean;
   readonly scrollElement: HTMLDivElement | null;
+  // board ticket 789: keep a row where it is on screen for the given time while rows above it open or close; mounted or
+  // not, it is placed by the list's own offset for it (keep-in-place.ts)
+  keepInPlace(rowId: string, ms: number): void;
 }
 
 export interface TranscriptListProps {
@@ -109,11 +113,12 @@ export interface TranscriptListProps {
 }
 
 // A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
-function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement): boolean {
+function nestedScrollerOwns(target: EventTarget | null, scroller: HTMLElement, up = true): boolean {
   for (let element = target instanceof Element ? target : null; element && element !== scroller; element = element.parentElement) {
     const style = getComputedStyle(element);
     if (!['auto', 'scroll'].includes(style.overflowY)) continue;
-    if (element.scrollTop > 0 || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
+    const room = up ? element.scrollTop > 0 : element.scrollTop < element.scrollHeight - element.clientHeight - 1;
+    if (room || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
   }
   return false;
 }
@@ -123,6 +128,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const followingRef = useRef(true);
   const scrollbarPointer = useRef<number | null>(null);
   const movementWitness = useRef(false);
+  // board ticket 789: the stop of the row kept in place while a turn's work opens or folds above it, until it ends; an
+  // explicit jump ends it first, or the next frame would put the reader back at the row
+  const anchor = useRef<(() => void) | null>(null);
+  const dropAnchor = useCallback(() => {
+    anchor.current?.();
+    anchor.current = null;
+  }, []);
+  useEffect(() => dropAnchor, [dropAnchor]);
   const changeFollow = useCallback((next: boolean) => {
     if (followingRef.current === next) return;
     followingRef.current = next;
@@ -244,6 +257,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const pointerDown = (event: PointerEvent) => {
       if (event.target === element && event.button === 0 && event.pointerType !== 'touch') {
+        dropAnchor(); // board ticket 789: the reader's own scroll input on this transcript ends a turn line's anchor
         scrollbarPointer.current = event.pointerId;
         observeEnd();
         releaseFollow();
@@ -263,14 +277,16 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const wheel = (event: WheelEvent) => {
       observeEnd();
-      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
+      if (event.deltaY !== 0 && !nestedScrollerOwns(event.target, element, event.deltaY < 0)) dropAnchor();
+      if (event.deltaY < 0 && !nestedScrollerOwns(event.target, element)) releaseUpward();
     };
     let touchY: number | null = null;
     const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
     const touchMove = (event: TouchEvent) => {
       observeEnd();
       const next = event.touches.length === 1 ? event.touches[0].clientY : null;
-      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
+      if (next !== null && touchY !== null && next !== touchY && !nestedScrollerOwns(event.target, element, next > touchY)) dropAnchor();
+      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwns(event.target, element)) releaseUpward();
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {
@@ -278,6 +294,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const pageKey = ['PageUp', 'PageDown', 'Home', 'End'].includes(event.key);
       const navigation = !editor && (event.key.startsWith('Arrow') || event.key === ' ');
       if (!pageKey && !navigation) return;
+      // a key that scrolls this transcript ends a turn line's anchor: not one typed into an editor (the composer, a
+      // row's own) or in another list, nor one a nested scroller here consumes
+      const here = event.target === document.body || (event.target instanceof Node && element.contains(event.target));
+      if (here && !editor && !nestedScrollerOwns(event.target, element, ['PageUp', 'Home', 'ArrowUp'].includes(event.key))) dropAnchor();
       observeEnd();
       armMovement(); // body/editor focus and nested containment do not tell us which list the browser will scroll
     };
@@ -305,7 +325,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       element.removeEventListener('touchmove', touchMove, true);
       window.removeEventListener('keydown', key, true);
     };
-  }, [readScroll, releaseFollow, remember, virtualizer]);
+  }, [dropAnchor, readScroll, releaseFollow, remember, virtualizer]);
 
   // Follow the committed DOM end with an absolute offset, not an index target that can chase later measurements.
   // This command accounts for current sizes, retiring any anchor compensation it already absorbed. Releasing follow
@@ -422,11 +442,13 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
 
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => {
+      dropAnchor();
       remember();
       virtualizer.scrollToIndex(index, { align, behavior: 'instant' });
       leaveIfAway(virtualizer.getTotalSize()); // P2-C
     },
     scrollToEnd: () => {
+      dropAnchor();
       remember();
       changeFollow(true);
       pinEnd();
@@ -436,6 +458,20 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     },
     get scrollElement() {
       return scrollRef.current;
+    },
+    keepInPlace: (rowId, ms) => {
+      const element = scrollRef.current;
+      if (!element) return;
+      const start = () => {
+        const index = rowsRef.current.findIndex((row) => row.id === rowId);
+        return index === -1 ? null : (virtualizer.measurementsCache[index]?.start ?? null);
+      };
+      dropAnchor();
+      anchor.current = keepInPlace(element, ms, {
+        element: () => element.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(rowId)}"]`),
+        start,
+        scrollTo: (offset) => virtualizer.scrollToOffset(offset, { behavior: 'instant' }),
+      });
     },
   }));
 
@@ -690,6 +726,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
+  const keepRow = useCallback((rowId: RowId, ms: number) => listRef.current?.keepInPlace(rowId, ms), []); // board ticket 789
   // The long-transcript window: a source whose history comes one window at a time pages older ones in as the reader
   // reaches the top, the reader's place kept through each (lane A's rules, source-pages.ts)
   const pages = useSourcePages(source, storeKey, listRef, rows, atRest);
@@ -817,8 +854,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const merged: TranscriptActions = { ...DEFAULT_ACTIONS, ...actions };
     const acts: TranscriptActions =
       childAgent === null ? merged : { ...merged, openFile: (path, line, appSessionId, options) => merged.openFile(path, line, appSessionId, { ...options, agent: childAgent, ...(childConversation !== null && { conversation: childConversation }) }) };
-    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
-  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor]);
+    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, keepInPlace: keepRow, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
+  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor, keepRow]);
 
   return (
     <TranscriptProvider value={context}>

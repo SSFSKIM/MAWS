@@ -21,6 +21,29 @@
     "turnId": "turn:u-stream-1"
   },
   {
+    "at": "2026-09-28T12:00:01.000Z",
+    "durationMs": 500,
+    "id": "think:msg_stream_1:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-stream-1",
+    "recordedMs": null,
+    "text": "The reader asked about anchoring. Keep it to three sentences.",
+    "turnId": "turn:u-stream-1"
+  },
+  {
+    "at": "2026-09-28T12:00:02.000Z",
+    "blockIndex": 1,
+    "id": "text:msg_stream_1:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The list is **anchored to its end**: new rows push older ones up, and expanding old work above the viewport adjusts the scroll offset by the same amount.",
+    "messageUuid": "a-stream-2",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-stream-1"
+  },
+  {
     "at": "2026-09-28T12:00:00.010Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:u-stream-1"
-  },
-  {
-    "at": "2026-09-28T12:00:01.000Z",
-    "durationMs": 500,
-    "id": "think:msg_stream_1:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "a-stream-1",
-    "recordedMs": null,
-    "text": "The reader asked about anchoring. Keep it to three sentences.",
-    "turnId": "turn:u-stream-1"
-  },
-  {
-    "at": "2026-09-28T12:00:02.000Z",
-    "blockIndex": 1,
-    "id": "text:msg_stream_1:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "The list is **anchored to its end**: new rows push older ones up, and expanding old work above the viewport adjusts the scroll offset by the same amount.",
-    "messageUuid": "a-stream-2",
-    "model": "claude-opus-5-5",
-    "phase": "answer",
     "turnId": "turn:u-stream-1"
   }
 ]

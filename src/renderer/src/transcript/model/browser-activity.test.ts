@@ -219,7 +219,7 @@ describe('attached activity rows', () => {
     const { state, nav, shot } = closedJsTurn();
     const open = withAllExpanded(state);
     const out = withBrowserActivityRows(rowsOf(open), attachmentOf(open, APP, [nav, shot]));
-    expect(shape(out)).toEqual(['time', 'user', 'divider', 'text:commentary', 'cell:j1', 'act:j1', 'act:j1', 'text:answer']);
+    expect(shape(out)).toEqual(['time', 'user', 'text:commentary', 'cell:j1', 'act:j1', 'act:j1', 'text:answer', 'divider']); // board ticket 789: the line ends the turn
     const rows = out.filter((row) => row.kind === 'browser_activity');
     expect(rows.map((row) => row.id)).toEqual([browserActivityRow(nav).id, browserActivityRow(shot).id]);
     expect(rows.every((row) => row.turnId === state.order[0])).toBe(true);
@@ -229,7 +229,7 @@ describe('attached activity rows', () => {
     const { state, nav, shot } = closedJsTurn();
     const derived = rowsOf(state); // a closed turn folds by default
     const out = withBrowserActivityRows(derived, attachmentOf(state, APP, [nav, shot]));
-    expect(shape(out)).toEqual(['time', 'user', 'divider', 'act:j1', 'act:j1', 'text:answer']);
+    expect(shape(out)).toEqual(['time', 'user', 'act:j1', 'act:j1', 'text:answer', 'divider']); // board ticket 789: before the line that ends the turn
     const divider = out.find((row) => row.kind === 'divider')!;
     expect(divider.kind === 'divider' && divider.toolCalls).toBe(1);
     for (const row of out.filter((row) => row.kind === 'browser_activity')) {

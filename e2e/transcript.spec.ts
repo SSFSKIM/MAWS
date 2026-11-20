@@ -2828,7 +2828,8 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(opened).toHaveAttribute('aria-expanded', 'true');
     await expect(opened).toBeFocused();
     // The list mounts a window of rows past the viewport and, following its end, keeps the end in view as the record's
-    // rows go in, so its turn's line, above them, can fall outside the window: the record's rows are brought into view.
+    // rows go in, so its turn's line (at the turn's end: board ticket 789) can fall outside the window: the record's rows
+    // are brought into view.
     await opened.scrollIntoViewIfNeeded();
     const turnLine = pane.locator('[data-kind="divider"]');
     await withPaneRows(pane, 'the pane’s rows with the first record open', () => expect(turnLine).toHaveCount(1));

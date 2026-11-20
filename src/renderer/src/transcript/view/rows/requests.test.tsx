@@ -293,9 +293,10 @@ describe('boundary row', () => {
     act(() => store.push(later.events));
     const after = store.rows();
     expect(after.slice(0, at)).toEqual(before.slice(0, at));
-    // W1: a turn's rows are in event order, and this retraction arrived after the fallback answer
-    expect(after.slice(at).map((row) => row.kind)).toEqual(['assistant_text', 'boundary']);
-    expect(after.at(-1)).toMatchObject({ kind: 'boundary', boundaryKind: 'retraction', id: rowId.boundary('retract' as EventId) });
+    // W1: a turn's rows are in event order, and this retraction arrived after the fallback answer; the turn's line
+    // ends the turn (board ticket 789)
+    expect(after.slice(at).map((row) => row.kind)).toEqual(['assistant_text', 'boundary', 'divider']);
+    expect(after.at(-2)).toMatchObject({ kind: 'boundary', boundaryKind: 'retraction', id: rowId.boundary('retract' as EventId) });
     expect(after.some((row) => row.kind === 'assistant_text' && row.markdown === 'A refused answer')).toBe(false);
     expect(after).toHaveLength(before.length);
   });

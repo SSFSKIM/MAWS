@@ -21,55 +21,6 @@
     "turnId": "turn:bdf06f09-8d65-4de0-9359-33d196190398"
   },
   {
-    "at": "2026-10-07T12:09:58.804Z",
-    "autoDenied": 0,
-    "caption": "Loaded 4 tools",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-07T12:10:22.302Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:bdf06f09-8d65-4de0-9359-33d196190398",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "loaded 4 tools"
-    ],
-    "startedAt": "2026-10-07T12:09:58.804Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": null,
-      "denials": [],
-      "durationMs": null,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 0
-      },
-      "terminalReason": null,
-      "toolCalls": 1,
-      "usage": null
-    },
-    "toolCalls": 1,
-    "turnId": "turn:bdf06f09-8d65-4de0-9359-33d196190398"
-  },
-  {
     "at": "2026-10-07T12:10:00.956Z",
     "blockIndex": 1,
     "id": "text:msg_011CfnrQEaxmU7HMMQFvtPJ8:1",
@@ -343,6 +294,55 @@
     "messageUuid": "54fbd31d-db47-409d-b08a-d363041aa932",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
+    "turnId": "turn:bdf06f09-8d65-4de0-9359-33d196190398"
+  },
+  {
+    "at": "2026-10-07T12:09:58.804Z",
+    "autoDenied": 0,
+    "caption": "Loaded 4 tools",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-07T12:10:22.302Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:bdf06f09-8d65-4de0-9359-33d196190398",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "loaded 4 tools"
+    ],
+    "startedAt": "2026-10-07T12:09:58.804Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 1,
+      "usage": null
+    },
+    "toolCalls": 1,
     "turnId": "turn:bdf06f09-8d65-4de0-9359-33d196190398"
   }
 ]

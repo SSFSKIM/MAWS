@@ -21,6 +21,39 @@
     "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
   },
   {
+    "agents": [
+      {
+        "agentId": null,
+        "glyph": 3,
+        "kind": "workflow",
+        "name": "Two echo agents in one phase",
+        "runId": "wf_7cacbb2d-902",
+        "subagentType": null,
+        "taskId": "wayue3on6",
+        "toolUseId": "toolu_01SawqFE14rcE7JMMJt8jBAg"
+      }
+    ],
+    "at": "2026-09-28T09:59:26.376Z",
+    "id": "subagent:wayue3on6",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Two echo agents in one phase was stopped",
+    "status": "stopped",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
+    "at": "2026-09-28T09:59:28.924Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeAmumd48awx4jRjgvC:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STARTED",
+    "messageUuid": "06fd19d9-89a6-4aea-bf14-7a5edaddea15",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
     "at": "2026-09-28T09:59:23.181Z",
     "autoDenied": 0,
     "caption": "Ran an agent (1 stopped)",
@@ -73,39 +106,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
-  },
-  {
-    "agents": [
-      {
-        "agentId": null,
-        "glyph": 3,
-        "kind": "workflow",
-        "name": "Two echo agents in one phase",
-        "runId": "wf_7cacbb2d-902",
-        "subagentType": null,
-        "taskId": "wayue3on6",
-        "toolUseId": "toolu_01SawqFE14rcE7JMMJt8jBAg"
-      }
-    ],
-    "at": "2026-09-28T09:59:26.376Z",
-    "id": "subagent:wayue3on6",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "Two echo agents in one phase was stopped",
-    "status": "stopped",
-    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
-  },
-  {
-    "at": "2026-09-28T09:59:28.924Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfVeAmumd48awx4jRjgvC:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "STARTED",
-    "messageUuid": "06fd19d9-89a6-4aea-bf14-7a5edaddea15",
-    "model": "claude-sonnet-5",
-    "phase": "answer",
     "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
   }
 ]

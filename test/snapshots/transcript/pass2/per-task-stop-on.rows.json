@@ -21,68 +21,6 @@
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   },
   {
-    "at": "2026-09-28T10:02:20.696Z",
-    "autoDenied": 0,
-    "caption": "Ran 2 commands (1 stopped)",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T10:02:29.861Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:77244027-54d4-46df-9794-2c1b36b8b601",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran 2 commands (1 stopped)"
-    ],
-    "startedAt": "2026-09-28T10:02:20.758Z",
-    "state": "stopped",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 2,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.057438600000000006,
-      "denials": [
-        {
-          "cellId": "cell:toolu_01GczghcaZQd9tzobjdCaiaR",
-          "disposition": "stopped",
-          "interruption": true,
-          "kind": "user-rejected"
-        }
-      ],
-      "durationMs": 9101,
-      "model": "claude-sonnet-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 1
-      },
-      "terminalReason": "aborted_streaming",
-      "toolCalls": 2,
-      "usage": {
-        "cacheCreationInputTokens": 12458,
-        "cacheReadInputTokens": 16673,
-        "inputTokens": 2,
-        "outputTokens": 158,
-        "thinkingTokens": 24
-      }
-    },
-    "toolCalls": 2,
-    "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
-  },
-  {
     "at": "2026-09-28T10:02:23.408Z",
     "cells": [
       {
@@ -174,6 +112,68 @@
     "kind": "group",
     "state": "completed",
     "summary": "Ran 2 commands (1 stopped)",
+    "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
+  },
+  {
+    "at": "2026-09-28T10:02:20.696Z",
+    "autoDenied": 0,
+    "caption": "Ran 2 commands (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T10:02:29.861Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:77244027-54d4-46df-9794-2c1b36b8b601",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran 2 commands (1 stopped)"
+    ],
+    "startedAt": "2026-09-28T10:02:20.758Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 2,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.057438600000000006,
+      "denials": [
+        {
+          "cellId": "cell:toolu_01GczghcaZQd9tzobjdCaiaR",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 9101,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 1
+      },
+      "terminalReason": "aborted_streaming",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 12458,
+        "cacheReadInputTokens": 16673,
+        "inputTokens": 2,
+        "outputTokens": 158,
+        "thinkingTokens": 24
+      }
+    },
+    "toolCalls": 2,
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   },
   {

@@ -721,3 +721,95 @@ it('a following reader stays at the end when the compaction’s row appears and 
   expect(s.handle.current!.following).toBe(true);
   expect(s.changed.mock.calls).toEqual([]);
 });
+
+// Board ticket 789: a click on a turn's line opens the work above it, and the list keeps the line where the reader saw
+// it. Work tall enough to push the line out of the list's window for a frame: the list places it by its own offset
+// for the row, the line's distance from the scroller's top kept. The scene anchors a row in view, then opens 40 rows
+// above it; `run` plays the frames as a browser runs them: the list's scroll, then the scroll event it raises.
+async function anchored() {
+  const s = await scene();
+  s.readerMove(-600);
+  expect(s.handle.current!.following).toBe(false);
+  const top = s.scroller.scrollTop;
+  const visible = [...s.scroller.querySelectorAll<HTMLElement>('[data-index]')].filter((row) => Number.parseFloat(row.style.top) > top && Number.parseFloat(row.style.top) < top + 200);
+  const anchor = visible[1] ?? visible[0]!;
+  const id = anchor.getAttribute('data-row-id')!;
+  const index = Number(anchor.getAttribute('data-index'));
+  const place = () => {
+    const element = s.scroller.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
+    return element === null ? null : Number.parseFloat(element.style.top) - s.scroller.scrollTop;
+  };
+  const before = place();
+  const frames: (() => void)[] = [];
+  vi.stubGlobal('requestAnimationFrame', (step: () => void) => frames.push(step));
+  act(() => s.handle.current!.keepInPlace(id, 500));
+  const opened: Row[] = Array.from({ length: 40 }, (_, i) => ({ id: `opened-row-${i}` as RowId, turnId: null, at: '', kind: 'time', label: `Opened ${i}` }));
+  s.redraw([...s.rows.slice(0, index), ...opened, ...s.rows.slice(index)]);
+  expect(place()).toBeNull(); // out of the window: the opened work stands between the reader and it
+  const run = () => { for (let i = 0; i < 3 && frames.length > 0; i += 1) act(() => { frames.shift()!(); fireEvent.scroll(s.scroller); }); };
+  return { s, place, before, run };
+}
+
+it('keeps an anchored row at its place on screen when rows inserted above push it out of the mounted window', async () => {
+  const a = await anchored();
+  a.run();
+  expect(a.place()).toBe(a.before);
+});
+
+// the review's finding: an explicit jump during the fold's motion ends the anchor; the reader goes where they asked
+it('Jump to latest during the anchor leaves the reader at the end, following', async () => {
+  const a = await anchored();
+  act(() => a.s.handle.current!.scrollToEnd());
+  a.run();
+  expect(a.s.scroller.scrollHeight - a.s.scroller.clientHeight - a.s.scroller.scrollTop).toBe(0);
+  expect(a.s.handle.current!.following).toBe(true);
+});
+
+it('a jump to a distant row during the anchor leaves the reader at that row', async () => {
+  const a = await anchored();
+  act(() => a.s.handle.current!.scrollToIndex(0, 'start'));
+  a.run();
+  expect(a.s.scroller.scrollTop).toBe(0);
+});
+
+// the review's finding: only the transcript's own scroll input takes the place back from the anchor
+for (const [input, give] of [
+  ['typing in the composer', () => {
+    const composer = document.createElement('textarea');
+    document.body.appendChild(composer);
+    for (const key of ['a', ' ', 'ArrowUp', 'PageUp']) fireEvent.keyDown(composer, { key });
+    composer.remove();
+  }],
+  ['a wheel a nested tool output consumes', (scroller: HTMLElement) => {
+    const output = document.createElement('div');
+    output.style.overflowY = 'auto';
+    Object.defineProperties(output, { scrollHeight: { value: 600 }, clientHeight: { value: 224 }, scrollTop: { value: 100 } });
+    scroller.appendChild(output);
+    fireEvent.wheel(output, { deltaY: -32 });
+    fireEvent.wheel(output, { deltaY: 32 });
+  }],
+] as const) {
+  it(`the anchor holds through ${input}`, async () => {
+    const a = await anchored();
+    act(() => { give(a.s.scroller); });
+    a.run();
+    expect(a.place()).toBe(a.before);
+  });
+}
+
+for (const [input, give] of [
+  ['a wheel on the transcript', (scroller: HTMLElement) => fireEvent.wheel(scroller, { deltaY: 32 })],
+  ['a touch drag on the transcript', (scroller: HTMLElement) => {
+    fireEvent.touchStart(scroller, { touches: [{ identifier: 1, clientY: 100 }] });
+    fireEvent.touchMove(scroller, { touches: [{ identifier: 1, clientY: 80 }] });
+  }],
+  ['a press on its scrollbar', (scroller: HTMLElement) => fireEvent.pointerDown(scroller, { pointerType: 'mouse', button: 0, pointerId: 3 })],
+  ['a page key', () => fireEvent.keyDown(document.body, { key: 'PageDown' })],
+] as const) {
+  it(`${input} takes the place back from the anchor`, async () => {
+    const a = await anchored();
+    act(() => { give(a.s.scroller); });
+    a.run();
+    expect(a.place()).toBeNull();
+  });
+}
