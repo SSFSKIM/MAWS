@@ -184,7 +184,7 @@ describe('queue release never follows an engine-initiated turn', () => {
         void session.interrupt({ cancelEngineQueued: true }).then(async (result) => {
           afterInterrupt = { cancelled: result.cancelled.length, busy: session.queue.busy, entries: session.queue.state.entries, disposition: null };
           afterInterrupt.disposition = (await session.send('again')).disposition;
-          expect(session.queue.isPaused).toBe(true);
+          expect(session.queue.isPaused).toBe(false); // ticket 790: the Stop held nothing, so its pause ended
           transport.kill('SIGTERM');
         });
       }

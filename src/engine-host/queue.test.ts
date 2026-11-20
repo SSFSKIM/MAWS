@@ -1723,12 +1723,15 @@ describe('a prepared submission', () => {
 
   it('l2-transcript-15: a prepared fresh send bypasses only the interrupt pause and leaves it paused', async () => {
     const p = preparer();
-    const { queue, writes } = await harness({ prepare: p.prepare });
+    const { queue, writes, h } = await harness({ prepare: p.prepare });
+    h.turn = true;
+    await queue.send('held'); // ticket 790: a pause that holds nothing ends at the send; this one holds a row
     await queue.pause('interrupt');
+    h.turn = false;
     expect((await queue.send('fresh')).disposition).toBe('sent');
     expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fresh' }, READ]]);
     expect(p.settled).toEqual([['fresh', true]]);
-    expect(queue.state.paused).toBe(true);
+    expect(queue.state).toMatchObject({ paused: true, entries: [{ content: 'held', state: 'queued' }] });
   });
 
   it('is busy while it prepares: a send meanwhile waits behind it, in order', async () => {

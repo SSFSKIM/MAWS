@@ -965,7 +965,8 @@ describe('F2 persisted queue and cwd regressions', () => {
     finishSave();
     await changing;
     await until(() => session.lifecycle === 'ready', 'recovered launch');
-    const expected = { entries: mutation === 'edit' ? [expect.objectContaining({ content: 'revised', uncertain: false })] : [], paused: true, pauseReason: 'interrupt' };
+    // ticket 790: removing the last held row ends the interrupt pause that held it
+    const expected = mutation === 'edit' ? { entries: [expect.objectContaining({ content: 'revised', uncertain: false })], paused: true, pauseReason: 'interrupt' } : { entries: [], paused: false, pauseReason: null };
     expect(session.queue.state).toMatchObject(expected);
     expect(await store.loadQueue(id)).toMatchObject(expected);
     transport.exit(0);
