@@ -252,9 +252,10 @@ export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 export const PROJECT_DECIDED_BY = ['link', 'minted', 'smns', 'remote', 'machine'] as const;
 export type ProjectDecidedBy = (typeof PROJECT_DECIDED_BY)[number];
 // A project act's refusals (Interfaces §G): `invalid_input`, its message starting `<code>: ` (`statements-unavailable: <reason>: `).
+// `channel-id`: a link to a sminos declared channel's id (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, §D).
 export const PROJECT_REFUSALS = [
   'not-a-directory', 'not-declared', 'statements-unavailable', 'unknown-project', 'not-a-hub-project', 'too-many-locations',
-  'has-statement', 'into-and-own', 'changed', 'unresolved',
+  'has-statement', 'into-and-own', 'changed', 'unresolved', 'channel-id',
 ] as const;
 export type ProjectRefusal = (typeof PROJECT_REFUSALS)[number];
 /** The RL2 capability an endpoint lists when it serves the project acts of Interfaces §G (src/endpoint/capabilities.ts, from M9). */

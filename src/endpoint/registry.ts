@@ -9,7 +9,10 @@
 // - `known` (design §4, the desk track's reading): a project sminos holds (its log-plane hello does not `follow` it)
 //   with sessions on this machine. While no sminos is connected, or its restatement after a welcome has not closed, the
 //   last answer stands: a sminos restarting is not every project's sessions ending. After a restart, before any answer,
-//   the kept record's `known` is the last answer (M9's review 1, F8).
+//   the kept record's `known` is the last answer (M9's review 1, F8). A sminos declared channel is `known` by the same
+//   rule: its log opened without `follow`, and a held lane A member that states it, which RL10 counts among the logs
+//   with sessions here once the hello listed `channels` (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
+//   Interfaces §C). So it reaches every machine's directory as a hub project, and no machine's app as a row.
 // - The directory sminos reads (§8): every project the verified records name, this machine's own included, as a hub
 //   project, but a project any location of which says `hub: false`; and the machines' own projects as today.
 // - A statement change answers after sminos acknowledged the locations that carry it (`published`), within
@@ -37,7 +40,11 @@ export type SminosView = {
   capabilities: readonly string[];
   /** Its restatement after the welcome has not closed yet. */
   restating: boolean;
-  /** The project of each session it holds. */
+  /**
+   * The logs this machine holds a member of: the project of each session it holds and, when its hello listed `channels`,
+   * the declared channels each lane A member it holds states, as the endpoint counts them (Interfaces §C). The one place
+   * a member's channels are read.
+   */
   sessionProjects(): string[];
   /** The projects it opened on the log plane, with its hello's name and whether it only follows them. */
   logProjects(): Array<{ project: string; name: string; follow: boolean }>;

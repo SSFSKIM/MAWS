@@ -25,8 +25,11 @@
 //     project's summary report straight, as a late one would arrive;
 //   - a `Registry` whose `summaries` lose their `live` column, as a registry stored before it had them, and one armed to
 //     take its next summary report as the version before `live` took it;
-//   - a `Registry` whose machines' `seen` and `confirmed`, keys' expiry and enrollments' expiry are moved back, as the
-//     time having passed would leave them, and whose alarm is read or cleared;
+//   - a `Registry` whose machines' `seen` and `confirmed`, keys' expiry, enrollments' expiry and projects' `unlisted` and
+//     `created` are moved back, as the time having passed would leave them, whose alarm is read or cleared and whose
+//     sweep is run as its alarm would run it, which answers a project's `unlisted`, and whose `projects` lose that
+//     column, as a registry stored before it had it; and one armed to hold a pass over sminos channels' rows between
+//     its verification and its apply, as a slow verification would;
 //   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
@@ -56,6 +59,9 @@ import {
   ABORT_REASON,
   ALARM_PATH,
   BACKDATE_PATH,
+  UNLISTED_PATH,
+  PROJECTS_BEFORE_UNLISTED_PATH,
+  PASS_HOLD_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
@@ -126,12 +132,13 @@ type Fault = { remaining: number; calls: number };
 type StateFault = Fault & { missing?: boolean };
 
 /** The Registry's RPC methods a suite calls as an object would (REGISTRY_RPC_PATH). */
-const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'push', 'policies'] as const;
+const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'storeProjects', 'notify', 'ownersOf', 'push', 'policies'] as const;
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
   private leaveRelease: (() => void) | undefined;
   private pageRelease: (() => void) | undefined;
+  private passRelease: (() => void) | undefined;
   /** Set once an armed reset of the projects pushes began (`pushProjects`). */
   private resetting = false;
 
@@ -139,6 +146,17 @@ export class Registry extends DeployedRegistry {
   head(): ReturnType<DeployedRegistry['head']> {
     if (this.ctx.storage.kv.get<boolean>('head-fault')) throw new Error('a failure the suite injected into head');
     return super.head();
+  }
+
+  /** Armed (PASS_HOLD_PATH), a pass waits once its records are verified, before it applies them, until released. */
+  protected async countedProjects() {
+    const verified = await super.countedProjects();
+    const armed = this.ctx.storage.kv.get<number>('pass-hold') ?? 0;
+    if (armed > 0) {
+      this.ctx.storage.kv.put('pass-hold', armed - 1);
+      await new Promise<void>((resolve) => (this.passRelease = resolve));
+    }
+    return verified;
   }
 
   /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
@@ -286,26 +304,61 @@ export class Registry extends DeployedRegistry {
       return new Response(release ? 'released' : 'none');
     }
     if (url.pathname === BACKDATE_PATH) {
-      const { machines, key, enrollment, pendingDevice } = (await request.json()) as {
+      const { machines, key, enrollment, pendingDevice, projects, clearAlarm } = (await request.json()) as {
         machines?: Array<{ name: string; seen?: string; confirmed?: string }>;
         key?: { id: string; expires: string };
         enrollment?: { machine: string; expires: string };
         pendingDevice?: { member: string; device: string; expires: string };
+        projects?: Array<{ id: string; unlisted?: string; created?: string }>;
+        clearAlarm?: boolean;
       };
       const sql = this.ctx.storage.sql;
       for (const machine of machines ?? []) {
         if (machine.seen !== undefined) sql.exec('UPDATE machines SET seen = ? WHERE name = ?', machine.seen, machine.name);
         if (machine.confirmed !== undefined) sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', machine.confirmed, machine.name);
       }
+      for (const project of projects ?? []) {
+        if (project.unlisted !== undefined) sql.exec('UPDATE projects SET unlisted = ? WHERE id = ?', project.unlisted, project.id);
+        if (project.created !== undefined) sql.exec('UPDATE projects SET created = ? WHERE id = ?', project.created, project.id);
+      }
       if (key) sql.exec('UPDATE provisioning_keys SET expires = ? WHERE id = ?', key.expires, key.id);
       if (enrollment) sql.exec('UPDATE enrollments SET expires = ? WHERE id = (SELECT enrollment FROM machines WHERE name = ?)', enrollment.expires, enrollment.machine);
       if (pendingDevice) sql.exec('UPDATE pending_devices SET expires = ? WHERE member = ? AND device = ?', pendingDevice.expires, pendingDevice.member, pendingDevice.device);
-      await this.scheduleAlarm();
+      // `clearAlarm`: no alarm is left, so that what follows is the one thing that can act on the moved times.
+      if (clearAlarm) await this.ctx.storage.deleteAlarm();
+      else await this.scheduleAlarm();
       return Response.json({ alarm: await this.ctx.storage.getAlarm() });
     }
     if (url.pathname === ALARM_PATH) {
-      if (request.method === 'POST' && ((await request.json()) as { clear?: boolean }).clear) await this.ctx.storage.deleteAlarm();
+      const { clear, sweep } = request.method === 'POST' ? ((await request.json()) as { clear?: boolean; sweep?: boolean }) : {};
+      if (clear) await this.ctx.storage.deleteAlarm();
+      if (sweep) await this.alarm();
       return Response.json({ alarm: await this.ctx.storage.getAlarm() });
+    }
+    if (url.pathname === UNLISTED_PATH) {
+      const { id } = (await request.json()) as { id: string };
+      const row = this.ctx.storage.sql.exec<{ unlisted: string | null }>('SELECT unlisted FROM projects WHERE id = ?', id).toArray()[0];
+      return Response.json({ unlisted: row?.unlisted ?? null });
+    }
+    if (url.pathname === PASS_HOLD_PATH) {
+      const { hold, release, reset } = request.method === 'POST' ? ((await request.json()) as { hold?: number; release?: boolean; reset?: boolean }) : {};
+      if (reset) {
+        // What is stored stays; the pass held, and every call in flight, go with this instance.
+        await this.ctx.storage.sync();
+        this.ctx.abort(ABORT_REASON);
+      }
+      if (hold !== undefined) this.ctx.storage.kv.put('pass-hold', hold);
+      if (release) {
+        const released = this.passRelease;
+        this.passRelease = undefined;
+        released?.();
+      }
+      const records = this.ctx.storage.sql.exec<{ machine: string; revision: number }>('SELECT machine, revision FROM projects_records ORDER BY machine').toArray();
+      return Response.json({ held: this.passRelease !== undefined, records });
+    }
+    if (url.pathname === PROJECTS_BEFORE_UNLISTED_PATH) {
+      this.ctx.storage.sql.exec('ALTER TABLE projects DROP COLUMN unlisted');
+      return new Response('dropped');
     }
     if (url.pathname === SUMMARY_AS_PREVIOUS_PATH) {
       this.ctx.storage.kv.put(`summary-as-previous:${((await request.json()) as { project: string }).project}`, true);

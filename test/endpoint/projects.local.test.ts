@@ -7,8 +7,10 @@
 // than what the hub holds, its clock behind that revision, is refused once, takes its floor from its own record in the
 // hub's snapshot, and its next record is stored. A replaced index takes its statements back from the kept file, and the
 // next record carries the same ids. A statement change's answer waits for sminos's acknowledgement, and answers
-// `restated: false` after the wait. Across a restart sminos's stand-in is told the same locations. A retired machine's
-// record is dropped, and its project leaves B's directory.
+// `restated: false` after the wait. Across a restart sminos's stand-in is told the same locations. A sminos declared
+// channel stated by a member on A, its log held there without follow, is `known` in A's record and a hub project in B's
+// directory, and leaves both with the member (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, M2). A retired
+// machine's record is dropped, and its project leaves B's directory.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { base64urlEncode, generateSigningKey, keyId, type OrgState, type ProjectsRecord, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
@@ -142,14 +144,17 @@ async function restarted(listed: Listed, options: { index?: StandInIndex; now?: 
   return { ...listed, endpoint, services, index };
 }
 
-/** sminos's stand-in on the endpoint's RL10 socket, its hello advertising `locations`; `ack`: it acknowledges each kept frame. */
-async function attachSminos(listed: Listed, ack = true): Promise<FakeSminos> {
+/**
+ * sminos's stand-in on the endpoint's RL10 socket, its hello advertising `locations` (and `channels` when `channels`);
+ * `ack`: it acknowledges each kept frame.
+ */
+async function attachSminos(listed: Listed, ack = true, { channels = false }: { channels?: boolean } = {}): Promise<FakeSminos> {
   const path = join(listed.services.machine.stateDir, 'rl10.json');
   await until(() => listed.endpoint.rl10.serving && fs.existsSync(path), 'rl10.json');
   const info = JSON.parse(fs.readFileSync(path, 'utf8')) as { socket: string; token: string };
   const s = await FakeSminos.open(info.socket);
   sminoses.push(s);
-  s.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: ['audience', 'record', 'locations'], token: info.token, sminos: { version: 'registry-suite' }, policy: { read_only: false, ceiling: 'settings' } });
+  s.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: ['audience', 'record', 'locations', ...(channels ? ['channels'] : [])], token: info.token, sminos: { version: 'registry-suite' }, policy: { read_only: false, ceiling: 'settings' } });
   const welcome = await s.next((f) => f.t === 'welcome', 'the RL10 welcome');
   expect(welcome.capabilities).toContain('locations');
   s.send({ t: 'restated' });
@@ -296,6 +301,27 @@ describe('across a restart', () => {
     expect(told.length).toBeGreaterThan(0);
     for (const at of told) expect(at).toEqual(before.locations!.at);
     pair = { ...pair!, a: again };
+  });
+});
+
+describe('a sminos declared channel', () => {
+  it('stated by a lane A member on A, its log held without follow: `known` in A’s record, a hub project in B’s directory, and gone with the member', async () => {
+    const { a, b, sb } = await machines();
+    const C = '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c';
+    const session = uuid();
+    const s = await attachSminos(a, true, { channels: true });
+    s.send({ t: 'hello', project: C, name: 'design-review', have: {} });
+    s.send({ t: 'member', session, alias: 'main', project: uuid(), lane: 'A', state: 'idle', cwd: '/srv/elsewhere', owners: ['@machine'], ownersProof: [], origin: { kind: 'terminal' }, channels: [C] });
+    const listed = await until(() => (heldRecord(b, a.ref)?.body.known.some((k) => k.id === C) ? heldRecord(b, a.ref) : null), 'A’s record listing the channel, held by B');
+    expect(listed.body.known).toContainEqual({ id: C, name: 'design-review' });
+    expect(a.endpoint.parts?.state.projects.record?.body.known).toContainEqual({ id: C, name: 'design-review' });
+    const named = await orgFrame(sb, (f) => hubProject(f, C), 'B’s directory naming the channel as a hub project');
+    expect(named.projects.find((p) => p.id === C)?.name).toBe('design-review');
+    const at = sb.received.lastIndexOf(named);
+    s.send({ t: 'member', session, gone: true });
+    await until(() => (heldRecord(b, a.ref)?.body.known.every((k) => k.id !== C) ? heldRecord(b, a.ref) : null), 'A’s record without the channel, held by B');
+    expect(a.endpoint.parts?.state.projects.record?.body.known.some((k) => k.id === C)).toBe(false);
+    await until(() => sb.received.slice(at + 1).some((f) => f.t === 'org' && !hubProject(f as OrgFrame, C)), 'B’s directory without the channel');
   });
 });
 
