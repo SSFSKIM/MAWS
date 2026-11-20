@@ -1,6 +1,6 @@
 # The word cut (2026-11-16)
 
-> **Parent:** `docs/charter.md`, the root spec (MAWS's standing purpose, §1). **Level name:** the word cut, the first built part of the visual renewal that `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` hands items to; it applies that wave's law 3, "Less on screen", to the text of the whole window. **Pin:** every decision here was made on master `2c7044231`; "today" in this document and its tables means the app at that commit. **State:** the design is approved by the owner (two rounds of pictures, 2026-11-15 and 2026-11-16); nothing is built on master. **It waits for the UX wave** (board #573): the wave rewrites many of the same surfaces, so the cut is applied afterwards, fresh, from this document and its tables, never by merging the scratch branch named under "Reference material". **Board:** #720. **Contracts:** none of X1 to X8 changes; the work is in the renderer and the artifact editors.
+> **Parent:** `docs/charter.md`, the root spec (MAWS's standing purpose, §1). **Level name:** the word cut, the first built part of the visual renewal that `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` hands items to; it applies that wave's law 3, "Less on screen", to the text of the whole window. **Pin:** every decision here was made on master `2c7044231`; "today" in this document and its tables means the app at that commit. **State:** the design is approved by the owner (two rounds of pictures, 2026-11-15 and 2026-11-16). The UX wave (board #573) has closed, and M0 (2026-11-20) re-read the tables against master `028cecd10` as the wave left it ("M0's record"); no cut is built yet. The cut is applied fresh, from this document and its tables, never by merging the scratch branch named under "Reference material". **Board:** #720. **Contracts:** none of X1 to X8 changes; the work is in the renderer and the artifact editors.
 
 ## Purpose
 
@@ -18,10 +18,11 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-16) The owner's round-two calls (68 screens, 18 items brought back, nothing further cut); the decisions in `2026-11-16-word-cut/items.json`.
 - [x] (2026-11-16) The adversarial review of this document; its eight findings resolved in the text and in six rows (Decision Log).
 - [x] (2026-11-16) This document and its tables.
-- [ ] The UX wave lands (board #573).
+- [x] (2026-11-20) The UX wave closed (board #573); master `028cecd10` is the wave as it left it.
 - [x] (2026-11-16) Board #720 registered, blocked by #573.
 - [x] (2026-11-16) The owner's answer on plugin rows; nothing is open with the owner.
-- [ ] M0: the list re-read against master as the wave left it.
+- [x] (2026-11-20) M0: the list re-read against master as the wave left it. Every one of the 1,060 rows carries an M0 field (986 unchanged, 7 moved, 11 rewritten by the wave, 4 gone, 52 moot); 34 rows and 7 new ones are recorded for the owner and two are held for U11b; 155 `pattern` rows added for the wave's new text; every surviving row has its milestone and a scene or the state it still needs. The rig is in the repository as `e2e/words-shots.rig.ts`, run on demand by `pnpm shots:words`, with 175 scenes (107 carried onto master, 3 of them without a target there, and 68 added). See "M0's record".
+- [ ] The "before" pictures taken on a Mac from master with `pnpm shots:words`.
 - [ ] M1 to M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
@@ -163,25 +164,66 @@ The cut was decided on `2c7044231`. By the time it is built, the UX wave (board 
 - Colour, type, spacing and the drawing of surfaces: the rest of the visual renewal. The cut is built with today's tokens and components.
 - New behaviour. The one behaviour change the owner asked for while judging, a × on the question card that closes it without dismissing, is board #705.
 
+## M0's record (2026-11-20)
+
+M0 read every row of the tables against master `028cecd10`, the UX wave as it left it, found the text the wave added, and carried the rig onto master. Nothing in the product changed. The record is the `m0` field of each row in `items.json`, shown in the tables' **M0** and **Build** columns.
+
+**What each status means.** `unchanged`: the same text on the same surface, from the same file (its line may have shifted). `moved`: the same text on the same surface, now from another file. `rewritten by the wave`: the surface is there and the wave put a different text in this one's place; the row is decided again by the five rules on the new text, as a `pattern` row (its re-decision is in the M0 column), except that a `consent` or `not a cut` row keeps its basis and is not decided again. `gone`: the surface is there and the wave removed this text with nothing in its place; a `cut` row that is gone is done, a `stays` row that is gone is the wave's and is not put back. `moot`: the surface no longer exists on master, or the wave's design settled the row. The `today`, `decision`, `basis` and `source` of a row are untouched: they stay the record of what the owner decided on.
+
+| File | Rows | Unchanged | Moved | Rewritten | Gone | Moot | For the owner | New rows (cut / reword / stay) |
+|---|---|---|---|---|---|---|---|---|
+| `session.md` | 172 | 166 | 0 | 1 | 2 | 3 | 8 | 29 (2 / 11 / 16) |
+| `beside.md` | 314 | 255 | 5 | 5 | 1 | 48 | 11 | 96 (6 / 29 / 61) |
+| `window.md` | 105 | 104 | 0 | 0 | 0 | 1 | 3 | 4 (0 / 1 / 3) |
+| `typed.md` | 52 | 51 | 0 | 1 | 0 | 0 | 1 | 1 (0 / 1 / 0) |
+| `settings.md` | 115 | 115 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `customize.md` | 81 | 76 | 2 | 2 | 1 | 0 | 10 | 19 (3 / 6 / 10) |
+| `artifacts.md` | 62 | 60 | 0 | 2 | 0 | 0 | 1 | 6 (0 / 1 / 5) |
+| `editors.md` | 159 | 159 | 0 | 0 | 0 | 0 | 0 | 0 |
+| | 1,060 | 986 | 7 | 11 | 4 | 52 | 34 | 155 (11 / 49 / 95) |
+
+**Where the wave changed the rows.** The moot rows are U5's Source control (the commit form, the Push and pull request sheets, the group actions, the Output and the diff pane with its Unified, Split and Wrap: 27 rows), U2b's report view (P496 to P505, and P509 as this document already said), U8's Artifacts card (T562, T563, T565), U1b's request slots and the waiting plan's word (T110, T89, C85), U5b's View menu in Review, which is what T303 asked for, and the palette's greyed rows U6b-5a deleted (W122). Nine more, T143 to T151, describe the Subagents and Background sections of the summary card: no component has drawn them since U8b, which landed before the pin, so they were never on screen. The rewritten rows: T356 (the Review totals line, re-decided `cut` and recorded for the owner), T366 to T368 (the branch line, now the Commits part's "Not pushed 2", "Pushed to origin/main 5", "· 3 behind": `stays`), C84 ("Also waiting" at the transcript's end: `stays`), P510 ("‹ fold to report", the mod's own words: `stays`), P573 (the `/mcp` line before a chat starts: `cut`, for the owner), P659 ("Filter": `cut`), G249 (the first-skills line: `stays`, the owner's call carried over), G291 (the library's four asking cards: `stays`, for the owner) and T614 (a `not a cut` row). Of the 306 `stays` rows, 284 are still on master as they were; Acceptance 3 checks those.
+
+**Recorded for the owner, not built** (the change would alter text the wave's design fixed, or restore what it removed; each is shown to the owner as a picture pair on the wave's surface in its milestone):
+- the names the wave fixed: P66, P67, P72 and the tab and menu titles T152, T153 ("Subagents", "Background tasks", "N running", U8);
+- the transcript's arrival lines U3 fixed: T42 ("Sent during this turn"), T68, T70, T73;
+- the request cards U1 drew: T98 ("View answers" is how an answered capsule opens its answers beside), C90 ("Also asked in the terminal: the first answer wins"), C92 ("Why: …");
+- Review and Source control, U5 and U5b: T306 (the hunk counter's long and short forms), T309 ("Open file ↗" worded in a wide header), T356 (the totals line), T357 (the footer the wave's checks accept), T360 (in a narrow header "Mark viewed" is a check box with the words as its tooltip, against the owner's ruling that it stays a worded button), T361 ("Untracked folder" keeps its note), and seven new rows on the Source control page whose words U5's frames fixed (N62, N68 to N72, N75);
+- Customize, U11c and U11h: W6 (the page name stands once, in the title bar), G199 ("Showing <project>"), G205 (the inventory note's summary), G215 (the Disabled badge and the row's menu), G216, G218, G225, G229, G248, P683 (the rows under All are full rows, the owner's answer of 2026-11-13 for the wave, where this cut's answer of 2026-11-16 has name, author and version at rest; the two answers meet on the combined list, which only the owner can settle), G247 (Refresh among the Skills tools), G291 (the four asking cards);
+- the View menu U6a fixed: W187, W188 (Tabs and Developer);
+- the model menu in a new chat: P555 ("Applies when the session starts", U11), and P573.
+
+**Held:** C40 and C42, the model menu's Default row and "For this session only". U11b, which removes that row and writes the default on a pick, was designed and never dispatched, so master still draws both; the cut leaves them to U11b, as "Meeting the UX wave" says, and builds them as decided only if U11b is dropped.
+
+**The wave's new text.** Four readers went through every non-test file of `src/renderer/src` and `src/artifacts` that changed between the pin and master, new modules included, and applied the five rules. They wrote a row for each piece a rule cuts or rewords, and a `stays` row where a rule could plausibly cut but rule 2, 3 or 5 keeps it; about 160 plain labels, headings and button names no rule touches were counted and not listed, as the inventory did with its "keep" items. That gives 155 rows, ids N1 to N155, basis `pattern` but for seven `consent` texts (warnings about secrets and protected folders, a shared file), each at the end of its area's table. Most are on the Source control page, Review and Files (U5, U5b, U6b), the custom connector sheet and the combined Customize list (U11c, U11g, U11h), the waiting requests (U1b) and the library's Spaces (U10b). Eleven pieces that were only the wave's rewrite of an existing row's text were dropped in favour of that row.
+
+**Milestones and scenes.** Every surviving row carries the milestone of its area (Settings M1; the conversation and the message box M2; the panels M3; window, typed dialogs and Customize M4; artifacts and editors M5), `stays` rows included, since a milestone checks that they still read as they did. Rows that change, by milestone, and how many of them a scene already photographs: M1 91 (74), M2 114 (45), M3 198 (46), M4 157 (59), M5 171 (48). A row with no scene names the state its picture needs (`no_scene`, "wanted: …") and why the rig does not reach it: most are a particular state of a surface whose resting form a scene shows (an editor's side panel in one state, a sheet at one step, a failure), some are a session on another machine or a wait no fixture holds. Each milestone's builder adds the scenes its own surfaces need to the rig before the "before" pictures of that milestone are taken (Decision Log).
+
+**The rig** is `e2e/words-shots.rig.ts`, run by `pnpm shots:words` (the harness build, then `playwright.words.config.ts`, which selects it alone). It is not a `*.spec.ts`, so no e2e group, no bare `pnpm e2e` and no default run collects it. `scenes.md` is its manifest: 175 scenes in five launches. The 107 scenes of the owner's rounds keep their ids; their locators were re-derived from master's source (data attributes, menu ids, IPC and the wave's new places), 50 have a new way in, state or title where the wave moved them, and three have no target on master (`shell-tools-transcript-view` and its scrolled form, whose switch U2 removed, and `r2-scm-push-sheet`, whose sheet U5 removed). The 68 added scenes (`m0-` ids) reach surfaces the wave added (the combined Customize list, Discover, the Source control page's other states, the Review stack, the Files finder, a file outside the session's folders, the to-human view) and states the rounds never reached: the resume dialog, the paused queue, a blocked command, scheduled jobs and a workflow in Background, the Tasks panel, Settings › Org signed in with its pairing and delegations, the presenter view, the deck's Check and Theme panels, dashboard tiles in their states and the source sheet, the design system checked against its law, a design's held board and comments, version history, the browser's find row, options, profile and suggestions, source control behind and in conflict, and typed dialogs in other states. Discover is drawn from the catalog's committed recordings, with no network. Not reached: most error texts (failures only a real network, machine or engine produces), a session on another machine, and waits no fixture holds open. The rig was written against master's source and has not been run; a step that cannot find its target records the scene as not reached in `_run.json` rather than failing the run, so the first run on a Mac is its check.
+
+The "before" pictures: on a Mac, from a clean checkout of master with this landing merged, `pnpm install`, then `WORDS_OUT=$HOME/maws-words/before pnpm shots:words` (about 25 minutes). The "after" pictures of a milestone are the same command on its branch, into another folder.
+
 ## The tables
 
 One file per area under `docs/doperpowers/specs/2026-11-16-word-cut/`, written by `render.py` there from `items.json` in the same directory. `items.json` is the record: a decision changes there and in the Decision Log below, and `python3 docs/doperpowers/specs/2026-11-16-word-cut/render.py` rewrites the tables.
 
-| File | Area | Items | Cut | Reworded | Stay |
-|---|---|---|---|---|---|
-| `session.md` | The conversation and the message box | 172 | 114 | 3 | 55 |
-| `beside.md` | Panels beside the conversation | 314 | 209 | 6 | 99 |
-| `window.md` | Window, sidebar, sheets and overview | 105 | 72 | 1 | 32 |
-| `typed.md` | Dialogs opened by typed commands | 52 | 43 | 0 | 9 |
-| `settings.md` | Settings | 115 | 90 | 1 | 24 |
-| `customize.md` | Customize | 81 | 40 | 5 | 36 |
-| `artifacts.md` | Artifacts: the library and an opened artifact | 62 | 33 | 1 | 28 |
-| `editors.md` | Artifact editors | 159 | 131 | 5 | 23 |
-| | | 1,060 | 732 | 22 | 306 |
+| File | Area | Items | Cut | Reworded | Stay | New in M0 |
+|---|---|---|---|---|---|---|
+| `session.md` | The conversation and the message box | 172 | 114 | 3 | 55 | 29 |
+| `beside.md` | Panels beside the conversation | 314 | 209 | 6 | 99 | 96 |
+| `window.md` | Window, sidebar, sheets and overview | 105 | 72 | 1 | 32 | 4 |
+| `typed.md` | Dialogs opened by typed commands | 52 | 43 | 0 | 9 | 1 |
+| `settings.md` | Settings | 115 | 90 | 1 | 24 | 0 |
+| `customize.md` | Customize | 81 | 40 | 5 | 36 | 19 |
+| `artifacts.md` | Artifacts: the library and an opened artifact | 62 | 33 | 1 | 28 | 6 |
+| `editors.md` | Artifact editors | 159 | 131 | 5 | 23 | 0 |
+| | | 1,060 | 732 | 22 | 306 | 155 |
 
-Each item in `items.json` has: `id`; `area`, `place`, `surface`, `where`; `today` (the text at the pin, an example value where the text is built from data); `decision` (`cut`, `reword`, `stays`); `basis`; `after` (what the surface shows afterwards, as built on the scratch branch); `why`; `round` (which round of calls last touched it); `source` (file and line at the pin); and `scratch_files` (the files the scratch branch changed for it, as a pointer to how much the item involves, not as a recipe). M0 adds its own field beside these (unchanged, moved, rewritten by the wave, gone, moot) and the current source; it does not overwrite `today`, `decision` or `source`, which stay the record of what the owner decided on.
+The first six numeric columns are the decisions at the pin; "M0's record" says what became of them on master.
 
-`scenes.md` in the same directory lists the 107 scenes the pictures were taken of: what each is, how it is reached and the state it shows. `rig/words-shots.spec.ts.txt` is the Playwright spec that reached them at the pin, kept as text so that no gate reads it.
+Each item in `items.json` has: `id`; `area`, `place`, `surface`, `where`; `today` (the text at the pin, an example value where the text is built from data); `decision` (`cut`, `reword`, `stays`); `basis`; `after` (what the surface shows afterwards, as built on the scratch branch); `why`; `round` (which round of calls last touched it); `source` (file and line at the pin); and `scratch_files` (the files the scratch branch changed for it, as a pointer to how much the item involves, not as a recipe). M0 added `m0` beside these: `status` (`unchanged`, `moved`, `rewritten by the wave`, `gone`, `moot`, or `new` for a row M0 added), `source` (file and line on master), `evidence` (what the reader saw), for a rewritten row `text` and its re-decision (`decision`, `after`, `why`, `basis`), `owner` (why the row is recorded for the owner and not built), `hold` (why it waits for other work), `milestone`, and `scene` or `no_scene`. It does not overwrite `today`, `decision`, `basis` or `source`, which stay the record of what the owner decided on. A row M0 added has the same fields, with `today` and `source` read on master and `round` "M0"; `items.json` names both commits (`pin`, `master`).
+
+`scenes.md` in the same directory lists the rig's 175 scenes: the 107 the owner's pictures were taken of and the 68 M0 added, what each is, how it is reached, the state it shows and what M0 found for it. The rig itself is `e2e/words-shots.rig.ts` (until M0 it was kept here as `rig/words-shots.spec.ts.txt`, the form that reached the scenes at the pin; that text is in the repository's history at `028cecd10`).
 
 ## Plan of Work
 
@@ -189,7 +231,7 @@ This is the cut the design implies, for whoever takes the board ticket to confir
 
 ### M0 — The list against master, and the fixtures
 
-Re-read all 1,060 rows against master: find each by its text and its source, and mark it unchanged, moved, rewritten by the wave, gone or moot, starting from the list in "Meeting the UX wave". Read the whole diff of `src/renderer/src` and `src/artifacts` between the pin and master for visible strings, in new modules as well as old, and add a `pattern` row for each. Bring the rig into the repository's e2e support from `rig/words-shots.spec.ts.txt`, repair its scenes against master (it finds elements by data attributes and positions, which the wave will have moved), and extend its fixtures toward the states "How firm each decision is" names. Assign every surviving and every new row to one of M1 to M5 and to a scene, or record why no scene can reach it. At the end the record describes master as it is, and the rig produces the "before" picture of every surface M1 to M5 will change. Proof: the regenerated tables with M0's field filled on every row; the scene list; the set of "before" pictures.
+Re-read all 1,060 rows against master: find each by its text and its source, and mark it unchanged, moved, rewritten by the wave, gone or moot, starting from the list in "Meeting the UX wave". Read the whole diff of `src/renderer/src` and `src/artifacts` between the pin and master for visible strings, in new modules as well as old, and add a `pattern` row for each. Bring the rig into the repository's e2e support from `rig/words-shots.spec.ts.txt`, repair its scenes against master (it finds elements by data attributes and positions, which the wave will have moved), and extend its fixtures toward the states "How firm each decision is" names. Assign every surviving and every new row to one of M1 to M5 and to a scene, or record why no scene can reach it. At the end the record describes master as it is, and the rig produces the "before" picture of every surface M1 to M5 will change. Proof: the regenerated tables with M0's field filled on every row; the scene list; the set of "before" pictures. *Done 2026-11-20 but for the pictures, which are taken on a Mac; see "M0's record".*
 
 ### M1 — The mechanisms, and Settings as their first use
 
@@ -236,6 +278,13 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - **Typechecks on the scratch branch stalled the machine.** Ten whole-tree typechecks started at once by the workers that applied the cut exhausted memory for about four hours. Typechecks belong to CI (CLAUDE.md, Gates); the scratch branch then ran none, which is one more reason it is not a change.
 - **The agent line already read the spawn description.** The owner asked for it as a change in round two; the fixture's lines were the descriptions. No work, but the rule is now written (Rulings).
 
+- **The wave left most of the words alone.** 986 of the 1,060 rows read on master exactly as at the pin; Settings and the artifact editors were not touched at all. The wave rewrote structure (Source control, the report view, Customize, the request cards) far more than wording, and where it wrote words it often fixed them in a frame the owner approved, which is why 41 rows go back to the owner rather than being built.
+- **Nine rows were never on screen.** T143 to T151 describe sections of the summary card that no component has drawn since U8b, which landed before the pin; the inventory read them from copy that was still in the source.
+- **A designed landing is not a built one.** The spec took U11b's removal of the model menu's Default row as done; U11b was never dispatched.
+- **Two answers of the owner meet on one list.** For the wave the owner chose full rows under Customize's All (2026-11-13); for the cut, name, author and version at rest (2026-11-16). The combined list is where both apply.
+- **The readers asked for many more states than the rig can take.** 550 distinct states for about 750 rows; 48 of them are a scene the rig takes. The rest are mostly one sheet, panel or failure of one surface.
+- **A helper's run can end on the account's limits.** The rig's helper stopped on a billing error after it had committed and pushed the rig; its manifest and checks were finished by the session that dispatched it. Work committed as it goes survives such a stop.
+
 ## Decision Log
 
 - 2026-11-15. **Pictures, not a list.** The owner rejected the list page. Alternative rejected: a shorter list grouped by rule; it has the same defect.
@@ -247,6 +296,15 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - 2026-11-16. **After the review of this document.** Six rows corrected in `items.json`: T205 from cut to stays (rule 5 and U8's O-09); G615 from cut to reword (rule 3: an empty panel says what to do); C106 from reword to stays (the × it described is #705's); G13 to G15 rewritten to the in-row note the owner saw, where they had described the first pass's floating card. P509 is recorded as moot after U2b (the wave's uncounted fold stands; alternative rejected: a count added by MAWS over the mod's line, against wave law 2). The scene manifest and the rig's spec were brought into the repository so that acceptance does not depend on material outside it. Totals after the corrections: 732 cut, 22 reworded, 306 stay.
 - 2026-11-16. **Plugin rows: name, author and version at rest; description on pointing.** The owner's answer to the one line where the two rounds disagreed (round one asked for the name alone; round two's list marked the change "bring back" while both pictures were called good). Alternatives the owner was shown and did not take: the name alone, and everything as today. The date goes with the description: the owner named the author and the version as what matters, not the date.
 - 2026-11-16. **Verification.** This document: one adversarial review of its buildability. The build: the rung the taking session names per milestone, and the owner's call on every picture pair.
+
+- 2026-11-20. **M0's statuses.** `unchanged` and `moved` differ by the file the text comes from, not by its line; `gone` keeps the surface and loses the text, `moot` loses the surface or is settled by the wave's design. Alternative rejected: a line shift counted as `moved`, which would have marked hundreds of rows for no change a builder sees.
+- 2026-11-20. **M0's field is one `m0` object per row**, holding the re-decision of a rewritten row beside the owner's decision rather than over it, so the tables show both. Alternative rejected: rewriting `decision` and `basis` in place, which "The tables" forbids and which would lose what the owner decided on.
+- 2026-11-20. **The wave's new text enters the tables only where a rule acts on it** (a cut, a rewording, or a `stays` a rule could plausibly have cut); about 160 plain labels were counted, not listed, as the inventory left its 959 "keep" items out. Alternative rejected: a row for every new string, which would bury the 155 rows that need a decision among labels no rule touches. A new piece that is only the wave's rewrite of an existing row's text was dropped for that row (eleven).
+- 2026-11-20. **The rows recorded for the owner go beyond the spec's list.** "Meeting the UX wave" named P66, P67, P72, T205, G291, G216, G225 and G248; the reading found the same collision on 26 more rows and 7 new ones (the list in "M0's record"), each where a wave child's text, frame or the owner's answer to that child fixes the words. T205 needed no correction: the wave's wording was already at the pin. N53 (the stale-commit tail of a Review footer) was corrected at the merge from `cut` to `stays` under rule 2, and C84's master line to the line of its text.
+- 2026-11-20. **C40 and C42 are held, not moot.** The spec closed them because U11b removes the Default row, but U11b was never dispatched and master draws both. They are left to U11b while it stands in the wave's plan, and built as decided if it is dropped. Alternative rejected: building the cut now, on a row the wave's design will remove.
+- 2026-11-20. **Every surviving row takes its area's milestone, `stays` rows included**, since the milestone checks that they still read as they did (Acceptance 3); a row recorded for the owner keeps its milestone, where its picture pair is shown.
+- 2026-11-20. **The rig is `e2e/words-shots.rig.ts`, not a `*.spec.ts`, with its own config and `pnpm shots:words`.** Its name keeps it out of every e2e group, the bare `pnpm e2e` and default's derivation without an entry in any of their lists or guards. Alternatives rejected: an env-gated `*.spec.ts`, which default's derivation would collect and the pinned lists would have to name; a `testIgnore` entry in the shared config. The script builds the harness variant because the Org scenes read a seeded org through the harness build's main; every window is still the product's (`MAWS_HARNESS=0`). The `.txt` copy under `rig/` is removed: the file in `e2e/` replaces it and the pin's form stays in the history.
+- 2026-11-20. **M0 reaches the states it could from existing fixtures and seams (68 scenes) and records the rest per row**, rather than staging the roughly 500 particular states the readers named. Each milestone's builder adds the scenes its own surfaces need before its "before" pictures are taken, on the states its rows' `no_scene` name. Alternative rejected: holding M1 to M5 until M0 had a scene for every row; most of those states are one surface's sheet or failure that the builder of that surface reaches more cheaply.
 
 ## Outcomes & Retrospective
 

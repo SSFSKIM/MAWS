@@ -11,6 +11,7 @@
   "include": [
     "playwright.config.ts",
     "playwright.dashboard.config.ts", // P3-E (E2 M6): the dashboard acceptance invocation's own config
+    "playwright.words.config.ts", // the word cut's M0: the words rig's own invocation
     "e2e/**/*",
     "src/renderer/src/env.d.ts",
     "src/shared/**/*",
