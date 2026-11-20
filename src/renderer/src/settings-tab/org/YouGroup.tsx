@@ -3,12 +3,14 @@
 // new keys, and your other devices. M1's and M3's lines moved here unchanged (OrgSection.tsx's Held and NewKeys): a
 // registered Mac removed (with the new-keys offer), closed on its held chain (with Re-anchor), signed out, or signed in.
 // Each attempt's refusal shows under its control; the shell hands down which, and the one with no control here.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): This Mac's device id and fingerprint wait
+// behind its chevron (G156), and its "signs" chip stands for the Signer row a root no longer has (G183).
 import { formatClock } from '@shared/app/date-format';
 import type { OrgRefusal, OrgView } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
 import { ORG } from '../copy';
-import { Setting, TEXT_ACTION } from '../parts';
-import { CodeField, DeviceLine, failed, Fingerprint, Refusal, UnplacedRefusal, type Attempt, type Registered } from './parts';
+import { Chip, Setting, TEXT_ACTION } from '../parts';
+import { CodeField, DeviceLine, Disclosure, DisclosureChevron, failed, Fingerprint, Refusal, UnplacedRefusal, useDisclosed, type Attempt, type Registered } from './parts';
 
 type Signer = NonNullable<Registered['signer']>;
 
@@ -41,6 +43,8 @@ export function YouGroup({ status, view, pending, refusalFor, unplaced, signIn, 
   const me = view?.members.find((m) => m.you) ?? null;
   const thisMac = me?.devices.find((d) => d.thisMac) ?? null;
   const others = me?.devices.filter((d) => !d.thisMac) ?? null;
+  const details = useDisclosed();
+  const signs = status.signer !== null && status.signer.root && status.signer.maySign;
   return (
     <>
       <Setting label={ORG.account}>
@@ -52,12 +56,16 @@ export function YouGroup({ status, view, pending, refusalFor, unplaced, signIn, 
         )}
       </Setting>
       <Setting label={ORG.device}>
-        <span className="font-mono">{status.device.slice(0, 8)}</span>
-        {thisMac !== null && (
-          <span className="text-fg-muted">
-            {ORG.thisMacFingerprint} <span className="font-mono text-fg">{thisMac.fingerprint}</span>
-          </span>
-        )}
+        <DisclosureChevron label={ORG.deviceDetails} disclosed={details} />
+        {signs && <Chip>{ORG.signsMark}</Chip>}
+        <Disclosure disclosed={details}>
+          <span className="font-mono">{status.device.slice(0, 8)}</span>
+          {thisMac !== null && (
+            <span className="text-fg-muted">
+              {ORG.thisMacFingerprint} <span className="font-mono text-fg">{thisMac.fingerprint}</span>
+            </span>
+          )}
+        </Disclosure>
       </Setting>
       <Held status={status} pending={pending} refusalFor={refusalFor} signIn={signIn} reanchor={reanchor} rekey={rekey} cancel={cancel} />
       {others !== null && (

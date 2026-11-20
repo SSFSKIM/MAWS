@@ -397,12 +397,16 @@ export const ARTIFACTS = {
 // least a sign-in to the org needs. No words here carry a pairing code: the field's text goes out and is never shown back.
 // M4a grows it into the Org page (settings-tab/org/): Q1's four groups, the change sheet and the pairing sheet. The code
 // a pairing makes is shown by the pairing sheet alone, and no words here carry it either.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G147 to G196): the wait is a quiet spinner
+// named by `reading`; the identifiers wait behind a chevron named by what it shows; a row's actions are one "…" menu
+// named by what they act on; a non-signer reads one view-only line at the top of the page.
 export const ORG = {
-  reading: 'Reading the org…',
+  reading: 'Reading the org…', // the quiet spinner's name (G153)
   readFailed: (why: string) => `Could not read the org · ${why}`,
   failed: (why: string) => `The org did not answer · ${why}`,
   org: 'Org',
-  notSignedIn: 'This Mac isn’t signed in to an org.',
+  notSignedIn: 'Not signed in', // G147
+  signInOpen: 'Sign in…', // G147, G148: opens the pairing-code field
   code: 'Pairing code',
   codeNote: 'Get one from a device already in the org: an admin pairs it from their Org page (Pair a device), or deployment admin pair --class native-mac.',
   signIn: 'Sign in',
@@ -416,6 +420,8 @@ export const ORG = {
   fingerprintNote: 'Compare it with the approving device, then approve there.',
   account: 'Account',
   device: 'This Mac',
+  deviceDetails: 'Device id and fingerprint', // G156: the chevron's name and tooltip
+  signsMark: 'signs', // G183: This Mac's chip while it signs the org state
   hub: 'Hub',
   hubAccess: {
     connected: 'Connected',
@@ -458,7 +464,6 @@ export const ORG = {
   },
   // M3: this Mac as the org's signer
   signer: 'Signer',
-  signs: 'This Mac signs the org state.',
   weekly: (days: number) => `Org state is ${days} days old`,
   resign: 'Re-sign now',
   makeRoot: 'Make this Mac a root: run',
@@ -553,8 +558,12 @@ export const ORG = {
   thisMacMark: 'this Mac',
   youMark: 'you',
   noDevices: 'No devices yet.',
-  readOnly: 'Only a root signs org changes.',
-  rootsAre: (emails: string) => `The roots are ${emails}.`,
+  readOnly: 'Only a root signs org changes.', // the sheets' line
+  // G170: the page's one line for someone who may not sign, in place of the People foot's, Enroll's and New delegation's
+  viewOnly: (roots: readonly string[]) =>
+    roots.length === 0 ? 'View only' : `View only: ${roots.length === 1 ? `${roots[0]} signs` : `${roots.slice(0, -1).join(', ')} and ${roots[roots.length - 1]} sign`} changes`,
+  personActions: (name: string) => `Actions for ${name}`, // G162
+  deviceActions: (kind: string, id: string) => `Actions for ${kind} ${id}`, // G163
   noRootListed: 'No root is listed.',
   addPerson: 'Add person…',
   removePerson: 'Remove person…',
@@ -564,10 +573,6 @@ export const ORG = {
   removeDevice: 'Remove device…',
   makeDeviceRoot: 'Make a root…',
   pairDevice: 'Pair a device…',
-  // The rule the page states in place of Pair a device (M4a's "The rule the page states"): a later device of a member who
-  // doesn't sign waits for the countersign flow; one who signs pairs it from their own app.
-  laterDevice: 'Their next device is paired from one of their own devices, a flow not built yet.',
-  laterDeviceRoot: 'They pair their next device from their own Org page.',
   pairingUntil: (time: string) => `Pairing a device until ${time}`,
   pairingShow: 'Show…',
   machineState: { up: 'Up', connecting: 'Connecting…', down: 'Offline', unknown: 'Not connected' },
@@ -578,14 +583,15 @@ export const ORG = {
   // M4b: the Machines group's actions. Enroll, Re-enroll, Owners and Drop sign the org state (a root's, `maySign`);
   // Grant… signs a grant, which a machine's owner may (an admin for an org-owned one), root or not.
   machineKey: (kid: string) => `key ${kid}`,
-  certifiedOwners: (delegation: string) => `Certified through delegation ${delegation}: its owners are the delegation’s, and change with it.`,
+  keyDetails: 'Key', // G171: the chevron's name and tooltip
+  machineActions: (name: string) => `Actions for ${name}`, // G173
+  certifiedOwners: (delegation: string) => `Via delegation ${delegation}`, // G176
   ownersAction: 'Owners…',
   reenroll: 'Re-enroll…',
   drop: 'Drop…',
   grant: 'Grant…',
-  enroll: 'Enroll a machine',
   enrollAction: 'Enroll a machine…',
-  enrollCantSign: 'This Mac can’t sign: enroll from an admin’s Mac that does.',
+  enrollCantSign: 'This Mac can’t sign: enroll from an admin’s Mac that does.', // the enrollment sheet's line
   enrollAdmins: 'An admin enrolls machines from their Org page.',
   enrollingUntil: (name: string, time: string) => `Enrolling ${name} until ${time}`,
   reenrollingUntil: (time: string) => `Re-enrolling until ${time}`,
@@ -600,8 +606,8 @@ export const ORG = {
     shell: 'Open a terminal and forward ports on it, outside any session.',
     'machine-admin': 'Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use.',
   },
-  onlyOwners: 'Only its owners have rights on it, and they hold every one.',
-  noRightsYou: 'You hold no rights on it.',
+  // G174: a grant line's rights in the page's words
+  rightWords: { spawn: 'sessions', shell: 'terminal', 'machine-admin': 'connectors' },
   withdrawn: 'every right withdrawn',
   notYetOn: (machine: string) => `Not yet on ${machine}`,
   notNewer: 'Another device changed this grant: sign again',
@@ -630,6 +636,7 @@ export const ORG = {
   rootHolder: (email: string, device: string, cls: string) => `${email} · device ${device} (${cls})`,
   unlistedRoot: 'no listed device',
   recovery: 'Recovery key',
+  details: 'Details', // G180: the Org group's chevron, beside its heading
   // The change sheet: what one change would sign, shown before Touch ID
   changeTitles: {
     'member.add': 'Add a person',
@@ -891,10 +898,8 @@ export const ORG = {
   revokeStrayConfirm: 'Revoke',
   notRevoked: 'Not revoked',
   // A new delegation
-  newDelegation: 'New delegation',
-  createAction: 'Create a delegation…',
+  createAction: 'New delegation…', // G187
   delegationsAdmins: 'An admin creates delegations from their Org page.',
-  delegationsCantSign: 'This Mac can’t sign: create delegations from an admin’s Mac that does.',
   createNoDestination: 'Set the code destination below first.',
   createDamaged: 'Reset the code destination below first.',
   createWaits: 'A delegation is being created, in this window or another: Create once it’s done.',

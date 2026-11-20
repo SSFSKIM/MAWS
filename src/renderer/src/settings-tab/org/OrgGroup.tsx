@@ -7,6 +7,9 @@
 // machines still owing a delivery, the discarded proposals a hub or machine may hold, and a rekey's old device still
 // listed, which M4a removes through the change sheet (`device.remove`) in place of M3's `remove-device` command.
 // M4c: the Delegations section (DelegationsSection.tsx) closes the group, a section of it rather than a fifth group.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the org's id, the roots and the recovery key
+// wait behind the group's Details chevron (G180, `OrgDetails`); a root's Signer row goes, This Mac's "signs" chip saying
+// it, and comes back for the weekly re-sign, an outcome, or a Mac that is not a root or can't sign (G183).
 import { useState } from 'react';
 import { ORG_HEAD_BACKSTOP_DAYS, ORG_HEAD_WARN_DAYS, type OrgView } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
@@ -26,21 +29,29 @@ type Pending = NonNullable<Signer['pending']>;
 
 const DAY_MS = 86_400_000;
 
-export function OrgGroup({ status, view }: { status: Registered; view: OrgView | null }) {
-  const signer = status.signer;
-  const signing = status.session === 'signed-in' && status.problem !== 'held-chain';
+// The identifiers behind the group's Details chevron: the org's id, the roots and the recovery key.
+export function OrgDetails({ status, view }: { status: Registered; view: OrgView | null }) {
   return (
     <>
       <Setting label={ORG.org}>
         <span className="font-mono">{status.org}</span>
       </Setting>
-      <HeadAge head={status.head} />
       {view !== null && <Roots view={view} />}
       {view !== null && (
         <Setting label={ORG.recovery}>
           <span className="font-mono">{view.recoveryKid}</span>
         </Setting>
       )}
+    </>
+  );
+}
+
+export function OrgGroup({ status, view }: { status: Registered; view: OrgView | null }) {
+  const signer = status.signer;
+  const signing = status.session === 'signed-in' && status.problem !== 'held-chain';
+  return (
+    <>
+      <HeadAge head={status.head} />
       {status.problem !== null && status.problem !== 'held-chain' && <Problem problem={status.problem} />}
       {signing && signer !== null && <SignerLines signer={signer} status={status} view={view} />}
       {view !== null && <DelegationsSection status={status} view={view} />}
@@ -148,29 +159,31 @@ function SignerLines({ signer, status, view }: { signer: Signer; status: Registe
   // M4c: a slot holding an unsent delegation waits for its code, not for the hub (its row, under Delegations, says why);
   // the status says whether it is still held (fix wave 2), the view only its prefix
   const unsent = slot?.held === true ? view?.delegations.find((d) => d.id === slot.delegation) : undefined;
+  // A root that signs says so by This Mac's chip; its row stands only for what it has to say.
+  const signerRow = unmarked || !signer.root || weekly !== null || outcome !== null;
   return (
     <>
-      <Setting label={ORG.signer} note={guide ? ORG.rootNote(signer.fingerprint) : undefined}>
-        {unmarked ? (
-          <span className="text-fg-muted">{ORG.unmarked}</span>
-        ) : signer.root ? (
-          <span>{ORG.signs}</span>
-        ) : (
-          <>
-            <span className="text-fg-muted">{ORG.makeRoot}</span>
-            <span className="font-mono text-fg select-all">{ORG.rootCommand(device)}</span>
-          </>
-        )}
-        {weekly !== null && (
-          <>
-            <span className="text-fg-muted">{ORG.weekly(weekly)}</span>
-            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={resign}>
-              {ORG.resign}
-            </button>
-          </>
-        )}
-        <OutcomeLine outcome={outcome} />
-      </Setting>
+      {signerRow && (
+        <Setting label={ORG.signer} note={guide ? ORG.rootNote(signer.fingerprint) : undefined}>
+          {unmarked ? (
+            <span className="text-fg-muted">{ORG.unmarked}</span>
+          ) : signer.root ? null : (
+            <>
+              <span className="text-fg-muted">{ORG.makeRoot}</span>
+              <span className="font-mono text-fg select-all">{ORG.rootCommand(device)}</span>
+            </>
+          )}
+          {weekly !== null && (
+            <>
+              <span className="text-fg-muted">{ORG.weekly(weekly)}</span>
+              <button type="button" className={TEXT_ACTION} disabled={acting} onClick={resign}>
+                {ORG.resign}
+              </button>
+            </>
+          )}
+          <OutcomeLine outcome={outcome} />
+        </Setting>
+      )}
       {slot !== null && (
         <Setting label={ORG.pending}>
           <span className={slot.fork || slot.refused !== null ? 'text-warning' : 'text-fg-muted'}>
@@ -288,7 +301,7 @@ function HeadAge({ head }: { head: Registered['head'] }) {
   const now = useNow();
   const days = head === null ? 0 : Math.max(0, Math.floor((now - Date.parse(head.issued)) / DAY_MS));
   return (
-    <Setting label={ORG.state} note={ORG.stateNote(ORG_HEAD_BACKSTOP_DAYS)}>
+    <Setting label={ORG.state} line={ORG.stateNote(ORG_HEAD_BACKSTOP_DAYS)}>
       {head === null ? <span className="text-fg-muted">{ORG.unverified}</span> : <span className={days >= ORG_HEAD_WARN_DAYS ? 'text-warning' : ''}>{ORG.version(head.version, days)}</span>}
     </Setting>
   );

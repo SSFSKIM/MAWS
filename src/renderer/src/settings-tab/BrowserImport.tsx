@@ -16,14 +16,12 @@
 // row is its date and a "…" menu holding Show report, Sync bookmarks now and Remove, its summary in the report (G73,
 // G74), a failed sync's line at rest and a good one in the row's note; the popup limit is an ⓘ beside the Extensions
 // heading (G76); each extension is a switch (G77).
-import { DropdownMenu } from 'radix-ui';
 import { useState } from 'react';
 import type { ImportedExtension } from '@shared/browser/import';
 import type { ImportedBookmarks, ImportedProfile } from '@shared/browser/profiles';
 import { useNow } from '../app/use-now';
 import { syncLine } from '../tools/browser/chrome/profile';
 import { BROWSER_COPY } from '../tools/browser/copy';
-import { MoreIcon } from '../tools/browser/icons';
 import { importDate, IMPORT_COPY } from '../tools/browser/import/copy';
 import { ImportSheet } from '../tools/browser/import/ImportSheet';
 import { RemoveSheet } from '../tools/browser/import/RemoveSheet';
@@ -32,11 +30,7 @@ import { openImport, setExtension, showReport, syncBookmarks, useBrowserImport }
 import { Tip } from '../ui/tip';
 import { BROWSER } from './copy';
 import { Setting, Switch, TEXT_ACTION, WORD_OWNER } from './parts';
-
-// A profile's "…" menu, as the library's row menu draws it (library/RowMenu.tsx); its Remove in the danger colour.
-const MENU_BUTTON = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg';
-const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
-const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+import { RowMenu } from './row-menu';
 
 export function BrowserImport() {
   const [sheet, setSheet] = useState(false);
@@ -114,35 +108,18 @@ function ProfileRow({ record, running, onReport, onRemove }: { record: ImportedP
     await syncBookmarks(record.profileDir);
     setSyncing(false);
   };
-  const actions = BROWSER.actions(record.name);
   return (
     <Setting row="browser.importedProfile" label={record.name} noteEnd={line !== null && !failed ? <p className="m-0">{line}</p> : undefined}>
       <span className="text-fg-muted">{BROWSER.importedOn(importDate(record.importedAt))}</span>
       {line !== null && failed && <span className="text-warning">{line}</span>}
-      <DropdownMenu.Root modal={false}>
-        <Tip content={actions}>
-          <DropdownMenu.Trigger asChild>
-            <button type="button" aria-label={actions} className={MENU_BUTTON}>
-              <MoreIcon />
-            </button>
-          </DropdownMenu.Trigger>
-        </Tip>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
-            <DropdownMenu.Item disabled={running} className={MENU_ITEM} onSelect={onReport}>
-              {BROWSER.showReport}
-            </DropdownMenu.Item>
-            {bookmarks !== null && (
-              <DropdownMenu.Item disabled={syncing} className={MENU_ITEM} onSelect={() => void sync()}>
-                {syncing ? BROWSER_COPY.profile.syncing : BROWSER_COPY.profile.syncNow}
-              </DropdownMenu.Item>
-            )}
-            <DropdownMenu.Item className={`${MENU_ITEM} text-danger`} onSelect={onRemove}>
-              {BROWSER.remove}
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
+      <RowMenu
+        label={BROWSER.actions(record.name)}
+        actions={[
+          { label: BROWSER.showReport, disabled: running, onSelect: onReport },
+          bookmarks !== null && { label: syncing ? BROWSER_COPY.profile.syncing : BROWSER_COPY.profile.syncNow, disabled: syncing, onSelect: () => void sync() },
+          { label: BROWSER.remove, danger: true, onSelect: onRemove },
+        ]}
+      />
     </Setting>
   );
 }

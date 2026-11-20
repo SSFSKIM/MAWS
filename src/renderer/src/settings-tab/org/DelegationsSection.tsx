@@ -13,17 +13,22 @@
 //   be gone once it settles (as the Machines group's Enroll row carries Owners' and Drop's).
 // - Code destination: where a new delegation's code goes (`org.provisioningSecret.*`, main's own file), with Save; a
 //   damaged file shows its reason and Reset behind a confirmation, and is never edited over.
+// - The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): New delegation… is one button with no label,
+//   and stands for the empty list's line where it is offered (G187); the code destination waits behind a chevron beside
+//   the heading, in view while it is unset or damaged and once it has been (G188, G189); someone who may not sign reads
+//   the page's top line, not this section's (G170).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDayTime } from '@shared/app/date-format';
 import { ProvisioningSecretSchema, type OrgChange, type OrgView, type ProvisioningSecret, type ProvisioningSecretReading } from '@shared/ipc/schema/org';
 import { GatewaySheet } from '../../gateway/GatewaySheet';
 import { ipc } from '../../ipc/client';
+import { DisclosureBody } from '../../ui/disclosure';
 import { ORG } from '../copy';
 import { INPUT, Setting, TEXT_ACTION } from '../parts';
 import { ChangeSheet } from './ChangeSheet';
 import { DelegationRow, StrayKey } from './DelegationRow';
 import { DelegationSheet } from './DelegationSheet';
-import { failed, OutcomeLine, signInOf, useOpen, type Outcome, type Registered } from './parts';
+import { DisclosureChevron, failed, OutcomeLine, signInOf, useDisclosed, useOpen, type Outcome, type Registered } from './parts';
 
 type Asked = { title: string; change: OrgChange };
 
@@ -74,10 +79,18 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
   const blocked =
     reading === null ? ORG.createNoDestination : reading !== undefined && 'damaged' in reading ? ORG.createDamaged : creating ? ORG.createWaits : slot !== null ? ORG.createPending : null;
   const { at, failed: unread } = view.hubKeys;
+  const creates = admin && may; // New delegation… and the code destination are offered
+  // The destination is in view while nothing can be created without it, and stays so once it has been, so a Save's line
+  // is not folded away with it.
+  const needed = creates && (reading === null || (reading !== undefined && 'damaged' in reading));
+  const disclosed = useDisclosed(needed);
   return (
     <div data-org-section="delegations" className="mt-2">
-      <h5 className="m-0 mt-1 mb-0.5 text-ui-sm font-medium text-fg">{ORG.delegations}</h5>
-      {view.delegations.length === 0 && <p className="m-0 py-1 text-ui-sm text-fg-muted">{ORG.noDelegations}</p>}
+      <div className="mt-1 mb-0.5 flex items-center gap-1">
+        <h5 className="m-0 text-ui-sm font-medium text-fg">{ORG.delegations}</h5>
+        {creates && !needed && <DisclosureChevron label={ORG.destination} disclosed={disclosed} />}
+      </div>
+      {view.delegations.length === 0 && !creates && <p className="m-0 py-1 text-ui-sm text-fg-muted">{ORG.noDelegations}</p>}
       {view.delegations.map((delegation) => (
         <DelegationRow key={delegation.id} delegation={delegation} members={view.members} hubSide={admin} hubKeys={view.hubKeys} may={may} signedIn={signedIn} slot={slot} rev={status.delegations.rev} destination={dest} creating={creating} ask={ask} said={setOutcome} />
       ))}
@@ -89,22 +102,26 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
           ))}
         </Setting>
       )}
-      <Setting label={ORG.newDelegation}>
-        {!admin ? (
-          <span className="text-fg-muted">{ORG.delegationsAdmins}</span>
-        ) : !may ? (
-          <span className="text-fg-muted">{ORG.delegationsCantSign}</span>
-        ) : (
-          <>
-            <button type="button" className={TEXT_ACTION} disabled={reading === undefined || blocked !== null} onClick={openCreate}>
-              {ORG.createAction}
-            </button>
-            {blocked !== null && <span className="text-fg-muted">{blocked}</span>}
-          </>
-        )}
-        <OutcomeLine outcome={outcome} />
-      </Setting>
-      {admin && may && <DestinationField reading={reading} reload={destination.reload} />}
+      {((may && !admin) || creates || outcome !== null) && (
+        <div data-org-new-delegation className="flex min-h-[34px] min-w-0 flex-wrap items-center gap-2 py-1 text-ui-sm [overflow-wrap:anywhere]">
+          {!may ? null : !admin ? (
+            <span className="text-fg-muted">{ORG.delegationsAdmins}</span>
+          ) : (
+            <>
+              <button type="button" className={TEXT_ACTION} disabled={reading === undefined || blocked !== null} onClick={openCreate}>
+                {ORG.createAction}
+              </button>
+              {blocked !== null && <span className="text-fg-muted">{blocked}</span>}
+            </>
+          )}
+          <OutcomeLine outcome={outcome} />
+        </div>
+      )}
+      {creates && (
+        <DisclosureBody open={disclosed.open} id={disclosed.id}>
+          <DestinationField reading={reading} reload={destination.reload} />
+        </DisclosureBody>
+      )}
       {asked !== null && (
         <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} signIn={signIn} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />
       )}

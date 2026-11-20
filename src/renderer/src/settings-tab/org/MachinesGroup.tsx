@@ -4,11 +4,13 @@
 // a link can drop with no new head), its actions and its rights.
 //
 // The org state's changes (Enroll a machine, Re-enroll, Owners, Drop) are a root's, so they show only while this Mac may
-// sign (`maySign`); an admin whose Mac can't is told to enroll from one that does. Owners and Drop go through the change
+// sign (`maySign`), the page's top line saying why to someone who may not. Owners and Drop go through the change
 // sheet (M4a's preview and change pipeline) with the machine kinds' fields; enrolling and re-enrolling through the
 // enrollment sheet, one at a time, and a running one shows here (Show… takes it up without its code). A machine this run
 // dropped whose hub row the delete didn't take out stays as a row of its own: "Signed. The hub still lists <name>: Retry",
 // Retry calling `org.drop.retry`, which deletes the row alone. Grant… is the row's, and follows `mayGrant` (Fork B).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the group ends with the one Enroll a machine…
+// button and no label (G178); for someone who may not sign the page's top line says why nothing is offered (G170).
 import { useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { DropRetryResult, OrgChange, OrgView } from '@shared/ipc/schema/org';
@@ -60,25 +62,25 @@ export function MachinesGroup({ view, status }: { view: OrgView; status: Registe
       {status.hubRowsLeft.map((left) => (
         <HubRowLeft key={left.name} name={left.name} />
       ))}
-      <Setting label={ORG.enroll}>
-        {fresh !== null ? (
-          <>
-            <span className={fresh.problem === null ? 'text-fg-muted' : 'text-warning'}>{fresh.problem === null ? ORG.enrollingUntil(fresh.name, formatClock(Date.parse(fresh.expires))) : ORG.enrollProblems[fresh.problem]}</span>
-            <button type="button" className={TEXT_ACTION} onClick={() => enroll(null, fresh.generation)}>
-              {ORG.enrollShow}
+      {(fresh !== null || may || outcome !== null) && (
+        <div data-org-enroll className="flex min-h-[34px] min-w-0 flex-wrap items-center gap-2 py-1 text-ui-sm [overflow-wrap:anywhere]">
+          {fresh !== null ? (
+            <>
+              <span className={fresh.problem === null ? 'text-fg-muted' : 'text-warning'}>{fresh.problem === null ? ORG.enrollingUntil(fresh.name, formatClock(Date.parse(fresh.expires))) : ORG.enrollProblems[fresh.problem]}</span>
+              <button type="button" className={TEXT_ACTION} onClick={() => enroll(null, fresh.generation)}>
+                {ORG.enrollShow}
+              </button>
+            </>
+          ) : !may ? null : !admin ? (
+            <span className="text-fg-muted">{ORG.enrollAdmins}</span>
+          ) : (
+            <button type="button" className={TEXT_ACTION} onClick={() => enroll(null, null)}>
+              {ORG.enrollAction}
             </button>
-          </>
-        ) : !admin ? (
-          <span className="text-fg-muted">{ORG.enrollAdmins}</span>
-        ) : may ? (
-          <button type="button" className={TEXT_ACTION} onClick={() => enroll(null, null)}>
-            {ORG.enrollAction}
-          </button>
-        ) : (
-          <span className="text-fg-muted">{ORG.enrollCantSign}</span>
-        )}
-        <OutcomeLine outcome={outcome} />
-      </Setting>
+          )}
+          <OutcomeLine outcome={outcome} />
+        </div>
+      )}
       {asked !== null && (
         <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} signIn={signIn} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />
       )}

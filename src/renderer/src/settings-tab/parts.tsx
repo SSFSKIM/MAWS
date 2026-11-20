@@ -68,8 +68,9 @@ type Values = Readonly<Record<string, string | null>>;
 // in the note (what the row holds at run time: the binary's path). A `bare` row draws its control alone, its label
 // still its name (Stop all).
 type DeclaredSetting = { row: string; state?: string; values?: Values; label?: string; bare?: boolean; lineEnd?: ReactNode; noteEnd?: ReactNode; children: ReactNode };
-// A row of the Org page, which the table does not hold: its label and note as given.
-type PlainSetting = { row?: undefined; label: string; note?: ReactNode; children: ReactNode };
+// A row of the Org page, which the table does not hold: its label, its note (waiting, as a declared row's) and its line
+// (at rest: a condition to act on, or a text the cut leaves standing) as given.
+type PlainSetting = { row?: undefined; label: string; note?: ReactNode; line?: ReactNode; children: ReactNode };
 
 export function Setting(props: DeclaredSetting | PlainSetting) {
   const id = useId();
@@ -82,7 +83,13 @@ export function Setting(props: DeclaredSetting | PlainSetting) {
   let note: ReactNode = null;
   const bare = props.row !== undefined && props.bare === true;
   if (props.row === undefined) {
-    if (props.note !== undefined && props.note !== null) line = <div className={SETTING_NOTE}>{props.note}</div>;
+    if (props.line !== undefined && props.line !== null) line = <div className={SETTING_NOTE}>{props.line}</div>;
+    if (props.note !== undefined && props.note !== null)
+      note = (
+        <RowNote note={rowNote} className={SECOND_COLUMN}>
+          <p className="m-0">{props.note}</p>
+        </RowNote>
+      );
   } else {
     const shown = declared!.states[stateName!];
     if (shown === undefined) throw new Error(`Settings row ${declared!.id} has no state ${stateName}`);
