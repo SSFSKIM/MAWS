@@ -219,3 +219,34 @@ describe('SessionStatusTracker: a background task’s starter', () => {
     ]);
   });
 });
+
+// Ticket 619: overlapping mcp_status reads. Each answer is the servers as of its own ask, so the later ask's answer stands
+// whichever lands first, and an init frame or a reload between an ask and its answer is the newer report.
+describe('SessionStatusTracker.applyMcpStatus', () => {
+  const answer = (status: string) => ({ mcpServers: [{ name: 'notes', status, source: 'user' }] });
+  const statusOf = (tracker: SessionStatusTracker) => tracker.mcpServers.map((s) => s.status);
+
+  it.each(['in order', 'out of order'] as const)('keeps the later ask’s answer when two overlap (%s)', (order) => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    const first = tracker.askMcp();
+    const second = tracker.askMcp();
+    if (order === 'in order') {
+      expect(tracker.applyMcpStatus(answer('pending'), first)).toBe(true);
+      expect(tracker.applyMcpStatus(answer('connected'), second)).toBe(true);
+    } else {
+      expect(tracker.applyMcpStatus(answer('connected'), second)).toBe(true);
+      expect(tracker.applyMcpStatus(answer('pending'), first), 'an older ask’s answer rolls nothing back').toBe(false);
+    }
+    expect(statusOf(tracker)).toEqual(['connected']);
+  });
+
+  it('drops an answer asked before an init frame that reported the servers', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    const asked = tracker.askMcp();
+    tracker.observe({ type: 'system', subtype: 'init', plugins: [], mcp_servers: [{ name: 'notes', status: 'failed' }] }, '2026-11-20T00:00:00.000Z');
+    expect(tracker.applyMcpStatus(answer('connected'), asked)).toBe(false);
+    expect(statusOf(tracker)).toEqual(['failed']);
+    expect(tracker.applyMcpStatus(answer('connected'), tracker.askMcp())).toBe(true);
+    expect(statusOf(tracker)).toEqual(['connected']);
+  });
+});
