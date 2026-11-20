@@ -282,8 +282,11 @@ ref=ci/$label-$short
 change=$branch
 if [[ -z $change && -n $label ]]; then
   change=$label
-  if [[ $label =~ ^(.*[^._-])[._-]([0-9a-f]{7,40})$ ]] && git -C "$git_dir" rev-parse --verify --quiet "${BASH_REMATCH[2]}^{commit}" >/dev/null; then
-    change=${BASH_REMATCH[1]}
+  # rev-parse also resolves a ref of that name (a tag `20261120`): the tail counts only as the start of the commit's id.
+  if [[ $label =~ ^(.*[^._-])[._-]([0-9a-f]{7,40})$ ]]; then
+    stem=${BASH_REMATCH[1]} tail=${BASH_REMATCH[2]}
+    named=$(git -C "$git_dir" rev-parse --verify --quiet "$tail^{commit}" || true)
+    [[ $named == "$tail"* ]] && change=$stem
   fi
 fi
 

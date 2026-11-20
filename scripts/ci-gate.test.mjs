@@ -179,6 +179,14 @@ test('the Change: trailer names the work: the branch, else the --label less a sh
   assert.deepEqual(detached('land-798'), ['Change: land-798']);
   assert.deepEqual(detached(`land-798-${short}`), ['Change: land-798']);
   assert.deepEqual(detached('release-20261120'), ['Change: release-20261120']);
+  // A tag of that name resolves to a commit too, but the tail is not that commit's id: the label stays whole.
+  const tagged = gate(['--gates', 'static', '--peer', 'none', '--label', 'release-20261120'], {
+    change: (tree, git) => {
+      git('tag', '20261120');
+      detach(tree, git);
+    },
+  });
+  assert.deepEqual(change(tagged.message), ['Change: release-20261120']);
   // Neither: a detached commit or a bare sha without a label has no trailer.
   assert.deepEqual(change(gate(['--gates', 'static', '--peer', 'none'], { change: detach }).message), []);
   assert.deepEqual(change(gate(['--gates', 'static', '--peer', 'none'], { bare: true }).message), []);
