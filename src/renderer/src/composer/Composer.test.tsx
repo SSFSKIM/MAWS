@@ -1189,18 +1189,37 @@ describe('the three menu chords', () => {
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull());
   });
 
-  it('EXPERIMENT flake order: ⇧⌘M before the closed chip menu has returned focus', async () => {
+  // A chip's menu gives the keyboard back when it closes, in Radix's unmount timer (0 ms). A menu opened before that timer
+  // runs (another chord, or the same chord pressed in the case above before the timer ran under load) holds the keyboard
+  // by then, and the closing menu takes it from there no more: before, the editor's focus closed the new menu at once.
+  it('a chord opens its menu over another chip’s open menu, and the menu stays open once the first has closed', async () => {
     live(A);
     live(B);
     tabs(1);
     mount([{ index: 0, id: A }, { index: 1, id: B }], <ComposerAppKeys />);
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     act(() => editorOf(1).focus());
     await chord(...EFFORT);
     expect(await screen.findByText('effort view')).toBeTruthy();
-    await chord(...MODE); // the effort menu still open: a person's ⇧⌘M from it
-    const opened = useComposerStore.getState().modeMenus.has(B);
-    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-    console.log('EXPERIMENT2', JSON.stringify({ opened, after: useComposerStore.getState().modeMenus.has(B), effort: useComposerStore.getState().chipWidgets.has(B), menu: document.querySelector('[aria-label="Permission mode"][role="dialog"]') !== null }));
+    await chord(...MODE); // from the open effort menu
+    await settle();
+    expect(useComposerStore.getState().chipWidgets.has(B)).toBe(false);
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
+    expect(await within(document.body).findByRole('menu', { name: 'Permission mode' })).toBeTruthy();
+    await chord(...MODEL); // and back, from the open mode menu
+    await settle();
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(false);
+    expect(useComposerStore.getState().chipWidgets.get(B)).toMatchObject({ name: 'model' });
+    expect(await screen.findByText('model list')).toBeTruthy();
+    // the flaky order of the case above, forced: the effort menu closed, ⇧⌘M pressed before its timer gave the keyboard back
+    await chord(...MODEL);
+    await chord(...EFFORT);
+    expect(await screen.findByText('effort view')).toBeTruthy();
+    await chord(...EFFORT);
+    act(() => editorOf(1).focus());
+    act(() => void (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'M', code: 'KeyM', metaKey: true, shiftKey: true })));
+    await settle();
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
   });
 
   // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on
