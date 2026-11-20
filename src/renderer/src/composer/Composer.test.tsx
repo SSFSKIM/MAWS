@@ -556,6 +556,20 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('one two and three four');
   });
 
+  // board ticket 739: the handle inserts text as text, never as markup the editor parses; a line break in it (a person's
+  // reply a failed notification kept) stays a line break
+  it('inserts text as text: markup stays as written and a line break stays one', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const lines = () => (editorOf().editor.getJSON().content ?? []).map((p) => (p.content ?? []).map((n) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
+    act(() => queueComposerAttachment(A, { files: [], text: 'a <p>b</p><br>c' }));
+    await waitFor(() => expect(lines()).toEqual(['a <p>b</p><br>c']));
+    act(() => editorOf().editor.commands.clearContent());
+    act(() => queueComposerAttachment(A, { files: [], text: 'one\ntwo' }));
+    await waitFor(() => expect(lines()).toEqual(['one[hardBreak]two']));
+  });
+
   // P2-B M6 (§5.10): "Use in chat" from a dialog widget closes it and inserts at the composer's caret, the text after the
   // caret kept after the insertion, though the dialog holds the keyboard when the widget asks
   it('a dialog widget’s insertion lands at the caret the editor had when the dialog opened', async () => {
