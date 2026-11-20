@@ -466,6 +466,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const text = userTextOf(content ?? event.content);
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
+      ...(answerEnvelopeOf(content ?? event.content) !== null && { answer: true as const }), // board ticket 715: by content, as the split reads it
       ...(waiting && !steer && { pending: 'next' as const }),
       ...(turn.waited && turn.state === 'open' && !turn.accepted && !openerDropped && !steer && { unread: true as const }), // UX wave U4a (decision 12)
       ...anchorOf(text), // E3

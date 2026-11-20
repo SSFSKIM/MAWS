@@ -11,7 +11,8 @@
 // P5 O10 M10 (the architect's ruling on acceptance 14): each is a guarded entry (test/support/guarded-entry.ts, the rule
 // O3's hosts reuse). `mawsd` loads its endpoint (the module, `ws`, org-protocol) only when it is needed, a deferred load
 // of a chunk the same build emits beside it; the hosts admit none.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { builtinModules } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { guardedEntryProblems, runPathOf } from '../../test/support/guarded-entry';
@@ -437,5 +438,79 @@ describe.skipIf(!existsSync(OUT))('the built main, host and preload files', () =
     );
     expect(files.length).toBeGreaterThan(2);
     expect(files.filter((file) => /[\u0100-\uffff]/.test(readFileSync(file, 'utf8')))).toEqual([]);
+  });
+});
+
+// Board ticket 715: the search text's worker (fs/search-text.ts) is built from functions' own sources, interpolated into
+// its text (the envelope's reader, the backfill's `parseBash` among them), so one that reached outside its arguments
+// would fail only inside the worker, at call time. The built `SearchTextReader`, taken from the engine-host chunk with
+// the top-level statements it reads (as the built `ws` is above), reads an invented transcript through its own worker
+// and gives the text the module's reader gives.
+type Reader = { read(path: string, cursor?: string): Promise<{ text: string; cursor: string | null }>; stop(): void };
+function builtSearchReader(file: string): new () => Reader {
+  const text = readFileSync(file, 'utf8');
+  const body = (parseAst(text) as unknown as { body: Ast[] }).body;
+  const declaring = new Map<string, number>();
+  body.forEach((statement, index) => {
+    if (statement.type === 'FunctionDeclaration' || statement.type === 'ClassDeclaration') declaring.set((statement.id as Ast).name as string, index);
+    if (statement.type === 'VariableDeclaration') for (const declarator of statement.declarations as Ast[]) for (const name of namesRead(declarator.id as Ast)) declaring.set(name, index);
+  });
+  const classes = body.filter((statement) => statement.type === 'ClassDeclaration' && text.slice(statement.start, statement.end).includes('Conversation reader stopped'));
+  expect(classes, `${file} declares the search text's reader once`).toHaveLength(1);
+  const name = (classes[0]!.id as Ast).name as string;
+  const taken = new Set<number>();
+  const pending = [name];
+  while (pending.length > 0) {
+    const index = declaring.get(pending.pop()!);
+    if (index === undefined || taken.has(index)) continue;
+    taken.add(index);
+    pending.push(...namesRead(body[index]));
+  }
+  let source = '';
+  let at = 0;
+  for (const index of [...taken].sort((a, b) => a - b)) {
+    source += text.slice(at, body[index].start).replace(/[^\n]+/g, '') + text.slice(body[index].start, body[index].end);
+    at = body[index].end;
+  }
+  const run = runInThisContext(`(function (require, __dirname, __filename) {"use strict";${source}\nreturn ${name};\n})`, { filename: file });
+  return (run as (...args: unknown[]) => new () => Reader)(createRequire(file), dirname(file), file);
+}
+
+const searchHost = hostFile(MARKER);
+describe.skipIf(searchHost === null)('the built search text worker (board ticket 715)', () => {
+  it('reads an invented transcript through its worker as the module’s reader does: the person’s words without the envelope, the reply, a shell row whole', async () => {
+    const { SearchTextReader } = await import('./fs/search-text');
+    const { askSteerText } = await import('@shared/maws/ask');
+    const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('toolu_715', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+    const rows = [
+      { type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: `Fix the footer.\n${envelope}` } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done: the footer is fixed.' }] } },
+      { type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: '<bash-input>ls</bash-input>' } },
+    ];
+    const dir = mkdtempSync(join(tmpdir(), 'maws-built-search-'));
+    const path = join(dir, 'session.jsonl');
+    writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const whole = async (reader: Reader) => {
+      try {
+        let page = await reader.read(path);
+        let all = page.text;
+        while (page.cursor) {
+          page = await reader.read(path, page.cursor);
+          all += page.text;
+        }
+        return all;
+      } finally {
+        reader.stop();
+      }
+    };
+    try {
+      const Built = builtSearchReader(searchHost!);
+      const read = await whole(new Built());
+      expect(read).toBe(await whole(new SearchTextReader()));
+      expect(read).toBe('Fix the footer.\nDone: the footer is fixed.\n<bash-input>ls</bash-input>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
