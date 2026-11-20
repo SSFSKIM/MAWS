@@ -1247,7 +1247,7 @@ export class EngineSession {
     if (this.frozen) return; // P5 O16 M3b fix wave 1: never ready, nothing held dispatched, once frozen
     this.setProcess('ready');
     void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
-    if (!adopted) void this.readMcpServers(); // ticket 619: the servers before the first turn's system/init (an adopted launch's are restored)
+    if (!adopted) void this.readMcpServers(); // ticket 619: the servers before the first turn's system/init (not at an adopted ready: a tracker row)
     if (adopted) {
       // fix wave 1: the gate opens; what it held is dispatched in order, as if it had arrived now
       const held = this.handshakeHeld ?? [];
