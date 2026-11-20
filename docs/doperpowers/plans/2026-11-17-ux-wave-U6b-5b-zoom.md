@@ -31,8 +31,9 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-19 23:00Z) U6b-5a's merged head (`06f265e4a` on `ux-wave/U6b-5`) merged into the branch (`e4af0692e`, the resolution's fix `31e832468`); the statements to check again hold on it (Decision Log 17). On the build VM at `31e832468`: the three typechecks exit 0, `src/main/browser` passes, and the gate's script tests pass 588 of 588.
 - [x] (2026-11-20) M2 built, `0c5110117` to `34dee1867`. The red cases at `0c5110117` are 40 failures, each placement failing with the Mac's recorded reading. At `34dee1867`: step 5's vitest set and the store's importers pass (290 files, 4,311 cases); the typechecks of node, web and e2e exit 0; eslint on the changed files exits 0; the desk's web app's typecheck, build and 801 cases pass; the routes patch holds `layout.zoom` alone (client class, no wire minor); the gate's script tests pass 588 of 588. The Toolbar's leading box is fixed (`a7f6672a4`, `d74b2ba8c`; Decision Log 18).
 - [x] (2026-11-20) M2 — Zoom: reviewed clean (`31e832468` to `97b9eba20`). The task review found five Important items and the re-review one more. All were fixed red-first (Decision Log 19). At the fixes' heads, on the build VM: tsc node and web exit 0; eslint exits 0 on the changed files; vitest passes over the renderer's browser tools (655), main's browser (1,144) and the step-5 set at `8df3835e9` (2,754, none failed); the desk's web app passes 801; the gate's script tests pass 588 of 588.
-- [ ] (2026-11-20) M3 built, `6b4f6aae1` and `e20ffca4a`, with master's last merge at `ea3310be2` (its fix `98f8e8c41`). At `e20ffca4a`, on the build VM: the e2e typecheck and eslint exit 0, and the gate's script tests pass 588 of 588. At `98f8e8c41`, the acceptance run (step 7): typecheck 0 and lint 0. The unit suite fails 11 of 2,935 files, each one on the build brief's list with its record or passing alone; `src/artifacts/document/markdown-runs.test.ts`, new to that list, passes alone 5 of 5. `src/shared/machine` fails only the two `git-reads` cases (board ticket 756). No scene has run. The unit suite exited 1. Its one failure not on the brief's list, `markdown-runs.test.ts`, timed out under load and passes alone; the controller set it aside as the VM's load and gave it to the architect for the brief's list (Decision Log 22). The task review returned six Important findings, which are being fixed.
-- [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
+- [x] (2026-11-20) M3 built, `6b4f6aae1` and `e20ffca4a`, with master's last merge at `ea3310be2` (its fix `98f8e8c41`). At `e20ffca4a`, on the build VM: the e2e typecheck and eslint exit 0, and the gate's script tests pass 588 of 588. At `98f8e8c41`, the acceptance run (step 7): typecheck 0 and lint 0. The unit suite fails 11 of 2,935 files, each one on the build brief's list with its record or passing alone; `src/artifacts/document/markdown-runs.test.ts`, new to that list, passes alone 5 of 5. `src/shared/machine` fails only the two `git-reads` cases (board ticket 756). No scene has run. The unit suite exited 1. Its one failure not on the brief's list, `markdown-runs.test.ts`, timed out under load and passes alone; the controller set it aside as the VM's load and gave it to the architect for the brief's list (Decision Log 22). The task review returned six Important findings and the re-review two more; all were fixed (`f66f29155`, `945b3c59d`), and the second re-review approved. The architect ruled the transcript's zoom scene `test.fail()` against the row of 2026-10-27 (`0ad253794`; Decision Log 23).
+- [x] (2026-11-20) M3 — The scenes, the cross-build row, the record, and the acceptance run: reviewed clean (`2ab89eaf1` to `0ad253794`).
+- [ ] (2026-11-20) U6b-5a's later heads merged before the gate: `72429dc03` (`a4160daf4`) and `17f422d11` (`abbb768b9`, with master `5e8534042`; the tracker keeps both sides' rows). Proof on the build VM at `0ad253794`, over the scope those merges touch: `pnpm typecheck` exits 0. The step-5 vitest set, with `App.test.tsx`, `src/shared/machine` and `src/main/window.test.ts`, passes 302 files and 4,494 cases; the only failures are the two `git-reads` cases (board ticket 756). The desk's web app builds, and its 93 files and 801 cases pass. The gate's script tests pass 588 of 588. Class 1a runs on this head. The architect owns the Mac runs (rows 6 and 7), the branch review (row 9) and the pull request.
 
 ## Words used in this document
 
@@ -691,6 +692,36 @@ Found while this document was written and reviewed; each changed a decision abov
 
     The sixth is the record of the acceptance run. Progress now says the unit suite exited 1, and `markdown-runs.test.ts` is set aside as the VM's load: it passes alone 5 of 5, and the architect adds it to the brief's list. §I's rule on `placedOn` names the popup's exception. The Minor, on the presenter scene, polls for the audience and the presenter, as the existing scene does, and is fixed with the rest. Ruled by the architect with the wave: B10's page-focused keys get a scene of their own in `e2e/browser-focus.spec.ts` (§I), since native key handling is beyond jsdom; if it needs a file beyond M3's and that spec, it stays the owner's (row 8).
 
+23. **2026-11-20 (UTC) · Ruled by the architect: the transcript's zoom scene is `test.fail()`.**
+    - **Why:** the scene reaches the 2026-10-27 condition, so on today's code it fails. A failing scene would keep `e2e:transcript` red at every landing until U3's fix, and would hide any new red in that group.
+    - **What stays:** the assertion is unchanged. The scene is marked expected-to-fail, and its annotation and the tracker row cite each other.
+    - **When it passes,** the row closes and the mark comes off.
+    - **Mac check:** `test.fail` counts any failure as the expected one. A Mac run should confirm that the failure reported is "followed after a clamp N px short", and not "the row's condition was never reached".
+    - **The page's keys (B10):** the tab binds ⌘= and ⌘+ to zoom in and ⌘- to zoom out, and has no reset. ⌘0 is View › Overview. The browser-focus scene therefore presses ⌘= and then ⌘-, which the architect confirmed.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-20, at the end of M3 (before the architect's Mac runs, branch review and pull request).**
+
+What exists:
+- ⌘= and ⌘−, and View ▸ Zoom In, Zoom Out and Actual Size, zoom the whole window along the in-app browser's steps from 50 % to 200 %, and each item is disabled at its end.
+- A line, "Zoom 125 %", says the step reached.
+- The factor is main's own key, `window.zoom`. It is published atomically: map and file together, or neither. It is in force from the window's first show (`webPreferences.zoomFactor` under `zoomMode: 'isolated'`, M1's row f1), and builds F and M are left at 100 %.
+- All six placements of §G multiply or divide by `zoomOf`, and main re-places a window's views and popup when its factor changes. The device size follows decision 35, as amended: the placed edges.
+- The scenes of §I are written and typechecked, and so is the cross-build row "(zoom, both ways)". None has run.
+
+Against the purpose:
+- B13's first half, B14's unit half and the unit halves of B10 to B12 are proven on the build VM (Progress).
+- B10's relaunch and page keys, B11 and B12 rest on the Mac runs (rows 6 and 7).
+- B11's sentence about a second display is not proven (row j, tracker).
+- The keys under the Korean input source and the look are the owner's (row 8).
+
+What the reviews taught:
+- **M1's red-first numbers paid for themselves.** Each placement's case failed on today's code with the Mac's own reading, so no fix was built on a cause read from code alone.
+- **The task reviews found what the design had not foreseen:**
+  - an open pin drifting across a change of factor;
+  - the chip off by one at a non-integral edge (decision 35 amended);
+  - a staged view moved by a placement report;
+  - a startup read racing a change.
+  They also found scenes that could pass without reaching their condition (the transcript, the fit menu, the toast waits, the four edges). The scenes now witness their premise before asserting.
+- **Residue:** nine tracker rows: four for "Left over", row j, the pin on a reflowing page, a window change while a view is staged, and the 2026-10-27 row kept open under a `test.fail` scene (Decision Log 23). The 2026-10-24 row loses zoom.
