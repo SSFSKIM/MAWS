@@ -1,10 +1,10 @@
 # UX wave · U6b-4c: the execution report
 
-The landing: `docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md` (revision 4), branch `ux-wave/U6b-4c`, executed 2026-11-19 by subagent-driven execution: a fresh executor per milestone, a task review at each milestone's frontier, the fixes resumed on the executor that wrote the code. The document's Progress, Surprises & Discoveries, Decision Log (entries 8 to 16 are this execution's) and Outcomes & Retrospective are the living record; this report is the account for ux-wave.
+The landing: `docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md` (revision 4), branch `ux-wave/U6b-4c`, executed 2026-11-19 by subagent-driven execution: a fresh executor per milestone, a task review at each milestone's frontier, the fixes resumed on the executor that wrote the code. The document's Progress, Surprises & Discoveries, Decision Log (entries 8 to 18 are this execution's) and Outcomes & Retrospective are the living record; this report is the account for ux-wave.
 
 ## Status
 
-All five milestones are built, and each was reviewed clean at its frontier. The branch review (the xhigh panel), the Mac scenes, the macOS-guarded unit cases and the two cross-build runs belong to ux-wave. By ux-wave's ruling no pull request is opened. After the hand-back nothing more is committed to the branch.
+All five milestones are built, and each was reviewed clean at its frontier. The branch review (the xhigh panel), the Mac scenes, the macOS-guarded unit cases and the two cross-build runs belong to ux-wave. By ux-wave's ruling no pull request is opened. After the first hand-back, two more rounds went onto the branch by ux-wave's instruction: the panel's fix wave, and the chain merge onto `ux-wave/U6b-5` with the minor at 60 (both below).
 
 ## The range
 
@@ -13,6 +13,7 @@ All five milestones are built, and each was reviewed clean at its frontier. The 
   - `796895fe8`, merged as `aa95d32c3`;
   - `4d4905175`, merged as `2d96a057a`;
   - `8cd4a7479`, its final head, merged as `5c6432b3d`.
+- The chain merge onto `ux-wave/U6b-5` at `17f422d11` (U6b-4b again, U6b-5a, master `5e8534042`), merged as `6034df3eb`; the manifest at minor 60 is `f67c36493`.
 - The landing's own work: `5b6afe386..` the head named in the hand-back, with the merges above inside that range. Against U6b-4b's final head (`git diff 8cd4a7479 HEAD`), this document aside, the landing is 55 files with about 4,500 added and 230 removed lines.
 
 | milestone | commits | review |
@@ -125,6 +126,34 @@ The manifest diff is the one property; `routes.json` and `address-paths.json` ar
 **Mac scenes the fixes touch:** all four of §H's titled scenes.
 - The sessions subagent scene is the most exposed: the window now sends `engineSessionId`, and the daemon requires matching row ids. Its staged rows carry them.
 - The sessions Markdown scene and both cross-build scenes are touched through the Markdown proof's turn and stop checks, and through the viewer's reopen and Save paths.
+
+## The chain merge onto U6b-5, and minor 60 (added after the fix wave)
+
+By ux-wave's instruction, `origin/ux-wave/U6b-5` was merged at `17f422d11` (its head had not moved): U6b-4b again, U6b-5a, and master `5e8534042`, which carries U6b-4a's `files.admit` (minor 58) and U11's skill actions (59). Merge `6034df3eb`; the manifest `f67c36493`. Decision Log 18 is the document's record.
+
+**The fourteen conflicts.** Each kept both sides:
+- `docs/tech-debt-tracker.md`: this branch's rows, then the chain's three.
+- `src/main/files/open-file.ts`: `APP_PAGE_ONLY = [...OUTSIDE_ACTS, 'layout.openFile', 'layout.openIn', 'customization.skillFile', 'files.follow']`; `files.follow` stays out of `OUTSIDE_ACTS`.
+- `src/main/daemon-root.test.ts` and `src/main/files/open-file.route.test.ts`: that list, exactly and sorted respectively.
+- `src/services/files/service.ts`: the imports, the `Files` interface, the bodies (this branch's `follow` and its helpers, then U6b-4a's `admit` and `opened`) and the returned object carry both.
+- `src/services/files/service.test.ts`, `register.test.ts`: both describes, each closed.
+- `src/shared/ipc/schema/files.ts`, `src/shared/ipc/schema.test.ts`: both entries, both names.
+- `test/cross-build/files-schema.test.ts`, `test/endpoint/checkout-rows.test.ts`, `test/support/spine-lists.ts`: both cases, both names.
+- `src/shared/ipc/wire.ts`: `WIRE_MINOR` 60, U11's line kept and this landing's entry "(60; a stand-in at 58 before the chain merge onto the skill actions' 59)".
+- `src/shared/ipc/wire-manifest.json`: regenerated (below).
+
+**The snapshots.** `pnpm wire:manifest` over the auto-merged file refused ("the wire has not changed since the manifest's minor 59"), since the merge had already carried this landing's entries under a 59 header. They were written on the VM from the chain's own 59 manifest. Against `17f422d11`: the manifest gains `commands.files.follow` (with `from.agent`'s optional `engineSessionId`, scalpel-2#3's conversation), `outside.linked` in the shared read answer (files.read, readOutside, readResolved, library.read) and the minor; `routes.json` gains `files.follow`; `address-paths.json` gains `commands.files.follow.input`. No major, no rebase switch, the fingerprint unchanged.
+
+**`files.admit` and the link record.** `admit` goes through `precheck` with the outside save's evidence for this machine's caller, so a save-admitting record admits Open in where a grant does and a read-only record admits none. A case in `service.test.ts` pins it (save-admitting admitted; read-only refused while its read still answers; no record refused; another machine refused).
+
+**Verified on the VM at `f67c36493`:** `pnpm typecheck` whole; eslint over the twelve resolved source files; vitest over `src/services/files/`, `src/services/fs/`, `spine-root`, `src/shared/files/`, `src/shared/ipc/`, `src/shared/machine/`, `src/main/files/`, `daemon-root`, `test/cross-build/`, `checkout-rows`, `test/lane-b/`, renderer `tools/code/`, `tools/agents/`, `transcript/`, `lane-a/` and the tokens guard: 9320 passed, 2 failed (the `git-reads` cases of ticket 756); the gate's script tests 588/588; the secret scan 8/8; desk-web 801/801 and its build. Two stderr lines printed on passing tests (an electron mock's missing `session` export at shutdown, and `bridge(...).on is not a function`); not traced. The gates on this head are named in the hand-back.
+
+**Mac scenes the fixes and the merge touch:**
+- `e2e:code` whole, on the host and in the guest copy (the viewer's reopen, Save and continuation paths; U6b-4a's Open in scene in `e2e/code-tools.spec.ts` reads the merged guard list).
+- The two `e2e/sessions.spec.ts` link scenes (titles in the table below).
+- `e2e:cross-build` with `--peer-exact f1852de3a` and `--peer-exact 2c7044231`: this build is now 3.60 against peers at 3.59 and older.
+- `unit:darwin`.
+- Added for the merge's guard list: "Open in, in the title bar and in a session row's menu, hands the working folder to the app chosen" (`e2e/panel.spec.ts`), and "skills: a skill's Open in hands its listed file to an editor or Finder; a plugin's line; refusals; New skill… fills a chat" (`e2e/discover.spec.ts`). The exact list is pinned in `daemon-root.test.ts`, so these two confirm what a unit case already holds; drop them if the Mac's time is short.
 
 ## The scenes ux-wave runs on a Mac
 
