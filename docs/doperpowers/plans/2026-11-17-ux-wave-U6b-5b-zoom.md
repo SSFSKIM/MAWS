@@ -675,7 +675,7 @@ Found while this document was written and reviewed; each changed a decision abov
     - **The scenes zoom through View's items, never in main.** Each clicks the item by id once main reads it enabled, then waits on the root's `--app-zoom`. Main sends `layout.zoomChanged` only after S3's steps 3 and 4, so the store's factor implies main's.
     - **`expectOnPane` takes the factor as a sixth argument, `factor = 1`, and calls `placedOn` first,** with the caller's own timeout. At 1 it is the old comparison with the acknowledgment ahead of it. Every existing call is unchanged.
     - **§I's "with a menu open over it" is read as the in-app browser's own Browser options menu.** That is the one DOM menu that overlaps the page, the cover's path. The native menus over the page are browser-chrome's scene.
-    - **Mark up's "covering what it covers at 100 %"** is read as: the layer lies on the pane, and the still's pixels per view point are the same at 150 % as at 100 %, within 2 %. Before M2 the two had the same pixels while the frame was drawn 1.5 times larger, and the ratio tells those apart.
+    - **Mark up's "covering what it covers at 100 %"** was first read as: the layer lies on the pane, and the still's pixels per view point are the same at 150 % as at 100 %, within 2 %. ~~That ratio~~ is superseded by Decision Log 25: a still is capped at `CROP_MAX_EDGE`, so on a large display its pixels per point differ between factors by design.
     - **Mobile reads exactly 375 at 0.5 and 1.25, and 375 or 376 at 0.8 and 2,** where 375 ÷ f is not a whole CSS pixel (decision 35 as amended in Decision Log 19). At all four factors the chip is held to the page's own `innerWidth × innerHeight`, which covers Decision Log 20's 1.25 and 2.
     - **The terminal's size is read from inside the shell** (`stty size`) and set beside the emulator's columns, so the page's terminal seam is not widened.
     - **The transcript scene runs in the product app,** because the transcript harness mounts no `connectZoom`.
@@ -727,6 +727,18 @@ Found while this document was written and reviewed; each changed a decision abov
       - The comment scenes' `dismiss` now takes the factor, without which the M3 pin scene failed at 0.5, 0.8 and 1.25.
     - **The pin's inset is main's rounded native origin, back in CSS pixels** (`round(x × a) ÷ a` less the column's left), not the CSS origin the pane sent.
     - The task review approved after one round. Master at `3f8fd97f8` (batch 6, docs only past `17f422d11`) is merged before the gate.
+
+25. **2026-11-20 (UTC) · What the Mac run at `8e92a8690` showed about two scenes, and the architect's rulings.** The run was on the Mac mini, 2,560 × 1,440 points at scale 2.
+    - **Mark up's still at 150 % (`e2e/browser.spec.ts`, the four-factor scene) failed on the scene's own check, not on the product.** It failed three times the same way, 0.0599 against 0.02.
+      - Every Mark up still is capped on its long edge at `CROP_MAX_EDGE` (1,568, the model's image edge; `src/shared/browser/comment.ts`), by `encodeCrop` and the markup image schema.
+      - At scale 2, 1,380 × 1,210 points is 2,760 × 2,420 px and becomes 1,568 × 1,375; 1,302 × 1,135 points becomes 1,568 × 1,367. Both are exactly the readings.
+      - The still is stretched over the pane, so on screen the page is at the same scale at both factors, which is what B12 asks. Only its sharpness differs, and a view wider than 784 points is capped at 100 % too.
+      - The check now holds each still to the view's device size, or that size capped at `CROP_MAX_EDGE`, within a pixel. It also holds the visible image's own rectangle to the pane. Decision Log 21's 2 % reading is superseded.
+    - **The transcript's zoom scene is no longer `test.fail`: Decision Log 23 is reversed on its own premise.** That ruling assumed the scene would fail on today's code. On the mini at 110 % the row's condition never arose (no clamp landed more than 1 px short), and following held. The first rework, a run-time verdict with a search for the condition, could still count an unrelated failure as the row and judged the raw DOM gap rather than the product's. Ruled by the architect:
+      - the scene asserts following at 110 % and at 80 % (the child's probe 4) and annotates the largest gap the product itself judges (`min(scrollHeight, the virtualizer's total) − clientHeight − scrollTop`);
+      - no search, no `test.fail`, no `test.skip`;
+      - if it goes red on a display of scale 1, that is a real defect a person would meet and gets a ticket, not a mask;
+      - the row of 2026-10-27 stays open, qualified to what was measured: not reached on the mini at 110 %, unproven at scale 1 and at other factors.
 
 ## Outcomes & Retrospective
 
