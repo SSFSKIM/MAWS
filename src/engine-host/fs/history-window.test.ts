@@ -292,7 +292,9 @@ describe('a long transcript is read in windows', () => {
     expect(userTexts(await pagesBefore(seam!)).at(-1)).toBe('prompt 14');
     // the earliest of the launch's messages the transcript holds decides, in whatever order the journal names them
     expect(await fs.historySeam(APP, ['elsewhere', 'a15', 'u15'] as MessageUuid[])).toBe(seam);
-    // a launch from the transcript's first message has nothing before it
+    // a launch from the transcript's first message (a session always run here) has none before it, only the session's
+    // start the log opens with
+    expect(whole[0]!.kind).toBe('session.started');
     expect(await fs.historySeam(APP, ['u1'] as MessageUuid[])).toBeNull();
     // a cursor past an end this log does not reach is one it never gave
     await expect(fs.eventsSnapshot(APP, null, { before: `history-past:${whole.length + 1}` as EventId }, true)).rejects.toThrow(UNKNOWN_CURSOR);

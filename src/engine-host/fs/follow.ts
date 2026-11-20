@@ -255,7 +255,7 @@ export class Follow {
   // UX wave, ticket 777: where a live launch's history meets this transcript's. The seam is the first event of the
   // earliest message of `journal` (the launch's message uuids) the log holds, else the log's end (a launch that has
   // written none of its messages yet). The cursor whose page ends just before the seam, so the pages before it are the
-  // transcript's history from before the launch and none of what the launch's stream carries; null when nothing is
+  // transcript's history from before the launch and none of what the launch's stream carries; null when no message is
   // before the seam, or the backfill is not done (the log is no history yet).
   seamCursor(journal: readonly MessageUuid[]): EventId | null {
     if (!this.backfilled) return null;
@@ -265,7 +265,8 @@ export class Follow {
       return uuid !== null && wanted.has(uuid);
     });
     const seam = found === -1 ? this.delivered.length : found;
-    if (seam === 0) return null;
+    // the session's start, which the log opens with, is no history of its own
+    if (!this.delivered.slice(0, seam).some((event) => messageOf(event) !== null)) return null;
     return seam < this.delivered.length ? this.delivered[seam]!.id : pastCursor(seam);
   }
 
