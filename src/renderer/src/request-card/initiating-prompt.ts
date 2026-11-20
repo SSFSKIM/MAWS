@@ -12,8 +12,17 @@ import type { Row, TurnActivity } from '../transcript';
 // opened alone has none (the split leaves it no prompt row of the person's), so nothing is found rather than the prompt
 // of the turn before it.
 export function initiatingPrompt(rows: readonly Row[], activity: readonly TurnActivity[]): (UserRow & { messageUuid: MessageUuid }) | null {
-  const human = new Set(activity.filter((turn) => turn.origin === 'human').map((turn) => turn.turnId));
-  const turn = rows.findLast((r) => r.turnId !== null && human.has(r.turnId))?.turnId ?? null;
+  const turn = newestHumanTurn(rows, activity);
   if (turn === null) return null;
   return rows.findLast((r): r is UserRow & { messageUuid: MessageUuid } => r.turnId === turn && isOwnPrompt(r)) ?? null;
+}
+
+/** Board ticket 714: the newest human turn holds no prompt of the person's own (an answer opened it alone): nothing to edit. */
+export function opensWithoutPrompt(rows: readonly Row[], activity: readonly TurnActivity[]): boolean {
+  return newestHumanTurn(rows, activity) !== null && initiatingPrompt(rows, activity) === null;
+}
+
+function newestHumanTurn(rows: readonly Row[], activity: readonly TurnActivity[]): Row['turnId'] {
+  const human = new Set(activity.filter((turn) => turn.origin === 'human').map((turn) => turn.turnId));
+  return rows.findLast((r) => r.turnId !== null && human.has(r.turnId))?.turnId ?? null;
 }

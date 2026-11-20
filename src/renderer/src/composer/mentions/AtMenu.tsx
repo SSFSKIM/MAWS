@@ -66,11 +66,13 @@ function useFiles(appSessionId: AppSessionId, cwd: string, additional: readonly 
       roots.map(async (root) => {
         const result = await ipc.invoke('git.lsFiles', { directory: root, query: q, limit: FILE_LIMIT }, pathTarget(machine, appSessionId));
         if (!result.ok) return [];
-        // board ticket 739: a path that holds a control character is offered by no row: its mention would name no file
-        return result.value.paths.filter((path) => !MENTION_BREAKS.test(path)).map((path): AtItem => {
+        // board ticket 739: a path that holds a control character, the root's included, is offered by no row: its mention
+        // would name no file
+        return result.value.paths.flatMap((path): AtItem[] => {
           const directory = path.endsWith('/');
           const bare = directory ? path.slice(0, -1) : path;
-          return { group: 'files', name: bare, path: pathMode ? `${root.replace(/\/$/, '')}/${bare}` : bare, directory };
+          const mentioned = pathMode ? `${root.replace(/\/$/, '')}/${bare}` : bare;
+          return MENTION_BREAKS.test(mentioned) ? [] : [{ group: 'files', name: bare, path: mentioned, directory }];
         });
       }),
     ).then((lists) => {
