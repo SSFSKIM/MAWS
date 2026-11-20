@@ -662,6 +662,28 @@ describe('a device size (U12a)', () => {
     }
   });
 
+  // The task review of the fix wave: the pin is in CSS pixels from the view's native origin, which main rounds to a point
+  // (decision 27), so the inset is that origin back in CSS pixels. At 50 % in a room of 999, Mobile is 750 wide and sent
+  // from 125 (124.5 rounded); main places it at 63 points (62.5 rounded), which is 126 CSS pixels, not 125
+  it('draws the pin’s caret from the view’s native origin as main rounds it, back in CSS pixels', async () => {
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')!;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 999 });
+    room = { left: 0, top: 40, right: 999, bottom: 1140 };
+    try {
+      act(() => useZoom.setState({ factor: 0.5 }));
+      const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 125, width: 750 } });
+      const anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'https://example.com/', css: '#increment' } as const;
+      act(() => openCard(anchor, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)!, rect: { x: 100, y: 200, width: 0, height: 0 } } }));
+      expect(container.querySelector('[data-card-caret]')?.getAttribute('data-card-caret')).toBe('226');
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', width);
+      act(() => useCommentCard.setState({ open: null }));
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
   it('a pane made narrower narrows the page, and widening it restores the size', async () => {
     const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
     await frames();
