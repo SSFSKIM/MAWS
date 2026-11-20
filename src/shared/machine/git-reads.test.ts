@@ -58,6 +58,9 @@ describe('a git config read as git reads it', () => {
       '[x "sub \\"q\\" \\\\ s"]',
       '\tk = " sp " mid\\ttab\\"q\\\\  ',
       '\tinner = one\ttwo  three \t',
+      '\tcr = one\rtwo',
+      '\tquoted = "one\ttwo"',
+      '\tother = one\vtwo\fthree',
       '\tempty =',
       '[include]',
       '\tpath = /nowhere',
@@ -72,7 +75,13 @@ describe('a git config read as git reads it', () => {
       const newline = entry.indexOf('\n');
       return newline === -1 ? { name: entry, value: null } : { name: entry.slice(0, newline), value: entry.slice(newline + 1) };
     });
-    expect(parseConfig(text).entries).toEqual(expected);
+    // ticket 756: an unquoted TAB or lone CR between words is kept by a newer git and folded to a space by an older one
+    // (2.43): those values are marked, and every other is git's own, whichever git is installed
+    const varying = ['x.sub "q" \\ s.inner', 'x.sub "q" \\ s.cr'];
+    const parsed = parseConfig(text).entries;
+    expect(parsed.filter((entry) => entry.variesByGit === true).map((entry) => entry.name)).toEqual(varying);
+    expect(parsed.filter((entry) => !varying.includes(entry.name))).toEqual(expected.filter((entry) => !varying.includes(entry.name)));
+    expect(parsed.map((entry) => entry.name)).toEqual(expected.map((entry) => entry.name));
     const config = parseConfig(text);
     expect(config.get('remote.Origin.url')).toBe('git@github.com:a/b.git');
     expect(config.bool('core.worktree')).toBe(true); // a key with no value
@@ -80,14 +89,22 @@ describe('a git config read as git reads it', () => {
     expect(config.get('include.path')).toBe('/nowhere'); // an entry like any other: nothing follows it
   });
 
-  // the review's case: a literal TAB inside a value is kept, so a `core.worktree` names the folder git names
+  // the review's case: a `core.worktree` names the folder git names, not a decoy spelled with a space. Ticket 756: an
+  // unquoted TAB in it is read as written by a newer git and as a space by an older one (2.43), so no folder is the one
+  // every git names and the layout is refused; quoted, every git keeps it.
   it('keeps a value’s internal whitespace as written: `core.worktree` names the folder git’s does, not a decoy', async () => {
     mkdirSync(join(home, 'Developer/one\ttwo'));
     mkdirSync(join(home, 'Developer/one two'));
     git(home, 'init', '-q', '--separate-git-dir', join(home, 'Developer/sep.git'), join(home, 'Developer/one\ttwo'));
-    writeFileSync(join(home, 'Developer/sep.git/config'), '[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ../one\ttwo\n');
+    const config = (worktree: string) => writeFileSync(join(home, 'Developer/sep.git/config'), `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ${worktree}\n`);
+    config('"../one\ttwo"');
     expect(await read(join(home, 'Developer/one\ttwo'))).toEqual(revParse(join(home, 'Developer/one\ttwo')));
     expect((await read(join(home, 'Developer/one\ttwo')))?.workTree).toBe(join(home, 'Developer/one\ttwo'));
+    config('../one two');
+    expect(await read(join(home, 'Developer/one\ttwo'))).toEqual(revParse(join(home, 'Developer/one\ttwo')));
+    expect((await read(join(home, 'Developer/one\ttwo')))?.workTree).toBe(join(home, 'Developer/one two'));
+    config('../one\ttwo');
+    await expect(discoverRepo(join(home, 'Developer/one\ttwo'), files)).rejects.toThrow(GitLayoutError);
   });
 
   it('refuses a line git refuses', () => {
