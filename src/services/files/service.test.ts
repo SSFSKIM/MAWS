@@ -4083,6 +4083,25 @@ describe('files saves outside the folders', () => {
         }
       });
 
+      // The branch panel (scalpel-2, finding 1): a regular file put in the found file's place between the walk and the open is
+      // what is opened; its records are another conversation's, and they link nothing for this session
+      it('records nothing from a file put in the found agent file’s place between the walk and the open; its own records link (the branch panel)', async () => {
+        const theirs = session('Theirs');
+        await transcriptOf(theirs, [said('Started a subagent.')]);
+        const elsewhere = agentOf(theirs, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const found = agentOf(A, [prompt('Go.')]);
+        const { files } = searched();
+        searchPoints.found = () => {
+          write(`${found}.next`, readFileSync(elsewhere));
+          renameSync(`${found}.next`, found);
+        };
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT))).toEqual(NOT_LINKED);
+        expect(searchPoints.found, 'the walk found the file').toBeUndefined();
+        expect(existsSync(linksFile)).toBe(false);
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT)), 'the control: its own records').toEqual(LINKED);
+      });
+
       // The branch panel (scalpel-2, finding 3): a drill-in still on screen after `/clear` names the conversation that drew it,
       // which is no longer the one the session is bound to, though that one has a subagent of the same id linking the path
       it('links nothing for a follow of the conversation the session left with `/clear`, or of none named, though the conversation it is bound to now has an agent of that id linking the path (Q11, the branch panel)', async () => {
@@ -4281,7 +4300,8 @@ describe('files saves outside the folders', () => {
           expect(await first, 'answered, its locator held').toEqual(NOT_LINKED);
           const seen = recordTouches();
           const second = follow(files, out('notes.txt')); // from the guide inside the folders, which asks no search
-          for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+          // the second's early answers run meanwhile: many round trips of the file system's threads
+          for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
           expect(seen.filter((entry) => entry.startsWith('open ')), 'the second proof waits for the first’s locator').toEqual([]);
           locators[0]!();
           expect(await second, 'the turn given back once the locator answered').toEqual(LINKED);
@@ -4368,7 +4388,7 @@ describe('files saves outside the folders', () => {
             expect(await answer, at).toEqual(NOT_LINKED);
             calls.length = 0;
             release();
-            for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+            for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
             const after = at === 'realpath' ? calls.filter((call) => call === `lstat ${guide()}` || call.startsWith('open ')) : calls.filter((call) => call === 'read');
             expect(after, `${at}: nothing after the call that answered late`).toEqual([]);
           }

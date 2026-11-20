@@ -72,7 +72,8 @@ describe('files allowlist', () => {
       let settled = false;
       const answer = admittedFolder({ directory: anchor, additionalDirectories: [], worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: null, linked: false } }, 'path').then((value) => ((settled = true), value));
       await reached;
-      for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+      // the folder's own reads run to its refusal meanwhile: many round trips of the file system's threads
+      for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
       expect(settled, 'the anchor’s read is still out').toBe(false);
       release();
       expect(await answer).toBeNull();
