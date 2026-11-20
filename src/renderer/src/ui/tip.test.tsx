@@ -95,7 +95,7 @@ describe('UnavailableButton', () => {
     expect(button.hasAttribute('aria-describedby')).toBe(false);
   });
 
-  it('keeps the focused control itself as its reason comes and goes, and shows the reason once it comes', async () => {
+  it('keeps the focused control itself as its reason comes and goes, describing it at once and showing it on the next focus', async () => {
     const Commit = ({ reason }: { reason: string | null }) => (
       <UnavailableButton reason={reason}>
         <button type="button">Commit</button>
@@ -103,13 +103,18 @@ describe('UnavailableButton', () => {
     );
     const view = render(<Commit reason={null} />);
     const button = screen.getByRole('button', { name: 'Commit' });
-    await user().tab();
+    const keys = user();
+    await keys.tab();
     expect(document.activeElement).toBe(button);
     expect(tooltip()).toBeNull();
     view.rerender(<Commit reason="Write a commit message" />);
     expect(screen.getByRole('button', { name: 'Commit', description: 'Write a commit message' })).toBe(button);
     expect(document.activeElement).toBe(button);
     expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(tooltip()).toBeNull(); // in the description at once; the tooltip waits for the next pointing or focus
+    await keys.tab();
+    await keys.tab({ shift: true });
+    expect(document.activeElement).toBe(button);
     expect(tooltip()).toBe('Write a commit message');
     view.rerender(<Commit reason={null} />);
     expect(screen.getByRole('button', { name: 'Commit' })).toBe(button);
@@ -117,6 +122,41 @@ describe('UnavailableButton', () => {
     expect(button.hasAttribute('aria-disabled')).toBe(false);
     expect(button.hasAttribute('aria-describedby')).toBe(false);
     expect(tooltip()).toBeNull();
+  });
+
+  it('stays closed for a reason that arrives after the pointer has rested on the control and left', async () => {
+    const Commit = ({ reason }: { reason: string | null }) => (
+      <UnavailableButton reason={reason}>
+        <button type="button">Commit</button>
+      </UnavailableButton>
+    );
+    const view = render(<Commit reason={null} />);
+    const pointer = user();
+    await pointer.hover(screen.getByRole('button', { name: 'Commit' }));
+    wait(POINTING_DELAY_MS * 2);
+    await pointer.unhover(screen.getByRole('button', { name: 'Commit' }));
+    view.rerender(<Commit reason="Still busy" />);
+    wait(POINTING_DELAY_MS * 2);
+    expect(screen.getByRole('button', { name: 'Commit', description: 'Still busy' })).toBeTruthy();
+    expect(tooltip()).toBeNull();
+  });
+
+  it('pointing at an available control leaves another control’s open tooltip open', async () => {
+    render(
+      <>
+        <Chip />
+        <UnavailableButton reason={null}>
+          <button type="button">Commit</button>
+        </UnavailableButton>
+      </>,
+    );
+    const keys = user();
+    await keys.tab(); // the chip's tooltip opens on focus
+    expect(tooltip()).toBe(FACT);
+    await keys.hover(screen.getByRole('button', { name: 'Commit' }));
+    wait(POINTING_DELAY_MS * 2);
+    expect(document.activeElement).toBe(screen.getByText('Blocked in macOS'));
+    expect(tooltip()).toBe(FACT);
   });
 
   it('stays closed for a reason that arrives after focus has left the control', async () => {

@@ -4,8 +4,15 @@
 // POINTING_DELAY_MS of pointing and at once on keyboard focus, closed on Escape, on a press and when focus leaves. Its
 // `description` is the owner's accessible description at all times, from an element that stays mounted (Radix names
 // its content only while open), added to whatever the owner is already described by (a row note's id). The owner is
-// the one child, which must take focus: a control, or a plain word given `tabIndex={0}`. With no `content` the tip
-// never opens, and the owner keeps its place in the tree, so a tip that comes and goes never remounts its control.
+// the one child, which must take focus: a control, or a plain word given `tabIndex={0}`. A caller adding a fact to an
+// owner that already has its own `aria-describedby` passes that fact as `description`: a tip with `content` alone
+// leaves the owner's ids as they are, and Radix's id of the open tooltip is then not added to them.
+//
+// With no `content` the tip never reaches Radix's open machinery: the trigger's pointermove and focus are cancelled
+// before Radix's own handlers (which skip a prevented event), so it arms no delay, opens nothing and closes no other
+// tooltip; the owner keeps its place in the tree, so a tip that comes and goes never remounts its control. Content that
+// arrives while its owner is already pointed at or focused shows on the next pointing or focus; it is in the owner's
+// description at once. The content is not hoverable, so leaving the trigger closes the tip at once, whatever is drawn.
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
@@ -16,7 +23,7 @@
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
 import { Tooltip } from 'radix-ui';
-import { cloneElement, useId, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, useId, type MouseEvent, type ReactElement, type ReactNode, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -26,24 +33,22 @@ type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 
 export function Tip({ content, description, children, ...guard }: { content: ReactNode; description?: string | null; children: Owner } & ClickGuard) {
   const descriptionId = useId();
-  // What pointing and focus ask, handed to Radix as is, so its close requests always arrive (it drops a close while
-  // its controlled `open` is already false); with no content, nothing is drawn while it holds.
-  const [open, setOpen] = useState(false);
   const shows = content !== null && content !== undefined && content !== '';
   const described = description !== undefined && description !== null && description !== '';
   const own = children.props['aria-describedby'];
   // The owner's own descriptions first, then this one, set on the owner itself (its props win over the trigger's). With
   // no description of its own the owner is left alone, so an open tooltip describes it through Radix; with nothing to
-  // show either, the owner keeps only its own, never Radix's id of a tooltip that is not drawn.
+  // show either, the owner keeps only its own ids.
   const owner = described
     ? cloneElement(children, { 'aria-describedby': [own, descriptionId].filter((ids) => ids).join(' ') })
     : shows
       ? children
       : cloneElement(children, { 'aria-describedby': own });
+  const silent = shows ? {} : SILENT;
   return (
-    <Tooltip.Provider delayDuration={POINTING_DELAY_MS}>
-      <Tooltip.Root open={open} onOpenChange={setOpen}>
-        <Tooltip.Trigger asChild {...guard}>
+    <Tooltip.Provider delayDuration={POINTING_DELAY_MS} disableHoverableContent>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild {...guard} {...silent}>
           {owner}
         </Tooltip.Trigger>
         {shows && (
@@ -62,6 +67,10 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
     </Tooltip.Provider>
   );
 }
+// A contentless tip's trigger: the events that would open it, cancelled before Radix's handlers read them (neither has
+// a default action a control relies on).
+const cancel = (event: SyntheticEvent) => event.preventDefault();
+const SILENT = { onPointerMove: cancel, onFocus: cancel };
 
 const swallow = (event: MouseEvent) => {
   event.preventDefault();
