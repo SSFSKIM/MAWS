@@ -3139,17 +3139,20 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
     const scroller = s.pane.locator('[data-transcript-scroller]');
     const composer = s.pane.locator('section[data-composer]');
     const jump = s.pane.getByRole('button', { name: 'Jump to latest' });
-    const heights = () => scroller.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, gap: el.scrollHeight - el.clientHeight - el.scrollTop }));
+    // `sizer` is the list's inner box, the virtualiser's total: it grows with every row, where the scroller's
+    // scrollHeight stays at its clientHeight while the rows still fit
+    const heights = () =>
+      scroller.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, gap: el.scrollHeight - el.clientHeight - el.scrollTop, sizer: (el.firstElementChild as HTMLElement).offsetHeight }));
     let sent = 0;
     const send = async () => value(await invoke(page, 'session.send', { appSessionId: id, content: `turn ${++sent}` }));
-    // the list grown past `before` and settled (two reads in a row the same height)
+    // the list's sizer grown past `before` and settled (two reads in a row the same height)
     const grownFrom = async (before: number, message: string) => {
       let last = before;
       await expect
         .poll(
           async () => {
             const previous = last;
-            last = (await heights()).scroll;
+            last = (await heights()).sizer;
             return last > before && last === previous;
           },
           { message },
@@ -3162,7 +3165,7 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
     };
     // the transcript filled past its viewport, so following is a scroll the list keeps doing
     while (sent < FILL) {
-      const before = (await heights()).scroll;
+      const before = (await heights()).sizer;
       await send();
       await idle(s, id);
       await grownFrom(before, `turn ${sent}'s rows grew the list, and it settled`);
@@ -3175,7 +3178,7 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
     await expect(field).toBeVisible();
     for (const f of FACTORS) {
       await zoomTo(s.maws.app, page, f);
-      const before = (await heights()).scroll;
+      const before = (await heights()).sizer;
       await send();
       const turn = sent;
       await expect(s.pane.getByText(followLine(turn, 0, 3)).first()).toBeVisible(); // the reply streams, and the engine holds
@@ -3221,7 +3224,7 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
         expect(clamp.after, `${at}, the viewport's growth clamped the offset: ${JSON.stringify(clamp)}`).toBeLessThan(clamp.before);
         if (clamp.gap > 1) short.push(clamp.gap);
         // the engine goes on: the next part appended, and the follower at the end
-        const held = (await heights()).scroll;
+        const held = (await heights()).sizer;
         value(await invoke(page, 'session.getContextUsage', { appSessionId: id, detail: 'summary' }));
         await expect(s.pane.getByText(followLine(turn, part, 3)).first()).toBeVisible();
         await grownFrom(held, `${at}, part ${part} grew the list`);

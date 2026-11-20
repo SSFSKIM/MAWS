@@ -109,11 +109,19 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await expect(next.locator('kbd')).toHaveText('⌘⇧U');
       await expect.poll(() => accelerator(app, 'attention.next')).toBe('Cmd+Shift+U');
 
-      // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B14): View's zoom items used, then
-      // settings.json read: the binding just recorded is in it (the reader's control) and none of the zoom's ids is.
+      // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B14): each of View's zoom items used,
+      // and settings.json read after each, the window zoomed or not: the binding just recorded is in it (the reader's
+      // control) and none of the zoom's ids is.
+      const afterZoom = (act: string) =>
+        expect.poll(() => readSettings(userData).keymap, { message: `settings.json after ${act}: the recorded binding, and nothing of the zoom` }).toEqual({ 'attention.next': 'Cmd+Shift+U' });
       expect(await zoomAct(app, page, 'zoom.in')).toBe(1.1);
+      await afterZoom('Zoom In, at 110 %');
       expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);
-      await expect.poll(() => readSettings(userData).keymap, { message: 'settings.json after the zoom: the recorded binding, and nothing of the zoom' }).toEqual({ 'attention.next': 'Cmd+Shift+U' });
+      await afterZoom('Actual Size, from 110 %');
+      expect(await zoomAct(app, page, 'zoom.out')).toBeLessThan(1);
+      await afterZoom('Zoom Out, below 100 %');
+      expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);
+      await afterZoom('Actual Size, from below 100 %');
 
       // The recorder keeps its own Esc (§H, row 3): Esc ends the recording, the chord stays, and the dialog stays open.
       await next.getByRole('button', { name: 'Change Next Needs-you' }).click();
