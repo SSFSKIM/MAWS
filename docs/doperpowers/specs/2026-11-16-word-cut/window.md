@@ -2,9 +2,9 @@
 
 > Part of `docs/doperpowers/specs/2026-11-16-word-cut-design.md`; read that first. This file is written by `render.py` from `items.json` beside it; a decision changes there and in the root document's Decision Log.
 
-105 items: 72 cut, 1 reworded, 32 stay. Of the 73 that change, the owner saw 20 in a picture or ruled on them; 53 follow the pattern and were not seen.
+105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; 3 recorded for the owner. M0 added 4 rows for the UX wave's new text (0 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 4 rows for the UX wave's new text (0 cut, 1 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -59,7 +59,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 |---|---|---|---|---|---|---|---|---|
 | W3 | on the corner of the Overview button, only while a session waits for you | ◐3 | stays | Stays. brought back on session-approval | brought back | `src/renderer/src/app/Toolbar.tsx:136` | unchanged `src/renderer/src/app/Toolbar.tsx:146` | M4 · `session-approval` |
 | W4 | left of the tabs, only when the window is wide enough: a folder icon and the current project | <project name> | cut | The title bar no longer shows the folder icon and project name left of the tabs; the tabs and surface icons take that room. | seen | `src/renderer/src/app/Toolbar.tsx:181` | unchanged `src/renderer/src/app/Toolbar.tsx:191` | M4 · `shell-tools` |
-| W6 | where the tabs were, while Customize, Projects or Artifacts is open: a back arrow and the page name as a heading | Customize | reword | the page name in the title bar stays on the Projects page; Customize and Artifacts stay without it, as the owner left them | brought back | `src/renderer/src/app/Toolbar.tsx:206` | unchanged `src/renderer/src/app/Toolbar.tsx:216` **For the owner, not built: U7 O-40 / U11 O-14 fix that the page name stands once, in the title bar ("the name in the title bar is the page's heading"; Customize's own head does not repeat it); this row removes it from Customize and Artifacts.** | M4 · `customize-plugins` |
+| W6 | where the tabs were, while Customize, Projects or Artifacts is open: a back arrow and the page name as a heading | Customize | reword | the page name in the title bar stays on the Projects page; Customize and Artifacts stay without it, as the owner left them | ruled | `src/renderer/src/app/Toolbar.tsx:206` | unchanged `src/renderer/src/app/Toolbar.tsx:216` Put to the owner: U7 O-40 / U11 O-14 fix that the page name stands once, in the title bar ("the name in the title bar is the page's heading"; Customize's own head does not repeat it); this row removes it from Customize and Artifacts. **Ruled by the owner, 2026-11-20, card 3: built as written.** | M4 · `customize-plugins` |
 
 ### Tab strip
 
@@ -208,8 +208,8 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | W185 | View menu, top level | Float conversation over surface | cut | View menu (and palette, shortcuts): "Float chat". | seen | `src/shared/keymap/actions.ts:62` | unchanged `src/shared/keymap/actions.ts:67` | M4 · `settings-keyboard` |
-| W187 | View ▸ Tabs | Select Tab 1 | cut | View ▸ Tabs lists Next tab and Previous tab only; ⌘1 to ⌘9 still work (hidden items keep their accelerators on macOS). | pattern | `src/main/menu.ts:125` | unchanged `src/main/menu.ts:133` **For the owner, not built: U6a (keymap) fixes the View menu as "Tabs ▸ (the nine Select Tab items)"; this row's cut lists Next and Previous tab only.** | M4 · no scene: The native menu bar is drawn by the OS outside the window, so no window screenshot shows it. |
-| W188 | View ▸ Developer | Developer | cut | The View menu has no Developer submenu in a packaged build; an unpackaged dev run still shows it. | pattern | `src/main/menu.ts:192` | unchanged `src/main/menu.ts:201` **For the owner, not built: U6a (keymap) fixes "Developer ▸" as the last View group; this row hides it in packaged builds.** | M4 · no scene: The native menu bar is drawn by the OS outside the window, so no window screenshot shows it. |
+| W187 | View ▸ Tabs | Select Tab 1 | stays | Stays. a closed menu puts no words on screen, so the cut gains nothing here; U6a already folds the nine items into one Tabs submenu, and a menu is where keys are looked up (Help's search finds them). Kept, the owner's ruling of 2026-11-20 | ruled | `src/main/menu.ts:125` | unchanged `src/main/menu.ts:133` Put to the owner: U6a (keymap) fixes the View menu as "Tabs ▸ (the nine Select Tab items)"; this row's cut lists Next and Previous tab only. **Ruled by the owner, 2026-11-20, card 10: kept, not cut.** | M4 · no scene: The native menu bar is drawn by the OS outside the window, so no window screenshot shows it. |
+| W188 | View ▸ Developer | Developer | stays | Stays. the Developer submenu is the way into diagnosis in the packaged build the owner uses daily; it is hidden only if MAWS is shipped to people who are not its developers. Kept, the owner's ruling of 2026-11-20 | ruled | `src/main/menu.ts:192` | unchanged `src/main/menu.ts:201` Put to the owner: U6a (keymap) fixes "Developer ▸" as the last View group; this row hides it in packaged builds. **Ruled by the owner, 2026-11-20, card 10: kept, not cut.** | M4 · no scene: The native menu bar is drawn by the OS outside the window, so no window screenshot shows it. |
 
 ## Projects, worktrees and archive
 
@@ -316,7 +316,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 ## The UX wave's new text (M0)
 
-Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master `028cecd10`, every row's basis is `pattern` (or `consent` for a consent text), and **Source** is the file and line on master.
+Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master `028cecd10`, every row's basis is `pattern` (or `consent` for a consent text, or `ruled` where the owner has since ruled on it), and **Source** is the file and line on master.
 
 ### Menu bar and the shortcuts window
 
