@@ -148,7 +148,7 @@ Each is a means the child's file and the cut leave open, with its reason and wha
 | 1 | The next factor, from the factor the store holds now (`readFactor(store.get('window.zoom'))`) and `to`. The same as now: answer it and stop | |
 | 2 | The key is published: the new value, or the key's removal at 100 % (decision 34) | The write throws: the store holds what it held, the command answers the error, and nothing below runs. The page, the placements, the next command and the next window all still have the old factor |
 | 3 | The factor is set on every app window's page | |
-| 4 | Each window's placements are applied again; its lights are placed; an open extension popup is placed again from its kept anchor | |
+| 4 | Each window's placements are applied again; its lights are placed; an open extension popup is closed (reason `'zoom'`; Decision Log 24) | |
 | 5 | `layout.zoomChanged` is sent to every app page | |
 | 6 | The answer: the factor | |
 
@@ -403,7 +403,7 @@ The six placements. "Multiply" and "divide" are by `zoomOf` of the app page conc
 | # | what is placed | the narrowest place | today | under the factor | owner |
 |---|---|---|---|---|---|
 | 1 | the in-app browser's view | `ViewManager` in `src/main/browser/view.ts`: the placement keeps the CSS rectangle `browser.view.place` sent; `attach` and every later `setBounds` of it multiply, edge by edge (decision 27). A function of the manager applies every placement of one window again, called from S3 | `setBounds(rect)` as sent | multiply | U12 |
-| 2 | an extension's popup | the head of `ExtensionPopups.open` in `src/main/browser/extensions/popup.ts`, where the anchor arrives; the kept anchor stays in CSS pixels and `preferred-size-changed` and S3 place from it | the anchor mixed with window points | multiply the anchor | U12 |
+| 2 | an extension's popup | the head of `ExtensionPopups.open` in `src/main/browser/extensions/popup.ts`, where the anchor arrives; the kept anchor stays in CSS pixels and `preferred-size-changed` places from it; S3 closes an open popup (`zoomed`, Decision Log 24) | the anchor mixed with window points | multiply the anchor | U12 |
 | 3 | the bookmarks menu, an extension's action menu, the puzzle's menu | where `NativeMenus` hands a menu to its presenter (`present` in `src/main/browser/bookmarks/menu.ts`), which all three reach: before the presenter, so that the e2e seam, which stands in for the native call, records the point handed over | `popup({ window, x, y })` as sent | multiply | U12 |
 | 4 | the comment's pin | the call of `pickPosition` in `src/main/browser/comment/mode.ts`: its factor becomes the tab's over the app's | the tab's window points, drawn by the window as CSS pixels | divide | U12 |
 | 5 | the traffic lights | `src/main/window.ts`: `setWindowButtonPosition({ x: 16, y: Math.round(22 * factor - 7) })` at a window's making and in S3; in `app/Toolbar.tsx` the 78 px kept clear becomes `calc(78px / var(--app-zoom, 1))` | `{ x: 16, y: 15 }` in a toolbar 44 CSS pixels high | the lights stay centred in the toolbar's height and clear of its controls | no child (`window.ts`); U7 (`Toolbar.tsx`) |
@@ -698,6 +698,31 @@ Found while this document was written and reviewed; each changed a decision abov
     - **When it passes,** the row closes and the mark comes off.
     - **Mac check:** `test.fail` counts any failure as the expected one. A Mac run should confirm that the failure reported is "followed after a clamp N px short", and not "the row's condition was never reached".
     - **The page's keys (B10):** the tab binds ⌘= and ⌘+ to zoom in and ⌘- to zoom out, and has no reset. ⌘0 is View › Overview. The browser-focus scene therefore presses ⌘= and then ⌘-, which the architect confirmed.
+
+24. **2026-11-20 (UTC) · The branch review (xhigh panel, `17f422d11..f39cc1289`) and the fix wave the architect ruled.** The panel's verdict was "incorrect", with eight findings. The architect ruled five to fix (`e88d13d75` red, `21c0ee894`, `fdd1b3300`) and three for the tracker (`fefb2e054`).
+    - **An open extension popup is closed on a change of the app's factor (sweep#1), not placed again.** S3's step 4 and §G's row 2 are revised to match.
+      - Main learns a button's box only from the click. Re-anchoring would need the renderer to report the box again after the toolbar reflows: a new command or field, plus a wait.
+      - The button can also fold into the puzzle menu at the new width.
+      - Closing is exact, and it matches the cover under the zoom line.
+      - The close reason is `'zoom'`. Focus goes back to the app's page, and the next click opens the popup again.
+      - Accepted by the architect.
+    - **Decision 35 is amended again: the chip reads the page's size as Blink does (scalpel-3#1), from both edges the pane sent (scalpel-3#2).**
+      - `reads` mirrors `AdjustForAbsoluteZoom::AdjustInt` (`third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h`, at Electron 44.4.5's Chromium 152.0.7977.130). It works over the frame's side in device pixels, at a layout zoom of the display's scale times the tab's zoom.
+      - `Room.at` becomes `Room.placed`, the whole rectangle the pane sent main. A sent side counts only within a pixel of the element's own.
+      - `Room` gains an optional `scale`, sampled with the rect: `devicePixelRatio ÷ the app's factor`, rounded to a whole number of at least 1.
+      - The reading depends on the display's scale. 894 points at a tab zoom of 110 % read 812 at two device pixels a point and 813 at one. Both are pinned.
+      - Ruled: **a Mac scene that asserts the chip takes its expected value from Blink's rule at the display's actual scale, never a constant.**
+      - Re-sampling the scale after a move between displays with no resize stays on row j's ground.
+    - **A comment pin on a centred device view carries the view's inset in its column (scalpel-3#3).** The pane's `CardFrame.offset` is the inset, not `{0, 0}`. One frame feeds every card the dock draws, so open and reopened pins both follow it. `side/card` is unedited.
+    - **The probe finalises on `close` (sweep#3).** It bounds its drain at 10 s after `exit` (`DRAIN_MS`), in case a helper still holds the pipes.
+    - **Tracker rows, as ruled:**
+      - scalpel-1#1: a zoom menu action reaches every app renderer, so one click steps twice with two windows;
+      - scalpel-1#2: a crashed renderer misses a zoom change;
+      - scalpel-2#1: an intermediate device width before the post-zoom pane report.
+    - **Mac scenes owed by this wave:**
+      - browser-chrome: a popup open at 125 %, zoomed through View, is gone;
+      - the browser scene's chip against `innerWidth`, at the display's own scale;
+      - browser-comment: the Mobile pin in a wider column at 125 %.
 
 ## Outcomes & Retrospective
 
