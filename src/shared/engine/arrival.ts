@@ -14,7 +14,8 @@
 // where a sminos bridge carried it for the person to a terminal session (submitted as the user, or appended into the
 // running turn as another machine's rows draw it), read whole: UX wave U1c) and a background
 // session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's
-// frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer; (3) one carrier can
+// frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer, and from sminos's
+// wake release (T2) the line of sminos's own that may end the text, its note, is neither's words (`note`); (3) one carrier can
 // hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
 // (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { ASK_STEER_OPENING, askSteerOpening, parseAskSteer } from '../maws/ask';
@@ -541,25 +542,28 @@ function peerMessage(text: string, origin: Json | null, queuedPrompt: string | n
     const arrival: Arrival = { class: 'subagent', agentId: parsed.fromAgentId, body: parsed.body, report, taskId };
     return { arrivals: [arrival], open: report !== null && taskId !== null ? { ...open, handbacks: added(open.handbacks, taskId) } : open };
   }
-  if (parsed.kind === 'teammate') return { arrivals: inboxPeer(text, origin, parsed.frame, 'team'), open };
+  if (parsed.kind === 'teammate') return { arrivals: inboxPeer(text, origin, parsed.frame, null, 'team'), open };
   if (parsed.frame !== null) {
     const sender = sminosFrameSender(parsed.frame);
-    return { arrivals: sender === 'human' ? [own('chat', parsed.frame, parsed.body)] : inboxPeer(text, origin, parsed.frame, 'inbox'), open };
+    return { arrivals: sender === 'human' ? [own('chat', parsed.frame, parsed.body, parsed.note)] : inboxPeer(text, origin, parsed.frame, parsed.note, 'inbox'), open };
   }
   const first = firstLine(parsed.body);
-  if (first === STEER_LINE && parsed.body.length > STEER_LINE.length) return { arrivals: [own('steer', STEER_LINE, parsed.body.slice(STEER_LINE.length + 1))], open }; // X-032: `sminos steer`'s inbox fallback
+  if (first === STEER_LINE && parsed.body.length > STEER_LINE.length) return { arrivals: [own('steer', STEER_LINE, parsed.body.slice(STEER_LINE.length + 1), null)], open }; // X-032: `sminos steer`'s inbox fallback
   if (first === BRIDGE_WAKE_LINE) return { arrivals: [{ class: 'wake' }], open };
-  return { arrivals: inboxPeer(text, origin, null, 'inbox'), open };
+  return { arrivals: inboxPeer(text, origin, null, null, 'inbox'), open };
 }
 
-/** A peer's message by the engine's inbox (or a teammate's), as its companion event reads it (`peerEventsOf`). */
-function inboxPeer(text: string, origin: Json | null, frame: string | null, via: 'inbox' | 'team'): Peer[] {
+/**
+ * A peer's message by the engine's inbox (or a teammate's), as its companion event reads it (`peerEventsOf`): its body
+ * is the envelope's as `parsePeerMessage` reads it, sminos's frame, note and reply line cut, and `note` the note it read.
+ */
+function inboxPeer(text: string, origin: Json | null, frame: string | null, note: string | null, via: 'inbox' | 'team'): Peer[] {
   const payload = peerEventsOf(text, null, origin);
   if (payload?.kind !== 'peer.message') return [];
   return [
     {
       class: 'peer', via, sender: { name: payload.fromName, address: payload.from, session: payload.fromSession, owners: frame === null ? null : (sminosFrameOwners(frame)?.owners ?? null) },
-      body: payload.text, frame, midTurn: payload.midTurn, lineage: payload.lineage, replyTo: payload.replyable ? payload.from : null,
+      body: payload.text, frame, midTurn: payload.midTurn, lineage: payload.lineage, replyTo: payload.replyable ? payload.from : null, note,
     },
   ];
 }
@@ -579,7 +583,7 @@ function pluginRow(row: Json): Arrival[] {
   const appended = prompts.kind === 'appended';
   if (appended) {
     const steer = markedSteerWords(row);
-    if (steer !== null) return [own('steer', STEER_LINE, steer)];
+    if (steer !== null) return [own('steer', STEER_LINE, steer, null)];
   }
   const text = deliveredText(prompts);
   const delivery = text === null ? null : framedDelivery(text, 'bridge', appended);
@@ -595,35 +599,40 @@ const isBridgePlugin = (name: unknown): boolean => (BRIDGE_PLUGINS as readonly u
 /**
  * A delivery whose text opens with sminos's whole frame line, the words after it: the person's own when the frame names
  * `human`, else a peer's, named by the frame's alias (no address: neither the bridge nor a seat's prompt carries one).
+ * The words end before sminos's note when the text ends with one (`sminosParts`), which the arrival carries as `note`.
  */
 function framedDelivery(text: string, via: 'bridge' | 'prompt' | 'inbox', midTurn: boolean): Own | Peer | null {
-  const { frame, body } = sminosParts(text);
+  const { frame, body, note } = sminosParts(text);
   if (frame === null) return null;
   const sender = sminosFrameSender(frame)!;
-  if (sender === 'human') return own('chat', frame, body);
+  if (sender === 'human') return own('chat', frame, body, note);
   return {
     class: 'peer', via, sender: { name: sminosFrameAlias(frame), address: '', session: null, owners: sminosFrameOwners(frame)?.owners ?? null },
-    body, frame, midTurn, lineage: 'peer', replyTo: null,
+    body, frame, midTurn, lineage: 'peer', replyTo: null, note,
   };
 }
 
 /**
  * UX wave U3b (Interfaces §D, Probes 5): a prompt's text as the person's own words. Where it opens with a whole sminos
  * frame line that names `human`, the words after it, as the `own` class reads them (with its guard for words that read
- * as the interrupt marker); else the text. The rewind's text of a prompt sminos delivered opens with that line.
+ * as the interrupt marker, and without sminos's note); else the text. The rewind's text of a prompt sminos delivered
+ * opens with that line.
  * MAWS's answer envelopes are never the person's words, in either form (board ticket 711): a text that holds one is
  * read without it, as the split reads a person's message (`readPersonsContent`, the reader's one loop; ticket 704), so
  * an envelope alone reads as no words.
  */
 export function ownWordsOf(text: string): string {
   const words = (readPersonsContent(text).own as string | null) ?? '';
-  const { frame, body } = sminosParts(words);
-  return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body).words : words;
+  const { frame, body, note } = sminosParts(words);
+  return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body, note).words : words;
 }
 
-/** The person's own words sminos delivered; words that alone would read as the engine's interrupt marker keep their frame line before them. */
-function own(via: 'chat' | 'steer', frame: string, words: string): Own {
-  return { class: 'own', via, words: INTERRUPT_MARKER.test(words.trim()) ? `${frame}\n${words}` : words, frame };
+/**
+ * The person's own words sminos delivered; words that alone would read as the engine's interrupt marker keep their frame
+ * line before them. `note` is sminos's own line after them, never theirs (null for a steer, which carries none).
+ */
+function own(via: 'chat' | 'steer', frame: string, words: string, note: string | null): Own {
+  return { class: 'own', via, words: INTERRUPT_MARKER.test(words.trim()) ? `${frame}\n${words}` : words, frame, note };
 }
 
 /**

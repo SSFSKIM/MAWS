@@ -179,11 +179,11 @@ describe('the reader, over sminos’s deliveries (u3-sminos)', () => {
       264: ['own chat: UXW owner busy: also say THREE.'],
       387: ['peer by inbox, mid-turn: session:7ef6ac00 › UXW peer busy: also say FOUR.'],
     });
-    expect(readArrivals(frameOf('u3-sminos-r1-maws', 54))).toEqual([{ class: 'own', via: 'chat', words: 'UXW owner idle: reply with only the word ONE.', frame: '[sminos message from human id=328cfd59]' }]);
+    expect(readArrivals(frameOf('u3-sminos-r1-maws', 54))).toEqual([{ class: 'own', via: 'chat', words: 'UXW owner idle: reply with only the word ONE.', frame: '[sminos message from human id=328cfd59]', note: null }]);
     expect(readArrivals(frameOf('u3-sminos-r1-maws', 100))).toEqual([
       {
         class: 'peer', via: 'inbox', sender: { name: 'session:7ef6ac00', address: '', session: null, owners: null },
-        body: 'UXW peer idle: reply with only the word TWO.', frame: '[sminos message from session:7ef6ac00 id=8f775ba5]', midTurn: false, lineage: 'peer', replyTo: null,
+        body: 'UXW peer idle: reply with only the word TWO.', frame: '[sminos message from session:7ef6ac00 id=8f775ba5]', midTurn: false, lineage: 'peer', replyTo: null, note: null,
       },
     ]);
   });
@@ -205,7 +205,7 @@ describe('the reader, over sminos’s deliveries (u3-sminos)', () => {
       84: ['own steer: UXW steer busy: also say FIVE.'], // 85, its mirror line: none
       112: ['answer by sminos to toolu_01LHmQnUatVVN4dGUBrrJefV: Your questions have been answered: "Which fruit do you prefer?"="Mango". You can now continue with these answers in mind.'],
     });
-    expect(readArrivals(rowOf('u3-sminos-r1-terminal', 84))).toEqual([{ class: 'own', via: 'steer', words: 'UXW steer busy: also say FIVE.', frame: '[sminos steer from human]' }]);
+    expect(readArrivals(rowOf('u3-sminos-r1-terminal', 84))).toEqual([{ class: 'own', via: 'steer', words: 'UXW steer busy: also say FIVE.', frame: '[sminos steer from human]', note: null }]);
     expect(readArrivals(rowOf('u3-sminos-r1-terminal', 112))).toEqual([
       { class: 'answer', tool: 'sminos', call: 'toolu_01LHmQnUatVVN4dGUBrrJefV', summary: 'Your questions have been answered: "Which fruit do you prefer?"="Mango". You can now continue with these answers in mind.', answers: null, dismissed: false },
     ]);
@@ -232,7 +232,7 @@ const inbox = (body: string, origin: Record<string, unknown> = { kind: 'peer', f
 describe('the reader, on deliveries written by hand', () => {
   it('a peer’s row the bridge submitted, and one it appended with its mirror line after it: the peer’s, named by the frame, with no address to reply to', () => {
     expect(readArrivals(submitted(`${PEER_FRAME}\nCould you rerun the lint?`))).toEqual([
-      { class: 'peer', via: 'bridge', sender: { name: 'session:5b2c9e10', address: '', session: null, owners: null }, body: 'Could you rerun the lint?', frame: PEER_FRAME, midTurn: false, lineage: 'peer', replyTo: null },
+      { class: 'peer', via: 'bridge', sender: { name: 'session:5b2c9e10', address: '', session: null, owners: null }, body: 'Could you rerun the lint?', frame: PEER_FRAME, midTurn: false, lineage: 'peer', replyTo: null, note: null },
     ]);
     const text = `${CHAT_FRAME}\nThe fixtures are ready.`;
     const { arrivals, open } = readNext(appended(text), nothingOpen);
@@ -241,13 +241,13 @@ describe('the reader, on deliveries written by hand', () => {
   });
 
   it('the owner’s steer by `sminos steer`’s inbox fallback is the owner’s (X-032); the frame line decides when the origin names no one', () => {
-    expect(readArrivals(inbox('[sminos steer from human]\nStop after the tests.'))).toEqual([{ class: 'own', via: 'steer', words: 'Stop after the tests.', frame: '[sminos steer from human]' }]);
+    expect(readArrivals(inbox('[sminos steer from human]\nStop after the tests.'))).toEqual([{ class: 'own', via: 'steer', words: 'Stop after the tests.', frame: '[sminos steer from human]', note: null }]);
     expect(readArrivals(inbox('[sminos message from human id=0f0e0d0c]\nAlso run the linter.', { kind: 'peer', from: 'unknown' })).map(said)).toEqual(['own chat: Also run the linter.']);
   });
 
   it('the owner’s words that alone read as the engine’s interrupt marker keep their frame line', () => {
     expect(readArrivals(inbox('[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]'))).toEqual([
-      { class: 'own', via: 'chat', words: '[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]', frame: '[sminos message from human id=0f0e0d0c]' },
+      { class: 'own', via: 'chat', words: '[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]', frame: '[sminos message from human id=0f0e0d0c]', note: null },
     ]);
   });
 
@@ -268,10 +268,10 @@ describe('the reader, on deliveries written by hand', () => {
 
   it('a background session’s prompt that opens with a whole frame line is that delivery: a peer’s with `via: prompt`, or the owner’s own', () => {
     expect(readArrivals(seatPrompt(`${OWNED}\nThe migration is merged.\n${REPLY}`))).toEqual([
-      { class: 'peer', via: 'prompt', sender: { name: 'river', address: '', session: null, owners: ['m-4821'] }, body: 'The migration is merged.', frame: OWNED, midTurn: false, lineage: 'peer', replyTo: null },
+      { class: 'peer', via: 'prompt', sender: { name: 'river', address: '', session: null, owners: ['m-4821'] }, body: 'The migration is merged.', frame: OWNED, midTurn: false, lineage: 'peer', replyTo: null, note: null },
     ]);
     expect(readArrivals(seatPrompt('[sminos message from session:9d0e1f2a id=4c5d6e7f]\nPlease review the plan.')).map(said)).toEqual(['peer by prompt: session:9d0e1f2a › Please review the plan.']);
-    expect(readArrivals(seatPrompt('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.'))).toEqual([{ class: 'own', via: 'chat', words: 'Keep going with the tests.', frame: '[sminos message from human id=1a2b3c4d]' }]);
+    expect(readArrivals(seatPrompt('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.'))).toEqual([{ class: 'own', via: 'chat', words: 'Keep going with the tests.', frame: '[sminos message from human id=1a2b3c4d]', note: null }]);
     expect(readArrivals(seatPrompt(`${OWNED}\nThe migration is merged.`, { promptSource: 'queued' })).map(said)).toEqual(['peer by prompt: river › The migration is merged.']);
   });
 
@@ -282,6 +282,54 @@ describe('the reader, on deliveries written by hand', () => {
     expect(readArrivals({ type: 'user', uuid: 'u-typed', origin: { kind: 'human' }, promptSource: 'typed', message: { role: 'user', content: `${PEER_FRAME}\nquoting what they sent me` } })).toEqual([]);
     expect(readArrivals(seatPrompt(`${OWNED} is the line to look for`))).toEqual([]); // no whole frame line with words after it
     expect(readArrivals({ type: 'user', uuid: 'u-typed', origin: { kind: 'human' }, message: { role: 'user', content: '<task-notification>\n<summary>typed</summary>\n</task-notification>' } })).toEqual([]);
+  });
+});
+
+// sminos's wake release (T2): the first text sminos pushes to a session it woke ends with a line of its own, after one
+// blank line and before the inbox's reply line. Every route that reads a framed delivery carries it apart from the words.
+describe('the reader, on sminos’s note after a delivery’s words', () => {
+  const NOTE = '[sminos] A note from sminos on this machine, not from the sender above: it woke this session to deliver the message.';
+  const NOTE_TEXT = NOTE.slice('[sminos] '.length);
+  const REPLY = '[To reply, run in Bash: /opt/tools/sminos say "@demo/5b2c9e10 <your reply>"]';
+  const OWN_FRAME = '[sminos message from human id=0f0e0d0c]';
+  const WORDS = 'Could you rerun the lint?\n\nThen push.';
+  const envelope = (body: string) => `<cross-session-message from-name="session:5b2c9e10">\n${body}\n</cross-session-message>`;
+  const queued = (prompt: string) => ({ type: 'attachment', uuid: 'u-q', attachment: { type: 'queued_command', prompt, source_uuid: 'u-q0', commandMode: 'prompt', origin: { kind: 'peer', from: 'unknown' } } });
+  const seat = (content: string) => ({ type: 'user', uuid: 'u-seat', origin: { kind: 'human' }, promptSource: 'typed', sessionKind: 'bg', turnOrigin: 'human', message: { role: 'user', content } });
+  const peerOf = (arrivals: Arrival[]) => arrivals.map((arrival) => (arrival.class === 'peer' ? { via: arrival.via, body: arrival.body, frame: arrival.frame, note: arrival.note } : arrival));
+
+  it('a peer’s delivery on every route: the words without the note, the note carried', () => {
+    const framed = `${PEER_FRAME}\n${WORDS}\n\n${NOTE}`;
+    const read = (via: string) => [{ via, body: WORDS, frame: PEER_FRAME, note: NOTE_TEXT }];
+    expect(peerOf(readArrivals(submitted(framed))), 'bridge, submitted').toEqual(read('bridge'));
+    expect(peerOf(readArrivals(appended(framed))), 'bridge, appended').toEqual(read('bridge'));
+    expect(peerOf(readArrivals(inbox(`${framed}\n${REPLY}`, { kind: 'peer', from: 'unknown' }))), 'inbox, idle').toEqual(read('inbox'));
+    expect(peerOf(readArrivals(queued(envelope(`${framed}\n${REPLY}`)))), 'inbox, queued').toEqual(read('inbox'));
+    expect(peerOf(readArrivals(queued(`${framed}\n${REPLY}`))), 'inbox, queued raw by an engine through 2.1.289').toEqual(read('inbox'));
+    expect(peerOf(readArrivals(seat(framed))), 'a background session’s first prompt').toEqual(read('prompt'));
+  });
+
+  it('the owner’s own send loses it, in the arrival’s words and in the rewind’s text', () => {
+    const framed = `${OWN_FRAME}\n${WORDS}\n\n${NOTE}`;
+    const own = [{ class: 'own', via: 'chat', words: WORDS, frame: OWN_FRAME, note: NOTE_TEXT }];
+    expect(readArrivals(submitted(framed))).toEqual(own);
+    expect(readArrivals(appended(framed))).toEqual(own);
+    expect(readArrivals(inbox(`${framed}\n${REPLY}`))).toEqual(own);
+    expect(readArrivals(queued(envelope(`${framed}\n${REPLY}`)))).toEqual(own);
+    expect(readArrivals(seat(framed))).toEqual(own);
+    expect(ownWordsOf(framed)).toBe(WORDS);
+  });
+
+  it('a delivery with no note, or whose last line is the sender’s, carries none and keeps its words', () => {
+    for (const words of [WORDS, `${WORDS}\n\n ${NOTE}`, `${WORDS}\n${NOTE}`, `${WORDS}\n\n${NOTE}\n\nThanks.`]) {
+      expect(peerOf(readArrivals(submitted(`${PEER_FRAME}\n${words}`))), words).toEqual([{ via: 'bridge', body: words, frame: PEER_FRAME, note: null }]);
+      expect(ownWordsOf(`${OWN_FRAME}\n${words}`), words).toBe(words);
+    }
+  });
+
+  it('two frames in one push: the note at its end cut, the second frame still among the first one’s words', () => {
+    const second = '[sminos message from session:5b2c9e10 id=cc33dd44]\nAnd the docs.';
+    expect(peerOf(readArrivals(inbox(`${PEER_FRAME}\n${WORDS}\n\n${second}\n\n${NOTE}\n${REPLY}`, { kind: 'peer', from: 'unknown' })))).toEqual([{ via: 'inbox', body: `${WORDS}\n\n${second}`, frame: PEER_FRAME, note: NOTE_TEXT }]);
   });
 });
 
@@ -648,9 +696,9 @@ describe('the grant a sminos bridge carried to a terminal session (U1c, M4; prob
 
   it('a grant behind a sminos frame line is the delivery it was: the person’s own words, or a peer’s, never an approval', () => {
     const own = '[sminos message from human id=0f0e0d0c]';
-    expect(readArrivals(submitted(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
+    expect(readArrivals(submitted(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own, note: null }]);
     expect(readArrivals(submitted(`${PEER_FRAME}\n${GRANT}`)).map((arrival) => arrival.class)).toEqual(['peer']);
-    expect(readArrivals(appended(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
+    expect(readArrivals(appended(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own, note: null }]);
     expect(readArrivals(appended(`${CHAT_FRAME}\n${GRANT}`)).map((arrival) => arrival.class)).toEqual(['peer']);
   });
 
@@ -684,9 +732,9 @@ describe('readNext and turnOriginOf', () => {
     const origins = Object.fromEntries(
       (
         [
-          { class: 'own', via: 'chat', words: 'w', frame: 'f' },
+          { class: 'own', via: 'chat', words: 'w', frame: 'f', note: null },
           { class: 'consent', kind: 'command', subject: 's' },
-          { class: 'peer', via: 'inbox', sender: { name: null, address: '', session: null, owners: null }, body: '', frame: null, midTurn: false, lineage: 'peer', replyTo: null },
+          { class: 'peer', via: 'inbox', sender: { name: null, address: '', session: null, owners: null }, body: '', frame: null, midTurn: false, lineage: 'peer', replyTo: null, note: null },
           { class: 'subagent', agentId: 'a', body: '', report: null, taskId: null },
           { class: 'task', taskId: null, toolUseId: null, runId: null, outcome: null, summary: '', durationMs: null, outputFile: null, detail: null },
           { class: 'schedule', prompt: null },
