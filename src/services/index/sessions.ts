@@ -22,7 +22,7 @@ import { NOT_CLEARED } from './drafts';
 import type { SessionRecordPatch } from '@shared/engine/status';
 import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { countLines } from '@shared/composer/pasted-framing';
-import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
+import { pastedPlaceholder, replacePasted } from '@shared/composer/pasted-content';
 import { planPromptOpened } from '@shared/engine/host-prompts'; // ticket 733a
 import { locate, type ProjectStore } from './projects';
 import { FolderReads, factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
@@ -138,7 +138,7 @@ const OPEN_PASTED = /<pasted_content id="[0-9a-f]{4}">[\s\S]*$/;
 
 function pastedPlaceholders(text: string): string {
   let n = 0;
-  const closed = text.replace(PASTED_BLOCK, (_block, _id: string, body: string) => ` ${pastedPlaceholder(++n, countLines(body))} `);
+  const closed = replacePasted(text, ({ body }) => ` ${pastedPlaceholder(++n, countLines(body))} `);
   return closed.replace(OPEN_PASTED, () => ` [Pasted text #${++n}] `);
 }
 

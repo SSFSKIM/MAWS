@@ -2,6 +2,8 @@
 // either the read-only set (focusable for ⌘F, the reason as the content's title) or CodeMirror's editing set (history,
 // the default and history keymaps with Tab indenting, bracket matching, the drawn selection) and the dirty listener.
 // Loaded with CodeView, never in the main chunk. No keymap here binds Mod-s: ⌘S is the application menu's `file.save`.
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, decision 17; B8): nor Mod-[ and
+// Mod-] (CodeMirror's indent less and more), which are Back and Forward; Tab and ⇧Tab indent.
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { Annotation, Compartment, EditorState, type Extension, type Text } from '@codemirror/state';
@@ -18,6 +20,9 @@ export const fromStore = Annotation.define<boolean>();
 // What the listener reports on the owner's every edit: the document as it now stands.
 export type EditListener = (doc: Text) => void;
 
+const BACK_AND_FORWARD = new Set(['Mod-[', 'Mod-]']);
+const editingKeymap = defaultKeymap.filter((binding) => binding.key === undefined || !BACK_AND_FORWARD.has(binding.key));
+
 export function editingExtensions(editable: boolean, readOnlyTitle: string | null, onEdit: EditListener): Extension {
   if (!editable) {
     return [
@@ -31,7 +36,7 @@ export function editingExtensions(editable: boolean, readOnlyTitle: string | nul
     EditorState.readOnly.of(false),
     EditorView.editable.of(true),
     history(),
-    keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+    keymap.of([...editingKeymap, ...historyKeymap, indentWithTab]),
     indentOnInput(),
     bracketMatching(),
     drawSelection(),

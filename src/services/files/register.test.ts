@@ -7,9 +7,11 @@ import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
 import type { ClientPort } from '@shared/client/port';
 import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
+import { gradeOf } from '@shared/ipc/grades';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import type { AllowlistRecord } from './allowlist';
 import { registerFilesHandlers, type FilesHandlerDeps } from './register';
+import { claimable } from '../machine-ops';
 
 // The asking page, as main's router hands a handler its ClientRef (src/main/ipc/clients.ts): a reload ends this
 // document's ref and the page asks with the next generation's; a close ends it.
@@ -289,6 +291,62 @@ describe('main answers files.* on the services bus', () => {
     });
   });
 
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R1, X1.2): the follow of a link
+  // is this machine's own client's, waiting as long as that client lives; another machine's request, claimed or not, is
+  // the service's refusal and records nothing
+  describe('the follow of a link (UX wave U6b-4c)', () => {
+    const outside = () => join(root, 'outside');
+    beforeEach(() => {
+      mkdirSync(outside());
+      writeFileSync(join(outside(), 'notes.txt'), 'outside notes\n');
+      writeFileSync(join(root, 'repo', 'guide.md'), `See [the notes](${join(outside(), 'notes.txt')}).\n`);
+    });
+
+    it('follows a link for this machine’s page, its search ending with its client, and refuses another machine’s request, claimed or not, recording nothing', async () => {
+      const added: unknown[][] = [];
+      const signals: (AbortSignal | undefined)[] = [];
+      const links = { add: (...args: unknown[]) => void added.push(args.slice(0, 3)), get: () => null };
+      // the first search answers at once; the second waits until what it was given to wait with ends
+      const agentNames = vi.fn((_appSessionId: string, _agent: { id: string; engineSessionId: string }, _path: string, signal?: AbortSignal, located?: () => void) => {
+        signals.push(signal);
+        located?.();
+        return signals.length === 1 ? Promise.resolve('counted' as const) : new Promise<false>((resolve) => signal?.addEventListener('abort', () => resolve(false)));
+      });
+      await install(undefined, undefined, { links, agentNames, log: () => {} });
+      const path = join(outside(), 'notes.txt');
+      const byFile = { appSessionId: 'A', path, from: { file: join(root, 'repo', 'guide.md') } };
+      const remote = { client: page, remote: true as const };
+      const claimed = { ...remote, op: { opId: 'op-1', opCreated: '2026-11-18T09:00:00.000Z', member: 'member-of-the-suite', device: 'device-of-the-suite', fingerprint: 'a'.repeat(64) } };
+      expect(await bus.invoke('files.follow', byFile, remote)).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+      expect(await bus.invoke('files.follow', byFile, claimed)).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+      expect(added).toEqual([]);
+      expect(await invoke('files.follow', byFile)).toEqual({ ok: true, value: { status: 'linked' } });
+      expect(added).toEqual([['A', path, { file: join(root, 'repo', 'guide.md') }]]);
+      const byAgent = { appSessionId: 'A', path, from: { agent: 'a1b2c3', engineSessionId: 'engine-session-1' } };
+      expect(await invoke('files.follow', byAgent)).toEqual({ ok: true, value: { status: 'linked' } });
+      void invoke('files.follow', byAgent);
+      await vi.waitFor(() => expect(signals).toHaveLength(2));
+      expect(signals[1]).toBeInstanceOf(AbortSignal);
+      expect(signals[1]!.aborted).toBe(false);
+      close();
+      expect(signals[1]!.aborted, 'the client ended: the search’s wait ends with it').toBe(true);
+    });
+  });
+
+  // UX wave U6b-4a: Open in's admission is main's alone, answers the real path, and refuses a caller on another machine
+  it('admits for main the working folder and a file outside named by the transcript, and refuses a page and another machine', async () => {
+    const named = vi.fn(async () => 'counted' as const);
+    await install(undefined, undefined, { named });
+    const path = join(root, 'outside', 'notes.txt');
+    mkdirSync(join(root, 'outside'));
+    writeFileSync(path, 'outside notes\n');
+    expect(await invoke('files.admit', { appSessionId: 'A' })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await bus.main('files.admit', { appSessionId: 'A', path }, { client: page, remote: true as const })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+    expect(named).not.toHaveBeenCalled();
+    expect(await bus.main('files.admit', { appSessionId: 'A', path })).toEqual({ ok: true, value: { path, kind: 'file' } });
+    expect(await bus.main('files.admit', { appSessionId: 'A' })).toEqual({ ok: true, value: { path: join(root, 'repo'), kind: 'folder' } });
+  });
+
   it('forgets an ended client: it is no longer followed once its page closes', async () => {
     const { files, followed } = await install();
     await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });
@@ -305,5 +363,19 @@ describe('main answers files.* on the services bus', () => {
     await answer;
     expect(followed.size).toBe(0);
     expect(files.watching()).toEqual([]);
+  });
+});
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, condition (a)): the four
+// acts on a file outside a session's folders take the terminal's grade by reference, so a change of `pty.spawn`'s moves
+// them, and each is an act `machine.op` claims
+describe('the four outside acts', () => {
+  const OUTSIDE = ['files.readOutside', 'files.listOutside', 'files.chooseOutside', 'files.writeOutside'];
+
+  it('are graded by the value pty.spawn’s declaration holds, and claimed by machine.op', () => {
+    for (const name of OUTSIDE) {
+      expect(gradeOf(name), name).toBe(gradeOf('pty.spawn'));
+      expect(claimable(name), name).toBe(true);
+    }
   });
 });

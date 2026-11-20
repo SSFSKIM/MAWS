@@ -8,23 +8,32 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
-import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
+import { FILES_MOVED, FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf, machineOf } from '@shared/machine/address';
+import { failureWords } from '@shared/ipc/remote-unavailable'; // UX wave U6f
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
+import { recordArtifactMachine, resetArtifactMachines } from '../../../artifacts/machines'; // UX wave U6b-4b, the branch review
+import { forgetOpenedThere, openedThere } from '../files/elsewhere'; // UX wave U6f
+import { chooserCalls, createRemoteChooser, forgetStarts } from '../files/remote-chooser'; // UX wave U6f
 import { record } from '../../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import type { TranscriptEntry } from '../../../stores/transcript';
-import { useTranscriptStore, type TurnId } from '../../../transcript';
+import { Markdown, useTranscriptStore, type TurnId } from '../../../transcript';
+import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../../../transcript/view/context'; // UX wave U6b-4b
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { openChosen } from '../files/open-chosen';
 import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
+import { follow, linkedCount, resetFollows } from '../follow'; // UX wave U6b-4c
+import { ipc } from '../../../ipc/client'; // UX wave U6b-4c: a follow asked directly, as a page could
+import { MarkdownView } from './MarkdownView'; // UX wave U6b-4c
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
-import { fakeHash, frameToken, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
+import { fakeHash, frameToken, installDisk, leaveRl2, OUTSIDE_REFUSAL, overRl2, refused, rosterSays, type DiskLink } from '../../../test-support/code-disk';
 import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
@@ -162,6 +171,14 @@ const lines = (count: number, at: (n: number) => string) => Array.from({ length:
 const notice = () => document.querySelector('[data-notice]')?.getAttribute('data-notice') ?? null;
 const flashed = () => document.querySelector(`.${FLASH_CLASS}`)?.textContent ?? null;
 const codeText = () => document.querySelector('.cm-content')?.textContent ?? null;
+// UX wave U6b-4b (M3): the notice of a file that cannot be read, as a person reads it: its paragraphs in order (the
+// sentences, the path, the command's own words), and its cause
+const noticeLines = () => [...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent);
+const noticeCause = () => document.querySelector('[data-refusal]')?.getAttribute('data-notice-cause') ?? null;
+const THREE_WAYS = "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.";
+const ASK_AGENT = 'Ask the agent to send the file to see it here.';
+// The first notice, as this Mac says it, for `path`
+const outsideHere = (path: string) => ['This file is outside the folders this session works in.', THREE_WAYS, ASK_AGENT, path, "path outside the session's directories"];
 
 describe('viewer', () => {
   const offs: (() => void)[] = [];
@@ -178,12 +195,11 @@ describe('viewer', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders a refusal in words with the path, and reads no more than once', async () => {
+  it('renders a refusal as its notice, in words with the path, and reads no more than once', async () => {
     const main = serve({ '/r/secret': { refusal: "path outside the session's directories" } });
     render(<FileViewer tab={fileTab('/r/secret')} />);
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain("Refused: path outside the session's directories");
-    expect(alert.textContent).toContain('/r/secret');
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(outsideHere('/r/secret')); // UX wave U6b-4b: the notice's words, no longer "Refused: "
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(main.callsOf('files.read')).toHaveLength(1);
     expect(main.callsOf('files.watch')).toEqual([{ appSessionId: MAIN_A, path: '/r' }]); // the file's directory, watched before the read
@@ -235,8 +251,8 @@ describe('viewer', () => {
     });
     refuse = true;
     render(<FileViewer tab={fileTab('/r/half.txt')} />);
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain("Refused: path outside the session's directories");
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(outsideHere('/r/half.txt'));
     expect(useViewer.getState().entries.get(FILE('/r/half.txt'))?.text).toBe('');
     expect(document.querySelector('.cm-content')).toBeNull();
   });
@@ -715,7 +731,8 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
   it('W3: reads a refused file again when its link is clicked again, and when its tab is shown again', async () => {
     const main = disk({ [OUT]: 'written later\n', '/elsewhere/other.txt': 'other\n' });
     show();
-    expect((await screen.findByRole('alert')).textContent).toContain(`Refused: ${OUTSIDE_REFUSAL}`);
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(outsideHere(OUT));
     await settle();
     expect(main.callsOf('files.read')).toHaveLength(1);
     main.names.add(OUT); // the row that links it is written
@@ -1152,7 +1169,8 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(frames.every(Boolean)).toBe(true);
     main.added.delete(OUT); // the Library's record goes: the next read is refused
     act(() => void openFile(A, OUT, null, { main: true }));
-    expect((await screen.findByRole('alert')).textContent).toContain('Refused');
+    await screen.findByRole('alert');
+    expect(noticeCause()).toBe('outside'); // UX wave U6b-4b: the notice in place of "Refused: "
     expect(shown()).toMatchObject({ status: 'error', named: false, locked: 'added', pin: OUT });
     expect(label()?.getAttribute('data-read-only')).toBe('added');
   });
@@ -1765,7 +1783,8 @@ describe('a framed file (UX wave U6b-2)', () => {
     let connected = false;
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_, issue) => (connected ? issue() : fail('layout.frameFile: machine mini is not connected')) });
     show();
-    expect((await screen.findByRole('alert')).textContent).toContain('Refused: layout.frameFile: machine mini is not connected');
+    await screen.findByRole('alert');
+    expect(noticeLines()).toEqual(['This file could not be opened.', PDF, 'layout.frameFile: machine mini is not connected']); // UX wave U6b-4b
     expect(entry()).toMatchObject({ status: 'error', frame: null });
     connected = true;
     act(() => useViewer.getState().revisit(FILE(PDF)));
@@ -2047,5 +2066,1786 @@ describe('open file', () => {
     holding(`${A}x`); // no ':': no shorter key is tried
     expect(sessionOfTurn(turn)).toBeNull();
     useTranscriptStore.setState({ entries: {} });
+  });
+});
+
+// ---- UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M4; §E; decisions 11 to
+// 14 and 18; sequences W1 to W3, R7 and R9) ----------------------------------------------------------------------------
+// A session main runs on another machine over RL2 (studio, for which the person is one of the owners unless a case says
+// otherwise). The fake main stands for main's adapter: it answers a keyed read of an outside file as the act there does
+// (`named` and `outside`), and, where a case gives `answers`, in UC-7's words with `issues.refusal`.
+describe('a file outside the folders on another machine (U6f)', () => {
+  const THERE = 'app-there';
+  const T = addressOf(OTHER_MACHINE, THERE as AppSessionId);
+  const P = addressOf('ThirdMachineRef0000000' as typeof OTHER_MACHINE, 'app-profile' as AppSessionId); // another profile of this Mac: no RL2 roster entry, its sessions take the manager's path
+  const TERMINAL = addressOf(OTHER_MACHINE, 'app-terminal' as AppSessionId);
+  const OUT = '/elsewhere/notes.txt';
+  const REAL = '/elsewhere/real/notes.txt';
+  const PRIVATE = '/elsewhere/Documents';
+  const INSIDE = `${PRIVATE}/rota.txt`;
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    resetRemoteLaneBStore();
+    forgetOpenedThere();
+    forgetStarts();
+    overRl2(T);
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+  });
+
+  const tab = (path: string, appSessionId: AppSessionId = T): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${machineOf(appSessionId)}:${path}`, kind: 'file', path, line: null, appSessionId, machine: machineOf(appSessionId), pinned: false });
+  const shown = (path = OUT, appSessionId: AppSessionId = T) => useViewer.getState().entries.get(tab(path, appSessionId).id)!;
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const lead = () => document.querySelector<HTMLElement>('[data-path-lead]')!;
+  const label = () => document.querySelector<HTMLElement>('[data-read-only]');
+  const body = () => document.querySelector<HTMLElement>('[data-refusal]');
+  const saveFailure = () => document.querySelector<HTMLElement>('span[role="alert"]')?.textContent ?? null; // the bar's line below the path
+  const reads = (main: { callsOf: ReturnType<typeof installDisk>['callsOf'] }) => main.callsOf('files.read');
+  // The disk as studio's daemon answers it for an owner: `/elsewhere` outside the session's folders, and what admits a file
+  // there for the session (a counted name, an added record).
+  function disk(files: Record<string, string>, how: { names?: readonly string[]; added?: readonly string[] } = {}) {
+    const names = new Set(how.names ?? []);
+    const served = installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === THERE && names.has(path), added: how.added });
+    offs.push(connectCodeEvents()); // main's pushed events into the stores, once the bridge is installed
+    return served;
+  }
+  const show = (path = OUT, appSessionId: AppSessionId = T, agent = false) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={tab(path, appSessionId)} agent={agent} />);
+  };
+  const editable = async (path = OUT) => {
+    await waitFor(() => expect(shown(path)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+  };
+  const protectedThere = 'This file is in a folder macOS protects on studio. Opening it may show a privacy prompt on studio’s own screen.';
+  const protectedThrough = 'This path goes through a link into another folder macOS protects on studio. Choose the file with Open File… to open it.';
+  // studio's answer to a read inside a private folder that did not carry `open`, as main's adapter words it
+  const asksOpen = (only: (input: Record<string, unknown>) => boolean = () => true) => (name: string, input: Record<string, unknown>) =>
+    name === 'files.read' && input.open !== true && (input.path as string).startsWith(`${PRIVATE}/`) && only(input) ? refused('Not opened: the file is in a folder macOS protects on studio', 'protected') : null;
+
+  it('every read carries named (and agent with the agent’s mark); an entry with a pin saves by one files.writeOutside, never files.write; its path says where Save writes on studio, with no label', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    main.reals[OUT] = REAL;
+    show();
+    await editable();
+    expect(reads(main).length).toBeGreaterThan(0);
+    expect(reads(main).every((input) => input.named === true && !('open' in input) && !('agent' in input))).toBe(true);
+    expect(shown()).toMatchObject({ named: true, locked: null, pin: REAL });
+    expect(label()).toBeNull();
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    expect(lead().getAttribute('title')).toBe(`Save writes to ${REAL} on studio`);
+    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${REAL} on studio`);
+    typed('two ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    await settle();
+    expect(main.callsOf('files.writeOutside')).toEqual([]); // typing sends no save
+    expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('ok');
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: THERE, path: OUT, content: 'two one\n', expectedHash: fakeHash('one\n'), real: REAL }]);
+    expect(main.callsOf('files.write')).toEqual([]);
+    cleanup();
+    useViewer.getState().reset();
+    main.calls.splice(0);
+    show(OUT, T, true);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready' }));
+    expect(reads(main).every((input) => input.named === true && input.agent === true)).toBe(true);
+  });
+
+  it('a file inside the session’s folders there is read with named and answered unmarked; its save is files.write, as today', async () => {
+    const main = disk({ '/r/a.ts': 'inside\n' });
+    show('/r/a.ts');
+    await editable('/r/a.ts');
+    expect(reads(main).every((input) => input.named === true)).toBe(true);
+    expect(shown('/r/a.ts')).toMatchObject({ named: false, pin: null });
+    expect(lead().getAttribute('title')).toBe('/r/a.ts');
+    typed('+');
+    await waitFor(() => expect(shown('/r/a.ts').dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(shown('/r/a.ts').tabId))).toBe('ok');
+    expect(main.callsOf('files.write')).toEqual([{ appSessionId: THERE, path: '/r/a.ts', content: '+inside\n', expectedHash: fakeHash('inside\n') }]);
+    expect(main.callsOf('files.writeOutside')).toEqual([]);
+  });
+
+  // Decision 11's two kinds (Decision Log 25: the property the renderer guard's old entry held, in a test of its own)
+  it.each([
+    ['a session of another profile of this Mac', P, () => {}],
+    ['a terminal session on another machine', TERMINAL, () => overRl2(TERMINAL, {}, 'A')],
+  ] as const)('%s is read without named, agent or open and never answered outside; its save is files.write', async (_, session, arrange) => {
+    arrange();
+    const main = disk({ '/r/a.ts': 'theirs\n', [OUT]: 'outside\n' }, { names: [OUT] });
+    openedThere(OTHER_MACHINE).add('/r');
+    show('/r/a.ts', session, true);
+    await waitFor(() => expect(shown('/r/a.ts', session)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('+');
+    await waitFor(() => expect(shown('/r/a.ts', session).dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(shown('/r/a.ts', session).tabId))).toBe('ok');
+    cleanup();
+    show(OUT, session);
+    await waitFor(() => expect(shown(OUT, session).status).toBe('error'));
+    expect(reads(main).length).toBeGreaterThan(0);
+    expect(reads(main).every((input) => !('named' in input) && !('agent' in input) && !('open' in input))).toBe(true);
+    expect(shown('/r/a.ts', session)).toMatchObject({ named: false, pin: null, locked: null });
+    expect(shown(OUT, session)).toMatchObject({ named: false, pin: null, error: OUTSIDE_REFUSAL });
+    expect(main.callsOf('files.write')).toEqual([{ appSessionId: bareOf(session), path: '/r/a.ts', content: '+theirs\n', expectedHash: fakeHash('theirs\n') }]);
+    expect(main.callsOf('files.writeOutside')).toEqual([]);
+  });
+
+  it('a read’s failure that carries issues.refusal is drawn as its message alone, nothing of the file shown; one that carries none as its notice (UX wave U6b-4b)', async () => {
+    const main = disk({ [OUT]: 'secret\n' }, { names: [OUT] });
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
+    show();
+    await waitFor(() => expect(body()).not.toBeNull());
+    expect(body()!.querySelector('p')!.textContent).toBe('Not opened: only studio’s owners can');
+    expect(shown()).toMatchObject({ said: true, kind: null, text: '' });
+    expect(document.body.textContent).not.toContain('secret');
+    cleanup();
+    main.answers.by = () => null;
+    show('/elsewhere/unnamed.txt');
+    await waitFor(() => expect(body()).not.toBeNull());
+    // UX wave U6b-4b: the plain read's refusal there: the path is outside the folders on studio; the three ways are not said,
+    // since studio's daemon did not run the open itself
+    expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', ASK_AGENT, '/elsewhere/unnamed.txt', OUTSIDE_REFUSAL]);
+    expect(shown('/elsewhere/unnamed.txt').said).toBe(false);
+  });
+
+  it('a read that answers that the path moved (a claimed read’s FILES_MOVED) is drawn as a failed read', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', FILES_MOVED)) : null);
+    show();
+    await waitFor(() => expect(body()).not.toBeNull());
+    expect(body()!.querySelector('p')!.textContent).toBe('This file could not be opened.'); // UX wave U6b-4b: the act ran and failed otherwise
+    expect(body()!.querySelector('[data-notice-detail]')!.textContent).toBe(`Not opened: ${FILES_MOVED}`);
+    expect(shown()).toMatchObject({ status: 'error', kind: null, editable: false });
+  });
+
+  describe('“Read-only” (decision 12’s third column)', () => {
+    it('an added file whose standing has a sentence reads elsewhere: its panel holds the sentence and no Open File…', async () => {
+      disk({ [OUT]: 'added\n' }, { added: [OUT] });
+      rosterSays(T, { owner: false });
+      show();
+      await waitFor(() => expect(label()).not.toBeNull());
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      expect(label()!.getAttribute('data-read-only')).toBe('elsewhere');
+      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
+      fireEvent.click(label()!);
+      const panel = await waitFor(() => document.querySelector<HTMLElement>('[data-read-only-panel]')!);
+      expect(panel.textContent).toBe('Read-only: Only studio’s owners can save this file there.');
+      expect(within(panel).queryByRole('button')).toBeNull();
+      expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only: Only studio’s owners can save this file there.');
+    });
+
+    it('with no sentence it reads added, and the panel’s Open File… opens the chooser on that machine', async () => {
+      const main = disk({ [OUT]: 'added\n' }, { added: [OUT] });
+      show();
+      await waitFor(() => expect(label()).not.toBeNull());
+      expect(readOnlyReason(shown())).toBe('added');
+      fireEvent.click(label()!);
+      const panel = await waitFor(() => document.querySelector<HTMLElement>('[data-read-only-panel]')!);
+      fireEvent.click(within(panel).getByRole('button', { name: 'Open File…' }));
+      await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+      expect(main.callsOf('layout.openFile')).toEqual([]);
+      expect(main.callsOf('files.listOutside')).toEqual([{ appSessionId: THERE }]);
+    });
+
+    it('W1: an edited outside file whose read answers the ownership refusal keeps its document, stops being editable with the sentence, and Save sends nothing', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      rosterSays(T, { owner: false });
+      main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
+      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: OUT, kind: 'changed' }, OTHER_MACHINE)); // from studio, its bare id lifted with it
+      await waitFor(() => expect(shown().status).toBe('error'));
+      expect(shown()).toMatchObject({ dirty: true, editable: false, pin: OUT });
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      expect(existingViewState(shown().tabId)?.docOf?.()).toBe('mine one\n');
+      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: only studio’s owners can'); // UC-7's sentence, said once (Decision Log 30 d)
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    it('R9: studio replaced by an older build under unsaved edits: the standing’s update sentence is the title, Save sends nothing and no files.write', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { capabilities: ['rl2.channel'] }));
+      await waitFor(() => expect(label()?.getAttribute('data-read-only')).toBe('elsewhere'));
+      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Can’t save this file on studio yet. Update MAWS on studio and try again.');
+      // Fix wave (review finding 7; decision 14, B9): Save answers the refusal as the save's failure, nothing sent
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: update MAWS on studio and try again');
+      expect(shown()).toMatchObject({ dirty: true, saving: false });
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    it('offline, the edited document stays savable: its save waits for the machine, as decision 14 says', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }));
+      expect(readOnlyReason(shown())).toBeNull();
+      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('ok');
+      expect(main.callsOf('files.writeOutside')).toHaveLength(1);
+    });
+
+    // Fix wave (review finding 2): waiting offline is the owners'; a person known not to own the machine sends nothing
+    it('offline, an edited file of a person who does not own the machine sends no save and says why', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined, owner: false }));
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: only studio’s owners can');
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    // Decision Log 30 (d): the failure of a save the machine could not be reached for, as the bar draws it
+    it('a save that fails with studio offline reads exactly the refusal’s sentence, said once', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }));
+      main.answers.by = (name) => (name === 'files.writeOutside' ? refused('Not saved: studio is offline', 'offline') : null);
+      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('error');
+      expect(saveFailure()).toBe('Not saved: studio is offline');
+      expect(main.files[OUT]).toBe('one\n');
+    });
+  });
+
+  it('R7: a save the service refuses there is worded as U6e’s, with the way on', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.answers.by = (name) => (name === 'files.writeOutside' ? fail(failureWords('files.writeOutside', OUTSIDE_REFUSAL)) : null);
+    expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('error');
+    expect(shown().saveError).toBe('MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it');
+    expect(saveFailure()).toBe('Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it'); // no sentence of UC-7: U6e's prefix
+    expect(main.files[OUT]).toBe('one\n');
+  });
+
+  describe('a private folder there (decision 18; W3)', () => {
+    it('shows the sentence and Open it with no document; the press sends one read with open, and every later read and save of that entry carries it', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(body()).not.toBeNull());
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: true, said: true, kind: null, text: '' });
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+      const before = reads(main).length;
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' })); // a second press while it reads sends nothing more
+      await editable(INSIDE);
+      expect(reads(main).slice(before)).toEqual([{ appSessionId: THERE, path: INSIDE, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true, open: true }]);
+      expect(openedThere(OTHER_MACHINE).has(INSIDE)).toBe(true);
+      typed('+');
+      await waitFor(() => expect(shown(INSIDE).dirty).toBe(true));
+      expect(await act(() => useViewer.getState().save(shown(INSIDE).tabId))).toBe('ok');
+      expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: THERE, path: INSIDE, content: '+rota\n', expectedHash: fakeHash('rota\n'), real: INSIDE, open: true }]);
+      const sent = reads(main).length;
+      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: INSIDE, kind: 'changed' }, OTHER_MACHINE));
+      await waitFor(() => expect(reads(main).length).toBeGreaterThan(sent)); // the change is read again
+      await settle();
+      expect(reads(main).slice(before).every((input) => input.open === true)).toBe(true);
+    });
+
+    it('a path under a folder confirmed in the chooser carries open from its first read; an entry never opened so carries none', async () => {
+      const main = disk({ [INSIDE]: 'rota\n', [OUT]: 'notes\n' }, { names: [INSIDE, OUT] });
+      main.answers.by = asksOpen();
+      openedThere(OTHER_MACHINE).add(PRIVATE);
+      show(INSIDE);
+      await editable(INSIDE);
+      expect(reads(main).every((input) => input.open === true)).toBe(true);
+      cleanup();
+      main.calls.splice(0);
+      show(OUT);
+      await editable(OUT);
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+    });
+
+    it('a read that carried open and answers protected again draws the second sentence with Open File… and no Open it (Decision Log 20)', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = (name, input) => (name === 'files.read' && input.path === INSIDE ? refused('Not opened: the file is in a folder macOS protects on studio', 'protected') : null);
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await waitFor(() => expect(body()!.querySelector('p')!.textContent).toBe(protectedThrough));
+      expect(within(body()!).queryByRole('button', { name: 'Open it' })).toBeNull();
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: false });
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open File…' }));
+      await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+      expect(main.callsOf('layout.openFile')).toEqual([]);
+    });
+
+    // Decision Log 30 (c) as built (a): main's projection keeps no field of a refusal but its word, so Open it remembers the file
+    it('Open it remembers the file: its reads carry open after, and another file in that folder still asks', async () => {
+      const OTHER_INSIDE = `${PRIVATE}/minutes.txt`;
+      const main = disk({ [INSIDE]: 'rota\n', [OTHER_INSIDE]: 'minutes\n' }, { names: [INSIDE, OTHER_INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await editable(INSIDE);
+      expect(openedThere(OTHER_MACHINE).has(INSIDE)).toBe(true); // the control
+      cleanup();
+      main.calls.splice(0);
+      show(OTHER_INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+    });
+
+    // Fix wave (review finding 6): the second sentence follows what the request carried, not what is known when it answers
+    it('a read sent with no open, its folder confirmed while it is out, answers protected with the first sentence and Open it', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      const gate = main.hold('files.read');
+      show(INSIDE);
+      await waitFor(() => expect(reads(main)).toHaveLength(1));
+      expect(reads(main)[0]).not.toHaveProperty('open');
+      openedThere(OTHER_MACHINE).add(PRIVATE); // the chooser's confirmation lands meanwhile
+      gate.release();
+      await waitFor(() => expect(body()).not.toBeNull());
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(within(body()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: true, offersOpenFile: false });
+    });
+
+    // Fix wave (review finding 3): a link into a private folder chosen in the chooser, followed through the tab's first read
+    it('a file chosen through a link into a private folder opens with open on its first read, and asks nothing', async () => {
+      const GRANTED = `${PRIVATE}/rota.txt`;
+      const main = disk({ [GRANTED]: 'rota\n' }, { names: [GRANTED] });
+      const asks = asksOpen();
+      main.answers.by = (name, input) => {
+        if (name === 'files.listOutside') return { ok: true, value: { status: 'listed', path: '/home/someone', parent: '/home', home: '/home/someone', entries: [{ name: 'latest', path: '/home/someone/latest', kind: 'link', protected: false }], cursor: null } };
+        if (name === 'files.chooseOutside') return input.open === true ? { ok: true, value: { status: 'granted', path: GRANTED } } : { ok: true, value: { status: 'refused', reason: 'protected' } };
+        return asks(name, input);
+      };
+      const chooser = createRemoteChooser(T, { ...chooserCalls(), machine: () => 'studio', startAt: null });
+      await waitFor(() => expect(chooser.state().at).toBe('listed'));
+      chooser.select('/home/someone/latest');
+      const chosen = chooser.choose();
+      await waitFor(() => expect(chooser.state().at).toBe('asking'));
+      chooser.confirm();
+      expect(await chosen).toBe(GRANTED);
+      show(GRANTED);
+      await editable(GRANTED);
+      expect(reads(main).length).toBeGreaterThan(0);
+      expect(reads(main).every((input) => input.open === true)).toBe(true);
+      expect(body()).toBeNull();
+    });
+
+    it('W3: an answer for a tab closed meanwhile lands nowhere; a failure of the press leaves the sentence and the button', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      main.answers.by = (name, input) => (name === 'files.read' && input.open === true ? { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine studio is not reachable' } } : asksOpen()(name, input));
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await settle();
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(within(body()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      main.answers.by = asksOpen();
+      const gate = main.hold('files.read');
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await waitFor(() => expect(reads(main).at(-1)).toMatchObject({ open: true }));
+      cleanup();
+      act(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main })); // the tab closed
+      act(() => useViewer.getState().prune());
+      gate.release();
+      await settle();
+      expect(useViewer.getState().entries.has(tab(INSIDE).id)).toBe(false);
+    });
+
+    it('a framed file there asks layout.frameFile with the tab’s agent, and with open only for an entry in openedThere (Decision Log 26)', async () => {
+      const PDF = '/elsewhere/ledger.pdf';
+      const PRIVATE_PDF = `${PRIVATE}/minutes.pdf`;
+      const main = disk({ [PDF]: '%PDF-1.4 invented\n', [PRIVATE_PDF]: '%PDF-1.4 invented\n' }, { names: [PDF, PRIVATE_PDF] });
+      main.answers.by = asksOpen();
+      show(PDF, T, true);
+      await waitFor(() => expect(shown(PDF).frame?.status).toBe('ready'));
+      expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: THERE, path: PDF, agent: true }]);
+      cleanup();
+      show(PRIVATE_PDF);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await waitFor(() => expect(shown(PRIVATE_PDF).frame?.status).toBe('ready'));
+      expect(main.callsOf('layout.frameFile')[1]).toEqual({ appSessionId: THERE, path: PRIVATE_PDF, open: true });
+    });
+  });
+
+  it('W2: a tab shown again, remounted or restored reads as U6c has it, the same reads a named file of this Mac sends', async () => {
+    const count = async (session: AppSessionId) => {
+      useViewer.getState().reset();
+      const named = (appSessionId: string, path: string) => path === OUT && (appSessionId === THERE || appSessionId === MAIN_A);
+      const served = installDisk({ [OUT]: 'one\n' }, { outside: ['/elsewhere'], names: named });
+      const first = show(OUT, session);
+      await waitFor(() => expect(shown(OUT, session).status).toBe('ready'));
+      first.unmount();
+      const second = render(<FileViewer tab={tab(OUT, session)} />); // remounted: shown again
+      await settle();
+      second.unmount();
+      useViewer.getState().reset(); // a relaunch: the store holds nothing, the tab is restored
+      render(<FileViewer tab={tab(OUT, session)} />);
+      await waitFor(() => expect(shown(OUT, session).status).toBe('ready'));
+      await settle();
+      cleanup();
+      return served.callsOf('files.read').length;
+    };
+    expect(await count(T)).toBe(await count(A));
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, decision 4, L14): a shown Markdown file
+// resolves a relative link against the folder of the path its tab holds. UX wave U6b-4c (Q9) reverses its L14 and N2.3 in
+// the window: a link there, or in a subagent's transcript, asks the daemon to follow it first (`files.follow`), and the
+// read then asks by name as any chip's does; what the daemon finds is the only evidence the link adds.
+describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b-4b)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    resetFollows(); // UX wave U6b-4c
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    offs.push(registerPanelTool(filesTool));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  // `/elsewhere` is outside the folders; `named` the paths session A's transcript names there; U6b-4c: `links` what the
+  // daemon's follow finds
+  function disk(files: Record<string, string>, named: string[] = [], links: DiskLink[] = []) {
+    const names = new Set(named);
+    return { ...installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path), links }), names };
+  }
+  const sideFiles = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  const mainFile = (path: string) => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).find((tab): tab is Extract<TabRef, { kind: 'file' }> => tab.kind === 'file' && tab.path === path);
+  const asked = (path: string) => ({ appSessionId: MAIN_A, path, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true });
+  const shownFile = (path: string) => {
+    act(() => void openFile(A, path, null, { main: true }));
+    return render(<FileViewer tab={fileTab(path)} />);
+  };
+
+  it('a relative link opens against the shown file’s folder beside the chat, and on ⌘ in the main area (L4)', async () => {
+    disk({ '/r/docs/guide.md': '[setup](setup.md) and [the app](../app.ts#L3)', '/r/docs/setup.md': 's\n', '/r/app.ts': 'a\n' });
+    shownFile('/r/docs/guide.md');
+    const setup = await screen.findByTitle('setup.md');
+    act(() => void fireEvent.click(setup));
+    expect(sideFiles()).toEqual([{ file: '/r/docs/setup.md', line: null, preview: true }]);
+    act(() => void fireEvent.click(screen.getByTitle('../app.ts'), { metaKey: true }));
+    expect(mainFile('/r/app.ts')).toMatchObject({ line: 3, appSessionId: A });
+  });
+
+  // U6b-4c reverses it in the window (Q9): one follow of exactly that path from the shown file, then the one read
+  it('a relative link in a shown file outside the folders follows, then asks for its sibling by name for the tab’s session: one follow and one read of exactly that path, refused where the daemon finds no link (N2.3)', async () => {
+    const main = disk({ '/elsewhere/docs/guide.md': '[setup](setup.md)', '/elsewhere/docs/setup.md': 'not named\n' }, ['/elsewhere/docs/guide.md']);
+    shownFile('/elsewhere/docs/guide.md');
+    const setup = await screen.findByTitle('setup.md');
+    act(() => void fireEvent.click(setup, { metaKey: true }));
+    const tab = mainFile('/elsewhere/docs/setup.md')!;
+    expect(tab).toMatchObject({ appSessionId: A });
+    render(<FileViewer tab={tab} />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere('/elsewhere/docs/setup.md')));
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: MAIN_A, path: '/elsewhere/docs/setup.md', from: { file: '/elsewhere/docs/guide.md' } }]);
+    expect(main.callsOf('files.read').filter((input) => input.path === '/elsewhere/docs/setup.md')).toEqual([asked('/elsewhere/docs/setup.md')]);
+    const order = main.calls.filter((call) => call.input.path === '/elsewhere/docs/setup.md' && call.name !== 'files.watch').map((call) => call.name);
+    expect(order).toEqual(['files.follow', 'files.read']);
+  });
+
+  // L5 (R2): the window resolves the relative chip against the session's working folder; the transcript wrote the relative
+  // string, which names nothing, so the one read for the absolute path is refused
+  it('a relative transcript chip that climbs out of the working folder makes one named read of the absolute path for the row’s session, refused (L5)', async () => {
+    const main = installDisk({ '/outside/secret.md': 'secret\n' }, { outside: ['/outside'], names: () => false });
+    // B's folder is deeper than A's, so a path resolved against B's would be /b/deep/outside/secret.md: only A's gives the one below
+    useSessions.setState({ records: new Map([[A, record(A, { directory: '/r/work' })], [B, record(B, { directory: '/b/deep/er/work' })]]) });
+    try {
+      useLayout.getState().openTab({ kind: 'session', appSessionId: B }); // another session in front
+      const row = { storeKey: A, variant: 'session', actions: { ...NO_ACTIONS, openFile: codeTranscriptActions.openFile }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'row' } as const;
+      render(
+        <TranscriptProvider value={row}>
+          <Markdown markdown="See [x](../../outside/secret.md)." live={false} />
+        </TranscriptProvider>,
+      );
+      const chip = await screen.findByTitle('../../outside/secret.md');
+      act(() => void fireEvent.click(chip, { metaKey: true }));
+      const tab = mainFile('/outside/secret.md')!;
+      expect(tab).toMatchObject({ appSessionId: A });
+      render(<FileViewer tab={tab} />);
+      await waitFor(() => expect(noticeLines()).toEqual(outsideHere('/outside/secret.md')));
+      expect(main.callsOf('files.read')).toEqual([asked('/outside/secret.md')]);
+    } finally {
+      useSessions.setState({ records: new Map() });
+    }
+  });
+
+  // U6b-4c reverses it in the window (Q9): each click follows from its own source first, and then reads by name; the
+  // subagent's transcript, which the daemon finds holds no such link, admits nothing; the shown file, which does, admits it
+  it('a path link in a subagent’s transcript and in a shown Markdown file each follow from their source and then ask by name: refused where the daemon finds no link, opened where it does (L14)', async () => {
+    const main = disk({ '/elsewhere/guide.md': `[the notes](${OUT})`, [OUT]: 'the notes\n' }, ['/elsewhere/guide.md'], [{ from: { file: '/elsewhere/guide.md' }, path: OUT }]);
+    // a subagent's transcript is keyed `<session>:<agent>`; its rows act on the session (useRowSession), and its mount adds
+    // the agent's id to every open (Transcript.tsx, held in Transcript.test.tsx)
+    const openFromAgent: typeof codeTranscriptActions.openFile = (path, line, session, options) => codeTranscriptActions.openFile(path, line, session, { ...options, agent: 'agent-1' });
+    const subagent = { storeKey: `${A}:agent-1`, variant: 'child', actions: { ...NO_ACTIONS, openFile: openFromAgent }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'agent' } as const;
+    render(
+      <TranscriptProvider value={subagent}>
+        <Markdown markdown={`Wrote [the notes](${OUT}).`} live={false} />
+      </TranscriptProvider>,
+    );
+    shownFile('/elsewhere/guide.md');
+    await waitFor(() => expect(screen.getAllByTitle(OUT)).toHaveLength(2));
+    const [inSubagent, inFile] = screen.getAllByTitle(OUT);
+    const reads = () => main.callsOf('files.read').filter((input) => input.path === OUT);
+    const follows = () => main.callsOf('files.follow');
+    act(() => void fireEvent.click(inSubagent, { metaKey: true }));
+    render(<FileViewer tab={mainFile(OUT)!} />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(follows()).toEqual([{ appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } }]);
+    expect(reads()).toEqual([asked(OUT)]);
+    act(() => void fireEvent.click(inFile, { metaKey: true })); // the same tab, read again after the follow: its last read failed
+    await waitFor(() => expect(useViewer.getState().entries.get(FILE(OUT))).toMatchObject({ status: 'ready', text: 'the notes\n', named: true, locked: null }));
+    expect(follows()).toEqual([
+      { appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } },
+      { appSessionId: MAIN_A, path: OUT, from: { file: '/elsewhere/guide.md' } },
+    ]);
+    expect(reads()).toEqual([asked(OUT), asked(OUT)]);
+    expect(mainFile(OUT)).toMatchObject({ appSessionId: A });
+  });
+});
+
+// ---- UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, M4; W1, Interfaces §F) -------
+// A click on a link in a shown Markdown file, or on a link or a chip in a subagent's transcript, of a session on this Mac
+// asks the daemon to follow it (`files.follow`) before the tab is placed, and the tab's read waits for the follow; a read
+// sent before the click that lands refused, or read-only, after a follow that found the link is read once more. The fake
+// disk's daemon finds the links each case gives (`links`). Invented paths under `/elsewhere` (outside session A's folders)
+// and `/r`, invented text.
+describe('a link followed from a shown Markdown file, or from a subagent’s transcript (U6b-4c)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const DOC = '/r/docs/guide.md';
+  const LINKED = `[the notes](${OUT})`;
+  const FROM_DOC = { appSessionId: MAIN_A, path: OUT, from: { file: DOC } };
+  const LINKED_ONLY = 'Read-only: the file that links this one is read-only in this conversation. Choose it with File ▸ Open File… to edit it';
+  const RESULT_ONLY = 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it';
+  const REFUSED = 'Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    resetFollows();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    offs.push(registerPanelTool(filesTool));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  // `/elsewhere` is outside the folders; what admits a file there for A: a counted name, a result-only name; `links` what
+  // the daemon's follow finds
+  function disk(files: Record<string, string>, how: { links?: DiskLink[]; names?: string[]; results?: string[]; older?: boolean } = {}) {
+    const forA = (paths: string[] = []) => (appSessionId: string, path: string) => appSessionId === MAIN_A && paths.includes(path);
+    return installDisk(files, { outside: ['/elsewhere'], names: forA(how.names), results: forA(how.results), links: how.links ?? [{ from: { file: DOC }, path: OUT }], older: how.older });
+  }
+  const shown = (path = OUT) => useViewer.getState().entries.get(FILE(path));
+  const reads = (main: ReturnType<typeof installDisk>, path = OUT) => main.callsOf('files.read').filter((input) => input.path === path);
+  const asked = (path: string, extra: Record<string, unknown> = {}) => ({ appSessionId: MAIN_A, path, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true, ...extra });
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const saveButton = () => screen.queryByRole('button', { name: 'Save' });
+  const label = () => document.querySelector<HTMLElement>('[data-read-only]');
+  const retryButton = () => document.querySelector<HTMLButtonElement>('[data-notice-retry]');
+  const sideFiles = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  const mainFile = (path: string) => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).find((tab) => tab.kind === 'file' && tab.path === path);
+  // A file's main tab and its viewer, as an open from the main area makes them
+  const showFile = (path: string, appSessionId: AppSessionId = A) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={fileTab(path, null, appSessionId)} />);
+  };
+  // The shown Markdown file `DOC` and its link to `path`, found before anything else is drawn with that title
+  const linkIn = async (path = OUT, doc = DOC) => {
+    showFile(doc);
+    await waitFor(() => expect(shown(doc)?.status).toBe('ready'));
+    return screen.findByTitle(path);
+  };
+  const click = (chip: HTMLElement, main = true) => act(() => void fireEvent.click(chip, { metaKey: main }));
+  // A subagent's chip, as the child's mount opens it (Transcript.tsx gives `agent`)
+  const fromAgent = (path: string, agent = 'agent-1') => act(() => codeTranscriptActions.openFile(path, undefined, A, { main: true, agent }));
+  const unreachable = () => fail('files.read: no answer within 10 s', 'timeout');
+
+  it('K1: the click follows from the shown file before its one read; the file opens beside the chat, and on ⌘ in the main area editable, with no label, and Save writes it', async () => {
+    const main = disk({ [DOC]: `Notes: ${LINKED}`, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip, false);
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
+    expect(sideFiles()).toEqual([{ file: OUT, line: null, preview: true }]); // nothing of the source on the tab
+    await settle(); // that follow answered
+    click(chip);
+    expect(main.callsOf('files.follow')).toHaveLength(2); // the first had settled, so this is a follow of its own
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true, named: true, locked: null, pin: OUT }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    expect(label()).toBeNull();
+    expect(reads(main)).toEqual([asked(OUT)]);
+    const order = main.calls.filter((call) => call.input.path === OUT && call.name !== 'files.watch').map((call) => call.name);
+    expect(order).toEqual(['files.follow', 'files.follow', 'files.read']);
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: MAIN_A, path: OUT, content: 'two one\n', expectedHash: fakeHash('one\n'), real: OUT }]);
+  });
+
+  it('K1: a PDF linked the same way is drawn in its frame', async () => {
+    const PDF = '/elsewhere/ledger.pdf';
+    const main = disk({ [DOC]: `[the ledger](${PDF})`, [PDF]: '%PDF-1.4 invented\n' }, { links: [{ from: { file: DOC }, path: PDF }] });
+    click(await linkIn(PDF));
+    render(<FileViewer tab={fileTab(PDF)} />);
+    await waitFor(() => expect(shown(PDF)).toMatchObject({ kind: 'frame', named: true, frame: { status: 'ready' } }));
+    expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: MAIN_A, path: PDF }]);
+  });
+
+  it('X3.4 (M4): a relative chip of a file at /base/dir/doc.md follows with the entry’s path as its source and the path the read then asks; an artifact’s view follows nothing', async () => {
+    const main = disk({ '/base/dir/doc.md': '[a](sub/a.md) and [out](/elsewhere/notes.txt)', '/base/dir/sub/a.md': 'a\n', [OUT]: 'the notes\n' });
+    click(await linkIn('sub/a.md', '/base/dir/doc.md'));
+    render(<FileViewer tab={fileTab('/base/dir/sub/a.md')} />);
+    await waitFor(() => expect(shown('/base/dir/sub/a.md')?.status).toBe('ready'));
+    const [followed] = main.callsOf('files.follow');
+    expect(followed).toEqual({ appSessionId: MAIN_A, path: '/base/dir/sub/a.md', from: { file: '/base/dir/doc.md' } });
+    expect(reads(main, '/base/dir/sub/a.md').map((input) => input.path)).toEqual([followed.path]);
+    cleanup();
+    // an artifact's view names no source: an absolute link, which a follow could take, follows nothing
+    render(<MarkdownView entry={shown('/base/dir/doc.md')!} artifactView />);
+    click(screen.getByTitle(OUT));
+    expect(mainFile(OUT)).toBeDefined(); // the open was made
+    expect(main.callsOf('files.follow')).toHaveLength(1);
+  });
+
+  it('W1 (a): while the follow is under way the tab shows its loading state and sends no files.read; when it is answered, exactly one', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    expect(main.callsOf('files.watch')).toContainEqual({ appSessionId: MAIN_A, path: '/elsewhere' }); // the watch was asked; the read waits
+    expect(shown()).toMatchObject({ status: 'loading', pending: 1 });
+    expect(reads(main)).toEqual([]);
+    await act(async () => held.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    await settle();
+    expect(reads(main)).toEqual([asked(OUT)]); // one read: it noted the count after the wait, so nothing reads again
+  });
+
+  it.each([
+    ['answers not-linked', (main: ReturnType<typeof installDisk>) => void main.links.splice(0)],
+    ['is refused by a daemon of an older build (K11)', (main: ReturnType<typeof installDisk>) => void (main.daemon.older = true)],
+    ['times out', (main: ReturnType<typeof installDisk>) => void (main.answers.by = (name) => (name === 'files.follow' ? fail('files.follow: no answer within 10 s', 'timeout') : null))],
+    ['finds no host', (main: ReturnType<typeof installDisk>) => void (main.answers.by = (name) => (name === 'files.follow' ? fail('the files service is not running', 'host_unavailable') : null))],
+    ['is refused to the caller', (main: ReturnType<typeof installDisk>) => void (main.answers.by = (name) => (name === 'files.follow' ? fail('forbidden sender', 'forbidden_sender') : null))],
+  ])('W1 (b): a follow that %s settles the wait the same way: the read is sent and its refusal draws the notice', async (_, how) => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    how(main);
+    click(await linkIn());
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
+    expect(reads(main)).toEqual([asked(OUT)]);
+  });
+
+  it('K11: on a daemon of an older build a link to a file inside the folders opens as before', async () => {
+    const main = disk({ [DOC]: '[the app](/r/app.ts)', '/r/app.ts': 'export const a = 1;\n' }, { older: true });
+    click(await linkIn('/r/app.ts'));
+    render(<FileViewer tab={fileTab('/r/app.ts')} />);
+    await waitFor(() => expect(codeText()).toBe('export const a = 1;'));
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: MAIN_A, path: '/r/app.ts', from: { file: DOC } }]);
+  });
+
+  it('W1 (c): a second click on the link while its follow is under way starts no second follow', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    click(chip);
+    click(chip, false);
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC]);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await act(async () => held.release());
+    await waitFor(() => expect(shown()?.status).toBe('ready'));
+    expect(reads(main)).toHaveLength(1);
+  });
+
+  it('W1 (d): the same tab opened for another session while the follow is under way reads at once for it, and the read that waited lands nowhere', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    const { rerender } = render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    expect(reads(main)).toEqual([]);
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />); // the other session's read does not wait
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }));
+    expect(reads(main).map((input) => input.appSessionId)).toEqual(['app-b']);
+    await act(async () => held.release());
+    await settle();
+    expect(reads(main).map((input) => input.appSessionId)).toEqual(['app-b', MAIN_A]); // sent when its follow settled ...
+    expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }); // ... and its answer landed nowhere
+  });
+
+  it('W1 (d): the tab closed while the follow is under way leaves no entry when its read answers', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    const { unmount } = render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    unmount();
+    act(() => useLayout.getState().closeTab(FILE(OUT)));
+    expect(shown()).toBeUndefined();
+    await act(async () => held.release());
+    await settle();
+    expect(shown()).toBeUndefined();
+  });
+
+  it('W1 (f): a tab that shows the file’s refusal is read again after the follow, and then shows the file', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    showFile(OUT);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    click(chip);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    expect(reads(main)).toEqual([asked(OUT), asked(OUT)]);
+  });
+
+  it('W1 (g): a read sent before the click that lands refused after the follow found the link is read once more: two reads in all', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read'); // answered as the disk is when it arrives: refused, no record yet
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    click(chip); // the read is pending, so the open itself reads nothing
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    await act(async () => before.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    await settle();
+    expect(reads(main)).toEqual([asked(OUT), asked(OUT)]);
+  });
+
+  it('W1 (g): the held read landing refused before the follow answers waits for it, then reads once more: two reads in all', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT))); // drawn as it is
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    await act(async () => followed.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g): a file that opened read-only before the click is read once more after the follow, and is editable', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' }, { results: [OUT] });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    await act(async () => before.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: null, editable: true }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g): no further read for a key whose entry became another session’s while the follow was under way', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    const { rerender } = showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT))); // landed refused; the store waits for the follow
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }));
+    await act(async () => followed.release());
+    await settle();
+    expect(reads(main).map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b']);
+  });
+
+  it('W1 (g): a hidden tab whose read landed refused before the follow found the link reads again when it is next shown, once', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const before = main.hold('files.read');
+    const { unmount } = showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(shown()?.status).toBe('error'));
+    unmount(); // the tab hidden: left for its next mount
+    await act(async () => followed.release());
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g) and Retry: while the store’s read again is out Retry is not offered and starts nothing', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? unreachable() : null);
+    const before = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    click(chip);
+    await act(async () => before.release());
+    await waitFor(() => expect(retryButton()?.disabled).toBe(false)); // unreachable: Retry offered, nothing out
+    main.answers.by = () => null; // the daemon answers again
+    const again = main.hold('files.read');
+    await act(async () => followed.release());
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    expect(shown()).toMatchObject({ retrying: true });
+    expect(retryButton()!.disabled).toBe(true);
+    act(() => useViewer.getState().retry(FILE(OUT)));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+    await act(async () => again.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', retrying: false }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (g) and Retry: a Retry’s read out when the follow found the link starts nothing meanwhile; landing refused it is read once more, the guard held to the end', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? unreachable() : null);
+    showFile(OUT);
+    await waitFor(() => expect(retryButton()?.disabled).toBe(false));
+    main.answers.by = () => null;
+    const retried = main.hold('files.read'); // Retry's read, answered refused: no record yet
+    fireEvent.click(retryButton()!);
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    await settle();
+    expect(reads(main)).toHaveLength(2); // nothing read while Retry's read is out
+    const again = main.hold('files.read');
+    await act(async () => retried.release());
+    await waitFor(() => expect(reads(main)).toHaveLength(3));
+    expect(shown()).toMatchObject({ retrying: true }); // the read again holds the guard Retry took
+    await act(async () => again.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', retrying: false }));
+    await settle();
+    expect(reads(main)).toHaveLength(3);
+  });
+
+  it('W1 (g) and Retry: a Retry pressed while the follow is under way reads after it, noting its count: one read and no read again', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    main.answers.by = (name, input) => (name === 'files.read' && input.path === OUT ? unreachable() : null);
+    showFile(OUT);
+    await waitFor(() => expect(retryButton()?.disabled).toBe(false));
+    main.answers.by = () => null;
+    const followed = main.hold('files.follow');
+    click(chip);
+    fireEvent.click(retryButton()!);
+    await settle();
+    expect(reads(main)).toHaveLength(1);
+    await act(async () => followed.release());
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', retrying: false }));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('W1 (h): a Markdown file’s and a subagent’s clicks for one path are two follows, and the read waits for both, the one that came during its wait included', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' }, { links: [{ from: { file: DOC }, path: OUT }, { from: { agent: 'agent-1' }, path: OUT }] });
+    const chip = await linkIn();
+    const first = main.hold('files.follow');
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    const second = main.hold('files.follow');
+    fromAgent(OUT);
+    expect(main.callsOf('files.follow')).toEqual([FROM_DOC, { appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } }]);
+    await act(async () => first.release());
+    await settle();
+    expect(reads(main)).toEqual([]);
+    await act(async () => second.release());
+    await waitFor(() => expect(shown()?.status).toBe('ready'));
+    expect(reads(main)).toHaveLength(1);
+  });
+
+  it('W1 (i): several loads that waited for one follow each send their read when it settles; only the newest lands', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const held = main.hold('files.follow');
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await settle();
+    act(() => useViewer.getState().applyChanged({ appSessionId: A, path: OUT, kind: 'changed' })); // a second load, waiting too
+    await settle();
+    expect(reads(main)).toEqual([]);
+    // the two reads tell apart: the older answers the old text and is held past the newer, which answers the new one
+    let n = 0;
+    main.answers.by = (name, input) => {
+      if (name === 'files.read' && input.path === OUT && ++n === 2) main.files[OUT] = 'newer notes\n';
+      return null;
+    };
+    const older = main.hold('files.read');
+    await act(async () => held.release());
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'newer notes\n' }));
+    await act(async () => older.release()); // the older answer, 'the notes', lands nowhere
+    await settle();
+    expect(shown()).toMatchObject({ status: 'ready', text: 'newer notes\n' });
+    expect(reads(main)).toHaveLength(2);
+  });
+
+  it('K4: a file a read-only Markdown file links opens read-only with its own sentence and Open File…; once the Markdown file is chosen, the same link opens it editable', async () => {
+    const SOURCE = '/elsewhere/docs/guide.md';
+    const main = disk({ [SOURCE]: LINKED, [OUT]: 'the notes\n' }, { results: [SOURCE], links: [{ from: { file: SOURCE }, path: OUT }] });
+    const chip = await linkIn(OUT, SOURCE);
+    expect(shown(SOURCE)).toMatchObject({ locked: 'result' });
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', named: true, locked: 'linked', editable: false }));
+    expect(readOnlyReason(shown()!)).toBe('linked');
+    const at = [...document.querySelectorAll<HTMLElement>('[data-read-only]')].find((node) => node.getAttribute('data-read-only') === 'linked')!;
+    expect(at.getAttribute('aria-description')).toBe(LINKED_ONLY);
+    await userEvent.setup().click(at);
+    const panel = await screen.findByRole('dialog');
+    expect(within(panel).getByText(LINKED_ONLY)).toBeTruthy();
+    expect(within(panel).queryByRole('button', { name: 'Open File…' })).not.toBeNull();
+    main.grant(MAIN_A, SOURCE); // the person chose the Markdown file
+    click(chip);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: null, editable: true }));
+    expect(main.linked(MAIN_A, OUT)).toEqual({ why: null });
+  });
+
+  it('K5: a subagent’s link to a file its counted text names opens editable; a path only a tool’s result there holds opens read-only', async () => {
+    const RESULT = '/elsewhere/listed.txt';
+    const main = disk({ [OUT]: 'the notes\n', [RESULT]: 'listed\n' }, { links: [{ from: { agent: 'agent-1' }, path: OUT }, { from: { agent: 'agent-1', why: 'result' }, path: RESULT }] });
+    fromAgent(OUT);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: null, editable: true }));
+    cleanup();
+    fromAgent(RESULT);
+    render(<FileViewer tab={fileTab(RESULT)} />);
+    await waitFor(() => expect(shown(RESULT)).toMatchObject({ status: 'ready', locked: 'result', editable: false }));
+    expect(label()!.getAttribute('aria-description')).toBe(RESULT_ONLY);
+    expect(main.callsOf('files.follow')).toEqual([
+      { appSessionId: MAIN_A, path: OUT, from: { agent: 'agent-1' } },
+      { appSessionId: MAIN_A, path: RESULT, from: { agent: 'agent-1' } },
+    ]);
+  });
+
+  it('K6: a link the shown file draws but the daemon no longer finds opens nothing: U6b-4b’s first notice', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' }, { links: [] }); // the file on disk changed since it was drawn
+    click(await linkIn());
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(main.linked(MAIN_A, OUT)).toBeNull();
+  });
+
+  it('K6: a link typed into the Source view and not saved draws no chip, and a follow of the path it names finds nothing; the saved link is still drawn and followed', async () => {
+    const DRAFT = '/elsewhere/draft.txt';
+    const main = disk({ [DOC]: `Saved: ${LINKED}\n`, [OUT]: 'the notes\n', [DRAFT]: 'a draft\n' }); // the daemon finds the saved link alone
+    await linkIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed(`Draft: [the draft](${DRAFT})\n`);
+    await waitFor(() => expect(shown(DOC)!.dirty).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
+    await waitFor(() => expect(document.querySelector('[data-markdown-view]')).not.toBeNull());
+    expect(screen.queryByTitle(DRAFT), 'the rendered view draws the saved text: no chip for the typed link').toBeNull();
+    expect(screen.getByTitle(OUT), 'the control: the saved link’s chip').toBeTruthy();
+    expect(await ipc.invoke('files.follow', { appSessionId: A, path: DRAFT, from: { file: DOC } }), 'a direct follow of the typed link’s path').toEqual({ ok: true, value: { status: 'not-linked' } });
+    act(() => follow(A, DRAFT, { file: DOC }));
+    await settle();
+    expect(linkedCount(A, DRAFT)).toBe(0);
+    expect(main.linked(MAIN_A, DRAFT)).toBeNull();
+    click(screen.getByTitle(OUT)); // the control: the saved link follows and is recorded
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    expect(linkedCount(A, OUT)).toBe(1);
+  });
+
+  it('K8: an open the agent asked for never follows, and a file only a link record admits is refused to it; the person’s own click then opens it', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    act(() => void openFile(A, OUT, null, { main: true, asked: 'agent', from: { file: DOC } }));
+    expect(main.callsOf('files.follow')).toEqual([]);
+    click(chip); // the person's click records the link; the agent's mark on the tab still reads as the agent's
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    const agentTab = render(<FileViewer tab={fileTab(OUT)} agent />);
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    expect(reads(main).at(-1)).toEqual(asked(OUT, { agent: true }));
+    agentTab.unmount();
+    render(<FileViewer tab={fileTab(OUT)} />); // the person's tab: read without the mark
+    click(chip);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', agent: false, editable: true }));
+    expect(reads(main).at(-1)).toEqual(asked(OUT));
+  });
+
+  it('K10: a click for a session on another machine sends no follow', () => {
+    const main = disk({});
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    act(() => void openFile(REMOTE, OUT, null, { main: true, from: { file: DOC } }));
+    act(() => codeTranscriptActions.openFile(OUT, undefined, REMOTE, { main: true, agent: 'agent-1' }));
+    expect(main.callsOf('files.follow')).toEqual([]);
+  });
+
+  it('W1 (g): with two reads out from before the click, the newest landing refused while the older is still out is read once more when the older has ended', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const older = main.hold('files.read');
+    const newer = main.hold('files.read');
+    showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    act(() => useViewer.getState().applyChanged({ appSessionId: A, path: OUT, kind: 'changed' })); // a newer load supersedes it
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).not.toBeNull());
+    await act(async () => newer.release()); // the newest lands refused while the older read is out
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT)));
+    await settle();
+    expect(reads(main)).toHaveLength(2);
+    await act(async () => older.release()); // superseded: it lands nowhere, and the load it was ends
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main)).toHaveLength(3);
+  });
+
+  it('W1 (g): a comparison of A’s read that ends after the tab became B’s leaves B’s owed read again in place: B reads once more', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const aRead = main.hold('files.read');
+    const { rerender } = showFile(OUT);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    const aFollow = main.hold('files.follow');
+    click(chip);
+    await act(async () => aRead.release()); // A's read lands refused; its comparison waits for A's follow
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: A, status: 'error' }));
+    const bOlder = main.hold('files.read');
+    const bNewer = main.hold('files.read');
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />); // the same tab, now B's
+    await waitFor(() => expect(reads(main)).toHaveLength(2));
+    act(() => useViewer.getState().applyChanged({ appSessionId: B, path: OUT, kind: 'changed' })); // B's newer load
+    await waitFor(() => expect(reads(main)).toHaveLength(3));
+    act(() => follow(B, OUT, { file: DOC })); // B's own follow finds the link
+    await waitFor(() => expect(main.linked('app-b', OUT)).not.toBeNull());
+    await act(async () => bNewer.release()); // B's newest lands refused while its older read is out: B owes a read again
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error' }));
+    await act(async () => aFollow.release()); // A's comparison resumes, for an entry no longer A's
+    await settle();
+    expect(reads(main)).toHaveLength(3);
+    await act(async () => bOlder.release()); // B's superseded read ends: B's read again goes now
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'ready', text: 'the notes\n' }));
+    await settle();
+    expect(reads(main).map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b', 'app-b', 'app-b']);
+  });
+
+  it('W1 (g): a Load more sent before the click that lands from a file that may not be saved is read once more, keeping what it loaded', async () => {
+    const BIG = '/elsewhere/big.log';
+    // two and a half chunks of real lines, in a file past the editor's cap: a head of one chunk, and one more by Load more
+    const text = lines(81_920, (n) => `log ${String(n).padStart(6, '0')} invented`.padEnd(31, '.'));
+    expect(text.length).toBe(81_920 * 32);
+    const main = disk({ [DOC]: `[the log](${BIG})`, [BIG]: text }, { results: [BIG], links: [{ from: { file: DOC }, path: BIG }] });
+    main.files[BIG] = { text, bytes: 5 * MiB } as never;
+    showFile(BIG);
+    await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', kind: 'head', locked: 'result', loaded: MiB }));
+    const before = reads(main, BIG).length;
+    const more = main.hold('files.read');
+    act(() => useViewer.getState().loadMore(FILE(BIG)));
+    await waitFor(() => expect(reads(main, BIG)).toHaveLength(before + 1));
+    // the follow alone, with no open (whose own read again of a named tab would hide what this case holds)
+    act(() => follow(A, BIG, { file: DOC }));
+    await waitFor(() => expect(main.linked(MAIN_A, BIG)).not.toBeNull());
+    await act(async () => more.release()); // lands read-only: no record when it arrived
+    await waitFor(() => expect(shown(BIG)).toMatchObject({ status: 'ready', locked: null }));
+    await settle();
+    // the read again covers what Load more reached: its two chunks, and the text stays the two chunks' whole
+    expect(reads(main, BIG).slice(before).map((input) => input.offset)).toEqual([MiB, 0, MiB]);
+    expect(shown(BIG)).toMatchObject({ loaded: 2 * MiB, text: text.slice(0, 2 * MiB) });
+  });
+
+  it('K3: a relative link in a Markdown file outside the folders that the person chose opens the file beside it, editable', async () => {
+    const SOURCE = '/elsewhere/docs/guide.md';
+    const NEXT = '/elsewhere/docs/next.md';
+    const main = disk({ [SOURCE]: '[next](next.md)', [NEXT]: 'next\n' }, { links: [{ from: { file: SOURCE }, path: NEXT }] });
+    main.grant(MAIN_A, SOURCE); // chosen with Open File…
+    click(await linkIn('next.md', SOURCE));
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: MAIN_A, path: NEXT, from: { file: SOURCE } }]);
+    render(<FileViewer tab={fileTab(NEXT)} />);
+    await waitFor(() => expect(shown(NEXT)).toMatchObject({ status: 'ready', named: true, locked: null, editable: true }));
+    expect(main.linked(MAIN_A, NEXT)).toEqual({ why: null });
+  });
+
+  it('Decision Log 14: a Save the daemon admits after the record is written and before the window hears linked leaves the tab clean, as saved, with nothing read over it', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    main.unlink(MAIN_A, OUT); // the record pushed out
+    const readsBefore = reads(main).length;
+    const held = main.hold('files.follow');
+    click(chip);
+    main.publish(MAIN_A, OUT); // the daemon wrote the record; its reply has not reached the window
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    await waitFor(() => expect(shown()).toMatchObject({ dirty: false, saving: false, saveError: null }));
+    await act(async () => held.release());
+    await settle();
+    expect(shown()).toMatchObject({ status: 'ready', dirty: false, saveError: null, error: null, failure: null, locked: null, editable: true, text: 'two one\n', hash: fakeHash('two one\n') });
+    expect(view().state.doc.toString()).toBe('two one\n');
+    expect(document.body.textContent).not.toContain('Could not save');
+    expect(reads(main).length - readsBefore).toBeLessThanOrEqual(1);
+  });
+
+  // The branch panel (scalpel-4, finding 1): the agent's open still reading when the person's own open takes the tab back
+  // and that read refuses; the click's open then finds only the agent's superseded read pending, which lands nowhere
+  it('W1 (f): a click whose open finds only a superseded read pending reads the file after the follow (the branch panel)', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'the notes\n' });
+    const chip = await linkIn();
+    const agentsRead = main.hold('files.read'); // the agent's open, its read held
+    render(<FileViewer tab={fileTab(OUT)} agent />);
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    act(() => void openFile(A, OUT, null, { main: true })); // the person's own open: the agent's mark goes, and the file is read again
+    await waitFor(() => expect(noticeLines()).toEqual(outsideHere(OUT))); // that read refused, the agent's still out
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true }));
+    await act(async () => agentsRead.release());
+    await settle();
+    expect(shown()).toMatchObject({ status: 'ready', text: 'the notes\n', editable: true });
+  });
+
+  // The branch panel (scalpel-4, finding 3): a Save made under session A answers after the tab moved to B, whose read waits
+  // on a follow of B's own: that read lands, and the tab shows B's answer, not A's writable state
+  it('a Save of the tab’s earlier session that answers while the tab’s read for its new session waits on a follow leaves that read to land (the branch panel)', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip);
+    const { rerender } = render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    const write = main.hold('files.writeOutside');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.callsOf('files.writeOutside')).toHaveLength(1));
+    const followed = main.hold('files.follow');
+    act(() => follow(B, OUT, { file: '/r/docs/other.md' })); // B's click on a link that holds nothing for it
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />); // the tab moves to B, its save out
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, pending: 1 })); // B's read, waiting on the follow
+    await act(async () => write.release());
+    await waitFor(() => expect(shown()).toMatchObject({ saving: false, dirty: false }));
+    await act(async () => followed.release());
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, status: 'error', editable: false }));
+    expect(noticeLines()).toEqual(outsideHere(OUT));
+    expect(main.files[OUT]).toBe('two one\n');
+  });
+
+  // The branch panel (scalpel-4, finding 4): an unwatched outside file read in chunks changes after its first; the
+  // continuation, sent before the follow found the link, answers another version, read-only. The load ends there, and
+  // once the follow has found the link the file is read once more, whole
+  it('W1 (g): a first open whose continuation found the file changed, read-only before the follow found the link, is read once more after it, whole and editable (the branch panel)', async () => {
+    const lines = (letter: string) => `${letter.repeat(99)}\n`.repeat(Math.ceil(FILES_READ_DEFAULT_LENGTH / 100) + 10);
+    const main = disk({ [DOC]: LINKED, [OUT]: lines('a') }, { results: [OUT] });
+    const chip = await linkIn();
+    const first = main.hold('files.read');
+    const second = main.hold('files.read');
+    // the tab's view mounted through the store alone: a megabyte drawn by the editor would only slow the case
+    act(() => void openFile(A, OUT, null, { main: true }));
+    act(() => void useViewer.getState().mount(FILE(OUT), { appSessionId: A, path: OUT, line: null }));
+    await waitFor(() => expect(reads(main)).toHaveLength(1));
+    await act(async () => {
+      first.release();
+      main.files[OUT] = lines('b'); // changed before the continuation arrives
+    });
+    await waitFor(() => expect(reads(main)).toHaveLength(2)); // the continuation, answered as the changed file, read-only
+    click(chip);
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    await act(async () => second.release());
+    const changed = lines('b');
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', complete: true, locked: null, editable: true }));
+    expect(shown()!.text === changed, 'the whole changed file').toBe(true);
+    expect(reads(main)).toHaveLength(4); // the two of the first open, and the whole file once more in two
+  });
+
+  it('X5.14: with unsaved edits and the record gone, Save is refused and the edits stand; pressed while the click’s follow is under way, refused again; after it answers linked, Save writes', async () => {
+    const main = disk({ [DOC]: LINKED, [OUT]: 'one\n' });
+    const chip = await linkIn();
+    click(chip);
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('two ');
+    await waitFor(() => expect(shown()!.dirty).toBe(true));
+    main.unlink(MAIN_A, OUT); // pushed out of the session's records
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(shown()!.saveError).not.toBeNull());
+    expect(document.body.textContent).toContain(REFUSED);
+    expect(view().state.doc.toString()).toBe('two one\n');
+    expect(main.files[OUT]).toBe('one\n');
+    const held = main.hold('files.follow');
+    click(chip);
+    fireEvent.click(saveButton()!);
+    await settle();
+    expect(main.callsOf('files.writeOutside')).toHaveLength(2);
+    expect(main.files[OUT]).toBe('one\n');
+    expect(shown()).toMatchObject({ dirty: true, saving: false });
+    await act(async () => held.release());
+    await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    expect(shown()).toMatchObject({ dirty: false, saveError: null });
+    expect(reads(main)).toHaveLength(1); // nothing was read over the edits
+  });
+});
+
+// ---- UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; Interfaces §C, S1, "The look") ------
+// A file that cannot be read shows the notice of its cause where "Refused: " and the command's words stood: its sentences,
+// the path (with Copy path where the path is outside the folders), Retry where reading again can help, and the command's
+// own words last. Retry is the store's `retry`: one read per press, held from the press until that read has settled, and
+// none while a save is out; under unsaved edits it reads as a watch's event does, the edits standing. Invented paths under
+// `/elsewhere` (outside session A's folders) and `/r`, invented text.
+describe('the notice of a file that cannot be read (U6b-4b)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const CODE = '/r/a.ts';
+  const T = addressOf(OTHER_MACHINE, 'app-notice' as AppSessionId); // a session MAWS runs on studio
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+    resetRemoteLaneBStore();
+  });
+
+  const unreachable = (message = 'files.read: the files service is not running') => fail(message, 'host_unavailable');
+  function disk(files: Record<string, string>) {
+    const served = installDisk(files, { outside: ['/elsewhere'], names: () => false });
+    offs.push(connectCodeEvents());
+    return served;
+  }
+  const tabOf = (path: string, appSessionId: AppSessionId = A): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${machineOf(appSessionId)}:${path}`, kind: 'file', path, line: null, appSessionId, machine: machineOf(appSessionId), pinned: false });
+  const shown = (path: string, appSessionId: AppSessionId = A) => useViewer.getState().entries.get(tabOf(path, appSessionId).id);
+  const show = (path: string, appSessionId: AppSessionId = A) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={tabOf(path, appSessionId)} />);
+  };
+  const block = () => document.querySelector<HTMLElement>('[data-refusal]');
+  const retry = () => block()?.querySelector<HTMLButtonElement>('[data-notice-retry]') ?? null;
+  const reads = (main: { callsOf: ReturnType<typeof installDisk>['callsOf'] }, path: string) => main.callsOf('files.read').filter((input) => input.path === path);
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+
+  it('L7: on this Mac a path outside the folders the session has no evidence for reads the first notice: three sentences, the path with Copy path, the command’s words small, and no Retry', async () => {
+    disk({ [OUT]: 'secret\n' });
+    const writeText = vi.fn(async () => {});
+    const before = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    try {
+      show(OUT);
+      await waitFor(() => expect(block()).not.toBeNull());
+      expect(block()!.getAttribute('role')).toBe('alert');
+      expect(noticeCause()).toBe('outside');
+      expect(noticeLines()).toEqual(outsideHere(OUT));
+      expect(block()!.querySelector('p')!.textContent).toBe('This file is outside the folders this session works in.'); // the headline, first
+      expect(block()!.querySelector('[data-notice-detail]')!.textContent).toBe(OUTSIDE_REFUSAL);
+      for (const line of noticeLines()) expect(line).not.toMatch(/^(Refused|files\.)/);
+      expect(retry()).toBeNull();
+      await act(async () => void fireEvent.click(within(block()!).getByRole('button', { name: 'Copy path' })));
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(OUT);
+      expect(block()!.querySelector('[data-notice-copy]')!.textContent).toBe('Copied');
+      expect(document.body.textContent).not.toContain('secret\n');
+    } finally {
+      if (before) Object.defineProperty(navigator, 'clipboard', before);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('Copy path says when the clipboard refused the path, and when there is no clipboard', async () => {
+    disk({ [OUT]: 'secret\n' });
+    const before = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const copy = () => block()!.querySelector<HTMLButtonElement>('[data-notice-copy]')!;
+    try {
+      for (const clipboard of [undefined, { writeText: async () => Promise.reject(new Error('denied')) }]) {
+        Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+        cleanup();
+        useViewer.getState().reset();
+        show(OUT);
+        await waitFor(() => expect(block()).not.toBeNull());
+        expect(copy().textContent).toBe('Copy path');
+        await act(async () => void fireEvent.click(copy()));
+        await waitFor(() => expect(copy().textContent).toBe("Couldn't copy the path"));
+      }
+    } finally {
+      if (before) Object.defineProperty(navigator, 'clipboard', before);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('L8: a path with no file reads “No file at this path.” with its path, and offers neither Copy path nor Retry', async () => {
+    disk({});
+    show('/r/gone.md');
+    await waitFor(() => expect(block()).not.toBeNull());
+    expect(noticeCause()).toBe('not-found');
+    expect(noticeLines()).toEqual(['No file at this path.', '/r/gone.md', 'not found: /r/gone.md']);
+    expect(block()!.querySelector('[data-notice-copy]')).toBeNull();
+    expect(retry()).toBeNull();
+  });
+
+  it('L10 and S1 (b): with this Mac’s daemon not answering the notice offers Retry; a Retry that fails again draws its own cause, and one that reads shows the file', async () => {
+    const main = disk({ [CODE]: 'export const a = 1;\n' });
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    expect(noticeLines()).toEqual(["MAWS's service on this Mac is not answering.", CODE, 'files.read: the files service is not running']);
+    expect(retry()!.textContent).toBe('Retry');
+    expect(retry()!.disabled).toBe(false);
+    main.answers.by = (name, input) => (name === 'files.read' ? fail(`not found: ${input.path as string}`) : null); // back, and the file is not there
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(noticeCause()).toBe('not-found'));
+    expect(retry()).toBeNull();
+    expect(reads(main, CODE)).toHaveLength(2);
+
+    cleanup();
+    useViewer.getState().reset();
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null; // the daemon answers again
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(codeText()).toBe('export const a = 1;'));
+    expect(block()).toBeNull();
+    expect(shown(CODE)).toMatchObject({ status: 'ready', error: null, failure: null, retrying: false });
+  });
+
+  it('S1 (c): a read the route gave up on reads as unreachable, with Retry', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    main.answers.by = (name) => (name === 'files.read' ? fail('files.read: no answer within 10 s', 'timeout') : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    expect(noticeLines()[0]).toBe("MAWS's service on this Mac is not answering.");
+    expect(retry()).not.toBeNull();
+  });
+
+  it('S1 (a): a second press while the file’s watch has not answered starts nothing, the button drawn disabled; one read follows the watch', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    // the first watch is refused, so a read again takes the watch again first (the Files store installs a refused watch again)
+    let watches = 0;
+    main.answers.by = (name) => (name === 'files.watch' && ++watches === 1 ? fail('files.watch: the files service is not running', 'host_unavailable') : name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    const watch = main.hold('files.watch');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(retry()!.disabled).toBe(true));
+    fireEvent.click(retry()!);
+    act(() => useViewer.getState().retry(tabOf(CODE).id)); // the act itself refuses too, not only the button
+    await settle();
+    expect(main.callsOf('files.watch')).toHaveLength(2);
+    expect(reads(main, CODE)).toHaveLength(1); // none yet: the read waits for the watch
+    watch.release();
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(2));
+    await waitFor(() => expect(retry()!.disabled).toBe(false));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(2);
+  });
+
+  it('S1 (a): a second press while the read is held starts nothing, the button drawn disabled', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    const read = main.hold('files.read');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(2));
+    expect(retry()!.disabled).toBe(true);
+    fireEvent.click(retry()!);
+    act(() => useViewer.getState().retry(tabOf(CODE).id));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(2);
+    read.release();
+    await waitFor(() => expect(retry()!.disabled).toBe(false));
+    expect(reads(main, CODE)).toHaveLength(2);
+  });
+
+  it('S1 (d): a Retry’s read held while the same path is opened for another session lands nowhere', async () => {
+    const main = disk({ [CODE]: 'session a’s\n' });
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    const { rerender } = show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null;
+    const read = main.hold('files.read'); // session A's Retry, answered with A's text once released
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(2));
+    main.files[CODE] = 'session b’s\n';
+    act(() => void openFile(B, CODE)); // the tab is one per machine and path: it takes session B
+    rerender(<FileViewer tab={tabOf(CODE, B)} />);
+    await waitFor(() => expect(shown(CODE, B)).toMatchObject({ appSessionId: B, status: 'ready', text: 'session b’s\n' }));
+    read.release();
+    await settle();
+    expect(shown(CODE, B)).toMatchObject({ appSessionId: B, status: 'ready', text: 'session b’s\n', retrying: false });
+  });
+
+  it('S1 (e): under unsaved edits a re-read that failed shows the notice over them; Retry keeps the edit while held, lands the file with the edit standing in the view the person chose, and a failure again keeps it', async () => {
+    const main = disk({ [CODE]: 'one\n' });
+    show(CODE);
+    await waitFor(() => expect(shown(CODE)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('mine ');
+    await waitFor(() => expect(shown(CODE)!.dirty).toBe(true));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    expect(shown(CODE)).toMatchObject({ status: 'error', dirty: true });
+    expect(existingViewState(tabOf(CODE).id)?.docOf?.()).toBe('mine one\n');
+
+    // held: the notice stands and so does the edit
+    main.answers.by = () => null;
+    const read = main.hold('files.read');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(shown(CODE)!.pending).toBe(1));
+    expect(noticeCause()).toBe('unreachable');
+    expect(retry()!.disabled).toBe(true);
+    expect(shown(CODE)).toMatchObject({ dirty: true });
+    read.release();
+    // answered with the file: the notice goes, the entry still unsaved, the edited text in the editor
+    await waitFor(() => expect(block()).toBeNull());
+    expect(shown(CODE)).toMatchObject({ status: 'ready', dirty: true, sourceView: false, failure: null });
+    await waitFor(() => expect(codeText()).toBe('mine one'));
+
+    // answered with a failure: the notice again, the edit still held; Retry's own read answers a failure of its own words
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    const before = reads(main, CODE).length;
+    main.answers.by = (name) => (name === 'files.read' ? fail('files.read: no answer within 10 s', 'timeout') : null);
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(document.querySelector('[data-notice-detail]')?.textContent).toBe('files.read: no answer within 10 s'));
+    await waitFor(() => expect(retry()!.disabled).toBe(false));
+    expect(reads(main, CODE)).toHaveLength(before + 1);
+    expect(noticeCause()).toBe('unreachable');
+    expect(shown(CODE)).toMatchObject({ status: 'error', dirty: true });
+    expect(existingViewState(tabOf(CODE).id)?.docOf?.()).toBe('mine one\n');
+  });
+
+  it('S1 (e): a Markdown file left on Rendered with unsaved edits stays on Rendered after a Retry, and its Source holds the edit', async () => {
+    const DOC = '/r/notes.md';
+    const main = disk({ [DOC]: 'saved\n' });
+    show(DOC);
+    await waitFor(() => expect(shown(DOC)).toMatchObject({ status: 'ready', kind: 'markdown' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('edited ');
+    await waitFor(() => expect(shown(DOC)!.dirty).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: DOC, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null;
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(block()).toBeNull());
+    expect(shown(DOC)).toMatchObject({ status: 'ready', dirty: true, sourceView: false });
+    expect(screen.getByText('saved')).toBeTruthy(); // Rendered shows the saved text, as for any unsaved edit
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    await waitFor(() => expect(codeText()).toBe('edited saved'));
+  });
+
+  it('S1 (f): while a save is out Retry is drawn disabled and starts nothing', async () => {
+    const main = disk({ [CODE]: 'one\n' });
+    show(CODE);
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('mine ');
+    await waitFor(() => expect(shown(CODE)!.dirty).toBe(true));
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    const write = main.hold('files.write');
+    let saved: Promise<unknown> = Promise.resolve();
+    act(() => void (saved = useViewer.getState().save(tabOf(CODE).id)));
+    await waitFor(() => expect(shown(CODE)!.saving).toBe(true));
+    expect(retry()!.disabled).toBe(true);
+    const before = reads(main, CODE).length;
+    fireEvent.click(retry()!);
+    act(() => useViewer.getState().retry(tabOf(CODE).id));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(before);
+    write.release();
+    await act(() => saved);
+    await waitFor(() => expect(retry()?.disabled).toBe(false));
+  });
+
+  it('S1 (f), the other order: Retry pressed while the watch is held, then a save whose conflict read is out when the watch answers: Retry reads nothing, and the conflict view stands', async () => {
+    const main = disk({ [CODE]: 'one\n' });
+    let watches = 0; // the first watch is refused, so Retry takes the watch again and waits for it
+    main.answers.by = (name) => (name === 'files.watch' && ++watches === 1 ? fail('files.watch: the files service is not running', 'host_unavailable') : null);
+    show(CODE);
+    await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
+    typed('mine ');
+    await waitFor(() => expect(shown(CODE)!.dirty).toBe(true));
+    main.files[CODE] = 'theirs\n'; // changed on disk: the save will conflict
+    main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: CODE, kind: 'changed' }));
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null;
+    const watch = main.hold('files.watch');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(main.callsOf('files.watch')).toHaveLength(2));
+    const before = reads(main, CODE).length;
+    const conflictRead = main.hold('files.read');
+    let saved: Promise<unknown> = Promise.resolve();
+    act(() => void (saved = useViewer.getState().save(tabOf(CODE).id)));
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(before + 1)); // the save's conflict read, out
+    watch.release();
+    await settle();
+    conflictRead.release();
+    expect(await act(() => saved)).toBe('conflict');
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(before + 1); // Retry read nothing
+    expect(shown(CODE)).toMatchObject({ saving: false, retrying: false, dirty: true, theirs: { view: 'merge', text: 'theirs\n' } });
+  });
+
+  // The branch review: the folder's watch invalidated while Retry waits for it is read by Retry's own read, once the watch
+  // installed again has answered: one read, whose file is shown
+  it('S1 (a): an invalidation while Retry waits for the watch starts no second read; Retry’s read shows the file', async () => {
+    const main = disk({ [CODE]: 'a\n' });
+    let watches = 0; // the first watch is refused, so Retry takes the watch again and waits for it
+    main.answers.by = (name) => (name === 'files.watch' && ++watches === 1 ? fail('files.watch: the files service is not running', 'host_unavailable') : name === 'files.read' ? unreachable() : null);
+    show(CODE);
+    await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+    main.answers.by = () => null; // the daemon answers again
+    const watch = main.hold('files.watch');
+    fireEvent.click(retry()!);
+    await waitFor(() => expect(main.callsOf('files.watch')).toHaveLength(2));
+    const before = reads(main, CODE).length;
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r', kind: 'invalidated' }));
+    watch.release();
+    await waitFor(() => expect(codeText()).toBe('a'));
+    await settle();
+    expect(reads(main, CODE)).toHaveLength(before + 1);
+    expect(shown(CODE)).toMatchObject({ status: 'ready', error: null, failure: null, retrying: false, pending: 0 });
+    expect(block()).toBeNull();
+  });
+
+  // The branch review: in a short split pane the notice is its own scroll box, its column centred only within at least the
+  // box's height, so a notice taller than the pane starts at its headline and scrolls, nothing above the scroll origin
+  it('the notice scrolls from its top: the block is the scroll box, and its column is centred within at least its height', async () => {
+    disk({ [OUT]: 'secret\n' });
+    show(OUT);
+    await waitFor(() => expect(block()).not.toBeNull());
+    const classes = (element: Element) => element.className.split(/\s+/);
+    expect(classes(block()!)).toEqual(expect.arrayContaining(['h-full', 'overflow-y-auto']));
+    expect(classes(block()!)).not.toContain('justify-center');
+    const column = block()!.firstElementChild!;
+    expect(classes(column)).toEqual(expect.arrayContaining(['flex', 'min-h-full', 'flex-col', 'justify-center']));
+    expect(classes(column)).not.toContain('h-full');
+    expect(column.querySelector('p')!.textContent).toBe('This file is outside the folders this session works in.');
+  });
+
+  // The branch review: a File artifact of another machine, read by the artifact alone (its session not in the window),
+  // names the artifact's machine when the read fails, not this Mac's service
+  it('a Library File artifact of another machine whose session the window does not know names that machine', async () => {
+    const ARTIFACT = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
+    const main = disk({});
+    overRl2(T); // the roster names the other machine studio
+    main.answers.by = (name) => (name === 'library.read' ? unreachable('library.read: machine studio is not reachable') : null);
+    const artifactView = (tabId: string) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, revision: 3 }} />);
+    try {
+      recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+      artifactView(`artifact:${ARTIFACT}:3`);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      expect(noticeLines()[0]).toBe('studio is not reachable.');
+      expect(retry()).not.toBeNull();
+      // the control: the same artifact of this Mac
+      cleanup();
+      useViewer.getState().reset();
+      resetArtifactMachines();
+      artifactView(`artifact:${ARTIFACT}:3:r1`);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      expect(noticeLines()[0]).toBe("MAWS's service on this Mac is not answering.");
+    } finally {
+      resetArtifactMachines();
+    }
+  });
+
+  describe('a session on another machine', () => {
+    beforeEach(() => overRl2(T));
+    const listed = (mine: boolean | null) =>
+      useSessions.setState((s) => {
+        const next = new Map(s.listed);
+        if (mine === null) next.delete(T);
+        else next.set(T, { ...s.listed.get(T)!, mine });
+        return { listed: next };
+      });
+    const grade = () => refused('files.read: refused grade by machine studio', 'grade');
+
+    it.each([
+      [true, 'not-on-record', 'studio does not have this session on record right now.', true],
+      [false, 'no-access', 'Your access to this session on studio does not include its files.', false],
+      [null, 'other', 'This file could not be opened.', true],
+    ] as const)('L9: a grade refusal of the read, the listing’s mine %s, reads %s', async (mine, cause, headline, offersRetry) => {
+      const main = disk({ '/r/a.ts': 'a\n' });
+      main.answers.by = (name) => (name === 'files.read' ? grade() : null);
+      listed(mine);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe(cause));
+      expect(noticeLines()).toEqual([headline, '/r/a.ts', 'files.read: refused grade by machine studio']);
+      expect(retry() !== null).toBe(offersRetry);
+    });
+
+    it('L9: with the machine not reachable the notice names it and offers Retry; started again, Retry shows the file', async () => {
+      const main = disk({ '/r/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      expect(noticeLines()[0]).toBe('studio is not reachable.');
+      main.answers.by = () => null;
+      fireEvent.click(retry()!);
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+    });
+
+    // The Mac run of e2e:remote's L9 scene: the link's return reopens the session's checkout feed, and main tells the folder
+    // of every files watch it gave back there invalidated (`src/main/lane-b/remote-checkout.ts`, `replay`). An errored tab
+    // whose folder's watch stood is read again by that invalidation, with no press: once, and the file shown.
+    it('L9: the machine back, the invalidation of the folder whose watch stood reads the unreachable file once, with no press', async () => {
+      const main = disk({ '/r/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      main.answers.by = () => null; // the link is up again
+      const before = reads(main, '/r/a.ts').length;
+      act(() => main.emit('files.changed', { appSessionId: bareOf(T), path: '/r', kind: 'invalidated' }, OTHER_MACHINE));
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+      await settle();
+      expect(reads(main, '/r/a.ts')).toHaveLength(before + 1);
+      expect(shown('/r/a.ts', T)).toMatchObject({ status: 'ready', error: null, failure: null, retrying: false, pending: 0 });
+      expect(block()).toBeNull();
+    });
+
+    it('L9: Retry pressed while the invalidation’s read is held is drawn disabled and starts nothing; the held read shows the file', async () => {
+      const main = disk({ '/r/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      main.answers.by = () => null;
+      const before = reads(main, '/r/a.ts').length;
+      const read = main.hold('files.read');
+      act(() => main.emit('files.changed', { appSessionId: bareOf(T), path: '/r', kind: 'invalidated' }, OTHER_MACHINE));
+      await waitFor(() => expect(reads(main, '/r/a.ts')).toHaveLength(before + 1));
+      await waitFor(() => expect(retry()?.disabled).toBe(true)); // the notice stands while the read is out
+      expect(noticeCause()).toBe('unreachable');
+      fireEvent.click(retry()!);
+      act(() => useViewer.getState().retry(tabOf('/r/a.ts', T).id));
+      await settle();
+      expect(reads(main, '/r/a.ts')).toHaveLength(before + 1);
+      read.release();
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+      await settle();
+      expect(reads(main, '/r/a.ts')).toHaveLength(before + 1);
+      expect(shown('/r/a.ts', T)).toMatchObject({ status: 'ready', retrying: false, pending: 0 });
+      expect(block()).toBeNull();
+    });
+
+    // The scene's other half: a folder nothing watched before the link went down (its watch failed with the read) is given
+    // back by no reopening, so nothing reads the tab again by itself; Retry, pressed with the machine back, shows the file.
+    it('L9: a folder whose watch failed with the read hears no invalidation, so the notice stands until Retry, which shows the file', async () => {
+      const main = disk({ '/r/notes/a.ts': 'from studio\n' });
+      main.answers.by = (name) => (name === 'files.read' || name === 'files.watch' ? unreachable('files.read: machine studio is not reachable') : null);
+      show('/r/notes/a.ts', T);
+      await waitFor(() => expect(noticeCause()).toBe('unreachable'));
+      main.answers.by = () => null;
+      const before = reads(main, '/r/notes/a.ts').length;
+      act(() => main.emit('files.changed', { appSessionId: bareOf(T), path: '/r', kind: 'invalidated' }, OTHER_MACHINE)); // the parent's, which stood
+      await settle();
+      expect(reads(main, '/r/notes/a.ts')).toHaveLength(before);
+      expect(retry()?.disabled).toBe(false);
+      fireEvent.click(retry()!);
+      await waitFor(() => expect(codeText()).toBe('from studio'));
+      expect(reads(main, '/r/notes/a.ts')).toHaveLength(before + 1);
+    });
+
+    it('L9: where studio’s daemon ran the open and refused the path, the notice says the three ways; UC-7’s refusal of the act is its headline, as it is', async () => {
+      const main = disk({ [OUT]: 'x\n' });
+      main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', OUTSIDE_REFUSAL)) : null);
+      show(OUT, T);
+      await waitFor(() => expect(noticeCause()).toBe('outside'));
+      expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', THREE_WAYS, ASK_AGENT, OUT, `Not opened: ${OUTSIDE_REFUSAL}`]);
+      expect(block()!.querySelector('[data-notice-copy]')).not.toBeNull();
+
+      cleanup();
+      useViewer.getState().reset();
+      main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
+      show(OUT, T);
+      await waitFor(() => expect(noticeCause()).toBe('said'));
+      expect(noticeLines()).toEqual(['Not opened: only studio’s owners can', OUT]); // no small line: it would say the same
+      expect(retry()).toBeNull();
+    });
+
+    it('decision 20: a folder macOS protects there keeps U6f’s sentence and Open it inside the notice’s block; the failure is kept whole', async () => {
+      const main = disk({ '/elsewhere/Documents/rota.txt': 'x\n' });
+      main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: the file is in a folder macOS protects on studio', 'protected') : null);
+      show('/elsewhere/Documents/rota.txt', T);
+      await waitFor(() => expect(noticeCause()).toBe('protected'));
+      expect(block()!.getAttribute('role')).toBe('alert');
+      expect(block()!.querySelector('p')!.textContent).toBe('This file is in a folder macOS protects on studio. Opening it may show a privacy prompt on studio’s own screen.');
+      expect(within(block()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      expect(retry()).toBeNull();
+      expect(shown('/elsewhere/Documents/rota.txt', T)!.failure).toEqual({ code: 'internal', message: 'Not opened: the file is in a folder macOS protects on studio', refusal: 'protected' });
+    });
   });
 });

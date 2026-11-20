@@ -1,9 +1,9 @@
 // The `@` menu's files belong to the folder they were listed for (UX wave U8c-2, M4 decision 8): when the agent's folder
 // changes, a list answered or in flight for the folder it left is never offered for the new one, whatever the query.
-import { Editor as RealEditor, type Editor, type Range } from '@tiptap/core';
+import { Editor, type JSONContent, type Range } from '@tiptap/core';
 import { PluginKey } from '@tiptap/pm/state';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
@@ -123,7 +123,7 @@ describe('the @ menu’s names (ticket 733a)', () => {
     expect(quotesGrant(parsed)).toBe(false);
     const catalog = { ...EMPTY_CATALOG, skills: [parsed, 'reviewer'] } as SessionCatalog;
     for (const [name, row] of [[parsed, 'review<br>'], ['reviewer', 'reviewer']] as const) {
-      const editor = new RealEditor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('@rev'))]) });
+      const editor = new Editor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('@rev'))]) });
       render(<AtMenu {...props('rev', '/repo')} editor={editor} command={(item: PopupItem) => item.apply(editor, { from: 1, to: 5 } as Range)} ctx={{ ...props('rev', '/repo').ctx, catalog }} />);
       await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
       await click(row);
@@ -133,5 +133,38 @@ describe('the @ menu’s names (ticket 733a)', () => {
       editor.destroy();
       cleanup();
     }
+  });
+});
+
+// board ticket 739: a name a model can write (a skill's) enters the draft as one line of literal text, never as markup the
+// editor parses; a path that holds a control character, which no mention can name, is not offered
+describe('what the @ menu puts in the draft', () => {
+  const NAME = 'x<br>y<p>z</p>\nw';
+  const lines = (editor: Editor) => (editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
+
+  it('a skill’s row puts /<name> at the start as one line of literal text', () => {
+    const command = vi.fn<(item: PopupItem) => void>();
+    render(<AtMenu {...props('', '')} command={command} ctx={{ ...props('', '').ctx, catalog: { ...EMPTY_CATALOG, skills: [NAME] } }} />);
+    act(() => (document.querySelector('[role="option"]') as HTMLElement).click());
+    const editor = new Editor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('see @'))]) });
+    command.mock.calls[0]![0].apply(editor, { from: 5, to: 6 });
+    expect(lines(editor)).toEqual(['/x<br>y<p>z</p>\ufffdw see ']);
+    editor.destroy();
+  });
+
+  it('leaves out a path that holds a control character', async () => {
+    render(<AtMenu {...props('sr', '/repo')} />);
+    await waitFor(() => expect(fake.pending('git.lsFiles')).toBe(1));
+    await act(() => fake.reply('git.lsFiles', files(['src/a.ts', 'src/b\nc.ts', 'src/d\u0085e.ts', 'src/f\u2028g.ts'])));
+    expect(options()).toEqual([['src/a.ts', null]]);
+  });
+
+  it('in path mode leaves out every file under a directory whose name holds a control character', async () => {
+    render(<AtMenu {...props('/sr', '/repo')} ctx={{ ...props('/sr', '/repo').ctx, additionalDirectories: ['/work/odd\tdir', '/work/plain'] }} />);
+    await waitFor(() => expect(fake.pending('git.lsFiles')).toBe(3));
+    await act(() => fake.reply('git.lsFiles', files(['src/a.ts']), 0));
+    await act(() => fake.reply('git.lsFiles', files(['src/b.ts']), 0));
+    await act(() => fake.reply('git.lsFiles', files(['src/c.ts']), 0));
+    expect(options().map(([path]) => path)).toEqual(['/repo/src/a.ts', '/work/plain/src/c.ts']);
   });
 });

@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Zoom probe</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  /* one line of red text, measured in a capture by its red ink; nothing else on the page is red */
+  #line { position: absolute; left: 40px; top: 24px; margin: 0; font: 32px/40px sans-serif; color: #e00000; }
+  /* the framed box a child view is placed over (row h, row j) */
+  #box { position: absolute; left: 40px; top: 120px; width: 400px; height: 240px; box-sizing: border-box; border: 1px solid #0000c0; }
+</style>
+</head>
+<body>
+<p id="line">Zoom probe line</p>
+<div id="box"></div>
+</body>
+</html>

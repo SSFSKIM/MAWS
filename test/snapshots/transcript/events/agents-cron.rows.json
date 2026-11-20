@@ -21,63 +21,6 @@
     "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
   },
   {
-    "at": "2026-10-06T11:12:15.035Z",
-    "autoDenied": 0,
-    "caption": "Loaded 2 tools, used CronCreate 2 times, used CronList",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T11:12:25.823Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:386cd114-7010-4342-abb7-eac942bb2812",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "loaded 2 tools",
-      "used CronCreate 2 times",
-      "used CronList"
-    ],
-    "startedAt": "2026-10-06T11:12:15.042Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 3,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.028520600000000004,
-      "denials": [],
-      "durationMs": 10779,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 4,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 4,
-      "usage": {
-        "cacheCreationInputTokens": 11858,
-        "cacheReadInputTokens": 82161,
-        "inputTokens": 36,
-        "outputTokens": 884,
-        "thinkingTokens": 405
-      }
-    },
-    "toolCalls": 4,
-    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
-  },
-  {
     "at": "2026-10-06T11:12:17.521Z",
     "blockIndex": 1,
     "id": "text:msg_011CfktBzYzGVMsxFt7fGnTJ:1",
@@ -373,6 +316,63 @@
     "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
   },
   {
+    "at": "2026-10-06T11:12:15.035Z",
+    "autoDenied": 0,
+    "caption": "Loaded 2 tools, used CronCreate 2 times, used CronList",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T11:12:25.823Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:386cd114-7010-4342-abb7-eac942bb2812",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "loaded 2 tools",
+      "used CronCreate 2 times",
+      "used CronList"
+    ],
+    "startedAt": "2026-10-06T11:12:15.042Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 3,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.028520600000000004,
+      "denials": [],
+      "durationMs": 10779,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 4,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 4,
+      "usage": {
+        "cacheCreationInputTokens": 11858,
+        "cacheReadInputTokens": 82161,
+        "inputTokens": 36,
+        "outputTokens": 884,
+        "thinkingTokens": 405
+      }
+    },
+    "toolCalls": 4,
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
     "at": "2026-10-06T11:14:20.103Z",
     "blockIndex": 1,
     "id": "text:msg_011CfktM15kX5Pk9MgKUVHWB:1",
@@ -420,63 +420,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Use CronDelete to cancel the job with id 481abb0a. Then call CronList and reply with its output.",
-    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
-  },
-  {
-    "at": "2026-10-06T11:16:23.246Z",
-    "autoDenied": 0,
-    "caption": "Loaded 1 tool, used CronDelete, used CronList",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T11:16:40.388Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:703e0237-f5f9-48f0-bac9-94cbb17c2692",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "loaded 1 tool",
-      "used CronDelete",
-      "used CronList"
-    ],
-    "startedAt": "2026-10-06T11:16:23.250Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 2,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.04951905,
-      "denials": [],
-      "durationMs": 17137,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 3,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 3,
-      "usage": {
-        "cacheCreationInputTokens": 926,
-        "cacheReadInputTokens": 76168,
-        "inputTokens": 28,
-        "outputTokens": 398,
-        "thinkingTokens": 169
-      }
-    },
-    "toolCalls": 3,
     "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
   },
   {
@@ -667,6 +610,63 @@
     "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
   },
   {
+    "at": "2026-10-06T11:16:23.246Z",
+    "autoDenied": 0,
+    "caption": "Loaded 1 tool, used CronDelete, used CronList",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T11:16:40.388Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:703e0237-f5f9-48f0-bac9-94cbb17c2692",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used CronDelete",
+      "used CronList"
+    ],
+    "startedAt": "2026-10-06T11:16:23.250Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 2,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.04951905,
+      "denials": [],
+      "durationMs": 17137,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 926,
+        "cacheReadInputTokens": 76168,
+        "inputTokens": 28,
+        "outputTokens": 398,
+        "thinkingTokens": 169
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
     "at": "2026-10-06T11:16:40.388Z",
     "attachments": [],
     "dropped": false,
@@ -678,62 +678,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Use CronCreate to schedule a recurring job \"0 9 * * 1\" with prompt \"E7 durable weekly\" and durable set to true. Then use CronCreate again to schedule a recurring job \"0 3 * * *\" with prompt \"E7 nightly\" (not durable). Then call CronList and reply with its output.",
-    "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
-  },
-  {
-    "at": "2026-10-06T11:16:40.388Z",
-    "autoDenied": 0,
-    "caption": "Used CronCreate 2 times, used CronList",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T11:16:52.375Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:d3323742-c528-4b10-8297-36c14387b554",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "used CronCreate 2 times",
-      "used CronList"
-    ],
-    "startedAt": "2026-10-06T11:16:40.389Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 3,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0589336,
-      "denials": [],
-      "durationMs": 11985,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 3,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 3,
-      "usage": {
-        "cacheCreationInputTokens": 973,
-        "cacheReadInputTokens": 52303,
-        "inputTokens": 18,
-        "outputTokens": 590,
-        "thinkingTokens": 188
-      }
-    },
-    "toolCalls": 3,
     "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
   },
   {
@@ -957,6 +901,62 @@
     "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
   },
   {
+    "at": "2026-10-06T11:16:40.388Z",
+    "autoDenied": 0,
+    "caption": "Used CronCreate 2 times, used CronList",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T11:16:52.375Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:d3323742-c528-4b10-8297-36c14387b554",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "used CronCreate 2 times",
+      "used CronList"
+    ],
+    "startedAt": "2026-10-06T11:16:40.389Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 3,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0589336,
+      "denials": [],
+      "durationMs": 11985,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 973,
+        "cacheReadInputTokens": 52303,
+        "inputTokens": 18,
+        "outputTokens": 590,
+        "thinkingTokens": 188
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
+  },
+  {
     "at": "2026-10-06T11:16:55.546Z",
     "attempt": null,
     "id": "error:replay:journal:502:0",
@@ -979,62 +979,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Call CronList (find it with ToolSearch) and reply with its output verbatim.",
-    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
-  },
-  {
-    "at": "2026-10-06T11:16:55.846Z",
-    "autoDenied": 0,
-    "caption": "Loaded 1 tool, used CronList",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T11:17:06.946Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:7a30e587-493f-47fc-a592-2397d7fe9938",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "loaded 1 tool",
-      "used CronList"
-    ],
-    "startedAt": "2026-10-06T11:16:56.746Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 1,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0700409,
-      "denials": [],
-      "durationMs": 6929,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 2,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 2,
-      "usage": {
-        "cacheCreationInputTokens": 926,
-        "cacheReadInputTokens": 81968,
-        "inputTokens": 28,
-        "outputTokens": 345,
-        "thinkingTokens": 185
-      }
-    },
-    "toolCalls": 2,
     "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
   },
   {
@@ -1245,6 +1189,62 @@
     "messageUuid": "12602645-5191-4aa2-99ef-2f9e373de295",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
+    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
+  },
+  {
+    "at": "2026-10-06T11:16:55.846Z",
+    "autoDenied": 0,
+    "caption": "Loaded 1 tool, used CronList",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T11:17:06.946Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:7a30e587-493f-47fc-a592-2397d7fe9938",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used CronList"
+    ],
+    "startedAt": "2026-10-06T11:16:56.746Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 1,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0700409,
+      "denials": [],
+      "durationMs": 6929,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 2,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 926,
+        "cacheReadInputTokens": 81968,
+        "inputTokens": 28,
+        "outputTokens": 345,
+        "thinkingTokens": 185
+      }
+    },
+    "toolCalls": 2,
     "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
   },
   {

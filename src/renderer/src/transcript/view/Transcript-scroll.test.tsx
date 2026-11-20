@@ -46,9 +46,11 @@ async function scene(ios = false, observedMeasurements = ios) {
   let frozenSize: number | null = null;
   let pendingContentSize: string | null = null;
   let overflow = 0;
+  let rowsReach = false; // the rows' own bottoms reach past the sizer, as placed and sized now
   let endShortfall = 0;
   const writes: number[] = [];
-  const size = (el: HTMLElement) => frozenSize !== null && el.hasAttribute('data-transcript-scroller') ? frozenSize : (Number.parseFloat((el.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0) + overflow;
+  const rowsBottom = (el: HTMLElement) => !rowsReach ? 0 : Math.max(0, ...[...el.querySelectorAll<HTMLElement>('[data-index]')].map((row) => Number.parseFloat(row.style.top) + (heights.get(row) ?? 56)));
+  const size = (el: HTMLElement) => frozenSize !== null && el.hasAttribute('data-transcript-scroller') ? frozenSize : Math.max((Number.parseFloat((el.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0) + overflow, rowsBottom(el));
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return this.hasAttribute('data-transcript-scroller') ? 200 : this.hasAttribute('data-index') ? heights.get(this) ?? 56 : 0;
   });
@@ -83,6 +85,7 @@ async function scene(ios = false, observedMeasurements = ios) {
       pendingContentSize = null;
     },
     extendDOMEnd: (pixels: number) => { overflow = pixels; },
+    rowsReachDOMEnd: () => { rowsReach = true; },
     roundDOMEnd: (pixels: number) => { endShortfall = pixels; },
     reportContentSize: () => act(() => {
       const content = scroller.firstElementChild!;
@@ -105,6 +108,18 @@ async function scene(ios = false, observedMeasurements = ios) {
         pendingContentSize = style.height;
         style.height = `${frozenSize}px`;
       }
+    },
+    // The observers' delivery of a row's growth as the browser runs it, outside React's act: the virtualiser's own
+    // re-render waits for a later task, so only what the list commits in the delivery's microtasks reaches the DOM.
+    growUnacted: (row: HTMLElement, delta: number) => {
+      const height = (heights.get(row) ?? 56) + delta;
+      heights.set(row, height);
+      const acting = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+      for (const { targets, callback, observer } of observers) {
+        if (targets.has(row)) callback([resizeEntry(row, height)], observer);
+      }
+      return Promise.resolve().then(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = acting; });
     },
     move: (by: number, report = true) => act(() => {
       top += by;
@@ -490,6 +505,33 @@ for (const grow of [24, 182]) {
   });
 }
 
+// Board ticket 789: the running turn's line is the list's last row, so the streamed answer grows in the row above it.
+// That growth overflows the sizer only by what passes the line, which keeps its place until the list re-renders: the
+// DOM's end stays short of the measured end, by the line's height or more. The list commits the measured sizes in the
+// observer pass that measured the growth and follows them, before the frame paints, and the line moves below the grown
+// answer in that same frame (e2e: transcript.spec.ts, painted frames while following). The sizer, an ancestor of the
+// observed row, keeps its height in that commit (a resize there would leave its own notification undelivered, an error
+// on the window) and grows in a later render; the moved line overflows it to the measured end meanwhile.
+for (const grow of [24, 182]) {
+  it(`a following list pins a measured ${grow}px growth of the row above the last before its sizer commits`, async () => {
+    const s = await scene(false, true);
+    s.rowsReachDOMEnd();
+    const end = s.scroller.scrollHeight;
+    const sizer = s.scroller.firstElementChild as HTMLElement;
+    const mounted = [...s.scroller.querySelectorAll<HTMLElement>('[data-index]')].sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+    const [answer, line] = mounted.slice(-2);
+    await s.growUnacted(answer!, grow);
+    expect(Number.parseFloat(line!.style.top), 'the line stands below the grown answer').toBe(end - 56 + grow);
+    expect(sizer.style.height, 'the sizer is not resized inside the row\'s delivery').toBe(`${end}px`);
+    expect(s.scroller.scrollTop, 'the reader is at the measured end').toBe(end + grow - 200);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sizer.style.height, 'the sizer grows in a later render').toBe(`${end + grow}px`);
+    expect(s.scroller.scrollTop, 'the reader stays at the end').toBe(end + grow - 200);
+    expect(s.handle.current!.following).toBe(true);
+    expect(s.changed.mock.calls).toEqual([]);
+  });
+}
+
 it('a measured growth after reader input leaves the reader where they are', async () => {
   const s = await scene(false, true);
   s.readerMove(-200);
@@ -543,27 +585,30 @@ it('a reversed scrollbar drag before its scroll event is kept through a measured
 });
 
 // One observer delivery that grows a row above the reader and the overflowing last row is followed once, against the
-// whole delivery's total: the iOS compensation for the row above is not retired early by a partial one.
+// whole delivery's total: the iOS compensation for the row above is not retired early by a partial one. Board ticket
+// 789: the follow commits that total before the frame paints, so the end it pins holds the compensation, which is not
+// replayed over the reader's drag after it.
 it('iOS keeps above-reader compensation when the same delivery grows the last row past the old sizer', async () => {
   const s = await scene(true);
   s.reportContentSize();
+  const end = s.scroller.scrollHeight;
   act(() => { fireEvent.touchStart(s.scroller, { touches: [{ identifier: 1, clientY: 100 }] }); });
   let held = 0;
-  // One delivery, its microtasks, and the drag, all before React re-renders the sizer (the outer act holds the render).
+  // One delivery, its microtasks, and the drag, all before the virtualiser's own re-render (the outer act holds it).
+  s.rowsReachDOMEnd(); // the rows' bottoms, as placed and sized, are the DOM's end past the sizer
   await act(async () => {
-    s.extendDOMEnd(182);
     s.resizeRow('first', 40);
     s.resizeRow('last', 182);
     await Promise.resolve();
+    expect(s.scroller.scrollTop, 'the whole delivery is followed').toBe(end + 40 + 182 - 200);
     fireEvent.touchMove(s.scroller, { touches: [{ identifier: 1, clientY: 120 }] });
     s.move(-20);
     held = s.scroller.scrollTop;
   });
-  s.extendDOMEnd(0);
   s.reportContentSize();
   act(() => { fireEvent.touchEnd(s.scroller, { touches: [] }); });
   await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-  expect(s.scroller.scrollTop).toBe(held + 40);
+  expect(s.scroller.scrollTop).toBe(held);
 });
 
 it('a browser clamp during remeasurement is not reader intent, even before the smaller sizer commits', async () => {
@@ -721,3 +766,95 @@ it('a following reader stays at the end when the compaction’s row appears and 
   expect(s.handle.current!.following).toBe(true);
   expect(s.changed.mock.calls).toEqual([]);
 });
+
+// Board ticket 789: a click on a turn's line opens the work above it, and the list keeps the line where the reader saw
+// it. Work tall enough to push the line out of the list's window for a frame: the list places it by its own offset
+// for the row, the line's distance from the scroller's top kept. The scene anchors a row in view, then opens 40 rows
+// above it; `run` plays the frames as a browser runs them: the list's scroll, then the scroll event it raises.
+async function anchored() {
+  const s = await scene();
+  s.readerMove(-600);
+  expect(s.handle.current!.following).toBe(false);
+  const top = s.scroller.scrollTop;
+  const visible = [...s.scroller.querySelectorAll<HTMLElement>('[data-index]')].filter((row) => Number.parseFloat(row.style.top) > top && Number.parseFloat(row.style.top) < top + 200);
+  const anchor = visible[1] ?? visible[0]!;
+  const id = anchor.getAttribute('data-row-id')!;
+  const index = Number(anchor.getAttribute('data-index'));
+  const place = () => {
+    const element = s.scroller.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
+    return element === null ? null : Number.parseFloat(element.style.top) - s.scroller.scrollTop;
+  };
+  const before = place();
+  const frames: (() => void)[] = [];
+  vi.stubGlobal('requestAnimationFrame', (step: () => void) => frames.push(step));
+  act(() => s.handle.current!.keepInPlace(id, 500));
+  const opened: Row[] = Array.from({ length: 40 }, (_, i) => ({ id: `opened-row-${i}` as RowId, turnId: null, at: '', kind: 'time', label: `Opened ${i}` }));
+  s.redraw([...s.rows.slice(0, index), ...opened, ...s.rows.slice(index)]);
+  expect(place()).toBeNull(); // out of the window: the opened work stands between the reader and it
+  const run = () => { for (let i = 0; i < 3 && frames.length > 0; i += 1) act(() => { frames.shift()!(); fireEvent.scroll(s.scroller); }); };
+  return { s, place, before, run };
+}
+
+it('keeps an anchored row at its place on screen when rows inserted above push it out of the mounted window', async () => {
+  const a = await anchored();
+  a.run();
+  expect(a.place()).toBe(a.before);
+});
+
+// the review's finding: an explicit jump during the fold's motion ends the anchor; the reader goes where they asked
+it('Jump to latest during the anchor leaves the reader at the end, following', async () => {
+  const a = await anchored();
+  act(() => a.s.handle.current!.scrollToEnd());
+  a.run();
+  expect(a.s.scroller.scrollHeight - a.s.scroller.clientHeight - a.s.scroller.scrollTop).toBe(0);
+  expect(a.s.handle.current!.following).toBe(true);
+});
+
+it('a jump to a distant row during the anchor leaves the reader at that row', async () => {
+  const a = await anchored();
+  act(() => a.s.handle.current!.scrollToIndex(0, 'start'));
+  a.run();
+  expect(a.s.scroller.scrollTop).toBe(0);
+});
+
+// the review's finding: only the transcript's own scroll input takes the place back from the anchor
+for (const [input, give] of [
+  ['typing in the composer', () => {
+    const composer = document.createElement('textarea');
+    document.body.appendChild(composer);
+    for (const key of ['a', ' ', 'ArrowUp', 'PageUp']) fireEvent.keyDown(composer, { key });
+    composer.remove();
+  }],
+  ['a wheel a nested tool output consumes', (scroller: HTMLElement) => {
+    const output = document.createElement('div');
+    output.style.overflowY = 'auto';
+    Object.defineProperties(output, { scrollHeight: { value: 600 }, clientHeight: { value: 224 }, scrollTop: { value: 100 } });
+    scroller.appendChild(output);
+    fireEvent.wheel(output, { deltaY: -32 });
+    fireEvent.wheel(output, { deltaY: 32 });
+  }],
+] as const) {
+  it(`the anchor holds through ${input}`, async () => {
+    const a = await anchored();
+    act(() => { give(a.s.scroller); });
+    a.run();
+    expect(a.place()).toBe(a.before);
+  });
+}
+
+for (const [input, give] of [
+  ['a wheel on the transcript', (scroller: HTMLElement) => fireEvent.wheel(scroller, { deltaY: 32 })],
+  ['a touch drag on the transcript', (scroller: HTMLElement) => {
+    fireEvent.touchStart(scroller, { touches: [{ identifier: 1, clientY: 100 }] });
+    fireEvent.touchMove(scroller, { touches: [{ identifier: 1, clientY: 80 }] });
+  }],
+  ['a press on its scrollbar', (scroller: HTMLElement) => fireEvent.pointerDown(scroller, { pointerType: 'mouse', button: 0, pointerId: 3 })],
+  ['a page key', () => fireEvent.keyDown(document.body, { key: 'PageDown' })],
+] as const) {
+  it(`${input} takes the place back from the anchor`, async () => {
+    const a = await anchored();
+    act(() => { give(a.s.scroller); });
+    a.run();
+    expect(a.place()).toBeNull();
+  });
+}

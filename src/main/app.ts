@@ -86,7 +86,8 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import { pickFiles } from './files/pick';
-import { appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
+import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile, OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly } from './files/open-file'; // UX wave U6e; U6f's frame's open
+import { createOpenIn } from './open-in/open-in'; // UX wave U6b-4a
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -106,6 +107,8 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P5 O3-C: appInterest
 import { revealPath } from './settings/reveal';
+import { skillFile } from './customization/skill-file'; // UX wave U11: a skill's Open in
+import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { knownSessionDirectories } from '@shared/sessions/directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { ipcError } from '@shared/ipc/errors'; // P5 O7 M5a: remote.openCopy's refusal
@@ -119,6 +122,7 @@ import { trackUnsavedFiles } from './lifecycle/quit-guard';
 // E5 end
 // E2 start
 import { appWindows } from './windows';
+import { startZoom, zoomOf } from './zoom'; // UX wave U6b-5b
 // E2 end
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
@@ -444,6 +448,14 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   }
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
+  // UX wave U6f (decision 13; §D): whether the signed-in member owns each machine, as the roster says (`MachineState.owner`,
+  // which the connection manager makes from the org state main holds and says in every `machines.changed`, heard from
+  // before the manager starts); unknown until it is said, and an outside act is asked for an owner alone
+  const machineOwners = new Map<MachineRef, boolean | null>();
+  onEmitted('machines.changed', ({ machines: listed }) => {
+    machineOwners.clear();
+    for (const machine of listed) machineOwners.set(machine.ref, machine.owner ?? null);
+  });
   const relayOnly = relayOnlyDial(process.env, app.isPackaged);
   const machines = startMachines({
     local,
@@ -508,6 +520,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     emitOwn: (name, payload) => void emit(name, payload),
     windowShown: windowShownOf,
     openUrl: (url, machine) => openForMachine(url, machine),
+    // UX wave U6f (the write rule's line 2): an outside act begins only for a live page of an app window, the predicate
+    // the guard below uses, of a person the roster says owns the machine
+    isAppPage: (client) => isAppPage(client, appUrl),
+    owns: (machine) => machineOwners.get(machine) ?? null,
     log: (line) => console.log(`[lane-b] ${line}`),
   });
   // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
@@ -523,9 +539,11 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   });
   // P5 O7 M5a (A10): "Open externally" on another machine's file opens a copy here; invoked on this app, or (a checkout
   // file, its address lowered) on the machine it names, which must be the one the input names
-  registerMainHandler('remote.openCopy', async (input, { target }) => {
+  // UX wave U6f (decision 15): the asking caller passed on, so a file outside the session's folders there is copied for
+  // an app page of an owner alone
+  registerMainHandler('remote.openCopy', async (input, { target, client }) => {
     if (target !== local && target !== input.machine) throw new CommandFailure(ipcError('invalid_input', `remote.openCopy: its source is on ${target}, not ${input.machine}`));
-    const result = await remoteLaneB.artifacts.openCopy(input);
+    const result = await remoteLaneB.artifacts.openCopy(input, client);
     if (!result.ok) throw new CommandFailure(result.error);
     return result.value;
   });
@@ -557,8 +575,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
   // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
-  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding
-  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly(appUrl));
+  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding;
+  // U6f: and the open, the listing and the pick of a file outside a session's folders on another machine
+  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl)); // UX wave U6b-4a: and Open in; U11: a skill's Open in
+  guardCommand(OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly(appUrl)); // UX wave U6f (Decision Log 26): a frame's open
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
@@ -784,6 +804,24 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   registerMainHandler('layout.openFile', (input, ctx) =>
     openChosenFile(input, ctx, { port: clientPort, isAppPage: (client) => isAppPage(client, appUrl), grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
   );
+  // UX wave U6b-4a: Open in, the apps this Mac has and the hand-off with the path this Mac's daemon admits (main's own call)
+  const openIn = createOpenIn({ run: execRunner, admit: (input) => invokeOwn('files.admit', input, { client: mainClient, target: local }) as Promise<CommandResult<'files.admit'>>, env: process.env });
+  registerMainHandler('layout.openInApps', async () => ({ apps: await openIn.apps() }));
+  registerMainHandler('layout.openIn', (input) => openIn.open(input));
+  // UX wave U11 (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decisions 2 and 11): a skill's file goes
+  // to "Open in"'s launcher only when main's own read of that place's inventory lists it; this Mac's inventory, as
+  // Customize's page is this Mac's
+  registerMainHandler('customization.skillFile', (input) =>
+    skillFile(input, {
+      inventory: async (cwd) => {
+        const answer = (await invokeOwn('customization.inventory', { cwd }, { client: mainClient, target: local })) as CommandResult<'customization.inventory'>;
+        if (!answer.ok) return { ok: false, message: answer.error.message };
+        const { skills, skillsRead, warnings } = answer.value;
+        return { ok: true, skills, complete: skillsRead === true, problem: [...warnings].reverse().find((warning) => warning !== CUSTOMIZATION_INVENTORY_COVERAGE) ?? null }; // the latest: a stop, the environment, a folder
+      },
+      launcher: openIn,
+    }),
+  );
   shutdown.add('usage', () => usage.stop());
   // C7 end
   // C11 start: the plumbing of settings v3 (C11 execution document, M1): ClaudeUsage's hand-off and status; the reveal
@@ -874,6 +912,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     hosts,
     // E4c end
     machineHost: true, // P5 O17 M9b: the app a tab engine to mawsd, whose machine host every launch runs (P5 O15 M2)
+    zoomOf: (win) => zoomOf(win.webContents), // UX wave U6b-5b: the view, the popup, the menus and the pin in window points
     // P5 O7 M3: a remote session's tabs are this Mac's, said from its machine; a forwarded port's tab opens its forward
     // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
     remote: {
@@ -888,6 +927,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   });
   shutdown.add('browser', browser.stop);
   cuaSockets = browser.cua; // E13
+  // UX wave U6b-5b: the window's zoom (`window.zoom`, main's own key; S3), before any window, which is made at it
+  // (`openAt`), and with the browser, whose placements follow it
+  startZoom({ layout, windows: appWindows, placeAgain: (win) => browser.placeAgain(win as BrowserWindow), emit, register: registerMainHandler });
   // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): a launch is told
   // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
   // socket admits that relay by the daemon the machine link is connected to: its socket's peer, pid and start read

@@ -197,7 +197,7 @@ describe('a steer reloaded from disk', () => {
   const shape = (rows: Row[]) => rows.filter((row) => row.kind !== 'time' && row.kind !== 'error').map((row) =>
     row.kind === 'group' ? `group:${row.cells.map((cell) => (cell.detail.kind === 'shell' ? /echo (\d+)/.exec(cell.detail.command)?.[1] ?? cell.detail.command : cell.toolName)).join(',')}` : row.kind === 'cell' ? `cell:${row.detail.kind === 'shell' ? /echo (\d+)/.exec(row.detail.command)?.[1] ?? row.detail.command : row.toolName}` : row.kind === 'user' ? `${row.steer ? 'steer' : 'prompt'}:${row.text}` : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown.split('\n')[0]}` : row.kind);
 
-  it('w1-steer-next-disk: the steer between the 2nd and 3rd Bash calls, as live; collapsed, prompt, divider, steer, answer', async () => {
+  it('w1-steer-next-disk: the steer between the 2nd and 3rd Bash calls, as live; collapsed, prompt, steer, answer, the turn’s line', async () => {
     const disk = await backfillFixture('w1-steer-next-disk', '655f7a68-9781-4217-a02f-db29a972ac95');
     const state = stateOf(disk);
     expect(state.order).toHaveLength(1);
@@ -209,7 +209,7 @@ describe('a steer reloaded from disk', () => {
     const live = rowsOf(withAllExpanded(stateOf(journalToEvents(loadJournal('pass3', 'steer-next-disk-live')))));
     const steerLive = live.find((row) => row.kind === 'user' && row.steer)!;
     expect(steerLive.id).toBe(rows[steerAt].id); // the same row, under the uuid the steer was written with
-    expect(shape(rowsOf(state)).slice(0, 3)).toEqual(['prompt:' + (ofKind(rows, 'user')[0].text), 'divider', 'steer:Reply NEXT_OK']);
+    expect(shape(rowsOf(state)).slice(0, 4)).toEqual(['prompt:' + (ofKind(rows, 'user')[0].text), 'steer:Reply NEXT_OK', 'answer:COUNTED', 'divider']);
   });
 
   it('w1-terminal-queued: a prompt the terminal queued mid-turn is a steer at its delivery position', async () => {

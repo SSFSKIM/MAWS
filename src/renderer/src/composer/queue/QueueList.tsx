@@ -144,7 +144,9 @@ export function QueueList({ appSessionId, queue, busy, client = ipc, onTakeBack 
       });
     }
   };
-  const paused = queue.paused && rows.length > 0 && !rows.some((row) => row.kind === 'uncertain');
+  // board ticket 668: the header names a pause over the rows it holds, never over a next-step row alone: the host's pause
+  // can outlive the turn its Stop held (a later turn, or another build's host before a handover) once nothing is held
+  const paused = queue.paused && rows.some((row) => row.kind === 'held') && !rows.some((row) => row.kind === 'uncertain');
   const folds = !paused && rows.length >= 3;
   const shown = !folds || open;
 

@@ -72,6 +72,17 @@ describe('composer store seam', () => {
   });
 });
 
+// board ticket 739: what a widget inserts is a name (a skill's, an agent's), one line by its nature, which a file a model
+// can write gives: each control character in it becomes U+FFFD, as in a mention
+describe('insertComposerText of a name', () => {
+  it('hands the composer one line', () => {
+    const target = { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn() };
+    registerFocusTarget(A, target);
+    insertComposerText(A, '/x<br>y\nz\r\u2028w ');
+    expect(target.insertText).toHaveBeenCalledWith('/x<br>y\ufffdz\ufffd\ufffdw ');
+  });
+});
+
 // P3-G (§D4.3, the M4 review's rulings): Mark-up's attachment for a session with no composer able to take it waits in a
 // per-session queue, which a composer drains into its draft when it registers (adding, never replacing); what it
 // refuses stays queued, in order, for the next one.

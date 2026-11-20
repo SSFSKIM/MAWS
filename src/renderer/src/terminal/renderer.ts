@@ -62,6 +62,8 @@ export interface TerminalRenderer {
   setLinkHandler(handler: (url: string, ev: MouseEvent) => void): void;
   hasSelection(): boolean;
   getSelection(): string;
+  // UX wave U6b-5a (decision 6): what the viewport shows now (not the buffer's end), as `screenTextOf` reads its rows
+  screenText(): string;
   selectAll(): void;
   paste(text: string): void;
   setVisible(visible: boolean): void; // acquire or release acceleration (Residue *WebGL policy*)
@@ -86,6 +88,24 @@ export async function createRenderer(kind: RendererKind, opts: RendererOptions):
     case 'ghostty':
       throw new Error('ghostty-web was discarded at the M1 verdict (spikes/terminal-probe/findings.md); no adapter is installed');
   }
+}
+
+// UX wave U6b-5a (decision 6; Claude Desktop's reading of "what the screen shows", the viewport's rows and not the
+// scrollback): the rows a viewport shows, each as the emulator holds it (not trimmed) and whether it continues the row
+// above it, as text: a soft-wrapped line as one line, each line without its trailing spaces, no blank line at the start
+// or the end. Pure; every renderer reads its screen through it.
+export function screenTextOf(rows: readonly { text: string; wrapped?: boolean }[]): string {
+  const lines: string[] = [];
+  for (const row of rows) {
+    if (row.wrapped && lines.length > 0) lines[lines.length - 1] += row.text;
+    else lines.push(row.text);
+  }
+  const trimmed = lines.map((line) => line.replace(/ +$/, ''));
+  let start = 0;
+  let end = trimmed.length;
+  while (start < end && trimmed[start] === '') start++;
+  while (end > start && trimmed[end - 1] === '') end--;
+  return trimmed.slice(start, end).join('\n');
 }
 
 // A theme in the sixteen-colour form both libraries take.

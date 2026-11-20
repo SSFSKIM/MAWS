@@ -102,7 +102,7 @@ export function CustomizeView({ view, show }: { view: PageView; show: CustomizeS
       }}
       className="@container/customize flex h-full min-h-0 flex-col bg-bg text-ui text-fg outline-none"
     >
-      <CustomizePlace cwd={cwd} name={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))} attached={attached?.appSessionId ?? null}>
+      <CustomizePlace cwd={cwd} projectId={project?.id ?? null} name={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))} attached={attached?.appSessionId ?? null}>
         <CustomizeHead view={view} show={show} inDetail={inDetail} onView={onView} onShow={onShow} project={projectSelect} live={liveScope} />
         <CustomizeBody view={view} show={show} onDetail={setInDetail} toList={toList} />
       </CustomizePlace>

@@ -21,6 +21,45 @@
     "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
   },
   {
+    "agent": null,
+    "at": "2026-09-29T02:22:36.757Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1 && echo 1",
+      "cwd": null,
+      "description": "Sleep one second, print 1",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "1",
+      "truncated": null
+    },
+    "endedAt": "2026-09-29T02:22:38.855Z",
+    "expanded": true,
+    "id": "cell:toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
+    "kind": "cell",
+    "label": "Ran `sleep 1 && echo 1` in 2s",
+    "paths": [],
+    "startedAt": "2026-09-29T02:22:36.757Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
+    "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
+  },
+  {
     "at": "2026-09-29T02:22:35.434Z",
     "autoDenied": 0,
     "caption": "Ran a command",
@@ -74,45 +113,6 @@
       }
     },
     "toolCalls": 1,
-    "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-29T02:22:36.757Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_flagged",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "sleep 1 && echo 1",
-      "cwd": null,
-      "description": "Sleep one second, print 1",
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "1",
-      "truncated": null
-    },
-    "endedAt": "2026-09-29T02:22:38.855Z",
-    "expanded": true,
-    "id": "cell:toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
-    "kind": "cell",
-    "label": "Ran `sleep 1 && echo 1` in 2s",
-    "paths": [],
-    "startedAt": "2026-09-29T02:22:36.757Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
     "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
   },
   {

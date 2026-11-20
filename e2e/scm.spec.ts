@@ -27,7 +27,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
-import { buildScmScratch, CHECKS_PASSED, prepareScm, type ScmScratch } from './support/scm-scratch';
+import { buildScmScratch, CHECKS_PASSED, prepareScm, scmLaunchEnv, type ScmScratch } from './support/scm-scratch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { mainTab, openSurface, sessionCard, sessionCards, showSessionCards, surface, unfoldSessionCard } from './support/shell';
 
@@ -56,7 +56,7 @@ async function withScm(options: ScmOptions, body: (p: Scm) => Promise<void>): Pr
   let maws: MawsLaunch | null = null;
   try {
     options.setup?.(scratch);
-    maws = await launchMaws({ env: scratch.env, prepare: prepareScm(scratch, { trust: options.trust ?? true, gh }) });
+    maws = await launchMaws({ env: scmLaunchEnv(scratch, gh), prepare: prepareScm(scratch, { trust: options.trust ?? true, gh }) });
     const { page } = maws;
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
@@ -130,9 +130,11 @@ async function columnAt(p: Scm, width: 360 | 280): Promise<void> {
 }
 
 // The scratch given a branch of its own, so the page has "Not pushed" and "Pushed to" (invented notes): `origin/main`
-// first moves one commit past the merge base (the branch one behind); then `feature/page` from `main`, carrying the
-// uncommitted entries, its upstream `origin/feature/page` at `main`'s commit ahead of the old `origin/main`, and two
-// commits not pushed, each one new note. A path-limited commit takes only its own path, so the staged file stays staged.
+// first moves one commit past the merge base (the branch one behind), a commit made by `commit-tree` and pushed by its
+// id, so neither the checkout's index nor its working tree is touched (a commit there would take the staged file with
+// it, and switching back would delete it); then `feature/page` from `main`, carrying the uncommitted entries, its
+// upstream `origin/feature/page` at `main`'s commit ahead of the old `origin/main`, and two commits not pushed, each one
+// new note. A path-limited commit takes only its own path, so the staged file stays staged.
 const NOTES = ['Add the first note', 'Add the second note', 'Add the third note'];
 // `at`: the commit's author and committer date, for a commit made long ago (the age column's widest age, frames' S12).
 function noteCommit(scratch: ScmScratch, n: number, at?: Date): string {
@@ -149,11 +151,9 @@ function noteCommit(scratch: ScmScratch, n: number, at?: Date): string {
 const OLD_AGE = '1003d';
 const OLD_DAYS = 1003;
 function featureBranch(scratch: ScmScratch): void {
-  scratch.git('switch', '--quiet', '-c', 'upstream-change', 'origin/main');
-  scratch.git('commit', '--quiet', '--no-verify', '--allow-empty', '-m', 'An upstream change');
-  scratch.git('push', '--quiet', 'origin', 'upstream-change:main');
-  scratch.git('switch', '--quiet', 'main');
-  scratch.git('branch', '--quiet', '-D', 'upstream-change');
+  const upstream = scratch.git('commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', 'An upstream change');
+  scratch.git('push', '--quiet', 'origin', `${upstream}:refs/heads/main`);
+  scratch.git('fetch', '--quiet', 'origin');
   scratch.git('switch', '--quiet', '-c', 'feature/page');
   scratch.git('push', '--quiet', '-u', 'origin', 'feature/page');
   noteCommit(scratch, 0, new Date(Date.now() - (OLD_DAYS * 24 + 2) * 3_600_000));
@@ -187,10 +187,10 @@ type Sized = Box & { full: number }; // `full`: the element's scroll width, the 
 interface Measures {
   page: Box;
   where: { line: Box; branch: Sized; branchMin: number; measuredBranch: number; measuredBranchText: string; worktree: Sized | null; machine: Box | null; below: Box | null };
-  uncommitted: { line: Box | null; counts: Sized | null; conflicts: (Sized & { rects: number }) | null };
-  heading: { line: Box; since: (Sized & { fit: string; text: string }) | null; sinceMin: number; measuredSince: number; behind: (Sized & { rects: number }) | null; latest: (Sized & { text: string }) | null; review: boolean };
-  phrases: { text: string; rects: number; top: number }[];
-  checkCounts: { text: string; rects: number; top: number }[];
+  uncommitted: { line: Box | null; counts: Sized | null; conflicts: (Sized & { lines: number }) | null };
+  heading: { line: Box; since: (Sized & { fit: string; text: string }) | null; sinceMin: number; measuredSince: number; behind: (Sized & { lines: number }) | null; latest: (Sized & { text: string }) | null; review: boolean };
+  phrases: { text: string; lines: number; top: number }[];
+  checkCounts: { text: string; lines: number; top: number }[];
   messages: (Box & { full: number; client: number })[];
   ages: { text: string; box: Box; textLeft: number; textRight: number; textWidth: number }[];
   fourDigits: number;
@@ -206,6 +206,19 @@ function measure(p: Scm): Promise<Measures> {
     };
     const one = (sel: string, scope: Element = root) => scope.querySelector<HTMLElement>(sel);
     const sized = (el: HTMLElement | null): Sized | null => (el === null ? null : { ...box(el), full: el.scrollWidth });
+    // The lines an inline element is drawn on: its client rects grouped by line. Chromium gives an inline one rect for each
+    // run of its content between child elements, so "2 passed" in a span and " ·" beside it are two rects on one line
+    const lines = (el: Element) => {
+      let count = 0;
+      let bottom = -Infinity;
+      for (const r of Array.from(el.getClientRects()).sort((a, b) => a.top - b.top)) {
+        if (r.top >= bottom - 1) {
+          count += 1; // below the line so far: a line of its own
+          bottom = r.bottom;
+        } else bottom = Math.max(bottom, r.bottom);
+      }
+      return count;
+    };
     const measured = (scope: Element, name: string) => scope.querySelector(`[data-scm-measure="${name}"]`)?.getBoundingClientRect().width ?? 0;
     const whereLine = one('[data-scm-where]')!;
     const uncommittedLine = one('[data-scm-uncommitted]');
@@ -254,19 +267,19 @@ function measure(p: Scm): Promise<Measures> {
       uncommitted: {
         line: uncommittedLine === null ? null : box(uncommittedLine),
         counts: uncommittedLine === null ? null : sized(one('[data-scm-counts]', uncommittedLine)),
-        conflicts: conflicts === null ? null : { ...box(conflicts), full: conflicts.scrollWidth, rects: conflicts.getClientRects().length },
+        conflicts: conflicts === null ? null : { ...box(conflicts), full: conflicts.scrollWidth, lines: lines(conflicts) },
       },
       heading: {
         line: box(headingLine),
         since: since === null ? null : { ...box(since), full: since.scrollWidth, fit: since.getAttribute('data-fit') ?? '', text: since.textContent ?? '' },
         sinceMin: measured(headingLine, 'since-min'),
         measuredSince: measured(headingLine, 'since'),
-        behind: behind === null ? null : { ...box(behind), full: behind.scrollWidth, rects: behind.getClientRects().length },
+        behind: behind === null ? null : { ...box(behind), full: behind.scrollWidth, lines: lines(behind) },
         latest: latest === null ? null : { ...box(latest), full: latest.scrollWidth, text: latest.textContent ?? '' },
         review: Array.from(headingLine.querySelectorAll('button')).some((b) => (b.textContent ?? '').trim() === 'Review ›'),
       },
-      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', rects: el.getClientRects().length, top: Math.round(el.getBoundingClientRect().top) })),
-      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), rects: el.parentElement!.getClientRects().length, top: Math.round(el.parentElement!.getBoundingClientRect().top) })),
+      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', lines: lines(el), top: Math.round(el.getBoundingClientRect().top) })),
+      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), lines: lines(el.parentElement!), top: Math.round(el.parentElement!.getBoundingClientRect().top) })),
       messages: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-pr-line], [data-scm-failure]')).map((el) => ({ ...box(el), full: el.scrollWidth, client: el.clientWidth })),
       ages,
       fourDigits,
@@ -322,12 +335,12 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = 
   // S6: "· N conflicts" and "· N behind" whole; the counts leave first, whole; "since" whole, or the base shortened to
   // eight characters, or the phrase left out whole; the checks' counts each whole on one line
   if (m.uncommitted.conflicts !== null) {
-    expect(drawnWhole(m.uncommitted.conflicts) && m.uncommitted.conflicts.rects === 1, `${at}: the conflicts whole on one line`).toBe(true);
+    expect(drawnWhole(m.uncommitted.conflicts) && m.uncommitted.conflicts.lines === 1, `${at}: the conflicts whole on one line`).toBe(true);
     expect(inside(m.uncommitted.conflicts, m.uncommitted.line!), `${at}: the conflicts inside the line`).toBe(true);
   }
   if (m.uncommitted.counts !== null) expect(drawnWhole(m.uncommitted.counts), `${at}: the counts whole where they stand`).toBe(true);
   if (m.heading.behind !== null) {
-    expect(drawnWhole(m.heading.behind) && m.heading.behind.rects === 1, `${at}: "· N behind" whole on one line`).toBe(true);
+    expect(drawnWhole(m.heading.behind) && m.heading.behind.lines === 1, `${at}: "· N behind" whole on one line`).toBe(true);
     expect(inside(m.heading.behind, m.heading.line), `${at}: "· N behind" inside the heading`).toBe(true);
   }
   if (m.heading.since !== null) {
@@ -335,9 +348,9 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = 
     if (m.heading.since.fit === 'shortened') expect(m.heading.since.right - m.heading.since.left, `${at}: the base keeps eight characters`).toBeGreaterThanOrEqual(m.heading.sinceMin - 1);
     else expect(drawnWhole(m.heading.since), `${at}: "since <base>" whole`).toBe(true);
   }
-  for (const count of m.checkCounts) expect(count.rects, `${at}: the check count "${count.text}" on one line`).toBe(1);
+  for (const count of m.checkCounts) expect(count.lines, `${at}: the check count "${count.text}" on one line`).toBe(1);
   // S5: the state line breaks only between its phrases
-  for (const phrase of m.phrases) expect(phrase.rects, `${at}: the phrase "${phrase.text}" whole on one line`).toBe(1);
+  for (const phrase of m.phrases) expect(phrase.lines, `${at}: the phrase "${phrase.text}" whole on one line`).toBe(1);
   // S7: a git or GitHub CLI message breaks anywhere inside its box and is never clipped at the column's edge
   for (const message of m.messages) {
     expect(message.full, `${at}: a message wraps inside its box`).toBeLessThanOrEqual(message.client + 1);
@@ -534,7 +547,10 @@ test.describe('source control over a scratch repository', () => {
       await pr.getByRole('button', { name: 'Refresh PR state' }).click();
       await expect(pr.locator('[data-scm-checks]'), 'nothing listed: the folded line stands alone').toHaveCount(0, { timeout: 20_000 });
       await expect.poll(() => words(pr.locator('[data-scm-fold-line]'))).toBe('Checks › 3 passed');
+      // The card's line, read where it is drawn: Session cards in the side column, where the page stood
+      await showEnvironment(p);
       await expect(line).toHaveText('PR #7 Open · 3 passed');
+      await openPage(p);
 
       scratch.gh('checks.json', JSON.stringify([CHECKS_PASSED[0], { ...CHECKS_PASSED[2], bucket: 'fail', state: 'FAILURE' }, CHECKS_PASSED[1]]));
       scratch.gh('checks.exit', '1');

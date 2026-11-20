@@ -425,3 +425,79 @@ describe('a copy ends at the size its first page gave', () => {
     expect(await readFile(join(dir, 'copy.pdf'))).toEqual(Buffer.alloc(0));
   });
 });
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 15, §D): a session's
+// file is read for a copy through the reader its caller hands in (the adapter's outside-aware read for the page that
+// asked), on both routes, "Open externally"'s and a frame's; a library source is read as it was, by `library.read`.
+describe('a session’s file read through the copy’s reader', () => {
+  /** A reader over the real files service's reads of `path`, recording what it was asked; the link is never called. */
+  function readerOver(path: string) {
+    const files = createFilesService({ records: () => null });
+    services.push(files);
+    const asked: Array<Record<string, unknown>> = [];
+    const reader = async (input: Record<string, unknown>) => {
+      asked.push(input);
+      const { offset, length, hash } = input as { offset?: number; length?: number; hash?: boolean };
+      return { ok: true as const, value: await files.readResolved({ path, ...(offset !== undefined && { offset }), ...(length !== undefined && { length }), ...(hash !== undefined && { hash }) }) };
+    };
+    const link = { machine: 'FarMachineRef000000000', name: 'mini', call: async () => { throw new Error('the link is not asked when a reader is given'); } } as unknown as RemoteLink;
+    return { reader, asked, link };
+  }
+
+  it('fetchToFile reads a session source through the reader, byte for byte, and never the link', async () => {
+    const dir = await scratch();
+    const path = join(dir, 'outside.txt');
+    const bytes = Buffer.from('a file outside the session’s folders, ünïcödé\n', 'utf8');
+    await writeFile(path, bytes);
+    const { reader, asked, link } = readerOver(path);
+    const to = join(dir, 'copy.txt');
+    expect(await fetchToFile(link, { appSessionId: 'app-1', path: '/remote/outside.txt' } as never, to, 64 * 1024 * 1024, () => {}, reader)).toEqual({ ok: true, value: 'written' });
+    expect(await readFile(to)).toEqual(bytes);
+    expect(asked.length).toBeGreaterThan(0);
+    for (const input of asked) expect(input).toMatchObject({ appSessionId: 'app-1', path: '/remote/outside.txt' });
+  });
+
+  it('fetchInto reads a session source through the reader, the hash asked on every page', async () => {
+    const dir = await scratch();
+    const path = join(dir, 'outside.pdf');
+    const bytes = Buffer.alloc(3 * 1024 * 1024 + 7, 0x62);
+    await writeFile(path, bytes);
+    const { reader, asked, link } = readerOver(path);
+    const handle = await open(join(dir, 'sink'), 'wx+', 0o600);
+    await unlink(join(dir, 'sink'));
+    try {
+      const seen: Array<{ mime: string; bytes: number }> = [];
+      expect(await fetchInto(link, { appSessionId: 'app-1', path: '/remote/outside.pdf' } as never, handle, 64 * 1024 * 1024, () => {}, { label: 'a file frame of app-1', seen: (first) => void seen.push(first), readSessionFile: reader })).toEqual({ ok: true, value: { written: bytes.length } });
+      const copied = Buffer.alloc(bytes.length);
+      await handle.read(copied, 0, bytes.length, 0);
+      expect(copied.equals(bytes)).toBe(true);
+      expect(seen).toEqual([{ mime: 'application/pdf', bytes: bytes.length }]);
+      expect(asked.length).toBeGreaterThan(1);
+      for (const input of asked) expect(Object.keys(input).sort()).toEqual(['appSessionId', 'hash', 'length', 'offset', 'path']);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('an artifact source is read by library.read as before, the reader never called', async () => {
+    const dir = await scratch();
+    const calls: string[] = [];
+    const bytes = Buffer.from('a stored file\n', 'utf8');
+    const link = {
+      machine: 'FarMachineRef000000000',
+      name: 'mini',
+      call: async (name: string, input: { offset?: number; length?: number }) => {
+        calls.push(name);
+        const offset = input.offset ?? 0;
+        const content = bytes.subarray(offset, offset + (input.length ?? bytes.length));
+        return { ok: true, output: { encoding: 'base64', content: content.toString('base64'), bytes: bytes.length, offset, length: content.length, truncated: offset + content.length < bytes.length, mime: 'text/plain', hash: null, utf8: null } };
+      },
+    } as unknown as RemoteLink;
+    const reader = vi.fn();
+    const to = join(dir, 'copy.txt');
+    expect(await fetchToFile(link, { artifactId: '00000000-0000-4000-8000-000000000001', revision: 3 } as never, to, 64 * 1024 * 1024, () => {}, reader)).toEqual({ ok: true, value: 'written' });
+    expect(await readFile(to)).toEqual(bytes);
+    expect(calls).toEqual(['library.read']);
+    expect(reader).not.toHaveBeenCalled();
+  });
+});

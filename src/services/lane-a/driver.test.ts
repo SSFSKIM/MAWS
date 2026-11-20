@@ -127,6 +127,7 @@ function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown
     },
     log: (line) => void logs.push(line),
     transcript: async (appId, engine) => (appId === APP && engine === ENGINE ? transcript : null),
+    processAlive: () => false, // the terminal's process: gone unless a case says it runs (ticket 701)
     ...more,
     timing: {
       jobsPollMs: 30,
@@ -433,11 +434,11 @@ describe('jobs', () => {
   const jobsOf = (planes: Plane[], watch: string) =>
     messagesOf(planes, watch).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents').map((m) => (m.body as { jobs: { taskId: string; status: string }[] }).jobs.map((j) => `${j.taskId} ${j.status}`));
 
-  async function watched(transcriptRows: string) {
+  async function watched(transcriptRows: string, more: Partial<LaneADeps> = {}) {
     const path = join(tmp('o9t-'), 'session.jsonl');
     writeFileSync(path, transcriptRows);
     const b = await bridge();
-    const h = harness(undefined, {}, path);
+    const h = harness(undefined, {}, path, more);
     h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
     await h.live();
     const { watch } = h.driver.watch(APP, client());
@@ -467,11 +468,30 @@ describe('jobs', () => {
     expect(jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 exited', 'bshell002 failed']);
   });
 
-  it('says a running job exited when the session’s bridge goes', async () => {
+  it('says a running job exited when the session’s bridge goes with its process', async () => {
     const { b, h, watch } = await watched(shell(1));
     await b.close();
     await expect.poll(() => h.planes.some((p) => p.watch === watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
     expect(jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 exited']);
+  });
+
+  // Ticket 701: a bridge that goes while its terminal's process runs is not the process gone. The watch ends on the job
+  // as last heard, which the window no longer takes to run (status unknown), until the bridge answers again.
+  it('says nothing of a running job’s end when the session’s bridge goes while its process runs; its holder ending then says it', async () => {
+    const asked: number[] = [];
+    const { b, h, watch } = await watched(shell(1), { processAlive: (pid) => (asked.push(pid), true) });
+    await b.close();
+    await expect.poll(() => h.planes.some((p) => p.watch === watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
+    expect(asked).toContain(terminal.pid);
+    expect(jobsOf(h.planes, watch).flat()).not.toContain('bshell001 exited');
+    expect(jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 running']);
+    // the bridge answers again: a fresh watch's snapshot says what runs; then the holder ends, and the job with it
+    await bridge();
+    await h.live();
+    const again = h.driver.watch(APP, client()).watch;
+    await expect.poll(() => jobsOf(h.planes, again).at(-1)).toEqual(['bshell001 running']);
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } });
+    expect(jobsOf(h.planes, again).at(-1)).toEqual(['bshell001 exited']);
   });
 
   it('stops only a job the transcript holds running; a task it doesn’t hold is the bridge’s to judge', async () => {
@@ -615,6 +635,7 @@ describe('subagents', () => {
     before?: (b: FakeBridge) => void; // what the bridge holds before the driver finds it
     prepare?: (listing: Listing) => void; // how the host answers, before the watch starts its follow
     hold?: string[]; // agents whose transcript's first read is held once it has read the file, until `releaseFile`
+    alive?: boolean; // the terminal's process runs whatever its bridge does (ticket 701)
   }
 
   async function session(setup: Setup = {}) {
@@ -645,7 +666,7 @@ describe('subagents', () => {
       }
       return path;
     };
-    const h = harness(undefined, setup.timing ?? {}, path, { ...listing.deps, transcript });
+    const h = harness(undefined, setup.timing ?? {}, path, { ...listing.deps, transcript, ...(setup.alive !== undefined && { processAlive: () => setup.alive! }) });
     h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
     await h.live();
     const watch = h.driver.watch(APP, client()).watch;
@@ -727,7 +748,7 @@ describe('subagents', () => {
 
   it.each([
     ['its holder ends', (s: Awaited<ReturnType<typeof session>>) => s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } })],
-    ['its bridge goes', (s: Awaited<ReturnType<typeof session>>) => void s.b.close()],
+    ['its bridge goes with its process', (s: Awaited<ReturnType<typeof session>>) => void s.b.close()],
   ])('says every agent the rows hold no end for ended with the session when %s, before the watch ends', async (_how, end) => {
     const s = await session({ main: launched(A1, 1) + launched(A2, 2) + queued(A2, 'failed', 3), entries: (dir) => [entry(dir, A1), entry(dir, A2)], before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
     await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)]).toEqual(['running/bridge', 'failed/rows']);
@@ -739,6 +760,17 @@ describe('subagents', () => {
     expect(agentsOf(s.h.planes, s.watch).some((a) => a.status === 'running' || a.running !== undefined)).toBe(false);
     expect(agentsOf(s.h.planes, s.watch)[0]?.spawn).toMatchObject({ toolUseId: tool(A1) }); // the bridge's spawn, kept
     expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
+  });
+
+  // Ticket 701: its bridge going while the terminal's process runs ends the watch on the agents as last heard; none reads
+  // ended with the session (the window takes a running one as no longer known to run: status unknown).
+  it('says nothing of how an agent ended when its bridge goes while the terminal’s process runs', async () => {
+    const s = await session({ alive: true, main: launched(A1, 1) + launched(A2, 2) + queued(A2, 'failed', 3), entries: (dir) => [entry(dir, A1), entry(dir, A2)], before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)]).toEqual(['running/bridge', 'failed/rows']);
+    void s.b.close();
+    await expect.poll(() => s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
+    expect(bodiesOf(s.h.planes, s.watch).flat().some((a) => a.evidence === 'session')).toBe(false);
+    expect(agentsOf(s.h.planes, s.watch).map((a) => `${a.agentId} ${a.status}/${a.evidence}`)).toEqual([`${A1} running/bridge`, `${A2} failed/rows`]);
   });
 
   // The fence review's first finding, through the driver (its ruling's point 2): the origin is fixed by the probe whose

@@ -44,6 +44,7 @@ import { createRelayedCallbacks } from './connectors/relayed-callback'; // P5 O7
 import { startSignIn } from './connectors/sign-in';
 import { startDelivery } from './delivery';
 import { followView, openFileGrants } from './files/grants';
+import { openFileLinks } from './files/links';
 import { ownFolders } from './files/own';
 import { uploadRootsOf } from './files/upload';
 import { createGitRunner } from './git/runner';
@@ -391,6 +392,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       index, settings: () => machineSettings.state(), engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: bus.register,
       attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
+      foldSummariesChanged: () => void bus.emit('mods.foldSummariesChanged', {}), // UX wave U2b (panel finding 3)
     });
     parts.push(['owner channel', ownerChannel.stop]);
     settling.push(ownerChannel.work);
@@ -556,6 +558,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     const unfollow = followView(grants, spineView.view);
     parts.push(['file grants', unfollow]);
   }
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §B): the link records of
+  // followed files, a spine file beside the grants' and none in a refused run (where nothing is followed), followed by the
+  // view as the grants are
+  const links = spineRuns ? openFileLinks(join(sessionsDir, 'file-links.json'), { known: (id) => spineView.view.known(id), log: (line) => console.warn(`[files] ${line}`) }) : null;
+  if (links !== null) {
+    const unfollow = followView(links, spineView.view);
+    parts.push(['file links', unfollow]);
+  }
   const checkouts = startCheckouts({
     view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots,
     // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, decision 13): files' admission by name
@@ -570,6 +580,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       return known?.endsWith(`/${record.engineSessionId}.jsonl`) ? known : transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
     },
     grants,
+    links, // U6b-4c
     // U6e (decision 20): a File artifact of the Library whose maker is a session of the asking session's line, compared
     // by real path as `fileAdmission` compares the linked ones; none while the index is not read
     sent: async (appSessionId, real) => {
@@ -577,6 +588,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       return false;
     },
     own: ownFolders(profile, process.execPath, deps.appBundles ?? (() => [])), // U6e (decision 8): no write reaches them
+    where: setupGuard.where, // UX wave U6f: the home and platform another machine's outside acts walk under, the folder list's
   });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);

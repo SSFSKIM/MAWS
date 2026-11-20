@@ -2,7 +2,7 @@
 // draft's restore and debounced write, history navigation, pasted and dropped files, the prefill intake, submission,
 // and the imperative handle the Composer drives. One controller per mounted Editor, created once; the component hands
 // it the latest props after every render, so the handlers Tiptap captured at creation always act on the current ones.
-import { Selection, type Transaction } from '@tiptap/pm/state';
+import { AllSelection, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 import type { HistoryEntry } from '@shared/composer/history-entry';
@@ -18,26 +18,23 @@ import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, MENTION, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, MENTION, mentionNode, paragraph, textNode, type Attachment, type ComposerDoc } from './doc';
 import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal, syncSelectionFromDOM } from './dictation-plugin'; // E9
-import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
+import { createDraftWriter, docOfDraft, draftOf, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav, type Recall } from './history';
 import { classifyFile, classifyText, mentionPath, pathRefusal, type FileAction } from './paste';
+import { holdsBlock, pastedBlock, type AttachedBlock } from './pasted-block'; // UX wave U6b-5a
+import { UNREAD, type Unread } from './unread'; // UX wave U6b-5a
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
-import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { draftState, modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
-
-// Ticket 733a (the M3 review): what `insertText` is given (a widget's insertion, Mark-up's draft, a queued text) goes into
-// the draft as text, never parsed as HTML: its writer checked these bytes, and a parse would decode entities and break
-// lines after the check. An empty text inserts nothing, as before (a text node may not be empty).
-const asText = (text: string) => (text === '' ? text : textNode(text));
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
 export interface DraftPort {
-  load(): Promise<Draft | null>;
+  load(): Promise<Draft | null | Unread>; // UX wave U6b-5a: `UNREAD`, a store that could not be read (restored as none)
   // UX wave U4a (decision 13; Interfaces D): `replaces`, when given, names what the save replaces (a take-back's settle
   // form, which the writer names until one save is acknowledged); the answer is whether the store took it
   save(draft: Draft | null, replaces?: string | null): Promise<boolean>;
@@ -88,7 +85,22 @@ export interface EditorHandle {
   // `settleDictation`); the sink's own `final` and `cancel` do not fire it.
   beginDictation(onEnded: () => void): DictationSink | null;
   settleDictation(): void; // the interim words become ordinary text where they stand and the sink ends (a card covered the box)
+  // UX wave U6b-5a (decisions 8 and 30; Interfaces §C): an attached block, once this mount's draft is restored. 'present'
+  // when the document holds a block of its id, or a send of the session holding one was accepted while it waited
+  // (nothing changes); else one block, at the caret the editor left (the
+  // keyboard with it, the caret after the block) or at the end (the caret, any selection and the keyboard untouched),
+  // never over a selection (Decision Log 14 (iv)). After the restore (the branch panel's fix wave): 'unread' when the
+  // restore could not read the store and nothing this mount saved has been taken since; 'held' when `held` says the box is
+  // another's (a take-back in hand); a caret insertion becomes one at the end, saved at once, when `keyboard` says the box
+  // can no longer take the keyboard. 'busy': a submission is in flight. 'closed':
+  // the editor takes no typing. 'gone': it unmounted meanwhile. Nothing changes in those three. With `save`, the pending
+  // write is dropped and the draft saved now through the port: 'taken' when the port answered true, 'unsaved' when not.
+  // `signal`: its asker gave up (the hand-over ended); a wait on the restore then ends 'gone', as an unmount ends it.
+  attachPasted(block: AttachedBlock, options: EditorAttachOptions): Promise<EditorAttach>;
 }
+
+export type EditorAttach = 'taken' | 'present' | 'unsaved' | 'unread' | 'held' | 'busy' | 'closed' | 'gone';
+export interface EditorAttachOptions { at: 'caret' | 'end'; save: boolean; signal?: AbortSignal; held?: () => boolean; keyboard?: () => boolean }
 
 // E9: what one capture writes through; every method is a no-op once the sink ended.
 export interface DictationSink {
@@ -153,7 +165,9 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
   return {
     load: async () => {
       const result = await client.invoke('session.drafts.get', { appSessionId });
-      return result.ok ? result.value : null;
+      if (result.ok) return result.value;
+      // UX wave U6b-5a: a session the index does not hold has none; any other failure has read nothing
+      return result.error.message.includes('unknown app session') ? null : UNREAD;
     },
     save: async (draft, replaces) => {
       const result = await client.invoke('session.drafts.set', { appSessionId, draft, ...(replaces != null && { replaces }) });
@@ -182,6 +196,26 @@ interface Submission { doc: ComposerDoc; done: Promise<boolean> }
 const submissions = new Map<AppSessionId, Submission>();
 /** A page reload (tests): the new page holds no submission of the old one's, whose answer it never sees. */
 export const forgetSubmissions = (): void => submissions.clear();
+/**
+ * UX wave U6b-5a (S1; Interfaces §C): the session's send in flight, whether or not a composer is still mounted for it;
+ * it settles once the send has, after the controller handed over the send's own write of the draft (a clear when it was
+ * accepted, the text back when it was refused), true when it was accepted. Null: none.
+ */
+export const submissionOf = (appSessionId: AppSessionId): Promise<boolean> | null => submissions.get(appSessionId)?.done ?? null;
+// UX wave U6b-5a (S1; Decision Log 14 (ii)): who hears each accepted send's document, by session
+const sendWatchers = new Map<AppSessionId, Set<(doc: ComposerDoc) => void>>();
+/**
+ * UX wave U6b-5a (S1; Decision Log 14 (ii)): `heard` is told the document of each send of the session accepted from now
+ * on, before its submission settles, so a hand-over knows a block it handed went with a message. Returns the unwatch.
+ */
+export function watchAcceptedSends(appSessionId: AppSessionId, heard: (doc: ComposerDoc) => void): () => void {
+  const watchers = sendWatchers.get(appSessionId) ?? new Set();
+  sendWatchers.set(appSessionId, watchers.add(heard));
+  return () => {
+    watchers.delete(heard);
+    if (watchers.size === 0 && sendWatchers.get(appSessionId) === watchers) sendWatchers.delete(appSessionId);
+  };
+}
 
 // E9: the open dictation sink's bookkeeping.
 interface Dictation { ended: boolean; onEnded(): void }
@@ -197,6 +231,9 @@ export class EditorController {
   private revision = 0; // local edits and submission invalidate pending restoration
   private lifetime = 0;
   private live = false;
+  private unread = false; // UX wave U6b-5a: this mount's restore could not read the store, and no save of its has been taken since
+  private savedIn = -1; // UX wave U6b-5a: the last mount (its lifetime) one of whose saves was taken
+  private readonly leaving = new Set<() => void>(); // UX wave U6b-5a: the waits on a restore that an unmount ends
   private attachmentEpoch = 0;
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
@@ -222,20 +259,27 @@ export class EditorController {
     inputs: ControllerInputs,
   ) {
     this.inputs = inputs;
-    this.writer = createDraftWriter((draft) => this.saveDraft(draft));
+    this.writer = createDraftWriter((draft) => void this.saveDraft(draft));
   }
 
-  // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged.
-  private saveDraft(draft: Draft | null): void {
+  // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged. The
+  // answer is whether the port took it (UX wave U6b-5a: an attach that saves at once says so).
+  private saveDraft(draft: Draft | null): Promise<boolean> {
     const form = this.settleForm;
-    if (form === null) {
-      void this.drafts.save(draft);
-      return;
-    }
-    void this.drafts.save(draft, form.replaces).then((taken) => {
-      if (!taken || this.settleForm !== form) return;
-      this.settleForm = null;
-      form.taken();
+    const saved = form === null ? this.drafts.save(draft) : this.drafts.save(draft, form.replaces).then((taken) => {
+      if (taken && this.settleForm === form) {
+        this.settleForm = null;
+        form.taken();
+      }
+      return taken;
+    });
+    // a port of the suites may answer nothing at all
+    return Promise.resolve(saved).then((taken) => {
+      if (taken) {
+        this.unread = false; // what is kept is this mount's now
+        this.savedIn = this.lifetime;
+      }
+      return taken;
     });
   }
 
@@ -314,7 +358,7 @@ export class EditorController {
     const doc = editor.getJSON();
     const mode = modeOf(doc);
     this.view.setMode(mode);
-    this.view.setCommandEmpty(mode === 'send' || serializeDraft(doc, { sessionId: null, cwd: '' }).empty);
+    this.view.setCommandEmpty(mode === 'send' || draftState(doc).empty); // board ticket 741: no fold on an edit
     this.inputs.onDocChange?.(doc);
     if (!this.silent && transaction.docChanged) {
       if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
@@ -384,8 +428,11 @@ export class EditorController {
       this.setDoc(flight.doc, { silently: true, caret: null });
       void this.followSubmission(flight);
     }
-    this.restoring = this.drafts.load().then((draft) => {
+    this.restoring = this.drafts.load().then((loaded) => {
       if (!this.live || this.lifetime !== lifetime) return;
+      // UX wave U6b-5a: restored as none, but not known to be none, unless a save of this mount's was taken meanwhile
+      this.unread = loaded === UNREAD && this.savedIn !== lifetime;
+      const draft = loaded === UNREAD ? null : loaded;
       // UX wave U4a M3 (decision 13, step 5): a stage is the take-back's to carry forward, never a draft to load
       if (draft !== null && (draft.doc as ComposerDoc | null)?.attrs?.takeBack !== undefined) {
         this.loaded = true;
@@ -402,6 +449,7 @@ export class EditorController {
     return () => {
       this.endDictation('remove'); // E9: before the flush, so the draft keeps no provisional words
       this.live = false;
+      this.leaving.forEach((left) => left());
       this.attachmentEpoch += 1;
       off();
       this.writer.flush();
@@ -488,7 +536,7 @@ export class EditorController {
     const widget = typed ? this.widgetFor(typed[1]) : null;
     if (typed && widget) {
       this.writer.cancel();
-      this.saveDraft(null);
+      void this.saveDraft(null);
       this.setDoc(emptyDoc(), { silently: true, caret: null });
       const args = typed[2] ?? '';
       const open = () => void this.openWidget(typed[1], args);
@@ -533,7 +581,8 @@ export class EditorController {
       warn(error instanceof Error ? error.message : String(error));
     }
     if (accepted) {
-      if (this.drafts.clearsOnSend?.() ?? true) this.saveDraft(null);
+      sendWatchers.get(appSessionId)?.forEach((heard) => heard(doc));
+      if (this.drafts.clearsOnSend?.() ?? true) void this.saveDraft(null);
     } else {
       this.writer.change(doc);
       if (!this.live) this.writer.flush();
@@ -730,11 +779,93 @@ export class EditorController {
 
   private insertPasted(text: string, name: string): void {
     if (this.busy) return;
-    this.editor
-      ?.chain()
-      .focus()
-      .insertContent(pastedNode({ id: atomId('pasted'), kind: 'text', name, lines: text.split('\n').length, text }))
-      .run();
+    this.editor?.chain().focus().insertContent(pastedBlock(text, undefined, name)).run(); // UX wave U6b-5a: the one maker
+  }
+
+  // UX wave U6b-5a (decisions 8 and 30; S1): an attached block, as `EditorHandle.attachPasted` says. A remount meanwhile
+  // is waited for in its turn, as files from outside are (`attachFromOutside`). A document that holds the block answers
+  // `present` first, even while it is being sent: the block then goes with the message, once; so does a send of the
+  // session that held it, accepted while this waited (Decision Log 17).
+  private async attachPasted(block: AttachedBlock, options: EditorAttachOptions): Promise<EditorAttach> {
+    const { signal } = options;
+    // Decision Log 17: a send of the session accepted while this waits on its restore, holding the block, took it. The
+    // watch lasts no longer than the wait, which an unmount or the asker's giving up ends.
+    let sent = false;
+    const unwatch = watchAcceptedSends(this.inputs.appSessionId, (doc) => {
+      if (holdsBlock(doc, block.id)) sent = true;
+    });
+    try {
+      for (;;) {
+        const lifetime = this.lifetime;
+        if (signal?.aborted) return 'gone';
+        await this.restoredOrLeft(signal);
+        if (signal?.aborted || !this.live) return 'gone';
+        if (this.lifetime === lifetime) break;
+      }
+    } finally {
+      unwatch();
+    }
+    const editor = this.editor;
+    if (!editor || editor.isDestroyed) return 'gone';
+    if (sent || holdsBlock(editor.getJSON(), block.id)) return 'present';
+    if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId)) return 'busy';
+    if (this.inputs.disabled !== null || !editor.isEditable) return 'closed';
+    // the branch panel's fix wave: never into a box whose draft was not read (its next save would write over it), nor one
+    // another holds by now, read at once rather than from a render that may not have come
+    if (this.unread) return 'unread';
+    if (options.held?.()) return 'held';
+    // a box that can no longer take the keyboard takes the block at the end, saved at once
+    const caret = options.at === 'caret' && options.keyboard?.() !== false;
+    const save = options.save || (options.at === 'caret' && !caret);
+    const node = pastedBlock(block.text, block.id);
+    const { state } = editor;
+    // Decision Log 14 (iv): at a collapsed position, never over a selection, which keeps the words it holds
+    if (caret) {
+      // the caret the person left (a range's head; one in no text, as ⌘A leaves it, at the nearest text before), else the end
+      const { $head } = state.selection;
+      const at = editor.isFocused || this.caretLeft ? ($head.parent.inlineContent ? $head.pos : Selection.near($head, -1).head) : Selection.atEnd(state.doc).head;
+      editor.chain().insertContentAt(at, node).run(); // the caret after the block
+      editor.view.focus();
+    } else {
+      // as `appendPasted` places it in a stored draft: into an empty last paragraph, else a paragraph of its own. Every
+      // position before the end keeps its number, so the person's caret and selection are set back as they were (mapped,
+      // a caret in that empty paragraph would move past the block).
+      const last = state.doc.lastChild;
+      const atom = state.schema.nodeFromJSON(node);
+      const empty = last !== null && last.type.name === 'paragraph' && last.content.size === 0;
+      const tr = empty ? state.tr.insert(state.doc.content.size - 1, atom) : state.tr.insert(state.doc.content.size, state.schema.nodes.paragraph.create(null, atom));
+      // Select All is kept as a selection of the old content, which never comes to cover the block
+      const kept = state.selection instanceof AllSelection ? TextSelection.between(tr.doc.resolve(Selection.atStart(state.doc).from), tr.doc.resolve(Selection.atEnd(state.doc).to)) : Selection.fromJSON(tr.doc, state.selection.toJSON());
+      editor.view.dispatch(tr.setSelection(kept));
+    }
+    if (!save) return 'taken';
+    // the insertion's pending write is this save's only once it is taken: a save that fails leaves it to the writer, so
+    // what the box holds is still saved at its pause or its unmount (the branch panel's fix wave)
+    const revision = this.revision;
+    const taken = await this.saveDraft(draftOf(editor.getJSON(), new Date().toISOString()));
+    if (taken && this.revision === revision) this.writer.cancel();
+    return taken ? 'taken' : 'unsaved';
+  }
+
+  // This mount's restore, or its unmount, or the signal's abort, whichever comes first. A restore that fails fails the
+  // wait: an editor whose draft never came is not an empty box to put the block in and save over that draft.
+  private restoredOrLeft(signal: AbortSignal | undefined): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const off = () => {
+        this.leaving.delete(left);
+        signal?.removeEventListener('abort', left);
+      };
+      const left = () => {
+        off();
+        resolve();
+      };
+      this.leaving.add(left);
+      signal?.addEventListener('abort', left);
+      this.restoring.then(left, (error: unknown) => {
+        off();
+        reject(error);
+      });
+    });
   }
 
   private insertMention(path: string): string | null {
@@ -954,12 +1085,14 @@ export class EditorController {
       insertText: (text, options) => {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
+        // board ticket 739: text nodes and hard breaks, never a string the editor would parse as markup (ticket 733a: its
+        // writer checked these bytes, and a parse would decode entities and break lines after the check)
         if (!options?.separated) {
-          at.insertContent(asText(text)).run();
+          at.insertContent(inlineContent(text)).run();
           return;
         }
         at.run(); // P3-G: the caret first, so the text before it can be read
-        editor().chain().insertContent(asText(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text)).run();
+        editor().chain().insertContent(inlineContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text)).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),
@@ -1034,6 +1167,7 @@ export class EditorController {
       clearSettle: () => void (this.settleForm = null),
       beginDictation: (onEnded) => this.beginDictation(onEnded), // E9
       settleDictation: () => this.endDictation('keep'), // E9
+      attachPasted: (block, options) => this.attachPasted(block, options), // UX wave U6b-5a
     };
   }
 }

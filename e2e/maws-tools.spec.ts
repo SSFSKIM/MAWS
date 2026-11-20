@@ -510,7 +510,7 @@ test('an ask beside an open file: its form stands in the capsule’s row under t
     // the file open in the side column, through Files
     await openSurface(s.page, 'Files');
     const files = surface(s.page, 'files');
-    const treeRow = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
+    const treeRow = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${path}"]`);
     await expect(treeRow(s.repo)).toBeVisible();
     if ((await treeRow(s.repo).getAttribute('aria-expanded')) !== 'true') await treeRow(s.repo).click();
     await expect(treeRow(s.repo)).toHaveAttribute('aria-expanded', 'true'); // the tree expands its first root by itself

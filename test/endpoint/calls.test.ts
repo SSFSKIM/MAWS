@@ -159,4 +159,23 @@ describe('endpoint.listings', () => {
     const owned = (await call(await openRemote(f, org.a1, org.A), 'endpoint.listings', null)).output as { listings: Signed<Listing>[] };
     expect(owned.listings.find((r) => r.body.session === 'la-private')!.body.fields).toMatchObject({ owners: [org.A], title: 'secret', lane: 'A' });
   });
+
+  // The plan of 2026-11-18, Decision Log 18: a lane A member whose state word is `gone` is held with its listing
+  // withdrawn, so the call signs none for it; `stopped` is listed, and lane B is not under the rule.
+  it('leaves out a held lane A member whose state word is gone, and lists a stopped one and a lane B one', async () => {
+    const f = await startEndpoint(org, started);
+    const b = f.host.add('app-b');
+    f.records.set({ lane: 'B', session: b.engineSessionId!, owners: ['@machine'] }, 'app-b');
+    await sminos(f, [
+      laneAMember({ session: 'la-gone', state: 'gone' }),
+      laneAMember({ session: 'la-stopped', state: 'stopped' }),
+      laneAMember({ session: b.engineSessionId, alias: 'studio', lane: 'B', state: 'gone' }),
+    ]);
+    await until(() => f.endpoint.rl10.members.appSessionId(b.engineSessionId!) === 'app-b', 'the lane B member joined to its app session');
+    expect(f.endpoint.rl10.members.get('la-gone')).not.toBeNull();
+    const result = await call(await openRemote(f, org.a1, org.A), 'endpoint.listings', null);
+    expect(result).toMatchObject({ ok: true });
+    const listings = (result.output as { listings: Signed<Listing>[] }).listings;
+    expect(listings.map((r) => r.body.session).sort()).toEqual(['app-b', 'la-stopped']);
+  });
 });

@@ -118,7 +118,12 @@ export const R2_DEADLINE_SHAPES: Record<R2Command, DeadlineShape> = {
   'session.ui.render': 'bounded', 'session.ui.press': 'bounded', 'session.ui.input': 'bounded', 'session.ui.select': 'bounded', 'session.ui.focus': 'bounded',
   'session.ui.scroll': 'bounded', 'session.ui.panes': 'bounded', 'session.ui.paneShow': 'bounded', 'session.ui.paneFocus': 'bounded', 'session.ui.close': 'bounded',
   'session.ui.promptEdit': 'bounded', 'session.ui.answer': 'immediate',
+  'session.ui.renderSite': 'bounded', // UX wave U2b: as session.ui.render
 };
+// The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §E): the sites
+// `session.ui.renderSite` asks, which the wire's closed set of `session.ui.render` does not name. The host checks a
+// component against this list where the ask runs; anything else is refused before it reaches the engine.
+export const RENDER_SITE_COMPONENTS: readonly string[] = ['TurnDuration'];
 
 // E8: `session.reloadSkills`, an operation like its plugins sibling. The `plugins.*` and `marketplaces.*` reads are one
 // CLI run each under the bridge's 10 s deadline (accepted, E8 M1); their mutations are operations of the plugin runner.
@@ -668,7 +673,14 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.getWorkspaceDiff', read('get_workspace_diff'));
   handle('session.exportConversation', read('export_conversation'));
   handle('session.getStatus', read('get_status'));
-  handle('session.mcpStatus', async (input) => rendererMcpStatus(await read('mcp_status')(input))); // P3-H: never a header value
+  handle('session.mcpStatus', async (input) => {
+    const id = input.appSessionId as AppSessionId;
+    const session = table.get(id); // ticket 619: the answer is the asked session's servers now
+    const asked = session?.mcpAsked();
+    const answer = await read('mcp_status')(input);
+    if (session !== undefined && asked !== undefined && table.get(id) === session) session.noteMcpStatus(answer, asked);
+    return rendererMcpStatus(answer); // P3-H: never a header value
+  });
   // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone; an engine refusal answers in its words
   const refusedOr = async <T>(run: () => Promise<T>): Promise<T | { ok: false; message: string }> => {
     try {
@@ -808,11 +820,18 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     if (!session.surface.attached) throw new HostCommandError({ code: 'internal', message: `session ${id} has no engine surface (the engine did not advertise ui_surface_v1)` });
     return { session, client, address: session.surface.address };
   };
-  handleR2('session.ui.render', async ({ appSessionId, component, instanceId, props, viewport, contentRows, keyed }) =>
+  // One render on the session's attached client, for `session.ui.render` and `session.ui.renderSite` alike.
+  const render = async ({ appSessionId, component, instanceId, props, viewport, contentRows, keyed }: CommandInput<'session.ui.renderSite'>): Promise<CommandOutput<'session.ui.render'>> => {
+    const { client, address } = attached(appSessionId);
+    const answer = await controls.uiRender(client, { ...address, component, instance_id: instanceId, props, ...(viewport && { viewport }), ...(contentRows !== undefined && { content_rows: contentRows }), ...(keyed && { keyed }) });
+    return renderAnswerOf(answer, props);
+  };
+  handleR2('session.ui.render', async (input) => bounded(() => render(input)));
+  // UX wave U2b: a render of a site outside the wire's closed set, checked against the host's own list
+  handleR2('session.ui.renderSite', async (input) =>
     bounded(async () => {
-      const { client, address } = attached(appSessionId);
-      const answer = await controls.uiRender(client, { ...address, component, instance_id: instanceId, props, ...(viewport && { viewport }), ...(contentRows !== undefined && { content_rows: contentRows }), ...(keyed && { keyed }) });
-      return renderAnswerOf(answer, props);
+      if (!RENDER_SITE_COMPONENTS.includes(input.component)) throw new HostCommandError({ code: 'invalid_input', message: `session.ui.renderSite does not ask ${input.component}: this engine host asks ${RENDER_SITE_COMPONENTS.join(', ')}` });
+      return render(input);
     }),
   );
   handleR2('session.ui.press', async ({ appSessionId, plugin, handle, key, href }) =>

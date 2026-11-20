@@ -22,6 +22,7 @@ import { invoke, value } from './c7-replay';
 import { clearToasts, closeScene, launchScene, scratchProject, type Scene, type Scratch } from './maws-tools';
 import { REPO_ROOT } from './launch';
 import { startBrowserServer, type BrowserServer } from './browser-server';
+import { blinkInner, displayScale, timesFactor } from './zoom'; // UX wave U6b-5b: decision 27's rule; Blink's reading
 
 export type Surface = 'panel' | 'main';
 type Rect = { x: number; y: number; width: number; height: number };
@@ -33,6 +34,9 @@ export interface InspectedView {
   attached: boolean;
   windowId: number | null;
   owner: { paneId: string; surface: Surface; windowId: number } | null;
+  // UX wave U6b-5b M1: the last rect main acted on from `browser.view.place` for the tab, as received, and how many
+  // reports it has acted on; null before the first (src/main/browser/view.ts `placedOf`)
+  placed: { rect: Rect | null; count: number } | null;
 }
 interface BrowserInspector {
   tab(tabId: string): InspectedView | null;
@@ -217,19 +221,61 @@ export async function paneRect(pane: Locator): Promise<Rect> {
   });
 }
 
-const within1 = (a: Rect, b: Rect) => Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1;
+// UX wave U6b-5b M1 (decision 36): the acknowledgment of a placement. Polls until the rect main last acted on for the tab
+// is the pane's rect as the window rounds it now, and answers that rect: a scene that changed the layout or the zoom
+// reads the view's native bounds only after it, never after a number of frames (the pane reports from its own
+// measuring, and an unchanged rect sends nothing).
+export async function placedOn(s: Scene, tabId: string, pane: Locator, timeout = 5_000): Promise<Rect> {
+  let rect: Rect | null = null;
+  await expect
+    .poll(
+      async () => {
+        const [view, now] = await Promise.all([viewOf(s, tabId), paneRect(pane)]);
+        rect = now;
+        const placed = view?.placed?.rect ?? null;
+        return placed !== null && placed.x === now.x && placed.y === now.y && placed.width === now.width && placed.height === now.height ? 'acknowledged' : JSON.stringify({ placed: view?.placed ?? null, pane: now });
+      },
+      { timeout, intervals: [16, 33, 50, 100], message: 'main acknowledged the pane’s rect for the tab' },
+    )
+    .toBe('acknowledged');
+  return rect!;
+}
 
-// The tab's view is visible and lies on the pane's rect within 1 px, polled until it settles.
-export async function expectOnPane(s: Scene, tabId: string, pane: Locator, surface: Surface, timeout = 2_000): Promise<void> {
+const within1 = (a: Rect, b: Rect) => Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1;
+const sameRect = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+// Each of the four edges (left, top, right, bottom) of `a` within a point of `b`'s.
+const edgesWithin1 = (a: Rect, b: Rect) =>
+  Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.x + a.width - (b.x + b.width)) <= 1 && Math.abs(a.y + a.height - (b.y + b.height)) <= 1;
+
+// The tab's view is visible and lies on the pane's rect, polled until it settles. UX wave U6b-5b (decision 36;
+// Interfaces §G): in one sample, main's acknowledged rect (`placed`, as `placedOn` reads it) is the rect the pane
+// measures now, and the view's bounds have each edge within a point of that rect times the window's zoom `factor`, as
+// main places it (decision 27's edges): a window point is `factor` CSS pixels. At factor 1 the rect is its own product.
+export async function expectOnPane(s: Scene, tabId: string, pane: Locator, surface: Surface, timeout = 2_000, factor = 1): Promise<void> {
   await expect
     .poll(
       async () => {
         const [view, rect] = await Promise.all([viewOf(s, tabId), paneRect(pane)]);
-        return view !== null && view.visible && view.attached && view.owner?.surface === surface && view.bounds !== null && within1(view.bounds, rect) ? 'on the pane' : JSON.stringify({ view, rect });
+        const placed = view?.placed?.rect ?? null;
+        const on = view !== null && view.visible && view.attached && view.owner?.surface === surface && placed !== null && sameRect(placed, rect) && view.bounds !== null && edgesWithin1(view.bounds, timesFactor(rect, factor));
+        return on ? 'on the pane' : JSON.stringify({ view, rect, factor });
       },
-      { timeout, intervals: [16, 16, 33, 50, 100] },
+      { timeout, intervals: [16, 16, 33, 50, 100], message: 'main acknowledged the pane’s rect for the tab, and the view lies on it' },
     )
     .toBe('on the pane');
+}
+
+// UX wave U6b-5b (the branch review's fix wave; the architect's rule): what the tab's page should read as its size,
+// worked out apart from the renderer: Blink's rule (support/zoom.ts `blinkInner`) over main's native bounds of the view,
+// the display's actual scale and the tab's zoom, all from one sample. Answers 'as Blink' when the page's own
+// `innerWidth × innerHeight` is that, and, given the chip, the chip's text and its accessible name too; else what was
+// read. Poll it after the scene's `expectOnPane`.
+export async function readsAsBlink(s: Scene, tabId: string, page: Page, chip?: Locator): Promise<string> {
+  const [{ tab, view }, scale, inner] = await Promise.all([tabState(s, tabId), displayScale(s.maws.app), page.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`)]);
+  if (tab === null || view === null || view.bounds === null) return JSON.stringify({ tab: tab?.tabId ?? null, bounds: view?.bounds ?? null });
+  const want = `${blinkInner(view.bounds.width, tab.zoom, scale)} × ${blinkInner(view.bounds.height, tab.zoom, scale)}`;
+  const [text, name] = chip ? [(await chip.textContent())?.trim() ?? null, await chip.getAttribute('aria-label')] : [want, `Viewport: ${want}`];
+  return inner === want && text === want && name === `Viewport: ${want}` ? 'as Blink' : JSON.stringify({ want, page: inner, chip: text, name, bounds: view.bounds, zoom: tab.zoom, scale });
 }
 
 // Where the view lies against the pane two animation frames after the call (the pane reports from a frame callback,

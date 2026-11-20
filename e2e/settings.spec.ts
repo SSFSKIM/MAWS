@@ -17,6 +17,8 @@ import { TESTED_ENGINE_VERSION } from '../src/engine-host/engine-compat';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { invoke, value } from './support/c7-replay'; // P5 O3-D M5b: the shape flip's raw reads
 import { SETTINGS_DEFAULTS_V21, splitSettings } from '@shared/settings/defaults'; // P5 O15 M2: a client file saved on the embedded shape
+import { formatChord } from '../src/shared/keymap/chord'; // UX wave U6b-5b: the zoom's chords as Settings draws them
+import { zoomAct } from './support/zoom'; // UX wave U6b-5b: View's zoom items, used before settings.json is read
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -107,6 +109,20 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await expect(next.locator('kbd')).toHaveText('⌘⇧U');
       await expect.poll(() => accelerator(app, 'attention.next')).toBe('Cmd+Shift+U');
 
+      // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B14): each of View's zoom items used,
+      // and settings.json read after each, the window zoomed or not: the binding just recorded is in it (the reader's
+      // control) and none of the zoom's ids is.
+      const afterZoom = (act: string) =>
+        expect.poll(() => readSettings(userData).keymap, { message: `settings.json after ${act}: the recorded binding, and nothing of the zoom` }).toEqual({ 'attention.next': 'Cmd+Shift+U' });
+      expect(await zoomAct(app, page, 'zoom.in')).toBe(1.1);
+      await afterZoom('Zoom In, at 110 %');
+      expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);
+      await afterZoom('Actual Size, from 110 %');
+      expect(await zoomAct(app, page, 'zoom.out')).toBeLessThan(1);
+      await afterZoom('Zoom Out, below 100 %');
+      expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);
+      await afterZoom('Actual Size, from below 100 %');
+
       // The recorder keeps its own Esc (§H, row 3): Esc ends the recording, the chord stays, and the dialog stays open.
       await next.getByRole('button', { name: 'Change Next Needs-you' }).click();
       await expect(next.getByRole('button', { name: 'Was ⌘⇧U' })).toBeVisible();
@@ -129,6 +145,26 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await page.getByRole('dialog', { name: 'Reset every key binding?' }).getByRole('button', { name: 'Reset', exact: true }).click();
       await expect(next.locator('kbd')).toHaveText('⌘⇧J');
       await expect.poll(() => accelerator(app, 'attention.next')).toBe('Cmd+Shift+J');
+
+      // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B14): the three rows this
+      // half adds are listed with their chords and no control to change them, while build F may still be gone back to;
+      // the control, in this test: Next Needs-you's row, read the same way, has its Change. settings.json holds none of
+      // their ids.
+      await expect(next.getByRole('button', { name: 'Change Next Needs-you' })).toHaveCount(1);
+      for (const [title, chord] of [['Attach selection to chat', '⌘⇧L'], ['Back', '⌘['], ['Forward', '⌘]']] as const) {
+        const row = keyRow(page, title);
+        await expect(row.locator('kbd'), title).toHaveText(chord);
+        await expect(row.getByRole('button'), `${title} has no control`).toHaveCount(0);
+      }
+      expect(Object.keys(readSettings(userData).keymap).filter((id) => ['terminal.attachSelection', 'go.back', 'go.forward'].includes(id)), 'no stored rebinding of the three').toEqual([]);
+      // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B14): Zoom In, Zoom Out and Actual
+      // Size, the same way (Actual Size has no chord), with the same control above; settings.json was read for their ids
+      // after View's zoom items were used, above.
+      for (const [title, chord] of [['Zoom In', formatChord('Cmd+=')], ['Zoom Out', formatChord('Cmd+-')], ['Actual Size', 'Unbound']] as const) {
+        const row = keyRow(page, title);
+        await expect(row.locator('kbd'), title).toHaveText(chord);
+        await expect(row.getByRole('button'), `${title} has no control`).toHaveCount(0);
+      }
 
       // The default route and the relay-unreachable policy, one field each.
       const gateway = panel(page).getByRole('region', { name: 'Gateway' });

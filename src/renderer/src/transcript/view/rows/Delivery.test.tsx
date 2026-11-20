@@ -14,6 +14,8 @@ import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import type { Row } from '../../model/rows';
 import { renderRow, rowOf, storeWith } from './test-support';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { leaveRl2, overRl2 } from '../../../test-support/code-disk'; // ticket 627
 
 afterEach(() => {
   cleanup();
@@ -68,6 +70,22 @@ describe('the delivery row’s file names', () => {
 // P5 O7 M4: on a lane B session on another machine, Open externally and Reveal in Finder would act on that machine's
 // desktop. P5 O7 M5a (A10): Open externally opens a copy here; Reveal stays greyed, saying where the file is.
 describe('a delivery on another machine’s session', () => {
+  // Ticket 627: a terminal (lane A) session over RL2 takes neither command and has no copy route here: both buttons are
+  // greyed with the declared sentences
+  it('greys Open externally and Reveal in Finder for a terminal session over RL2, each with its sentence', () => {
+    const TERMINAL = addressOf(OTHER_MACHINE, 'app-a' as AppSessionId);
+    overRl2(TERMINAL, {}, 'A');
+    const { actions } = renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: TERMINAL });
+    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf' });
+    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf' });
+    expect([open.disabled, open.title, reveal.disabled, reveal.title]).toEqual([true, REMOTE_UNAVAILABLE['files.openExternal'], true, REMOTE_UNAVAILABLE['files.reveal']]);
+    fireEvent.click(open);
+    fireEvent.click(reveal);
+    expect(actions.openDelivered).not.toHaveBeenCalled();
+    expect(actions.revealDelivered).not.toHaveBeenCalled();
+    leaveRl2();
+  });
+
   it('opens a copy through Open externally, and greys Reveal in Finder with “on <machine>”', () => {
     const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     useMachines.getState().applyRoster([

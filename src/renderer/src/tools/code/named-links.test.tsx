@@ -3,20 +3,29 @@
 // transcript's own Markdown, every path chip is clicked, and what the click asks for (through `normalizeLexically`, as
 // `openFile` does) must be among `linkPaths` of the string, while the string's counter-example must not. The chip's and
 // the anchor's readers are held to the rule's copies the same way. The daemon's rule is specified from remark's and
-// micromark's code; this file is what shows the two agree.
+// micromark's code; this file is what shows the two agree. UX wave U6b-4c
+// (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, X3.4's M1 half): a shown Markdown file draws
+// with the same Markdown and resolves a chip against its own folder (`MarkdownView`, `resolveRelative`), so every case
+// also holds `fileLinkTargets` of the string, in the folder BASE, to the chips resolved there.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchorPaths, chipPath, EDIT_TOOLS, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
+import { anchorPaths, chipPath, EDIT_TOOLS, fileLinkTargets, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
 import { Markdown } from '../../transcript';
 import { filePathOf } from '../../transcript/model/cells';
 import { userTextOf } from '../../transcript/model/user-text';
 import { MCP_TOOL } from '../../transcript/model/classify';
-import { TranscriptActionsProvider } from '../../transcript/view/context';
-import { normalizeLexically } from './open-file';
+import { TranscriptActionsProvider, turnFileLinks } from '../../transcript/view/context';
+import { installFakeMain, ok } from '../../test-support/code';
+import { normalizeLexically, resolveRelative } from './open-file';
+import { MarkdownView } from './viewer/MarkdownView';
 
 afterEach(cleanup);
+
+// UX wave U6b-4b (decision 17): the window's entries turn the `file:` form on as they load; this suite draws as the window does
+beforeAll(() => turnFileLinks(true));
+afterAll(() => turnFileLinks(false));
 
 // The Markdown chunk loaded once, so every later mount draws in its first commit.
 beforeAll(async () => {
@@ -25,8 +34,8 @@ beforeAll(async () => {
   cleanup();
 });
 
-// What the window's path chips in `markdown` ask for, each through `normalizeLexically` as `openFile` does.
-function clickedPaths(markdown: string): string[] {
+// What the window's path chips in `markdown` ask for, as the click hands them to `openFile`.
+function clickedRaw(markdown: string): string[] {
   const openFile = vi.fn();
   const { container } = render(
     <TranscriptActionsProvider actions={{ openFile }}>
@@ -35,10 +44,15 @@ function clickedPaths(markdown: string): string[] {
   );
   expect(container.textContent).not.toBe('');
   for (const chip of container.querySelectorAll('[data-chip="path"]')) fireEvent.click(chip);
-  return openFile.mock.calls.map(([path]) => normalizeLexically(path as string));
+  return openFile.mock.calls.map(([path]) => path as string);
 }
+// Each through `normalizeLexically`, as `openFile` reads a chip of the transcript.
+const clickedPaths = (markdown: string): string[] => clickedRaw(markdown).map(normalizeLexically);
 
 const P = '/work/out/report.md';
+// The folder of a shown Markdown file (U6b-4c), and a chip's path as `openFile` resolves it there (its `resolvedPath`).
+const BASE = '/base/dir';
+const inBase = (path: string): string => normalizeLexically(resolveRelative(BASE, path));
 
 describe('a path chip asks for a path the rule names', () => {
   // [the string, the path its chip asks for, a path the rule must not name for it]
@@ -73,12 +87,23 @@ describe('a path chip asks for a path the rule names', () => {
     ['[r](/a/%2e%2e/b)', '/b', '/a/%2e%2e/b'],
     ['[r](//work/out/report.md)', P, '//work/out/report.md'],
     ['[r](/work/notes#1.md)', '/work/notes#1.md', '/work/notes'],
+    // UX wave U6b-4c: relative forms, as a Markdown file writes them
+    ['[a](a.md)', 'a.md', '/a.md'],
+    ['[a](./a.md)', 'a.md', './a.md'],
+    ['[a](../a.md)', '../a.md', 'a.md'],
+    ['[a](<sub/a b.md>)', 'sub/a b.md', 'sub/a'],
+    ['[a](a.md#L3)', 'a.md', 'a.md#L3'],
   ])('%j', (markdown, path, counter) => {
-    const clicked = clickedPaths(markdown);
+    const raw = clickedRaw(markdown);
+    const clicked = raw.map(normalizeLexically);
     expect(clicked).toContain(path);
     const named = linkPaths(markdown);
     for (const asked of clicked) expect(named).toContain(asked);
     expect(named).not.toContain(counter);
+    // in a Markdown file at BASE: each chip, resolved as the click resolves it, is among the file's targets
+    const targets = fileLinkTargets(markdown, BASE);
+    expect(raw.map(inBase)).toContain(inBase(path));
+    for (const asked of raw) expect(targets).toContain(inBase(asked));
   });
 });
 
@@ -91,12 +116,20 @@ describe('what is not clickable today yields no path chip', () => {
     '![r](/work/out/report.md)',
     '[r][ref]\n\n[ref]: /work/out/report.md',
     '[r](host:/work/out/report.md)',
-    '[r](file:///work/out/report.md)',
     '[r](C:/work/out/report.md)',
     'the key is at host:/vault/key',
   ])('%j', (markdown) => {
     expect(clickedPaths(markdown)).toEqual([]);
     expect(linkPaths(markdown)).toEqual([]);
+  });
+
+  // U6b-4c: a relative path written with its line as `:<n>` begins with what reads as a scheme (`notes.md:`): no chip,
+  // and the rule names nothing; the control, the same path written from `./`, is both
+  it('[n](notes.md:7) is no chip and names nothing; [n](./notes.md:7) is both', () => {
+    expect(clickedPaths('[n](notes.md:7)')).toEqual([]);
+    expect(linkPaths('[n](notes.md:7)')).toEqual([]);
+    expect(clickedPaths('[n](./notes.md:7)')).toEqual(['notes.md']);
+    expect(linkPaths('[n](./notes.md:7)')).toEqual(['notes.md']);
   });
 
   // a link in code, in math, in another link's text or in an image's: no chip, and the rule names nothing (fix round 1)
@@ -174,6 +207,18 @@ describe('listed refusals: what the click asks for, and the rule names nothing',
     expect(clickedPaths(markdown)).toEqual(asked);
     expect(linkPaths(markdown)).toEqual([]);
   });
+
+  // UX wave U6b-4b (N1.6): U6c's refusals hold for the `file:` form, whatever the window draws; each beside its control,
+  // a form of the same path that the rule's own reader names
+  it.each([
+    ['[r](file:///work/%41.md)', '[r](file:///work/A.md)', '/work/A.md'],
+    ['[r](file&colon;///work/x.md)', '[r](file:///work/x.md)', '/work/x.md'],
+  ])('%j: the click asks for the path and the rule names nothing; %j names %j', (refused, named, path) => {
+    expect(clickedPaths(refused)).toEqual([path]);
+    expect(linkPaths(refused)).toEqual([]);
+    expect(linkPaths(named)).toEqual([path]);
+    expect(clickedPaths(named)).toEqual([path]);
+  });
 });
 
 describe('the chip’s and the anchor’s readers', () => {
@@ -216,6 +261,264 @@ describe('the chip’s and the anchor’s readers', () => {
   });
 });
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1, "The scanner's three gaps"): the rule
+// reads a text's blocks as the window's parser does, or names less. Each case states what both the window's chips and
+// the rule's names are, beside its control.
+function agree(markdown: string, paths: string[]): void {
+  expect(chipPaths(markdown), `chips of ${JSON.stringify(markdown)}`).toEqual(paths);
+  expect(linkPaths(markdown), `names of ${JSON.stringify(markdown)}`).toEqual(paths);
+}
+
+describe('the rule reads the blocks the window draws', () => {
+  it('a table’s cell past the head’s width is not drawn, and names nothing; a cell the head covers does (N1.11)', () => {
+    agree('| a | b |\n|---|---|\n| x | y | [r](/work/x.md) |', []);
+    agree('| a | b |\n|---|---|\n| x | [r](/work/x.md) | y |', ['/work/x.md']);
+  });
+
+  it('a delimiter row of a colon and dashes alone makes a table of one column (N1.13)', () => {
+    agree('Title\n:---\ntext | [r](/work/x.md)', []);
+    agree('Title\n:---\n[r](/work/x.md) | text', ['/work/x.md']);
+  });
+
+  // N1.14: the tokenizer takes no head of one pipe alone. Recorded: the window draws prose there, and the rule reads it
+  // as prose too, so a code span the paragraph opens before it still holds the link
+  it('a line of one pipe alone is no table’s head (N1.14)', () => {
+    agree('|\n|-|\n[r](/work/x.md) | [s](/work/y.md)', ['/work/x.md', '/work/y.md']);
+    agree('`a\n|\n|-|\n[r](/work/x.md)`', []);
+  });
+
+  // N1.15: the window's parser drops a leading byte order mark; one that does not lead the text is a character
+  it('a byte order mark before a fence’s opening: a fence to both (N1.15)', () => {
+    for (const fence of ['```', '~~~']) {
+      agree(`\uFEFF${fence}\n[r](/work/x.md)\n${fence}`, []);
+      agree(`\uFEFF[s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+      // the mark after a first line of prose opens no fence for either: the link is prose, and the closing run opens one
+      agree(`prose\n\uFEFF${fence}\n[r](/work/x.md)\n${fence}`, ['/work/x.md']);
+    }
+  });
+
+  // M1's review, finding 1: the window reads a table in a list item, or one whose head a quote's paragraph would continue
+  // lazily, apart from the lines round it (a delimiter row or a body row is never a lazy line); a top-level table is the
+  // control. Both forms of destination.
+  it.each(['/example/report.md', 'file:///example/report.md'])('a table in a container, and the lines after it (%s)', (destination) => {
+    const after = `\`a\n[r](${destination})\``;
+    agree(`- Title\n:---\n${after}`, []);
+    agree(`- Title\n  :---\n${after}`, []);
+    agree(`- item\n\n  | a | b |\n  |---|---|\n${after}`, []);
+    agree(`> para \`x\nT | u\n|-|-|\n[r](${destination}) \``, []);
+    agree(`T | u\n-|-\n> \`x\n[r](${destination})\``, []);
+    agree(`Title\n:---\n${after}`, ['/example/report.md']);
+    agree(`- item\n\n| a | b |\n|---|---|\n| [r](${destination}) | x |`, ['/example/report.md']);
+  });
+
+  // Finding 1's neighbour: a list item that could not interrupt a paragraph continues it in the window
+  it.each(['/example/report.md', 'file:///example/report.md'])('a list item that cannot interrupt a paragraph (%s)', (destination) => {
+    const path = '/example/report.md';
+    for (const marker of ['2.', '2)', '10.']) agree(`x \`y\n${marker} [r](${destination}) \``, []);
+    for (const marker of ['1.', '*', '+']) agree(`x \`y\n${marker}\n[r](${destination}) \``, []);
+    agree(`x\n2. [r](${destination})`, [path]);
+    agree(`x \`y\n1. [r](${destination}) \``, [path]);
+    agree(`- a\n\n  x \`y\n  2) [r](${destination}) \``, []);
+  });
+
+  // The review's refinement: a following item of a list is a sibling; a weak line inside the item holding the paragraph is text
+  it.each(['/x/', 'file:///x/'])('a list of links, and a weak line outside or inside its item (%s)', (at) => {
+    agree(`1. [a](${at}a.md)\n2. [b](${at}b.md)\n3. [c](${at}c.md)`, ['/x/a.md', '/x/b.md', '/x/c.md']);
+    agree(`1) [a](${at}a.md)\n2) [b](${at}b.md)\n3) [c](${at}c.md)`, ['/x/a.md', '/x/b.md', '/x/c.md']);
+    agree(`9. [a](${at}a.md)\n10. [b](${at}b.md)`, ['/x/a.md', '/x/b.md']);
+    agree(`* [a](${at}a.md)\n* [b](${at}b.md)`, ['/x/a.md', '/x/b.md']);
+    agree(`1. a \`x\n2. [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`1. a \`x\n2) [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`- a\n  - b \`x\n  2. [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`- a\n  1. b \`x\n     2) [r](${at}r.md) \``, []);
+    // M1's re-review: a marker the rule cannot place hides nothing it then reads as a block (a heading after a quoted or
+    // tabbed `2.`); the control, `1.`, interrupts and its heading stands
+    agree(`> - a\n>\n>   x \`y\n>   2. # [r](${at}r.md) \``, []);
+    agree(`> - a\n>\n>   x \`y\n>   1. # [r](${at}r.md) \``, ['/x/r.md']);
+    agree(`- a\n\n  x \`y\n  2.\t# [r](${at}r.md) \``, []);
+    agree(`- a\n\n  x \`y\n  1.\t# [r](${at}r.md) \``, ['/x/r.md']);
+    // a fence such a marker may open has no end the rule can find: the text names nothing
+    const fenced = `- a\n\n  x \`y\n  2.\t\`\`\`\n  [r](${at}r.md)\n\n[s](${at}s.md)`;
+    expect(linkPaths(fenced)).toEqual([]);
+    expect(chipPaths(fenced)).toContain('/x/s.md');
+    // a weak line over a delimiter row is a table's head to the window; the control has no delimiter row
+    agree(`x \`y\n2. \`\`\`\n  :---\n| x | y | [r](${at}r.md) |`, []);
+    agree(`x \`y\n2. a\n  b\n| x | y | [r](${at}r.md) |`, ['/x/r.md']);
+    // what still drops: a paragraph that does not open its item, and a weak line less indented than its text
+    const uncertain = `- a\n\n  x \`y\n2. [r](${at}r.md) \``;
+    expect(chipPaths(uncertain)).toEqual(['/x/r.md']);
+    expect(linkPaths(uncertain)).toEqual([]);
+  });
+
+  // N1.16: the window ends a line at a carriage return alone; the rule names nothing of such a text
+  it('lone carriage returns round a fence: the rule names nothing, the window draws no chip in the fence (N1.16)', () => {
+    for (const fence of ['```', '~~~']) {
+      const lone = `see [s](/work/s.md)\r${fence}\r[r](/work/x.md)\r${fence}`;
+      expect(chipPaths(lone), fence).toEqual(['/work/s.md']);
+      expect(linkPaths(lone), fence).toEqual([]);
+      agree(`see [s](/work/s.md)\n${fence}\n[r](/work/x.md)\n${fence}`, ['/work/s.md']);
+    }
+  });
+
+  // The branch review's four (UX wave U6b-4b), each drawn by the window: no chip, and the rule names nothing up to the
+  // next blank line, after which the control's link is both (ux-wave's ruling; the cases are board ticket 776's)
+  it.each(['/s', 'file:///s'])('where a line meets a container the pass does not follow: no chip, nothing named, to the next blank line (%s)', (destination) => {
+    for (const shape of [
+      '> a `x\n2. > `[r](@)`',
+      '- > a `x\n> `[r](@)`',
+      '> - a `x\n> T | u\n> -|-\n[r](@) `',
+      '- a | b\n    --|--\n    x | y | [r](@)',
+      '- a\n    T | u\n    -|-\n    x | y | [r](@)',
+      'a\n+\n>     [r](@)',
+      'a\n>     [r](@)',
+      '- a\n>     [r](@)',
+    ]) {
+      const markdown = shape.replace('@', destination);
+      agree(markdown, []);
+      agree(`${markdown}\n\n[c](/c)`, ['/c']);
+    }
+  });
+
+  // The delta review (fix wave 2): a table candidate the pass does not read ends no paragraph and loses no definition
+  it.each(['/s', 'file:///s'])('a table candidate the pass does not read ends no paragraph and loses no definition (%s)', (destination) => {
+    for (const shape of [
+      '- a `x\n  T | u\n        -|-\n  2. # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  2) # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  10. # [r](@) `',
+      '> - a `x\n>   T | u\n>         -|-\n>   2. # [r](@) `',
+      '- a `x\n  T | u\n        -|-\n  2. ***\n[r](@) `',
+      '- [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)',
+      '- [a]: /x\n  [ref]: https://example.com/\n        :---\n\n[outer [ref]](@)',
+      '> - [ref]: https://example.com/\n>         :---\n\n[outer [ref]](@)',
+    ]) {
+      agree(shape.replace('@', destination), []);
+    }
+    agree(`- a \`x\n  T | u\n        -|-\n  y\n\n2. # [r](${destination})`, ['/s']);
+  });
+
+  // The delta review again (fix wave 3): where the scan discarded anything and the text may hold a definition, nothing
+  it.each(['/s', 'file:///s'])('a text the scan discarded anything of names nothing when it may hold a definition (%s)', (destination) => {
+    for (const shape of [
+      '- > a\n2. [ref]: https://example.com\n\n[outer [ref]](@)',
+      '- T | u\n  -|-\n[ref]:\n  https://example.com\n\n[outer [ref]](@)',
+      '- T | u\n  -|-\n[ref]: https://example.com\n  "title"\n\n[outer [ref]](@)',
+    ]) {
+      agree(shape.replace('@', destination), []);
+    }
+    agree(`- > a\n2. x\n\n[c](${destination})`, ['/s']);
+    agree(`[ref]: /x\n\n[c](${destination})`, ['/s']);
+  });
+});
+
+// UX wave U6b-4c (X3.7): a file's text as a shown Markdown file draws it (`MarkdownView`, for a file at BASE): a link in
+// a block the window draws as code is no chip, and the rule names nothing of it, each beside its control.
+describe('a Markdown file’s text, drawn by MarkdownView (U6b-4c)', () => {
+  // `MarkdownView` asks the bridge for this Mac; the suite's bridge is put back after it
+  let prior: typeof window.maws | undefined;
+  beforeAll(() => {
+    prior = window.maws;
+    installFakeMain(() => ok());
+  });
+  afterAll(() => {
+    if (prior === undefined) Reflect.deleteProperty(window, 'maws');
+    else window.maws = prior;
+  });
+  // the paths of the chips drawn, as each chip holds it
+  function drawn(text: string): string[] {
+    const { container } = render(<MarkdownView entry={{ tabId: 'u6b4c-doc', appSessionId: null, path: `${BASE}/doc.md`, text } as never} />);
+    const paths = [...container.querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'));
+    cleanup();
+    return paths as string[];
+  }
+
+  it('lone carriage returns: no chip for the fence’s link, and the rule names nothing of the file; with line feeds, the prose’s link is both', () => {
+    for (const fence of ['```', '~~~']) {
+      const lone = `see [s](s.md)\r${fence}\r[r](r.md)\r${fence}\r`;
+      expect(drawn(lone), fence).toEqual(['s.md']);
+      expect(fileLinkTargets(lone, BASE), fence).toEqual([]);
+      const fed = lone.replaceAll('\r', '\n');
+      expect(drawn(fed), fence).toEqual(['s.md']);
+      expect(fileLinkTargets(fed, BASE), fence).toEqual([`${BASE}/s.md`]);
+    }
+  });
+
+  it('a byte order mark, then indented code: no chip and no name for its link; the mark before prose: both', () => {
+    const coded = '\uFEFF    [r](r.md)\n\n[s](s.md)';
+    expect(drawn(coded)).toEqual(['s.md']);
+    expect(fileLinkTargets(coded, BASE)).toEqual([`${BASE}/s.md`]);
+    const prose = '\uFEFF[r](r.md)\n\n[s](s.md)';
+    expect(drawn(prose)).toEqual(['r.md', 's.md']);
+    expect(fileLinkTargets(prose, BASE)).toEqual([`${BASE}/r.md`, `${BASE}/s.md`]);
+  });
+});
+
+// UX wave U6b-4b (R1): an inline `file:` link with an empty host is the path chip of its rest, and the rule names that
+// rest; every other `file:` form is text and names nothing. The fixed rows are drawn finished and while still arriving
+// (`live`); the seeded differential below draws finished text only.
+describe.each([false, true])('the file: form (live: %s)', (live) => {
+  // [the string, the path its chip asks for, a path the rule must not name for it]
+  it.each([
+    ['[r](file:///work/out/report.md)', P, 'file:///work/out/report.md'],
+    ['[r](file:///work/out/report.md#L12)', P, '/work/out/report.md#L12'],
+    ['[n](file:///work/out/my%20notes.md)', '/work/out/my notes.md', '/work/out/my%20notes.md'],
+    ['[n](<file:///work/out/my notes.md>)', '/work/out/my notes.md', '/work/out/my'],
+    ['[r](FILE:///work/out/report.md)', P, 'FILE:///work/out/report.md'],
+    ['[r](file:////work/out/report.md)', P, '//work/out/report.md'],
+  ])('%j', (markdown, path, counter) => {
+    const chips = chipPaths(markdown, live);
+    expect(chips).toEqual([path]);
+    const named = linkPaths(markdown);
+    for (const asked of chips) expect(named).toContain(asked);
+    expect(named).not.toContain(counter);
+  });
+
+  // N1.1 to N1.4 and L3: no chip, nothing named, and no element's href is a `file:` URL; the control, an inline link to
+  // the same path beside it, is both
+  it.each([
+    '[r](file://host/work/x.md)',
+    '[r](file://localhost/work/x.md)',
+    '[r](file:/work/x.md)',
+    '[r](file:work/x.md)',
+    '[r](file://)',
+    '<file:///work/x.md>',
+    'see file:///work/x.md here',
+    '`[r](file:///work/x.md)`',
+    '```\n[r](file:///work/x.md)\n```',
+    '$$\n[r](file:///work/x.md)\n$$',
+    '$$[r](file:///work/x.md)$$',
+    '[r][l]\n\n[l]: file:///work/x.md',
+  ])('%j: no chip and nothing named; the inline link beside it is both', (markdown) => {
+    expect(chipPaths(markdown, live)).toEqual([]);
+    expect(linkPaths(markdown)).toEqual([]);
+    const { container } = render(<Markdown markdown={markdown} live={live} />);
+    expect([...container.querySelectorAll('[href]')].map((element) => element.getAttribute('href')).filter((href) => /^(file|maws-path):/i.test(href!))).toEqual([]);
+    cleanup();
+    const control = `${markdown}\n\n[c](file:///work/c.md)`;
+    expect(chipPaths(control, live)).toEqual(['/work/c.md']);
+    expect(linkPaths(control)).toEqual(['/work/c.md']);
+  });
+
+  // N1.10: an offset is not an index into the text (the parser drops a leading byte order mark before it counts)
+  it('after a leading byte order mark the inline form is a chip and is named; its autolink is neither (N1.10)', () => {
+    for (const [markdown, paths] of [['\uFEFF[r](file:///work/x.md)', ['/work/x.md']], ['\uFEFF<file:///work/x.md>', []]] as const) {
+      expect(chipPaths(markdown, live), JSON.stringify(markdown)).toEqual(paths);
+      expect(linkPaths(markdown), JSON.stringify(markdown)).toEqual(paths);
+    }
+  });
+
+  it('a table’s cell past the head’s width: no chip and nothing named in this form either (N1.11, N1.13)', () => {
+    for (const [markdown, paths] of [
+      ['| a | b |\n|---|---|\n| x | y | [r](file:///work/x.md) |', []],
+      ['| a | b |\n|---|---|\n| x | [r](file:///work/x.md) | y |', ['/work/x.md']],
+      ['Title\n:---\ntext | [r](file:///work/x.md)', []],
+      ['Title\n:---\n[r](file:///work/x.md) | text', ['/work/x.md']],
+    ] as const) {
+      expect(chipPaths(markdown, live), JSON.stringify(markdown)).toEqual(paths);
+      expect(linkPaths(markdown), JSON.stringify(markdown)).toEqual(paths);
+    }
+  });
+});
+
 // The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own
 // Markdown. One direction is asserted, the one that admits: every path the rule names is a path chip the window draws.
 // The other direction (a chip the rule refuses) fails towards the refusal; it is counted and a few are printed.
@@ -234,6 +537,13 @@ const FRAGMENTS = [
   '#L3', ':12', '%20', '%72', '/work/a.md', '/secret', '/work/my notes.md', '/w/(x).md', '/vault/key,backup', '[ref]: ', '[ref]',
   '[^1]: ', '# ', '**', 'text', 'x', ':', 'host:', '//', '..', '/./', '[r](/work/a.md)', '[r](</secret>)', '[r](/secret "t")',
   '![i](/secret)', '[ref]: /secret', '[ref]: </secret>', '<https://e.com/', 'Here is:\n', '[a [b](/secret) c]',
+  // UX wave U6b-4b (R1): the `file:` form beside the scheme-less one, the marks the window's parser reads apart, and a
+  // table whose rows can run past its head
+  'file://', 'file:///', 'FILE:///', '<file:///', 'file://h/', '\uFEFF', '\r', '~~~\n', '| a | b |\n', '|---|---|\n', ':---\n', '| x | y | z |\n',
+  // M1's review, finding 1: a table's lines beside a list item's, a quote's and a lazy line's
+  '- T\n', '\n- ', '  :---\n', '  |---|---|\n', '> p\n', '\n`', '`\n',
+  // UX wave U6b-4c (X3.4): relative destinations, a fragment and a query, and two relative links whole
+  './', '../', 'a/', '#u', '?q', '[r](a/b.md)', '[r](../up.md)',
 ];
 const LONG_TAIL = 'a'.repeat(17_000); // past the 16 KiB bound; few, for the time
 function generated(seed: number, count: number): string[] {
@@ -244,18 +554,20 @@ function generated(seed: number, count: number): string[] {
     return text;
   });
 }
-// What the window's path chips in `markdown` ask for, as `clickedPaths`, for a string that may draw nothing.
-function chipPaths(markdown: string): string[] {
+// What the window's path chips in `markdown` ask for, as `clickedPaths`, for a string that may draw nothing; drawn
+// finished unless `live` says it is still arriving.
+function chipRaw(markdown: string, live = false): string[] {
   const openFile = vi.fn();
   const { container } = render(
     <TranscriptActionsProvider actions={{ openFile }}>
-      <Markdown markdown={markdown} live={false} />
+      <Markdown markdown={markdown} live={live} />
     </TranscriptActionsProvider>,
   );
   for (const chip of container.querySelectorAll('[data-chip="path"]')) fireEvent.click(chip);
   cleanup();
-  return openFile.mock.calls.map(([path]) => normalizeLexically(path as string));
+  return openFile.mock.calls.map(([path]) => path as string);
 }
+const chipPaths = (markdown: string, live = false): string[] => chipRaw(markdown, live).map(normalizeLexically);
 
 describe('the differential: every path the rule names is a chip the window draws', () => {
   it('over seeded strings of link-shaped fragments', { timeout: 300_000 }, () => {
@@ -263,18 +575,54 @@ describe('the differential: every path the rule names is a chip the window draws
     const count = 2000;
     const started = performance.now();
     let checked = 0;
+    let relative = 0;
     const faults: { markdown: string; path: string }[] = [];
     const windowOnly: { markdown: string; path: string }[] = [];
     for (const markdown of generated(seed, count)) {
-      const chips = chipPaths(markdown);
+      const raw = chipRaw(markdown);
+      const chips = raw.map(normalizeLexically);
       const named = linkPaths(markdown);
       checked += named.length;
+      relative += named.filter((path) => !path.startsWith('/')).length;
       for (const path of named) if (!chips.includes(path)) faults.push({ markdown, path });
       for (const path of chips) if (!named.includes(path)) windowOnly.push({ markdown, path });
+      // U6b-4c: the same string as a Markdown file at BASE, each chip resolved as the click resolves it there
+      const resolved = raw.map(inBase);
+      for (const path of fileLinkTargets(markdown, BASE)) if (!resolved.includes(path)) faults.push({ markdown, path: `${path} (in ${BASE})` });
     }
-    console.log(`named-links differential: seed ${seed}, ${count} strings, ${checked} named paths checked, ${windowOnly.length} window-only chips, ${Math.round(performance.now() - started)} ms`);
+    console.log(`named-links differential: seed ${seed}, ${count} strings, ${checked} named paths checked (${relative} relative), ${windowOnly.length} window-only chips, ${Math.round(performance.now() - started)} ms`);
     for (const only of windowOnly.slice(0, 5)) console.log(`window-only chip ${JSON.stringify(only.path)} in ${JSON.stringify(only.markdown.slice(0, 200))}`);
     expect(faults.slice(0, 10).map(({ markdown, path }) => `${JSON.stringify(path)} in ${JSON.stringify(markdown.slice(0, 200))}`)).toEqual([]);
     expect(faults).toHaveLength(0);
+  });
+
+  // M1's review, finding 1: strings of whole lines, a table's beside a list item's, a quote's, an indented one's and a
+  // code span's that runs from one line to the next, so the class a table in a container belongs to is met often
+  it('over seeded lines of tables, containers and code spans', { timeout: 300_000 }, () => {
+    const seed = 0x7461626c;
+    const count = 1500;
+    const LINES = [
+      '- T', '1. T', '> p', '> p `x', '> - T', 'T', 'T | u', '| a | b |', '  | a | b |', ':---', '  :---', '-|-', '|---|---|', '  |---|---|', '> |---|---|',
+      '`a', 'x `y', '[r](/secret)`', '[r](/secret) `', '| [r](/secret) | x |', '| x | y | [r](/secret) |', '  [r](/secret)', '> [r](/secret)', '- [r](/secret)', '',
+      // lines whose interrupting a paragraph the two readings may judge apart: an ordered item that does not start at
+      // one, an item with nothing after its marker, indented code, a setext underline and a thematic break
+      // (no line indented four columns: after a table, or under an empty list item, the window reads such a line as code
+      // or as the item's content where this scanner does not; M1's report lists the two, a structural fix's to close)
+      '2. [r](/secret) `', '2) [r](/secret)`', '2. x `y', '1.', '1. ', '-', '*', '+', '- ', '---', '===', '***', '- - -',
+      '  2. [r](/secret) `', '  - x `y', '   2) x', '1. x `y', '3) [r](/secret)', '* [r](/secret)', '10. x',
+      // M1's re-review: block starts after a marker the rule cannot place
+      '# [r](/secret)', '2. # [r](/secret) `', '  2.\t# [r](/secret) `', '>   2. # [r](/secret) `', '2. ```', '  2.\t```', '```', '> - a', '>', '>   x `y',
+    ];
+    const random = mulberry32(seed);
+    const faults: string[] = [];
+    for (let k = 0; k < count; k += 1) {
+      const markdown = Array.from({ length: 2 + Math.floor(random() * 6) }, () => LINES[Math.floor(random() * LINES.length)]!).join('\n');
+      const raw = chipRaw(markdown);
+      const chips = raw.map(normalizeLexically);
+      for (const path of linkPaths(markdown)) if (!chips.includes(path)) faults.push(`${JSON.stringify(path)} in ${JSON.stringify(markdown)}`);
+      const resolved = raw.map(inBase);
+      for (const path of fileLinkTargets(markdown, BASE)) if (!resolved.includes(path)) faults.push(`${JSON.stringify(path)} (in ${BASE}) in ${JSON.stringify(markdown)}`);
+    }
+    expect(faults.slice(0, 10)).toEqual([]);
   });
 });

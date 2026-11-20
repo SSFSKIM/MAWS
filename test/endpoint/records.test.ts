@@ -663,4 +663,21 @@ describe('notify', () => {
     notifier.welcome();
     expect(sent).toEqual([notify('s1', 'wrote', 0), notify('s1', 'wrote', 0)]);
   });
+
+  it('keys a to-human event by its project too: a session that changed project starts its writer at seq 1 again (ticket 761)', () => {
+    const { notifier, sent } = setup();
+    const host = (project: string, seq: number) => ({
+      kind: 'host',
+      session: 's1',
+      project,
+      sub: null,
+      body: { event: { kind: 'message', writer: 'mini/s1', seq } },
+    });
+    const marks: string[] = [];
+    notifier.hostMessage(host('p-old', 1), () => marks.push('p-old 1'));
+    notifier.hostMessage(host('p-new', 1), () => marks.push('p-new 1'));
+    notifier.hostMessage(host('p-new', 1), () => marks.push('p-new 1 again'));
+    expect(sent).toEqual([notify('s1', 'wrote', 0), notify('s1', 'wrote', 0)]);
+    expect(marks).toEqual(['p-old 1', 'p-new 1']);
+  });
 });

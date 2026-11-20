@@ -30,6 +30,7 @@ import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
 import { DESTINATION } from '../destination/copy';
 import { PAGE_TITLE_ID } from '../destination/DestinationPage';
 import { useShellGeometry, useShellView } from './shell-view';
+import { useZoom } from '../stores/zoom'; // UX wave U6b-5b
 import { useSlot } from './slots';
 import { mountChromeTabs } from '../main/chrome-tabs';
 import { SurfaceRow } from '../panel/SurfaceRow';
@@ -43,6 +44,8 @@ import { useSessionActionUnavailable } from '../lane-b/remote-unavailable'; // t
 import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { displayTitle } from '../sessions/title';
+import { OpenInSubmenu } from '../open-in/OpenInMenu'; // UX wave U6b-4a
+import { useOtherMachine } from '../open-in/open'; // UX wave U6b-4a
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
 // P3-L end
@@ -90,6 +93,12 @@ export function toolbarTitle(
 
 // The room the usage ring takes from the surface icons' count: its 28 px button (UX wave U7b, M7 decision 1).
 const USAGE_RING_ROOM = 28;
+// UX wave U6b-5b (placement 5; its Decision Log 18): the traffic lights keep 78 window points clear, which is 78 ÷ the
+// window's zoom CSS pixels, and the leading box holds that clearance, its two 28 px buttons, the 4 px between them and its
+// 12 px of right padding: 150 at 100 %, as before. It is never narrower than that at any zoom, the sidebar's width or not.
+const LIGHTS_CLEAR_PT = 78;
+const LEADING_CONTROLS = 28 + 4 + 28 + 12;
+const leadingFloor = (zoom: number) => Math.ceil(LIGHTS_CLEAR_PT / zoom) + LEADING_CONTROLS;
 
 export function Toolbar() {
   const sidebar = useLayout((s) => s.regions.sidebar);
@@ -106,7 +115,8 @@ export function Toolbar() {
   const split = useLayout((s) => currentSet(s.main).panes.length === 2);
   // Budget against the grid's actual header, not the window: a full-height surface can leave only 360px.
   // Preserve a usable, scrolling strip (including New chat) before allocating optional chrome controls.
-  const leading = geometry.sidebar || 150;
+  const zoom = useZoom((s) => s.factor); // UX wave U6b-5b
+  const leading = Math.max(geometry.sidebar || 150, leadingFloor(zoom));
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
@@ -116,7 +126,7 @@ export function Toolbar() {
   return (
     <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-start-1 col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
       <div
-        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
+        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[calc(78px/var(--app-zoom,1))]"
         style={{ width: leading }}
       >
         <div className="flex items-center gap-1">
@@ -223,6 +233,8 @@ const BoardIcon = () => (
 // another machine's terminal session (a listed lane A row, no record here) offers Take over, disabled in place with the
 // reason its controls port gives (Q2: a gap is shown where the control would be). P5 O8 M6b: and Share, for a session you
 // own, listed or a record. P5 O8 M5b: and Add owner after it, for the session's owners (`useCanAddOwner`).
+// UX wave U6b-4a: Open in, after the session's actions and before Share, for a record and for another machine's terminal
+// session (drawn disabled there, saying where the folder is).
 function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5: Take over and Fork for a bridged terminal session
@@ -232,17 +244,20 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
   const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
   const mine = useSessions((s) => s.listed.get(appSessionId)?.mine ?? false); // the UX wave, U9: the listing's
+  const elsewhere = useOtherMachine(appSessionId) !== null; // UX wave U6b-4a: by its address, before any record arrives
   if (remote) {
     const takeOver = controls?.capability('take-over') ?? null;
     return <SessionMenu disabled={false}>
       <SessionMenuItem id="takeOver" appSessionId={appSessionId} label={SESSION_ACTIONS.takeOver} gap={takeOver === null || takeOver.available ? null : takeOver.reason} />
+      <OpenInSubmenu appSessionId={appSessionId} menu="dropdown" />
       {shareable && <ShareMenuItem appSessionId={appSessionId} />}
       {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
     </SessionMenu>;
   }
   const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading, mine }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
-  return <SessionMenu disabled={ids.length === 0 && !shareable}>
+  return <SessionMenu disabled={!record && !shareable && !elsewhere}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
+    {(record || elsewhere) && <OpenInSubmenu appSessionId={appSessionId} menu="dropdown" /> /* UX wave U6b-4a: the working folder; disabled for another machine */}
     {shareable && <ShareMenuItem appSessionId={appSessionId} />}
     {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
   </SessionMenu>;

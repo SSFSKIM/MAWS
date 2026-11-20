@@ -15,6 +15,12 @@
 // authenticated one, and never makes a session a member that words can address. Each session says which it is read
 // from (`authenticated`), so the renderer names only legacy entries by a legacy lifecycle.
 //
+// A sminos thread outlives its process (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §G; the
+// design's D7): its lifecycle events carry its thread's id in `thread`. A sminos from before threads writes a `retired`
+// with reason `ended` and no `thread` when the process ends, on any verb that reads its store; for a session whose latest
+// `joined` carries its thread, that `retired` is passed by, and the session stays a member. Every other `retired` is
+// honoured, whoever wrote it.
+//
 // Electron-free.
 import { streamOf, writerMachine } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelRecipients, ChannelSession } from '@shared/ipc/schema/org';
@@ -42,9 +48,15 @@ const text = (value: unknown): string | null => (typeof value === 'string' && va
 /** Whether a verdict authenticates what the event says: signed and verified, or attested at migration; not `legacy`. */
 export const isAuthenticated = (verdict: Verdict): boolean => !('failed' in verdict) && verdict.label !== 'legacy';
 
+/** Whether a lifecycle event carries its thread's id (sminos's threads): a non-empty string in `thread`. */
+export const isStamped = (event: Logged): boolean => text(event.thread) !== null;
+/** A `retired` a reader may have to pass by: reason `ended`, not stamped; what a sminos from before threads writes for a session whose process ended. */
+export const isUnstampedEnd = (event: Logged): boolean => event.kind === 'retired' && event.reason === 'ended' && !isStamped(event);
+
 /**
  * Each session's latest lifecycle, read by offset, in the order the log first names it: its authenticated lifecycle
  * alone when it has any, else its legacy one, which names it but never makes it a member. A failed one names nothing.
+ * A `retired` that `isUnstampedEnd` changes nothing when the session's latest `joined` read before it `isStamped`.
  */
 export function projectSessions(entries: Iterable<{ offset: number; event: Logged; verdict: Verdict }>): ChannelSession[] {
   const named = [...entries]
@@ -55,11 +67,17 @@ export function projectSessions(entries: Iterable<{ offset: number; event: Logge
     .sort((a, b) => a.offset - b.offset);
   const authenticated = new Set(named.filter((n) => n.authentic).map((n) => n.session));
   const sessions = new Map<string, ChannelSession>();
+  /** The sessions whose latest `joined` read so far carries its thread. */
+  const threads = new Set<string>();
   for (const { event, session, kind, authentic } of named) {
     if (authentic !== authenticated.has(session)) continue;
+    if (threads.has(session) && isUnstampedEnd(event)) continue;
     const held = sessions.get(session) ?? { session, alias: session.slice(0, 8), machine: writerMachine(event.writer) ?? '', title: null, member: false, authenticated: authentic };
-    if (kind === 'joined') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias, machine: text(event.machine) ?? held.machine, member: authentic });
-    else if (kind === 'retired') sessions.set(session, { ...held, member: false });
+    if (kind === 'joined') {
+      if (isStamped(event)) threads.add(session);
+      else threads.delete(session);
+      sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias, machine: text(event.machine) ?? held.machine, member: authentic });
+    } else if (kind === 'retired') sessions.set(session, { ...held, member: false });
     else if (kind === 'renamed') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias });
     else sessions.set(session, { ...held, title: typeof event.title === 'string' ? event.title.trim() || null : null });
   }

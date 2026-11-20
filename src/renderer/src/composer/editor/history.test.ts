@@ -186,7 +186,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
   it('never recalls an answer envelope: with one waiting at the newest end, ↑ goes to the prompt before it', () => {
     const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
     const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
-    const rows = [userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', envelope), steer: true } as Row];
+    const rows = [userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', envelope), steer: true, answer: true } as Row];
     const recalls = recallEntries(rows, [turn('t1', 'human')], []);
     expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.']);
     const first = historyNavigation({ index: null, draft: null }, 'up', recalls.length, doc(''));
@@ -206,6 +206,26 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const state = applyEvents(createState(null, null), b.events);
     return recallEntries(rowsOf(state), turnActivity(state), []);
   };
+
+  // Board ticket 715: the recall reads a row's content as the split reads it, so two text blocks that form an envelope
+  // only once joined are the person's prompt, as the bubble draws them; an envelope sent alone is no prompt
+  it('reads a row’s content as the split does: two text blocks that make an envelope only joined are a prompt, one envelope alone none', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const [head, ...tail] = envelope.split('\n');
+    const b = builder();
+    ['Count to ten.', envelope, 'spread'].forEach((text, n) => {
+      b.turn(`u${n + 1}`, text);
+      b.end([`u${n + 1}`]);
+    });
+    const spread = b.events.filter((event) => event.kind === 'user.message').at(-1) as { content: unknown };
+    spread.content = [{ type: 'text', text: head }, { type: 'text', text: tail.join('\n') }];
+    const state = applyEvents(createState(null, null), b.events);
+    const users = rowsOf(state).filter((row) => row.kind === 'user');
+    const drawn = `${head}\n\n${tail.join('\n')}`; // the row's text, its blocks joined: whole, an envelope's reading
+    expect(users.map((row) => row.text)).toEqual(['Count to ten.', envelope, drawn]); // the spread row draws as the bubble the split leaves it
+    expect(recallEntries(rowsOf(state), turnActivity(state), []).map(recallText)).toEqual(['Count to ten.', drawn]);
+  });
 
   it('recalls a joined envelope and prompt as the prompt alone, in either order, and the search reads the same', () => {
     const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };

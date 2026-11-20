@@ -33,24 +33,30 @@ export function minimalPdf(link?: string, mark: Rgb = BLACK): Buffer {
 }
 
 // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): how many pixels of `element`'s
-// rect, in what main paints for the window showing `page`, are within 40 of `mark` on every channel: a PDF drawn by
-// Chromium's viewer is its page's square of that colour, which neither the viewer's error page nor a blank frame paints.
+// rect, in what main paints for the window showing `page`, are within MARK_TOLERANCE of `mark` on every channel: a PDF
+// drawn by Chromium's viewer is its page's square of that colour, which neither the viewer's error page nor a blank frame
+// paints.
 // 0 when the element has no box yet (not attached, or replaced while it is read), so a poll on it asks again rather than
 // ending on a throw; a capture that fails still throws.
+// How far a captured channel may be from a mark's and still be the mark. Chromium's PDF viewer paints everything around
+// the page in its own background, 0xff282828 (rgb(40, 40, 40), BACKGROUND_COLOR in the viewer's bundle of Electron 44): a
+// tolerance of 40 counted that background as the black square, so a viewer that had drawn no page yet passed as drawn.
+export const MARK_TOLERANCE = 16;
+
 export async function markPixels(app: ElectronApplication, page: Page, element: Locator, mark: Rgb = BLACK): Promise<number> {
   const rect = await element.boundingBox({ timeout: 2_000 }).catch(() => null);
   if (!rect || rect.width < 1 || rect.height < 1) return 0;
   const clip = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
   return app.evaluate(
-    async ({ BrowserWindow }, { clip, url, mark }) => {
+    async ({ BrowserWindow }, { clip, url, mark, tolerance }) => {
       const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url);
       if (!win) throw new Error(`no window shows ${url}`);
       const bitmap = (await win.webContents.capturePage(clip)).toBitmap(); // BGRA
       let count = 0;
-      for (let i = 0; i < bitmap.length; i += 4) if (Math.abs(bitmap[i + 2] - mark[0]) <= 40 && Math.abs(bitmap[i + 1] - mark[1]) <= 40 && Math.abs(bitmap[i] - mark[2]) <= 40) count++;
+      for (let i = 0; i < bitmap.length; i += 4) if (Math.abs(bitmap[i + 2] - mark[0]) <= tolerance && Math.abs(bitmap[i + 1] - mark[1]) <= tolerance && Math.abs(bitmap[i] - mark[2]) <= tolerance) count++;
       return count;
     },
-    { clip, url: page.url(), mark: [...mark] },
+    { clip, url: page.url(), mark: [...mark], tolerance: MARK_TOLERANCE },
   );
 }
 

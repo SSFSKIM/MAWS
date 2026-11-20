@@ -605,7 +605,9 @@ describe('drill-in', () => {
     const openFile = vi.fn();
     const off = registerTranscriptActions({ openFile });
     fireEvent.click(await within(drill).findByTitle('src/a.ts'));
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A, { main: false }); // UX wave U6b-1: a path link says whether ⌘ was held
+    // UX wave U6b-1: a path link says whether ⌘ was held; UX wave U6b-4c (decision 9): the drill-in's mount adds the agent's id,
+    // and the branch panel the conversation the session was in at the mount (the record's engine session, `record`'s `eng-<id>`)
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A, { main: false, agent: child, conversation: `eng-${A}` });
     off();
   });
 

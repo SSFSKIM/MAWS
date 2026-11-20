@@ -936,6 +936,28 @@ describe('terminal select all from the application menu', () => {
   });
 });
 
+// UX wave U6b-5a (Interfaces §C): which terminal holds the keyboard, for "Attach selection to chat": the entry whose
+// container holds the focused element, and none when the keyboard is elsewhere.
+describe('the terminal that holds the keyboard', () => {
+  it('is the entry whose container holds the focused element, and none when focus is elsewhere', async () => {
+    const registry = makeRegistry();
+    const first = await openRunning(registry, 't1');
+    const second = await openRunning(registry, 't2');
+    const helper = document.createElement('textarea'); // where xterm puts focus
+    second.renderer.element.append(helper);
+    const input = document.createElement('input');
+    document.body.append(input);
+
+    helper.focus();
+    expect(registry.focused()?.info.id).toBe(second.id); // the control: the same read finds the terminal that has it
+    input.focus();
+    expect(registry.focused()).toBeNull();
+    first.renderer.element.append(helper);
+    helper.focus();
+    expect(registry.focused()?.info.id).toBe(first.id);
+  });
+});
+
 // The marker contract with C5's dispatcher (wave-2 ledger, keymap dispatcher row), isolated from the dispatcher's other
 // refusals: the terminal sits inside the element a pane-scoped binding answers for (a docked card's pane, or a panel
 // that hosts both), and the key comes from a focused element that is neither text entry nor a button, so only the

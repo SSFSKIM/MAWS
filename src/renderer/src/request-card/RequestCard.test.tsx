@@ -9,6 +9,8 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { commentsMessage } from '@shared/anchor/message'; // UX wave U5a
+import { loadJournal } from '../../../../test/support/fixtures'; // board ticket 714
+import { journalToEvents } from '../transcript/dev/journal'; // board ticket 714
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -351,6 +353,35 @@ describe('edit prompt restores the initiating prompt', () => {
     const edit = screen.getByRole('button', { name: 'Edit prompt' });
     b.turn('u-2', SEVERAL);
     transcript([...b.events]);
+    fireEvent.click(edit);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull());
+    await flush();
+    expect(answers()).toEqual([]);
+    expect(useComposerStore.getState().inlineEdits.get(APP)).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
+  });
+
+  // board ticket 714: a turn the person's answer to an asynchronous question opened alone holds no prompt of the person's
+  // own, so there is none to edit: as for a message of several comments, the dialog offers Retry and Cancel only and never
+  // answers edit_prompt, also when the click finds it after the render offered the button. The recording's prompt turn
+  // ends at seq 153; the answer's envelope opens the next turn alone (pass3/p1-maws-ask-async)
+  const ASK_ASYNC = loadJournal('pass3', 'p1-maws-ask-async');
+  const upTo = (seq: number) => journalToEvents(ASK_ASYNC.filter((row) => row.seq <= seq));
+  it('a followed transcript whose newest turn an answer opened alone: no Edit prompt, only Retry and Cancel', async () => {
+    transcript(upTo(Infinity));
+    await act(() => useTranscriptStore.getState().attach(APP, ipcSource(APP)));
+    mount(refusal, 'inline');
+    expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+  });
+
+  it('an answer that opened the newest turn alone, found by the click: no edit_prompt, Retry and Cancel stay', async () => {
+    transcript(upTo(153));
+    await held();
+    mount(refusal, 'inline');
+    const edit = screen.getByRole('button', { name: 'Edit prompt' });
+    transcript(upTo(Infinity));
     fireEvent.click(edit);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull());
     await flush();

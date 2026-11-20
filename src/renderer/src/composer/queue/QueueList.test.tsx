@@ -393,6 +393,22 @@ describe('the stack’s text, fold and pause', () => {
     expect(invoke).toHaveBeenCalledWith('session.queue.setPaused', { appSessionId: APP, paused: false });
   });
 
+  // board ticket 668: a Stop's pause outlives its turn in the host's queue (a stop by an earlier turn, or by another build's
+  // host before a handover, with nothing held); a message at the next step is no row the pause holds, so no header says so
+  it('says a pause only over a row it holds: a next-step row under a pause that holds nothing draws no header', () => {
+    const { client } = bridge();
+    for (const entries of [[], [entry('q-run', { state: 'released', messageUuid: U2 })]]) {
+      const { unmount } = render(<QueueList appSessionId={APP} busy queue={queue(entries, { paused: true, pauseReason: 'interrupt', steers: [steer(U1, 'look at b too')] })} client={client} />);
+      expect(rows().map(mark)).toEqual(['Next step']);
+      expect(stack().querySelector('header')).toBeNull();
+      expect(stack().textContent).not.toMatch(/Queue paused/);
+      unmount();
+    }
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { paused: true, pauseReason: 'interrupt', steers: [steer(U1, 'look at b too')] })} client={client} />);
+    expect(rows().map(mark)).toEqual(['Next step', 'Held']);
+    expect(stack().querySelector('header')!.textContent).toBe(`${PAUSED_COPY.interrupt}Resume`);
+  });
+
   it('keeps the uncertain head’s row with Resume, Edit and Delete, and nothing to act on for a submitting sibling', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const now = new Date('2026-09-29T10:00:00.000Z');

@@ -21,62 +21,6 @@
     "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
   },
   {
-    "at": "2026-10-06T03:07:28.684Z",
-    "autoDenied": 0,
-    "caption": "Loaded 1 tool, used maws · echo_file",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-06T03:07:32.971Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "loaded 1 tool",
-      "used maws · echo_file"
-    ],
-    "startedAt": "2026-10-06T03:07:28.691Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 1,
-        "other": 0,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0205216,
-      "denials": [],
-      "durationMs": 4278,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 2,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 2,
-      "usage": {
-        "cacheCreationInputTokens": 9942,
-        "cacheReadInputTokens": 56661,
-        "inputTokens": 28,
-        "outputTokens": 284,
-        "thinkingTokens": 122
-      }
-    },
-    "toolCalls": 2,
-    "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
-  },
-  {
     "at": "2026-10-06T03:07:29.405Z",
     "cells": [
       {
@@ -282,40 +226,26 @@
     "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
   },
   {
-    "at": "2026-10-06T03:07:33.481Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:6c078ad4-88df-447c-a13b-ba0417a054d0",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "6c078ad4-88df-447c-a13b-ba0417a054d0",
-    "placeholders": [],
-    "steer": false,
-    "text": "Call the tool mcp__maws__echo_upper with {\"text\":\"quiet\"} and reply with exactly the text it returned, nothing else. If the tool does not exist, reply with exactly NO_SUCH_TOOL.",
-    "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
-  },
-  {
-    "at": "2026-10-06T03:07:33.481Z",
+    "at": "2026-10-06T03:07:28.684Z",
     "autoDenied": 0,
-    "caption": "Loaded 1 tool, used maws · echo_upper",
+    "caption": "Loaded 1 tool, used maws · echo_file",
     "counts": {
       "added": 0,
       "removed": 0
     },
     "denied": 0,
-    "endedAt": "2026-10-06T03:07:37.170Z",
+    "endedAt": "2026-10-06T03:07:32.971Z",
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
-    "id": "divider:turn:6c078ad4-88df-447c-a13b-ba0417a054d0",
+    "id": "divider:turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad",
     "kind": "divider",
     "origin": "human",
     "parts": [
       "loaded 1 tool",
-      "used maws · echo_upper"
+      "used maws · echo_file"
     ],
-    "startedAt": "2026-10-06T03:07:33.482Z",
+    "startedAt": "2026-10-06T03:07:28.691Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -329,9 +259,9 @@
         "web": 0
       },
       "childAgents": 0,
-      "costUsd": 0.029739750000000002,
+      "costUsd": 0.0205216,
       "denials": [],
-      "durationMs": 3687,
+      "durationMs": 4278,
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
@@ -341,14 +271,28 @@
       "terminalReason": "completed",
       "toolCalls": 2,
       "usage": {
-        "cacheCreationInputTokens": 747,
-        "cacheReadInputTokens": 68114,
+        "cacheCreationInputTokens": 9942,
+        "cacheReadInputTokens": 56661,
         "inputTokens": 28,
-        "outputTokens": 289,
-        "thinkingTokens": 135
+        "outputTokens": 284,
+        "thinkingTokens": 122
       }
     },
     "toolCalls": 2,
+    "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
+  },
+  {
+    "at": "2026-10-06T03:07:33.481Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:6c078ad4-88df-447c-a13b-ba0417a054d0",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "6c078ad4-88df-447c-a13b-ba0417a054d0",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call the tool mcp__maws__echo_upper with {\"text\":\"quiet\"} and reply with exactly the text it returned, nothing else. If the tool does not exist, reply with exactly NO_SUCH_TOOL.",
     "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
   },
   {
@@ -557,40 +501,26 @@
     "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
   },
   {
-    "at": "2026-10-06T03:07:37.685Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:4b0468ce-8b8f-4460-9d4f-15e67987bf95",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "4b0468ce-8b8f-4460-9d4f-15e67987bf95",
-    "placeholders": [],
-    "steer": false,
-    "text": "Call the tool mcp__maws2__shout with {\"text\":\"hello\"} and reply with exactly the text it returned, nothing else. If the tool does not exist, reply with exactly NO_SUCH_TOOL.",
-    "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
-  },
-  {
-    "at": "2026-10-06T03:07:37.685Z",
+    "at": "2026-10-06T03:07:33.481Z",
     "autoDenied": 0,
-    "caption": "Loaded 1 tool, used maws2 · shout",
+    "caption": "Loaded 1 tool, used maws · echo_upper",
     "counts": {
       "added": 0,
       "removed": 0
     },
     "denied": 0,
-    "endedAt": "2026-10-06T03:07:41.191Z",
+    "endedAt": "2026-10-06T03:07:37.170Z",
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
-    "id": "divider:turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95",
+    "id": "divider:turn:6c078ad4-88df-447c-a13b-ba0417a054d0",
     "kind": "divider",
     "origin": "human",
     "parts": [
       "loaded 1 tool",
-      "used maws2 · shout"
+      "used maws · echo_upper"
     ],
-    "startedAt": "2026-10-06T03:07:37.686Z",
+    "startedAt": "2026-10-06T03:07:33.482Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -604,9 +534,9 @@
         "web": 0
       },
       "childAgents": 0,
-      "costUsd": 0.039174350000000004,
+      "costUsd": 0.029739750000000002,
       "denials": [],
-      "durationMs": 3504,
+      "durationMs": 3687,
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
@@ -616,14 +546,28 @@
       "terminalReason": "completed",
       "toolCalls": 2,
       "usage": {
-        "cacheCreationInputTokens": 742,
-        "cacheReadInputTokens": 70341,
+        "cacheCreationInputTokens": 747,
+        "cacheReadInputTokens": 68114,
         "inputTokens": 28,
         "outputTokens": 289,
         "thinkingTokens": 135
       }
     },
     "toolCalls": 2,
+    "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
+  },
+  {
+    "at": "2026-10-06T03:07:37.685Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:4b0468ce-8b8f-4460-9d4f-15e67987bf95",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "4b0468ce-8b8f-4460-9d4f-15e67987bf95",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call the tool mcp__maws2__shout with {\"text\":\"hello\"} and reply with exactly the text it returned, nothing else. If the tool does not exist, reply with exactly NO_SUCH_TOOL.",
     "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
   },
   {
@@ -829,6 +773,62 @@
     "messageUuid": "6421d21d-f9cb-480f-987d-570422852d1e",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
+    "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
+  },
+  {
+    "at": "2026-10-06T03:07:37.685Z",
+    "autoDenied": 0,
+    "caption": "Loaded 1 tool, used maws2 · shout",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-06T03:07:41.191Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used maws2 · shout"
+    ],
+    "startedAt": "2026-10-06T03:07:37.686Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 1,
+        "other": 0,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.039174350000000004,
+      "denials": [],
+      "durationMs": 3504,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 2,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 742,
+        "cacheReadInputTokens": 70341,
+        "inputTokens": 28,
+        "outputTokens": 289,
+        "thinkingTokens": 135
+      }
+    },
+    "toolCalls": 2,
     "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
   },
   {

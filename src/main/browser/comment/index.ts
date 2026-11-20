@@ -8,7 +8,7 @@
 // §14: a `browser:preload:*` message counts only from a loaded tab's own page) and drops the rest.
 import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ipcMain, type IpcMainEvent, type WebContents } from 'electron';
+import { ipcMain, type BrowserWindow, type IpcMainEvent, type WebContents } from 'electron';
 import { COMMENT_CHANNEL } from '@shared/browser/comment-protocol';
 import type { BrowserControl } from '@shared/browser/tab';
 import type { registerMainHandler } from '../../ipc/router';
@@ -27,6 +27,7 @@ export interface CommentModeStartDeps {
   userData: string;
   env: NodeJS.ProcessEnv;
   away?(key: string): AwaySession | null; // P5 O7 M3: another machine's session key's machine and bare id (../machines.ts)
+  zoomOf?(win: BrowserWindow): number; // UX wave U6b-5b: the app window's zoom, for the pin (placement 4)
 }
 
 export interface CommentModeService {
@@ -53,7 +54,7 @@ declare global {
   var __maws_browser_comment: CommentModeSeam | undefined;
 }
 
-export function startCommentMode({ store, emit, register, userData, env, away }: CommentModeStartDeps): CommentModeService {
+export function startCommentMode({ store, emit, register, userData, env, away, zoomOf: appZoomOf }: CommentModeStartDeps): CommentModeService {
   const dir = join(userData, 'browser', 'crops'); // E4a's layout reserves it (its Design §9)
   const mode = new CommentMode({
     store,
@@ -61,6 +62,7 @@ export function startCommentMode({ store, emit, register, userData, env, away }:
     capture: (entry, rect) => (entry.view ? captureCrop(entry.view, rect, { dir, tabId: entry.tab.tabId }) : Promise.resolve({ crop: 'failed' })),
     discard: (path) => void unlink(path).catch(() => {}),
     ...(away && { away }),
+    ...(appZoomOf && { zoomOf: appZoomOf }),
   });
   register('browser.comment.set', ({ tabId, on }) => mode.set(tabId, on));
   register('browser.comment.card', ({ tabId, open }) => mode.card(tabId, open)); // UX wave U5a (X-216)

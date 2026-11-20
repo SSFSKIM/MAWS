@@ -47,61 +47,6 @@
     "turnId": "turn:e975eb41-95da-4384-a36e-ccec8893f267"
   },
   {
-    "at": "2026-10-09T12:20:02.738Z",
-    "autoDenied": 0,
-    "caption": "Ran 3 commands",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-10-09T12:20:21.638Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:e975eb41-95da-4384-a36e-ccec8893f267",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran 3 commands"
-    ],
-    "startedAt": "2026-10-09T12:20:02.740Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 3,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0036981149999999996,
-      "denials": [],
-      "durationMs": 18897,
-      "model": "claude-haiku-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 3,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 3,
-      "usage": {
-        "cacheCreationInputTokens": 3909,
-        "cacheReadInputTokens": 69559,
-        "inputTokens": 8,
-        "outputTokens": 287,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 3,
-    "turnId": "turn:e975eb41-95da-4384-a36e-ccec8893f267"
-  },
-  {
     "agent": null,
     "at": "2026-10-09T12:20:03.592Z",
     "background": false,
@@ -252,6 +197,61 @@
     "messageUuid": "53c7a8a3-1818-42b5-9af1-0573e85bf7fe",
     "model": "claude-haiku-5-5",
     "phase": "answer",
+    "turnId": "turn:e975eb41-95da-4384-a36e-ccec8893f267"
+  },
+  {
+    "at": "2026-10-09T12:20:02.738Z",
+    "autoDenied": 0,
+    "caption": "Ran 3 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-10-09T12:20:21.638Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:e975eb41-95da-4384-a36e-ccec8893f267",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran 3 commands"
+    ],
+    "startedAt": "2026-10-09T12:20:02.740Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 3,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0036981149999999996,
+      "denials": [],
+      "durationMs": 18897,
+      "model": "claude-haiku-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 3909,
+        "cacheReadInputTokens": 69559,
+        "inputTokens": 8,
+        "outputTokens": 287,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 3,
     "turnId": "turn:e975eb41-95da-4384-a36e-ccec8893f267"
   },
   {

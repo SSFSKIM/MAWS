@@ -8,7 +8,8 @@
 //
 // `prepareScm` is the launcher's `prepare`: the scratch shell home's `.zshrc`, the last file an interactive login zsh
 // reads (after `/etc/zprofile`'s path_helper), puts `bin/` first on the captured PATH, or for `gh: 'none'` replaces the
-// PATH with one that holds no gh; and with `trust` the launch's config home trusts the repository as the engine would.
+// PATH with one that holds no gh (`scmLaunchEnv` gives the launch's own PATH the same, for a capture that falls back to
+// it); and with `trust` the launch's config home trusts the repository as the engine would.
 //
 // UX wave U5b-2 (M11): `holdReads` stages a branch read that is still out (the page's first read outstanding): the
 // services' git becomes `bin/hold-git` (MAWS_GIT), which holds a `rev-list`, the branch read's own run, while a file
@@ -270,12 +271,22 @@ function buildIn(root: string): ScmScratch {
   };
 }
 
+// A PATH that holds no gh: the scratch's empty `bin-empty` and the system's own directories.
+const noGhPath = (scratch: ScmScratch) => `${join(scratch.root, 'bin-empty')}:/usr/bin:/bin:/usr/sbin:/sbin`;
+
+// The launch's environment for a scratch. For `none` its own PATH holds no gh either: when the login shell's capture
+// fails (a slow shell under load) mawsd falls back to its own environment (`src/shared/host/shell-env.ts`), and the
+// runner's PATH there could find a real gh.
+export function scmLaunchEnv(scratch: ScmScratch, gh: 'fake' | 'none'): Record<string, string> {
+  return gh === 'none' ? { ...scratch.env, PATH: noGhPath(scratch) } : scratch.env;
+}
+
 // The launcher's `prepare` for a scratch: the captured PATH begins with the fake gh's directory (`fake`) or holds no gh
 // at all (`none`), and `trust` records the repository as trusted in the launch's config home, keyed by its realpath
 // (the trust key of a main checkout is its root), exactly as the engine records it.
 export function prepareScm(scratch: ScmScratch, { trust, gh }: { trust: boolean; gh: 'fake' | 'none' }) {
   return ({ shellHome, claudeConfigDir }: { shellHome: string; claudeConfigDir: string }): void => {
-    const path = gh === 'fake' ? `export PATH=${sh(join(scratch.root, 'bin'))}:"$PATH"\n` : `export PATH=${sh(join(scratch.root, 'bin-empty'))}:/usr/bin:/bin:/usr/sbin:/sbin\n`;
+    const path = gh === 'fake' ? `export PATH=${sh(join(scratch.root, 'bin'))}:"$PATH"\n` : `export PATH=${sh(noGhPath(scratch))}\n`;
     for (const file of ['.zshrc', '.bash_profile']) appendFileSync(join(shellHome, file), path);
     if (trust) writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ projects: { [scratch.dir]: { hasTrustDialogAccepted: true } } }, null, 2));
   };

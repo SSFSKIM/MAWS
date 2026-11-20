@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { nameSlot } from '@shared/engine/grant'; // ticket 733a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
+import { oneLine } from '../composer/editor/mention-text'; // board ticket 739
 import type { EditorHostScope } from '../panel/editor-host';
 import { selectedPanelTabId, shownSession } from '../panel/host';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
@@ -191,7 +192,7 @@ export async function addMarkupToChat(marks: readonly Mark[], render: typeof com
 async function deliver(appSessionId: AppSessionId, picture: Blob, label: string, signal: AbortSignal): Promise<'taken' | 'queued' | 'refused' | 'discarded'> {
   const name = picture.type === 'image/jpeg' ? 'mark-up.jpg' : 'mark-up.png';
   const file = new File([picture], name, { type: picture.type });
-  const text = MARKUP_COPY.draft(label);
+  const text = MARKUP_COPY.draft(oneLine(label)); // board ticket 739: a page's title or address, on one line
   const composer = useComposerStore.getState().focusTargets.get(appSessionId);
   if (composer?.attachFiles) {
     const taken = await composer.attachFiles([file], { signal });

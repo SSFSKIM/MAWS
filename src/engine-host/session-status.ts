@@ -10,7 +10,7 @@ import { PERMISSION_MODES, type AutoModeRefusalCode, type PermissionMode } from 
 import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
+import type { InitializeResponse, McpStatusResponse, ReloadPluginsResponse } from '@shared/wire/control';
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { browserHoldOf, CRON_TOOLS, sessionCronsOf, WorkState, type BrowserEntry, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2; P5 O17 M7: the browser entry
 
@@ -51,6 +51,9 @@ export function isPermissionMode(mode: string): mode is PermissionMode {
   return (PERMISSION_MODES as readonly string[]).includes(mode);
 }
 
+
+/** Ticket 619: an mcp_status ask, as `applyMcpStatus` weighs its answer. */
+export interface McpAsk { reports: number; seq: number }
 export class SessionStatusTracker {
   engineState: EngineSessionStatus['engineState'] = 'unknown';
   activity: EngineSessionStatus['activity'] = null;
@@ -69,6 +72,10 @@ export class SessionStatusTracker {
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
   pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet); U11h: and its MCP servers
   mcpServers: EngineSessionStatus['mcpServers'] = [];
+  // ticket 619: the init frames' and reloads' reports of the servers, the mcp_status asks, and the latest ask applied
+  private mcpReports = 0;
+  private mcpAsks = 0;
+  private mcpApplied = 0;
   backgroundTasks: EngineSessionStatus['backgroundTasks'] = [];
   heldPeerMessages: EngineSessionStatus['heldPeerMessages'] = [];
   published: EngineSessionStatus['published'] = undefined; // P5 E312: the last code_change_published
@@ -260,10 +267,32 @@ export class SessionStatusTracker {
   // with the plugins (`pluginsObservedAt` is when both were); an answer without the list leaves the last one.
   applyReload(answer: ReloadPluginsResponse): void {
     this.plugins = pluginsOf(answer.plugins);
-    if (Array.isArray(answer.mcpServers)) this.mcpServers = mcpServersOf(answer.mcpServers);
+    if (Array.isArray(answer.mcpServers)) this.reportMcp(mcpServersOf(answer.mcpServers));
     this.pluginsObservedAt = new Date().toISOString(); // P2-A
     const names = new Set(list(answer.commands).map((command) => command.name));
     this.setCatalog({ commands: answer.commands, agents: answer.agents, skills: this.catalogState.skills.filter((skill) => names.has(skill)) });
+  }
+
+  // Ticket 619: an mcp_status answer is the session's servers now: the engine answers it once the session is ready, before
+  // the first turn's system/init (which the list was otherwise filled from). `asked`: the token `askMcp` gave when it was
+  // asked. Each answer is the servers as of its own ask, so it stands unless an init frame or a reload reported them since,
+  // or a later ask's answer was applied already (which an older one never rolls back). The plugins' observation stays the
+  // init's and the reload's: the answer says nothing of them. True when the list changed.
+  askMcp(): McpAsk {
+    return { reports: this.mcpReports, seq: ++this.mcpAsks };
+  }
+
+  applyMcpStatus(answer: McpStatusResponse, asked: McpAsk): boolean {
+    if (asked.reports !== this.mcpReports || asked.seq <= this.mcpApplied) return false;
+    this.mcpApplied = asked.seq;
+    const before = JSON.stringify(this.mcpServers);
+    this.mcpServers = mcpServersOf(answer.mcpServers);
+    return JSON.stringify(this.mcpServers) !== before;
+  }
+
+  private reportMcp(servers: EngineSessionStatus['mcpServers']): void {
+    this.mcpServers = servers;
+    this.mcpReports += 1;
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {
@@ -336,7 +365,7 @@ export class SessionStatusTracker {
     if (typeof frame.claude_code_version === 'string') this.engineVersion = frame.claude_code_version;
     if (typeof frame.cwd === 'string') this.engineCwd = frame.cwd;
     if (typeof frame.permissionMode === 'string') this.setMode(frame.permissionMode);
-    if (Array.isArray(frame.mcp_servers)) this.mcpServers = mcpServersOf(frame.mcp_servers);
+    if (Array.isArray(frame.mcp_servers)) this.reportMcp(mcpServersOf(frame.mcp_servers));
     this.setFastMode(frame);
     ({ plugins: this.plugins, pluginErrors: this.pluginErrors, pluginWarnings: this.pluginWarnings } = initPluginsOf(frame));
     this.pluginsObservedAt = at; // P2-A

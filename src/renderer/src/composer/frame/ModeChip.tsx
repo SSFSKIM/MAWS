@@ -14,6 +14,7 @@ import { ModeMenu, modeReported, MODE_REFUSAL_WORDS, type ModeBinding } from '..
 import { POPOVER_TICK_MS } from '../../statusline/use-now';
 import { closeModeMenu, requestModeMenu, useComposerStore } from '../../stores/composer';
 import { CHIP, POPOVER } from './chip-style';
+import { keyboardTaken } from './close-focus';
 import { useDraftShown } from './draft-shown';
 
 // The clock a reported mode's age reads against: read again as a report arrives, and every 30 s while one is shown.
@@ -65,7 +66,7 @@ export function ModeChip({ appSessionId, binding, onOpen }: { appSessionId: AppS
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content aria-label="Permission mode" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72`}>
+        <Popover.Content aria-label="Permission mode" side="top" align="start" sideOffset={6} collisionPadding={8} onCloseAutoFocus={(event) => { if (keyboardTaken()) event.preventDefault(); }} className={`${POPOVER} w-72`}>
           <ModeMenu binding={binding} onDone={() => setOpen(false)} />
         </Popover.Content>
       </Popover.Portal>

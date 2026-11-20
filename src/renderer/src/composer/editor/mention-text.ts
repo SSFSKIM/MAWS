@@ -11,6 +11,7 @@ import { LINE_OR_CONTROL, nameSlot } from '@shared/engine/grant';
 // The class is the one copy a name's slot reads too (ticket 733a, `nameSlot`): C0 (LF, CR, tab among them), DEL, C1 (NEL
 // among them), the line and paragraph separators.
 export const MENTION_BREAKS = LINE_OR_CONTROL;
+const BREAKS = new RegExp(MENTION_BREAKS.source, 'gu');
 
 // A mention's text form: `@<path>` (quoted when the path holds whitespace, the terminal's form) or `@agent-<name>`, the
 // form the engine's agent-mention producer recognises. Ticket 733a (its document, Design 3): the name goes by the name's
@@ -19,6 +20,13 @@ export const MENTION_BREAKS = LINE_OR_CONTROL;
 export function mentionText({ id, kind }: { id: string; kind: 'file' | 'agent' }): string {
   const name = nameSlot(id);
   return kind === 'agent' ? `@agent-${name}` : /\s/.test(name) ? `@"${name}"` : `@${name}`;
+}
+
+// Board ticket 739: a name or a title that is one line by its nature (a skill's, a command's or an agent's name, an
+// artifact's or a page's title, a page's address), as it enters the person's draft: each control character becomes
+// U+FFFD, as in a mention, so another party's wording brings no line of its own into the draft.
+export function oneLine(text: string): string {
+  return text.replace(BREAKS, '\ufffd');
 }
 
 // Ticket 733a: a skill's or a command's name as the composer writes it into a draft, `/<name> ` (the `@` menu's skill row,

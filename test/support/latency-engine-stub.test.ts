@@ -113,7 +113,7 @@ describe('the latency engine stub', () => {
       await until('the third gateway check', () => statusChecks().length >= 3); // the check after the last turn's result answers after it
 
       const subtypes = journal.rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'control_request').map((r) => (r.frame as { request: { subtype: string } }).request.subtype);
-      expect(new Set(subtypes)).toEqual(new Set(['initialize', 'set_max_thinking_tokens', 'get_status', 'get_context_usage']));
+      expect(new Set(subtypes)).toEqual(new Set(['initialize', 'set_max_thinking_tokens', 'get_status', 'get_context_usage', 'mcp_status'])); // ticket 619: the servers at ready
       expect(meta().map((m) => m.event)).not.toContain('parse_error');
       expect(statusChecks()).toEqual(['direct', 'direct', 'direct']); // at ready and after each human turn
       expect(events.filter((e) => e.kind === 'frame.unknown' || e.kind === 'error.raised' || e.kind === 'notice.posted')).toEqual([]);

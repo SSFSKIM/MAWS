@@ -3,22 +3,26 @@
 // `to-human` output style declaring `declared`, the `to-human` plugin installed beside it, both enabled at user scope,
 // and `doperpowers:to-human` selected. `toHuman: false` leaves the to-human plugin out (installed but disabled); `scope`
 // is both installs' recorded scope (`managed`: the engine's record of a plugin its managed settings enable).
-// Settings already in the home are kept, these keys merged over them.
+// Settings already in the home are kept, these keys merged over them. The UX wave, U2b: `declares` writes the to-human
+// installation's declaration (`maws-surface.json` at its root, drawing from 9), and `version` names its cache folder;
+// the function answers that installation's path.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const PLUGIN_STYLE = 'doperpowers:to-human';
 
-export function installToHumanPlugin(configHome: string, options: { declared?: number; toHuman?: boolean; scope?: 'user' | 'managed' } = {}): void {
-  const { declared = 6, toHuman = true, scope = 'user' } = options;
+export function installToHumanPlugin(configHome: string, options: { declared?: number; toHuman?: boolean; scope?: 'user' | 'managed'; declares?: boolean; version?: string } = {}): string {
+  const { declared = 6, toHuman = true, scope = 'user', declares = false, version = '0.7.1' } = options;
   const doperpowers = join(configHome, 'plugins', 'cache', 'doperpowers', 'doperpowers', '7.200.0');
-  const plugin = join(configHome, 'plugins', 'cache', 'doperpowers', 'to-human', '0.7.1');
+  const plugin = join(configHome, 'plugins', 'cache', 'doperpowers', 'to-human', version);
   mkdirSync(join(doperpowers, 'output-styles'), { recursive: true });
   mkdirSync(plugin, { recursive: true });
+  if (declares) writeFileSync(join(plugin, 'maws-surface.json'), JSON.stringify({ toHumanView: { drawsFrom: 9 } }));
   writeFileSync(join(doperpowers, 'output-styles', 'to-human.md'), `---\nname: to-human\nmaws-to-human-contract: ${declared}\n---\n\nSend every message with mcp__to-human__message.\n`);
   const record = (installPath: string) => [{ scope, installPath, version: '0', installedAt: '2026-10-27T00:00:00.000Z', lastUpdated: '2026-10-27T00:00:00.000Z' }];
   writeFileSync(join(configHome, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'doperpowers@doperpowers': record(doperpowers), 'to-human@doperpowers': record(plugin) } }));
   const path = join(configHome, 'settings.json');
   const settings = existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>) : {};
   writeFileSync(path, JSON.stringify({ ...settings, outputStyle: PLUGIN_STYLE, enabledPlugins: { ...(settings.enabledPlugins as object | undefined), 'doperpowers@doperpowers': true, 'to-human@doperpowers': toHuman } }));
+  return plugin;
 }

@@ -115,6 +115,38 @@ describe('the keymap table', () => {
     expect(row('request.accept')).toMatchObject({ title: 'Next or Submit on a question; Implement on a plan', display: '↩' });
   });
 
+  // UX wave U6b-3b (decision 11; B4): Go to file under Go, after the palette, with ⌘P and no control to change it; it
+  // shows unbound while a stored rebinding of another row holds ⌘P
+  it('lists Go to file under Go after Command palette at ⌘P, not rebindable, and unbound while another row’s rebinding holds ⌘P', () => {
+    const go = (overrides: KeymapOverrides) => keymapGroups(overrides).find((g) => g.label === 'Go')!.rows;
+    const goToFile = (overrides: KeymapOverrides) => go(overrides).find((r) => r.id === 'files.goToFile');
+    expect(go({}).map((r) => r.id).slice(2, 4)).toEqual(['palette.open', 'files.goToFile']); // U6b-5a: after Back and Forward
+    expect(goToFile({})).toMatchObject({ title: 'Go to file', chord: 'Cmd+P', display: '⌘P', overridden: false, rebindable: false });
+    expect(goToFile({ 'attention.next': 'Cmd+P' })).toMatchObject({ chord: null, display: 'Unbound', rebindable: false });
+  });
+
+  // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M3; B13, B14): Back and Forward
+  // lead Go at ⌘[ and ⌘], with no control to change them
+  it('lists Back and Forward first under Go at ⌘[ and ⌘], not rebindable', () => {
+    const go = keymapGroups({}).find((g) => g.label === 'Go')!.rows;
+    expect(go.slice(0, 2)).toMatchObject([
+      { id: 'go.back', title: 'Back', chord: 'Cmd+[', display: '⌘[', overridden: false, rebindable: false },
+      { id: 'go.forward', title: 'Forward', chord: 'Cmd+]', display: '⌘]', overridden: false, rebindable: false },
+    ]);
+  });
+
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M2; B13, B14): Zoom In, Zoom Out and Actual
+  // Size under View, after Move to tab, with no control to change them
+  it('lists Zoom In, Zoom Out and Actual Size under View after Move to tab, not rebindable', () => {
+    const view = keymapGroups({}).find((g) => g.label === 'View')!.rows;
+    const at = view.findIndex((r) => r.id === 'artifact.moveToTab');
+    expect(view.slice(at + 1, at + 4)).toMatchObject([
+      { id: 'zoom.in', title: 'Zoom In', chord: 'Cmd+=', display: '⌘=', overridden: false, rebindable: false },
+      { id: 'zoom.out', title: 'Zoom Out', chord: 'Cmd+-', overridden: false, rebindable: false },
+      { id: 'zoom.reset', title: 'Actual Size', chord: null, display: 'Unbound', overridden: false, rebindable: false },
+    ]);
+  });
+
   // A9: the sheet and Settings list every row once, under the group the menus draw it in
   it.each(TABLES)('puts every row in exactly one group, labelled by its placement, its submenu’s path or its scope (%s)', (_name, table) => {
     const groups = keymapGroups({}, table);
@@ -132,13 +164,14 @@ describe('the keymap table', () => {
   it('lists a sibling’s rows with no edit here: an edit row’s submenu, a fixed row under its scope, neither rebindable', () => {
     const groups = keymapGroups({}, EXTENDED_TABLE);
     const labels = groups.map((g) => g.label);
-    expect(labels.indexOf('Edit › Sample')).toBe(labels.indexOf('File') + 1); // after File, before View: no Edit row names no submenu
+    expect(labels.indexOf('Edit')).toBe(labels.indexOf('File') + 1); // UX wave U6b-5a: Attach selection to chat, the table's Edit row
+    expect(labels.indexOf('Edit › Sample')).toBe(labels.indexOf('Edit') + 1); // after the Edit rows that name no submenu, before View
     const composer = groups.find((g) => g.label === 'In the composer')!.rows;
     expect(composer.find((r) => r.id === sample('sample.fixed'))).toMatchObject({ chord: 'Shift+Enter', display: '⇧↩', rebindable: false });
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
     for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U11a M5's channel.open, U1a's two)
-    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U11a M5's one; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['terminal.attachSelection', 'channel.open', 'zoom.in', 'zoom.out', 'zoom.reset', 'go.back', 'go.forward', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U6b-5a's Attach selection to chat (M2); U11a M5's one; U6b-5b's three; U6b-5a's Back and Forward (M3); U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {

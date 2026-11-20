@@ -123,4 +123,104 @@ describe('the built-in mods section', () => {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }
   });
+  // UX wave U2b, M7 (the execution document, Interfaces §M, "The switch"; cards 10 and 11; the rulings on the drawing):
+  // under the to-human entry's own switch, a second line: the words `Summaries on fold lines`, its sentence under
+  // them, and its switch, the words being the switch's label; no pending line of its own.
+  describe('the summaries’ switch', () => {
+    const SENTENCE = 'Each summary is one small model call by the to-human mod, on the session’s own account. Off: sessions MAWS starts make no new summaries from their next start, and summaries already made stay. A session started in a terminal follows the mod’s own setting.';
+    const WITH = { ...ROW, summaries: true };
+    const summaries = () => screen.getByRole('switch', { name: 'Summaries on fold lines' });
+
+    it('draws the words, its sentence and its switch on a second line of the row; its accessible name is its words', async () => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [WITH]));
+      const line = summaries().closest('label')!;
+      expect(line.getAttribute('data-mod-summaries')).toBe('');
+      expect(line.textContent).toBe(`Summaries on fold lines${SENTENCE}`);
+      expect(summaries().getAttribute('aria-checked')).toBe('true');
+      expect(within(screen.getByRole('listitem')).getAllByRole('switch')).toHaveLength(2);
+    });
+
+    it('a press on the words toggles it: the write, then the rows read again', async () => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [WITH]));
+      await act(async () => fireEvent.click(screen.getByText('Summaries on fold lines')));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: false }]);
+      expect(fake.invoked('mods.list')).toHaveLength(1); // the write is awaited first
+      await act(() => fake.reply('mods.setFoldSummaries', undefined));
+      expect(fake.invoked('mods.list')).toHaveLength(2);
+      await act(() => fake.reply('mods.list', [{ ...WITH, summaries: false }]));
+      expect(summaries().getAttribute('aria-checked')).toBe('false');
+      await act(async () => fireEvent.click(summaries()));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: false }, { on: true }]);
+    });
+
+    it('a second press while the first is out does nothing', async () => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [WITH]));
+      await act(async () => fireEvent.click(summaries()));
+      await act(async () => fireEvent.click(summaries()));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: false }]);
+      await act(() => fake.reply('mods.setFoldSummaries', undefined));
+      await act(() => fake.reply('mods.list', [{ ...WITH, summaries: false }]));
+      await act(async () => fireEvent.click(summaries()));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: false }, { on: true }]);
+    });
+
+    it('a failure leaves the row as it was, under the widget’s own notice', async () => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [WITH]));
+      await act(async () => fireEvent.click(summaries()));
+      await act(() => fake.fail('mods.setFoldSummaries', 'index unavailable: locked by another build'));
+      await act(() => fake.reply('mods.list', [WITH]));
+      expect(within(section()).getByRole('alert').textContent).toBe('Not saved: index unavailable: locked by another build');
+      expect(summaries().getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('the entry’s own switch keeps its name and has no visible words', async () => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [WITH]));
+      const own = screen.getByRole('switch', { name: 'To-human in every session' });
+      expect(own.textContent).toBe('');
+      expect(own.closest('label')).toBeNull();
+    });
+
+    it.each([undefined, 'next-launch', 'next-compaction'] as const)('draws no pending line for it whatever the row’s pending (%s)', async (pending) => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [{ ...WITH, ...(pending !== undefined && { pending }) }]));
+      const line = summaries().closest('label')!;
+      expect(line.querySelector('[data-mod-pending]')).toBeNull();
+      expect(screen.getByRole('listitem').querySelectorAll('[data-mod-pending]')).toHaveLength(pending === undefined ? 0 : 1);
+    });
+
+    // Panel finding 3 (the coordinator's ruling): the switch is this machine's, so a write through one mounted list is
+    // main's word to every other (`mods.foldSummariesChanged`), each reading `mods.list` again; a list with no session
+    // (Customize with none attached) among them. Its next press writes the opposite of what the first wrote.
+    it('two mounted lists: one writes on, the other shows on, and that other’s next press writes off', async () => {
+      const first = render(<BuiltInMods appSessionId={APP} search="" />);
+      const other = render(<BuiltInMods appSessionId={null} search="" />);
+      const switchIn = (view: ReturnType<typeof render>) => within(view.container).getByRole('switch', { name: 'Summaries on fold lines' });
+      await act(() => fake.reply('mods.list', [{ ...WITH, summaries: false }]));
+      await act(() => fake.reply('mods.list', [{ ...WITH, summaries: false }]));
+      expect([switchIn(first).getAttribute('aria-checked'), switchIn(other).getAttribute('aria-checked')]).toEqual(['false', 'false']);
+      await act(async () => fireEvent.click(switchIn(first)));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: true }]);
+      await act(() => fake.reply('mods.setFoldSummaries', undefined));
+      await act(() => fake.reply('mods.list', [WITH])); // the writer's own read
+      act(() => fake.event('mods.foldSummariesChanged', {})); // main's word after the write
+      expect(fake.pending('mods.list')).toBe(2); // every mounted list reads again
+      await act(() => fake.reply('mods.list', [WITH]));
+      await act(() => fake.reply('mods.list', [WITH]));
+      expect([switchIn(first).getAttribute('aria-checked'), switchIn(other).getAttribute('aria-checked')]).toEqual(['true', 'true']);
+      await act(async () => fireEvent.click(switchIn(other)));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: true }, { on: false }]);
+    });
+
+    it('is drawn only where the row carries summaries (an earlier daemon’s row does not)', async () => {
+      render(<BuiltInMods appSessionId={APP} search="" />);
+      await act(() => fake.reply('mods.list', [ROW]));
+      expect(screen.queryByRole('switch', { name: 'Summaries on fold lines' })).toBeNull();
+      expect(screen.getByRole('listitem').textContent).not.toContain('Summaries on fold lines');
+    });
+  });
 });

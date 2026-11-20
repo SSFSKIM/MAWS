@@ -46,8 +46,8 @@ describe('divider row', () => {
     expect(divider.expanded).toBe(true);
     view.rerenderRow(divider);
     // The work area's rows by their element ids (`t` is the test's id prefix): the denied call and the run call, not
-    // the answer after them.
-    const work = expanded.slice(expanded.indexOf(divider) + 1).filter((row) => row.kind !== 'time');
+    // the answer after them; the turn's line ends the turn, under them (board ticket 789).
+    const work = expanded.slice(expanded.findIndex((row) => row.kind === 'user') + 1, expanded.indexOf(divider)).filter((row) => row.kind !== 'time');
     expect(work.map((row) => row.kind)).toEqual(['cell', 'cell', 'assistant_text']);
     expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe(work.slice(0, 2).map((row) => `t-${row.id}`).join(' '));
     // W8: a fold reads closed at once and leaves the list once its rows have closed (the 150 ms close).
@@ -55,6 +55,21 @@ describe('divider row', () => {
     expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByRole('button', { name: /Worked for/ }).hasAttribute('aria-controls')).toBe(false);
     await waitFor(() => expect(store.rows()).toHaveLength(before));
+  });
+
+  // Board ticket 789: the line ends its turn, so a click opens or folds the work above it; the line asks the list to keep
+  // it where it is on screen through the motion (the list's anchor: keep-in-place.test.ts, Transcript-scroll.test.tsx)
+  it.each([false, true])('asks the list to keep the clicked line in place while the work above it opens or folds (folding=%s)', async (folding) => {
+    const store = await storeWith(deniedTurn().events);
+    if (folding) act(() => useTranscriptStore.getState().toggleTurn(store.key, rowOf(store.rows(), 'divider').turnId!));
+    const keepInPlace = vi.fn();
+    const line = rowOf(store.rows(), 'divider');
+    renderRow(line, { storeKey: store.key, keepInPlace });
+    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
+    expect(keepInPlace).toHaveBeenCalledOnce();
+    expect(keepInPlace).toHaveBeenCalledWith(line.id, expect.any(Number));
+    // the row tests share one motion (context.tsx, NO_MOTION): the fold this click started runs out here, not in the next case
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the 150 ms close
   });
 
   it('a second click while a fold runs takes it back, and the turn stays open (W8)', async () => {

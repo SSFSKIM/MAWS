@@ -27,6 +27,10 @@
 //   the pipe can also leave a sleep's state behind, its connections dead and silent and a new connect refused (`stall`),
 //   or answer TCP and forward nothing (`hold`), and it records each connection's first line (`requests`).
 //
+// - UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §G): `b.buildRoot` runs
+//   B's daemon from another build's checkout (profile-daemon.ts's `buildRoot`: e2e:cross-build's peer as the other
+//   machine); this checkout's build when absent, as before.
+//
 // The scene changes nothing the machine checks: the device keys, the handshakes, the endpoint's authorization and the
 // listings are all production's. Nothing reaches beyond 127.0.0.1.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -141,7 +145,7 @@ net.Server.prototype.listen = function (...args) {
  * The org, B enrolled and served, sminos on B's RL10 socket and A's device listed. `b.env` and `b.prepare` are B's
  * own (its replay fixtures, its trusted folders), as profile-daemon.ts takes them.
  */
-export async function startRemoteScene(opts: { scratch: string; aUserData: string; secondUserData?: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void; root?: string }; directPipe?: boolean }): Promise<RemoteScene> {
+export async function startRemoteScene(opts: { scratch: string; aUserData: string; secondUserData?: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void; root?: string; buildRoot?: string /* UX wave U6f */ }; directPipe?: boolean }): Promise<RemoteScene> {
   const { scratch, aUserData } = opts;
   mkdirSync(scratch, { recursive: true });
   const undo: (() => Promise<void> | void)[] = [];
@@ -178,6 +182,7 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
       env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...(bRoot !== null && { TMPDIR: bRoot }), ...opts.b?.env },
       ...(opts.b?.prepare === undefined ? {} : { prepare: opts.b.prepare }),
       nodeArgs: ['--require', preload],
+      ...(opts.b?.buildRoot !== undefined && { buildRoot: opts.b.buildRoot }), // UX wave U6f
     });
     undo.push(() => daemon.stop().then(() => undefined));
     const ref = (await daemon.request<{ ref: MachineRef }>('machine.identity')).ref;

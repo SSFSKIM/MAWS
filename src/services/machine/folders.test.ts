@@ -68,6 +68,19 @@ describe('machine.folders.list', () => {
     expect(await refusal(listFolders({ path: '~/shortcut/..' }, mac))).toBe('protected');
   });
 
+  // UX wave U6f (Decision Log 17, 19): naming a link is choosing it, so `open: true` enters the protected folder the target
+  // of the path's last component lies in, or is; a link met on the way into one is refused all the same
+  it('opens with `open: true` the protected target of a link that is the path’s last component, and refuses a link on the way into one', async () => {
+    mkdirSync(join(home, 'Documents/proj/src'));
+    symlinkSync(join(home, 'Documents/proj'), join(home, 'Developer/proj-link'));
+    symlinkSync(join(home, 'Documents'), join(home, 'Developer/docs-link'));
+    expect(await refusal(listFolders({ path: '~/Developer/proj-link' }, mac))).toBe('protected');
+    expect(await listFolders({ path: '~/Developer/proj-link', open: true }, mac)).toEqual({ entries: [{ name: 'src', path: join(home, 'Documents/proj/src'), protected: false }], cursor: null }); // the target's real path
+    expect(names(await listFolders({ path: '~/Developer/docs-link', open: true }, mac))).toEqual(['proj']);
+    expect(await refusal(listFolders({ path: '~/Developer/docs-link/proj' }, mac))).toBe('protected');
+    expect(await refusal(listFolders({ path: '~/Developer/docs-link/proj', open: true }, mac))).toBe('protected');
+  });
+
   it('refuses a path outside the home, a missing one, and a link out of the home', async () => {
     const outside = realpathSync(mkdtempSync(join(tmpdir(), 'folders-out-')));
     try {

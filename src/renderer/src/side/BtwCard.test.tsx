@@ -26,6 +26,13 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, mainShowing, panelOf, resetPanelStores } from '../test-support/panel';
+import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files'; // UX wave U6b-4b
+import { registerPanelTool } from '../panel/host';
+import { allTabs } from '../stores/layout-model';
+import { filesTool } from '../tools/code/files/FilesTool';
+import { FileViewer } from '../tools/code/viewer/FileViewer';
+import { useViewer } from '../tools/code/viewer/viewer-store';
+import { openFile } from '../tools/code/open-file';
 import { preloadOf } from '../test-support/preload-of';
 import { SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
@@ -33,6 +40,12 @@ import { BtwCard } from './BtwCard';
 import { BtwWidget } from './BtwWidget';
 import { registerSidePane } from './register';
 import { btwCardOf, btwUnseen, onSideOperation, openBtwCard, resetSideQuestions, sidePaneOf, useBtwCards, useSidePane } from './store';
+
+// UX wave U6b-4b (R4): the opener the answers' chips call, spied through to the real one, so a case counts its calls
+vi.mock('../tools/code/open-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../tools/code/open-file')>();
+  return { ...actual, openFile: vi.fn(actual.openFile) };
+});
 
 const A_ID = bareOf(A);
 const T = Date.parse('2026-11-13T10:00:00.000Z');
@@ -551,5 +564,60 @@ describe('the /btw card for a terminal session', () => {
     await screen.findByText('Because.');
     expect(waiting(card()!)).toEqual([]);
     expect(fake.invoked('side.question.list')).toEqual([]);
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4, L6): a path in the card's answer opens the
+// file for the card's session, as a transcript's chip does; the answer adds no evidence, so a file outside the folders is
+// read as any chip asks for it, by name for that session alone.
+describe('a path in the card’s answer (U6b-4b)', () => {
+  const filesBeside = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  const mainFiles = () => allTabs(useLayout.getState().main).filter((tab): tab is Extract<typeof tab, { kind: 'file' }> => tab.kind === 'file');
+  let unregister: () => void;
+  beforeEach(() => {
+    unregister = registerPanelTool(filesTool);
+    useViewer.getState().reset();
+    vi.mocked(openFile).mockClear();
+    withProcess(A, 'ready');
+    useLayout.setState({ main: mainShowing(B) }); // another session in front
+  });
+  afterEach(() => unregister());
+
+  it('opens for the card’s session beside its chat at the line, and on ⌘ in the main area', async () => {
+    listing([exchange({ response: 'See [a](/work/a.ts#L12).' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    const chip = await within(card()!).findByTitle('/work/a.ts');
+    act(() => void fireEvent.click(chip));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/work/a.ts', 12, { main: false }]]); // one open per click, the tabs' reuse aside
+    expect(filesBeside(A)).toEqual([{ file: '/work/a.ts', line: 12, preview: true }]);
+    act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/work/a.ts', 12, { main: false }], [A, '/work/a.ts', 12, { main: true }]]);
+    expect(mainFiles()).toEqual([expect.objectContaining({ path: '/work/a.ts', line: 12, appSessionId: A })]);
+    expect(filesBeside(A)).toEqual([]);
+    expect(filesBeside(B)).toEqual([]);
+  });
+
+  it('a path outside the folders makes one read, by name, for the card’s session, refused as today', async () => {
+    listing([exchange({ response: 'See [o](/elsewhere/o.md).' })], { 'files.watch': undefined, 'files.unwatch': undefined });
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    const chip = await within(card()!).findByTitle('/elsewhere/o.md');
+    act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/elsewhere/o.md', undefined, { main: true }]]);
+    const [tab] = mainFiles();
+    expect(tab).toMatchObject({ path: '/elsewhere/o.md', appSessionId: A });
+    render(<FileViewer tab={tab} />);
+    await settle();
+    expect(fake.invoked('files.read')).toEqual([{ appSessionId: A_ID, path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
+    await act(() => fake.fail('files.read', "path outside the session's directories"));
+    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences, the path, the command's words
+    expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual([
+      'This file is outside the folders this session works in.',
+      "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+      'Ask the agent to send the file to see it here.',
+      '/elsewhere/o.md',
+      "path outside the session's directories",
+    ]);
   });
 });

@@ -1,5 +1,5 @@
 import { PluginKey } from '@tiptap/pm/state';
-import { Editor as RealEditor, type Editor, type Range } from '@tiptap/core';
+import { Editor, type JSONContent, type Range } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -270,7 +270,7 @@ describe('a command’s name in a real editor’s draft (ticket 733a)', () => {
       key('Enter');
       const item = command.mock.calls.at(-1)?.[0];
       expect(item, name).toBeDefined();
-      const editor = new RealEditor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/tidy'))]) });
+      const editor = new Editor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/tidy'))]) });
       act(() => item!.apply(editor, { from: 1, to: 6 } as Range));
       const sent = serializeDraft(editor.getJSON(), { sessionId: 's', cwd: '' });
       expect(sent.text, name).toBe(`/${name}`);
@@ -278,5 +278,18 @@ describe('a command’s name in a real editor’s draft (ticket 733a)', () => {
       editor.destroy();
       cleanup();
     }
+  });
+});
+
+// board ticket 739: a command's name, which a file a model can write gives, enters the draft as one line of literal text
+describe('what the slash palette puts in the draft', () => {
+  it('a command’s row puts /<name> in place of the query as one line of literal text', () => {
+    const name = 'x<br>y<p>z</p>\nw';
+    const { command, options } = open('x', { extra: { commands: [{ name, description: '', argumentHint: null, builtin: false }], skills: [] } });
+    act(() => options().find((o) => o.textContent!.includes('<br>'))!.click());
+    const editor = new Editor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/x'))]) });
+    command.mock.calls[0]![0].apply(editor, { from: 1, to: 3 });
+    expect((editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''))).toEqual(['/x<br>y<p>z</p>\ufffdw ']);
+    editor.destroy();
   });
 });

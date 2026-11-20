@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId } from '../../graph/ids';
 import type { MachineRef } from '../../machine/ref';
-import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema, FILES_TREE_EXPANDED_MAX, FilesTreeSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
+import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema, FILES_TREE_EXPANDED_MAX, FilesTreeSchema, WindowZoomSchema, ZOOM_MAX, ZOOM_MIN } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
 
 // P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
 // lifted with it.
@@ -129,10 +129,31 @@ describe('layout value shapes', () => {
   });
 
   it('accepts the key grammar and nothing else', () => {
-    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */, 'library.exportFolder' /* UX wave U5 */]) {
+    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */, 'library.exportFolder' /* UX wave U5 */, 'window.zoom' /* UX wave U6b-5b */]) {
       expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
     }
     for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */, 'library.other' /* UX wave U5 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+  });
+
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, decision 23; Interfaces §G): the window's
+  // zoom, main's own key, a version and a factor between the two bounds
+  it('holds the window’s zoom as a version and a factor from 50 % to 200 %, and nothing else', () => {
+    expect([ZOOM_MIN, ZOOM_MAX]).toEqual([0.5, 2]);
+    for (const factor of [0.5, 1.25, 2]) expect(WindowZoomSchema.parse({ version: 1, factor })).toEqual({ version: 1, factor });
+    for (const value of [{ version: 1, factor: 0.49 }, { version: 1, factor: 2.5 }, { version: 2, factor: 1.25 }, { version: 1 }, { version: 1, factor: 1.25, at: 1 }, 1.25, null]) {
+      expect(WindowZoomSchema.safeParse(value).success, JSON.stringify(value)).toBe(false);
+    }
+  });
+
+  // UX wave U6b-5b (S3; Interfaces §G): one command, a step, the return to 100 % or the factor as it is, answered with the
+  // factor; one event to every app page
+  it('carries layout.zoom’s four acts and its answer, and layout.zoomChanged’s factor', () => {
+    const zoom = commands['layout.zoom'];
+    for (const to of ['in', 'out', 'actual', 'current']) expect(zoom.input.safeParse({ to }).success, to).toBe(true);
+    for (const input of [{ to: 'reset' }, {}, { to: 'in', factor: 2 }]) expect(zoom.input.safeParse(input).success, JSON.stringify(input)).toBe(false);
+    expect(zoom.output.parse({ factor: 1.25 })).toEqual({ factor: 1.25 });
+    expect(events['layout.zoomChanged'].parse({ factor: 0.67 })).toEqual({ factor: 0.67 });
+    expect(events['layout.zoomChanged'].safeParse({ factor: 0.67, to: 'out' }).success).toBe(false);
   });
 
   // UX wave U5 (l6-artifacts-20): main's key for the last export's folder holds a path and nothing else
@@ -535,6 +556,9 @@ describe('layout value shapes', () => {
       'layout.openFile': 'main', // UX wave U6e: Open File…, the system's chooser, then main's grant
       'layout.frameFile': 'main', // UX wave U6b-2: a file frame's token, issued to the asking page
       'layout.releaseFrame': 'main', // UX wave U6b-2: its release by that page
+      'layout.openInApps': 'main', // UX wave U6b-4a: the apps Open in lists
+      'layout.openIn': 'main', // UX wave U6b-4a: the hand-off, after main's files.admit
+      'layout.zoom': 'main', // UX wave U6b-5b: the window's zoom, stepped, returned to 100 % or read
     });
   });
 

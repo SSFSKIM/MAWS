@@ -21,6 +21,29 @@
     "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
   },
   {
+    "at": "2026-09-28T19:40:17.810Z",
+    "durationMs": 716,
+    "id": "think:msg_011CfWQTePg9wanc7iw52R5E:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "0ea9ca74-d046-4125-856c-6d3990a8142a",
+    "recordedMs": null,
+    "text": "The user asked me to remember the word \"MANGO\" at the start of our conversation. Now they're asking me to recall it and reply with just that word.\n\nThis is a straightforward test of whether I retained the information from earlier in the conversation.\n\nThe answer is: MANGO",
+    "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
+  },
+  {
+    "at": "2026-09-28T19:40:18.527Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfWQTePg9wanc7iw52R5E:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MANGO",
+    "messageUuid": "88c10c5a-d64c-445f-86a3-5b180b8d486b",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
+  },
+  {
     "at": "2026-09-28T19:40:17.222Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
-  },
-  {
-    "at": "2026-09-28T19:40:17.810Z",
-    "durationMs": 716,
-    "id": "think:msg_011CfWQTePg9wanc7iw52R5E:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "0ea9ca74-d046-4125-856c-6d3990a8142a",
-    "recordedMs": null,
-    "text": "The user asked me to remember the word \"MANGO\" at the start of our conversation. Now they're asking me to recall it and reply with just that word.\n\nThis is a straightforward test of whether I retained the information from earlier in the conversation.\n\nThe answer is: MANGO",
-    "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
-  },
-  {
-    "at": "2026-09-28T19:40:18.527Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfWQTePg9wanc7iw52R5E:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "MANGO",
-    "messageUuid": "88c10c5a-d64c-445f-86a3-5b180b8d486b",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
   },
   {

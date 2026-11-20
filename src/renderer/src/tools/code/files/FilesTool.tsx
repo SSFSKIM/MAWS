@@ -20,37 +20,62 @@
 // tree's context menu (a right-click in it, or ⇧F10 with the keyboard in it) holds the one row "Open File…", the menus'
 // component as the Files icon's menu draws it, with no chord; for a session on another machine the row is disabled and
 // names the machine (until U6f). A tab's agent's mark is handed to its file's viewer (decision 19).
-import { useVirtualizer } from '@tanstack/react-virtual';
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, M2): the drawn tree holds the git
+// store's watch of the working folder; a Changed group of what git lists as changed stands as the list's first rows, the
+// tree's rows carry the same letters and a dot above each change, and the entries git ignores are muted. A status whose
+// set of entries changed lists the drawn directories of its repository again (decision 14 (b)).
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, M1; decision 9, "The look"): Go to
+// file's field stands above the tree in every tree column, outside the tree's context menu; in the file's place, under the
+// "Files" bar. A tab Go to file chose is finding: its column is drawn for the search whatever the fold, and the tree's
+// button ends that before it does what it did. M2: while the field holds text the list stands in the tree's place, the
+// tree kept mounted (its hold on the git store) and drawing nothing.
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; decision 9, "The look"): a root or folder
+// whose listing failed says the notice's sentences for a folder (`viewer/notice.ts`): the roots' failure all of them, with
+// the list's own refresh as Retry where reading again can help; a row of the tree its first sentence, at its height.
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { GitStatus } from '@shared/ipc/schema/git';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { Resizer } from '../../../app/Resizer';
 import { panelHost } from '../../../panel/host';
+import { followKeyShow } from '../../../panel/SurfaceRow'; // UX wave U6b-5a
+import { available } from '../../../keymap/shell-navigation'; // UX wave U6b-5a
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { ipc } from '../../../ipc/client';
-import { machineFor } from '../../../ipc/machine';
+import { checkoutKey, machineFor } from '../../../ipc/machine';
+import { useGit } from '../../../stores/git';
 import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
 import { useLayout } from '../../../stores/layout';
 import { paramsHoldFile } from '../../../stores/layout-model';
-import { FILES_COPY, OPEN_FILE_COPY, REFUSAL } from '../copy';
+import { FILES_COPY, NOTICE_COPY, OPEN_FILE_COPY, REVIEW_COPY } from '../copy';
 import { closeGuardOf, registerSideFile } from '../editor/register';
 import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
+import { classifyFailure, type FileFailure } from '../viewer/notice'; // UX wave U6b-4b
+import { useNoticePlace, type NoticePlace } from '../viewer/notice-place'; // UX wave U6b-4b
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
-import { openChosen } from './open-chosen';
+import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
+import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, reviewEntry, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
+import { useTakesRemoteRoute } from './elsewhere';
+import { FinderColumn } from './FinderView';
+import { requestKeyboard, takeKeyboard, useKeyboardRequest, withdrawKeyboard } from './finder'; // UX wave U6b-5a
+import { openChosenFor } from './open-chosen';
+import { folderFromEnd, measureIn } from './path-cut';
+import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
-import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
+import { basename, expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
 import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
 
 export { FILES_TOOL_ID };
-export const FILES_ROW_HEIGHT = 24;
+export { FILES_ROW_HEIGHT }; // U6b-3b: kept in `row-metrics.ts`, which the result rows read too
 
 // What an add of Files is given: a file to show (`openFile`'s), or nothing for the tree. A restored tab's params are
 // whatever the layout holds for it (X5), read through `fileOfTab`.
@@ -120,22 +145,14 @@ const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
   const held = fileOfTab(useLayout((s) => s.panelParams[state.tabId]));
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;
-  return <FilesTab tabId={state.tabId} appSessionId={ctx.appSessionId} session={ctx.session} held={held} visible={ctx.visible} />;
+  return <FilesTab tabId={state.tabId} appSessionId={ctx.appSessionId} session={ctx.session} held={held} visible={ctx.visible} focus={{ request: ctx.focusRequest, of: state }} />;
 }
 
-// The tab's own width, measured as it draws and followed as it changes (happy-dom measures 0: a tab too narrow for both).
-function useWidth(): [number, (element: HTMLDivElement | null) => (() => void) | undefined] {
-  const [width, setWidth] = useState(0);
-  const measure = useCallback((element: HTMLDivElement | null) => {
-    if (element === null) return;
-    setWidth(element.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return [width, measure];
-}
+// UX wave U6b-5a (M1, decision 4): the last focus request each tab acted on; X5's counter outlives the tab's mounts, so a
+// remount under the same counter takes no keyboard. And the number of the request for the keyboard each tab made for a
+// surface's key, withdrawn when that showing ends (the tab hidden or unmounted) if it still waits.
+const focusSeen = new WeakMap<FilesState, number>();
+const keyboardAsked = new WeakMap<FilesState, number>();
 
 const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-border bg-bg px-3 py-1 text-ui-sm';
 
@@ -147,7 +164,7 @@ const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-bord
 // stays mounted (the cap never takes it), and it is not where the keyboard is.
 // UX wave U6b-2 (Decision Log 29): while the tree stands in the file's place or the panel is not on screen, the file is
 // not in view, and a framed file's element is not in the document.
-function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean }) {
+function FilesTab({ tabId, appSessionId, session, held, visible, focus }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean; focus: { request: number; of: FilesState } }) {
   const machine = machineFor(appSessionId);
   const key = held ? fileKey(machine, held.file) : null;
   const [tabWidth, measure] = useWidth();
@@ -161,32 +178,76 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   const file = held?.file ?? null;
   const [shown, setShown] = useState<{ file: string | null; on: boolean }>({ file, on: false });
   if (shown.file !== file) setShown({ file, on: false });
+  // U6b-3b (decision 9): when the search ends the column is where the stored fold and the tab's width put it, so a press
+  // of the button in a narrow tab does not outlast a search begun over it.
+  if (tree.finding === tabId && shown.on) setShown({ file, on: false });
   const treeWidth = Math.max(TREE_WIDTH_MIN, tree.width ?? TREE_WIDTH_DEFAULT);
   const roomy = tabWidth >= treeWidth + FILE_WIDTH_MIN;
-  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on });
+  const finding = tree.finding === tabId; // U6b-3b (decision 9): Go to file chose this tab
+  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on, finding });
   useEffect(() => (visible && key !== null && fileColumn && place !== 'instead' ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn, place]);
   const inView = visible && place !== 'instead'; // UX wave U6b-2 (Decision Log 29)
   // The button: with room for both it folds the tree for the session (stored); too narrow, it shows the tree in the file's
-  // place in this tab, until a file is chosen or it is pressed again.
+  // place in this tab, until a file is chosen or it is pressed again. U6b-3b (M1 decision 6): it ends finding first, then
+  // hides the column it showed, so a fold the person had needs no write.
   const toggleTree = () => {
     if (held === null) return;
-    if (roomy) useTreeState.getState().setFolded(appSessionId, !tree.folded);
-    else setShown({ file, on: place !== 'instead' });
+    if (finding) useTreeState.getState().setFinding(appSessionId, null);
+    const hide = place === 'beside' || place === 'instead';
+    if (roomy) {
+      if (tree.folded !== hide) useTreeState.getState().setFolded(appSessionId, hide);
+    } else setShown({ file, on: !hide });
   };
-  const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} />;
+  const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
-  const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
+  // UX wave U6b-5a (M1, decision 4): the focus request of a surface's key (`followKeyShow`, by the counter's value the key
+  // made) is answered once, by U6b-3b's request for the keyboard (`finder.ts`), whose taker takes it when it is drawn,
+  // which the person's next key or pointer press drops, and which is withdrawn when the key's show ends (the panel fix
+  // wave, G3: a newer act, or a later request of the host's for any tab) or this tab's showing does (hidden, unmounted).
+  // It is the file's view while the tab holds a file not covered by the tree (it hands the keyboard to its editor once one
+  // is drawn), else the tree (`TreeList`: its selected row, else its first row, else itself). Go to file's field is not
+  // where it lands. The host's other requests (an open of a file from a link or the tree, the agent's show) are used up
+  // and answered with nothing, as before this landing: the keyboard stays where the person has it.
+  useEffect(() => {
+    if (focus.request <= (focusSeen.get(focus.of) ?? 0)) return;
+    focusSeen.set(focus.of, focus.request);
+    let asked: number | null = null;
+    const ended = () => {
+      if (asked !== null) withdrawKeyboard(asked);
+    };
+    if (!followKeyShow(tabId, focus.request, ended)) return; // an open, not the key's
+    asked = requestKeyboard(key !== null && place !== 'instead' ? { into: 'file', key } : { into: 'tree', tabId });
+    keyboardAsked.set(focus.of, asked);
+  }, [focus.request, focus.of, key, place, tabId]);
+  useEffect(() => {
+    if (!visible) return;
+    const of = focus.of;
+    return () => {
+      const asked = keyboardAsked.get(of);
+      if (asked !== undefined) withdrawKeyboard(asked);
+    };
+  }, [visible, focus.of]);
+  // U6b-3b: the field above the tree, outside its menu, and while it holds text the list in the tree's place
+  const column = (
+    <FinderColumn
+      appSessionId={appSessionId}
+      tabId={tabId}
+      visible={visible}
+      clicked={chosenFile}
+      tree={(searching) => (loaded ? <SessionTree key={appSessionId} tabId={tabId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} searching={searching} /> : null)}
+    />
+  );
   return (
     <div ref={measure} data-files-tab data-file={file ?? ''} onDoubleClick={(event) => keepChosen(tabId, event.target)} className="flex h-full min-h-0 min-w-0">
       {place === 'alone' ? (
-        <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 min-w-0 flex-1">
-          {sessionTree}
+        <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          {column}
         </div>
       ) : null}
       {place === 'beside' ? (
         <>
-          <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 shrink-0 border-r border-border" style={{ width: treeWidth }}>
-            {sessionTree}
+          <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 shrink-0 flex-col border-r border-border" style={{ width: treeWidth }}>
+            {column}
           </div>
           <Resizer
             label={FILES_COPY.resizeTree}
@@ -207,7 +268,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
             {button}
             <span className="truncate text-fg-muted">{FILES_COPY.title}</span>
           </div>
-          <div className="min-h-0 flex-1">{sessionTree}</div>
+          {column}
         </div>
       ) : null}
       {held ? (
@@ -268,18 +329,31 @@ function MoveToMainIcon({ className }: { className?: string }) {
   );
 }
 
-function TreeToggle({ drawn, onToggle }: { drawn: boolean; onToggle(): void }) {
+// U6b-3b (the task review's finding 1): while finding, a press of the button leaves the keyboard in the field, so the
+// field's blur does not end the search and fold the column before the click acts on the column the person pressed.
+function TreeToggle({ drawn, onToggle, keepKeyboard }: { drawn: boolean; onToggle(): void; keepKeyboard: boolean }) {
   const label = drawn ? FILES_COPY.hideTree : FILES_COPY.showTree;
   return (
-    <button type="button" data-files-tree-toggle aria-label={label} title={label} onClick={onToggle} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+    <button type="button" data-files-tree-toggle aria-label={label} title={label} onMouseDown={keepKeyboard ? (event) => event.preventDefault() : undefined} onClick={onToggle} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
       <TreeIcon className="size-3.5" />
     </button>
   );
 }
 
+// Per status the git store holds, the sessions for which one of their drawn trees has listed again (decision 14 (b)).
+const relisted = new WeakMap<GitStatus, Set<AppSessionId>>();
+function firstToRelist(status: GitStatus, appSessionId: AppSessionId): boolean {
+  const sessions = relisted.get(status) ?? new Set<AppSessionId>();
+  relisted.set(status, sessions);
+  if (sessions.has(appSessionId)) return false;
+  sessions.add(appSessionId);
+  return true;
+}
+
 // The session's tree. `marked`: the file the tab holds, whose row is marked when it is listed (Decision 8: the tree marks
-// and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it.
-function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void }) {
+// and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it. U6b-3b:
+// `searching`, Go to file's list stands in its place: it keeps its holds and draws nothing.
+function SessionTree({ tabId, appSessionId, session, marked, chosen, searching }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void; searching: boolean }) {
   const view = useTreeState((s) => treeOf(s, appSessionId));
   const listings = useFiles((s) => s.listings);
   const roots = listings.get(listingKey(appSessionId, null));
@@ -334,9 +408,82 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     for (const path of shown.split('\0')) if (!useFiles.getState().listing(appSessionId, path)) useFiles.getState().list(appSessionId, path);
   }, [appSessionId, shown]);
 
+  // UX wave U6b-3a (M2 decision 1): the git store's watch of the working folder, the drawn tree's while it is drawn, and
+  // the status it holds; none: no Changed group and no mark (decision 3).
+  const machine = machineFor(appSessionId);
+  const working = folder?.path ?? null;
+  useEffect(() => (working === null ? undefined : useGit.getState().watch(machine, working, appSessionId)), [machine, working, appSessionId]);
+  const gitKey = working === null ? null : checkoutKey(machine, working);
+  const status = useGit((s) => (gitKey === null ? null : (s.entries.get(gitKey)?.status ?? null)));
+  const changes = useMemo(() => (status === null ? [] : changedRows(status)), [status]);
+  const marks = useMemo(() => marksOf(changes), [changes]);
+  // The Changed group, as the list's first rows once the roots' listing has answered (decision 6); folded to its heading.
+  const listed = roots?.status === 'ok';
+  const section = useMemo((): TreeRow[] => {
+    if (!listed || changes.length === 0) return [];
+    const heading: TreeRow = { kind: 'changed-heading', key: 'changed\n', count: changes.length, folded: view.changedFolded };
+    return view.changedFolded ? [heading] : [heading, ...changes.map((row): TreeRow => ({ kind: 'changed', key: `changed\n${row.rel}`, row }))];
+  }, [listed, changes, view.changedFolded]);
+  const listRows = useMemo(() => [...section, ...rows], [section, rows]);
+
+  // Decision 14 (b): a status whose set of entries differs from the last one this tree drew from lists again every drawn
+  // directory in its repository; the first status, and one of another folder, list nothing (S3, S5). The listings are
+  // the session's, so of its trees drawn at once only the first to see a status lists again for it (the branch panel's
+  // sweep): the trees of one session draw the same directories.
+  const seen = useRef<{ key: string; set: string } | null>(null);
+  useEffect(() => {
+    if (status === null || gitKey === null) return;
+    const set = statusSet(status);
+    const last = seen.current;
+    seen.current = { key: gitKey, set };
+    if (last === null || last.key !== gitKey || last.set === set || shown === '' || !firstToRelist(status, appSessionId)) return;
+    for (const path of shown.split('\0')) if (pathUnder(status.repoRoot, path) !== null) useFiles.getState().list(appSessionId, path);
+  }, [status, gitKey, shown, appSessionId]);
+
+  // A Changed row's click (decision 6): a file on disk opens as a tree row's does; a folder opens in the tree; a row with
+  // nothing on disk, and one outside every listed root (R6), opens Review on Uncommitted at its entry.
+  const rootPaths = rootEntries.map((root) => root.path);
+  // A link at a Changed row's path (the ruling on the panel's sweep 1): the status says so for a tracked path; for an
+  // untracked one, the listing the store holds of its folder, when it holds one. The viewer opens no link.
+  const isLink = (row: ChangedRow, inside: { path: string; ancestors: readonly string[] }) => {
+    if (row.link) return true;
+    const folder = inside.ancestors.at(-1);
+    const listing = folder === undefined ? undefined : useFiles.getState().listing(appSessionId, folder);
+    return listing?.status === 'ok' && listing.value.entries.some((entry) => entry.name === basename(inside.path) && entry.kind === 'symlink');
+  };
+  const activateChanged = (row: ChangedRow, main: boolean) => {
+    const inside = expandTo(rootPaths, row.path);
+    if (inside === null || !row.onDisk || (!row.folder && isLink(row, inside))) {
+      panelHost.addTool('review', { appSessionId, params: { scope: 'uncommitted', path: reviewEntry(row) } });
+      return;
+    }
+    if (row.folder) {
+      // a folder on the way whose listing failed is asked again, as a tree row's expansion asks it (the branch panel's
+      // scalpel 4), so the folder can arrive
+      for (const folder of [...inside.ancestors, inside.path]) if (useFiles.getState().listing(appSessionId, folder)?.status === 'error') useFiles.getState().list(appSessionId, folder);
+      return useTreeState.getState().revealIn(appSessionId, inside.path, inside.ancestors);
+    }
+    useTreeState.getState().select(appSessionId, inside.path);
+    chosen();
+    if (main) return void openFile(appSessionId, row.path, null, { main: true });
+    chosenFile(row.path, openFile(appSessionId, row.path, null));
+  };
+  const keepChanged = (row: ChangedRow) => {
+    const inside = expandTo(rootPaths, row.path);
+    if (row.onDisk && !row.folder && inside !== null && !isLink(row, inside)) openFile(appSessionId, row.path, null, { keep: true });
+  };
+  const changed: ChangedProps = {
+    marks,
+    working,
+    rootPaths,
+    activate: activateChanged,
+    keep: keepChanged,
+    fold: (folded) => useTreeState.getState().foldChanged(appSessionId, folded),
+  };
+
   // A click: a folder opens or closes; a file opens in the preview tab, or with ⌘ as a main tab (L3).
   const activate = (row: TreeRow, main: boolean) => {
-    if (row.kind === 'notice') return;
+    if (row.kind !== 'root' && row.kind !== 'entry') return;
     const directory = row.kind === 'root' || row.entry.kind === 'dir';
     // Expanding a directory whose listing failed asks again (a refused root stays expandable for a retry).
     if (directory && !row.expanded && useFiles.getState().listing(appSessionId, row.path)?.status === 'error') useFiles.getState().list(appSessionId, row.path);
@@ -356,11 +503,12 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     for (const path of view.expanded) useFiles.getState().list(appSessionId, path);
   };
 
+  if (searching) return null;
   return (
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
-        {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
-        <TreeList rows={rows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} />
+        {roots?.status === 'error' ? <RootsFailure message={roots.message} failure={roots.failure} appSessionId={appSessionId} refresh={refresh} /> : null}
+        <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} tabId={tabId} settled={roots !== undefined && roots.status !== 'loading'} />
       </div>
     </FilesMenu>
   );
@@ -413,9 +561,12 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
     const box = (event.target as Element).getBoundingClientRect();
     event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
   };
-  // Another machine (Decision Log 6: until U6f): the row disabled, its parenthesis in the muted colour, a long name cut
-  // with the whole row as its title.
-  const whole = elsewhere === null ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
+  // Another machine (U6e's Decision Log 6): the row disabled, its parenthesis in the muted colour, a long name cut with
+  // the whole row as its title. A session that takes the remote route (UX wave U6f, §E; decision 12): the row opens MAWS's
+  // own chooser there, or is disabled with the helper's sentence as its title (the sentence alone, decision 12's words).
+  const remote = useTakesRemoteRoute(appSessionId);
+  const unavailable = useRemoteUnavailable(remote ? appSessionId : null, 'files.chooseOutside');
+  const whole = elsewhere === null || remote ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
   return (
     <ContextMenu.Root modal={false} onOpenChange={opened}>
       <ContextMenu.Trigger ref={list} asChild onKeyDown={atKeyboard}>
@@ -431,8 +582,12 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
           onInteractOutside={() => void (outside.current = true)}
           style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
         >
-          {whole === null ? (
-            <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosen(appSessionId)}>
+          {remote && unavailable !== null ? (
+            <ContextMenu.Item data-open-file="" disabled title={unavailable} aria-description={unavailable} className={MENU_ROW}>
+              {OPEN_FILE_COPY.row}
+            </ContextMenu.Item>
+          ) : whole === null ? (
+            <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosenFor(appSessionId)}>
               {OPEN_FILE_COPY.row}
             </ContextMenu.Item>
           ) : (
@@ -447,6 +602,42 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
   );
 }
 
+// UX wave U6b-3a: what the list needs to draw the Changed group and the marks.
+interface ChangedProps {
+  marks: Marks;
+  working: string | null; // the working folder's path, from which a row under it names its folder
+  rootPaths: readonly string[]; // the roots the files service listed: a row under none is outside the session's folders
+  activate(row: ChangedRow, main: boolean): void;
+  keep(row: ChangedRow): void;
+  fold(folded: boolean): void;
+}
+
+// UX wave U6b-3a (S2; M2 decision 4; the task review's findings): when the Changed group gains or loses rows while a tree
+// row is the first row in view, the offset moves by the same height, so the tree does not move under the person's eyes as
+// the agent writes. A press on the heading moves nothing (`folded` is the person's fold, from the tree's state: a folded
+// heading that comes or goes with the status is a change of the group), nor does a group that changes while the list is
+// at its top (it grows in view) or while an offset is being restored. The offset it starts from is the list's real one
+// before the change, read from the page before React applies the commit: then the list still has its old height, so the
+// browser has clamped nothing, and a person's scroll whose event has not come yet is counted. A class, because only a
+// class reads the page before a commit is applied (`getSnapshotBeforeUpdate`); it draws nothing.
+class KeepTreeInView extends Component<{ scroller: RefObject<HTMLDivElement | null>; length: number; folded: boolean; restoring(): boolean }> {
+  override getSnapshotBeforeUpdate(previous: Readonly<{ length: number; folded: boolean }>): number | null {
+    if (previous.length === this.props.length || previous.folded !== this.props.folded) return null;
+    return this.props.scroller.current?.scrollTop ?? null;
+  }
+
+  override componentDidUpdate(previous: Readonly<{ length: number }>, _state: unknown, before: number | null): void {
+    const el = this.props.scroller.current;
+    if (before === null || el === null || this.props.restoring()) return;
+    if (before <= 0 || Math.floor(before / FILES_ROW_HEIGHT) < previous.length) return;
+    el.scrollTop = Math.max(0, before + (this.props.length - previous.length) * FILES_ROW_HEIGHT);
+  }
+
+  override render(): null {
+    return null;
+  }
+}
+
 // The rows as one virtual list. Its own component because the React Compiler skips any component that calls
 // `useVirtualizer` (its API returns functions it cannot memoise); the tree above stays compiled.
 function TreeList({
@@ -456,6 +647,9 @@ function TreeList({
   keepRow,
   appSessionId,
   refresh,
+  changed,
+  tabId,
+  settled,
 }: {
   rows: TreeRow[];
   selected: string | null;
@@ -463,9 +657,31 @@ function TreeList({
   keepRow: (row: TreeRow) => void;
   appSessionId: AppSessionId;
   refresh(): void;
+  changed: ChangedProps;
+  tabId: string; // UX wave U6b-5a: the tab whose tree this is, for the keyboard a surface's key asks of it
+  settled: boolean; // UX wave U6b-5a: the roots' listing has answered (with roots, none, or a failure)
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const tree = useRef<HTMLDivElement>(null);
+  const place = useNoticePlace(appSessionId); // UX wave U6b-4b: what a failed folder's row is said with
+  // UX wave U6b-3a (M2 decision 8; Decision Log 6, note 1): Refresh and its room are the first root's row's, wherever in
+  // the list it stands, with or without a Changed group above it.
+  const rootAt = rows.findIndex((row) => row.kind === 'root');
+  const [width, measureWidth] = useWidth(); // the rows' width, from which a Changed row's folder gets its room
+  const fonts = useMemo(rowFonts, []);
   const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
+  // The row the keyboard is in stays drawn while it is out of the drawn range (the branch panel's scalpel 4): a group
+  // that grows above it moves it out of that range before the offset is corrected, and an unmounted row would drop the
+  // keyboard to the page.
+  const [focused, setFocused] = useState<string | null>(null);
+  const kept = useMemo(() => (focused === null ? -1 : rows.findIndex((row) => row.key === focused)), [rows, focused]);
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const base = defaultRangeExtractor(range);
+      return kept < 0 || base.includes(kept) ? base : [...base, kept].sort((a, b) => a - b);
+    },
+    [kept],
+  );
   // eslint-disable-next-line react-hooks/incompatible-library -- see above
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -473,6 +689,7 @@ function TreeList({
     estimateSize: () => FILES_ROW_HEIGHT,
     getItemKey,
     overscan: 12,
+    rangeExtractor,
   });
   // The scroll offset lives in the session's tree state across unmounts (the host mounts only the selected tab): restored once
   // per mount, written back on unmount. A tab hidden past the watch grace comes back with its directories unlisted, so
@@ -497,24 +714,102 @@ function TreeList({
     el.scrollTop = want;
     if (el.scrollTop >= want) pending.current = null;
   }, [total]);
-  const scrolledByOwner = () => void (pending.current = null);
+  // UX wave U6b-3a (S4): a folder opened from its Changed row is scrolled into view in the first render in which its row
+  // exists, and the note is dropped; the person's own scroll or another selection drops it first.
+  const reveal = useTreeState((s) => treeOf(s, appSessionId).reveal);
+  const revealAt = reveal === null ? -1 : rows.findIndex((row) => (row.kind === 'root' || row.kind === 'entry') && sameFile(row.path, reveal));
+  useLayoutEffect(() => {
+    if (revealAt < 0) return;
+    const el = scroller.current!;
+    const top = revealAt * FILES_ROW_HEIGHT;
+    const height = el.clientHeight || el.offsetHeight; // happy-dom lays nothing out: its offsetHeight is the tests' viewport
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) el.scrollTop = top + FILES_ROW_HEIGHT - height;
+    useTreeState.getState().revealed(appSessionId);
+  }, [revealAt, appSessionId]);
+  // UX wave U6b-3a (S2; M2 decision 4): the rows of the Changed group above the tree, and the person's fold of it
+  // (`KeepTreeInView`).
+  const treeAt = rows.findIndex((row) => row.kind !== 'changed-heading' && row.kind !== 'changed');
+  const sectionLength = treeAt < 0 ? rows.length : treeAt;
+  const folded = useTreeState((s) => treeOf(s, appSessionId).changedFolded);
+  const scrolledByOwner = () => {
+    pending.current = null;
+    useTreeState.getState().revealed(appSessionId);
+  };
+  // UX wave U6b-5a (M1, decision 4): the keyboard a surface's key asked of this tab's tree, taken once the roots' listing
+  // has answered. Taken under a cover (a page over the column) it moves nothing. Its row is read from the rows, not from
+  // what is drawn: the selected row, else the first row; it is scrolled into view and kept drawn (`focused`), then
+  // focused once drawn. With no row (no roots, or their listing failed), the tree itself.
+  const asked = useKeyboardRequest({ into: 'tree', tabId });
+  const aim = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const element = tree.current;
+    const scrolling = scroller.current;
+    if (asked === 0 || element === null || scrolling === null || !settled || !takeKeyboard({ into: 'tree', tabId }) || !available(element)) return;
+    const at = keyboardRow(rows, selected);
+    if (at < 0) {
+      element.tabIndex = -1; // focusable by this answer alone, no stop of Tab's
+      element.focus({ preventScroll: true });
+      return;
+    }
+    const top = at * FILES_ROW_HEIGHT;
+    const height = scrolling.clientHeight || scrolling.offsetHeight; // happy-dom lays nothing out: its offsetHeight is the tests' viewport
+    if (top < scrolling.scrollTop) scrolling.scrollTop = top;
+    else if (top + FILES_ROW_HEIGHT > scrolling.scrollTop + height) scrolling.scrollTop = top + FILES_ROW_HEIGHT - height;
+    pending.current = null; // the restored offset no longer pulls the list back over the row
+    aim.current = rows[at].key;
+    setFocused(rows[at].key);
+  }, [asked, settled, rows, selected, tabId]);
+  useLayoutEffect(() => {
+    const key = aim.current;
+    if (key === null) return;
+    const item = [...(tree.current?.querySelectorAll<HTMLElement>('[data-row-key]') ?? [])].find((drawn) => drawn.dataset.rowKey === key)?.querySelector<HTMLElement>('[role="treeitem"]');
+    if (!item) return;
+    aim.current = null;
+    item.focus({ preventScroll: true });
+  });
   return (
     <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
-      <div className="relative w-full">
-        <div role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
+      <KeepTreeInView scroller={scroller} length={sectionLength} folded={folded} restoring={() => pending.current !== null} />
+      <div ref={measureWidth} className="relative w-full">
+        <div ref={tree} role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (
-              <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === 0 && row.kind === 'root' ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
-                <Row row={row} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} />
+              <div
+                key={item.key}
+                data-row-key={row.key}
+                className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`}
+                style={{ top: item.start, height: FILES_ROW_HEIGHT }}
+                onFocus={() => setFocused(row.key)}
+                onBlur={() => setFocused((key) => (key === row.key ? null : key))}
+              >
+                {row.kind === 'changed-heading' ? (
+                  <ChangedHeading count={row.count} folded={row.folded} fold={changed.fold} />
+                ) : row.kind === 'changed' ? (
+                  <ChangedItem row={row.row} changed={changed} width={width} fonts={fonts} />
+                ) : (
+                  <Row row={row} marks={changed.marks} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} place={place} />
+                )}
               </div>
             );
           })}
         </div>
-        {rows[0]?.kind === 'root' && <div className="absolute top-0 right-1"><RefreshButton refresh={refresh} /></div>}
+        {rootAt >= 0 && (
+          <div className="absolute right-1" style={{ top: rootAt * FILES_ROW_HEIGHT }}>
+            <RefreshButton refresh={refresh} />
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+// UX wave U6b-5a (M1, decision 4): the row a surface's key gives the keyboard to: the selected row, else the first row
+// that is one (a notice is not); -1 when there is none.
+function keyboardRow(rows: readonly TreeRow[], selected: string | null): number {
+  const chosen = selected === null ? -1 : rows.findIndex((row) => (row.kind === 'root' || row.kind === 'entry') && sameFile(row.path, selected));
+  return chosen >= 0 ? chosen : rows.findIndex((row) => row.kind !== 'notice');
 }
 
 // E11: what main says of a session it cannot place (a New chat with no project yet): the pane's no-session sentence,
@@ -525,18 +820,41 @@ function RefreshButton({ refresh }: { refresh(): void }) {
   return <button type="button" aria-label={FILES_COPY.refresh} title={FILES_COPY.refresh} onClick={refresh} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"><RefreshIcon className="size-3.5" /></button>;
 }
 
-function RootsFailure({ message }: { message: string }) {
-  if (message.startsWith(UNKNOWN_SESSION)) return <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>;
+// UX wave U6b-4b: the notice's sentences for a folder, the command's own words under them, and Retry (the list's refresh).
+// Fix wave 1 (review, Minor a): one control lists the roots again: Retry where the notice offers it, else Refresh beside.
+function RootsFailure({ message, failure, appSessionId, refresh }: { message: string; failure: FileFailure; appSessionId: AppSessionId; refresh(): void }) {
+  const place = useNoticePlace(appSessionId);
+  const notice = message.startsWith(UNKNOWN_SESSION) ? null : classifyFailure(failure, { ...place, subject: 'folder' });
   return (
-    <p role="alert" className="px-3 py-2 text-ui-sm text-danger">
-      {message === REFUSAL ? FILES_COPY.refused(message) : FILES_COPY.couldNotList(message)}
-    </p>
+    <div className="flex items-center justify-between pr-1">
+      {notice === null ? (
+        <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>
+      ) : (
+        <div role="alert" data-notice-cause={notice.cause} className="flex min-w-0 flex-col items-start gap-1 px-3 py-2 text-ui-sm">
+          {notice.lines.map((line) => (
+            <p key={line} className="text-danger">
+              {line}
+            </p>
+          ))}
+          {notice.retry ? (
+            <button type="button" data-notice-retry="" className="rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={refresh}>
+              {NOTICE_COPY.retry}
+            </button>
+          ) : null}
+          {notice.detail !== '' ? (
+            <p data-notice-detail="" className="text-fg-muted break-all">
+              {notice.detail}
+            </p>
+          ) : null}
+        </div>
+      )}
+      {notice?.retry === true ? null : <RefreshButton refresh={refresh} />}
+    </div>
   );
 }
 
-const indent = (depth: number) => ({ paddingLeft: 8 + depth * 12 });
-
-function Chevron({ open }: { open: boolean }) {
+// Exported for the chooser of another machine's files (UX wave U6f, §E): a folder's mark there, closed.
+export function Chevron({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={`size-3 shrink-0 text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 4l4 4-4 4" />
@@ -544,18 +862,111 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void }) {
-  if (row.kind === 'notice') {
-    const text =
-      row.notice === 'empty'
-        ? FILES_COPY.empty
-        : row.notice === 'truncated'
-          ? FILES_COPY.truncated
-          : row.notice === 'refused'
-            ? FILES_COPY.refused(row.message ?? REFUSAL)
-            : FILES_COPY.couldNotList(row.message ?? '');
+// A letter's words, Review's (`REVIEW_COPY.kinds`): after a name for a screen reader, and as the letter's title.
+const KIND: Record<ChangeLetter, string> = {
+  M: REVIEW_COPY.kinds.modified,
+  A: REVIEW_COPY.kinds.added,
+  U: REVIEW_COPY.kinds.untracked,
+  D: REVIEW_COPY.kinds.deleted,
+  R: REVIEW_COPY.kinds.renamed,
+  '!': REVIEW_COPY.kinds.conflict,
+};
+
+// UX wave U6b-3a (decision 9): the mark's slot at the row's end, 16 px after the row's gap, only on a row that carries a
+// letter or a dot; hidden from a screen reader, which hears the state after the name. `plain`: the selected row, whose
+// letter takes the row's own colour.
+function Mark({ letter, dot, plain }: { letter: ChangeLetter | null; dot: ChangeLetter | null; plain: boolean }) {
+  if (letter !== null) {
     return (
-      <div data-notice={row.notice} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
+      <span data-mark aria-hidden="true" title={KIND[letter]} className={`ml-auto inline-flex w-4 shrink-0 justify-center text-ui-sm font-semibold ${plain ? '' : LETTER_TONE[letter]}`}>
+        {letter}
+      </span>
+    );
+  }
+  if (dot === null) return null;
+  return (
+    <span data-mark aria-hidden="true" className={`ml-auto inline-flex w-4 shrink-0 items-center justify-center ${LETTER_TONE[dot]}`}>
+      <span className="size-1.5 rounded-full bg-current" />
+    </span>
+  );
+}
+
+// UX wave U6b-3a (decision 11; the owner's answer on the card): the Changed group's heading, a button that folds the
+// group to its one line; its chevron at the tree's root indent, as a root's row has one.
+function ChangedHeading({ count, folded, fold }: { count: number; folded: boolean; fold(folded: boolean): void }) {
+  return (
+    <button
+      type="button"
+      role="treeitem"
+      aria-level={1}
+      aria-expanded={!folded}
+      aria-selected={false}
+      data-files-changed=""
+      data-count={count}
+      onClick={() => fold(!folded)}
+      className="flex h-full min-w-0 flex-1 items-center gap-1.5 truncate pr-2 text-left text-ui-sm text-fg-muted hover:bg-bg-hover"
+      style={indent(0)}
+    >
+      <Chevron open={!folded} />
+      <span className="truncate">{FILES_COPY.changed(count)}</span>
+    </button>
+  );
+}
+
+// What a Changed row leaves of its width for the folder, besides its name, mirroring the classes it is drawn with (the
+// architect's ruling 2, Decision Log 14; a case reads them off a drawn row): the list row's `pr-1` (4), the button's
+// `pr-2` (8), one level's indent (`indent(1)`, 20), the button's `gap-1.5` twice (6 after the name, 6 before the slot),
+// and the slot's `w-4` (16). A change of any of these classes changes this number.
+export const CHANGED_ROW_FIXED = 4 + 8 + 20 + 6 + 6 + 16;
+
+// UX wave U6b-3a (decisions 6 and 8): a Changed row, one level in: its name, then its folder in the muted colour, cut at
+// its start where it does not fit and gone below two characters of room, then its letter.
+function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed: ChangedProps; width: number; fonts: { name: string; folder: string } }) {
+  const label = labelOf(row, changed.working);
+  const outside = expandTo(changed.rootPaths, row.path) === null;
+  const oldPath = row.oldRel === null ? null : row.path.slice(0, row.path.length - row.rel.length) + row.oldRel;
+  const title = outside
+    ? FILES_COPY.outside(`${row.rel}${row.folder ? '/' : ''}`)
+    : row.letter === 'R' && oldPath !== null && row.oldRel !== null
+      ? REVIEW_COPY.renamedFrom(shownPath(oldPath, row.oldRel, changed.working))
+      : label.shown;
+  // The folder gives way first; until the list has a width (its first layout) it is drawn whole.
+  const folder = label.folder === '' || width <= 0 ? label.folder : folderFromEnd(label.folder, width - CHANGED_ROW_FIXED - measureIn(fonts.name)(label.name), measureIn(fonts.folder));
+  return (
+    <button
+      type="button"
+      role="treeitem"
+      aria-level={2}
+      aria-selected={false}
+      data-changed-row=""
+      data-path={row.path}
+      data-letter={row.letter}
+      data-folder={row.folder ? '' : undefined}
+      data-outside={outside ? '' : undefined}
+      title={title}
+      onClick={(event) => changed.activate(row, event.metaKey)}
+      onDoubleClick={() => changed.keep(row)}
+      className="flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden pr-2 text-left text-ui text-fg hover:bg-bg-hover"
+      style={indent(1)}
+    >
+      <span data-name className="truncate">
+        {label.name}
+      </span>
+      {folder ? <span className="shrink-0 whitespace-nowrap text-ui-sm text-fg-muted">{folder}</span> : null}
+      <span className="sr-only"> {KIND[row.letter]}</span>
+      <Mark letter={row.letter} dot={null} plain={false} />
+    </button>
+  );
+}
+
+function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRow; marks: Marks; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void; place: NoticePlace }) {
+  if (row.kind === 'notice') {
+    // UX wave U6b-4b: a failed listing's row reads its notice's first sentence; its title holds that sentence whole (a narrow
+    // row cuts it) and the command's own words (fix wave 1)
+    const failed = row.failure === null ? null : classifyFailure(row.failure, { ...place, subject: 'folder' });
+    const text = row.notice === 'empty' ? FILES_COPY.empty : row.notice === 'truncated' ? FILES_COPY.truncated : (failed?.lines[0] ?? NOTICE_COPY.other.folder);
+    return (
+      <div data-notice={row.notice} data-notice-cause={failed?.cause} title={failed === null ? undefined : [failed.lines[0], failed.detail].filter((part) => part !== '').join('\n')} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
         <span className={row.notice === 'refused' || row.notice === 'error' ? 'text-danger' : ''}>{text}</span>
         {row.notice === 'refused' ? <span className="truncate font-mono text-fg-faint">{row.path}</span> : null}
       </div>
@@ -566,6 +977,12 @@ function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boo
   const secondary =
     row.kind === 'root' ? row.role : row.entry.kind === 'symlink' ? FILES_COPY.symlink(row.entry.target) : null;
   const inert = row.kind === 'entry' && (row.entry.kind === 'symlink' || row.entry.kind === 'other');
+  // UX wave U6b-3a (decisions 9 and 15): a changed entry's letter, a dot on a folder with a change beneath it and no letter
+  // of its own, and an entry git ignores muted (the selected row keeps its own colour)
+  const letter = marks.letter(row.path);
+  const dot = directory && letter === null ? marks.dot(row.path) : null;
+  const ignored = row.kind === 'entry' && row.entry.ignored === true;
+  const state = letter !== null ? KIND[letter] : dot !== null ? FILES_COPY.containsChanges : null;
   return (
     <button
       type="button"
@@ -575,6 +992,9 @@ function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boo
       aria-selected={selected}
       data-path={row.path}
       data-kind={row.kind === 'root' ? 'root' : row.entry.kind}
+      data-letter={letter ?? undefined}
+      data-dot={dot ?? undefined}
+      data-ignored={ignored ? '' : undefined}
       title={row.path}
       onClick={(event) => activate(row, event.metaKey)}
       onDoubleClick={() => keepRow(row)}
@@ -582,8 +1002,13 @@ function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boo
       style={indent(row.depth)}
     >
       {directory ? <Chevron open={row.expanded} /> : <span className="size-3 shrink-0" />}
-      <span className={`truncate ${row.kind === 'root' ? 'font-medium' : ''}`}>{name}</span>
+      <span data-name className={`truncate ${row.kind === 'root' ? 'font-medium' : ''} ${ignored && !selected ? 'text-fg-muted' : ''}`}>
+        {name}
+      </span>
       {secondary ? <span className="truncate text-ui-sm text-fg-faint">{secondary}</span> : null}
+      {ignored ? <span className="sr-only"> {FILES_COPY.ignored}</span> : null}
+      {state !== null ? <span className="sr-only"> {state}</span> : null}
+      <Mark letter={letter} dot={dot} plain={selected} />
     </button>
   );
 }

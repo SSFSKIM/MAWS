@@ -7,29 +7,82 @@ import { createHash } from 'node:crypto';
 import fs, { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
-import { FILES_LIST_MAX_ENTRIES, FILES_MOVED, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, type FilesChanged, type FilesWriteOutput } from '@shared/ipc/schema/files';
+import { FILES_LIST_MAX_ENTRIES, FILES_MOVED, FILES_PROTECTED, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, OUTSIDE_LIST_PAGE, type FilesChanged, type FilesWriteOutput } from '@shared/ipc/schema/files';
+import { endableClientRef } from '@shared/ipc/client';
 import type { LibraryEntry } from '@shared/ipc/schema/library';
 import { summary } from '../../../test/support/index-fixture';
+import { fakeBus } from '../../../test/support/fake-bus';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { askSteerText } from '@shared/maws/ask';
 import { linkedReadBlock } from '@shared/maws/linked-read';
+import { fileLinkSteps, normalizeLexically, PAUSE } from '@shared/files/named'; // UX wave U6b-4b; U6b-4c: fileLinkSteps
+import { MARKDOWN_RENDER_CAP } from '@shared/files/markdown'; // UX wave U6b-4c
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
 import { openFileGrants, type FileGrants } from './grants';
+import { openFileLinks, type FileLinks } from './links'; // UX wave U6b-4c
 import { ownFolders } from './own';
 import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { NO_LINK } from '../fs/no-link';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, type NamedPathsOptions } from './named';
-import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
+import { runGit } from '../../../test/support/git-fixture';
+import { execGit, type ExecFileFn } from '../git/runner';
+import { createIgnoreCheck, type IgnoreCheck } from './ignored';
+import { createNamedPaths, NAMED_PATH_MAX, NAMED_WAIT_MS, NAMED_WAITING_MAX, type Naming, type NamedPathsOptions } from './named';
+import { createFilesService, FOLLOW_IN_FLIGHT_MAX, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
+import { registerFilesHandlers } from './register';
 
 const OUT = "path outside the session's directories";
+// UX wave U6f: who asks (`FilesCaller`): a request from another machine that no claimed act carries, and, absent, this
+// machine's own client
+const UNCLAIMED = { remote: true, claim: null } as const;
+const fromAnotherMachine = (remote: boolean) => (remote ? UNCLAIMED : undefined);
+
+// UX wave U6f: what the disk is asked, by the walk and the listing (their `node:fs/promises` imports) and by the service
+// (`fs.promises`), recorded only while a case asks (`recordTouches`), for the cases that hold a private folder untouched
+const touches = vi.hoisted(() => ({ on: false, seen: [] as string[] }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const seen =
+    <A extends unknown[], R>(name: string, call: (...args: A) => R) =>
+    (...args: A): R => {
+      if (touches.on) touches.seen.push(`${name} ${String(args[0])}`);
+      return call(...args);
+    };
+  return { ...actual, lstat: seen('lstat', actual.lstat), stat: seen('stat', actual.stat), readdir: seen('readdir', actual.readdir), readlink: seen('readlink', actual.readlink), realpath: seen('realpath', actual.realpath), open: seen('open', actual.open) };
+});
+// UX wave U6b-4c (X3.5): the turns of the event loop given back through `node:timers/promises`, counted while a case asks
+const turnsGiven = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:timers/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:timers/promises')>();
+  const counted = ((...args: Parameters<typeof actual.setImmediate>) => ((turnsGiven.count += 1), actual.setImmediate(...args))) as typeof actual.setImmediate;
+  return { ...actual, setImmediate: counted };
+});
+function recordTouches(): string[] {
+  touches.seen = [];
+  touches.on = true;
+  for (const name of ['lstat', 'stat', 'readdir', 'readlink', 'realpath', 'open'] as const) {
+    const original = (fs.promises[name] as (...args: unknown[]) => unknown).bind(fs.promises);
+    vi.spyOn(fs.promises, name).mockImplementation(((...args: unknown[]) => {
+      if (touches.on) touches.seen.push(`${name} ${String(args[0])}`);
+      return original(...args);
+    }) as never);
+  }
+  return touches.seen;
+}
+// What of the recorded asks lies inside `folder`: a path under it, or a read of its own entries
+const inside = (seen: readonly string[], folder: string) =>
+  seen.filter((entry) => {
+    const call = entry.slice(0, entry.indexOf(' '));
+    const path = entry.slice(entry.indexOf(' ') + 1);
+    return path.startsWith(`${folder}${sep}`) || ((call === 'readdir' || call === 'open') && path === folder);
+  });
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
 const H = 'H' as AppSessionId; // U6e: a session whose folder holds MAWS's own folders
@@ -142,6 +195,7 @@ beforeEach(() => {
   services = [];
 });
 afterEach(() => {
+  touches.on = false;
   for (const created of services) created.dispose();
   vi.restoreAllMocks();
   rmSync(base, { recursive: true, force: true });
@@ -682,6 +736,133 @@ describe('files service listing and reading', () => {
   });
 });
 
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13, S1): a listing
+// carries `ignored: true` on the entries the ignore check names, asked after the entries' reads and the cut, before the
+// last confirmation; the check here is a function the test gives.
+describe('files service listing: what git ignores', () => {
+  const mixed = () => {
+    write(inRoot('mix', 'b.txt'), 'b');
+    write(inRoot('mix', 'A.txt'), 'a');
+    mkdirSync(inRoot('mix', 'zdir'));
+    mkdirSync(inRoot('mix', 'adir'));
+  };
+  const markedOf = (listing: { entries: { name: string }[] }) => listing.entries.filter((entry) => 'ignored' in entry).map((entry) => [entry.name, (entry as { ignored?: unknown }).ignored]);
+
+  it('marks exactly the names the check answers, drops a name the listing does not carry, and asks with the confirmed realpath and the names answered', async () => {
+    mixed();
+    symlinkSync(root, at('root-link'));
+    records.set(A, record(at('root-link')));
+    const ignored = vi.fn(async () => new Set(['zdir', 'b.txt', 'not-listed']));
+    const listing = await service({ ignored }).list({ appSessionId: A, path: at('root-link', 'mix') });
+    expect(listing.entries.map((entry) => entry.name)).toEqual(['adir', 'zdir', 'A.txt', 'b.txt']);
+    expect(markedOf(listing)).toEqual([['zdir', true], ['b.txt', true]]);
+    expect(ignored).toHaveBeenCalledTimes(1);
+    const opened = statSync(inRoot('mix'), { bigint: true });
+    expect(ignored).toHaveBeenCalledWith(inRoot('mix'), ['adir', 'zdir', 'A.txt', 'b.txt'], expect.objectContaining({ dev: opened.dev, ino: opened.ino })); // the folder the service confirmed
+  });
+
+  it('marks no entry when the check answers nothing, gives no answer or is absent, and never asks for the roots, beside a listing it marks', async () => {
+    mixed();
+    const marking = vi.fn(async () => new Set(['b.txt']));
+    expect(markedOf(await service({ ignored: marking }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]); // the control
+    const before = await service().list({ appSessionId: A, path: inRoot('mix') });
+    for (const ignored of [async () => new Set<string>(), async () => null]) {
+      const listing = await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') });
+      expect(markedOf(listing)).toEqual([]);
+      expect(JSON.stringify(listing)).toBe(JSON.stringify(before)); // byte for byte what it was
+    }
+    expect(markedOf(before)).toEqual([]);
+    marking.mockClear();
+    const roots = await service({ ignored: marking }).list({ appSessionId: A });
+    expect(marking).not.toHaveBeenCalled();
+    expect(markedOf(roots)).toEqual([]);
+  });
+
+  it('asks about at most the capped entries, in the answer’s order', async () => {
+    mkdirSync(inRoot('many'));
+    for (let i = 0; i <= FILES_LIST_MAX_ENTRIES; i++) writeFileSync(inRoot('many', `f${String(i).padStart(5, '0')}.txt`), '');
+    const ignored = vi.fn(async (_dir: string, names: readonly string[]) => new Set([names.at(-1)!, 'f05000.txt']));
+    const listing = await service({ ignored }).list({ appSessionId: A, path: inRoot('many') });
+    expect(listing.truncated).toBe(true);
+    const asked = ignored.mock.calls[0]![1];
+    expect(asked).toHaveLength(FILES_LIST_MAX_ENTRIES);
+    expect(asked).toEqual(listing.entries.map((entry) => entry.name));
+    expect(markedOf(listing)).toEqual([['f04999.txt', true]]); // the name past the cut is dropped
+  });
+
+  it('refuses the whole listing when the directory is swapped for a link at before-ignored', async () => {
+    mixed();
+    write(join(outside, 'mix', 'secret.txt'), 'outside');
+    points['before-ignored'] = () => swapToLink(inRoot('mix'), join(outside, 'mix'));
+    await expect(service({ ignored: async () => new Set(['b.txt']) }).list({ appSessionId: A, path: inRoot('mix') })).rejects.toThrow(OUT);
+  });
+
+  it('reaches before-ignored in a listing it answers, with nothing swapped (the control for the refusal)', async () => {
+    mixed();
+    points['before-ignored'] = () => undefined;
+    const ignored = vi.fn(async () => new Set(['b.txt']));
+    expect(markedOf(await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]);
+    expect(points['before-ignored']).toBeUndefined(); // the point was reached
+  });
+
+  // The panel's scalpel 2, first finding, with its own input. The listed folder is reached through a link (`via`) to its
+  // real ancestor (`real`); at a point after the open, `real` is moved elsewhere in the root, `via` retargeted to it, and
+  // `real` replaced by a link to an outside repository. The request's spelling still names the opened folder; the
+  // spelling the listing read it by, and handed to git, leads outside.
+  describe('a standing substitution under a moved ancestor', () => {
+    let checks: IgnoreCheck[];
+    let calls: string[];
+    beforeEach(async () => {
+      checks = [];
+      calls = [];
+      await runGit(root, ['init', '-q', '-b', 'main']);
+      write(inRoot('.gitignore'), '*.tmp\n'); // the root's own rule
+      write(inRoot('real', 'listed', 'x.log'), 'x');
+      write(inRoot('real', 'listed', 'y.tmp'), 'y');
+      symlinkSync(inRoot('real'), inRoot('via'));
+      write(join(outside, 'repo', '.gitignore'), '*.log\n'); // the outside repository's rule
+      write(join(outside, 'repo', 'listed', 'x.log'), 'outside x');
+      await runGit(join(outside, 'repo'), ['init', '-q', '-b', 'main']);
+    });
+    afterEach(async () => {
+      await Promise.all(checks.map((check) => check.dispose()));
+    });
+    // The real check, under an empty home, keeping each git call's directory
+    const check = () => {
+      mkdirSync(at('home'), { recursive: true });
+      const execFile: ExecFileFn = (file, args, options, callback) => (calls.push(args[1]!), execGit(file, args, options, callback));
+      const made = createIgnoreCheck({ env: { PATH: process.env.PATH, HOME: at('home') }, execFile });
+      checks.push(made);
+      return made;
+    };
+    const substitute = () => {
+      renameSync(inRoot('real'), inRoot('moved'));
+      unlinkSync(inRoot('via'));
+      symlinkSync(inRoot('moved'), inRoot('via'));
+      symlinkSync(join(outside, 'repo'), inRoot('real'));
+    };
+
+    it('marks by the root’s rules through the link with nothing substituted (the control)', async () => {
+      const listing = await service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') });
+      expect(markedOf(listing)).toEqual([['y.tmp', true]]);
+      expect(calls.length).toBeGreaterThan(0);
+    });
+
+    it('refuses the listing, and runs no git, under the substitution at before-ignored', async () => {
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      points['before-ignored'] = substitute;
+      await expect(service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
+      expect(calls).toEqual([]);
+      expect(warned.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the folder or its repository changed before git ran/)]); // naming no folder
+    });
+
+    it('refuses the listing under the same substitution once the names were read, with no check', async () => {
+      points['after-readdir'] = substitute;
+      await expect(service().list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
+    });
+  });
+});
+
 describe('files openExternal', () => {
   beforeEach(() => {
     write(inRoot('doc.pdf'), '%PDF-1.4\n%%EOF\n');
@@ -1150,8 +1331,8 @@ describe('files service raw read', () => {
     write(inRoot('euros.txt'), 'ab€€cd\r\n');
     const files = service();
     for (const [offset, length] of [[0, 3], [3, 3], [0, 100]]) {
-      const plain = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length }, true);
-      const raw = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length, raw: true }, true);
+      const plain = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length }, UNCLAIMED);
+      const raw = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length, raw: true }, UNCLAIMED);
       expect(raw, `${offset} ${length}`).toStrictEqual(plain);
       expect(raw).not.toHaveProperty('identity');
     }
@@ -1419,7 +1600,7 @@ describe('files admission of named files', () => {
     await transcriptOf(A, [said(link(out('notes.txt'))), said(link(out('report.pdf')))]);
     const log = at('open.log');
     const files = namedService({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
-    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(OUT);
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, UNCLAIMED)).rejects.toThrow(OUT);
     await expect(files.openExternal(A, out('report.pdf'), null, { named: true, remote: true })).rejects.toThrow(OUT);
     expect(located).toEqual([]);
     expect(fs.existsSync(log)).toBe(false);
@@ -1437,7 +1618,7 @@ describe('files admission of named files', () => {
     const spy = opens();
     expect(await files.read({ appSessionId: A, path: out('notes.txt'), named: true })).toMatchObject({ content: 'outside notes\n', named: true });
     located.length = 0;
-    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(new Error(OUT));
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, UNCLAIMED)).rejects.toThrow(new Error(OUT));
     expect(located, 'a remote caller never reaches the transcript').toEqual([]);
     await expect(files.read({ appSessionId: A, path: out('notes.txt') })).rejects.toThrow(new Error(OUT));
     expect(located, 'nor does a request without the key').toEqual([]);
@@ -1464,8 +1645,8 @@ describe('files admission of named files', () => {
     expect(bytesOf(raw).equals(pdf)).toBe(true);
     // refused where the plain read is: without the key, from another machine, and a file the transcript does not name
     for (const [input, remote] of [[{ path: out('report.pdf') }, false], [{ path: out('report.pdf'), named: true as const }, true], [{ path: out('unnamed.txt'), named: true as const }, false]] as const) {
-      await expect(files.read({ appSessionId: A, ...input }, remote), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
-      await expect(files.read({ appSessionId: A, ...input, raw: true }, remote), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
+      await expect(files.read({ appSessionId: A, ...input }, fromAnotherMachine(remote)), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
+      await expect(files.read({ appSessionId: A, ...input, raw: true }, fromAnotherMachine(remote)), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
     }
   });
 
@@ -1557,7 +1738,7 @@ describe('files admission of named files', () => {
     const named = vi.fn(async () => 'counted' as const);
     const signal = new AbortController().signal;
     const files = service({ named, env: {} });
-    await files.read({ appSessionId: A, path: at('via', 'notes.txt'), named: true }, false, signal);
+    await files.read({ appSessionId: A, path: at('via', 'notes.txt'), named: true }, undefined, signal);
     expect(named.mock.calls).toEqual([[A, at('via', 'notes.txt'), signal]]);
   });
 
@@ -1669,11 +1850,11 @@ describe('files saves outside the folders', () => {
   const openGrants = () => openFileGrants(grantsFile, { known: (id) => records.has(id), log: (line) => logged.push(line) });
   // The service as the daemon composes it (spine-root.ts): the real search, the real grants, the Library's index, MAWS's
   // own folders, each asked through a counting spy
-  function outsideService(extra: Partial<FilesServiceOptions> = {}) {
+  function outsideOptions(extra: Partial<FilesServiceOptions> = {}): Partial<FilesServiceOptions> {
     const paths = createNamedPaths({ transcript: async (appSessionId) => (asked.transcript.push(appSessionId), transcripts.get(appSessionId) ?? null) });
     const counted: FilesServiceOptions['grants'] = { add: (id, real) => grants.add(id, real), has: (id, real) => (asked.grants += 1, grants.has(id, real)) };
     const linkedPaths = fileAdmission({ fileLinkedPaths: async (id) => index.library.fileLinkedPaths(id) });
-    return service({
+    return {
       named: paths.names,
       grants: counted,
       sent: async (id, real) => {
@@ -1685,8 +1866,9 @@ describe('files saves outside the folders', () => {
       own: ownFolders(profile, daemonExec(), () => told),
       env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: at('open.log') },
       ...extra,
-    });
+    };
   }
+  const outsideService = (extra: Partial<FilesServiceOptions> = {}) => service(outsideOptions(extra));
   type Files = ReturnType<typeof outsideService>;
   // A read as the window makes one (with the key and the hash), and the save of what it showed
   const shown = (files: Files, appSessionId: AppSessionId, path: string, extra: object = {}) => files.read({ appSessionId, path, named: true, hash: true, ...extra });
@@ -1791,10 +1973,10 @@ describe('files saves outside the folders', () => {
       grants.add(A, out('chosen.txt'));
       const files = outsideService();
       for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) {
-        await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: sha(`${name} as it was\n`), real: out(name) }, true), name).rejects.toThrow(new Error(OUT));
+        await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: sha(`${name} as it was\n`), real: out(name) }, UNCLAIMED), name).rejects.toThrow(new Error(OUT));
         expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} as it was\n`);
       }
-      await expect(files.grant(A, out('unnamed.txt'), true)).rejects.toThrow(new Error(OUT));
+      await expect(files.grant(A, out('unnamed.txt'), UNCLAIMED)).rejects.toThrow(new Error(OUT));
       expect(grants.has(A, out('unnamed.txt'))).toBe(false);
       nothingAsked();
     });
@@ -1890,6 +2072,60 @@ describe('files saves outside the folders', () => {
       expect(readFileSync(out('linked.txt'), 'utf8')).toBe('linked.txt as it was\n');
       await transcriptOf(A, [message(`Make it warmer, and ${link(out('linked.txt'))}`)]);
       expect(await saveShown(files, A, out('linked.txt'), 'the person’s edit\n')).toEqual({ status: 'ok', hash: sha('the person’s edit\n') });
+    });
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): a `file:` link with an empty host is
+  // the scheme-less link's form, under the same rule; every other `file:` form adds no evidence
+  describe('the file: form of a link', () => {
+    const fileLink = (path: string) => `See [the file](file://${path}).`;
+
+    it('in the agent’s text, opens a file outside the folders and saves it (L2)', async () => {
+      await transcriptOf(A, [said(fileLink(out('named.txt')))]);
+      const files = outsideService();
+      expect(await shown(files, A, out('named.txt'))).toMatchObject({ named: true, outside: { real: out('named.txt'), writable: true } });
+      expect(await saveShown(files, A, out('named.txt'), 'saved\n')).toEqual({ status: 'ok', hash: sha('saved\n') });
+    });
+
+    // N1.7: refused for a session with no other evidence; the control, the person's choice, which no form takes away
+    it('a transcript whose only mention of the file is another `file:` form is refused; the person’s choice still opens it (N1.7)', async () => {
+      const path = out('unnamed.txt');
+      await transcriptOf(A, [said(`[r](file://host${path}) [r](file://localhost${path}) [r](file:${path}) <file://${path}>`), said(`[r][l]\n\n[l]: file://${path}`)]);
+      const files = outsideService();
+      await expect(shown(files, A, path)).rejects.toThrow(new Error(OUT));
+      expect(asked.transcript).toEqual([A]);
+      expect(await files.grant(A, path)).toEqual({ status: 'granted', path });
+      expect(await shown(files, A, path)).toMatchObject({ named: true, outside: { real: path, writable: true } });
+    });
+
+    it('written only in an MCP tool’s result, it opens read-only and is never saved by that name (N1.8)', async () => {
+      await transcriptOf(A, [called('t-mcp', 'mcp__docs__find', { query: 'notes' }), answered('t-mcp', [{ type: 'text', text: fileLink(out('result.txt')) }])]);
+      const files = outsideService();
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: false, why: 'result' } });
+      await expect(saveShown(files, A, out('result.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('result.txt as it was\n');
+      // the control: once the person chooses the same file, the same save is made
+      expect(await files.grant(A, out('result.txt'))).toEqual({ status: 'granted', path: out('result.txt') });
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: true } });
+      expect(await saveShown(files, A, out('result.txt'), 'pwned\n')).toEqual({ status: 'ok', hash: sha('pwned\n') });
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('pwned\n');
+    });
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, N2.2): the window resolves a relative
+  // link against the working folder before it reads; the transcript wrote the relative string, which names nothing
+  describe('a relative link', () => {
+    it('names no file outside the folders: the absolute path the window resolves it to is refused; the person’s choice opens it (N2.2)', async () => {
+      const path = out('unnamed.txt');
+      const written = relative(root, path); // `../outside/unnamed.txt`, as an agent working in the root would write it
+      expect(written.startsWith('..')).toBe(true);
+      expect(normalizeLexically(`${root}/${written}`)).toBe(path); // what the window asks for (open-file.ts, resolveRelative)
+      await transcriptOf(A, [said(`See [the file](${written}) and [the other](./${written}).`)]);
+      const files = outsideService();
+      await expect(shown(files, A, path)).rejects.toThrow(new Error(OUT));
+      expect(asked.transcript).toEqual([A]); // the search ran and found nothing
+      expect(await files.grant(A, path)).toEqual({ status: 'granted', path });
+      expect(await shown(files, A, path)).toMatchObject({ named: true, outside: { real: path, writable: true } });
     });
   });
 
@@ -2272,7 +2508,7 @@ describe('files saves outside the folders', () => {
       const named = vi.fn((_appSessionId: AppSessionId, _path: string, signal?: AbortSignal) => new Promise<false>((resolve) => signal!.addEventListener('abort', () => resolve(false))));
       const files = outsideService({ named });
       const ended = new AbortController();
-      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal);
+      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, undefined, ended.signal);
       await vi.waitFor(() => expect(named).toHaveBeenCalledOnce());
       ended.abort();
       await expect(answer).rejects.toThrow(new Error(OUT));
@@ -2292,7 +2528,7 @@ describe('files saves outside the folders', () => {
         reached();
         await held;
       };
-      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal);
+      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, undefined, ended.signal);
       await searching;
       expect(await files.grant(A, far())).toEqual({ status: 'granted', path: far() });
       ended.abort();
@@ -2306,7 +2542,7 @@ describe('files saves outside the folders', () => {
       await files.grant(A, far());
       const ended = new AbortController();
       points['after-open'] = () => ended.abort();
-      await expect(files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal)).rejects.toThrow(new Error(OUT));
+      await expect(files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, undefined, ended.signal)).rejects.toThrow(new Error(OUT));
       expect(readFileSync(far(), 'utf8')).toBe('same bytes\n');
     });
 
@@ -2338,6 +2574,1958 @@ describe('files saves outside the folders', () => {
         await files.grant(A, far());
       };
       expect(await shown(files, A, far())).toMatchObject({ content: 'same bytes\n', named: true, outside: { real: far(), writable: true } });
+    });
+  });
+
+  // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M1): the same rule for a
+  // request from another machine under the claim `machine.op` made for one of the four outside acts, read by this
+  // machine's daemon over its own evidence; below that claim, the pin's answers. The other machine's home is a folder of
+  // this suite and its private folders are macOS's by the platform handed in, so no case reads a real one.
+  describe('files from another machine', () => {
+    const member = 'member-of-the-suite';
+    const device = 'device-of-the-suite';
+    const claimed = (opId = 'op-1') => ({ remote: true as const, claim: { member, device, opId } });
+    const asker = endableClientRef('page:9.1');
+    const unclaimed = { client: asker, remote: true as const };
+    const claimedContext = (opId = 'op-1') => ({ ...unclaimed, op: { opId, opCreated: '2026-11-15T09:00:00.000Z', member, device, fingerprint: 'a'.repeat(64) } });
+    const refused = { ok: false, error: { code: 'internal', message: OUT } };
+    const protectedRefusal = { message: FILES_PROTECTED, ipcError: { code: 'internal', message: FILES_PROTECTED, issues: { refusal: 'protected' } } };
+    let home: string;
+    let logLines: string[];
+    let recordsAsked: number;
+    const inHome = (...parts: string[]) => join(home, ...parts);
+    const secret = () => inHome('Documents', 'private.txt');
+    // The service as the other machine's daemon composes it: U6e's, with the daemon user's home, macOS, and its log
+    const remoteOptions = (extra: Partial<FilesServiceOptions> = {}) => outsideOptions({ home: () => home, platform: 'darwin', homes: () => [home], outsideLog: (line) => logLines.push(line), ...extra });
+    const remoteService = (extra: Partial<FilesServiceOptions> = {}) => service(remoteOptions(extra));
+    // The same behind its handlers, which the endpoint's dispatch reaches with `remote` and `machine.op` with its claim too
+    function remoteHandlers(extra: Partial<FilesServiceOptions> = {}) {
+      const bus = fakeBus();
+      const files = registerFilesHandlers((id) => ((recordsAsked += 1), records.get(id) ?? null), {
+        bus,
+        emit: () => {},
+        port: { openExternal: async () => ({ opened: true }), reveal: async () => ({ revealed: true }) },
+        ...remoteOptions(extra),
+      });
+      services.push(files);
+      return bus;
+    }
+    // The open of files.readOutside (the keyed read, the hash asked) and the save of what it showed, each under a claim
+    const readThere = (files: Files, appSessionId: AppSessionId, path: string, opId = 'op-read', extra: object = {}) => files.read({ appSessionId, path, named: true, hash: true, ...extra }, claimed(opId));
+    async function saveThere(files: Files, appSessionId: AppSessionId, path: string, content: string, opId = 'op-save', extra: object = {}) {
+      const read = await readThere(files, appSessionId, path, `${opId}-read`, extra);
+      return files.writeOutside({ appSessionId, path, content, expectedHash: read.hash!, real: read.outside?.real ?? path, ...extra }, claimed(opId));
+    }
+    const choose = (files: Files, path: string, opId = 'op-choose', extra: object = {}) => files.chooseOutside({ appSessionId: A, path, ...extra }, claimed(opId));
+    const list = (files: Files, input: { path?: string; open?: true; cursor?: string } = {}, appSessionId: AppSessionId = A) => files.listOutside({ appSessionId, ...input }, claimed('op-list'));
+    const names = (answer: { status: string; entries?: { name: string }[] }) => (answer.entries ?? []).map((entry) => entry.name);
+    const nothingTouchedIn = (seen: readonly string[], folder: string) => expect(inside(seen, folder), `nothing inside ${folder} is touched`).toEqual([]);
+
+    beforeEach(() => {
+      home = at('home');
+      logLines = [];
+      recordsAsked = 0;
+      write(inHome('notes.txt'), 'notes in the home\n');
+      write(secret(), 'private as it was\n');
+      write(inHome('Documents', 'deep', 'more.txt'), 'more as it was\n');
+      mkdirSync(inHome('Desktop'));
+      mkdirSync(inHome('projects', 'garden'), { recursive: true });
+    });
+
+    describe('the claimed caller', () => {
+      it('reads a named, a chosen and a sent file writable and saves each: the bytes on disk the content sent', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        index.library.reconcile({ artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A })], links: [linked(1, A)], spaces: [] });
+        const files = remoteService();
+        expect(await choose(files, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) {
+          expect(await readThere(files, A, out(name)), name).toMatchObject({ content: `${name} as it was\n`, named: true, outside: { real: out(name), writable: true } });
+          expect(await saveThere(files, A, out(name), `${name} saved\n`), name).toEqual({ status: 'ok', hash: sha(`${name} saved\n`) });
+          expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} saved\n`);
+        }
+        expect(readFileSync(out('unnamed.txt'), 'utf8')).toBe('unnamed.txt as it was\n');
+      });
+
+      it('reads a file only a tool’s result names and one only an added record admits read-only, and refuses their save', async () => {
+        await transcriptOf(A, [called('t-mcp', 'mcp__docs__find', { query: 'notes' }), answered('t-mcp', link(out('result.txt')))]);
+        index.library.reconcile({ artifacts: [artifact(2, out('added.txt'), { kind: 'human' })], links: [linked(2, A)], spaces: [] });
+        const files = remoteService();
+        for (const [name, why] of [['result.txt', 'result'], ['added.txt', 'added']] as const) {
+          const read = await readThere(files, A, out(name));
+          expect(read, name).toMatchObject({ content: `${name} as it was\n`, named: true, outside: { real: out(name), writable: false, why } });
+          await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: read.hash!, real: out(name) }, claimed()), name).rejects.toThrow(new Error(OUT));
+          expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} as it was\n`);
+        }
+      });
+
+      it('reads a file inside the remote roots unmarked and saves it by files.writeOutside with the real path compared, asking no evidence', async () => {
+        const files = remoteService();
+        const path = inRoot('README.md');
+        const read = await readThere(files, A, path);
+        expect(read).toMatchObject({ content: '# readme\n' });
+        expect(read).not.toHaveProperty('outside');
+        expect(await files.writeOutside({ appSessionId: A, path, content: '# saved\n', expectedHash: read.hash!, real: path }, claimed())).toEqual({ status: 'ok', hash: sha('# saved\n') });
+        expect(readFileSync(path, 'utf8')).toBe('# saved\n');
+        await expect(files.writeOutside({ appSessionId: A, path, content: 'x', expectedHash: sha('# saved\n'), real: inRoot('src', 'a.ts') }, claimed())).rejects.toThrow(new Error(FILES_MOVED));
+        expect(readFileSync(path, 'utf8')).toBe('# saved\n');
+        nothingAsked();
+      });
+
+      it('answers a raw read asked with a claim with the plain read', async () => {
+        const files = remoteService();
+        const plain = await files.read({ appSessionId: A, path: inRoot('README.md') }, claimed());
+        const raw = await files.read({ appSessionId: A, path: inRoot('README.md'), raw: true }, claimed());
+        expect(raw).toStrictEqual(plain);
+        expect(raw).not.toHaveProperty('identity');
+      });
+
+      it('saves after the daemon restarts between the read and the save, on the evidence it reads then (R6)', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        await choose(remoteService(), out('chosen.txt'));
+        const named = await readThere(remoteService(), A, out('named.txt'));
+        const chosen = await readThere(remoteService(), A, out('chosen.txt'));
+        grants = openGrants(); // the daemon restarts: the grants are a file, the transcript is a file
+        const restarted = remoteService();
+        for (const [name, read] of [['named.txt', named], ['chosen.txt', chosen]] as const) {
+          expect(await restarted.writeOutside({ appSessionId: A, path: out(name), content: 'after a restart\n', expectedHash: read.hash!, real: read.outside!.real }, claimed()), name).toEqual({ status: 'ok', hash: sha('after a restart\n') });
+          expect(readFileSync(out(name), 'utf8'), name).toBe('after a restart\n');
+        }
+      });
+
+      it('refuses the save once the transcript no longer names the file, and saves it after a choice of the same file (R7)', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const files = remoteService();
+        const read = await readThere(files, A, out('named.txt'));
+        await transcriptOf(A, [said('the conversation was cleared')]);
+        const save = () => files.writeOutside({ appSessionId: A, path: out('named.txt'), content: 'saved\n', expectedHash: read.hash!, real: read.outside!.real }, claimed());
+        await expect(save()).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out('named.txt'), 'utf8')).toBe('named.txt as it was\n');
+        expect(await choose(files, out('named.txt'))).toEqual({ status: 'granted', path: out('named.txt') });
+        expect(await save()).toEqual({ status: 'ok', hash: sha('saved\n') });
+      });
+
+      it('refuses a claimed read and save whose last component becomes a link, or whose folder is swapped, between the check and the open (R2: S1, S2)', async () => {
+        write(at('far', 'dir', 'notes.txt'), 'same bytes\n');
+        write(at('twin', 'notes.txt'), 'same bytes\n');
+        const far = at('far', 'dir', 'notes.txt');
+        await transcriptOf(A, [said(link(far))]);
+        const files = remoteService();
+        const read = await readThere(files, A, far);
+        const swaps: [string, () => void, () => void][] = [
+          ['the last component', () => (renameSync(far, `${far}.away`), symlinkSync(at('twin', 'notes.txt'), far)), () => (unlinkSync(far), renameSync(`${far}.away`, far))],
+          ['the folder', () => swapToLink(at('far', 'dir'), at('twin')), () => restore(at('far', 'dir'))],
+        ];
+        for (const [what, swap, back] of swaps) {
+          points['before-open'] = swap;
+          await expect(readThere(files, A, far), what).rejects.toThrow(new Error(OUT));
+          back();
+          points['before-open'] = swap;
+          await expect(files.writeOutside({ appSessionId: A, path: far, content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real }, claimed()), what).rejects.toThrow(new Error(OUT));
+          back();
+          expect([readFileSync(far, 'utf8'), readFileSync(at('twin', 'notes.txt'), 'utf8')], what).toEqual(['same bytes\n', 'same bytes\n']);
+        }
+      });
+    });
+
+    describe('the four acts behind their handlers', () => {
+      it('refuses each of the four without a claim, and the listing and the choice to this machine’s own client, asking nothing and resolving no session', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        index.library.reconcile({ artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A })], links: [linked(1, A)], spaces: [] });
+        grants.add(A, out('chosen.txt'));
+        const bus = remoteHandlers();
+        const save = (path: string, before: string) => ({ appSessionId: A, path, content: 'pwned\n', expectedHash: sha(before), real: path });
+        for (const name of ['named.txt', 'chosen.txt', 'sent.txt', 'unnamed.txt']) expect(await bus.invoke('files.readOutside', { appSessionId: A, path: out(name) }, unclaimed), name).toEqual(refused);
+        expect(await bus.invoke('files.readOutside', { appSessionId: A, path: inRoot('README.md') }, unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.writeOutside', save(out('named.txt'), 'named.txt as it was\n'), unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.writeOutside', save(inRoot('README.md'), '# readme\n'), unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.listOutside', { appSessionId: A }, unclaimed)).toEqual(refused);
+        expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('unnamed.txt') }, unclaimed)).toEqual(refused);
+        // this machine's own client: its chooser is the system's, so the daemon lists and chooses nothing for it
+        expect(await bus.invoke('files.listOutside', { appSessionId: A }, asker)).toEqual(refused);
+        expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('unnamed.txt') }, asker)).toEqual(refused);
+        expect([readFileSync(out('named.txt'), 'utf8'), readFileSync(inRoot('README.md'), 'utf8')]).toEqual(['named.txt as it was\n', '# readme\n']);
+        expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+        nothingAsked();
+        expect(recordsAsked, 'no session is resolved, so no root is computed').toBe(0);
+        expect(logLines).toEqual([]);
+      });
+
+      it('answers files.readOutside and files.writeOutside under the claim machine.op passes, and logs the claim’s member', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const bus = remoteHandlers();
+        const read = await bus.invoke('files.readOutside', { appSessionId: A, path: out('named.txt'), hash: true }, claimedContext('op-read'));
+        expect(read).toMatchObject({ ok: true, value: { content: 'named.txt as it was\n', named: true, outside: { real: out('named.txt'), writable: true } } });
+        const save = { appSessionId: A, path: out('named.txt'), content: 'saved there\n', expectedHash: sha('named.txt as it was\n'), real: out('named.txt') };
+        expect(await bus.invoke('files.writeOutside', save, claimedContext('op-save'))).toEqual({ ok: true, value: { status: 'ok', hash: sha('saved there\n') } });
+        expect(readFileSync(out('named.txt'), 'utf8')).toBe('saved there\n');
+        expect(logLines).toEqual([`outside write: member ${member} device ${device} session ${A} op op-save: ok 12 bytes ${out('named.txt')}`]);
+      });
+
+      it('lists through files.listOutside under the claim machine.op passes, the folder’s real entries', async () => {
+        const folder = at('listing');
+        mkdirSync(join(folder, 'inner'), { recursive: true });
+        write(join(folder, 'a.txt'), '');
+        const bus = remoteHandlers();
+        expect(await bus.invoke('files.listOutside', { appSessionId: A, path: folder }, claimedContext('op-list'))).toEqual({
+          ok: true,
+          value: {
+            status: 'listed',
+            path: folder,
+            parent: base,
+            home,
+            entries: [
+              { name: 'inner', path: join(folder, 'inner'), kind: 'dir', protected: false },
+              { name: 'a.txt', path: join(folder, 'a.txt'), kind: 'file', protected: false },
+            ],
+            cursor: null,
+          },
+        });
+      });
+
+      it('holds each input to its schema: no raw, no key beyond it, and nothing in a choice that could name a grant’s content', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const bus = remoteHandlers();
+        const malformed = { ok: false, error: { code: 'invalid_input' } };
+        for (const input of [{ raw: true }, { named: true }, { real: out('named.txt') }]) expect(await bus.invoke('files.readOutside', { appSessionId: A, path: out('named.txt'), ...input }, claimedContext()), JSON.stringify(input)).toMatchObject(malformed);
+        for (const input of [{ real: out('unnamed.txt') }, { at: 1 }, { session: B }]) expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('unnamed.txt'), ...input }, claimedContext()), JSON.stringify(input)).toMatchObject(malformed);
+        expect(await bus.invoke('files.listOutside', { appSessionId: A, entries: [] }, claimedContext())).toMatchObject(malformed);
+        expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+        expect(logLines).toEqual([]);
+      });
+
+      it('chooses through files.chooseOutside, the grants file on this machine holding the real path, and refuses files.grant from another machine even under a claim', async () => {
+        symlinkSync(out('chosen.txt'), out('alias.txt'));
+        const bus = remoteHandlers();
+        expect(await bus.invoke('files.chooseOutside', { appSessionId: A, path: out('alias.txt') }, claimedContext('op-choose'))).toEqual({ ok: true, value: { status: 'granted', path: out('chosen.txt') } });
+        expect((JSON.parse(readFileSync(grantsFile, 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions[A]!.map((entry) => entry.real)).toEqual([out('chosen.txt')]);
+        expect(await bus.main('files.grant', { appSessionId: A, path: out('unnamed.txt') }, claimedContext('op-grant'))).toEqual(refused);
+        expect(await bus.main('files.grant', { appSessionId: A, path: out('unnamed.txt') }, unclaimed)).toEqual(refused);
+        expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+        expect(logLines).toEqual([`outside choice: member ${member} device ${device} session ${A} op op-choose: granted ${out('chosen.txt')}`]);
+      });
+    });
+
+    // Condition (c): P5's Decision Log 237 stands for every request no claimed act carries, and a claim changes nothing
+    // outside the four names
+    describe('below the terminal’s grade, to the byte', () => {
+      it('answers files.list, files.read, files.watch and files.write for a chat rooted at the home and one in a project what the pin answers, with a claim or without, asking no evidence', async () => {
+        const HOME_CHAT = 'home-chat' as AppSessionId;
+        records.set(HOME_CHAT, record(home));
+        for (const id of [HOME_CHAT, A]) {
+          await transcriptOf(id, [said(link(inHome('notes.txt')))]);
+          grants.add(id, inHome('notes.txt'));
+        }
+        const bus = remoteHandlers();
+        const answers = async (appSessionId: AppSessionId, context: typeof unclaimed) => ({
+          roots: await bus.invoke('files.list', { appSessionId }, context),
+          home: await bus.invoke('files.list', { appSessionId, path: home }, context),
+          folder: await bus.invoke('files.list', { appSessionId, path: inHome('projects') }, context),
+          notes: await bus.invoke('files.read', { appSessionId, path: inHome('notes.txt') }, context),
+          readme: await bus.invoke('files.read', { appSessionId, path: inRoot('README.md') }, context),
+          watch: await bus.invoke('files.watch', { appSessionId, path: home }, context),
+          write: await bus.invoke('files.write', { appSessionId, path: inHome('notes.txt'), content: 'pwned\n', expectedHash: sha('notes in the home\n') }, context),
+        });
+        const atHome = await answers(HOME_CHAT, unclaimed);
+        expect(atHome).toEqual({ roots: refused, home: refused, folder: refused, notes: refused, readme: refused, watch: refused, write: refused });
+        expect(await answers(HOME_CHAT, claimedContext())).toEqual(atHome);
+        const inProject = await answers(A, unclaimed);
+        expect(inProject).toMatchObject({ roots: { ok: true, value: { entries: [{ path: root }] } }, home: refused, folder: refused, notes: refused, readme: { ok: true, value: { content: '# readme\n' } }, watch: refused, write: refused });
+        expect(await answers(A, claimedContext())).toEqual(inProject);
+        expect(readFileSync(inHome('notes.txt'), 'utf8')).toBe('notes in the home\n');
+        // a read outside the roots asks the Library's delivered files, as at the pin; nothing else is asked
+        expect({ transcript: asked.transcript, grants: asked.grants, sent: asked.sent }).toEqual({ transcript: [], grants: 0, sent: 0 });
+        expect(logLines).toEqual([]);
+      });
+
+      it('marks a delivered file read with the key and no claim added and read-only, its bytes those read without the key, and refuses one only the transcript or a grant admits (decision 9)', async () => {
+        index.library.reconcile({ artifacts: [artifact(1, out('added.txt'), { kind: 'human' }), artifact(2, out('sent.txt'), { kind: 'session', appSessionId: A })], links: [linked(1, A), linked(2, A)], spaces: [] });
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        grants.add(A, out('chosen.txt'));
+        const bus = remoteHandlers();
+        for (const name of ['added.txt', 'sent.txt']) {
+          const without = (await bus.invoke('files.read', { appSessionId: A, path: out(name), hash: true }, unclaimed)) as { ok: true; value: object };
+          expect(without, name).toMatchObject({ ok: true, value: { content: `${name} as it was\n` } });
+          expect(without.value, name).not.toHaveProperty('outside');
+          expect(await bus.invoke('files.read', { appSessionId: A, path: out(name), hash: true, named: true }, unclaimed), name).toEqual({ ok: true, value: { ...without.value, named: true, outside: { real: out(name), writable: false, why: 'added' } } });
+        }
+        for (const name of ['named.txt', 'chosen.txt']) expect(await bus.invoke('files.read', { appSessionId: A, path: out(name), named: true }, unclaimed), name).toEqual(refused);
+        expect({ transcript: asked.transcript, grants: asked.grants, sent: asked.sent }).toEqual({ transcript: [], grants: 0, sent: 0 });
+      });
+    });
+
+    describe('the listing', () => {
+      it('lists one folder outside the home: folders first, dot names after the others of their kind, case aside, a link as a link', async () => {
+        const folder = at('listing');
+        for (const name of ['beta', 'Alpha', '.hidden-dir']) mkdirSync(join(folder, name), { recursive: true });
+        for (const name of ['b.txt', 'A.txt', '.zshrc', 'c.md']) write(join(folder, name), '');
+        symlinkSync(out('named.txt'), join(folder, 'latest'));
+        execFileSync('mkfifo', [join(folder, 'pipe')]);
+        const entry = (name: string, kind: string) => ({ name, path: join(folder, name), kind, protected: false });
+        expect(await list(remoteService(), { path: folder })).toEqual({
+          status: 'listed',
+          path: folder,
+          parent: base,
+          home,
+          entries: [entry('Alpha', 'dir'), entry('beta', 'dir'), entry('.hidden-dir', 'dir'), entry('A.txt', 'file'), entry('b.txt', 'file'), entry('c.md', 'file'), entry('latest', 'link'), entry('pipe', 'other'), entry('.zshrc', 'file')],
+          cursor: null,
+        });
+      });
+
+      it('answers one page of 200 with the cursor of the next, the dot names of a kind after its last page’s others', async () => {
+        expect(OUTSIDE_LIST_PAGE).toBe(200);
+        const folder = at('many');
+        for (const name of ['d1', 'd2', 'd3']) mkdirSync(join(folder, name), { recursive: true });
+        const fileNames = Array.from({ length: 205 }, (_, i) => `f-${String(i).padStart(3, '0')}.txt`);
+        for (const name of [...fileNames, '.dot.txt']) write(join(folder, name), '');
+        const files = remoteService();
+        const first = await list(files, { path: folder });
+        expect(names(first)).toEqual(['d1', 'd2', 'd3', ...fileNames.slice(0, 197)]);
+        expect(first).toMatchObject({ status: 'listed', cursor: 'f-196.txt' });
+        const second = await list(files, { path: folder, cursor: 'f-196.txt' });
+        expect(names(second)).toEqual([...fileNames.slice(197), '.dot.txt']);
+        expect(second).toMatchObject({ status: 'listed', cursor: null });
+      });
+
+      it('lists the home when no path is asked, `~` and `~/…` under it, the private folders marked, and the filesystem’s root', async () => {
+        const files = remoteService();
+        const answer = await list(files);
+        expect(answer).toEqual({
+          status: 'listed',
+          path: home,
+          parent: base,
+          home,
+          entries: [
+            { name: 'Desktop', path: inHome('Desktop'), kind: 'dir', protected: true },
+            { name: 'Documents', path: inHome('Documents'), kind: 'dir', protected: true },
+            { name: 'projects', path: inHome('projects'), kind: 'dir', protected: false },
+            { name: 'notes.txt', path: inHome('notes.txt'), kind: 'file', protected: false },
+          ],
+          cursor: null,
+        });
+        expect(await list(files, { path: '~' })).toEqual(answer);
+        expect(await list(files, { path: '~/projects' })).toMatchObject({ status: 'listed', path: inHome('projects'), parent: home, entries: [{ name: 'garden', kind: 'dir' }] });
+        const top = await list(files, { path: sep });
+        expect(top).toMatchObject({ status: 'listed', path: sep, parent: null, home });
+        expect((top as { entries: { name: string; kind: string }[] }).entries).toContainEqual(expect.objectContaining({ name: base.split(sep)[1], kind: 'dir' }));
+      });
+
+      it('takes each entry’s kind from its directory entry alone: no entry is stat’ed, read or followed', async () => {
+        const folder = at('listing');
+        mkdirSync(join(folder, 'dir'), { recursive: true });
+        write(join(folder, 'file.txt'), 'x');
+        symlinkSync(out('named.txt'), join(folder, 'latest'));
+        const seen = recordTouches();
+        expect(names(await list(remoteService(), { path: folder }))).toEqual(['dir', 'file.txt', 'latest']);
+        expect(seen.filter((entry) => ['dir', 'file.txt', 'latest'].some((name) => entry.endsWith(join(folder, name)) || entry.includes(`${join(folder, name)}${sep}`)))).toEqual([]);
+      });
+
+      it('refuses inside a private folder without open, touching nothing in it, and lists it with open', async () => {
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const path of [inHome('Documents'), '~/Documents/deep']) expect(await list(files, { path }), path).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+        expect(names(await list(files, { path: '~/Documents', open: true }))).toEqual(['deep', 'private.txt']);
+        expect(names(await list(files, { path: '~/Documents/deep', open: true }))).toEqual(['more.txt']);
+      });
+
+      it('refuses a link from outside the home into a private folder the same way, and with open lists where it leads', async () => {
+        symlinkSync(inHome('Documents'), at('to-documents'));
+        const files = remoteService();
+        const seen = recordTouches();
+        expect(await list(files, { path: at('to-documents') })).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+        expect(await list(files, { path: at('to-documents'), open: true })).toMatchObject({ status: 'listed', path: inHome('Documents'), entries: [{ name: 'deep' }, { name: 'private.txt' }] });
+      });
+
+      it('refuses a folder reached through a link on the way into a private folder even with open, touching nothing inside it', async () => {
+        symlinkSync(inHome('Documents'), at('to-documents'));
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const open of [undefined, true] as const) expect(await list(files, { path: join(at('to-documents'), 'deep'), ...(open && { open }) }), `open ${open}`).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+      });
+
+      it('answers unreadable for a folder it cannot read, not-a-folder for a file, no-folder for a missing or relative path, and an unknown session', async () => {
+        write(at('locked', 'inside.txt'), 'x');
+        const files = remoteService();
+        chmodSync(at('locked'), 0o000);
+        try {
+          expect(await list(files, { path: at('locked') })).toEqual({ status: 'refused', reason: 'unreadable' });
+        } finally {
+          chmodSync(at('locked'), 0o700);
+        }
+        expect(await list(files, { path: out('named.txt') })).toEqual({ status: 'refused', reason: 'not-a-folder' });
+        for (const path of [at('missing'), at('missing', 'deeper'), 'relative/path']) expect(await list(files, { path }), path).toEqual({ status: 'refused', reason: 'no-folder' });
+        await expect(list(files, {}, 'nope' as AppSessionId)).rejects.toThrow('unknown app session: nope');
+      });
+
+      it('marks and guards no folder as private on a platform that is not macOS', async () => {
+        const files = remoteService({ platform: 'linux' });
+        expect(names(await list(files, { path: '~/Documents' }))).toEqual(['deep', 'private.txt']);
+        expect((await list(files)) as { entries: { protected: boolean }[] }).toMatchObject({ entries: [{ protected: false }, { protected: false }, { protected: false }, { protected: false }] });
+      });
+    });
+
+    describe('the choice', () => {
+      it('grants a regular file by its real path and a link as its target, and refuses a directory, a package and a special file', async () => {
+        mkdirSync(out('folder'));
+        mkdirSync(out('Tool.app', 'Contents'), { recursive: true });
+        execFileSync('mkfifo', [out('pipe')]);
+        symlinkSync(out('chosen.txt'), out('alias.txt'));
+        const files = remoteService();
+        expect(await choose(files, out('alias.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        expect(grants.has(A, out('chosen.txt'))).toBe(true);
+        expect(grants.has(A, out('alias.txt'))).toBe(false);
+        for (const path of [out('folder'), out('Tool.app'), out('pipe')]) {
+          expect(await choose(files, path), path).toEqual({ status: 'refused', reason: 'not-a-file' });
+          expect(grants.has(A, path), path).toBe(false);
+        }
+        expect(await choose(files, '~/notes.txt')).toEqual({ status: 'granted', path: inHome('notes.txt') });
+      });
+
+      it('refuses a missing path no-file and a choice for a session this machine does not know', async () => {
+        const files = remoteService();
+        for (const path of [out('never.txt'), at('missing', 'never.txt')]) expect(await choose(files, path), path).toEqual({ status: 'refused', reason: 'no-file' });
+        await expect(files.chooseOutside({ appSessionId: 'nope' as AppSessionId, path: out('chosen.txt') }, claimed())).rejects.toThrow('unknown app session: nope');
+        expect(grants.has('nope' as AppSessionId, out('chosen.txt'))).toBe(false);
+      });
+
+      it('refuses a path in a private folder and a last link whose target lies in one without open, touching nothing inside it; with open grants the target’s real path', async () => {
+        symlinkSync(secret(), out('to-private'));
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const path of [secret(), out('to-private')]) expect(await choose(files, path), path).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+        expect(grants.has(A, secret())).toBe(false);
+        expect(await choose(files, out('to-private'), 'op-choose', { open: true })).toEqual({ status: 'granted', path: secret() });
+        expect(grants.has(A, secret())).toBe(true);
+      });
+
+      it('drops the oldest grant of a session at its 257th choice (U6e’s bound, reached from another machine)', async () => {
+        const many = Array.from({ length: 257 }, (_, i) => at('many', `chosen-${i}.txt`));
+        for (const path of many) write(path, 'x');
+        const files = remoteService();
+        for (const path of many) expect(await choose(files, path), path).toMatchObject({ status: 'granted' });
+        expect([grants.has(A, many[0]!), grants.has(A, many[1]!), grants.has(A, many[256]!)]).toEqual([false, true, true]);
+      }, 20_000); // 257 choices, each a walk and a grants file written: about 4.5 s on the build VM, near the default 5 s
+    });
+
+    // Decision 10: the other machine's own record of each save and each choice made from another machine
+    describe('the log', () => {
+      it('writes one line per ending of a claimed save and choice, with the claim’s member, device and operation id, and never the content', async () => {
+        write(out('readonly.txt'), 'read-only as it was\n');
+        chmodSync(out('readonly.txt'), 0o444);
+        mkdirSync(out('folder'));
+        const settings = join(profile, 'settings.json');
+        await transcriptOf(A, [said(link(out('named.txt'))), said(link(out('gone.txt'))), said(link(out('readonly.txt'))), said(link(settings))]);
+        const files = remoteService();
+        const read = await readThere(files, A, out('named.txt'));
+        const save = (appSessionId: AppSessionId, path: string, opId: string, extra: object = {}) =>
+          files.writeOutside({ appSessionId, path, content: 'the words typed\n', expectedHash: read.hash!, real: path, ...extra }, claimed(opId));
+        expect(await save(A, out('named.txt'), 'op-save')).toEqual({ status: 'ok', hash: sha('the words typed\n') });
+        expect(await save(A, out('named.txt'), 'op-conflict')).toEqual({ status: 'conflict', hash: sha('the words typed\n') });
+        await expect(save(A, out('unnamed.txt'), 'op-outside')).rejects.toThrow(new Error(OUT));
+        await expect(save(A, settings, 'op-own')).rejects.toThrow(new Error(`not writable: ${settings}`));
+        await expect(save(A, out('named.txt'), 'op-moved', { real: out('elsewhere.txt') })).rejects.toThrow(new Error(FILES_MOVED));
+        await expect(save(A, out('gone.txt'), 'op-missing')).rejects.toThrow(new Error(`not found: ${out('gone.txt')}`));
+        await expect(save(A, out('readonly.txt'), 'op-locked')).rejects.toThrow(new Error(`not writable: ${out('readonly.txt')}`));
+        await expect(save(A, secret(), 'op-private')).rejects.toMatchObject(protectedRefusal);
+        expect(await choose(files, out('chosen.txt'), 'op-choose')).toMatchObject({ status: 'granted' });
+        expect(await choose(files, out('folder'), 'op-folder')).toEqual({ status: 'refused', reason: 'not-a-file' });
+        const by = (appSessionId: AppSessionId, opId: string) => `member ${member} device ${device} session ${appSessionId} op ${opId}`;
+        expect(logLines).toEqual([
+          `outside write: ${by(A, 'op-save')}: ok 16 bytes ${out('named.txt')}`,
+          `outside write: ${by(A, 'op-conflict')}: conflict ${out('named.txt')}`,
+          `outside write: ${by(A, 'op-outside')}: refused (outside) ${out('unnamed.txt')}`,
+          `outside write: ${by(A, 'op-own')}: refused (own) ${settings}`,
+          `outside write: ${by(A, 'op-moved')}: refused (moved) ${out('named.txt')}`,
+          `outside write: ${by(A, 'op-missing')}: refused (missing) ${out('gone.txt')}`,
+          `outside write: ${by(A, 'op-locked')}: refused (not-writable) ${out('readonly.txt')}`,
+          `outside write: ${by(A, 'op-private')}: refused (protected) ${secret()}`,
+          `outside choice: ${by(A, 'op-choose')}: granted ${out('chosen.txt')}`,
+          `outside choice: ${by(A, 'op-folder')}: refused (not-a-file) ${out('folder')}`,
+        ]);
+        expect(logLines.join('\n')).not.toContain('the words typed');
+      });
+
+      it('escapes the control characters of a path in its line, so a name holding a line ending writes one line, and an ordinary path reads as it is', async () => {
+        const fed = out('fed\noutside choice: member someone device elsewhere session S op forged: granted .txt');
+        const returned = out('returned\r\u0001.txt');
+        write(fed, 'fed as it was\n');
+        write(returned, 'returned as it was\n');
+        const files = remoteService();
+        expect(await choose(files, fed, 'op-fed')).toEqual({ status: 'granted', path: fed });
+        expect(await saveThere(files, A, fed, 'saved\n', 'op-save')).toEqual({ status: 'ok', hash: sha('saved\n') });
+        await expect(files.writeOutside({ appSessionId: A, path: returned, content: 'pwned\n', expectedHash: sha('returned as it was\n'), real: returned }, claimed('op-returned'))).rejects.toThrow(new Error(OUT));
+        expect(await choose(files, out('tab\there'), 'op-tab')).toEqual({ status: 'refused', reason: 'no-file' });
+        expect(await choose(files, out('chosen.txt'), 'op-plain')).toEqual({ status: 'granted', path: out('chosen.txt') });
+        const by = (opId: string) => `member ${member} device ${device} session ${A} op ${opId}`;
+        const escapedFed = out('fed\\noutside choice: member someone device elsewhere session S op forged: granted .txt');
+        expect(logLines).toEqual([
+          `outside choice: ${by('op-fed')}: granted ${escapedFed}`,
+          `outside write: ${by('op-save')}: ok 6 bytes ${escapedFed}`,
+          `outside write: ${by('op-returned')}: refused (outside) ${out('returned\\r\\x01.txt')}`,
+          `outside choice: ${by('op-tab')}: refused (no-file) ${out('tab\\x09here')}`,
+          `outside choice: ${by('op-plain')}: granted ${out('chosen.txt')}`,
+        ]);
+        for (const line of logLines) expect(line, line).not.toMatch(/\p{Cc}/u);
+      });
+
+      it('writes none for a save on this machine, a read or a listing, and a log that throws changes no answer', async () => {
+        await transcriptOf(A, [said(link(out('named.txt')))]);
+        const files = remoteService();
+        expect(await saveShown(files, A, out('named.txt'), 'saved here\n')).toEqual({ status: 'ok', hash: sha('saved here\n') });
+        await readThere(files, A, out('named.txt'));
+        await list(files, { path: outside });
+        expect(logLines).toEqual([]);
+        const failing = remoteService({
+          outsideLog: () => {
+            throw new Error('the log cannot be written');
+          },
+        });
+        expect(await saveThere(failing, A, out('named.txt'), 'saved anyway\n')).toEqual({ status: 'ok', hash: sha('saved anyway\n') });
+        expect(await choose(failing, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        await expect(saveThere(failing, A, out('unnamed.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      });
+    });
+
+    // The architect's ruling on the walk-to-use race (the cheap half): the step after the chooser's walk uses the real path
+    // the walk ended at, and resolves nothing again from the path as typed. A link of the typed path is moved between the
+    // walk and that step, so a step that resolved the typed path again would reach the link's new target
+    describe('the walk’s real path, handed to the step after it', () => {
+      const relink = (link: string, target: string) => () => {
+        rmSync(link);
+        symlinkSync(target, link);
+        relinked.push(link);
+      };
+      let relinked: string[];
+      beforeEach(() => {
+        relinked = [];
+      });
+
+      it('grants the file the choice’s walk ended at', async () => {
+        symlinkSync(out('chosen.txt'), out('pick'));
+        const files = remoteService();
+        points['after-outside-walk'] = relink(out('pick'), out('unnamed.txt'));
+        expect(await choose(files, out('pick'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        expect(relinked, 'the link moved between the walk and the grant').toEqual([out('pick')]);
+        expect([grants.has(A, out('chosen.txt')), grants.has(A, out('unnamed.txt'))]).toEqual([true, false]);
+      });
+
+      it('lists the folder the listing’s walk ended at', async () => {
+        write(at('first', 'one.txt'), '');
+        write(at('second', 'two.txt'), '');
+        symlinkSync(at('first'), at('shown'));
+        points['after-outside-walk'] = relink(at('shown'), at('second'));
+        expect(await list(remoteService(), { path: at('shown') })).toEqual({ status: 'listed', path: at('first'), parent: base, home, entries: [{ name: 'one.txt', path: at('first', 'one.txt'), kind: 'file', protected: false }], cursor: null });
+        expect(relinked, 'the link moved between the walk and the listing').toEqual([at('shown')]);
+      });
+
+      // The architect's ruling on item 6 (b): U6e's step 4 resolves the typed path as before, and a claimed path whose walk
+      // answered is refused FILES_MOVED where step 4's real path is not the walk's, before anything is opened
+      it('refuses a claimed read and save FILES_MOVED where a link moved between the walk and the resolution, opening nothing; unmoved, each reads and saves', async () => {
+        write(at('first', 'file.txt'), 'first as it was\n');
+        write(at('second', 'file.txt'), 'second as it was\n');
+        symlinkSync(at('first'), at('via'));
+        const path = at('via', 'file.txt');
+        for (const real of [at('first', 'file.txt'), at('second', 'file.txt')]) grants.add(A, real); // either is the session's to read and save
+        const files = remoteService();
+        // the read
+        const seen = recordTouches();
+        points['after-outside-walk'] = relink(at('via'), at('second'));
+        await expect(readThere(files, A, path)).rejects.toThrow(new Error(FILES_MOVED));
+        expect(relinked, 'the link moved between the walk and the resolution').toEqual([at('via')]);
+        expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
+        // the save of what an unmoved read showed
+        touches.on = false;
+        relink(at('via'), at('first'))();
+        const read = await readThere(files, A, path);
+        expect(read).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
+        seen.length = 0;
+        touches.on = true;
+        points['after-outside-walk'] = relink(at('via'), at('second'));
+        await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real }, claimed('op-save'))).rejects.toThrow(new Error(FILES_MOVED));
+        expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
+        expect([readFileSync(at('first', 'file.txt'), 'utf8'), readFileSync(at('second', 'file.txt'), 'utf8')]).toEqual(['first as it was\n', 'second as it was\n']);
+        // the control: no move, and the same read and save answer
+        touches.on = false;
+        relink(at('via'), at('first'))();
+        expect(await readThere(files, A, path)).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
+        expect(await saveThere(files, A, path, 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect([readFileSync(at('first', 'file.txt'), 'utf8'), readFileSync(at('second', 'file.txt'), 'utf8')]).toEqual(['saved there\n', 'second as it was\n']);
+      });
+    });
+
+    // Decision 18: no act of another machine reads or writes inside a private folder of this one unasked
+    describe('a private folder, for a read and a save', () => {
+      it('refuses a claimed read and save of a named file in a private folder as protected, touching nothing inside it and asking no evidence; with open reads and writes it', async () => {
+        await transcriptOf(A, [said(link(secret()))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, secret())).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: secret(), content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret() }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingAsked();
+        touches.on = false;
+        expect(await readThere(files, A, secret(), 'op-read', { open: true })).toMatchObject({ content: 'private as it was\n', named: true, outside: { real: secret(), writable: true } });
+        expect(await saveThere(files, A, secret(), 'saved there\n', 'op-save', { open: true })).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect(readFileSync(secret(), 'utf8')).toBe('saved there\n');
+      });
+
+      it('answers protected for a link on the way, outside every private folder, that leads into one, with open or without, touching nothing inside it', async () => {
+        symlinkSync(inHome('Documents'), at('docs-link'));
+        const via = at('docs-link', 'private.txt');
+        await transcriptOf(A, [said(link(via))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret() }, claimed())).rejects.toMatchObject(protectedRefusal);
+        await expect(readThere(files, A, via, 'op-read', { open: true })).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), open: true }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingAsked();
+        expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
+      });
+
+      // Decision 18 as ruled (Decision Log 17): `open: true` covers the private folders the path names and the target of a
+      // link that is its last component, never a link met on the way into another one
+      it('answers protected for a path under an opened private folder whose link on the way leads into a second one, with open or without, touching nothing inside the second', async () => {
+        write(inHome('Desktop', 'far.txt'), 'far as it was\n');
+        symlinkSync(inHome('Desktop'), inHome('Documents', 'to-desktop'));
+        const via = inHome('Documents', 'to-desktop', 'far.txt');
+        await transcriptOf(A, [said(link(via))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingTouchedIn(seen, inHome('Desktop'));
+        await expect(readThere(files, A, via, 'op-read', { open: true })).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('far as it was\n'), real: inHome('Desktop', 'far.txt'), open: true }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Desktop'));
+        nothingAsked();
+        expect(readFileSync(inHome('Desktop', 'far.txt'), 'utf8')).toBe('far as it was\n');
+      });
+
+      it('opens with open the target in a private folder of a link that is the path’s last component, by the choice, and reads the file it grants', async () => {
+        write(inHome('Desktop', 'far.txt'), 'far as it was\n');
+        symlinkSync(inHome('Desktop', 'far.txt'), out('to-far'));
+        const files = remoteService();
+        const seen = recordTouches();
+        expect(await choose(files, out('to-far'))).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Desktop'));
+        expect(await choose(files, out('to-far'), 'op-choose', { open: true })).toEqual({ status: 'granted', path: inHome('Desktop', 'far.txt') });
+        expect(await readThere(files, A, inHome('Desktop', 'far.txt'), 'op-read', { open: true })).toMatchObject({ content: 'far as it was\n', outside: { real: inHome('Desktop', 'far.txt'), writable: true } });
+        nothingTouchedIn(seen, inHome('Documents'));
+      });
+
+      // The branch review (scalpel-2#1; Decision Log 33 (1)): a walk that cannot finish refuses as protected, and nothing
+      // resolves the path unchecked after it
+      it('refuses as protected a claimed read and a hash-checked save through a folder the walk cannot list (0111) holding a link into a private folder, with open or without, touching nothing inside it', async () => {
+        mkdirSync(at('passage'));
+        symlinkSync(inHome('Documents'), at('passage', 'to-docs'));
+        write(at('passage', 'beside.txt'), 'beside as it was\n');
+        const via = at('passage', 'to-docs', 'private.txt');
+        await transcriptOf(A, [said(link(via)), said(link(at('passage', 'beside.txt')))]);
+        const files = remoteService();
+        chmodSync(at('passage'), 0o111); // entered by name, never listed: the walk cannot read its entries
+        try {
+          const seen = recordTouches();
+          for (const open of [{}, { open: true as const }]) {
+            await expect(readThere(files, A, via, 'op-read', open), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
+            await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), ...open }, claimed('op-save')), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
+          }
+          nothingTouchedIn(seen, inHome('Documents'));
+          expect(seen.filter((entry) => entry === `realpath ${via}`), 'the path is never resolved unchecked').toEqual([]);
+          // fail closed: a file of that folder itself, which the walk cannot see either, is refused the same way
+          await expect(readThere(files, A, at('passage', 'beside.txt'))).rejects.toMatchObject(protectedRefusal);
+        } finally {
+          chmodSync(at('passage'), 0o755);
+        }
+        expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
+        expect(readFileSync(at('passage', 'beside.txt'), 'utf8')).toBe('beside as it was\n');
+      });
+
+      it('the control: through a folder the walk can list, a link to an ordinary folder reads and saves a named file; a named file gone from a folder it cannot list still says it is gone', async () => {
+        mkdirSync(at('passage'));
+        write(at('plain', 'notes.txt'), 'plain as it was\n');
+        symlinkSync(at('plain'), at('passage', 'to-plain'));
+        const via = at('passage', 'to-plain', 'notes.txt');
+        await transcriptOf(A, [said(link(via)), said(link(at('passage', 'gone.txt')))]);
+        const files = remoteService();
+        expect(await readThere(files, A, via)).toMatchObject({ content: 'plain as it was\n', named: true, outside: { real: at('plain', 'notes.txt'), writable: true } });
+        expect(await saveThere(files, A, via, 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect(readFileSync(at('plain', 'notes.txt'), 'utf8')).toBe('saved there\n');
+        chmodSync(at('passage'), 0o111);
+        try {
+          await expect(readThere(files, A, at('passage', 'gone.txt'))).rejects.toThrow(new Error(`not found: ${at('passage', 'gone.txt')}`));
+          await expect(files.writeOutside({ appSessionId: A, path: at('passage', 'gone.txt'), content: 'pwned\n', expectedHash: sha(''), real: at('passage', 'gone.txt') }, claimed('op-gone'))).rejects.toThrow(new Error(`not found: ${at('passage', 'gone.txt')}`));
+        } finally {
+          chmodSync(at('passage'), 0o755);
+        }
+      });
+
+      it('walks no path under one of the caller’s roots: a root inside a private folder reads and saves without open', async () => {
+        records.set(B, record(inHome('Documents', 'deep')));
+        const files = remoteService();
+        const read = await readThere(files, B, inHome('Documents', 'deep', 'more.txt'));
+        expect(read).toMatchObject({ content: 'more as it was\n' });
+        expect(read).not.toHaveProperty('outside');
+        expect(await files.writeOutside({ appSessionId: B, path: inHome('Documents', 'deep', 'more.txt'), content: 'saved\n', expectedHash: read.hash!, real: inHome('Documents', 'deep', 'more.txt') }, claimed())).toEqual({ status: 'ok', hash: sha('saved\n') });
+      });
+
+      it('reads a delivered file in a private folder for a request with no claim as at the pin', async () => {
+        index.library.reconcile({ artifacts: [artifact(1, secret(), { kind: 'human' })], links: [linked(1, A)], spaces: [] });
+        const files = remoteService();
+        const read = await files.read({ appSessionId: A, path: secret() }, UNCLAIMED);
+        expect(read).toMatchObject({ content: 'private as it was\n' });
+        expect(read).not.toHaveProperty('outside');
+      });
+
+      it('guards no folder on a platform that is not macOS: a claimed read and save there need no open', async () => {
+        await transcriptOf(A, [said(link(secret()))]);
+        const files = remoteService({ platform: 'linux' });
+        expect(await readThere(files, A, secret())).toMatchObject({ content: 'private as it was\n', outside: { writable: true } });
+        expect(await saveThere(files, A, secret(), 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+      });
+    });
+
+    describe('a chat rooted at the home', () => {
+      it('reads and saves a named file under that home as any outside file, refuses one nothing admits, and keeps the home out of its roots', async () => {
+        const HOME_CHAT = 'home-chat' as AppSessionId;
+        records.set(HOME_CHAT, record(home));
+        write(inHome('unnamed.txt'), 'unnamed in the home\n');
+        await transcriptOf(HOME_CHAT, [said(link(inHome('notes.txt')))]);
+        const files = remoteService();
+        expect(await readThere(files, HOME_CHAT, inHome('notes.txt'))).toMatchObject({ content: 'notes in the home\n', named: true, outside: { real: inHome('notes.txt'), writable: true } });
+        expect(await saveThere(files, HOME_CHAT, inHome('notes.txt'), 'saved in the home\n')).toEqual({ status: 'ok', hash: sha('saved in the home\n') });
+        expect(readFileSync(inHome('notes.txt'), 'utf8')).toBe('saved in the home\n');
+        await expect(readThere(files, HOME_CHAT, inHome('unnamed.txt'))).rejects.toThrow(new Error(OUT));
+        await expect(files.list({ appSessionId: HOME_CHAT }, true)).rejects.toThrow(new Error(OUT));
+      });
+    });
+
+    // Condition (e): MAWS's own folders and the real path, reached by the claimed caller with nothing skipped
+    describe('MAWS’s own folders and the real path', () => {
+      it('reads a file under the profile, the daemon’s bundle and a told bundle with own, and refuses its claimed save', async () => {
+        told = [at('Dev', 'MAWS Dev.app')];
+        const ownFiles = [join(profile, 'settings.json'), at('Apps', 'MAWS.app', 'Contents', 'Resources', 'app.txt'), at('Dev', 'MAWS Dev.app', 'Contents', 'Resources', 'dev.txt')];
+        await transcriptOf(A, ownFiles.map((path) => said(`See [the file](<${path}>).`)));
+        const files = remoteService();
+        for (const path of ownFiles) {
+          const before = readFileSync(path, 'utf8');
+          const read = await readThere(files, A, path);
+          expect(read, path).toMatchObject({ content: before, own: true, named: true, outside: { real: path } });
+          await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: path }, claimed()), path).rejects.toThrow(new Error(`not writable: ${path}`));
+          expect(readFileSync(path, 'utf8'), path).toBe(before);
+        }
+      });
+
+      it('refuses with FILES_MOVED a claimed save whose folder was swapped for a link since the read, and saves once it is back', async () => {
+        write(at('far', 'dir', 'notes.txt'), 'same bytes\n');
+        write(at('twin', 'notes.txt'), 'same bytes\n');
+        const far = at('far', 'dir', 'notes.txt');
+        await transcriptOf(A, [said(link(far))]);
+        const files = remoteService();
+        const read = await readThere(files, A, far);
+        swapToLink(at('far', 'dir'), at('twin'));
+        const save = () => files.writeOutside({ appSessionId: A, path: far, content: 'saved\n', expectedHash: read.hash!, real: read.outside!.real }, claimed());
+        await expect(save()).rejects.toThrow(new Error(FILES_MOVED));
+        expect([readFileSync(at('far', 'dir.away', 'notes.txt'), 'utf8'), readFileSync(at('twin', 'notes.txt'), 'utf8')]).toEqual(['same bytes\n', 'same bytes\n']);
+        restore(at('far', 'dir'));
+        expect(await save()).toEqual({ status: 'ok', hash: sha('saved\n') });
+      });
+    });
+  });
+
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R1 to R5, Interfaces §B and §D):
+  // a link in a Markdown file the session may read, found by the daemon itself (`files.follow`), recorded for the session
+  // in a file of the profile, and every later request of this machine that asks by name admitted by the record
+  describe('a followed link (UX wave U6b-4c)', () => {
+    const LINKED = { status: 'linked' } as const;
+    const INSIDE = { status: 'inside' } as const;
+    const NOT_LINKED = { status: 'not-linked' } as const;
+    const claimed = (opId = 'op-1') => ({ remote: true as const, claim: { member: 'member-of-the-suite', device: 'device-of-the-suite', opId } });
+    let linksFile: string;
+    let links: FileLinks;
+    let followLog: string[];
+    const openLinks = () => openFileLinks(linksFile, { known: (id) => records.has(id), log: (line) => logged.push(line) });
+    // U6e's service as the daemon composes it, with the link records and the log of each record written; a claimed caller
+    // walks under a home of the suite's, on macOS
+    const followService = (extra: Partial<FilesServiceOptions> = {}) => outsideService({ links, log: (line) => followLog.push(line), home: () => at('home'), platform: 'darwin', ...extra });
+    const guide = () => inRoot('docs', 'guide.md');
+    type Source = { file: string } | { agent: string; engineSessionId?: string };
+    // the branch panel: a subagent source names the conversation whose subagent drew the link, here the session's own
+    // transcript (`transcriptOf` writes `engine-<session>.jsonl`)
+    const fromAgent = (agent: string, appSessionId: AppSessionId = A) => ({ agent, engineSessionId: `engine-${appSessionId}` });
+    const follow = (files: Files, path: string, from: Source = { file: guide() }, appSessionId: AppSessionId = A, signal?: AbortSignal) => files.follow({ appSessionId, path, from }, undefined, signal);
+    type Recorded = { real: string; at: number; from: Source; why?: string };
+    const recorded = (): Record<string, Recorded[]> | null => (existsSync(linksFile) ? (JSON.parse(readFileSync(linksFile, 'utf8')) as { sessions: Record<string, Recorded[]> }).sessions : null);
+    const realsOf = (appSessionId: AppSessionId) => (recorded()?.[appSessionId] ?? []).map((entry) => entry.real);
+    const ok = (content: string) => ({ status: 'ok', hash: sha(content) });
+
+    beforeEach(() => {
+      linksFile = join(profile, 'sessions', 'file-links.json');
+      links = openLinks();
+      followLog = [];
+      mkdirSync(at('home'), { recursive: true });
+      write(out('notes.txt'), 'notes as they were\n');
+      write(guide(), `# Guide\n\n${link(out('notes.txt'))}\n`);
+    });
+
+    describe('what a follow records, and what the record admits', () => {
+      it('records a file a Markdown file of the folders links, and admits its read, its open outside MAWS and its save by the record (K1, X1.6)', async () => {
+        const linking = session('Linking');
+        write(out('report.pdf'), '%PDF-1.4\n%%EOF\n');
+        write(guide(), `# Guide\n\n${link(out('notes.txt'))} And [the report](${out('report.pdf')}).\n`);
+        const files = followService();
+        await expect(shown(files, linking, out('notes.txt')), 'before the follow').rejects.toThrow(new Error(OUT));
+        expect(await follow(files, out('notes.txt'), { file: guide() }, linking)).toEqual(LINKED);
+        expect(await follow(files, out('report.pdf'), { file: guide() }, linking)).toEqual(LINKED);
+        const read = await shown(files, linking, out('notes.txt'));
+        expect(read).toMatchObject({ content: 'notes as they were\n', named: true });
+        expect(read.outside).toEqual({ real: out('notes.txt'), writable: true });
+        expect(await files.openExternal(linking, out('report.pdf'), null, { named: true })).toEqual({ opened: true, message: null });
+        expect(await saveShown(files, linking, out('notes.txt'), 'saved through the link\n')).toEqual(ok('saved through the link\n'));
+        expect(readFileSync(out('notes.txt'), 'utf8')).toBe('saved through the link\n');
+        expect(recorded()).toEqual({
+          [linking]: [
+            { real: out('notes.txt'), at: expect.any(Number), from: { file: guide() } },
+            { real: out('report.pdf'), at: expect.any(Number), from: { file: guide() } },
+          ],
+        });
+        expect(followLog).toHaveLength(2);
+        for (const line of followLog) {
+          expect(line).toContain(linking);
+          expect(line).not.toContain(base);
+          expect(line).not.toMatch(/notes|report/);
+        }
+      });
+
+      it('admits the file again after the daemon restarts: the store opened again from its file, and a new service (K2, K12)', async () => {
+        expect(await follow(followService(), out('notes.txt'))).toEqual(LINKED);
+        links = openLinks();
+        const again = followService();
+        expect((await shown(again, A, out('notes.txt'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+        expect(await saveShown(again, A, out('notes.txt'), 'saved after the restart\n')).toEqual(ok('saved after the restart\n'));
+      });
+
+      it('answers not-linked for a path the source does not link, writes nothing, and a read of it stays refused; the linked path is recorded (X1.5, K7)', async () => {
+        const files = followService();
+        expect(await follow(files, out('unnamed.txt'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        await expect(shown(files, A, out('unnamed.txt'))).rejects.toThrow(new Error(OUT));
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('notes.txt')]);
+      });
+
+      it('admits the record for its session alone, for a request that asks by name, and never for an open the agent asked for (X5.1, X5.2, X5.4)', async () => {
+        records.set(B, record(root));
+        write(out('report.pdf'), '%PDF-1.4\n%%EOF\n');
+        write(guide(), `${link(out('notes.txt'))} ${link(out('report.pdf'))}\n`);
+        const files = followService();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('report.pdf'))).toEqual(LINKED);
+        expect((await shown(files, A, out('notes.txt'))).outside, 'the control').toEqual({ real: out('notes.txt'), writable: true });
+        await expect(shown(files, B, out('notes.txt'))).rejects.toThrow(new Error(OUT));
+        await expect(shown(files, A, out('notes.txt'), { agent: true })).rejects.toThrow(new Error(OUT));
+        await expect(files.openExternal(A, out('report.pdf'), null, { named: true, agent: true })).rejects.toThrow(new Error(OUT));
+        await expect(files.read({ appSessionId: A, path: out('notes.txt') })).rejects.toThrow(new Error(OUT));
+      });
+
+      it('reaches a link record for a session with no folder that resolves, as a grant is reached', async () => {
+        records.set(B, record(at('no-such-folder')));
+        links.add(B, out('notes.txt'), { file: guide() });
+        const files = service({ links });
+        expect(await files.read({ appSessionId: B, path: out('notes.txt'), named: true })).toMatchObject({ named: true, outside: { real: out('notes.txt'), writable: true } });
+        await expect(files.read({ appSessionId: B, path: out('unnamed.txt'), named: true })).rejects.toThrow(new Error(OUT));
+      });
+
+      // the chain merge onto U6b-4a: Open in's admission asks the outside save's evidence through the same precheck, so a
+      // link record answers it exactly where a grant does, for this machine's own caller alone
+      it('admits for Open in (files.admit) a file whose link record admits a save, as a grant would; a read-only record admits none, nor does no record (the control)', async () => {
+        write(out('report.txt'), 'the report\n');
+        write(out('plain.txt'), 'plain\n');
+        links.add(A, out('notes.txt'), { file: guide() });
+        links.add(A, out('report.txt'), { file: guide() }, 'linked');
+        const files = followService();
+        expect(await files.admit({ appSessionId: A, path: out('notes.txt') })).toEqual({ path: out('notes.txt'), kind: 'file' });
+        await expect(files.admit({ appSessionId: A, path: out('report.txt') }), 'a read-only record').rejects.toThrow(new Error(OUT));
+        await expect(files.admit({ appSessionId: A, path: out('plain.txt') }), 'the control: no record').rejects.toThrow(new Error(OUT));
+        await expect(files.admit({ appSessionId: A, path: out('notes.txt') }, true), 'another machine').rejects.toThrow(new Error(OUT));
+        expect((await shown(files, A, out('report.txt'))).outside, 'the read-only record still admits its read').toMatchObject({ real: out('report.txt'), writable: false });
+      });
+
+      it('reads a recorded file under MAWS’s own folders with own, and its save answers not writable (X4.5)', async () => {
+        const settings = join(profile, 'settings.json');
+        write(guide(), `${link(settings)}\n`);
+        const files = followService();
+        expect(await follow(files, settings)).toEqual(LINKED);
+        const read = await shown(files, A, settings);
+        expect(read).toMatchObject({ own: true, outside: { real: settings, writable: true } });
+        await expect(files.writeOutside({ appSessionId: A, path: settings, content: 'pwned\n', expectedHash: read.hash!, real: settings })).rejects.toThrow(new Error(`not writable: ${settings}`));
+        expect(readFileSync(settings, 'utf8')).toBe('{ "theme": "light" }\n');
+      });
+
+      it('answers not found for a recorded path that is gone by its real path, and the refusal by another spelling of it (X5.13, Q7)', async () => {
+        write(out('kept', 'gone.txt'), 'soon gone\n');
+        symlinkSync(out('kept'), out('kept-alias'));
+        write(guide(), `${link(out('kept', 'gone.txt'))}\n`);
+        const files = followService();
+        expect(await follow(files, out('kept', 'gone.txt'))).toEqual(LINKED);
+        expect((await shown(files, A, out('kept-alias', 'gone.txt'))).outside, 'the record is of the real path').toEqual({ real: out('kept', 'gone.txt'), writable: true });
+        unlinkSync(out('kept', 'gone.txt'));
+        await expect(shown(files, A, out('kept', 'gone.txt'))).rejects.toThrow(new Error(`not found: ${out('kept', 'gone.txt')}`));
+        await expect(shown(files, A, out('kept-alias', 'gone.txt'))).rejects.toThrow(new Error(OUT));
+        await expect(shown(files, A, out('kept', 'gone.txt'), { agent: true }), 'an open the agent asked for').rejects.toThrow(new Error(OUT));
+      });
+
+      it('admits nothing once the path leads to another real path, and the save answers the refusal, not that the file moved (X5.3)', async () => {
+        write(out('moving', 'b.txt'), 'before the move\n');
+        write(out('twin', 'b.txt'), 'before the move\n');
+        write(guide(), `${link(out('moving', 'b.txt'))}\n`);
+        const files = followService();
+        expect(await follow(files, out('moving', 'b.txt'))).toEqual(LINKED);
+        const read = await shown(files, A, out('moving', 'b.txt'));
+        swapToLink(out('moving'), out('twin'));
+        await expect(shown(files, A, out('moving', 'b.txt'))).rejects.toThrow(new Error(OUT));
+        await expect(files.writeOutside({ appSessionId: A, path: out('moving', 'b.txt'), content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real })).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out('twin', 'b.txt'), 'utf8')).toBe('before the move\n');
+        restore(out('moving'));
+        expect(await saveShown(files, A, out('moving', 'b.txt'), 'saved\n')).toEqual(ok('saved\n'));
+      });
+
+      // R5, Q6; U6f's caller: a claimed caller of another machine reaches the outside evidence, where a grant admits it and
+      // a link record does not
+      it('admits nothing by a link record to another machine’s caller, claimed or not, and says not found to none of them; a grant admits the claimed one (X5.5)', async () => {
+        write(out('gone.txt'), 'soon gone\n');
+        write(guide(), `${link(out('notes.txt'))} ${link(out('gone.txt'))}\n`);
+        const files = followService();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('gone.txt'))).toEqual(LINKED);
+        const mine = await shown(files, A, out('notes.txt'));
+        expect(mine.outside, 'this machine’s own request (the control)').toEqual({ real: out('notes.txt'), writable: true });
+        await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, UNCLAIMED)).rejects.toThrow(new Error(OUT));
+        await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true, hash: true }, claimed('op-read'))).rejects.toThrow(new Error(OUT));
+        await expect(files.writeOutside({ appSessionId: A, path: out('notes.txt'), content: 'pwned\n', expectedHash: mine.hash!, real: out('notes.txt') }, claimed('op-save'))).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out('notes.txt'), 'utf8')).toBe('notes as they were\n');
+        unlinkSync(out('gone.txt'));
+        await expect(files.read({ appSessionId: A, path: out('gone.txt'), named: true }, claimed('op-gone'))).rejects.toThrow(new Error(OUT));
+        await expect(shown(files, A, out('gone.txt')), 'this machine’s own request (the control)').rejects.toThrow(new Error(`not found: ${out('gone.txt')}`));
+        // the control: a grant of the same file admits the claimed caller as U6f built it
+        await files.grant(A, out('notes.txt'));
+        expect((await files.read({ appSessionId: A, path: out('notes.txt'), named: true, hash: true }, claimed('op-read-2'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+      });
+    });
+
+    describe('who asks, and what is asked (R1)', () => {
+      it('refuses a follow from another machine, claimed or not, before the disk is touched, and records nothing; this machine’s own records (X1.2)', async () => {
+        const files = followService();
+        const input = { appSessionId: A, path: out('notes.txt'), from: { file: guide() } };
+        const seen = recordTouches();
+        await expect(files.follow(input, UNCLAIMED)).rejects.toThrow(new Error(OUT));
+        await expect(files.follow(input, claimed())).rejects.toThrow(new Error(OUT));
+        expect(seen).toEqual([]);
+        touches.on = false;
+        expect(existsSync(linksFile)).toBe(false);
+        expect(asked.transcript).toEqual([]);
+        expect(await files.follow(input)).toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('notes.txt')]);
+      });
+
+      it('refuses as a read does an unknown session, a relative path and a path not normal, and links no path past its bound (X1.4)', async () => {
+        const files = followService();
+        await expect(files.follow({ appSessionId: 'Z' as AppSessionId, path: out('notes.txt'), from: { file: guide() } })).rejects.toThrow(new Error('unknown app session: Z'));
+        await expect(follow(files, 'notes.txt')).rejects.toThrow(new Error('path must be absolute'));
+        for (const path of [`${outside}/../outside/notes.txt`, `${out('notes.txt')}/`, `${outside}//notes.txt`]) await expect(follow(files, path), path).rejects.toThrow(new Error(OUT));
+        const long = `${outside}/${'d/'.repeat(NAMED_PATH_MAX / 2)}notes.txt`;
+        write(guide(), `${link(long)}\n`);
+        expect(await follow(files, long)).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'), { file: inRoot('docs', 'none.md') }), 'a source that is not there').toEqual(NOT_LINKED);
+        write(guide(), `${link(out('notes.txt'))}\n`);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      });
+
+      it('answers not-linked from a service given no store of link records', async () => {
+        const files = outsideService();
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+      });
+    });
+
+    describe('the early answers (decision 4)', () => {
+      it('answers inside for a target under the folders, a folder too, before the source is opened; not-linked for a target that is gone (Q7)', async () => {
+        const opened: string[] = [];
+        write(guide(), `${link(out('notes.txt'))} ${link(out('gone.txt'))}\n`);
+        const files = followService({ hooks: { at: async (point, path) => void (point === 'before-open' && opened.push(path)) } });
+        expect(await files.follow({ appSessionId: A, path: inRoot('README.md'), from: { file: inRoot('src', 'a.ts') } })).toEqual(INSIDE);
+        expect(await follow(files, inRoot('src'))).toEqual(INSIDE);
+        expect(opened).toEqual([]);
+        expect(await follow(files, out('gone.txt'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(opened).toEqual([guide()]);
+      });
+
+      it('links neither a path inside the folders that ends in a link nor one outside that ends in a link to a file inside, and answers neither inside (X5.11)', async () => {
+        symlinkSync(out('notes.txt'), inRoot('to-notes.txt'));
+        symlinkSync(inRoot('README.md'), out('to-readme.md'));
+        write(guide(), `${link(inRoot('to-notes.txt'))} ${link(out('to-readme.md'))} ${link(out('notes.txt'))}\n`);
+        const files = followService();
+        expect(await follow(files, inRoot('to-notes.txt'))).toEqual(NOT_LINKED);
+        expect(await follow(files, out('to-readme.md'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      });
+    });
+
+    describe('the source, read as a read reads it (R2)', () => {
+      it('reads a source outside the folders only once the person chose it (X2.1)', async () => {
+        const source = out('docs', 'guide.md');
+        write(source, `${link(out('notes.txt'))}\n`);
+        const files = followService();
+        expect(await follow(files, out('notes.txt'), { file: source })).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        await files.grant(A, source);
+        expect(await follow(files, out('notes.txt'), { file: source })).toEqual(LINKED);
+      });
+
+      it('reads as a source only a file the window draws as Markdown, by the name the request gives (X2.2)', async () => {
+        const files = followService();
+        for (const name of ['notes.txt', 'README', 'guide.md.bak']) {
+          write(inRoot('kinds', name), `${link(out('notes.txt'))}\n`);
+          expect(await follow(files, out('notes.txt'), { file: inRoot('kinds', name) }), name).toEqual(NOT_LINKED);
+        }
+        expect(existsSync(linksFile)).toBe(false);
+        for (const name of ['notes.mdx', 'notes.markdown', 'notes.md']) {
+          write(inRoot('kinds', name), `${link(out('notes.txt'))}\n`);
+          expect(await follow(files, out('notes.txt'), { file: inRoot('kinds', name) }), name).toEqual(LINKED);
+        }
+      });
+
+      it('reads no source past the Markdown cap or with a binary head; the same link in a file of exactly the cap is followed (X2.3)', async () => {
+        const line = `${link(out('notes.txt'))}\n`;
+        const filled = (size: number) => (line + 'some words of the guide\n'.repeat(Math.ceil(size / 24))).slice(0, size);
+        write(inRoot('docs', 'big.md'), filled(MARKDOWN_RENDER_CAP + 1));
+        write(inRoot('docs', 'nul.md'), `\0${line}`);
+        write(inRoot('docs', 'cap.md'), filled(MARKDOWN_RENDER_CAP));
+        expect(statSync(inRoot('docs', 'cap.md')).size).toBe(MARKDOWN_RENDER_CAP);
+        const files = followService();
+        expect(await follow(files, out('notes.txt'), { file: inRoot('docs', 'big.md') })).toEqual(NOT_LINKED);
+        expect(await follow(files, out('notes.txt'), { file: inRoot('docs', 'nul.md') })).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'), { file: inRoot('docs', 'cap.md') })).toEqual(LINKED);
+      });
+
+      it('reads no source that ends in a link, even to a Markdown file of the folders, nor one not lexically normal (X2.4)', async () => {
+        symlinkSync(guide(), inRoot('docs', 'alias.md'));
+        const files = followService();
+        expect(await follow(files, out('notes.txt'), { file: inRoot('docs', 'alias.md') })).toEqual(NOT_LINKED);
+        expect(await follow(files, out('notes.txt'), { file: `${root}/docs/../docs/guide.md` })).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      });
+
+      it('opens the source through the read’s boundary: a folder swapped for a link at the open is refused, and the file there is what decides (X2.5)', async () => {
+        write(at('decoy', 'guide.md'), `${link(out('notes.txt'))}\n`);
+        const files = followService();
+        points['before-open'] = () => swapToLink(inRoot('docs'), at('decoy'));
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        restore(inRoot('docs'));
+        const replaced = (text: string) => () => {
+          unlinkSync(guide());
+          writeFileSync(guide(), text);
+        };
+        points['before-open'] = replaced('# Guide, linking nothing now\n');
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        points['before-open'] = replaced(`# Guide, written again\n\n${link(out('notes.txt'))}\n`);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      });
+
+      it('proves one Markdown source at a time: a second follow opens its source only once the first’s proof has ended, and leaves the line when its client ends (decision 7)', async () => {
+        write(inRoot('docs', 'second.md'), `${link(out('result.txt'))}\n`);
+        write(inRoot('docs', 'third.md'), `${link(out('chosen.txt'))}\n`);
+        const order: string[] = [];
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let reached!: () => void;
+        const proving = new Promise<void>((resolve) => (reached = resolve));
+        const waiting = new Set<string>(); // the follows that reached the line, by their source's name
+        let bothWaiting!: () => void;
+        const lined = new Promise<void>((resolve) => (bothWaiting = resolve));
+        const files = followService({
+          hooks: {
+            at: async (point, path) => {
+              if (point === 'before-open') order.push(`open ${basename(path)}`);
+              if (point === 'before-follow-turn' && basename(path) !== 'guide.md' && waiting.add(basename(path)).size === 2) bothWaiting();
+              if (point !== 'after-follow-read') return;
+              order.push(`read ${basename(path)}`);
+              if (basename(path) !== 'guide.md') return;
+              reached();
+              await held;
+            },
+          },
+        });
+        const first = follow(files, out('notes.txt'));
+        await proving;
+        const second = follow(files, out('result.txt'), { file: inRoot('docs', 'second.md') });
+        const ending = new AbortController();
+        const third = follow(files, out('chosen.txt'), { file: inRoot('docs', 'third.md') }, A, ending.signal);
+        await lined;
+        await new Promise((resolve) => setImmediate(resolve)); // each has taken its place in the line, the turn after its hook
+        ending.abort();
+        expect(await third, 'its client ended while it waited').toEqual(NOT_LINKED);
+        expect(order).toEqual(['open guide.md', 'read guide.md']);
+        release();
+        expect(await Promise.all([first, second])).toEqual([LINKED, LINKED]);
+        expect(order).toEqual(['open guide.md', 'read guide.md', 'open second.md', 'read second.md']);
+      });
+
+      it('records read-only what a Markdown file of MAWS’s own folders links, inside the session’s folders or chosen outside them; the same text elsewhere gives a save (X2.10, R4)', async () => {
+        const own = join(profile, 'docs', 'own.md');
+        write(own, `${link(out('notes.txt'))}\n`);
+        records.set(H, record(join(profile, 'docs')));
+        const files = followService();
+        const readOnly = { real: out('notes.txt'), writable: false, why: 'result', linked: true };
+        expect(await follow(files, out('notes.txt'), { file: own }, H)).toEqual(LINKED);
+        expect((await shown(files, H, out('notes.txt'))).outside).toEqual(readOnly);
+        await expect(saveShown(files, H, out('notes.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+        await files.grant(A, own);
+        expect(await follow(files, out('notes.txt'), { file: own })).toEqual(LINKED);
+        expect((await shown(files, A, out('notes.txt'))).outside).toEqual(readOnly);
+        await expect(saveShown(files, A, out('notes.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out('notes.txt'), 'utf8')).toBe('notes as they were\n');
+        const mine = out('docs', 'mine.md');
+        write(mine, `${link(out('notes.txt'))}\n`);
+        await files.grant(A, mine);
+        expect(await follow(files, out('notes.txt'), { file: mine })).toEqual(LINKED);
+        expect(await saveShown(files, A, out('notes.txt'), 'saved\n')).toEqual(ok('saved\n'));
+      });
+    });
+
+    describe('the link, read as the click reads it (R3)', () => {
+      it('follows only an inline link: the path in prose, a code span, a fence, an autolink, a reference, a cell the window does not draw and an image link nothing (X3.1, K6)', async () => {
+        const P = out('notes.txt');
+        const forms = [`see ${P}`, `\`[r](${P})\``, `\`\`\`\n[r](${P})\n\`\`\``, `<${P}>`, `[x][l]\n\n[l]: ${P}`, `| a | b |\n|---|---|\n| x | y | [r](${P}) |`, `![x](${P})`];
+        const files = followService();
+        for (const form of forms) {
+          write(guide(), `${form}\n`);
+          expect(await follow(files, P), form).toEqual(NOT_LINKED);
+        }
+        expect(existsSync(linksFile)).toBe(false);
+        write(guide(), `${forms.join('\n\n')}\n\n[c](${P})\n`);
+        expect(await follow(files, P)).toEqual(LINKED);
+      });
+
+      it('resolves a relative link against the source’s own folder, never one above or beside it (X3.2, K3)', async () => {
+        const source = out('docs', 'guide.md');
+        write(source, '[next](sub/a.md) and [up](../other/up.md)\n');
+        for (const path of [out('sub', 'a.md'), out('docs', 'sub', 'b.md'), out('docs', 'sub', 'a.md'), out('other', 'up.md')]) write(path, 'x\n');
+        const files = followService();
+        await files.grant(A, source);
+        expect(await follow(files, out('sub', 'a.md'), { file: source })).toEqual(NOT_LINKED);
+        expect(await follow(files, out('docs', 'sub', 'b.md'), { file: source })).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('docs', 'sub', 'a.md'), { file: source })).toEqual(LINKED);
+        expect(await follow(files, out('other', 'up.md'), { file: source })).toEqual(LINKED);
+        expect((await shown(files, A, out('docs', 'sub', 'a.md'))).outside).toEqual({ real: out('docs', 'sub', 'a.md'), writable: true });
+        expect((await shown(files, A, out('other', 'up.md'))).outside).toEqual({ real: out('other', 'up.md'), writable: true });
+      });
+
+      it('links no path that differs from the link in letter case or in Unicode normal form (X3.3)', async () => {
+        const composed = out('café.txt');
+        const decomposed = out('café.txt');
+        write(out('NOTES.txt'), 'notes as they were\n'); // on a file system that ignores case, the same file
+        write(composed, 'composed\n');
+        write(decomposed, 'decomposed\n'); // on one that ignores the normal form, the same file
+        write(guide(), `${link(out('notes.txt'))} ${link(composed)}\n`);
+        const files = followService();
+        expect(await follow(files, out('NOTES.txt'))).toEqual(NOT_LINKED);
+        expect(await follow(files, decomposed)).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(await follow(files, composed)).toEqual(LINKED);
+      });
+
+      it('links nothing past where the rule refuses a text, and gives the event loop back at every pause of the scan (X3.5)', async () => {
+        write(guide(), `${'> '.repeat(40)}x\n\n${link(out('notes.txt'))}\n`);
+        const files = followService();
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        const long = `${'[r](/elsewhere/other.txt) and some words\n'.repeat(20_000)}\n${link(out('notes.txt'))}\n`;
+        write(guide(), long);
+        const pauses = [...fileLinkSteps(long, dirname(guide()))].filter((step) => step === PAUSE).length;
+        expect(pauses).toBeGreaterThan(1);
+        turnsGiven.count = 0;
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(turnsGiven.count).toBe(pauses);
+      });
+
+      it('proves a relative link against the folder the source was confirmed in, not the spelling the window sent (X3.6, Q17)', async () => {
+        write(out('real', 'docs', 'guide.md'), '[x](../secret.txt)\n');
+        write(out('real', 'secret.txt'), 'beside the real folder\n');
+        write(out('alias', 'secret.txt'), 'beside the alias\n');
+        symlinkSync(out('real', 'docs'), out('alias', 'docs'));
+        const files = followService();
+        await files.grant(A, out('real', 'docs', 'guide.md'));
+        expect(await follow(files, out('alias', 'secret.txt'), { file: out('alias', 'docs', 'guide.md') })).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('real', 'secret.txt'), { file: out('real', 'docs', 'guide.md') })).toEqual(LINKED);
+        // a folder whose two spellings share a parent: the suite's folder by its real path, and by the system's alias of it
+        // where the platform has one (macOS: /var for /private/var)
+        write(out('same', 'docs', 'guide.md'), '[x](../beside.txt)\n');
+        write(out('same', 'beside.txt'), 'beside\n');
+        await files.grant(A, out('same', 'docs', 'guide.md'));
+        const alias = base.startsWith('/private/') && realpathSync(base.slice('/private'.length)) === base ? [base.slice('/private'.length)] : [];
+        for (const spelling of [base, ...alias]) {
+          const as = (path: string) => spelling + path.slice(base.length);
+          expect(await follow(files, as(out('same', 'beside.txt')), { file: as(out('same', 'docs', 'guide.md')) }), spelling).toEqual(LINKED);
+        }
+        expect(realsOf(A)).toEqual([out('real', 'secret.txt'), out('same', 'beside.txt')]);
+      });
+    });
+
+    describe('a link is no stronger than what writes it (R4)', () => {
+      it('records read-only a file that a Markdown file only a tool’s result names links, and gives a save once the person chose the Markdown file (X4.1)', async () => {
+        const source = out('docs', 'found.md');
+        write(source, `${link(out('notes.txt'))}\n`);
+        await transcriptOf(A, [called('t-mcp', 'mcp__docs__find', { query: 'guide' }), answered('t-mcp', [{ type: 'text', text: link(source) }])]);
+        const files = followService();
+        expect((await shown(files, A, source)).outside, 'the premise').toEqual({ real: source, writable: false, why: 'result' });
+        expect(await follow(files, out('notes.txt'), { file: source })).toEqual(LINKED);
+        const read = await shown(files, A, out('notes.txt'));
+        expect(read.outside).toEqual({ real: out('notes.txt'), writable: false, why: 'result', linked: true });
+        await expect(files.writeOutside({ appSessionId: A, path: out('notes.txt'), content: 'pwned\n', expectedHash: read.hash!, real: out('notes.txt') })).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out('notes.txt'), 'utf8')).toBe('notes as they were\n');
+        await files.grant(A, source);
+        expect(await follow(files, out('notes.txt'), { file: source })).toEqual(LINKED);
+        expect((await shown(files, A, out('notes.txt'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+        expect(await saveShown(files, A, out('notes.txt'), 'saved\n')).toEqual(ok('saved\n'));
+        expect(recorded()![A]).toEqual([{ real: out('notes.txt'), at: expect.any(Number), from: { file: source } }]);
+      });
+
+      it('records read-only a file that a Markdown file only the Library admits links, and gives a save once the person chose it (X4.2)', async () => {
+        const source = out('docs', 'added.md');
+        write(source, `${link(out('notes.txt'))}\n`);
+        index.library.reconcile({ artifacts: [artifact(1, source, { kind: 'human' })], links: [linked(1, A)], spaces: [] });
+        const files = followService();
+        expect((await shown(files, A, source)).outside, 'the premise').toEqual({ real: source, writable: false, why: 'added' });
+        expect(await follow(files, out('notes.txt'), { file: source })).toEqual(LINKED);
+        const read = await shown(files, A, out('notes.txt'));
+        expect(read.outside).toEqual({ real: out('notes.txt'), writable: false, why: 'result', linked: true });
+        await expect(files.writeOutside({ appSessionId: A, path: out('notes.txt'), content: 'pwned\n', expectedHash: read.hash!, real: out('notes.txt') })).rejects.toThrow(new Error(OUT));
+        await files.grant(A, source);
+        expect(await follow(files, out('notes.txt'), { file: source })).toEqual(LINKED);
+        expect(await saveShown(files, A, out('notes.txt'), 'saved\n')).toEqual(ok('saved\n'));
+      });
+
+      it('keeps a record that admits a save, and where its link stood, when a later follow finds only a result form; a read-only one is raised (X4.4, W2 d)', async () => {
+        write(out('other.txt'), 'other\n');
+        write(out('later.txt'), 'later\n');
+        write(guide(), `${link(out('notes.txt'))} ${link(out('other.txt'))} ${link(out('later.txt'))}\n`);
+        const files = followService({ agentNames: async (_appSessionId, _agentId, _path, _signal, located) => (located?.(), 'result') });
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('other.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('notes.txt'), fromAgent('a1b2c3'))).toEqual(LINKED);
+        expect(recorded()![A]).toEqual([
+          { real: out('other.txt'), at: expect.any(Number), from: { file: guide() } },
+          { real: out('notes.txt'), at: expect.any(Number), from: { file: guide() } },
+        ]);
+        expect((await shown(files, A, out('notes.txt'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+        expect(await follow(files, out('later.txt'), fromAgent('a1b2c3'))).toEqual(LINKED);
+        expect((await shown(files, A, out('later.txt'))).outside).toEqual({ real: out('later.txt'), writable: false, why: 'result' });
+        expect(await follow(files, out('later.txt'))).toEqual(LINKED);
+        expect((await shown(files, A, out('later.txt'))).outside).toEqual({ real: out('later.txt'), writable: true });
+        expect(recorded()![A]!.at(-1)).toEqual({ real: out('later.txt'), at: expect.any(Number), from: { file: guide() } });
+      });
+    });
+
+    describe('a subagent’s transcript as the source (M3 supplies its search)', () => {
+      it('answers not-linked while the service is given no search over one, and records what the search answers once it is', async () => {
+        expect(await follow(followService(), out('notes.txt'), fromAgent('a1b2c3'))).toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        const searched: unknown[][] = [];
+        const answers: Record<string, Naming> = { [out('notes.txt')]: 'counted', [out('result.txt')]: 'result' };
+        const files = followService({ agentNames: async (appSessionId, agentId, path, signal, located) => (searched.push([appSessionId, agentId, path, signal]), located?.(), answers[path] ?? false) });
+        const client = new AbortController();
+        expect(await follow(files, out('notes.txt'), fromAgent('a1b2c3'), A, client.signal)).toEqual(LINKED);
+        expect(await follow(files, out('result.txt'), fromAgent('a1b2c3'))).toEqual(LINKED);
+        expect(await follow(files, out('unnamed.txt'), fromAgent('a1b2c3'))).toEqual(NOT_LINKED);
+        // the search is asked for the agent of the conversation the follow names, and waits with the follow's own end
+        const agent = { id: 'a1b2c3', engineSessionId: 'engine-A' };
+        expect(searched).toEqual([[A, agent, out('notes.txt'), expect.any(AbortSignal)], [A, agent, out('result.txt'), expect.any(AbortSignal)], [A, agent, out('unnamed.txt'), expect.any(AbortSignal)]]);
+        expect((await shown(files, A, out('notes.txt'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+        expect((await shown(files, A, out('result.txt'))).outside).toEqual({ real: out('result.txt'), writable: false, why: 'result' });
+        expect(recorded()![A]).toEqual([
+          { real: out('notes.txt'), at: expect.any(Number), from: fromAgent('a1b2c3') },
+          { real: out('result.txt'), at: expect.any(Number), from: fromAgent('a1b2c3'), why: 'result' },
+        ]);
+      });
+
+      it('counts nine follows at most, each from before its first file system call until its own work ends, its locator’s call included (decision 7, K13)', async () => {
+        const held: { located: () => void; answer: (naming: Naming) => void }[] = [];
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) =>
+          new Promise<Naming>((answer) => {
+            held.push({ located: located!, answer });
+            if (held.length === FOLLOW_IN_FLIGHT_MAX) nine();
+          });
+        const files = followService({ agentNames });
+        const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), fromAgent('a1b2c3')));
+        await allIn;
+        const seen = recordTouches();
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(seen, 'the tenth, with nine searches under way').toEqual([]);
+        for (const one of held) one.answer(false); // each search answered, its locator's call not yet
+        expect(await Promise.all(follows)).toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(seen, 'the tenth, with nine locators’ calls under way').toEqual([]);
+        held[0]!.located();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(seen.length, 'a place given back: the next follow reads').toBeGreaterThan(0);
+        for (const one of held.slice(1)) one.located();
+      });
+
+      // The search's contract (M3's `namesInAgent`, faked here): it calls `located` exactly once, when its call of the
+      // transcript locator has settled (answered, thrown, or never made), whether the search itself fulfils, rejects or
+      // throws as it is called, and possibly after it did. The follow gives its place back on `located` alone.
+      it('keeps a follow’s place while its locator’s call is under way, whether its search rejects or throws as it is called (decision 7)', async () => {
+        const locators: (() => void)[] = [];
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) => {
+          locators.push(located!);
+          if (locators.length % 2 === 0) throw new Error('the search threw as it was called');
+          return Promise.reject(new Error('the search failed'));
+        };
+        const files = followService({ agentNames });
+        const answers = await Promise.all(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), fromAgent('a1b2c3'))));
+        expect(answers).toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+        const seen = recordTouches();
+        expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+        expect(seen, 'nine locators’ calls under way: nine places held').toEqual([]);
+        locators[0]!();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(seen.length, 'one located: one place given back').toBeGreaterThan(0);
+        for (const located of locators.slice(1)) located();
+      });
+    });
+
+    // M3 (Interfaces §E): the daemon's own search over one subagent's transcript, composed as checkouts-root.ts composes
+    // it (one search, `names` and `namesInAgent` sharing its slot, its queue and its memory)
+    describe('a subagent’s transcript, searched by the daemon (M3)', () => {
+      const AGENT = 'a1b2c3';
+      type SearchPoint = NonNullable<Parameters<NonNullable<NonNullable<NamedPathsOptions['hooks']>['at']>>[0]>;
+      let searchPoints: Partial<Record<SearchPoint, () => void | Promise<void>>>;
+      function searched(locate: NamedPathsOptions['transcript'] = async (appSessionId) => transcripts.get(appSessionId) ?? null) {
+        const hooks: NamedPathsOptions['hooks'] = {
+          at: async (point) => {
+            const fn = searchPoints[point];
+            if (!fn) return;
+            delete searchPoints[point]; // each runs once
+            await fn();
+          },
+        };
+        const paths = createNamedPaths({ transcript: locate, hooks });
+        return { paths, files: followService({ named: paths.names, agentNames: paths.namesInAgent }) };
+      }
+      const folderOf = (appSessionId: AppSessionId) => transcripts.get(appSessionId)!.slice(0, -'.jsonl'.length);
+      // A subagent's file as the engine writes it beside the session's transcript: every record a sidechain of that agent of
+      // that conversation (its `sessionId` and `agentId`), none with an origin, its first `user` record the prompt its
+      // parent wrote
+      function agentOf(appSessionId: AppSessionId, rows: object[], agentId = AGENT): string {
+        const path = join(folderOf(appSessionId), 'subagents', `agent-${agentId}.jsonl`);
+        write(path, rows.map((row) => `${JSON.stringify({ sessionId: `engine-${appSessionId}`, agentId, ...row, isSidechain: true })}\n`).join(''));
+        return path;
+      }
+      const prompt = (content: string) => ({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content } });
+      const turn = () => new Promise((resolve) => setImmediate(resolve));
+      function held() {
+        let release!: () => void;
+        const until = new Promise<void>((resolve) => (release = resolve));
+        let reach!: () => void;
+        const reached = new Promise<void>((resolve) => (reach = resolve));
+        return { hold: async () => (reach(), await until), reached, release };
+      }
+
+      beforeEach(async () => {
+        searchPoints = {};
+        await transcriptOf(A, [said('Started a subagent.')]);
+      });
+
+      it('records a file the subagent’s text links or its read’s chip names, which reads and saves; a path only its tool’s result or its prompt holds opens read-only (K5, X4.3)', async () => {
+        write(out('read.txt'), 'read by the subagent\n');
+        write(out('prompted.txt'), 'in the prompt\n');
+        agentOf(A, [
+          prompt(`Check ${link(out('prompted.txt'))}`),
+          said(link(out('notes.txt'))),
+          called('t-read', 'Read', { file_path: out('read.txt') }),
+          called('t-mcp', 'mcp__docs__find', { query: 'notes' }),
+          answered('t-mcp', [{ type: 'text', text: link(out('result.txt')) }]),
+        ]);
+        const { files } = searched();
+        await expect(shown(files, A, out('notes.txt')), 'before the follow').rejects.toThrow(new Error(OUT));
+        for (const path of [out('notes.txt'), out('read.txt')]) {
+          expect(await follow(files, path, fromAgent(AGENT)), path).toEqual(LINKED);
+          expect((await shown(files, A, path)).outside).toEqual({ real: path, writable: true });
+        }
+        expect(await saveShown(files, A, out('notes.txt'), 'saved through the subagent\n')).toEqual(ok('saved through the subagent\n'));
+        expect(readFileSync(out('notes.txt'), 'utf8')).toBe('saved through the subagent\n');
+        for (const path of [out('result.txt'), out('prompted.txt')]) {
+          const before = readFileSync(path, 'utf8');
+          expect(await follow(files, path, fromAgent(AGENT)), path).toEqual(LINKED);
+          const read = await shown(files, A, path);
+          expect(read.outside).toEqual({ real: path, writable: false, why: 'result' });
+          await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: path })).rejects.toThrow(new Error(OUT));
+          expect(readFileSync(path, 'utf8')).toBe(before);
+        }
+        expect(await follow(files, out('unnamed.txt'), fromAgent(AGENT))).toEqual(NOT_LINKED);
+        expect(recorded()![A]).toEqual([
+          { real: out('notes.txt'), at: expect.any(Number), from: fromAgent(AGENT) },
+          { real: out('read.txt'), at: expect.any(Number), from: fromAgent(AGENT) },
+          { real: out('result.txt'), at: expect.any(Number), from: fromAgent(AGENT), why: 'result' },
+          { real: out('prompted.txt'), at: expect.any(Number), from: fromAgent(AGENT), why: 'result' },
+        ]);
+      });
+
+      it('finds no agent of another session’s transcript folder, and reads no folder for a session with no transcript (X2.7, X2.8)', async () => {
+        const theirs = session('Theirs');
+        await transcriptOf(theirs, [said('Started a subagent.')]);
+        agentOf(theirs, [prompt('Go.'), said(link(out('notes.txt')))]);
+        mkdirSync(join(folderOf(A), 'subagents'), { recursive: true });
+        const { files } = searched();
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT), A), 'asked under this session').toEqual(NOT_LINKED);
+        const unstarted = session('Unstarted');
+        const seen = recordTouches();
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT, unstarted), unstarted)).toEqual(NOT_LINKED);
+        expect(seen.filter((entry) => /^(readdir|open) /.test(entry)), 'no folder read, no file opened').toEqual([]);
+        touches.on = false;
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT, theirs), theirs), 'the control: under its own session').toEqual(LINKED);
+        expect(Object.keys(recorded()!)).toEqual([theirs]);
+      });
+
+      it('keeps a record that admits a save, and where its link stood, when the subagent’s transcript names the path only in its prompt (X4.4)', async () => {
+        write(out('other.txt'), 'other\n');
+        write(guide(), `${link(out('notes.txt'))} ${link(out('other.txt'))}\n`);
+        agentOf(A, [prompt(`Look at ${link(out('notes.txt'))}`)]);
+        const { files } = searched();
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('other.txt'))).toEqual(LINKED);
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT))).toEqual(LINKED);
+        expect(recorded()![A]).toEqual([
+          { real: out('other.txt'), at: expect.any(Number), from: { file: guide() } },
+          { real: out('notes.txt'), at: expect.any(Number), from: { file: guide() } },
+        ]);
+        expect((await shown(files, A, out('notes.txt'))).outside).toEqual({ real: out('notes.txt'), writable: true });
+      });
+
+      it('records the real path the named path leads to at the last resolution, for a target changed during the search or after it (X5.10)', async () => {
+        const target = out('t', 'b.txt');
+        write(target, 'the first\n');
+        write(out('u', 'b.txt'), 'the second\n');
+        write(out('v', 'b.txt'), 'the third\n');
+        agentOf(A, [prompt('Go.'), said(link(target))]);
+        const { files } = searched();
+        // at the search's end: the target's folder swapped for a link; the record is of the file the path now leads to
+        searchPoints.searched = () => swapToLink(out('t'), out('u'));
+        expect(await follow(files, target, fromAgent(AGENT))).toEqual(LINKED);
+        expect(searchPoints.searched, 'the search reached its end').toBeUndefined();
+        expect(realsOf(A)).toEqual([out('u', 'b.txt')]);
+        restore(out('t'));
+        // after the search answered, before the last resolution: another folder outside, then the target removed
+        points['before-follow-record'] = () => swapToLink(out('t'), out('v'));
+        expect(await follow(files, target, fromAgent(AGENT))).toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), out('v', 'b.txt')]);
+        restore(out('t'));
+        points['before-follow-record'] = () => renameSync(target, `${target}.gone`);
+        expect(await follow(files, target, fromAgent(AGENT))).toEqual(NOT_LINKED);
+        renameSync(`${target}.gone`, target);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), out('v', 'b.txt')]);
+        expect(await follow(files, target, fromAgent(AGENT)), 'the control: nothing changed meanwhile').toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), out('v', 'b.txt'), target]);
+      });
+
+      it('answers not-linked once its patience runs out while its subagent’s search is held, and records nothing after (X5.12)', async () => {
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const opened = held();
+        searchPoints.opened = opened.hold;
+        const { files } = searched();
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const answer = follow(files, out('notes.txt'), fromAgent(AGENT), A, new AbortController().signal);
+          await opened.reached;
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await answer, 'answered with its search still held').toEqual(NOT_LINKED);
+          opened.release();
+          for (let i = 0; i < 20; i += 1) await turn();
+          expect(existsSync(linksFile), 'nothing recorded after the patience').toBe(false);
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT)), 'the control').toEqual(LINKED);
+      });
+
+      it('keeps nine follows’ places while their locators are held past the patience; a tenth makes no file system call until one answers (K13, decision 7)', async () => {
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const locators: (() => void)[] = [];
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const { files } = searched(
+          (appSessionId) =>
+            new Promise((answer) => {
+              locators.push(() => answer(transcripts.get(appSessionId) ?? null));
+              if (locators.length === FOLLOW_IN_FLIGHT_MAX) nine();
+            }),
+        );
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), fromAgent(AGENT)));
+          await allIn;
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await Promise.all(follows), 'each answered, its locator held').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+          const seen = recordTouches();
+          expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+          expect(seen, 'a tenth, nine locators held').toEqual([]);
+          locators[0]!();
+          await turn();
+          expect(await follow(files, out('notes.txt')), 'one locator answered: one place given back').toEqual(LINKED);
+          expect(seen.length).toBeGreaterThan(0);
+          for (const answer of locators.slice(1)) answer();
+          for (let i = 0; i < 20; i += 1) await turn();
+          expect(recorded()![A], 'the late locators queue no search and record nothing').toEqual([{ real: out('notes.txt'), at: expect.any(Number), from: { file: guide() } }]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      // The branch panel (scalpel-2, finding 1): a regular file put in the found file's place between the walk and the open is
+      // what is opened; its records are another conversation's, and they link nothing for this session
+      it('records nothing from a file put in the found agent file’s place between the walk and the open; its own records link (the branch panel)', async () => {
+        const theirs = session('Theirs');
+        await transcriptOf(theirs, [said('Started a subagent.')]);
+        const elsewhere = agentOf(theirs, [prompt('Go.'), said(link(out('notes.txt')))]);
+        const found = agentOf(A, [prompt('Go.')]);
+        const { files } = searched();
+        searchPoints.found = () => {
+          write(`${found}.next`, readFileSync(elsewhere));
+          renameSync(`${found}.next`, found);
+        };
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT))).toEqual(NOT_LINKED);
+        expect(searchPoints.found, 'the walk found the file').toBeUndefined();
+        expect(existsSync(linksFile)).toBe(false);
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]);
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT)), 'the control: its own records').toEqual(LINKED);
+      });
+
+      // The branch panel (scalpel-2, finding 3): a drill-in still on screen after `/clear` names the conversation that drew it,
+      // which is no longer the one the session is bound to, though that one has a subagent of the same id linking the path
+      it('links nothing for a follow of the conversation the session left with `/clear`, or of none named, though the conversation it is bound to now has an agent of that id linking the path (Q11, the branch panel)', async () => {
+        agentOf(A, [prompt('Go.'), said(link(out('notes.txt')))]); // the conversation the drill-in drew
+        const { files } = searched();
+        transcripts.set(A, await store.addTranscript(root, 'engine-A-cleared', [JSON.stringify(said('Started again.'))]));
+        write(join(folderOf(A), 'subagents', `agent-${AGENT}.jsonl`), `${JSON.stringify({ sessionId: 'engine-A-cleared', agentId: AGENT, ...said(link(out('notes.txt'))), isSidechain: true })}\n`);
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT)), 'the conversation left behind').toEqual(NOT_LINKED);
+        expect(await follow(files, out('notes.txt'), { agent: AGENT }), 'no conversation named').toEqual(NOT_LINKED);
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'), { agent: AGENT, engineSessionId: 'engine-A-cleared' }), 'the control: the conversation it is bound to').toEqual(LINKED);
+      });
+
+      it('with eight searches waiting, a burst of follows for the session answers not-linked at once and reads no folder (K13)', async () => {
+        const burst = ['notes.txt', 'named.txt', 'result.txt', 'chosen.txt', 'sent.txt'].map((name) => out(name));
+        agentOf(A, [prompt('Go.'), ...burst.map((path) => said(link(path)))]);
+        const opened = held();
+        searchPoints.opened = opened.hold;
+        const { paths, files } = searched();
+        const running = paths.names(A, out('named.txt')); // holds the one slot
+        await opened.reached;
+        const waiting = Array.from({ length: NAMED_WAITING_MAX }, (_, i) => paths.names(A, out(`waiting-${i}.txt`)));
+        await turn();
+        const seen = recordTouches();
+        expect(await Promise.all(burst.map((path) => follow(files, path, fromAgent(AGENT))))).toEqual(burst.map(() => NOT_LINKED));
+        expect(seen.filter((entry) => entry.startsWith('readdir ')), 'no folder read by any of them').toEqual([]);
+        expect([...inside(seen, folderOf(A)), ...inside(seen, realpathSync(folderOf(A)))], 'nothing of the transcript’s folder, by either spelling').toEqual([]);
+        for (const path of burst) expect(seen.some((entry) => entry.endsWith(` ${path}`)), `${path} was read, under the count of follows`).toBe(true);
+        touches.on = false;
+        opened.release();
+        expect(await running).toBe(false);
+        expect(await Promise.all(waiting)).toEqual(Array.from({ length: NAMED_WAITING_MAX }, () => false));
+        expect(await follow(files, out('notes.txt'), fromAgent(AGENT)), 'the control, the queue free').toEqual(LINKED);
+      });
+    });
+
+    describe('between the proof and the record (W2, R5)', () => {
+      it('records only the real path the target’s last resolution found, for a target changed during the follow (X5.10)', async () => {
+        const target = out('t', 'b.txt');
+        write(target, 'the first\n');
+        write(out('u', 'b.txt'), 'the second\n');
+        write(out('v', 'b.txt'), 'the third\n');
+        write(guide(), `${link(target)}\n`);
+        const files = followService();
+        // before the second test: the absolute link leads, as the asked path does, to the new file, which is recorded
+        points['after-follow-read'] = () => swapToLink(out('t'), out('u'));
+        expect(await follow(files, target)).toEqual(LINKED);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt')]);
+        restore(out('t'));
+        // after the proof, before the last resolution: a swap to another folder outside, and a removal, record nothing
+        points['before-follow-record'] = () => swapToLink(out('t'), out('v'));
+        expect(await follow(files, target)).toEqual(NOT_LINKED);
+        restore(out('t'));
+        points['before-follow-record'] = () => renameSync(target, `${target}.gone`);
+        expect(await follow(files, target)).toEqual(NOT_LINKED);
+        renameSync(`${target}.gone`, target);
+        expect(realsOf(A)).toEqual([out('u', 'b.txt')]);
+        expect(await follow(files, target)).toEqual(LINKED); // the control: nothing changed meanwhile
+        expect(realsOf(A)).toEqual([out('u', 'b.txt'), target]);
+      });
+
+      it('records nothing once the asking client has ended, during the source’s scan or after the proof (X5.8, W2 a)', async () => {
+        const files = followService();
+        for (const point of ['after-follow-read', 'before-follow-record'] as const) {
+          const client = new AbortController();
+          points[point] = () => client.abort();
+          expect(await follow(files, out('notes.txt'), { file: guide() }, A, client.signal), point).toEqual(NOT_LINKED);
+        }
+        expect(existsSync(linksFile)).toBe(false);
+        expect(await follow(files, out('notes.txt'), { file: guide() }, A, new AbortController().signal)).toEqual(LINKED);
+      });
+
+      // decision 7 (iv): the patience bounds the answer; the work under way keeps the follow's places until it ends, and
+      // starts no step after it. The clock and the timers are the suite's (setTimeout and Date faked), the disk the real one.
+      it('answers not-linked once its patience runs out while its Markdown proof is held open, keeps its place in the proofs’ line until the proof ends, and records nothing after (X5.12)', async () => {
+        write(inRoot('docs', 'second.md'), `${link(out('result.txt'))}\n`);
+        const seen: string[] = [];
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let reached!: () => void;
+        const proving = new Promise<void>((resolve) => (reached = resolve));
+        let queued!: () => void;
+        const lined = new Promise<void>((resolve) => (queued = resolve));
+        const files = followService({
+          hooks: {
+            at: async (point, path) => {
+              seen.push(`${point} ${basename(path)}`);
+              if (point === 'before-follow-turn' && basename(path) === 'second.md') queued();
+              if (point !== 'after-follow-read' || basename(path) !== 'guide.md') return;
+              reached();
+              await held;
+            },
+          },
+        });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const first = follow(files, out('notes.txt'), { file: guide() }, A, new AbortController().signal);
+          await proving;
+          vi.advanceTimersByTime(NAMED_WAIT_MS); // to the deadline's own millisecond, no further
+          expect(await first, 'answered with its proof still held').toEqual(NOT_LINKED); // the proof is released after this
+          const second = follow(files, out('result.txt'), { file: inRoot('docs', 'second.md') });
+          await lined;
+          await new Promise((resolve) => setImmediate(resolve)); // the second has taken its place in the line
+          expect(seen.filter((entry) => entry.startsWith('before-open')), 'the line is still the first’s').toEqual(['before-open guide.md']);
+          release();
+          expect(await second).toEqual(LINKED);
+          expect(seen, 'the first starts no step after its patience').not.toContain('before-follow-record notes.txt');
+          expect(realsOf(A)).toEqual([out('result.txt')]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('answers not-linked once its patience runs out while its subagent’s search is held open, keeps its place in the count until its locator’s call has settled, and records nothing after (X5.12, K13)', async () => {
+        const held: { located: () => void; answer: (naming: Naming) => void }[] = [];
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) =>
+          new Promise<Naming>((answer) => {
+            held.push({ located: located!, answer });
+            if (held.length === FOLLOW_IN_FLIGHT_MAX) nine();
+          });
+        const files = followService({ agentNames });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), fromAgent('a1b2c3')));
+          await allIn;
+          vi.advanceTimersByTime(NAMED_WAIT_MS); // to the deadline's own millisecond, no further
+          expect(await Promise.all(follows), 'answered with each search still held').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+          const seen = recordTouches();
+          expect(await follow(files, out('notes.txt'))).toEqual(NOT_LINKED);
+          expect(seen, 'every place is still held').toEqual([]);
+          for (const one of held) {
+            one.answer('counted'); // a counted form, which would have recorded within the patience
+            one.located();
+          }
+          await new Promise((resolve) => setImmediate(resolve));
+          expect(existsSync(linksFile), 'nothing recorded after the patience').toBe(false);
+          expect(await follow(files, out('notes.txt'))).toEqual(LINKED); // the places are given back
+          expect(seen.length).toBeGreaterThan(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      // decision 7: the search that runs on in the search's own slot is bounded there, not counted here
+      it('gives back the place of a follow whose patience ran out once its locator’s call has settled, its search still under way (decision 7, K13)', async () => {
+        let called = 0;
+        let nine!: () => void;
+        const allIn = new Promise<void>((resolve) => (nine = resolve));
+        const agentNames: FilesServiceOptions['agentNames'] = (_appSessionId, _agentId, _path, _signal, located) => {
+          located!(); // the locator answered at once; the search itself never does
+          if ((called += 1) === FOLLOW_IN_FLIGHT_MAX) nine();
+          return new Promise<Naming>(() => {});
+        };
+        const files = followService({ agentNames });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const follows = Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => follow(files, out('notes.txt'), fromAgent('a1b2c3')));
+          await allIn;
+          const seen = recordTouches();
+          expect(await follow(files, out('notes.txt')), 'within the patience, the nine follows’ own work holds their places').toEqual(NOT_LINKED);
+          expect(seen).toEqual([]);
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await Promise.all(follows), 'answered with each search still under way').toEqual(Array.from({ length: FOLLOW_IN_FLIGHT_MAX }, () => NOT_LINKED));
+          await new Promise((resolve) => setImmediate(resolve));
+          expect(await follow(files, out('notes.txt')), 'a Markdown follow, the nine places given back').toEqual(LINKED);
+          expect(seen.length).toBeGreaterThan(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      // The branch panel (scalpel-3, finding 1): a Markdown source outside the folders with no other evidence is admitted by
+      // the search, whose call of the transcript locator can stall; the follow's place and the proof's turn are kept until
+      // that call settles, past the follow's own answer, as a subagent's search keeps them (decision 7)
+      it('keeps its Markdown proof’s turn while the search its source’s admission asked still has its locator’s call out, past its patience; the next proof starts once that call settles (decision 7, the branch panel)', async () => {
+        const source = out('docs', 'outside.md');
+        write(source, `${link(out('notes.txt'))}\n`);
+        const locators: (() => void)[] = [];
+        let reached!: () => void;
+        const asking = new Promise<void>((resolve) => (reached = resolve));
+        const paths = createNamedPaths({
+          transcript: (appSessionId) =>
+            new Promise((answer) => {
+              locators.push(() => answer(transcripts.get(appSessionId) ?? null));
+              reached();
+            }),
+        });
+        const files = followService({ named: paths.names });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const first = follow(files, out('notes.txt'), { file: source });
+          await asking;
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await first, 'answered, its locator held').toEqual(NOT_LINKED);
+          const seen = recordTouches();
+          const second = follow(files, out('notes.txt')); // from the guide inside the folders, which asks no search
+          // the second's early answers run meanwhile: many round trips of the file system's threads
+          for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
+          expect(seen.filter((entry) => entry.startsWith('open ')), 'the second proof waits for the first’s locator').toEqual([]);
+          locators[0]!();
+          expect(await second, 'the turn given back once the locator answered').toEqual(LINKED);
+          expect(realsOf(A)).toEqual([out('notes.txt')]);
+          expect(recorded()![A]![0]!.from, 'recorded by the second').toEqual({ file: guide() });
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      // The branch panel (scalpel-3, finding 2): the search a subagent follow asks waits with the follow's own end, so its
+      // waiter leaves when the follow's patience runs out and queues no search for a follow that can no longer record
+      it('ends its subagent search’s wait when its patience runs out: the signal the search waits with is aborted (the branch panel)', async () => {
+        const given: (AbortSignal | undefined)[] = [];
+        let reached!: () => void;
+        const asked = new Promise<void>((resolve) => (reached = resolve));
+        const files = followService({
+          agentNames: (_appSessionId, _agent, _path, signal, located) => {
+            given.push(signal);
+            located?.();
+            reached();
+            return new Promise<Naming>(() => {});
+          },
+        });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          const answer = follow(files, out('notes.txt'), fromAgent('a1b2c3'));
+          await asked;
+          expect(given[0]?.aborted, 'within the patience').toBe(false);
+          vi.advanceTimersByTime(NAMED_WAIT_MS);
+          expect(await answer).toEqual(NOT_LINKED);
+          expect(given[0]?.aborted, 'the search’s waiter leaves with the follow').toBe(true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      // The branch panel (scalpel-3, finding 3, and the sweep): the Markdown proof reads the follow's patience between file
+      // system calls, its whole-file read included, so a call that answers late is followed by none
+      it('starts no file system call of its Markdown proof once its patience has run out: none after a late resolution of the source, no stat after a late confirmation’s realpath, and no second read after a late first one (X5.12, the branch panel)', async () => {
+        const realpath = fs.promises.realpath.bind(fs.promises);
+        const lstat = fs.promises.lstat.bind(fs.promises);
+        const stat = fs.promises.stat.bind(fs.promises);
+        const open = fs.promises.open.bind(fs.promises);
+        const sourceReal = realpathSync(guide());
+        const calls: string[] = [];
+        // one call held once, where the case says: the source's resolution, its confirmation's realpath once its descriptor
+        // is open, or the first read of that descriptor
+        type At = 'realpath' | 'confirm' | 'read';
+        let hold: { at: At; until: Promise<void>; reach: () => void } | null = null;
+        let opened = false;
+        const holding = async (at: At) => {
+          if (hold?.at !== at) return;
+          const { until, reach } = hold;
+          hold = null;
+          reach();
+          await until;
+        };
+        vi.spyOn(fs.promises, 'realpath').mockImplementation((async (path: string, ...rest: unknown[]) => {
+          if (path === guide()) await holding(opened ? 'confirm' : 'realpath');
+          return realpath(path, ...(rest as []));
+        }) as never);
+        vi.spyOn(fs.promises, 'stat').mockImplementation(((path: string, ...rest: unknown[]) => (calls.push(`stat ${path}`), stat(path, ...(rest as [])))) as never);
+        vi.spyOn(fs.promises, 'lstat').mockImplementation(((path: string, ...rest: unknown[]) => (calls.push(`lstat ${path}`), lstat(path, ...(rest as [])))) as never);
+        vi.spyOn(fs.promises, 'open').mockImplementation((async (path: string, ...rest: unknown[]) => {
+          calls.push(`open ${path}`);
+          const handle = await open(path, ...(rest as []));
+          if (String(path) !== sourceReal) return handle;
+          opened = true;
+          const read = handle.read.bind(handle) as (...args: unknown[]) => Promise<{ bytesRead: number; buffer: Buffer }>;
+          return Object.assign(handle, {
+            read: async (...args: unknown[]) => {
+              calls.push('read');
+              await holding('read');
+              return read(...args);
+            },
+          });
+        }) as never);
+        const files = followService();
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+          for (const at of ['realpath', 'confirm', 'read'] as const) {
+            opened = false;
+            let release!: () => void;
+            let reach!: () => void;
+            const reached = new Promise<void>((resolve) => (reach = resolve));
+            hold = { at, until: new Promise<void>((resolve) => (release = resolve)), reach };
+            const answer = follow(files, out('notes.txt'));
+            await reached;
+            vi.advanceTimersByTime(NAMED_WAIT_MS);
+            expect(await answer, at).toEqual(NOT_LINKED);
+            calls.length = 0;
+            release();
+            for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
+            const after = calls.filter((call) => (at === 'realpath' ? call === `lstat ${guide()}` || call.startsWith('open ') : at === 'confirm' ? call === `stat ${sourceReal}` : call === 'read'));
+            expect(after, `${at}: nothing after the call that answered late`).toEqual([]);
+          }
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(existsSync(linksFile), 'nothing recorded').toBe(false);
+        expect(await follow(files, out('notes.txt')), 'the control: the same follow, nothing held').toEqual(LINKED);
+      });
+
+      it('fails the follow of a session removed before its record is written, writing nothing (W2 b)', async () => {
+        const files = followService();
+        points['before-follow-record'] = () => void records.delete(A);
+        await expect(follow(files, out('notes.txt'))).rejects.toThrow(new Error(`unknown app session: ${A}`));
+        expect(existsSync(linksFile)).toBe(false);
+        expect(followLog).toEqual([]);
+        records.set(A, record(root));
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      });
+
+      it('fails a follow whose record cannot be written: nothing is held, and a later read is refused (X5.9)', async () => {
+        chmodSync(join(profile, 'sessions'), 0o500);
+        const files = followService();
+        await expect(follow(files, out('notes.txt'))).rejects.toThrow();
+        chmodSync(join(profile, 'sessions'), 0o700);
+        await expect(shown(files, A, out('notes.txt'))).rejects.toThrow(new Error(OUT));
+        expect(existsSync(linksFile)).toBe(false);
+        expect(followLog).toEqual([]);
+        expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
+      });
+    });
+  });
+
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission. The
+  // working folder as U8c-2 admits it; a path by the outside save's rule; the real path, which main launches with.
+  describe('Open in’s admission (files.admit)', () => {
+    it('admits the working folder by its real path, and refuses one U8c-2 does not admit or that is gone', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A })).toEqual({ path: root, kind: 'folder' });
+      records.set(B, { ...record(root), agentFolder: { checkout: outside, cwd: outside, branch: null, linked: true } }); // no work tree of root's repository
+      await expect(files.admit({ appSessionId: B })).rejects.toThrow(new Error(OUT));
+      records.set(H, record(at('gone')));
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: 'Z' as AppSessionId })).rejects.toThrow('unknown app session: Z');
+    });
+
+    it('admits a file and a folder inside the folders by their real paths, through a link in the path as given too', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+      expect(await files.admit({ appSessionId: A, path: inRoot('src') })).toEqual({ path: inRoot('src'), kind: 'folder' });
+      symlinkSync(inRoot('src'), at('src-link'));
+      records.set(B, record(at('src-link')));
+      expect(await files.admit({ appSessionId: B, path: join(at('src-link'), 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+    });
+
+    it('admits outside the folders what a save would write (named, chosen, sent), and refuses a result’s name, an added record, an unnamed file and MAWS’s own', async () => {
+      await transcriptOf(A, [said(link(out('named.txt'))), called('t-mcp', 'mcp__docs__find', {}), answered('t-mcp', link(out('result.txt')))]);
+      index.library.reconcile({
+        artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A }), artifact(2, out('added.txt'), { kind: 'human' })],
+        links: [linked(1, A), linked(2, A)],
+        spaces: [],
+      });
+      const files = outsideService();
+      await files.grant(A, out('chosen.txt'));
+      for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) expect(await files.admit({ appSessionId: A, path: out(name) }), name).toEqual({ path: out(name), kind: 'file' });
+      for (const name of ['result.txt', 'added.txt', 'unnamed.txt']) await expect(files.admit({ appSessionId: A, path: out(name) }), name).rejects.toThrow(new Error(OUT));
+      records.set(H, record(base));
+      await expect(files.admit({ appSessionId: H, path: join(profile, 'settings.json') })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Review of 785e66161, finding 1: outside the session's roots the evidence is of one file, so only a regular file is
+    // admitted there; a directory only under a root (and a terminal is handed only a folder the daemon admitted)
+    it('refuses a directory outside the folders though the transcript names it, and the folder of a file admitted alone', async () => {
+      await transcriptOf(A, [said(link(join(outside, 'dirs'))), said(link(out('named.txt')))]);
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A, path: join(outside, 'dirs') })).rejects.toThrow(new Error(OUT));
+      expect(await files.admit({ appSessionId: A, path: out('named.txt') })).toEqual({ path: out('named.txt'), kind: 'file' });
+      await expect(files.admit({ appSessionId: A, path: outside })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Finding 3: the path is confirmed again after precheck's await, through an open with no link and the opened object's
+    // identity, as files.read is; the working folder too, against the real path the admission checked
+    it('refuses a path turned into a link after precheck, a file and a folder', async () => {
+      const files = outsideService();
+      points['before-open'] = () => swapToLink(inRoot('src', 'a.ts'), out('unnamed.txt'));
+      await expect(files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(new Error(OUT));
+      restore(inRoot('src', 'a.ts'));
+      points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      await expect(files.admit({ appSessionId: A, path: inRoot('src') })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses the working folder when it is replaced after its admission', async () => {
+      const files = outsideService();
+      points['before-open'] = () => swapToLink(root, outside);
+      await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
+      restore(root);
+      points['after-open'] = () => {
+        renameSync(root, `${root}.away`);
+        mkdirSync(root); // another directory at the same path once the first is open: the identity differs
+      };
+      await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Finding 4: MAWS's own folders are no working folder an app is handed
+    it('refuses a working folder that is one of MAWS’s own folders', async () => {
+      records.set(H, record(profile));
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses a caller on another machine before anything is read', async () => {
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A }, true)).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: A, path: inRoot('README.md') }, true)).rejects.toThrow(new Error(OUT));
+      nothingAsked();
     });
   });
 });
@@ -2440,7 +4628,7 @@ describe('files service: the folders the record’s two facts name', () => {
     const svc = service({ homes: HOMES });
     for (const remote of [false, true]) {
       expect(await rootNames(svc, remote), `remote ${remote}`).toEqual([p.main, p.beside]);
-      expect((await svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, remote)).content, `remote ${remote}`).toBe('hello\n');
+      expect((await svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, fromAnotherMachine(remote))).content, `remote ${remote}`).toBe('hello\n');
       expect((await svc.list({ appSessionId: A, path: join(p.beside, 'packages') }, remote)).root, `remote ${remote}`).toBe(p.beside);
     }
     const away = join(p.base, 'beside-registration');
@@ -2448,7 +4636,7 @@ describe('files service: the folders the record’s two facts name', () => {
     try {
       expect(await rootNames(svc, false)).toEqual([p.main]);
       await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') })).rejects.toThrow(OUT);
-      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, UNCLAIMED)).rejects.toThrow(OUT);
     } finally {
       renameSync(away, join(p.main, '.git/worktrees/beside'));
     }
@@ -2469,8 +4657,8 @@ describe('files service: the folders the record’s two facts name', () => {
     records.set(A, { directory: p.w1, additionalDirectories: [], worktree: { path: p.w1, branch: 'w1' }, launchFolder: app });
     const svc = service({ homes: HOMES });
     expect(await rootNames(svc, true)).toEqual([p.w1, app]);
-    expect((await svc.read({ appSessionId: A, path: join(app, 'index.ts') }, true)).content).toBe('hello\n');
-    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') }, true)).rejects.toThrow(OUT);
+    expect((await svc.read({ appSessionId: A, path: join(app, 'index.ts') }, UNCLAIMED)).content).toBe('hello\n');
+    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') }, UNCLAIMED)).rejects.toThrow(OUT);
   });
 
   it('drops an admitted folder that is a home of the machine for a remote caller, and keeps it for this machine’s', async () => {
@@ -2478,7 +4666,7 @@ describe('files service: the folders the record’s two facts name', () => {
     const svc = service({ homes: () => [p.beside] });
     expect(await rootNames(svc, false)).toEqual([p.main, p.beside]);
     expect(await rootNames(svc, true)).toEqual([p.main]);
-    await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+    await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, UNCLAIMED)).rejects.toThrow(OUT);
   });
 
   it.each(ADMISSION_CASES)('reads under a fact’s folder only where the table admits it: %s', async (_name, make) => {

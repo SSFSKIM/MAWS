@@ -1,0 +1,48 @@
+/* The lab's own chrome. Everything is under .lab-, and nothing here styles an experiment. */
+html, body, #root { height: 100%; margin: 0; }
+body { overflow: hidden; }
+
+.lab-stage { position: fixed; inset: 0; }
+
+.lab-tab {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 2147483000;
+  font: 600 10px/1 ui-sans-serif, system-ui; letter-spacing: 0.08em; color: #fff; background: rgba(20, 20, 20, 0.78);
+  border: 0; border-radius: 8px 0 0 8px; padding: 10px 5px; writing-mode: vertical-rl; cursor: pointer; opacity: 0.55;
+}
+.lab-tab:hover { opacity: 1; }
+
+.lab-panel {
+  position: fixed; right: 12px; top: 50%; transform: translateY(-50%); z-index: 2147483001; width: 300px;
+  max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 14px;
+  font: 12px/1.45 ui-sans-serif, system-ui; color: #f2f2f2; background: rgba(22, 22, 22, 0.94);
+  border-radius: 14px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.lab-panel h2 { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #9a9a9a; margin: 14px 0 6px; }
+.lab-panel h2:first-child { margin-top: 0; }
+.lab-panel a { color: inherit; text-decoration: none; }
+.lab-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.lab-chip {
+  display: inline-block; padding: 4px 9px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: #ddd;
+  border: 0; font: inherit; cursor: pointer;
+}
+.lab-chip[aria-current='true'] { background: #f2f2f2; color: #111; }
+.lab-exp { display: block; padding: 6px 8px; border-radius: 8px; color: #ddd; }
+.lab-exp[aria-current='true'] { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.lab-exp small { display: block; color: #9a9a9a; }
+.lab-notes { margin: 0; padding-left: 16px; color: #c8c8c8; }
+.lab-keys { color: #8a8a8a; margin-top: 12px; }
+.lab-close { position: absolute; right: 10px; top: 8px; background: none; border: 0; color: #aaa; font-size: 16px; cursor: pointer; }
+
+.lab-index { position: fixed; inset: 0; overflow: auto; background: #f4f4f2; color: #1c1c1c; font: 14px/1.5 ui-sans-serif, system-ui; }
+.lab-index-inner { max-width: 1040px; margin: 0 auto; padding: 56px 32px 80px; }
+.lab-index h1 { font-size: 26px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 6px; }
+.lab-index p.lead { color: #5c5c5c; max-width: 68ch; margin: 0 0 32px; }
+.lab-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.lab-card { background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.lab-card h3 { margin: 0 0 4px; font-size: 16px; }
+.lab-card p { margin: 0 0 12px; color: #4a4a4a; }
+.lab-card .lab-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.lab-card .lab-links a { padding: 4px 10px; border-radius: 999px; background: #efefec; color: #1c1c1c; text-decoration: none; font-size: 12.5px; }
+.lab-card .lab-links a.dark { background: #1c1c1c; color: #f4f4f2; }
+.lab-card .lab-id { font: 600 11px/1 ui-monospace, monospace; color: #9a9a9a; }
+.lab-fallback { position: fixed; inset: 0; display: grid; place-items: center; font: 13px ui-sans-serif, system-ui; color: #888; }

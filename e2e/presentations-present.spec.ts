@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { windowFactors, zoomTo } from './support/zoom'; // UX wave U6b-5b
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -310,3 +311,37 @@ test('a magic move starts each element where it was, a child inside a turned gro
   await closed;
 });
 
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B12; the child's probe 5): the app's
+// window zoomed to 150 % by View's items (support/zoom.ts), the presenter's audience window opens at 100 %: main's
+// factor for each window of the show is 1 while the app's page holds 1.5 (each read in main, polled).
+test('zoom: the presenter’s window at 100 % while the app is at 150 %', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const app = launch!.app;
+  const id = await createDeck(page, 'Zoomed show', SHOW);
+  await openFromLibrary(page, 'Zoomed show', id);
+  await zoomTo(app, page, 1.5);
+  const own = page.url().split('#', 1)[0]!; // the app's page; the show's windows load it with another query
+  const appPage = async () => (await windowFactors(app)).filter((w) => w.url.split('#', 1)[0] === own).map((w) => w.factor);
+  await expect.poll(appPage, { message: 'the app’s page at 150 %' }).toEqual([1.5]);
+
+  // the audience, and the presenter where a second display calls for one, as the show's scene above polls for them
+  const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().length);
+  const windows = displays > 1 ? 2 : 1;
+  await deckAction(page, 'Present');
+  await expect.poll(() => presentPages(app).length, { timeout: 15_000, message: 'the show’s windows opened' }).toBe(windows);
+  const audience = presentPages(app).find((w) => w.url().includes('role=audience'))!;
+  await expect(audience.locator('[data-present-view="audience"]')).toBeVisible({ timeout: 15_000 });
+  if (displays > 1) await expect(presentPages(app).find((w) => w.url().includes('role=presenter'))!.locator('[data-present-view="presenter"]')).toBeVisible({ timeout: 15_000 });
+  const shown = async () => (await windowFactors(app)).filter((w) => w.url.includes('present=1')).map((w) => w.factor);
+  await expect.poll(shown, { message: 'every window of the show at 100 %' }).toEqual(Array.from({ length: windows }, () => 1));
+  expect(await appPage(), 'the app’s page still at 150 %').toEqual([1.5]);
+
+  const closed = Promise.all(presentPages(app).map((w) => w.waitForEvent('close')));
+  await audience.keyboard.press('Escape').catch((error: unknown) => {
+    if (!/has been closed/.test(String(error))) throw error;
+  });
+  await closed;
+  await zoomTo(app, page, 1);
+});

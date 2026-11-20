@@ -6,7 +6,7 @@ import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { cellOf, firstJsonBlock, type ToolRecord } from './cells';
+import { cellOf, firstJsonBlock, mergeReads, type ToolRecord } from './cells';
 
 const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
 const RESULT = { status: 'captured', id: 'dash', title: 'Dashboard', version: 1 };
@@ -60,5 +60,27 @@ describe('the shell cell’s folders', () => {
     const live = detailOf(shell({ command: 'ls' }));
     expect(live).toMatchObject({ kind: 'shell', cwd: null });
     expect('rowCwd' in live).toBe(false); // an event with no folder makes the cell it made before
+  });
+});
+
+// UX wave U2b, M7 (the execution document, Interfaces §M, "Where the ids and the inputs come from"; reported point 25):
+// a merged read keeps every member read's tool-use id in an additive list, so a stored run bounded by a later member is
+// placed; the cell's own id and `toolUseId`, which every reader of the cell reads, are as they were.
+describe('a merged read’s members', () => {
+  const AT = '2026-11-16T10:00:00.000Z';
+  const read = (id: string, path: string): ToolRecord => ({
+    use: { id: `e-${id}`, sessionId: 'S', at: AT, seq: 1, agentId: null, parentToolUseId: null, kind: 'tool.use', toolUseId: id, toolName: 'Read', input: { file_path: path }, apiMessageId: null, messageUuid: null } as Extract<SessionEvent, { kind: 'tool.use' }>,
+    result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false,
+  });
+  const cell = (id: string, path: string) => cellOf(read(id, path), { closed: false, stopped: false, continued: new Set(), lastAt: AT }, false);
+
+  it('lists every member read’s id, in order, and leaves the cell’s own id and toolUseId as they were', () => {
+    const first = cell('r1', '/notes/a.md');
+    const two = mergeReads(first, cell('r2', '/notes/b.md'));
+    const three = mergeReads(two, cell('r3', '/notes/c.md'));
+    expect(two.reads).toEqual(['r1', 'r2']);
+    expect(three.reads).toEqual(['r1', 'r2', 'r3']);
+    expect([three.id, three.toolUseId, three.paths]).toEqual(['cell:reads:r1', 'r1', ['/notes/a.md', '/notes/b.md', '/notes/c.md']]);
+    expect(first).not.toHaveProperty('reads');
   });
 });

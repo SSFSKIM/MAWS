@@ -8,13 +8,18 @@
 // through `withNativeClipboard`, which serializes MAWS runs and writes back what it held unless something else has
 // copied since; support/clipboard.ts). The shells start over the launch's scratch shell home (support/launch.ts), so
 // none writes the owner's history.
-import { expect, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { logicalLines } from '../test/support/terminal-lines'; // UX wave U8b, Addendum 5
 import { PROFILE_VARIABLE } from '../test/support/shell-home';
 import { withNativeClipboard } from './support/clipboard';
 import { test } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { openSurface, pinSurfaceForSessions, showSessionCards, sideColumn, sideGroup, surface } from './support/shell';
+import { addressed } from './support/address'; // UX wave U6b-5a
+import { launchReady, turnsJournal } from './support/c7-replay'; // UX wave U6b-5a
+import { menu } from './support/menu'; // UX wave U6b-5a
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
+import { ofKind, scene, show, type Scene } from './support/maws-tools'; // UX wave U6b-5a
 import { bareOf } from '../src/shared/machine/address'; // P5 O6 M2: the page's pty ids are addresses; the raw bridge's are bare
 
 // The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and an Electron
@@ -944,6 +949,219 @@ test('openTerminal runs the attach command', async ({ maws }) => {
   await expect(page.locator(`[data-terminal-id="${other.terminalId}"]`), 'its terminal is mounted on screen').toBeVisible();
   await h.expectLine(other.terminalId!, 'MAWS_ATTACH_B', 5_000);
   expect(await h.info(other.terminalId!)).toMatchObject({ cwd: DIR_B, visible: true });
+});
+
+// ---- UX wave U6b-5a: "Attach selection to chat" ----------------------------------------------------------------------
+// (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B2, B3 and B4.) The `#panel` page draws no
+// composer for a session, so these scenes run the product itself over indexed sessions (`support/maws-tools.ts`'s scene:
+// the replay transport, a scratch config home), each in its own launch, with real login shells. The terminal draws on a
+// canvas, so its lines are read through the page's terminals seam (`window.__maws_terminals`). Each command clears the
+// screen first, so what it prints is the first row's one word; a double click selects that word alone, as a hand does,
+// and the terminal's menu is opened on that row, where it has room below it inside the panel: on the word (a right click
+// inside a selection keeps it) or on the row's empty half (a right click on blank cells selects nothing; xterm's
+// right-click word selection takes only a word). Each scene waits on the composer's pasted chip, whose title is the
+// block's whole text, and the line's text; "nothing was sent" is read from the session's events, the transcript's
+// source, with a send at the scene's end as the control.
+
+type SeamWindow = { __maws_terminals?: { lines(id: string): string[] | null } };
+const seamLines = (page: Page, id: string) => page.evaluate((tid) => (window as unknown as SeamWindow).__maws_terminals?.lines(tid) ?? null, id);
+
+// The Terminal surface's terminal in view, once its shell has drawn a prompt.
+async function shownTerminal(page: Page): Promise<string> {
+  await openSurface(page, 'Terminal');
+  const element = surface(page, 'terminal').locator('[data-terminal-id]:visible');
+  await expect(element).toHaveCount(1, { timeout: 15_000 });
+  const id = (await element.getAttribute('data-terminal-id'))!;
+  await expect.poll(async () => (await seamLines(page, id))?.some((line) => line.trim() !== '') ?? false, { timeout: 15_000, message: 'a prompt' }).toBe(true);
+  return id;
+}
+
+const screenOf = (page: Page, id: string) => page.locator(`[data-terminal-id="${id}"] .xterm-screen`);
+
+// A command typed into the terminal through the page's keys (the screen clicked first, which focuses it and clears any
+// selection), and the line it prints awaited.
+async function runIn(page: Page, id: string, command: string, prints: string): Promise<void> {
+  await screenOf(page, id).click();
+  await page.keyboard.type(command);
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await seamLines(page, id))?.some((line) => line.trim() === prints) ?? false, { timeout: 10_000, message: `a line reading ${prints}` }).toBe(true);
+}
+
+// A point on the screen's first row: on the word a command printed there after `clear` (its third cell), or on the
+// row's empty half.
+async function firstRow(page: Page, id: string, on: 'word' | 'blank'): Promise<{ x: number; y: number }> {
+  const box = (await screenOf(page, id).boundingBox())!;
+  return { x: on === 'word' ? box.x + 20 : box.x + box.width / 2, y: box.y + 5 };
+}
+
+// The word on the first row, selected by a double click, and nothing else.
+async function selectPrinted(page: Page, id: string): Promise<void> {
+  const at = await firstRow(page, id, 'word');
+  await page.mouse.dblclick(at.x, at.y);
+}
+
+// The terminal's own menu, opened by a right click on the first row, every item of it inside the panel.
+async function terminalMenu(page: Page, id: string, on: 'word' | 'blank'): Promise<Locator> {
+  const at = await firstRow(page, id, on);
+  await page.mouse.click(at.x, at.y, { button: 'right' });
+  const opened = surface(page, 'terminal').getByRole('menu', { name: 'terminal' });
+  await expect(opened).toBeVisible();
+  await expect(opened.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeInViewport({ ratio: 1 });
+  return opened;
+}
+
+const userSends = async (s: Scene, id: string) => ofKind(await s.events(id), 'user.message').filter((event) => !event.isReplay).length;
+
+test('Attach selection to chat: the menu’s fifth item attaches the selection and Edit ▸ Attach the screen when none, each as one block in the session’s composer, which has the keyboard; nothing is sent until Enter', async () => {
+  test.setTimeout(120_000);
+  await scene({ titles: ['Attach alpha'], label: 'u6b5-attach' }, async (s) => {
+    const { page } = s;
+    const id = s.ids[0]!;
+    await launchReady(page, id, turnsJournal(s.scratch.root, 'u6b5-attach', 1), { cwd: s.repo });
+    await show(s, id);
+    const box = s.pane.locator(`[data-composer="${await addressed(page, id)}"]`).getByRole('textbox', { name: 'Message' });
+    const chips = box.locator('[data-pasted="text"]');
+    const terminal = await shownTerminal(page);
+    await runIn(page, terminal, "clear; printf 'attach-%s\\n' first", 'attach-first');
+
+    // B3, the menu's half: with nothing selected its fifth item is drawn disabled, after a separator
+    const unselected = await terminalMenu(page, terminal, 'blank');
+    await expect(unselected.getByRole('menuitem')).toHaveText(['Copy', 'Paste', 'Select all', 'Clear', 'Attach selection to chat']);
+    await expect(unselected.getByRole('separator')).toHaveCount(1);
+    await expect(unselected.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(unselected).toHaveCount(0);
+
+    // B2: a selection, attached from the menu, is one block in this session's composer, which takes the keyboard; the
+    // block is the selection alone, not the screen it was chosen from
+    await selectPrinted(page, terminal);
+    const selected = await terminalMenu(page, terminal, 'word');
+    await expect(selected.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeEnabled();
+    await selected.getByRole('menuitem', { name: 'Attach selection to chat' }).click();
+    await expect(chips).toHaveCount(1);
+    await expect(chips.first()).toHaveAttribute('title', 'attach-first');
+    await expect(box, 'the composer has the keyboard').toBeFocused();
+
+    // B3: with nothing selected, Edit ▸ Attach selection to chat attaches what the screen shows, a second block. The
+    // click that types the command clears the selection; the menu's item, drawn disabled, says none is left, and a
+    // click on blank cells gives the terminal the keyboard back without choosing any.
+    await runIn(page, terminal, "clear; printf 'attach-%s\\n' second third", 'attach-third');
+    const cleared = await terminalMenu(page, terminal, 'blank');
+    await expect(cleared.getByRole('menuitem', { name: 'Attach selection to chat' }), 'nothing is selected').toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(cleared).toHaveCount(0);
+    const blank = await firstRow(page, terminal, 'blank');
+    await page.mouse.click(blank.x, blank.y);
+    await expect.poll(() => s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('terminal.attachSelection')?.enabled ?? null), { message: 'Edit ▸ Attach selection to chat enabled while the terminal has the keyboard' }).toBe(true);
+    await menu(s.maws.app, 'terminal.attachSelection');
+    await expect(chips).toHaveCount(2);
+    // the screen from its first row, both lines the command printed (the prompt after them, if drawn by then)
+    await expect(chips.nth(1)).toHaveAttribute('title', /^attach-second\nattach-third(\n|$)/);
+    await expect(box).toBeFocused();
+
+    // nothing was sent: no message of the person's among the session's events (what its transcript draws its rows from);
+    // the control, a send, is read by the same reader
+    expect(await userSends(s, id), 'no message sent by an attach').toBe(0);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => userSends(s, id), { message: 'Enter sends the message, the two blocks with it' }).toBe(1);
+    await expect(chips).toHaveCount(0);
+  });
+});
+
+test('Attach selection to chat from a terminal kept open for every session, beside another session’s chat: Added to its session, whose box holds the block after a reload', async () => {
+  test.setTimeout(120_000);
+  await scene({ titles: ['Attach alpha', 'Attach beta'], label: 'u6b5-attach-pinned' }, async (s) => {
+    const { page } = s;
+    const [alpha, beta] = [s.ids[0]!, s.ids[1]!];
+    await show(s, alpha);
+    await pinSurfaceForSessions(page, 'Terminal');
+    const terminal = await shownTerminal(page);
+    await runIn(page, terminal, "clear; printf 'attach-%s\\n' pinned", 'attach-pinned');
+
+    // beside beta's chat: alpha's composer is mounted nowhere, so the block goes to alpha's stored draft
+    await show(s, beta);
+    expect(await shownTerminal(page), 'the same terminal, kept for every session').toBe(terminal);
+    await selectPrinted(page, terminal);
+    await (await terminalMenu(page, terminal, 'word')).getByRole('menuitem', { name: 'Attach selection to chat' }).click();
+    await expect(page.getByRole('region', { name: /^Notifications/ }), 'the line names the terminal’s session').toContainText('Added to Attach alpha');
+    const chipsOf = async (id: string) => s.pane.locator(`[data-composer="${await addressed(page, id)}"]`).getByRole('textbox', { name: 'Message' }).locator('[data-pasted="text"]');
+    await expect(await chipsOf(beta), 'nothing in the chat on screen').toHaveCount(0);
+
+    // the window reloaded before alpha is opened: its box holds the block (the control of the absence above)
+    await page.reload();
+    await expect(s.pane.locator(`[data-composer="${await addressed(page, beta)}"]`)).toBeVisible({ timeout: 20_000 });
+    await show(s, alpha);
+    const kept = await chipsOf(alpha);
+    await expect(kept).toHaveCount(1, { timeout: 15_000 });
+    await expect(kept.first()).toHaveAttribute('title', 'attach-pinned');
+  });
+});
+
+// ---- UX wave U6b-5b: zoom (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; the child's probe 3) ----------
+// The window zoomed to 125 % by View's items (support/zoom.ts): the terminal's grid refits to the smaller room the
+// window's CSS pixels now give it, and the pty is told: what `stty size` prints (the pty's own size) has the columns of
+// the emulator's grid, read as the length of the first row a 600-character line wraps to, and fewer rows and columns
+// than at 100 %. Each read is a command typed into the shell, retried until the pty has the grid's size. Then a word the
+// shell prints, double-clicked where it is drawn, is the selection: Attach selection to chat makes it the composer's
+// block, the selection's text.
+type Grid = { pty: { rows: number; cols: number }; emulator: number };
+async function gridOf(page: Page, id: string, mark: string): Promise<Grid | null> {
+  await screenOf(page, id).click();
+  await page.keyboard.type(`clear; printf 'grid-${mark} %s\\n' "$(stty size)"; printf '%0600d\\n' 0`);
+  await page.keyboard.press('Enter');
+  const said = new RegExp(`^grid-${mark} (\\d+) (\\d+)$`);
+  let grid: Grid | null = null;
+  await expect
+    .poll(
+      async () => {
+        const lines = (await seamLines(page, id)) ?? [];
+        for (let at = lines.length - 2; at >= 0; at--) {
+          const sized = said.exec(lines[at]!.trim());
+          if (sized === null) continue;
+          const zeros = lines[at + 1]!.trim();
+          if (!/^0+$/.test(zeros)) return false;
+          grid = { pty: { rows: Number(sized[1]), cols: Number(sized[2]) }, emulator: zeros.length };
+          return true;
+        }
+        return false;
+      },
+      { timeout: 10_000, message: `the grid's read ${mark}` },
+    )
+    .toBe(true);
+  return grid;
+}
+
+test('zoom: the grid refits and a selection is under the pointer at 125 %', async () => {
+  test.setTimeout(120_000);
+  await scene({ titles: ['Zoom alpha'], label: 'u6b5b-zoom' }, async (s) => {
+    const { page } = s;
+    const id = s.ids[0]!;
+    await launchReady(page, id, turnsJournal(s.scratch.root, 'u6b5b-zoom', 1), { cwd: s.repo });
+    await show(s, id);
+    const box = s.pane.locator(`[data-composer="${await addressed(page, id)}"]`).getByRole('textbox', { name: 'Message' });
+    const terminal = await shownTerminal(page);
+    const before = (await gridOf(page, terminal, 'actual'))!;
+    expect(before.pty.cols, `at 100 % the pty has the grid's columns: ${JSON.stringify(before)}`).toBe(before.emulator);
+
+    await zoomTo(s.maws.app, page, 1.25);
+    let reads = 0;
+    let after: Grid | null = null;
+    await expect(async () => {
+      after = (await gridOf(page, terminal, `zoomed${++reads}`))!;
+      expect(after.pty.cols, `at 125 % the pty has the grid's columns: ${JSON.stringify(after)}`).toBe(after.emulator);
+      expect(after.pty.cols, 'fewer columns than at 100 %').toBeLessThan(before.pty.cols);
+      expect(after.pty.rows, 'fewer rows than at 100 %').toBeLessThan(before.pty.rows);
+    }).toPass({ timeout: 30_000 });
+    test.info().annotations.push({ type: 'zoom: the grid', description: JSON.stringify({ before, after }) });
+
+    await runIn(page, terminal, "clear; printf 'zoomed-%s\\n' 125", 'zoomed-125');
+    await selectPrinted(page, terminal);
+    await (await terminalMenu(page, terminal, 'word')).getByRole('menuitem', { name: 'Attach selection to chat' }).click();
+    const chips = box.locator('[data-pasted="text"]');
+    await expect(chips).toHaveCount(1);
+    await expect(chips.first(), 'the word under the pointer is the selection').toHaveAttribute('title', 'zoomed-125');
+    await zoomTo(s.maws.app, page, 1);
+  });
 });
 
 // W14: real-pane takeover through the product confirm.

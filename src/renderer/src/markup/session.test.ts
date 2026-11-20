@@ -211,6 +211,14 @@ describe('addMarkupToChat', () => {
     expect(useComposerStore.getState().prefills.size).toBe(0);
   });
 
+  // board ticket 739: a page's title and address, which a site writes, enter the draft as one line
+  it('puts a label that holds line breaks in the draft as one line', async () => {
+    registerMarkupSurface(scope, { ...surface(), label: () => 'Page <br>A\n<p>x</p>\r\nhttp://127.0.0.1/a.html' });
+    await startMarkup();
+    await addMarkupToChat(marks, vi.fn(async () => png));
+    expect(queued().map((q) => q.text)).toEqual(['Mark-up of Page <br>A\ufffd<p>x</p>\ufffd\ufffdhttp://127.0.0.1/a.html ']);
+  });
+
   it('queues it for the session when no composer is mounted (the card closed to its pill), never as a prefill that would replace the draft', async () => {
     const s = surface();
     registerMarkupSurface(scope, s);

@@ -4,6 +4,8 @@
 // escapes or goes unsaid: a failed command (main's failure envelope, or a rejected invoke when the bridge is gone) is
 // said where it was asked, the card under its button and Mark all read, which has no card, in a toast with Retry.
 // UX wave U2b: the report's cards and their answering are gone with the bar (M2), so this is all that is left here.
+// Ticket 627: a session on another machine over RL2 takes no `ownerChannel.markRead`: its marking answers the window's
+// helper's sentence and sends nothing (the card draws its button disabled with it).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { MarkId } from '@shared/owner/marks';
@@ -12,6 +14,7 @@ import { focusedSession } from '../../composer/ComposerAppKeys';
 import { ipc } from '../../ipc/client';
 import { toast } from '../../stores/notices';
 import { useOwnerChannelStore } from '../../stores/owner-channel';
+import { remoteUnavailableOf } from '../../lane-b/remote-unavailable';
 import { REPORT } from './copy';
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -27,8 +30,11 @@ async function failureOf(invoke: () => Promise<{ ok: true } | { ok: false; error
 }
 
 // Null when main read them, else the failure's words, for the caller to say where it was asked.
-export const markRead = (appSessionId: AppSessionId, markIds: MarkId[] | 'all', client: MawsBridge = ipc): Promise<string | null> =>
-  failureOf(() => client.invoke('ownerChannel.markRead', { appSessionId, markIds }));
+export function markRead(appSessionId: AppSessionId, markIds: MarkId[] | 'all', client: MawsBridge = ipc): Promise<string | null> {
+  const unavailable = remoteUnavailableOf(appSessionId, 'ownerChannel.markRead');
+  if (unavailable !== null) return Promise.resolve(unavailable);
+  return failureOf(() => client.invoke('ownerChannel.markRead', { appSessionId, markIds }));
+}
 
 // How many legacy items the session's channel holds unread: an essential not read, a question not answered.
 export const unreadOf = (owner: Pick<OwnerChannelState, 'marks'> | null): number =>

@@ -264,7 +264,13 @@ describe('shell focus actions from native browser views', () => {
     electron.focused = null;
   });
 
-  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open'])(
+  it.each([
+    'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open', 'files.goToFile',
+    // UX wave U6b-5a (M1, decision 1): every surface's action, the six with no default chord too (a person can bind them)
+    'surface.terminal', 'surface.review', 'surface.files', 'surface.browser', 'surface.source-control', 'surface.subagents', 'surface.background', 'surface.session-info', 'surface.ask-sheet',
+    // UX wave U6b-5a (M3): a step shows a tab, a page or the Overview, which a browser page's keyboard must leave for
+    'go.back', 'go.forward',
+  ])(
     '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
       const otherPage = contents(1);
       const hostPage = contents(2);
@@ -396,6 +402,35 @@ describe('File ▸ Open File…', () => {
   });
 });
 
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 11; B4): Go ▸ Go to file
+describe('Go ▸ Go to file', () => {
+  const go = (overrides: KeymapOverrides, enabled: ReadonlySet<ActionId>) => top(menuTemplate(ACTIONS, overrides, enabled, vi.fn()), 'Go')!.submenu as Item[];
+  const goToFile: ActionId = 'files.goToFile';
+
+  it('stands directly under Command palette at ⌘P with no separator between them, and a separator after it', () => {
+    const items = go({}, ALL);
+    const palette = items.findIndex((item) => item.id === 'palette.open'); // U6b-5a: Back and Forward lead Go
+    expect(items.slice(palette, palette + 3).map((item) => item.id ?? item.type)).toEqual(['palette.open', 'files.goToFile', 'separator']);
+    expect(byId(go({}, ALL), 'files.goToFile')).toMatchObject({ label: 'Go to file', accelerator: 'Cmd+P', enabled: true });
+  });
+
+  it('is disabled until the page registers its handler', () => {
+    expect(byId(go({}, new Set(ACTION_IDS.filter((id) => id !== goToFile))), 'files.goToFile')).toMatchObject({ enabled: false });
+    expect(byId(go({}, new Set()), 'files.goToFile')).toMatchObject({ enabled: false });
+  });
+
+  it('has no accelerator while a stored rebinding of another action holds ⌘P, and has it again once that goes', () => {
+    const taken = go({ 'attention.next': 'Cmd+P' }, ALL);
+    expect(byId(taken, 'files.goToFile')!.accelerator).toBeUndefined();
+    expect(byId(taken, 'attention.next')!.accelerator).toBe('Cmd+P');
+    expect(byId(go({ 'files.goToFile': 'Cmd+Alt+P' }, ALL), 'files.goToFile')!.accelerator).toBe('Cmd+P'); // its own stored value is never read
+  });
+
+  it('keeps its chord from a page of the in-app browser, which leaves ⌘P to the menu', () => {
+    expect(keyAction({ type: 'keyDown', key: 'p', meta: true, control: false, alt: false, shift: false }, { findOpen: false, loading: false })).toBeNull();
+  });
+});
+
 // U6a start (the UX wave's U6, first landing; A9, A7's first sentence, decisions 2 to 5, 10 and 12): the menus drawn
 // from the table's order, placements and submenus, with separators between groups of ids. Every generic assertion runs
 // over the table and over the table extended with sample rows shaped as the siblings' will be.
@@ -441,9 +476,12 @@ describe('the menus drawn from the table', () => {
 
   it('puts an edit row after the Edit menu’s own items, in its submenu', () => {
     const edit = submenuOf(menuTemplate(EXTENDED_TABLE, {}, new Set(idsOf(EXTENDED_TABLE)), vi.fn()), 'Edit');
-    expect(shape(edit)).toEqual(['Undo', 'Redo', '—', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'Select All', '—', 'Sample ▸']);
+    expect(shape(edit)).toEqual(['Undo', 'Redo', '—', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'Select All', '—', 'Attach selection to chat', '—', 'Sample ▸']);
     expect((edit.at(-1)!.submenu as Item[]).map((item) => item.id)).toEqual([sample('sample.menu')]);
-    expect(shape(submenuOf(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'Edit')).at(-1)).toBe('Select All'); // no edit row today: nothing after
+    // UX wave U6b-5a (M2): the table's one Edit row, after the menu's own items and a separator, at ⇧⌘L
+    const own = submenuOf(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'Edit');
+    expect(shape(own).slice(-3)).toEqual(['Select All', '—', 'Attach selection to chat']);
+    expect(own.at(-1)).toMatchObject({ id: 'terminal.attachSelection', accelerator: 'Cmd+Shift+L' });
   });
 
   it('reads View and Go in groups, with Tabs, More surfaces, Comments, Appearance and Developer as submenus', () => {
@@ -461,10 +499,26 @@ describe('the menus drawn from the table', () => {
     expect(shape(submenuOf(view, 'More surfaces'))).toEqual(['Source control', 'Subagents', 'Background tasks', 'Session info', 'Questions']);
     expect(shape(submenuOf(view, 'Comments'))).toEqual(['Expand comments', 'Minimize comments', 'Hide comments']);
     expect(shape(submenuOf(view, 'Developer'))).toEqual(['reload', 'forceReload', 'toggleDevTools']);
+    // U6b-5a (M3; B13): Back and Forward lead Go, a group of their own
+    expect(shape(submenuOf(template, 'Go')).slice(0, 3)).toEqual(['Back', 'Forward', '—']);
+    expect(['go.back', 'go.forward'].map((id) => byId(template, id)?.accelerator)).toEqual(['Cmd+[', 'Cmd+]']);
     expect(subsequence(shape(submenuOf(template, 'Go')), [
-      'Command palette', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
+      'Back', 'Forward', '—', 'Command palette', 'Go to file', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
       'Next tab in strip', 'Previous tab in strip', '—', 'Focus next region', 'Focus previous region', 'Focus sidebar',
     ]), shape(submenuOf(template, 'Go')).join(' · ')).toBe(true);
+  });
+
+  // UX wave U6b-5b (M2; B10, B13): the window's zoom, the app's own rows and no roles, a group of their own in View, outside
+  // any submenu, between the moves and Comments ▸; each disabled while the page registers no handler for it
+  it('holds Zoom In at ⌘=, Zoom Out at ⌘- and Actual Size in View, outside any submenu, a group of their own', () => {
+    const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
+    const view = submenuOf(template, 'View');
+    const at = shape(view).indexOf('Move to tab');
+    expect(shape(view).slice(at, at + 7)).toEqual(['Move to tab', '—', 'Zoom In', 'Zoom Out', 'Actual Size', '—', 'Comments ▸']);
+    expect(view.filter((item) => item.id?.startsWith('zoom.')).map((item) => [item.id, item.accelerator ?? null])).toEqual([['zoom.in', 'Cmd+='], ['zoom.out', 'Cmd+-'], ['zoom.reset', null]]);
+    expect(items(view).filter((item) => item.role !== undefined && /zoom/i.test(String(item.role)))).toEqual([]);
+    const none = menuTemplate(ACTIONS, {}, new Set<ActionId>(ACTION_IDS.filter((id) => id !== 'zoom.reset')), vi.fn());
+    expect(['zoom.in', 'zoom.out', 'zoom.reset'].map((id) => byId(none, id)?.enabled)).toEqual([true, true, false]);
   });
 
   it('gives Terminal, Review and Files their chords (l5-code-08)', () => {

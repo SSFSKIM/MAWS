@@ -25,12 +25,26 @@ export const FILES_COPY = {
   symlink: (target: string | null) => `Symbolic link → ${target ?? 'unknown target'}`,
   empty: 'Empty directory',
   truncated: `Showing ${FILES_LIST_MAX_ENTRIES.toLocaleString('en-US')} of many entries`,
-  couldNotList: (message: string) => `Could not list: ${message}`,
-  refused: (message: string) => `Refused: ${message}`,
+  // UX wave U6b-4b: a listing that failed reads the notice's sentences for a folder (NOTICE_COPY below)
   // UX wave U6b-1 (M3): the tree at the file's left, its button in the file's bar and its divider
   hideTree: 'Hide files',
   showTree: 'Show files',
   resizeTree: 'Resize files',
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, "The sentences a person reads"):
+  // the Changed group's heading, a folder's dot and an ignored entry for a screen reader, and the title of a row for an
+  // entry outside the session's folders; a letter's words are Review's (`REVIEW_COPY.kinds`)
+  changed: (count: number) => `Changed ${count.toLocaleString('en-US')}`,
+  containsChanges: 'Contains changes',
+  ignored: 'Ignored by git',
+  outside: (path: string) => `${path} · Outside the folders this session works in`,
+  // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, "The sentences a person reads"): the
+  // field's placeholder and its accessible name; the list's lines; the label `disabledWords` words the offline line from
+  // ("File search is unavailable while <machine> is offline.")
+  goToFile: 'Go to file',
+  noMatchingFiles: 'No matching files',
+  searchingFiles: 'Searching files…', // the `@` menu's words
+  searchFailed: 'Files could not be searched.',
+  fileSearch: 'file search',
 } as const;
 
 export const VIEWER_COPY = {
@@ -52,6 +66,12 @@ export const VIEWER_COPY = {
   // UX wave U6e (§D): the label of a file that cannot be saved, and a savable outside file's path's tooltip and description
   readOnly: 'Read-only',
   savesTo: (real: string) => `Save writes to ${real}`,
+  // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; decisions 12 and 18,
+  // Decision Log 20): a savable outside file of a session on another machine, and a file there inside a folder macOS protects
+  savesToOn: (real: string, machine: string) => `Save writes to ${real} on ${machine}`,
+  protectedThere: (machine: string) => `This file is in a folder macOS protects on ${machine}. Opening it may show a privacy prompt on ${machine}’s own screen.`,
+  openIt: 'Open it',
+  protectedThrough: (machine: string) => `This path goes through a link into another folder macOS protects on ${machine}. Choose the file with Open File… to open it.`,
   // P2-F W-V (L95): an image's or a video's sizing controls
   zoom: 'Zoom',
   zoomIn: 'Zoom in',
@@ -68,6 +88,27 @@ export const VIEWER_COPY = {
   videoUnplayable: 'This video can’t be played here.',
   soundUnplayable: 'This sound can’t be played here.',
   olderService: 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.',
+} as const;
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, "The sentences a person reads"; decisions 9
+// and 19): the notice of a file that cannot be read and of a folder that cannot be listed, by cause (`viewer/notice.ts`).
+// A folder's forms are the Files list's. No sentence says who may open a file on a machine.
+type Subject = 'file' | 'folder';
+export const NOTICE_COPY = {
+  outside: { file: 'This file is outside the folders this session works in.', folder: 'This folder is outside the folders this session works in.' },
+  outsideOn: (subject: Subject, machine: string) => `This ${subject} is outside the folders this session works in on ${machine}.`,
+  threeWays: "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+  askAgent: 'Ask the agent to send the file to see it here.',
+  notFound: (subject: Subject, machine: string | null) => `No ${subject} at this path${machine === null ? '' : ` on ${machine}`}.`,
+  unreachableHere: "MAWS's service on this Mac is not answering.",
+  unreachable: (machine: string) => `${machine} is not reachable.`,
+  notOnRecord: (machine: string) => `${machine} does not have this session on record right now.`,
+  noAccess: (machine: string) => `Your access to this session on ${machine} does not include its files.`,
+  other: { file: 'This file could not be opened.', folder: 'This folder could not be listed.' },
+  retry: 'Retry',
+  copyPath: 'Copy path',
+  copied: 'Copied', // the Copy path button's words for a moment after it copied (fix wave 1)
+  copyFailed: "Couldn't copy the path", // … after the clipboard refused, or with none (as the agents' log says it)
 } as const;
 
 // A count as Review prints it, with the thousands separator (UX wave U5b, §I); English throughout, as the app's other counts.
@@ -185,9 +226,14 @@ export const EDITOR_COPY = {
     maws: 'Read-only: MAWS does not edit its own files',
     added: 'Read-only: this file is in the Library, not in this session’s folders. Choose it with File ▸ Open File… to edit it',
     result: 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it',
+    // UX wave U6b-4c (Q2, R4): a file opened through a link in a Markdown file that is itself read-only for the session
+    linked: 'Read-only: the file that links this one is read-only in this conversation. Choose it with File ▸ Open File… to edit it',
     head: 'Read-only: the file is larger than the editor’s cap',
     encoding: 'Read-only: the file is not UTF-8',
     loading: 'Read-only until the file has loaded',
+    // UX wave U6f (§E; decision 12's third column): an outside file of a session on another machine this person may not
+    // save there, with the sentence of the window's helper
+    elsewhere: (words: string) => `Read-only: ${words}`,
   },
   comment: (line: number) => `Comment on line ${line}`,
   anchorTitle: (label: string) => `Comment on ${label}`, anchorBody: 'The comment composer arrives with side threads (E3). This anchor will open it:', close: 'Close',
@@ -204,4 +250,21 @@ export const OPEN_FILE_COPY = {
   elsewhere: (machine: string) => `Open File… (this session runs on ${machine})`,
   notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.',
   unavailable: 'MAWS could not open the file just now. Try Open File again in a moment.',
+} as const;
+
+// UX wave U6f (§E; Card 1 as the owner answered it): the chooser MAWS draws for Open File… when the files are on another
+// machine.
+export const REMOTE_CHOOSER_COPY = {
+  title: (machine: string) => `Open a file on ${machine}`,
+  go: 'Go', up: '..', more: 'More…', open: 'Open', cancel: 'Cancel', back: 'Back', retry: 'Try again',
+  private: 'private', link: 'link',
+  foot: (machine: string) => `Files on ${machine}, read as its MAWS service can read them.`,
+  reading: 'Reading the folders…',
+  empty: 'Nothing here',
+  openPrivate: (folder: string, machine: string) => `Open ${folder} on ${machine}? macOS protects this folder, and opening it may show a privacy prompt on ${machine}’s own screen.`,
+  unreadable: (machine: string) => `MAWS on ${machine} cannot read this folder.`,
+  noAnswer: (machine: string) => `${machine} has not answered yet.`,
+  unreachable: (machine: string) => `${machine} is not reachable.`,
+  nothingThere: (machine: string) => `There is no file or folder at that path on ${machine}.`,
+  notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.', // U6e's sentence
 } as const;

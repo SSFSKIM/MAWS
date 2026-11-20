@@ -11,6 +11,8 @@
 // UX wave U4a (O-20): since a session's own `/btw` answers in its card (BtwCard.tsx), this view is a side thread's
 // questions under its thread view; the card asks, lists and draws its exchanges through the same hook and row
 // (`useSideAsk`, `Exchange`), with its own waiting line in place of the spinner.
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4): a path in an answer opens the file
+// for the session the questions are asked of (`answerFiles`; here the side thread's own), as a chip of its transcript does.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
@@ -23,11 +25,18 @@ import { promoteSide } from './actions';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
+import { TranscriptActionsProvider, type TranscriptActions } from '../transcript/view/context'; // UX wave U6b-4b
+import { openFile } from '../tools/code/open-file';
 import { SIDE_COPY } from './copy';
 import { askSide, beginPromotion, btwCardOf, clearSide, promotable, promotionInFlight, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, usePromotions, useSidePane } from './store';
 
 const COPY = SIDE_COPY.btw;
 const SHOWN = 50; // the most recent exchanges kept on screen
+
+// UX wave U6b-4b (R4): the file action an answer's Markdown is given, bound to the session asked; ⌘ opens a main tab.
+export const answerFiles = (appSessionId: AppSessionId): Partial<TranscriptActions> => ({
+  openFile: (path, line, _session, options) => void openFile(appSessionId, path, line, { main: options?.main === true }),
+});
 
 // Asking, listing and the field of one session's side questions: the view's and the card's alike. `log` is for the
 // scroller, kept at its newest exchange; `field` for the textarea, which takes the keyboard when the session's side-question
@@ -138,11 +147,13 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
         {shown.length === 0 ? (
           <p className="m-0 mx-auto mt-6 max-w-[280px] text-center text-ui text-fg-muted">{COPY.empty}</p>
         ) : (
-          <ol className="m-0 flex list-none flex-col gap-4 p-0">
-            {shown.map((exchange) => (
-              <Exchange key={exchange.id} exchange={exchange} canRetry={canAsk} onRetry={() => void side.retry(exchange)} />
-            ))}
-          </ol>
+          <TranscriptActionsProvider actions={answerFiles(parent)}>
+            <ol className="m-0 flex list-none flex-col gap-4 p-0">
+              {shown.map((exchange) => (
+                <Exchange key={exchange.id} exchange={exchange} canRetry={canAsk} onRetry={() => void side.retry(exchange)} />
+              ))}
+            </ol>
+          </TranscriptActionsProvider>
         )}
       </div>
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2.5">
