@@ -1077,7 +1077,8 @@ describe('the grants in a person’s message (rule R)', () => {
 });
 
 // The architect's ruling of 2026-11-16 (the Decision Log): the reader's work on one text is bounded. A slice is checked
-// whole only at a line that ends in a fence, at most MAX_ENVELOPE_CHECKS times a text, and the lines inside pasted
+// whole only at a result block's close (board ticket 734: a json fence line and the first close after it), at most
+// MAX_ENVELOPE_CHECKS times a text, and the lines inside pasted
 // segments are marked in one walk over the lines and the segments together. Pinned by the counts the reading reports.
 describe('the answer envelopes inside a joined text: the work one text costs is bounded', () => {
   const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
@@ -1101,11 +1102,36 @@ describe('the answer envelopes inside a joined text: the work one text costs is 
     expect(readAnswerEnvelopesWithCost(text).cost.checks).toBe(64);
   });
 
-  it('one opening line and 20,000 fence lines: exactly 64 checks, the text whole', () => {
-    const text = [askSteerOpening('ask-1'), ...Array.from({ length: 20_000 }, () => '```')].join('\n');
+  it('one opening line and 20,000 fence lines: no check, since no result block opens; a json fence line above them: one check; the text whole', () => {
+    const fences = Array.from({ length: 20_000 }, () => '```');
+    for (const [lines, checks] of [[[askSteerOpening('ask-1'), ...fences], 0], [[askSteerOpening('ask-1'), '```json', ...fences], 1]] as const) {
+      const text = lines.join('\n');
+      const reading = readAnswerEnvelopesWithCost(text);
+      expect(reading.cost.checks).toBe(checks);
+      expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [], rest: text });
+    }
+  });
+
+  it('65 json blocks after an opening line, none a result: 64 checks, the text whole', () => {
+    const text = [askSteerOpening('ask-1'), ...Array.from({ length: 65 }, () => ['```json', '{}', '```']).flat()].join('\n');
     const reading = readAnswerEnvelopesWithCost(text);
     expect(reading.cost.checks).toBe(64);
     expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [], rest: text });
+  });
+
+  // Board ticket 734: an earlier build wrote the question's words into its envelope, so a question holding code holds
+  // lines that end in a fence; read one check a result block, such envelopes joined are every one read, at any size
+  it('three earlier builds’ envelopes joined, their questions holding 80 fence lines each: one check each, every one read, an answer each on the reload', () => {
+    const code = Array.from({ length: 40 }, (_, k) => `\`\`\`\nconst step${k} = ${k};\n\`\`\``).join('\n');
+    const question = { id: 'q1', question: `Which of these steps should run first?\n${code}`, modality: 'choice' as const, options: [{ label: 'The first' }, { label: 'The last' }] };
+    const joined = [1, 2, 3].map((n) => earlierAskSteerText(`ask-${n}`, [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['The first'] }]));
+    expect(joined[0]!.split('\n').filter((line) => line.endsWith('```')).length).toBeGreaterThan(MAX_ENVELOPE_CHECKS);
+    const text = joined.join('\n');
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect(reading.cost.checks).toBe(3);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: joined.map((member) => parseAskSteer(member)!), rest: '' });
+    const arrivals = readArrivals({ type: 'user', uuid: 'u-j', origin: { kind: 'human' }, message: { role: 'user', content: text } });
+    expect(arrivals.map((arrival) => (arrival.class === 'answer' ? arrival.call : arrival.class))).toEqual(['ask-1', 'ask-2', 'ask-3']);
   });
 
   it('2,000 pasted segments, each holding an envelope, then a real one: one walk of at most lines plus segments steps', () => {

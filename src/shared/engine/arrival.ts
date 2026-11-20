@@ -128,12 +128,24 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
   // The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does,
   // and 'over' where finding it would take a check past the cap. A run ends before the next opening line:
   // `parseAskSteer` pairs the first tag with the last result block, so a malformed member would otherwise run over the
-  // words and the envelope after it (the joined answer's task review).
+  // words and the envelope after it (the joined answer's task review). Found in one forward pass (board ticket 734): a
+  // run can end only at a line that is a fence's close alone, its result block opening at the last json fence line
+  // above it, and only at the first close after that line, since a block holding a close alone parses as no JSON (a
+  // JSON string holds no line break). So a check is spent on a result block once, not on every line that ends in a
+  // fence, and an earlier build's envelope whose question holds many fences is read whatever their number.
   const envelopeAt = (start: number): { member: { text: string; read: T }; next: number } | null | 'over' => {
+    let block = false; // a json fence opened above, its first close not yet passed
     for (let last = start; last < lines.length; last++) {
+      const line = lines[last]!;
+      if (line === '```json') {
+        block = true; // pasted or not: the read finds the opener in the slice's bytes
+        continue;
+      }
+      const closes = line === '```' && block;
+      if (line === '```') block = false;
       if (inPasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
-      if (last > start && opens(lines[last]!)) return null;
-      if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
+      if (last > start && opens(line)) return null;
+      if (!closes) continue; // the result block's close ends every envelope
       if (checks === maxChecks) return 'over';
       checks += 1;
       const slice = lines.slice(start, last + 1).join('\n');
@@ -160,9 +172,10 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
 
 /**
  * The most whole-slice checks (`parseAskSteer` on a candidate slice, each one a join and a scan of it) one text may
- * cost. A writer-made envelope costs one, its result block's close being its only line that ends in a fence, and a
- * joined message holds one envelope per answer waiting at a turn's end; so the reader's work on a text stays within
- * this many slices of it (the architect's ruling of 2026-11-16).
+ * cost. A check is spent on a result block (a json fence line and the first close after it): a writer-made envelope
+ * costs one, an earlier build's one more for each json block its questions hold, and a joined message holds one
+ * envelope per answer waiting at a turn's end; so the reader's work on a text stays within this many slices of it (the
+ * architect's ruling of 2026-11-16; board ticket 734).
  */
 export const MAX_ENVELOPE_CHECKS = 64;
 
