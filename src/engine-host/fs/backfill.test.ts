@@ -6,6 +6,7 @@ import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/g
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture, loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
+import { bashEcho } from '@shared/engine/host-prompts'; // ticket 733a
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, endedByExit, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 import { mapSystemFrame } from '../normalizer-system';
@@ -74,6 +75,19 @@ describe('transcript records map to X1 events', () => {
     expect(messages[3].bash).toEqual({ part: 'output', stdout: 'OK', stderr: 'warn', exitCode: 3 });
     expect(messages[3].content).toBe('OK\nwarn');
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['u1', 'u3', 'u4']);
+  });
+
+  // ticket 733a (Design 4): the echo MAWS writes carries its output inside pasted segments; the row is read as its command,
+  // as an unframed echo is (the control), and no event holds a tag of the frame
+  it('maps an echo row with its output framed as its command', () => {
+    const framed = bashEcho('printf OK', '<bash-stdout>OK</bash-stdout><bash-stderr>warn</bash-stderr><bash-exit-code>3</bash-exit-code>', 'a1b2');
+    expect(framed).toContain('<pasted_content id="a1b2">');
+    const events = mapAll([
+      rec({ type: 'user', uuid: 'u1', parentUuid: null, timestamp: at(0), message: { role: 'user', content: framed } }),
+      rec({ type: 'user', uuid: 'u2', parentUuid: 'u1', timestamp: at(1), message: { role: 'user', content: '<bash-input>printf OK</bash-input>\n<bash-stdout>OK</bash-stdout><bash-stderr>warn</bash-stderr><bash-exit-code>3</bash-exit-code>' } }),
+    ]);
+    expect(only(events, 'user.message').map((m) => [m.bash, m.content])).toEqual([[{ part: 'input', command: 'printf OK' }, 'printf OK'], [{ part: 'input', command: 'printf OK' }, 'printf OK']]);
+    expect(JSON.stringify(events)).not.toContain('pasted_content');
   });
 
   it('maps tool results with the spill path from the structured field, else the marker', () => {

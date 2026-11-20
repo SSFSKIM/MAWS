@@ -3,6 +3,7 @@
 // composer's caret through C7's insertion seam.
 import type { AppSessionId } from '@shared/graph/ids';
 import { insertComposerText } from '../composer';
+import { mentionText } from '../composer/editor/mention-text'; // ticket 733a
 import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
 import { AGENTS, WIDGET_TITLE } from './copy';
@@ -18,7 +19,7 @@ export function AgentsBody({ agents, appSessionId, close }: { agents: { name: st
   if (agents.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{AGENTS.none}</p>;
   const mention = (name: string) => {
     close();
-    insertComposerText(appSessionId, `@agent-${name} `);
+    insertComposerText(appSessionId, `${mentionText({ id: name, kind: 'agent' })} `); // ticket 733a: the mention's writer, by the name's rule
   };
   return (
     <Rows label={AGENTS.list}>

@@ -4,6 +4,7 @@
 // it), ending the session only once the composer took it; Escape, the surface unmounting, a panel tab switch and the
 // panel collapsing discard. The page or artifact is never changed.
 import { create } from 'zustand';
+import { nameSlot } from '@shared/engine/grant'; // ticket 733a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
 import { oneLine } from '../composer/editor/mention-text'; // board ticket 739
@@ -33,7 +34,7 @@ export const MARKUP_COPY = {
   cancel: 'Cancel',
   addToChat: 'Add to chat',
   text: 'Mark-up text',
-  draft: (label: string) => `Mark-up of ${label} `,
+  draft: (label: string) => `Mark-up of ${nameSlot(label)} `, // ticket 733a: a page's title or address, by the name's rule
 };
 
 export interface MarkupSession {

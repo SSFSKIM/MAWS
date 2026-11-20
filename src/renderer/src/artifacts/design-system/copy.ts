@@ -1,5 +1,9 @@
 // The Design System page's app-side words (P3-D; docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D10, D12, D14):
 // its X32 header, its tab's states, the delete sheet and the adopt request.
+import { nameSlot } from '@shared/engine/grant'; // ticket 733a
+
+const adoptRequest = (name: string, artifactId: string) =>
+  `Adopt a law for the design system “${name}” (artifact ${artifactId}): read it with artifact_read, write its DESIGN.md through the designer skill’s adopt route (record “adopted from ${name}”, its nine sections, the hard don’ts tagged where they can be checked), and publish it with artifact_publish. Keep its tokens as they are.`;
 export const DESIGN_SYSTEM_COPY = {
   untitled: 'Design system',
   check: 'Check against law',
@@ -27,7 +31,7 @@ export const DESIGN_SYSTEM_COPY = {
   moveFailed: (title: string, reason: string) => `Could not move “${title}” · ${reason}`,
   // "Ask the agent to adopt it" (D12)
   noSession: 'Open a session to ask the agent.',
-  adoptRequest: (name: string, artifactId: string) =>
-    `Adopt a law for the design system “${name}” (artifact ${artifactId}): read it with artifact_read, write its DESIGN.md through the designer skill’s adopt route (record “adopted from ${name}”, its nine sections, the hard don’ts tagged where they can be checked), and publish it with artifact_publish. Keep its tokens as they are.`,
+  // ticket 733a: the system's title, which its author gave, goes into the person's draft by the name's rule
+  adoptRequest: (title: string, artifactId: string) => adoptRequest(nameSlot(title), artifactId),
   adoptAsked: 'The request is in the chat’s message box; send it when it reads right.',
 } as const;

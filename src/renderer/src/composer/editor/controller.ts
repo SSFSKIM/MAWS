@@ -1085,7 +1085,8 @@ export class EditorController {
       insertText: (text, options) => {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
-        // board ticket 739: text nodes and hard breaks, never a string the editor would parse as markup
+        // board ticket 739: text nodes and hard breaks, never a string the editor would parse as markup (ticket 733a: its
+        // writer checked these bytes, and a parse would decode entities and break lines after the check)
         if (!options?.separated) {
           at.insertContent(inlineContent(text)).run();
           return;

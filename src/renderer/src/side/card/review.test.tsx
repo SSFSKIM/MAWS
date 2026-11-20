@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
+import { commentInPlace, quotedComment } from '@shared/anchor/message'; // ticket 733a
 import { commands as SIDE_COMMANDS, SIDE_QUESTION_CAP } from '@shared/ipc/schema/side';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
@@ -166,11 +167,20 @@ describe('the inline layout', () => {
   });
 });
 
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3): a quoted line stands inside a
+// pasted segment; the words read in place are what they were before
+const inPlace = (text: string) => commentInPlace(text).text;
+const SEGMENT = /^(Before the change:\n)?\n\n<pasted_content id="[0-9a-f]{4}">\n/;
+type Words = { text: string; more?: Words[] };
+const wordsInPlace = <T extends Words>(comment: T): T => ({ ...comment, text: inPlace(comment.text), ...(comment.more && { more: comment.more.map(wordsInPlace) }) });
+
 describe('a pass of Review comments sent', () => {
   it('ticked: one message whose comments quote their lines, the removed one under “Before the change:”', async () => {
     twoComments();
     fireEvent.click(sendButton());
-    expect(fake.invoked('side.comment.content')).toEqual([
+    const [built] = fake.invoked('side.comment.content') as { comments: Words[] }[];
+    for (const comment of built!.comments) expect(comment.text).toMatch(SEGMENT);
+    expect(fake.invoked('side.comment.content').map((input) => ({ comments: (input as { comments: Words[] }).comments.map(wordsInPlace) }))).toEqual([
       {
         comments: [
           { anchor: ADDED, text: '`const total = rows.length;`\nCount the header too.', screenshot: null },
@@ -191,7 +201,8 @@ describe('a pass of Review comments sent', () => {
     twoComments();
     fireEvent.click(box());
     fireEvent.click(sendButton());
-    expect(fake.invoked('side.thread.open')).toEqual([
+    expect((fake.invoked('side.thread.open')[0] as { from: Words }).from.text).toMatch(SEGMENT);
+    expect(fake.invoked('side.thread.open').map((input) => ({ ...(input as object), from: wordsInPlace((input as { from: Words }).from) }))).toEqual([
       {
         appSessionId: PARENT_ID,
         from: { kind: 'comment', anchor: ADDED, text: '`const total = rows.length;`\nCount the header too.', screenshot: null, more: [{ anchor: REMOVED, text: 'Before the change:\n`if (row.berth) skip();`\nWhy was this dropped?', screenshot: null }] },
@@ -238,11 +249,11 @@ describe('a Review comment near the cap on a comment’s text', () => {
   it('keeps the quote while it fits, to the last unit of the cap', () => {
     render(<Review />);
     comment(ADDED, 'x');
-    const room = '`x`\n'.length;
+    const room = quotedComment(ADDED, 'x', 'w', 'a1b2').length - 1; // ticket 733a: the span inside its segment, whatever the id
     type(near(room));
     fireEvent.click(sendButton());
     const [input] = sent('side.comment.content') as { comments: { text: string }[] }[];
-    expect(input?.comments[0]?.text).toBe(`\`x\`\n${near(room)}`);
+    expect(inPlace(input!.comments[0]!.text)).toBe(`\`x\`\n${near(room)}`);
     expect(input?.comments[0]?.text).toHaveLength(SIDE_QUESTION_CAP);
     expect(SIDE_COMMANDS['side.comment.content'].input.safeParse(input).success).toBe(true);
   });

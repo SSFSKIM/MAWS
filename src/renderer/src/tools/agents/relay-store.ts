@@ -11,7 +11,7 @@ import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { agentWorkClient } from './client';
 import { RELAY_COPY } from './copy';
-import { isPending, matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './model/relay';
+import { isPending, matchesReceipt, matchesSendMessage, parentRoundsBetween, RELAY_ADDRESS_REFUSED, relayText, type Relay } from './model/relay';
 import { sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
 import { isPeerPending, isPeerTarget, sendsToPeer, type AgentTarget, type PeerRelay, type PeerTarget } from './model/relay'; // E7
 
@@ -220,6 +220,7 @@ export function createRelayStore() {
       if (inFlight.has(key) || get().peers.get(key)?.state.kind === 'asked') return; // a second would race the first
       const base = { appSessionId, target, text };
       const content = relayText(target, text);
+      if (content === null) return putPeer(key, { ...base, state: { kind: 'failed', message: RELAY_ADDRESS_REFUSED } }); // ticket 733a: an address that reads as a grant
       const refusal = sendContentRefusal(content);
       if (refusal) return putPeer(key, { ...base, state: { kind: 'failed', message: refusal.message } });
       const w = subscribe(appSessionId);

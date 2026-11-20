@@ -5,6 +5,7 @@
 // process; the sequence asks it through `ClearAndImplementHost`.
 import { randomUUID } from 'node:crypto';
 import { planPrompt } from '@shared/engine/host-prompts'; // UX wave U6e: the prompt's one copy
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a
 import type { PermissionMode } from '@shared/graph/enums';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { UserInputFrame } from '@shared/wire/frames';
@@ -113,7 +114,9 @@ export class ClearAndImplementSequence {
       // Keep the queue held until the out row registers the prompt with the normalizer. A further resume or
       // queue save must not write a second implementation while this write is in flight.
       clear.phase = 'writing_implementation';
-      void this.writeUser(planPrompt(clear.plan))
+      // ticket 733a (Design 3, "The tag id"): the sequence holds no id of the conversation the clear began, so the plan's
+      // segment takes a random one
+      void this.writeUser(planPrompt(clear.plan, pastedTagId(null)))
         .catch((error: unknown) => this.host.log(`plan prompt not written: ${messageOf(error)}`))
         .finally(() => {
           if (this.clear === clear) {

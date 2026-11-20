@@ -3,6 +3,7 @@
 // only one past 20,000 characters becomes a pasted atom (the chip), which can be opened and turned into text. A file is attached as bytes only when the API reads it: PNG, JPEG, GIF and WebP
 // images and PDFs, within their caps; any other file with a path becomes a mention of that path (HEIC, BMP and TIFF
 // included: never bytes), and a file with no path (dragged from a browser) is read as text or refused. Pure.
+import { quotesGrant } from '@shared/engine/grant';
 import { MENTION_BREAKS } from './mention-text';
 
 // The one number C1 (a 20,000-character paste on the owner's machines) may lower, if typing in the box does not stay
@@ -23,9 +24,11 @@ export type FileAction = { kind: 'image' } | { kind: 'pdf' } | { kind: 'mention'
 // `path` is Electron's (`pathForFile`), '' when it has none.
 // UX wave U1c (the review of rule R, F2): a path that holds a line break or another control character is mentioned by no
 // one; a model with a shell can create one, and its lines would stand in the person's message (mention-text.ts). The
-// words for a file dropped or picked by such a path, or null when its path can be mentioned.
+// words for a file dropped or picked by such a path, or null when its path can be mentioned. Ticket 733a (its document,
+// Design 3, §E): a path that quotes the grant's opening is refused the same way, at a drop, a pick and the `@` menu.
 export function pathRefusal(name: string, path: string): string | null {
-  return MENTION_BREAKS.test(path) ? `${name} can't be attached; its path holds a line break or another control character` : null;
+  if (MENTION_BREAKS.test(path)) return `${name} can't be attached; its path holds a line break or another control character`;
+  return quotesGrant(path) ? `${name} can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it` : null; // ticket 733a, §E as revised
 }
 
 export function classifyFile(file: { name: string; type: string; size: number }, path: string): FileAction {

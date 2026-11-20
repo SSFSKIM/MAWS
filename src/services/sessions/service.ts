@@ -35,6 +35,7 @@ import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, sideThreadRefusal, type GuardContext, type Guarded } from './start-guards';
 // E3 start
 import { promotionMessage } from '@shared/anchor/message';
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a
 import type { ContentBlock } from '@shared/graph/events';
 import type { Lineage } from '@shared/graph/session';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
@@ -1072,7 +1073,7 @@ export class SessionService {
       const content: ContentBlock[] =
         from.kind === 'comment'
           ? await commentsContent([from, ...(from.more ?? [])], 'thread', () => screenshotRoots(this.deps.userData, source), (index) => (index === 0 ? [] : ['more', index - 1]))
-          : [{ type: 'text', text: promotionMessage(from.exchanges, from.text) }];
+          : [{ type: 'text', text: promotionMessage(from.exchanges, from.text, pastedTagId(null)) }]; // ticket 733a: the thread's session does not exist yet, so a random id
       const tooLarge = sendContentRefusal(content);
       if (tooLarge !== null) throw new InvalidSideInput([], `the side thread's first message is too large: ${tooLarge.message}`);
       const display = String(content.at(-1)!.text); // the anchored text, whole: what a failed setup hands back to the editor

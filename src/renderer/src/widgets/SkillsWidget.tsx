@@ -14,6 +14,7 @@ import { useContext, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { insertComposerText } from '../composer';
+import { slashText } from '../composer/editor/mention-text'; // ticket 733a
 import { useSessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
@@ -69,7 +70,7 @@ function SkillsOnDisk({ appSessionId, folder, place, close }: { appSessionId: Ap
   const [inDetail, setInDetail] = useState(false);
   const use = (name: string) => {
     close();
-    insertComposerText(appSessionId, `/${name} `);
+    insertComposerText(appSessionId, slashText(name)); // ticket 733a: the name's rule
   };
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state="ready" error={null} close={close} size="library" toolbar={inDetail ? null : <SkillsToolbar plugins={plugin} />}>
@@ -113,7 +114,7 @@ function SkillsEngine({ appSessionId, close }: { appSessionId: AppSessionId; arg
 
   const use = (name: string) => {
     close();
-    insertComposerText(appSessionId, `/${name} `);
+    insertComposerText(appSessionId, slashText(name)); // ticket 733a: the name's rule
   };
   const failed = read.state === 'error';
   const toolbar = inDetail ? null : <SkillsToolbar plugins={plugin} canReload={ready} reloading={reload.state.phase === 'working'} onReload={() => void reload.run({})} unavailable={reload.unavailable} />;

@@ -10,6 +10,7 @@ import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, type RecentTurn, type R
 import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 import { messageLine, previewLine } from '@shared/owner/preview';
 import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3
+import { formTextInPlace } from '@shared/engine/form-in-place'; // ticket 733a
 import { slashCommandLine } from '@shared/wire/local-command';
 import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type Delivery, type TranscriptRecord } from '@shared/wire/transcript';
 import { answerEnvelopeOf, answerOutsideTranscript } from '@shared/engine/persons-message'; // ticket 704
@@ -22,9 +23,11 @@ export const RECENT_TURNS_TAIL_BYTES = 256 * 1024;
 
 export const NO_TURNS: RecentTurns = { turns: [], earlier: false, source: 'none' };
 
-// P4-A3: a linked read sent with a prompt is not the prompt's words
+// P4-A3: a linked read sent with a prompt is not the prompt's words. Ticket 733a (Design 4): one of MAWS's forms reads
+// with its segments in place
+const inPlace = (text: string): string => formTextInPlace(text) ?? text;
 const textOf = (content: string | ContentBlock[]): string =>
-  typeof content === 'string' ? content : withoutLinkedReads(content).map((block) => (block.type === 'text' && typeof block.text === 'string' ? block.text : block.type === 'image' ? '[Image]' : '')).filter(Boolean).join('\n');
+  typeof content === 'string' ? inPlace(content) : withoutLinkedReads(content).map((block) => (block.type === 'text' && typeof block.text === 'string' ? inPlace(block.text) : block.type === 'image' ? '[Image]' : '')).filter(Boolean).join('\n');
 
 // What a human prompt reads as in the preview: a slash command as typed, `!` before a bash command, MAWS's answer
 // envelope as an answer reads outside the transcript (ticket 704, ruling A: nothing, so the turn it opened has no

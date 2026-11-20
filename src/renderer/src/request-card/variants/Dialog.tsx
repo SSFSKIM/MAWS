@@ -64,7 +64,7 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
     setCapturing(false);
     if (prompt === 'none' || (prompt !== null && !prompt.editable)) return setNotEditable(true); // UX wave U5a, board ticket 714: rows can change between the render and the click
     answer('edit_prompt', 'Edit prompt', () => {
-      if (prompt) startInlineEdit(item.appSessionId, prompt, 'edit');
+      if (prompt) startInlineEdit(item.appSessionId, prompt.messageUuid, 'edit'); // ticket 733a: the stored row, by its id
       else toast({ level: 'info', text: 'No prompt to edit', actions: [], dismissible: true });
     });
   };

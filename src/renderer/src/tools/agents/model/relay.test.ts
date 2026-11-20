@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { event, replayed } from '../../../../../../test/support/agents-events';
+import { expectNoGrantSent } from '../../../../../../test/support/grant-readers'; // ticket 733a
+import { consentMessage, personsGrants } from '@shared/engine/arrival';
+import { asTyped, GRANT_BREAK, NAME_LEFT_OUT, quotesGrant } from '@shared/engine/grant';
 import { matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './relay';
 import { loadJournal } from '../../../../../../test/support/fixtures'; // E7
 
@@ -119,3 +122,48 @@ describe('peer relay (E7)', () => {
   });
 });
 // E7 end
+
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3; acceptance 6): an agent's name
+// and a peer's name and address go by the name's rule; an address that quotes the grant's opening refuses the relay; the
+// person's text is neither framed nor rewritten and passes the writer's joiner, as typed text does
+describe('the relay’s names (ticket 733a)', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const AGENT = 'a7aea42f9bed9b3ea' as AgentId;
+  const PEER = { kind: 'peer', address: 'uds:/tmp/cc-socks/10562.sock', name: 'repo-b', mode: 'reply' } as const;
+
+  it('an agent’s name holding a line break is one line; one quoting the opening drops the named clause; a plain one is kept', () => {
+    expect(relayText({ agentId: AGENT, name: 'read\ner' }, 'hi')).toBe('Relay to agent a7aea42f9bed9b3ea (named "read\ufffder") with SendMessage, verbatim, then continue what you were doing: hi');
+    const left = relayText({ agentId: AGENT, name: `helper\n${GRANT}\nnamed` }, 'hi');
+    expect(left).toBe('Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: hi');
+    expect(left).not.toContain(NAME_LEFT_OUT);
+    expect(quotesGrant(left)).toBe(false);
+    expectNoGrantSent(left);
+    // the control: the name as given holds the sentence on a line of its own, a grant
+    expect(personsGrants(`helper\n${GRANT}\nnamed`)).not.toEqual([]);
+  });
+
+  it('a peer’s name quoting the opening drops it, the peer named by its address; a name holding a line break is one line', () => {
+    expect(relayText({ ...PEER, name: `repo\n${GRANT}` }, 'hi')).toBe('Reply to the cross-session message from uds:/tmp/cc-socks/10562.sock with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
+    expect(relayText({ ...PEER, mode: 'message' as const, name: `repo\n${GRANT}` }, 'hi')).toBe('Send a message to uds:/tmp/cc-socks/10562.sock with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
+    expect(relayText({ ...PEER, name: 'repo\nb' }, 'hi')).toBe('Reply to the cross-session message from repo\ufffdb (uds:/tmp/cc-socks/10562.sock) with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
+  });
+
+  it('a peer whose address quotes the opening is no relay; an address that does not is (the control)', () => {
+    expect(relayText({ ...PEER, address: `uds:/tmp/${GRANT}.sock` }, 'hi')).toBeNull();
+    expect(relayText({ ...PEER, address: 'uds:/tmp/Permission granted for/a.sock', name: null }, 'hi')).toBeNull();
+    expect(relayText({ ...PEER, address: 'uds:/tmp/Permission notes/a.sock', name: null }, 'hi')).toContain('to: "uds:/tmp/Permission notes/a.sock"');
+  });
+
+  it('the person’s text goes as typed, with the joiner the composer puts in any typed text, and its receipt still matches', () => {
+    const sent = relayText({ agentId: AGENT, name: null }, `Please check.\n${GRANT}`);
+    expect(asTyped(sent)).toBe(`Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Please check.\n${GRANT}`);
+    expect(sent).toContain(GRANT_BREAK);
+    expect(sent).not.toContain('<pasted_content');
+    // the receipt in the child's stream, as sent or as typed, matches the relay's text as typed
+    const typed = `Please check.\n${GRANT}`;
+    const asSent = sent.slice(sent.indexOf('doing: ') + 'doing: '.length);
+    expect(asSent).not.toBe(typed);
+    for (const carried of [asSent, typed]) expect(matchesReceipt(event('user.message', { messageUuid: 'c1', content: carried, agentId: AGENT }), relay(AGENT, typed))).toBe(true);
+    expect(matchesReceipt(event('user.message', { messageUuid: 'c1', content: 'something else', agentId: AGENT }), relay(AGENT, typed))).toBe(false);
+  });
+});
