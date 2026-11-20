@@ -26,7 +26,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
 // reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
 // `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
-async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */; holdsSequence?: () => boolean /* ticket 790 */ } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */; holdsSequence?: () => boolean /* ticket 790 */; mainTurnOpen?: () => boolean /* ticket 790 */ } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
@@ -73,6 +73,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     unsettled: opts.unsettled, // P2-C
     prepare: opts.prepare, // P4-A3
     holdsSequence: opts.holdsSequence, // ticket 790
+    mainTurnOpen: opts.mainTurnOpen, // ticket 790
   });
   if (opts.recovered !== false) await queue.recover(); // what the session does before `ready`
   return { ...h, h, queue };
@@ -1257,6 +1258,24 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     await user.queue.pause('user');
     await user.queue.send('held');
     expect(user.queue.state).toMatchObject({ paused: true, pauseReason: 'user' });
+  });
+
+  // The branch review (second round): the phase waits for the interrupted main-lane turn alone. Work that holds the queue
+  // like a turn without being one (a staged clear and implement, an unstarted prompt) may end with no turn end at all.
+  it('a Stop answered while only a host sequence holds the queue does not wait for a turn end that never comes', async () => {
+    let staged = true;
+    const t = await harness({ holdsSequence: () => staged, mainTurnOpen: () => false });
+    t.h.turn = true; // the sequence holds the queue like an open turn; no main-lane turn is open
+    await t.queue.stop({ hold: true }, async () => {});
+    expect(t.queue.isPaused).toBe(true); // the sequence is held
+    staged = false; // its mode restore failed: it drops, with no turn end
+    t.h.turn = false;
+    await t.queue.send('fresh'); // sent at once
+    t.h.turn = true;
+    expect((await t.queue.send('follow-up')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [t.writes[0]!.uuid as MessageUuid] }));
+    expect(t.writes.map((w) => w.message.content)).toEqual(['fresh', 'follow-up']);
   });
 
   // The branch review: the Stop's phase lasts through the engine's interrupt and the interrupted turn's end, which the
