@@ -1,0 +1,138 @@
+/* Quiet: every value the experiment uses is named here. Components read the roles, never a literal. */
+
+@font-face {
+  font-family: 'Quiet Literata';
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/literata/files/literata-latin-wght-normal.woff2') format('woff2');
+}
+
+.root {
+  /* Two inputs per scheme: the ground (set inline from the knob) and the ink. Everything else is a mix of them. */
+  --q-ink: #1b1a17;
+  --q-ground: #faf9f5;
+  --q-raised: #ffffff;
+  --q-shadow-ink: 27 26 23;
+
+  --q-fg: var(--q-ink);
+  --q-fg2: color-mix(in srgb, var(--q-ink) 76%, var(--q-ground));
+  --q-muted: color-mix(in srgb, var(--q-ink) 62%, var(--q-ground));
+  --q-faint: color-mix(in srgb, var(--q-ink) 42%, var(--q-ground));
+
+  --q-line: color-mix(in srgb, var(--q-ink) 9%, transparent);
+  --q-line-strong: color-mix(in srgb, var(--q-ink) 16%, transparent);
+  --q-hover: color-mix(in srgb, var(--q-ink) 4.5%, transparent);
+  --q-selected: color-mix(in srgb, var(--q-ink) 7.5%, transparent);
+  --q-well: color-mix(in srgb, var(--q-ink) 5.5%, transparent);
+
+  /* Orange has one meaning: it is your move. The fill is the owner's value; marks and text on a light ground need
+     deeper steps of the same hue to be seen. */
+  --q-accent: #fd780f;
+  --q-accent-mark: #d95f06;
+  --q-accent-text: #b84a00;
+  --q-accent-soft: color-mix(in srgb, var(--q-accent) 13%, transparent);
+  --q-on-accent: #2a1300;
+
+  --q-add: #23794a;
+  --q-del: #c0392b;
+  --q-add-wash: color-mix(in srgb, var(--q-add) 7%, transparent);
+  --q-del-wash: color-mix(in srgb, var(--q-del) 7%, transparent);
+
+  --q-shadow-float: 0 0 0 0.5px var(--q-line-strong), 0 1px 2px rgb(var(--q-shadow-ink) / 4%),
+    0 8px 28px -6px rgb(var(--q-shadow-ink) / 10%);
+  --q-shadow-float-focus: 0 0 0 0.5px color-mix(in srgb, var(--q-ink) 28%, transparent),
+    0 1px 2px rgb(var(--q-shadow-ink) / 5%), 0 10px 32px -6px rgb(var(--q-shadow-ink) / 14%);
+  --q-shadow-pop: 0 0 0 0.5px var(--q-line-strong), 0 2px 6px rgb(var(--q-shadow-ink) / 6%),
+    0 14px 36px -8px rgb(var(--q-shadow-ink) / 18%);
+
+  --q-ui: system-ui, -apple-system, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif;
+  --q-voice: 'Quiet Literata', ui-serif, 'New York', Georgia, 'Apple SD Gothic Neo', serif;
+  --q-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Motion: four durations, two curves. */
+  --q-t-press: 90ms;
+  --q-t-hover: 130ms;
+  --q-t-pop: 210ms;
+  --q-t-pop-out: 130ms;
+  --q-t-fold: 300ms;
+  --q-t-shell: 340ms;
+  --q-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --q-ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+  --q-side-w: 272px;
+  --q-aside-w: 296px;
+  --q-bar-h: 48px;
+  --q-row-h: 34px;
+  --q-measure: 680px;
+}
+
+.root[data-q-scheme='dark'] {
+  --q-ink: #f4f2ed;
+  --q-ground: #191919;
+  --q-raised: color-mix(in srgb, var(--q-ink) 7%, var(--q-ground));
+  --q-shadow-ink: 0 0 0;
+
+  --q-fg: color-mix(in srgb, var(--q-ink) 93%, var(--q-ground));
+  --q-fg2: color-mix(in srgb, var(--q-ink) 74%, var(--q-ground));
+  --q-muted: color-mix(in srgb, var(--q-ink) 58%, var(--q-ground));
+  --q-faint: color-mix(in srgb, var(--q-ink) 40%, var(--q-ground));
+
+  --q-line: color-mix(in srgb, var(--q-ink) 10%, transparent);
+  --q-line-strong: color-mix(in srgb, var(--q-ink) 16%, transparent);
+  --q-hover: color-mix(in srgb, var(--q-ink) 6%, transparent);
+  --q-selected: color-mix(in srgb, var(--q-ink) 10%, transparent);
+  --q-well: color-mix(in srgb, var(--q-ink) 7.5%, transparent);
+
+  --q-accent-mark: #fd780f;
+  --q-accent-text: #ff8a2b;
+  --q-accent-soft: color-mix(in srgb, var(--q-accent) 17%, transparent);
+
+  --q-add: #6fcf97;
+  --q-del: #f08a7e;
+  --q-add-wash: color-mix(in srgb, var(--q-add) 8%, transparent);
+  --q-del-wash: color-mix(in srgb, var(--q-del) 8%, transparent);
+
+  --q-shadow-float: 0 0 0 0.5px var(--q-line-strong), 0 1px 2px rgb(0 0 0 / 20%), 0 10px 30px -6px rgb(0 0 0 / 36%);
+  --q-shadow-float-focus: 0 0 0 0.5px color-mix(in srgb, var(--q-ink) 30%, transparent), 0 1px 2px rgb(0 0 0 / 24%),
+    0 12px 34px -6px rgb(0 0 0 / 44%);
+  --q-shadow-pop: 0 0 0 0.5px var(--q-line-strong), 0 2px 6px rgb(0 0 0 / 24%), 0 16px 40px -8px rgb(0 0 0 / 52%);
+}
+
+/* Roundness. One family, three settings. `ctl` is every row, button, chip, tab and input; `item` sits inside `pop`
+   with a 5px gutter, so the two stay concentric. */
+.root,
+.root[data-q-round='rounder'] {
+  --q-r-ctl: 11px;
+  --q-r-item: 9px;
+  --q-r-pop: 14px;
+  --q-r-card: 18px;
+  --q-r-bubble: 22px;
+  --q-r-composer: 26px;
+  --q-r-check: 6px;
+  --q-corner-ctl: squircle;
+}
+.root[data-q-round='today'] {
+  --q-r-ctl: 6px;
+  --q-r-item: 6px;
+  --q-r-pop: 10px;
+  --q-r-card: 14px;
+  --q-r-bubble: 22px;
+  --q-r-composer: 22px;
+  --q-r-check: 4px;
+  --q-corner-ctl: squircle;
+}
+.root[data-q-round='roundest'] {
+  --q-r-ctl: 999px;
+  --q-r-item: 15px;
+  --q-r-pop: 20px;
+  --q-r-card: 26px;
+  --q-r-bubble: 26px;
+  --q-r-composer: 32px;
+  --q-r-check: 999px;
+  --q-corner-ctl: round;
+}
+
+.root[data-q-prose='sans'] {
+  --q-voice: var(--q-ui);
+}

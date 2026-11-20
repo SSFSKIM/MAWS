@@ -1,0 +1,1038 @@
+// The words rig: the same MAWS screens, in the same states, from any build, so that a before/after pair differs only
+// in the app's words. Copied into <worktree>/e2e/ by run.sh (it imports the worktree's own e2e support) and run there.
+// Only repository fixtures and scratch folders under /private/tmp/maws-words: HOME, the engine store, ClaudeUsage, the
+// projects' git repositories and the user-data folder are all scratch, and the machine is named "studio".
+// Locators avoid the app's words where they can (data attributes, menu ids, IPC, positions), because the words are what
+// the other build changes; a step that cannot find its target records the screen as not reached instead of failing all.
+import { execFileSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { isolatedGitEnv } from '../test/support/git-env';
+import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
+import { launchReady, invoke, steerStopJournal, value } from './support/c7-replay';
+import { createDesign, DESIGN_FILES } from './support/design';
+import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { menu } from './support/menu';
+import { sidebarRow } from './support/sidebar';
+
+const OUT = process.env.WORDS_OUT ?? '';
+const ONLY = process.env.WORDS_ONLY ? new Set(process.env.WORDS_ONLY.split(',')) : null;
+const SCRATCH = '/private/tmp/maws-words';
+const W = 1440;
+const H = 900;
+test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
+
+// ---- screens.json: what each capture shows, for a person and for matching a change to it -----------------------------
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 };
+const META: Meta[] = [];
+const results: { id: string; ok: boolean; error?: string }[] = [];
+const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
+
+// ---- scratch fixtures ------------------------------------------------------------------------------------------------
+const FIXED_DATE = '2026-09-20T09:00:00+00:00';
+function git(cwd: string, ...args: string[]) {
+  return execFileSync('/usr/bin/git', args, { cwd, env: { ...isolatedGitEnv(), GIT_AUTHOR_DATE: FIXED_DATE, GIT_COMMITTER_DATE: FIXED_DATE }, encoding: 'utf8' }).trim();
+}
+// A repository with three commits on main, two pushed to a local bare origin, then one edited file, one new file and one
+// staged file: Source control and Review have something to draw, and every hash is the same on every run.
+function makeRepo(name: string): string {
+  const dir = join(SCRATCH, 'repos', name);
+  const origin = join(SCRATCH, 'origins', `${name}.git`);
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(SCRATCH, 'origins'), { recursive: true });
+  git(join(SCRATCH, 'origins'), 'init', '--quiet', '--bare', '-b', 'main', origin);
+  git(dir, 'init', '--quiet', '-b', 'main');
+  const commit = (file: string, text: string, message: string) => {
+    mkdirSync(join(dir, file, '..'), { recursive: true });
+    writeFileSync(join(dir, file), text);
+    git(dir, 'add', file);
+    git(dir, 'commit', '--quiet', '-m', message);
+  };
+  commit('README.md', `# ${name}\n\nA scratch project for the words rig.\n`, 'Start the project');
+  commit('src/sidebar.ts', 'export function dragRow(from: number, to: number) {\n  return { from, to };\n}\n', 'Add sidebar drag');
+  git(dir, 'remote', 'add', 'origin', origin);
+  git(dir, 'push', '--quiet', 'origin', 'main');
+  git(dir, 'branch', '--quiet', '-u', 'origin/main');
+  commit('src/quota.ts', 'export const resetAfterMs = 5 * 60 * 60 * 1000;\n', 'Add quota reset');
+  writeFileSync(join(dir, 'src/sidebar.ts'), 'export function dragRow(from: number, to: number) {\n  if (from === to) return null;\n  return { from, to };\n}\n');
+  writeFileSync(join(dir, 'src/notes.md'), 'Drag keeps the row under the pointer.\n');
+  writeFileSync(join(dir, 'README.md'), `# ${name}\n\nA scratch project for the words rig.\n\nSee src/ for the code.\n`);
+  git(dir, 'add', 'README.md');
+  return dir;
+}
+
+// ClaudeUsage's committed fixture, its readings moved so the newest is two minutes old (c7-shots' way).
+function usageFixture(): string {
+  const usage = join(SCRATCH, 'claude-usage');
+  cpSync(join(REPO_ROOT, 'test/fixtures/claude-usage'), usage, { recursive: true });
+  const history = join(usage, 'history');
+  const files = readdirSync(history).map((name) => join(history, name));
+  const rows = (file: string) => readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  const newest = Math.max(...files.flatMap((file) => rows(file).map((row) => Date.parse(row.recordedAt as string))));
+  const offset = Math.round((Date.now() - 2 * 60_000 - newest) / 60_000) * 60_000;
+  const shift = (at: unknown) => new Date(Date.parse(at as string) + offset).toISOString().replace('.000Z', 'Z');
+  for (const file of files) writeFileSync(file, rows(file).map((row) => JSON.stringify({ ...row, recordedAt: shift(row.recordedAt), resetsAt: shift(row.resetsAt) })).join('\n') + '\n');
+  return usage;
+}
+
+// nine-sessions.json with every directory moved onto the scratch repositories (a session's onto its project's), so no
+// panel reads a real checkout of this machine.
+function scenarioFile(repos: Record<string, string>): string {
+  const raw = readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8');
+  const data = JSON.parse(raw) as { projects: { id: string; name: string; directory: string }[]; sessions: { projectId: string | null; directory: string }[]; transcripts?: Record<string, string> };
+  const moves: [string, string][] = [];
+  const projectDir = new Map<string, string>();
+  for (const project of data.projects) {
+    const to = repos[project.name] ?? repos.MAWS!;
+    moves.push([project.directory, to]);
+    projectDir.set(project.id, to);
+  }
+  for (const session of data.sessions) moves.push([session.directory, session.projectId ? projectDir.get(session.projectId)! : repos.MAWS!]);
+  let text = raw;
+  for (const [from, to] of moves.sort((a, b) => b[0].length - a[0].length)) text = text.split(from).join(to);
+  const moved = JSON.parse(text) as typeof data;
+  for (const [id, path] of Object.entries(moved.transcripts ?? {})) if (!id.startsWith('_')) moved.transcripts![id] = join(REPO_ROOT, 'test/fixtures/shell', path);
+  const path = join(SCRATCH, 'scenario.json');
+  writeFileSync(path, JSON.stringify(moved, null, 2));
+  return path;
+}
+
+// The engine store's trust for every scratch repository: a folder the person trusted is the everyday state, and MAWS
+// runs git (Environment, Source control, Review) only in a trusted folder.
+function trust(configDir: string) {
+  mkdirSync(configDir, { recursive: true });
+  const projects = Object.fromEntries(readdirSync(join(SCRATCH, 'repos')).map((name) => [join(SCRATCH, 'repos', name), { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true }]));
+  writeFileSync(join(configDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, projects }, null, 2)}\n`);
+}
+
+// ---- capture ---------------------------------------------------------------------------------------------------------
+async function size(maws: MawsLaunch) {
+  await maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((x) => !x.isDestroyed())!.setContentSize(w, h), [W, H] as const);
+  await expect.poll(() => maws.page.evaluate(() => [innerWidth, innerHeight, devicePixelRatio])).toEqual([W, H, 2]);
+}
+async function light(page: Page) {
+  value(await invoke(page, 'settings.set', { theme: 'light' } as never));
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+}
+async function dismissToasts(page: Page) {
+  // the toast region's dismiss buttons (C5's notifications): by their place, not their words
+  for (let i = 0; i < 5; i++) {
+    const buttons = page.locator('[data-toast-viewport] li > button:last-child:has(> span[aria-hidden])');
+    if ((await buttons.count()) === 0) return;
+    await buttons.first().click({ timeout: 2_000 }).catch(() => undefined);
+  }
+}
+async function settle(page: Page, hover: boolean) {
+  // a hover capture keeps the pointer where its step left it: toasts were dismissed before the step
+  if (!hover) await dismissToasts(page);
+  if (!hover) {
+    await page.mouse.move(W - 2, H - 2);
+    await page.waitForTimeout(250);
+  }
+  await page.evaluate(() => document.fonts.ready);
+  // the screen's text unchanged across three reads 700 ms apart (at most 20 s): git reads, cards and lists have landed
+  let last = '';
+  let same = 0;
+  for (const until = Date.now() + 20_000; Date.now() < until && same < 2; ) {
+    await page.waitForTimeout(700);
+    const text = await page.evaluate(() => document.body.innerText);
+    same = text === last ? same + 1 : 0;
+    last = text;
+  }
+  // finite animations finished, so a capture never lands mid-motion; spinners are frozen by the screenshot's own switch
+  await page.evaluate(() => {
+    for (const a of document.getAnimations()) if (Number.isFinite(a.effect?.getComputedTiming().endTime)) a.finish();
+  });
+  await page.waitForTimeout(700);
+}
+async function shot(page: Page, meta: Meta, prepare: () => Promise<void>) {
+  if (!wanted(meta.id)) return;
+  META.push(meta);
+  try {
+    if (meta.hover) await dismissToasts(page);
+    // one more try after a failed step: this Mac is loaded, and a press can land before its target has drawn
+    await prepare().catch(async (first) => {
+      console.log(`[words] ${meta.id}: retrying after ${(first instanceof Error ? first.message : String(first)).split('\n')[0]!.slice(0, 120)}`);
+      for (let i = 0; i < 3; i++) await page.keyboard.press('Escape');
+      await page.waitForTimeout(1500);
+      await prepare();
+    });
+    await settle(page, meta.hover === true);
+    await page.screenshot({ path: join(OUT, `${meta.id}.png`), animations: 'disabled', caret: 'hide' });
+    results.push({ id: meta.id, ok: true });
+  } catch (error) {
+    const message = (error instanceof Error ? error.message : String(error)).split('\n')[0]!.slice(0, 300);
+    results.push({ id: meta.id, ok: false, error: message });
+    console.log(`[words] ${meta.id} not reached: ${message}`);
+  }
+}
+// back to a known place: no dialog, no menu, no page; the given session's tab in front when one is named
+async function reset(page: Page) {
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Escape');
+  const back = page.locator('[data-toolbar] [data-page-title] button').first();
+  if (await page.locator('[data-region="page"]').count()) await back.click({ timeout: 2_000 }).catch(() => undefined);
+  await page.waitForTimeout(200);
+}
+const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
+// the sidebar's destinations by position: New chat, Projects, Artifacts, Customize
+// The sidebar's destinations by place, never by name: New chat first, then (in builds that draw it) Projects, then
+// Artifacts and Customize last. A build without a Projects row has no user path to that page: the screen is not reached.
+async function destination(page: Page, which: 'projects' | 'artifacts' | 'customize') {
+  const rows = sidebar(page).locator('nav').first().locator('button');
+  const count = await rows.count();
+  if (which === 'projects' && count < 4) throw new Error('unreachable: the sidebar has no Projects row in this build');
+  await rows.nth(which === 'projects' ? 1 : which === 'artifacts' ? count - 2 : count - 1).click();
+  await expect(page.locator('[data-region="page"]')).toBeVisible();
+}
+async function openSession(page: Page, appId: string, away?: string) {
+  await (await sidebarRow(page, { appSessionId: appId })).click();
+  await expect(page.locator('[data-region="main"] [data-pane="0"]')).toBeVisible();
+  await page.waitForTimeout(500);
+  if (away) await gitLanded(page, appId, away);
+}
+// The Environment card's git read has a time budget (services/command-budgets.ts) that a loaded machine can miss, and
+// the card then says git is unavailable. The change line appears once git answered; when it has not within 15 s, the
+// session is left for another and opened again, which makes a new read (twice at most).
+async function gitLanded(page: Page, appId: string, away: string) {
+  const line = page.locator('[data-region="main"] [data-testid="change-line"]');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await line.first().isVisible({ timeout: 15_000 }).catch(() => false)) return;
+    if (attempt === 2) return;
+    await (await sidebarRow(page, { appSessionId: away })).click();
+    await page.waitForTimeout(1500);
+    await (await sidebarRow(page, { appSessionId: appId })).click();
+  }
+}
+async function sideSurface(app: ElectronApplication, page: Page, id: string) {
+  await menu(app, `surface.${id}`);
+  await expect(page.locator(`[data-region="panel"]:not([inert]) [data-surface="${id}"]`)).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(800);
+}
+async function settingsAt(app: ElectronApplication, page: Page, section: string) {
+  if ((await page.getByRole('dialog').locator(`#settings-${section}`).count()) === 0) {
+    await reset(page);
+    await menu(app, 'settings.open');
+  }
+  const heading = page.locator(`#settings-${section}`);
+  await expect(heading).toBeAttached({ timeout: 10_000 });
+  await heading.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await page.waitForTimeout(400);
+}
+
+test.beforeAll(() => {
+  rmSync(SCRATCH, { recursive: true, force: true });
+  mkdirSync(join(SCRATCH, 'home'), { recursive: true });
+  for (const profile of ['profile-scenario', 'profile-replay', 'profile-r2', 'profile-r2run']) mkdirSync(join(SCRATCH, profile), { recursive: true });
+  mkdirSync(OUT, { recursive: true });
+});
+test.afterAll(() => {
+  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[] };
+  const keep = <T extends { id: string }>(old: T[], fresh: T[]) => [...old.filter((o) => !fresh.some((f) => f.id === o.id)), ...fresh];
+  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META) }, null, 2));
+});
+
+const BASE_ENV = (extra: Record<string, string>) => ({
+  MAWS_HARNESS: '0',
+  MAWS_E2E_FOREGROUND: '0',
+  MAWS_MACHINE_NAME: 'studio',
+  HOME: join(SCRATCH, 'home'),
+  ...extra,
+});
+
+// ======================================================================================================================
+// Launch 1: the C5 scenario (nine sessions, three waiting on the person), on a manual clock.
+// ======================================================================================================================
+test('scenario: sidebar, Overview, waiting sessions, pages, Settings, Customize', async () => {
+  test.setTimeout(900_000);
+  const repos = { MAWS: makeRepo('MAWS'), codex_somersault: makeRepo('codex_somersault'), 'claude-usage-menubar': makeRepo('claude-usage-menubar') };
+  const scenario = scenarioFile(repos);
+  const usage = usageFixture();
+  // the engine CLI's plugin commands answered by the repository's stub, in the owner-shaped state its fixture describes
+  // (a scenario has no engine to ask, and the replay engine refuses a real invocation)
+  mkdirSync(join(SCRATCH, 'elsewhere'), { recursive: true });
+  const cli = writePluginCliStub(join(SCRATCH, 'profile-scenario'), ownerShapedState(repos.MAWS, join(SCRATCH, 'elsewhere')));
+  // a fixed profile folder, so the paths Settings prints (the engine store) are the same on every run
+  const maws = await launchMaws({ userData: join(SCRATCH, 'profile-scenario'), prepare: ({ claudeConfigDir }) => trust(claudeConfigDir), env: BASE_ENV({ MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_CLAUDE_USAGE_DIR: usage, MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin }) });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    await expect(sidebar(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1500);
+    await dismissToasts(page);
+
+    const SID = { approval: 'app-3eb04b84', question: 'app-d095dc75', plan: 'app-bac6130b', running: 'app-9a1d4262', terminal: 'app-466b0d0d', idle: 'app-7412a115' };
+
+    await shot(page, { id: 'overview', title: 'Overview', how: 'View › Overview (⌘0), or the grid button in the title bar', state: 'Nine sessions in three projects; three wait on you (an approval, a question, a plan), two run', folders: ['overview', 'request-card', 'attention', 'sidebar', 'shell'] }, async () => {
+      await expect.poll(() => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.enabled ?? false)).toBe(true);
+      await menu(app, 'tab.overview');
+      await expect(page.locator('[data-region="main"] [role="dialog"]').first()).toBeVisible();
+    });
+    await shot(page, { id: 'overview-scrolled', title: 'Overview, further down', how: 'Overview, scrolled to its end', state: 'The plan card and the sessions that do not wait', folders: ['overview', 'request-card', 'attention'] }, async () => {
+      if ((await page.locator('[data-region="main"] [role="dialog"]').count()) === 0) await menu(app, 'tab.overview');
+      await page.locator('[data-region="main"] [role="dialog"]').first().evaluate((dialog) => {
+        const scrollers = [dialog, ...dialog.querySelectorAll('*')].filter((el) => el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== 'visible');
+        for (const el of scrollers) el.scrollTop = el.scrollHeight;
+      });
+    });
+    await reset(page);
+
+    // the sidebar fully expanded: every project open
+    const expandAll = async () => {
+      for (const row of await sidebar(page).locator('[data-kind="project"]').all()) {
+        if ((await row.getAttribute('aria-expanded')) === 'false') await row.locator('[data-project-line]').click().catch(() => undefined);
+      }
+      await page.waitForTimeout(500);
+    };
+
+    await shot(page, { id: 'session-approval', title: 'A session waiting on an approval', how: 'Click a session marked as waiting in the sidebar', state: 'The session asks to run a command; the approval card stands in the message box’s place; every project open in the sidebar', folders: ['request-card', 'composer', 'attention', 'session', 'transcript', 'sidebar', 'shell'] }, async () => {
+      await openSession(page, SID.approval, SID.idle);
+      await expandAll();
+      await expect(page.locator('[data-region="main"] [data-request-card]').first()).toBeVisible({ timeout: 15_000 });
+    });
+    await shot(page, r2({ id: 'r2-deny-reason-scenario', title: 'An approval with the deny-with-reason field open', how: 'Click the deny-with-reason field of an approval card', state: 'The waiting approval, its reason field focused, nothing typed', folders: ['request-card'] }), async () => {
+      await openSession(page, SID.approval, SID.idle);
+      // the card's first button opens the reason box ("Deny… with a reason", drawn first in its controls row)
+      await page.locator('[data-region="main"] [data-request-card] button.mr-auto').first().evaluate((el) => (el as HTMLButtonElement).click()); // a pointer click is taken by the card's own hit area
+      await expect(page.locator('[data-region="main"] [data-request-card] textarea').first()).toBeVisible({ timeout: 5_000 });
+      await page.waitForTimeout(800);
+    });
+    await reset(page);
+    await shot(page, { id: 'session-question', title: 'A session asking a question', how: 'Click the session waiting on a question', state: 'Two questions, the first shown, with options', folders: ['request-card', 'composer', 'attention', 'session'] }, async () => {
+      await openSession(page, SID.question, SID.idle);
+      await expect(page.locator('[data-region="main"] [data-request-card]').first()).toBeVisible({ timeout: 15_000 });
+    });
+    await shot(page, { id: 'session-plan', title: 'A session waiting on a plan', how: 'Click the session waiting on a plan', state: 'Plan review: the plan, its buttons', folders: ['request-card', 'composer', 'attention', 'session'] }, async () => {
+      await openSession(page, SID.plan, SID.idle);
+      await expect(page.locator('[data-region="main"] [data-request-card]').first()).toBeVisible({ timeout: 15_000 });
+    });
+    await shot(page, { id: 'session-terminal-held', title: 'A session held by a terminal', how: 'Click a session another terminal runs', state: 'The notice in the message box’s place: live in a terminal, read-only', folders: ['session', 'composer', 'lane-a', 'resume', 'transcript'] }, async () => {
+      await openSession(page, SID.terminal, SID.idle);
+    });
+    await shot(page, { id: 'session-terminal-held-info', title: 'Session info of a session held by a terminal', how: 'The terminal-held session, Session info in the right column', state: 'The rows a terminal-held session cannot use here', folders: ['tools/session-info', 'panel', 'side'] }, async () => {
+      await openSession(page, SID.terminal);
+      await sideSurface(app, page, 'session-info');
+    });
+    await shot(page, { id: 'session-running-cards', title: 'A running session with the right column’s cards', how: 'Click a running session', state: 'Working; the right column shows the session cards', folders: ['side', 'panel', 'session', 'composer', 'statusline'] }, async () => {
+      await openSession(page, SID.running, SID.idle);
+    });
+    await shot(page, { id: 'sidebar-hover', title: 'Sidebar, pointer on a session row', how: 'Hover a session row in the sidebar', state: 'The hover card of a waiting session', folders: ['sidebar', 'sessions', 'attention'], hover: true }, async () => {
+      const row = sidebar(page).locator(`[role="treeitem"][data-menu$="${SID.question}"]`).first();
+      await row.hover();
+      await page.waitForTimeout(1500);
+    });
+    await shot(page, { id: 'sidebar-hover-project', title: 'Sidebar, pointer on a project row', how: 'Hover a project row in the sidebar', state: 'The first project row under the pointer: its own tools', folders: ['sidebar'], hover: true }, async () => {
+      await page.mouse.move(W - 2, H - 2);
+      await sidebar(page).locator('[data-kind="project"] [data-project-line]').first().hover();
+      await page.waitForTimeout(1200);
+    });
+    await reset(page);
+
+    // ---- pages ----
+    await shot(page, { id: 'new-chat', title: 'New chat', how: 'New chat in the sidebar (⌘N)', state: 'An empty new chat, its project chosen, nothing typed', folders: ['composer', 'session', 'destination', 'shell'] }, async () => {
+      await menu(app, 'session.new');
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+    await shot(page, { id: 'projects', title: 'Projects', how: 'Projects in the sidebar', state: 'Three projects', folders: ['projects', 'destination'] }, async () => {
+      await destination(page, 'projects');
+    });
+    await reset(page);
+    await shot(page, { id: 'customize-plugins', title: 'Customize, Plugins', how: 'Customize in the sidebar, Plugins', state: 'User configuration; the built-in mods; no live session', folders: ['customize', 'widgets/plugins', 'destination'] }, async () => {
+      await destination(page, 'customize');
+      await page.locator('[data-region="page"] [role="tablist"]').first().locator('[role="tab"]').nth(0).click();
+      await page.waitForTimeout(2500);
+    });
+    await shot(page, { id: 'customize-plugins-hover', title: 'Customize, Plugins, pointer on a plugin row', how: 'Hover a plugin row in Customize › Plugins', state: 'The first plugin row under the pointer', folders: ['customize', 'widgets/plugins'], hover: true }, async () => {
+      if ((await page.locator('[data-plugin-row]').count()) === 0) {
+        await destination(page, 'customize');
+        await page.locator('[data-region="page"] [role="tablist"]').first().locator('[role="tab"]').nth(0).click();
+      }
+      await page.locator('[data-plugin-row]').first().hover();
+      await page.waitForTimeout(1200);
+    });
+    await shot(page, { id: 'customize-skills', title: 'Customize, Skills', how: 'Customize, Skills', state: 'User configuration, no skills on disk', folders: ['customize', 'widgets/skills'] }, async () => {
+      await page.locator('[data-region="page"] [role="tablist"]').first().locator('[role="tab"]').nth(1).click();
+      await page.waitForTimeout(2500);
+    });
+    await shot(page, { id: 'customize-connectors', title: 'Customize, Connectors', how: 'Customize, Connectors', state: 'User configuration, no connectors', folders: ['customize', 'customize/connectors'] }, async () => {
+      await page.locator('[data-region="page"] [role="tablist"]').first().locator('[role="tab"]').nth(2).click();
+      await page.waitForTimeout(2500);
+    });
+    await shot(page, r2({ id: 'r2-plugin-detail', title: 'Customize, a plugin’s own page', how: 'Click a plugin row in Customize › Plugins', state: 'The first user plugin’s page, from the plugin CLI stub', folders: ['customize', 'widgets/plugins'] }), async () => {
+      if ((await page.locator('[data-region="page"] [role="tablist"]').count()) === 0) await destination(page, 'customize');
+      await page.locator('[data-region="page"] [role="tablist"]').first().locator('[role="tab"]').nth(0).click();
+      await page.locator('[data-plugin-row]:visible').first().click();
+      await expect(page.locator('[data-plugin-detail]').first()).toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(1500);
+    });
+    await page.keyboard.press('Escape');
+    await reset(page);
+
+    // ---- Settings, one capture per wordy section ----
+    const SETTINGS: [string, string, string, string[]][] = [
+      ['appearance', 'Settings, General (Appearance and Notifications)', 'The top of Settings', ['settings-tab']],
+      ['keyboard', 'Settings, Keyboard', 'The keyboard shortcuts table', ['settings-tab', 'keymap']],
+      ['voice', 'Settings, Voice', 'Voice dictation settings', ['settings-tab']],
+      ['browser', 'Settings, Browser', 'The browser section, no profile imported', ['settings-tab']],
+      ['artifacts', 'Settings, Artifacts', 'The artifacts section', ['settings-tab']],
+      ['sessions', 'Settings, Sessions', 'The Sessions section of Sessions & engine', ['settings-tab', 'budget']],
+      ['gateway', 'Settings, Gateway', 'How sessions reach the model', ['settings-tab', 'gateway']],
+      ['usage', 'Settings, Usage', 'Accounts and limits from the ClaudeUsage fixture, newest reading two minutes old', ['settings-tab', 'usage', 'accounts']],
+      ['engine', 'Settings, Engine', 'The engine version and its update', ['settings-tab', 'engine-surface']],
+      ['supervisor', 'Settings, Supervisor', 'The supervisor daemon', ['settings-tab']],
+      ['org', 'Settings, Org', 'Not signed in to an org', ['settings-tab', 'accounts', 'owner']],
+    ];
+    for (const [section, title, state, folders] of SETTINGS) {
+      await shot(page, { id: `settings-${section}`, title, how: `Settings (⌘,), ${title.replace('Settings, ', '')} in its index`, state, folders }, async () => {
+        await settingsAt(app, page, section);
+      });
+    }
+    // rows whose helper words wait for the pointer: the first control of a section, hovered
+    for (const [section, title] of [['notifications', 'Notifications'], ['sessions', 'Sessions']] as const) {
+      await shot(page, { id: `settings-${section}-hover`, title: `Settings, ${title}, pointer on its first row`, how: `Settings, ${title}; hover its first row`, state: 'The first row of the section under the pointer', folders: ['settings-tab'], hover: true }, async () => {
+        await settingsAt(app, page, section);
+        await page.locator(`section[aria-labelledby="settings-${section}"]`).locator('button, select, input, [role="switch"]').first().hover();
+        await page.waitForTimeout(1200);
+      });
+    }
+    await reset(page);
+
+    // round 2: dialogs from typed commands, answered by the widget backend's recorded reads (MAWS_WIDGET_BACKEND=fixtures)
+    const typed = async (command: string) => {
+      await openSession(page, SID.idle);
+      const box = page.locator('[data-region="main"] [data-pane="0"] [contenteditable="true"]').first();
+      await box.click();
+      await page.keyboard.press('Meta+a');
+      await page.keyboard.press('Backspace');
+      await page.keyboard.type(`/${command}`);
+      await page.waitForTimeout(600);
+      await page.keyboard.press('Enter');
+      // the dialog the command opens (a widget dialog, or the model popover for /model)
+      await expect(page.locator(`[data-widget-dialog="${command}"], [data-widget-dialog], [role="dialog"]`).first()).toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(1500);
+    };
+    for (const [command, title] of [['mcp', 'Connectors dialog (/mcp)'], ['permissions', 'Permissions dialog (/permissions)'], ['config', 'Config dialog (/config)'], ['context', 'Context dialog (/context)'], ['agents', 'Agents dialog (/agents)'], ['memory', 'Memory dialog (/memory)'], ['sandbox', 'Sandbox dialog (/sandbox)'], ['model', 'Model menu (/model)'], ['diff', 'Diff dialog (/diff)'], ['hooks', 'Hooks dialog (/hooks)']] as const) {
+      await shot(page, r2({ id: `r2-dialog-${command}`, title, how: `Type /${command} in a session's message box and press Enter`, state: 'An idle session; the dialog answered from the widget backend’s recorded reads', folders: ['widgets', 'composer'] }), async () => {
+        await typed(command);
+      });
+      await reset(page);
+    }
+    expect(maws.consoleErrors().length >= 0).toBe(true);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 2: sessions discovered from a scratch engine store, then played through the replay engine, so their
+// transcripts have real tool calls, agents and finished turns; the right column's panels; the Artifacts library.
+// ======================================================================================================================
+type Row = { direction: string; frame: { type?: string; message?: { content?: unknown } } };
+const promptsOf = (fixture: string) =>
+  readFileSync(join(REPO_ROOT, fixture), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Row)
+    .filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => r.frame.message!.content as string);
+
+const PLAYED = [
+  { key: 'agents', fixture: 'test/fixtures/transcript/agents-and-messages.jsonl', engineId: '0a1b2c3d-0000-4000-8000-000000000001', title: 'Survey TODOs with two agents' },
+  { key: 'tools', fixture: 'test/fixtures/transcript/mockup-turn.jsonl', engineId: '0a1b2c3d-0000-4000-8000-000000000002', title: 'Fix the sidebar drag' },
+  { key: 'explore', fixture: 'test/fixtures/transcript/exploration-and-web.jsonl', engineId: '0a1b2c3d-0000-4000-8000-000000000003', title: 'Research the stream reconnects' },
+  { key: 'edit', fixture: 'test/fixtures/transcript/edit-and-receipt.jsonl', engineId: '0a1b2c3d-0000-4000-8000-000000000004', title: 'Tidy the quota module' },
+] as const;
+const IDLE = ['Usage reset countdown', 'SDK wire inventory', 'Terminal workflow notes', 'Workstation north star'];
+
+test('replay: transcripts, the right column, the Artifacts library and an editor', async () => {
+  test.setTimeout(900_000);
+  const repo = existsSync(join(SCRATCH, 'repos', 'MAWS')) ? join(SCRATCH, 'repos', 'MAWS') : makeRepo('MAWS');
+  const other = existsSync(join(SCRATCH, 'repos', 'codex_somersault')) ? join(SCRATCH, 'repos', 'codex_somersault') : makeRepo('codex_somersault');
+  const config = join(SCRATCH, 'claude-config');
+  rmSync(config, { recursive: true, force: true });
+  const seed = (dir: string, engineId: string, title: string, minute: number) => {
+    const project = join(config, 'projects', dir.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    const row = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: engineId.replace(/^0a/, '1b'), timestamp: `2026-09-29T10:${String(minute).padStart(2, '0')}:00.000Z`, cwd: dir, sessionId: engineId, version: '2.1.283' };
+    writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(row)}\n`);
+  };
+  PLAYED.forEach((p, i) => seed(repo, p.engineId, p.title, 10 + i));
+  IDLE.forEach((title, i) => seed(i % 2 ? other : repo, `0a1b2c3d-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`, title, i));
+  const usage = existsSync(join(SCRATCH, 'claude-usage')) ? join(SCRATCH, 'claude-usage') : usageFixture();
+  trust(config);
+  const maws = await launchMaws({ userData: join(SCRATCH, 'profile-replay'), env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage }) });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    const ids: Record<string, string> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const p of PLAYED) ids[p.key] = sessions.find((s) => s.engineSessionId === p.engineId)?.appId ?? '';
+      return PLAYED.every((p) => ids[p.key]);
+    }, { timeout: 30_000 }).toBe(true);
+
+    // play each journal into its session: open it, launch the replay, send what the journal's person sent
+    mkdirSync(join(SCRATCH, 'journals'), { recursive: true });
+    for (const p of PLAYED) {
+      try {
+        const journal = join(SCRATCH, 'journals', p.fixture.split('/').at(-1)!);
+        cpSync(join(REPO_ROOT, p.fixture), journal);
+        await openSession(page, ids[p.key]!);
+        await launchReady(page, ids[p.key]!, journal, { cwd: repo });
+        for (const content of promptsOf(p.fixture)) {
+          value(await invoke(page, 'session.send', { appSessionId: ids[p.key] as never, content }));
+          await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: ids[p.key] as never })).turn, { timeout: 60_000 }).toBeNull();
+        }
+        // a launched replay files the transcript under the fixture's engine id and the record loses its seeded title
+        value(await invoke(page, 'session.rename', { appSessionId: ids[p.key] as never, title: p.title }));
+      } catch (error) {
+        console.log(`[words] replay ${p.key} failed: ${(error as Error).message.split('\n')[0]}`);
+      }
+    }
+    await dismissToasts(page);
+    await page.waitForTimeout(1000);
+
+    await shot(page, { id: 'shell-agents', title: 'The shell: a finished session that used agents', how: 'Click the session in the sidebar', state: 'One finished turn that dispatched two agents, messaged one and searched code; the right column’s session cards beside it', folders: ['shell', 'sidebar', 'transcript', 'tools', 'side', 'composer', 'statusline', 'session'] }, async () => {
+      await openSession(page, ids.agents!);
+    });
+    await shot(page, { id: 'shell-agents-composer-hover', title: 'The shell, pointer and caret in the message box', how: 'Click into the message box of a session', state: 'The agents session with the pointer and the caret in the message box: its chips (model, mode, place)', folders: ['composer', 'statusline', 'widgets'], hover: true }, async () => {
+      await openSession(page, ids.agents!);
+      // the pointer and the caret in the box: chips that wait for the box's hover or focus show (the caret is hidden)
+      const box = page.locator('[data-region="main"] [data-pane="0"] [data-composer] [contenteditable="true"]').first();
+      await box.click();
+      await box.hover();
+      await page.waitForTimeout(1200);
+    });
+    await shot(page, { id: 'shell-tools', title: 'A finished session with many tool calls', how: 'Click the session in the sidebar', state: 'One finished turn: reads, searches, edits and commands', folders: ['transcript', 'tools', 'markup', 'session', 'composer'] }, async () => {
+      await openSession(page, ids.tools!);
+    });
+    await shot(page, { id: 'shell-explore', title: 'A finished session that searched and read the web', how: 'Click the session in the sidebar', state: 'Searches, reads, a web search and fetch, a skill and a connector call', folders: ['transcript', 'tools', 'markup'] }, async () => {
+      await openSession(page, ids.explore!);
+    });
+    await shot(page, { id: 'shell-edit', title: 'A finished session that edited files', how: 'Click the session in the sidebar', state: 'Read, Edit, MultiEdit, Write and a command, with the turn’s receipt', folders: ['transcript', 'tools', 'markup', 'delivery'] }, async () => {
+      await openSession(page, ids.edit!);
+    });
+    const pane = () => page.locator('[data-region="main"] [data-pane="0"]');
+    const openTurn = async () => {
+      const disclosure = pane().locator('.transcript-divider .transcript-disclosure').first();
+      if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await disclosure.click();
+      await page.waitForTimeout(800);
+    };
+    await shot(page, { id: 'transcript-hover-turn', title: 'Transcript, pointer on a finished turn’s line', how: 'Hover the line under the person’s message', state: 'The tool-heavy session, the pointer on its turn line', folders: ['transcript', 'transcript/view'], hover: true }, async () => {
+      await openSession(page, ids.tools!);
+      await pane().locator('.transcript-divider').first().hover();
+      await page.waitForTimeout(1200);
+    });
+    await shot(page, { id: 'shell-tools-open', title: 'A finished turn opened: its tool calls', how: 'Click the turn line under the person’s message', state: 'The tool-heavy session with its turn unfolded', folders: ['transcript', 'transcript/view', 'tools', 'markup'] }, async () => {
+      await openSession(page, ids.tools!);
+      await openTurn();
+    });
+    await shot(page, { id: 'shell-agents-open', title: 'A finished turn opened: agents and their messages', how: 'Click the turn line of the agents session', state: 'Two agents dispatched, one messaged, a search', folders: ['transcript', 'transcript/view', 'tools/agents'] }, async () => {
+      await openSession(page, ids.agents!);
+      await openTurn();
+    });
+    await shot(page, { id: 'shell-explore-open', title: 'A finished turn opened: searches, reads and the web', how: 'Click the turn line of the research session', state: 'Searches, reads, a web search and fetch, a skill and a connector call, unfolded', folders: ['transcript', 'transcript/view', 'tools'] }, async () => {
+      await openSession(page, ids.explore!);
+      await openTurn();
+    });
+    await shot(page, { id: 'shell-tools-transcript-view', title: 'The Transcript view of a session', how: 'Transcript in the switch at the top right of the session', state: 'The tool-heavy session shown as its full transcript instead of the report', folders: ['transcript', 'owner/report', 'transcript/view'] }, async () => {
+      await openSession(page, ids.tools!);
+      await pane().locator('[role="group"]').first().locator('button').nth(1).click();
+      await page.waitForTimeout(1000);
+    });
+    await shot(page, { id: 'shell-tools-transcript-view-end', title: 'The Transcript view, scrolled to its end', how: 'Transcript view, scrolled down', state: 'The end of the tool-heavy session’s transcript', folders: ['transcript', 'transcript/view', 'tools'] }, async () => {
+      await pane().evaluate((el) => {
+        for (const node of el.querySelectorAll('*')) if (node.scrollHeight > node.clientHeight + 4 && getComputedStyle(node).overflowY !== 'visible') node.scrollTop = node.scrollHeight;
+      });
+      await page.waitForTimeout(600);
+    });
+    // back to the report for the panels below
+    await pane().locator('[role="group"]').first().locator('button').nth(0).click().catch(() => undefined);
+
+    // ---- the right column's panels, on the agents session (its directory is the scratch repository) ----
+    const PANELS: [string, string, string, string[]][] = [
+      ['session-info', 'Session info', 'Session info of a finished replayed session', ['tools/session-info', 'panel', 'side']],
+      ['source-control', 'Source control', 'The scratch repository: one commit not pushed, one staged, one edited and one new file', ['tools/scm', 'tools', 'panel', 'side']],
+      ['review', 'Review', 'The same changes as a review', ['tools/code/review', 'tools/code', 'panel', 'side']],
+      ['subagents', 'Subagents', 'The two agents the turn dispatched', ['tools/agents', 'tools', 'panel', 'side']],
+      ['background', 'Background tasks', 'The session’s background tasks', ['tools/agents/background', 'tools/agents', 'panel', 'side']],
+      ['files', 'Files', 'The scratch repository’s files', ['tools/code/files', 'tools/code', 'panel', 'side']],
+    ];
+    for (const [surface, title, state, folders] of PANELS) {
+      await shot(page, { id: `panel-${surface}`, title: `Right column, ${title}`, how: `${title} from the title bar’s surface buttons (View menu)`, state, folders }, async () => {
+        await openSession(page, ids.agents!);
+        await sideSurface(app, page, surface);
+        if (surface === 'subagents') {
+          const folded = page.locator('[data-region="panel"]:not([inert]) [data-surface="subagents"] button[aria-expanded="false"]');
+          for (let i = 0; i < 3 && (await folded.count()) > 0; i++) await folded.first().click();
+          await page.waitForTimeout(600);
+        }
+      });
+    }
+    await shot(page, r2({ id: 'r2-scm-push-sheet', title: 'Source control, the Push sheet', how: 'Source control › Push', state: 'One commit ahead of a local origin; the sheet open, nothing pushed', folders: ['tools/scm'] }), async () => {
+      await openSession(page, ids.agents!);
+      await sideSurface(app, page, 'source-control');
+      await page.locator('[data-scm-remote-action="push"]').first().click();
+      await expect(page.locator('[data-scm-sheet="push"]').first()).toBeVisible({ timeout: 10_000 });
+    });
+    await page.keyboard.press('Escape');
+    await shot(page, { id: 'panel-subagents-tools-session', title: 'Right column, Subagents, on a session with no agents', how: 'Subagents with the tool-heavy session in front', state: 'An empty Subagents panel', folders: ['tools/agents', 'tools', 'panel'] }, async () => {
+      await openSession(page, ids.tools!);
+      await sideSurface(app, page, 'subagents');
+    });
+    await reset(page);
+
+    // ---- the Artifacts library and an editor ----
+    const created: string[] = [];
+    if (wanted('artifacts-library') || wanted('artifacts-library-hover') || wanted('artifact-document')) {
+      for (const [kind, title] of [['document', 'Launch notes'], ['presentation', 'Quarterly review'], ['dashboard', 'Usage by week'], ['design', 'Sidebar redesign']] as const) {
+        const result = await invoke(page, 'artifacts.create', { kind, title } as never);
+        if (result.ok) created.push((result.value as { artifact: { id: string } }).artifact.id);
+        else console.log(`[words] artifacts.create ${kind}: ${result.error.message}`);
+      }
+      const html = await invoke(page, 'artifacts.create', { kind: 'html', title: 'Status page', content: { bytes: new TextEncoder().encode('<!doctype html><h1>Status</h1>'), name: 'index.html' } } as never);
+      if (html.ok) created.push((html.value as { artifact: { id: string } }).artifact.id);
+    }
+    await shot(page, { id: 'artifacts-library', title: 'Artifacts library', how: 'Artifacts in the sidebar', state: 'Five artifacts made in this profile, plus the seeded design systems', folders: ['library', 'artifacts', 'destination'] }, async () => {
+      await destination(page, 'artifacts');
+      await page.waitForTimeout(1500);
+    });
+    await shot(page, { id: 'artifacts-library-hover', title: 'Artifacts library, pointer on a row', how: 'Hover a row in the Artifacts library', state: 'The first row under the pointer', folders: ['library'], hover: true }, async () => {
+      if ((await page.locator('[data-library]').count()) === 0) await destination(page, 'artifacts');
+      await page.locator('[data-library] article[data-artifact-row]').first().hover();
+      await page.waitForTimeout(1200);
+    });
+    await shot(page, { id: 'artifact-document', title: 'A document artifact open', how: 'Click a document in the Artifacts library', state: 'The document editor with one paragraph typed', folders: ['artifacts', 'library'] }, async () => {
+      if ((await page.locator('[data-library]').count()) === 0) await destination(page, 'artifacts');
+      await page.locator(`[data-library] article[data-artifact-row="${created[0]}"]`).click();
+      const text = page.locator('.ds-doc .ProseMirror').first();
+      await expect(text).toBeVisible({ timeout: 20_000 });
+      await text.click();
+      await page.keyboard.type('The launch moves to Friday. Owners confirm by Wednesday.');
+      await page.locator('[data-region="main"]').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+    });
+    await reset(page);
+    // last: the dialog does not always close on Escape
+    await shot(page, { id: 'permissions-dialog', title: 'Permissions (the /permissions dialog)', how: 'Session info › Permissions › /permissions, or /permissions in the message box', state: 'The finished agents session’s permissions, before its rules are read', folders: ['widgets', 'panel'] }, async () => {
+      await openSession(page, ids.agents!);
+      await sideSurface(app, page, 'session-info');
+      await page.locator('[data-region="panel"]:not([inert]) [data-surface="session-info"]').getByText('/permissions', { exact: true }).first().click();
+      // its rules are read on request, which relaunches the session's engine: a replayed session's cannot, so the dialog
+      // is taken as it opens
+      await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 10_000 });
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Round 2, launch 3: recorded engine transcripts read from disk (the repository's transcript fixtures, their cwd and
+// session id moved onto the scratch repository), and the press-to-open menus and popovers around a session.
+// ======================================================================================================================
+const r2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 2 });
+const DISK: { key: string; file: string; title: string; state: string; folders: string[] }[] = [
+  { key: 'subagents', file: 'test/fixtures/transcripts/subagent-parent.jsonl', title: 'A session whose agents have finished', state: 'Two agents dispatched and finished, with their own transcripts on disk', folders: ['transcript', 'transcript/view', 'tools/agents'] },
+  { key: 'browser', file: 'test/fixtures/transcripts/p1-maws-browser.jsonl', title: 'A session that drove the browser', state: 'A recorded session whose turns used the browser tools', folders: ['transcript', 'transcript/view', 'tools/browser', 'computer-use'] },
+  { key: 'ask', file: 'test/fixtures/transcripts/p1-maws-ask-async.jsonl', title: 'A session that asked the person questions', state: 'A recorded session with to-human questions and answers', folders: ['transcript', 'transcript/view', 'owner', 'attention'] },
+  { key: 'artifacts', file: 'test/fixtures/transcripts/p1-maws-artifacts.jsonl', title: 'A session that made an artifact', state: 'A recorded session that created, screenshotted and updated an artifact', folders: ['transcript', 'transcript/view', 'tools/maws', 'artifacts'] },
+  { key: 'compact', file: 'test/fixtures/transcripts/w1-compact.jsonl', title: 'A session that was compacted', state: 'A recorded session with a compaction boundary', folders: ['transcript', 'transcript/view'] },
+  { key: 'hooks', file: 'test/fixtures/transcripts/w1-hooks-blocking.jsonl', title: 'A session whose hook blocked', state: 'A recorded session with a blocking hook', folders: ['transcript', 'transcript/view'] },
+  { key: 'interrupted', file: 'test/fixtures/transcripts/interrupt-marker.jsonl', title: 'A session the person interrupted', state: 'A recorded session with an interrupt marker', folders: ['transcript', 'transcript/view'] },
+  { key: 'errors', file: 'test/fixtures/transcript-d1-api-errors.jsonl', title: 'A session with API errors', state: 'Synthetic transcript with API error lines', folders: ['transcript', 'transcript/view'] },
+  { key: 'notices', file: 'test/fixtures/transcript-d1-notices.jsonl', title: 'A session with notice lines', state: 'Synthetic transcript of system notices', folders: ['transcript', 'transcript/view'] },
+  { key: 'local', file: 'test/fixtures/transcript-d1-local-commands.jsonl', title: 'A session with local commands', state: 'Synthetic transcript of typed local commands and their output', folders: ['transcript', 'transcript/view'] },
+  { key: 'agentfail', file: 'test/fixtures/transcript-d1-agent-failure.jsonl', title: 'A session whose agent failed', state: 'Synthetic transcript with a failed agent', folders: ['transcript', 'transcript/view', 'tools/agents'] },
+  { key: 'tohuman', file: 'test/fixtures/transcript-to-human-final.jsonl', title: 'A session that reported to the person', state: 'Synthetic transcript ending in a to-human final message (the report view)', folders: ['transcript', 'owner', 'owner/report'] },
+];
+const diskId = (i: number) => `0b2c3d4e-0000-4000-8000-0000000002${String(i).padStart(2, '0')}`;
+// three sessions to a project at most, so every one is a row in the sidebar's tree (it lists five, then Show more)
+function seedDisk(config: string, repos: string[]) {
+  const move = (line: string, id: string, repo: string) => {
+    if (!line.trim()) return line;
+    const row = JSON.parse(line) as Record<string, unknown>;
+    if ('cwd' in row) row.cwd = repo;
+    if ('sessionId' in row) row.sessionId = id;
+    return JSON.stringify(row);
+  };
+  DISK.forEach((d, i) => {
+    const id = diskId(i);
+    const repo = repos[i % repos.length]!;
+    const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    const lines = readFileSync(join(REPO_ROOT, d.file), 'utf8').split('\n');
+    writeFileSync(join(project, `${id}.jsonl`), lines.map((l) => move(l, id, repo)).join('\n'));
+    if (d.key === 'subagents') {
+      const from = join(REPO_ROOT, 'test/fixtures/transcripts/9a1d4262-0b43-46ad-acb9-5982f31d209c/subagents');
+      const to = join(project, id, 'subagents');
+      mkdirSync(to, { recursive: true });
+      for (const name of readdirSync(from)) {
+        const text = readFileSync(join(from, name), 'utf8');
+        writeFileSync(join(to, name), name.endsWith('.jsonl') ? text.split('\n').map((l) => move(l, id, repo)).join('\n') : text);
+      }
+    }
+  });
+}
+
+test('round 2: recorded transcripts, menus and popovers around a session', async () => {
+  test.setTimeout(900_000);
+  const repoOf = (name: string) => (existsSync(join(SCRATCH, 'repos', name)) ? join(SCRATCH, 'repos', name) : makeRepo(name));
+  const repos = ['MAWS', 'codex_somersault', 'claude-usage-menubar', 'stages'].map(repoOf);
+  const config = join(SCRATCH, 'claude-config-r2');
+  rmSync(config, { recursive: true, force: true });
+  seedDisk(config, repos);
+  trust(config);
+  const usage = existsSync(join(SCRATCH, 'claude-usage')) ? join(SCRATCH, 'claude-usage') : usageFixture();
+  mkdirSync(join(SCRATCH, 'profile-r2'), { recursive: true });
+  const maws = await launchMaws({ userData: join(SCRATCH, 'profile-r2'), env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage }) });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    const ids: Record<string, string> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      DISK.forEach((d, i) => (ids[d.key] = sessions.find((s) => s.engineSessionId === diskId(i))?.appId ?? ''));
+      return DISK.every((d) => ids[d.key]);
+    }, { timeout: 30_000 }).toBe(true);
+    const pane = () => page.locator('[data-region="main"] [data-pane="0"]');
+    const unfoldAll = async () => {
+      for (let i = 0; i < 12; i++) {
+        const closed = pane().locator('.transcript-divider .transcript-disclosure[aria-expanded="false"]');
+        if ((await closed.count()) === 0) break;
+        await closed.first().click().catch(() => undefined);
+        await page.waitForTimeout(300);
+      }
+    };
+    for (const d of DISK) {
+      await shot(page, r2({ id: `r2-disk-${d.key}`, title: d.title, how: 'Click the session in the sidebar', state: `${d.state}; every turn unfolded`, folders: d.folders }), async () => {
+        await openSession(page, ids[d.key]!);
+        await expect(pane().locator('[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+        await unfoldAll();
+      });
+    }
+    await shot(page, r2({ id: 'r2-subagents-finished', title: 'Right column, Subagents, two finished agents', how: 'The agents session, Subagents in the right column', state: 'Two finished agents read from disk', folders: ['tools/agents', 'panel', 'side'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await sideSurface(app, page, 'subagents');
+      const folded = page.locator('[data-region="panel"]:not([inert]) [data-surface="subagents"] button[aria-expanded="false"]');
+      for (let i = 0; i < 3 && (await folded.count()) > 0; i++) await folded.first().click();
+    });
+    await shot(page, r2({ id: 'r2-subagent-page', title: 'Right column, Subagents, one agent opened', how: 'Click an agent in the Subagents panel', state: 'The first finished agent’s page', folders: ['tools/agents', 'panel', 'side'] }), async () => {
+      const surface = page.locator('[data-region="panel"]:not([inert]) [data-surface="subagents"]');
+      if ((await surface.count()) === 0) await sideSurface(app, page, 'subagents');
+      await surface.locator('[data-agent-row]').first().click();
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+    await menu(app, 'panel.toggle').catch(() => undefined);
+
+    // the press-to-open places around a session, on the agents session
+    const toolbar = () => pane().locator('[role="toolbar"]').first();
+    await shot(page, r2({ id: 'r2-cards-unfolded', title: 'Session cards, every card unfolded', how: 'Open each card in the right column', state: 'Environment, Context and Connectors open on a finished session', folders: ['side', 'panel', 'panel/summary'] }), async () => {
+      await openSession(page, ids.subagents!);
+      const cards = page.locator('[data-region="main"] aside, [data-region="main"] [aria-label="Session cards"]').first();
+      for (const button of await page.locator('[data-region="main"] section > h3 > button[aria-expanded="false"]').all()) await button.click().catch(() => undefined);
+      void cards;
+      await page.waitForTimeout(800);
+    });
+    await shot(page, r2({ id: 'r2-model-menu', title: 'Model menu, opened from the model chip', how: 'Click the model chip under the message box', state: 'The model and effort menu of a finished session', folders: ['composer/frame', 'widgets'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await pane().locator('[contenteditable="true"]').first().click();
+      await toolbar().locator('button[aria-haspopup="dialog"]:not([data-context-ring])').last().click();
+      await page.waitForTimeout(1200);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-context-popover', title: 'Context popover, from the ring', how: 'Click the ring at the end of the row under the message box', state: 'The context breakdown of a finished session', folders: ['composer/frame', 'statusline'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await pane().locator('[data-context-ring]').first().click();
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-plus-menu', title: 'Message box, the + menu', how: 'Click + under the message box', state: 'The + menu of a finished session', folders: ['composer/frame', 'composer'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await pane().locator('[contenteditable="true"]').first().click();
+      const tools = pane().locator('[role="toolbar"][aria-label="Composer tools"]');
+      await ((await tools.count()) ? tools : pane().locator('[data-composer]').last()).locator('button').first().click();
+      await page.waitForTimeout(1000);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-mention-menu', title: 'Mention menu (typing @)', how: 'Type @ in the message box', state: 'The mention menu over the scratch repository', folders: ['composer', 'composer/editor'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await pane().locator('[contenteditable="true"]').first().click();
+      await page.keyboard.type('@');
+      await page.waitForTimeout(2000);
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Backspace');
+    await shot(page, r2({ id: 'r2-slash-menu', title: 'Slash command menu (typing /)', how: 'Type / in the message box', state: 'The command list of a finished session', folders: ['composer', 'palette'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await pane().locator('[contenteditable="true"]').first().click();
+      await page.keyboard.type('/');
+      await page.waitForTimeout(2000);
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Backspace');
+    await reset(page);
+    await shot(page, r2({ id: 'r2-usage-popover', title: 'Usage ring popover', how: 'Click the ring at the right end of the title bar', state: 'The ClaudeUsage fixture, newest reading two minutes old', folders: ['usage'] }), async () => {
+      await page.locator('[data-toolbar] [data-usage-ring]').first().click();
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-palette', title: 'Command palette', how: 'View › Command palette (⌘K)', state: 'The palette open with nothing typed', folders: ['palette'] }), async () => {
+      await menu(app, 'palette.open');
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-shortcuts', title: 'The shortcuts window', how: 'Help › Keyboard shortcuts', state: 'The shortcuts overview', folders: ['keymap'] }), async () => {
+      await menu(app, 'shortcuts.open');
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+    // the in-app browser: a tab that never navigated, and a page that failed to load (127.0.0.1:9 refuses on macOS)
+    const browserTab = async (url: string | null) => {
+      await openSession(page, ids.browser!);
+      await sideSurface(app, page, 'browser');
+      value(await invoke(page, 'browser.tabs.open', { appSessionId: ids.browser as never, url, select: true } as never));
+      await page.waitForTimeout(3000);
+    };
+    await shot(page, r2({ id: 'r2-browser-blank', title: 'Browser, a tab that never navigated', how: 'Browser in the right column, a new tab', state: 'A new tab with no address', folders: ['tools/browser'] }), async () => {
+      await browserTab(null);
+    });
+    await shot(page, r2({ id: 'r2-browser-failed', title: 'Browser, a page that failed to load', how: 'Browser in the right column, an address that refuses', state: 'http://127.0.0.1:9/ refused the connection', folders: ['tools/browser'] }), async () => {
+      await browserTab('http://127.0.0.1:9/');
+      await expect(page.locator('[data-browser-page^="error"]').first()).toBeAttached({ timeout: 30_000 });
+    });
+    await reset(page);
+    await menu(app, 'panel.toggle').catch(() => undefined);
+    await shot(page, r2({ id: 'r2-session-menu', title: 'A session row’s menu', how: 'Right-click a session in the sidebar', state: 'The menu of a finished session', folders: ['sidebar', 'sessions'] }), async () => {
+      await (await sidebarRow(page, { appSessionId: ids.subagents! })).click({ button: 'right' });
+      await page.waitForTimeout(1000);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-project-menu', title: 'A project row’s menu', how: 'Right-click a project in the sidebar', state: 'The menu of the scratch project', folders: ['sidebar'] }), async () => {
+      await sidebar(page).locator('[data-kind="project"] [data-project-line]').first().click({ button: 'right' });
+      await page.waitForTimeout(1000);
+    });
+    await reset(page);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Round 2, launch 4: work in progress, from recorded replays that hold where the recording waited for the app (a
+// replay with no exit row waits at its next `out` row, so its agents and shells stay running), and the artifact
+// editors seeded through their e2e seams.
+// ======================================================================================================================
+const UXWAVE = 'spikes/protocol-probe/fixtures/pass3/uxwave/uxwave-subagent-tasks-nodelay.jsonl';
+test('round 2: running agents and shells, the queue, artifact editors', async () => {
+  test.setTimeout(900_000);
+  const repo = existsSync(join(SCRATCH, 'repos', 'MAWS')) ? join(SCRATCH, 'repos', 'MAWS') : makeRepo('MAWS');
+  const config = join(SCRATCH, 'claude-config-r2run');
+  rmSync(config, { recursive: true, force: true });
+  const engineIds = { run: '0c3d4e5f-0000-4000-8000-000000000301', queue: '0c3d4e5f-0000-4000-8000-000000000302' };
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  for (const [key, id] of Object.entries(engineIds)) {
+    const row = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: key === 'run' ? 'Agents and a shell at work' : 'Count slowly' }, uuid: id.replace(/^0c/, '1c'), timestamp: '2026-09-29T11:00:00.000Z', cwd: repo, sessionId: id, version: '2.1.283' };
+    writeFileSync(join(project, `${id}.jsonl`), `${JSON.stringify(row)}\n`);
+  }
+  trust(config);
+  mkdirSync(join(SCRATCH, 'journals'), { recursive: true });
+  const usage = existsSync(join(SCRATCH, 'claude-usage')) ? join(SCRATCH, 'claude-usage') : usageFixture();
+  mkdirSync(join(SCRATCH, 'profile-r2run'), { recursive: true });
+  const maws = await launchMaws({ userData: join(SCRATCH, 'profile-r2run'), env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage }) });
+  const { app, page } = maws;
+  const pane = () => page.locator('[data-region="main"] [data-pane="0"]');
+  const status = async (id: string) => value(await invoke(page, 'session.status', { appSessionId: id as never }));
+  try {
+    await size(maws);
+    await light(page);
+    const ids: Record<string, string> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const [key, id] of Object.entries(engineIds)) ids[key] = sessions.find((s) => s.engineSessionId === id)?.appId ?? '';
+      return Object.values(ids).every(Boolean);
+    }, { timeout: 30_000 }).toBe(true);
+
+    // ---- agents and a shell running: the uxwave recording, sent its first two prompts, holds at its third
+    const journal = join(SCRATCH, 'journals', 'uxwave-subagent-tasks-nodelay.jsonl');
+    cpSync(join(REPO_ROOT, UXWAVE), journal);
+    const prompts = promptsOf(UXWAVE);
+    let running = false;
+    try {
+      await openSession(page, ids.run!);
+      await launchReady(page, ids.run!, journal, { cwd: repo });
+      for (const content of prompts.slice(0, 2)) {
+        value(await invoke(page, 'session.send', { appSessionId: ids.run as never, content }));
+        await expect.poll(async () => (await status(ids.run!)).turn, { timeout: 60_000 }).toBeNull();
+      }
+      // no rename here: a live session's rename is written to its engine, which the replay does not expect
+      running = true;
+    } catch (error) {
+      console.log(`[words] uxwave replay: ${(error as Error).message.split('\n')[0]}`);
+    }
+    const need = () => { if (!running) throw new Error('the held replay did not reach its second hold'); };
+    await shot(page, r2({ id: 'r2-run-cards', title: 'Session cards while agents run', how: 'A session whose agents are still at work', state: 'Two background agents dispatched by the recorded session, still running; the turn has ended', folders: ['side', 'panel', 'panel/summary', 'tools/agents'] }), async () => {
+      need();
+      await openSession(page, ids.run!);
+      for (const button of await page.locator('[data-region="main"] section > h3 > button[aria-expanded="false"]').all()) await button.click().catch(() => undefined);
+    });
+    await shot(page, r2({ id: 'r2-run-transcript', title: 'The transcript while agents run', how: 'The same session, its turns unfolded', state: 'Two agents running in the background', folders: ['transcript', 'transcript/view', 'tools/agents'] }), async () => {
+      need();
+      await openSession(page, ids.run!);
+      for (const d of await pane().locator('.transcript-divider .transcript-disclosure[aria-expanded="false"]').all()) await d.click().catch(() => undefined);
+    });
+    await shot(page, r2({ id: 'r2-run-subagents', title: 'Right column, Subagents, agents running', how: 'Subagents in the right column', state: 'Two agents running', folders: ['tools/agents', 'panel', 'side'] }), async () => {
+      need();
+      await sideSurface(app, page, 'subagents');
+    });
+    await shot(page, r2({ id: 'r2-run-subagent-page', title: 'Right column, Subagents, a running agent opened', how: 'Click a running agent in Subagents', state: 'One running agent’s page with its message box', folders: ['tools/agents', 'panel', 'side'] }), async () => {
+      need();
+      const surface = page.locator('[data-region="panel"]:not([inert]) [data-surface="subagents"]');
+      if ((await surface.count()) === 0) await sideSurface(app, page, 'subagents');
+      await surface.locator('[data-agent-row]').first().click();
+      await page.waitForTimeout(1500);
+    });
+    await shot(page, r2({ id: 'r2-run-background', title: 'Right column, Background tasks, agents running', how: 'Background tasks in the right column', state: 'The running work of the session', folders: ['tools/agents/background', 'tools/agents', 'panel', 'side'] }), async () => {
+      need();
+      await sideSurface(app, page, 'background');
+    });
+    await menu(app, 'panel.toggle').catch(() => undefined);
+    // the third prompt starts a shell in the background and an agent asks to run a command: it holds at that answer
+    let third = false;
+    if (running) {
+      try {
+        value(await invoke(page, 'session.send', { appSessionId: ids.run as never, content: prompts[2]! }));
+        await expect(page.locator('[data-region="main"] [data-request-card]').first()).toBeVisible({ timeout: 60_000 });
+        third = true;
+      } catch (error) {
+        console.log(`[words] uxwave third prompt: ${(error as Error).message.split('\n')[0]}`);
+      }
+    }
+    await shot(page, r2({ id: 'r2-run-approval-cards', title: 'A running session waiting on an approval, with its cards', how: 'The same session after its third prompt', state: 'Agents running, a background shell started, a command waiting for approval', folders: ['request-card', 'side', 'panel/summary', 'tools/agents'] }), async () => {
+      if (!third) throw new Error('the held replay did not reach its approval');
+      await openSession(page, ids.run!);
+      for (const button of await page.locator('[data-region="main"] section > h3 > button[aria-expanded="false"]').all()) await button.click().catch(() => undefined);
+    });
+    await shot(page, r2({ id: 'r2-deny-reason', title: 'An approval with the deny-with-reason field open', how: 'Click the deny-with-reason field of an approval card', state: 'The field focused, nothing typed', folders: ['request-card'] }), async () => {
+      if (!third) throw new Error('the held replay did not reach its approval');
+      // the card's first button opens the reason box ("Deny… with a reason", drawn first in its controls row)
+      await page.locator('[data-region="main"] [data-request-card] button.mr-auto').first().evaluate((el) => (el as HTMLButtonElement).click());
+      await expect(page.locator('[data-region="main"] [data-request-card] textarea').first()).toBeVisible({ timeout: 5_000 });
+      await page.waitForTimeout(800);
+    });
+    await shot(page, r2({ id: 'r2-run-background-shell', title: 'Right column, Background tasks, a shell and agents running', how: 'Background tasks in the right column', state: 'A background shell and agents running', folders: ['tools/agents/background', 'panel', 'side'] }), async () => {
+      if (!third) throw new Error('the held replay did not reach its approval');
+      await sideSurface(app, page, 'background');
+    });
+    await menu(app, 'panel.toggle').catch(() => undefined);
+
+    // ---- the queue: a counting turn held at its next user write; one message for the next step, one for after the turn
+    let counting = false;
+    try {
+      await openSession(page, ids.queue!);
+      await launchReady(page, ids.queue!, steerStopJournal(join(SCRATCH, 'journals'), 'steer'), { cwd: repo });
+      const box = pane().locator('[contenteditable="true"]').first();
+      await box.click();
+      await page.keyboard.type('Count to 30 slowly');
+      await page.keyboard.press('Enter');
+      await expect.poll(async () => (await status(ids.queue!)).turn, { timeout: 30_000 }).not.toBeNull();
+      await page.keyboard.type('Use one Bash call for the rest.');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(800);
+      await page.keyboard.type('Then sum the numbers.');
+      await page.keyboard.press('Meta+Enter');
+      await page.waitForTimeout(800);
+      counting = true;
+    } catch (error) {
+      console.log(`[words] queue: ${(error as Error).message.split('\n')[0]}`);
+    }
+    await shot(page, r2({ id: 'r2-queue', title: 'The message box mid-turn with two queued messages', how: 'Type while a turn runs: Enter for the next step, ⌘Enter for after the turn', state: 'A turn running; one message queued for the next step, one for after the turn', folders: ['composer', 'composer/queue'] }), async () => {
+      if (!counting) throw new Error('the counting turn did not start');
+      await openSession(page, ids.queue!);
+    });
+    await shot(page, r2({ id: 'r2-queue-hover', title: 'The queue, pointer on a queued message', how: 'Hover a queued message', state: 'The pointer on the first queued row', folders: ['composer/queue'], hover: true }), async () => {
+      if (!counting) throw new Error('the counting turn did not start');
+      await page.locator('[data-region="main"] li[data-queue-state]').first().hover();
+      await page.waitForTimeout(1000);
+    });
+    await shot(page, r2({ id: 'r2-history-step', title: 'The message box stepping back through history (↑)', how: 'Press ↑ in an empty message box', state: 'The box showing an earlier message of the session', folders: ['composer', 'composer/editor'] }), async () => {
+      if (!counting) throw new Error('the counting turn did not start');
+      await openSession(page, ids.queue!);
+      const box = pane().locator('[contenteditable="true"]').first();
+      await box.click();
+      await page.keyboard.press('ArrowUp');
+      await page.waitForTimeout(800);
+    });
+    await page.keyboard.press('Escape');
+    await reset(page);
+
+    // ---- artifact editors, seeded through their seams
+    const created: Record<string, string> = {};
+    const make = async (kind: string, title: string) => {
+      const result = await invoke(page, 'artifacts.create', { kind, title } as never);
+      if (!result.ok) throw new Error(result.error.message);
+      return (result.value as { artifact: { id: string } }).artifact.id;
+    };
+    const openArtifact = async (id: string) => {
+      await destination(page, 'artifacts');
+      await page.locator(`[data-library] article[data-artifact-row="${id}"]`).click();
+      await expect(page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`)).toBeVisible({ timeout: 20_000 });
+      await page.waitForTimeout(1500);
+    };
+    try {
+      created.deck = await make('presentation', 'Quarterly review');
+      await page.evaluate(([a, f]) => (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<void> } }).__maws_presentations.seed(a, f), [created.deck, benchDeckFiles(6)] as const);
+      created.design = await createDesign(page, 'Launch screens', DESIGN_FILES);
+      created.doc = await make('document', 'Launch notes');
+    } catch (error) {
+      console.log(`[words] seeding: ${(error as Error).message.split('\n')[0]}`);
+    }
+    await shot(page, r2({ id: 'r2-deck', title: 'A presentation open in the slides editor', how: 'Click a presentation in the Artifacts library', state: 'A six-slide deck, its first slide selected', folders: ['tools/presentation', 'artifacts'] }), async () => {
+      await openArtifact(created.deck!);
+      await expect(page.locator('[data-deck-editor]').first()).toBeVisible({ timeout: 20_000 });
+    });
+    await shot(page, r2({ id: 'r2-deck-element', title: 'Slides editor, an element selected', how: 'Click an element on the slide', state: 'The inspector for a selected element', folders: ['tools/presentation'] }), async () => {
+      const box = await page.locator('[data-deck-editor]').first().boundingBox();
+      if (!box) throw new Error('no deck editor');
+      // the slide's title, where the first slide draws it (the stage's left half, a little below the middle)
+      await page.mouse.click(box.x + box.width * 0.35, box.y + box.height * 0.5);
+      await page.waitForTimeout(1200);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-design', title: 'A design open in the workbench', how: 'Click a design in the Artifacts library', state: 'Five boards, one of them held because its HTML is broken', folders: ['tools/design', 'artifacts'] }), async () => {
+      await openArtifact(created.design!);
+      await expect(page.locator('[data-design-editor]').first()).toBeVisible({ timeout: 20_000 });
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-design-system', title: 'A design system page', how: 'Click the MAWS design system in the Artifacts library', state: 'The built-in MAWS design system', folders: ['tools/design', 'artifacts', 'library'] }), async () => {
+      await destination(page, 'artifacts');
+      const rows = page.locator('[data-library] article[data-artifact-row]');
+      const n = await rows.count();
+      await rows.nth(n - 2).click();
+      await page.waitForTimeout(2500);
+    });
+    await reset(page);
+    await shot(page, r2({ id: 'r2-doc-versions', title: 'A document with a saved version, its history open', how: 'Document, toolbar › Version history', state: 'One paragraph, one saved version, the version history rail open', folders: ['tools/document', 'artifacts'] }), async () => {
+      await openArtifact(created.doc!);
+      const text = page.locator('.ds-doc .ProseMirror').first();
+      await text.click();
+      await page.keyboard.type('The launch moves to Friday.');
+      await page.waitForTimeout(1500);
+      value(await invoke(page, 'artifacts.saveVersion', { artifactId: created.doc!, label: 'Draft' } as never));
+      await text.click();
+      await page.keyboard.type(' Owners confirm by Wednesday.');
+      await page.waitForTimeout(1500);
+      // the toolbar's history button: the last button of the formatting toolbar's group that holds it
+      const history = page.locator('[data-region="main"] [role="toolbar"] button[aria-label*="istory"], [data-region="main"] [role="toolbar"] button:has-text("History")').first();
+      await history.click();
+      await page.waitForTimeout(1500);
+    });
+    await reset(page);
+  } finally {
+    await maws.cleanup();
+  }
+});
