@@ -1349,18 +1349,17 @@ test('(export folder) the last export’s folder, kept as main’s layout key, s
 // opens the library's tab so that it writes its layout whole, and quits: the file still holds the key as written, and
 // the peer's page read 1 (its `getZoomFactor()` in main; this build's zoom is isolated, so Chromium kept none of it);
 // this build launches again at 125 % (main's factor and the window's zoom store). Skipped only for a peer whose
-// LayoutKeySchema names the key: a skipped scene is not evidence. The runs of record are against build F and build M
-// (`--peer-exact f1852de3a`, `--peer-exact 2c7044231`), the master this landing merges into, and master at
-// `b89d6d1d7`; none of the four names the key. It replaces M1's "(zoom probe)", whose lines FINDINGS.md keeps.
+// LayoutKeySchema names the key (`layoutSchemaNames`, U7a's form of `namesExportFolder`): a skipped scene is not
+// evidence. The runs of record are against build F and build M (`--peer-exact f1852de3a`, `--peer-exact 2c7044231`),
+// the master this landing merges into, and master at `b89d6d1d7`; none of the four names the key. It replaces M1's
+// "(zoom probe)", whose lines FINDINGS.md keeps.
 const WINDOW_ZOOM_KEY = 'window.zoom';
-const namesWindowZoom = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/layout.ts'), 'utf8').includes(`'${WINDOW_ZOOM_KEY}'`);
-const storedLayout = (userData: string) => JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
 // The factor main holds for the app's own window (the visible one, as the scenes' other helpers find it).
 const mainFactorOf = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents.getZoomFactor());
 
 test('(zoom, both ways) the window’s zoom, kept as main’s layout key, survives the peer’s launch on the profile, which does not name the key and opens at 100 %, and this build opens at it again', async () => {
   const { here, peer } = builds();
-  test.skip(namesWindowZoom(peer), `the peer (wire ${wireOf(peer)}) names ${WINDOW_ZOOM_KEY} in its LayoutKeySchema: there is no build that lacks the key to cross`);
+  test.skip(layoutSchemaNames(peer, WINDOW_ZOOM_KEY), `the peer (wire ${wireOf(peer)}) names ${WINDOW_ZOOM_KEY} in its LayoutKeySchema: there is no build that lacks the key to cross`);
   await withScratch('xb-window-zoom', async (s) => {
     // this build: 125 % through View's items, and the key in layout.json
     const first = await s.launch();

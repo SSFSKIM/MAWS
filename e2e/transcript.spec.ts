@@ -3082,13 +3082,24 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
     const jump = s.pane.getByRole('button', { name: 'Jump to latest' });
     const heights = () => scroller.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, gap: el.scrollHeight - el.clientHeight - el.scrollTop }));
     let sent = 0;
-    // one turn: sent, its rows awaited by the list's growth, then `during` (a key, while the stream lands) has run
+    // one turn: sent, `during` run while its rows land (a key), the session idle again, and the list grown by its rows
+    // and settled (two reads in a row the same height)
     const turn = async (during?: () => Promise<void>) => {
       const before = (await heights()).scroll;
       value(await invoke(page, 'session.send', { appSessionId: id, content: `turn ${++sent}` }));
       await during?.();
       await idle(s, id);
-      await expect.poll(async () => (await heights()).scroll, { message: `turn ${sent}'s rows grew the list` }).toBeGreaterThan(before);
+      let last = before;
+      await expect
+        .poll(
+          async () => {
+            const previous = last;
+            last = (await heights()).scroll;
+            return last > before && last === previous;
+          },
+          { message: `turn ${sent}'s rows grew the list, and it settled` },
+        )
+        .toBe(true);
     };
     // the transcript filled past its viewport, so following is a scroll the list keeps doing
     while (sent < 30) {
