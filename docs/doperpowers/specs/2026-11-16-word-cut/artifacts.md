@@ -4,7 +4,7 @@
 
 62 items: 33 cut, 1 reworded, 28 stay. Of the 34 that change, the owner saw 4 in a picture or ruled on them; 30 follow the pattern and were not seen.
 
-Against master (M0): 60 unchanged, 2 rewritten by the wave; 1 recorded for the owner. M0 added 6 rows for the UX wave's new text (0 cut, 1 reworded, 5 stay), listed at the end.
+Against master (M0): 60 unchanged, 2 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 6 rows for the UX wave's new text (0 cut, 1 reworded, 5 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -115,7 +115,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| G283 | the title at the left of the head | Artifacts | cut | The head no longer prints 'Artifacts' (the tab already says it); the heading stays for assistive tech. | seen | `src/renderer/src/library/copy.ts:86` | unchanged `src/renderer/src/library/copy.ts:94` | M5 · `artifacts-library` |
+| G283 | the title at the left of the head | Artifacts | cut | The head no longer prints 'Artifacts'; the heading stays for assistive tech. Artifacts is a page, not a tab: with W6 the title bar draws no name for it either, so the page names itself nowhere but in the sidebar's highlighted row, which the owner accepted on 2026-11-20 (W6). | seen | `src/renderer/src/library/copy.ts:86` | unchanged `src/renderer/src/library/copy.ts:94` | M5 · `artifacts-library` |
 | G284 | a button after the title, shown when other machines are known; its menu lists them | This Mac ▾ | stays | Stays. which machine the library shows (the owner brought back "This Mac", P29), and a way in | pattern | `src/renderer/src/library/copy.ts:95` | unchanged `src/renderer/src/library/copy.ts:103` | M5 · no scene: needs a session on another machine (wanted: the Artifacts library with a second machine known (the machine button after the title)) |
 | G285 | a four-part switch in the head | All · General · Pinned · By Space | stays | Stays. brought back on artifacts-library | brought back | `src/renderer/src/library/copy.ts:87` | unchanged `src/renderer/src/library/copy.ts:95` | M5 · `artifacts-library` |
 | G287 | a button after the search; its menu lists the seven kinds with counts | All types ▾ | cut | 'All types' is gone from the head; the kinds (with counts) are the second group of the funnel menu, and a chosen kind stands beside the search as a chip with its glyph that clears it. | seen | `src/renderer/src/library/copy.ts:91` | unchanged `src/renderer/src/library/copy.ts:99` | M5 · `artifacts-library` |
@@ -126,7 +126,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | G290 | a small heading over the strip, with the place it will file into | Make something new · General | stays | Stays. brought back on artifacts-library | brought back | `src/renderer/src/library/copy.ts:96` | unchanged `src/renderer/src/library/copy.ts:104` | M5 · `artifacts-library` |
-| G291 | seven cards always at the top of the list, each with a kind's name and two word buttons (Document, Presentation, Design, Design system, Dashboard, HTML page, File) | Document · New · Ask Claude | stays | Stays. brought back on artifacts-library | brought back | `src/renderer/src/library/copy.ts:98` | rewritten by the wave `src/renderer/src/library/MakeSomethingNew.tsx:162`: now "four cards, each the kind's name, its one-line blurb (Notes, specs and reports / A slide deck / Charts bound to data / Artboards on a canvas) and a Blank button; a More menu holds Design system, HTML page and Add a file…"; decided again (pattern): stays, The Make something new strip keeps its four cards (name, one-line blurb, Blank) and More as the wave draws them. **For the owner, not built: Spec names G291: U10b l6-artifacts-08 redrew the strip as four cards that ask, so the row's buttons (New, Ask Claude) are gone and the wave's text stands; any cut of the card blurbs would change text the wave fixed, so recorded for the owner, not built.** | M5 · `artifacts-library` |
+| G291 | seven cards always at the top of the list, each with a kind's name and two word buttons (Document, Presentation, Design, Design system, Dashboard, HTML page, File) | Document · New · Ask Claude | stays | Stays. brought back on artifacts-library | brought back | `src/renderer/src/library/copy.ts:98` | rewritten by the wave `src/renderer/src/library/MakeSomethingNew.tsx:162`: now "four cards, each the kind's name, its one-line blurb (Notes, specs and reports / A slide deck / Charts bound to data / Artboards on a canvas) and a Blank button; a More menu holds Design system, HTML page and Add a file…"; decided again (ruled): stays, The Make something new strip keeps its four cards (name, one-line blurb, Blank) and More as the wave draws them. Put to the owner: Spec names G291: U10b l6-artifacts-08 redrew the strip as four cards that ask, so the row's buttons (New, Ask Claude) are gone and the wave's text stands; any cut of the card blurbs would change text the wave fixed, so recorded for the owner, not built. **Ruled by the owner, 2026-11-20, card 3: kept, not cut (the four cards stay as the wave draws them).** | M5 · `artifacts-library` |
 
 ### Artifacts, the list
 
@@ -156,7 +156,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 ## The UX wave's new text (M0)
 
-Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master `028cecd10`, every row's basis is `pattern` (or `consent` for a consent text), and **Source** is the file and line on master.
+Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master `028cecd10`, every row's basis is `pattern` (or `consent` for a consent text, or `ruled` where the owner has since ruled on it), and **Source** is the file and line on master.
 
 ### An opened artifact
 

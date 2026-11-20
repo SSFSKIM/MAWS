@@ -32,7 +32,8 @@ LEGEND = (
 )
 M0_LEGEND = (
     "Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master "
-    f"`{data.get('master', '')}`, every row's basis is `pattern` (or `consent` for a consent text), and **Source** is the file and line on master.\n"
+    f"`{data.get('master', '')}`, every row's basis is `pattern` (or `consent` for a consent text, or `ruled` where the owner has since "
+    "ruled on it), and **Source** is the file and line on master.\n"
 )
 MILESTONE = {'settings': 'M1', 'session': 'M2', 'beside': 'M3', 'window': 'M4', 'typed': 'M4', 'customize': 'M4', 'artifacts': 'M5', 'editors': 'M5'}
 
@@ -60,6 +61,12 @@ def m0_cell(x):
         out += f": {m['why']}"
     if m.get('owner'):
         out += f" **For the owner, not built: {m['owner']}**"
+    if m.get('asked'):
+        out += f" Put to the owner: {m['asked'].rstrip('.')}."
+    if m.get('ruled'):
+        out += f" **Ruled by the owner, {m['ruled']}.**"
+    if m.get('note'):
+        out += f" **For the builder: {m['note']}**"
     if m.get('hold'):
         out += f" **Not built: {m['hold']}**"
     return out
@@ -77,7 +84,7 @@ def build_cell(x):
 def table(group):
     out = ['| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |', '|---|---|---|---|---|---|---|---|---|']
     for x in group:
-        after = x['after'] if x['decision'] != 'stays' else ('Stays. ' + x['why'] if x['why'] else 'Stays.')
+        after = x['after'] if x['decision'] != 'stays' else ('Stays. ' + (x['after'] or x['why'])).strip()
         if x.get('pending'):
             after += ' **Open with the owner; see the root document.**'
         out.append(f"| {x['id']} | {cell(x['where'])} | {cell(x['today'])} | {x['decision']} | {cell(after)} | {x['basis']} | `{x['source']}` | {cell(m0_cell(x))} | {cell(build_cell(x))} |")
@@ -117,9 +124,12 @@ for key, title in AREAS:
     statuses = collections.Counter((x.get('m0') or {}).get('status', 'not read') for x in rows)
     if any(x.get('m0') for x in rows):
         owner = sum(1 for x in rows if (x.get('m0') or {}).get('owner'))
+        ruled = sum(1 for x in rows + added if (x.get('m0') or {}).get('ruled'))
         new_by = collections.Counter(x['decision'] for x in added)
         out += [
-            'Against master (M0): ' + ', '.join(f'{n} {s}' for s, n in statuses.most_common()) + f'; {owner} recorded for the owner. '
+            'Against master (M0): ' + ', '.join(f'{n} {s}' for s, n in statuses.most_common())
+            + (f'; {owner} recorded for the owner' if owner or not ruled else '; none waits on the owner')
+            + (f'; {ruled} put to the owner (new rows included) and since ruled' if ruled else '') + '. '
             f'M0 added {len(added)} rows for the UX wave\'s new text ({new_by["cut"]} cut, {new_by["reword"]} reworded, {new_by["stays"]} stay), '
             'listed at the end.', '',
         ]
