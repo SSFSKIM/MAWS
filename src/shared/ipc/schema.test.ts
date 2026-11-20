@@ -308,6 +308,10 @@ describe('ipc schema validates both directions', () => {
       expect(follow({ file: '/w/guide.md' })).toBe(true);
       expect(follow({ agent: 'a1b2-C3_d4' })).toBe(true);
       expect(follow({ agent: 'x'.repeat(128) })).toBe(true);
+      // the branch panel: a subagent's source may name the conversation that drew the link; a file's may not
+      expect(follow({ agent: 'a1', engineSessionId: 'engine-session-1' })).toBe(true);
+      expect(follow({ agent: 'a1', engineSessionId: '' })).toBe(false);
+      expect(follow({ file: '/w/guide.md', engineSessionId: 'engine-session-1' })).toBe(false);
       for (const agent of ['a/b', 'a.b', '..', 'x'.repeat(129), '']) expect(follow({ agent }), agent).toBe(false);
       expect(follow({ file: '/w/guide.md', agent: 'a1' })).toBe(false);
       expect(follow({})).toBe(false);
