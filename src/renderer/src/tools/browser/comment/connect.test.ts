@@ -16,7 +16,7 @@ import { connectBrowserComment } from './connect';
 import { COMMENT_COPY } from './copy';
 import { registerDock } from './dock';
 import { resetCommentMode, useCommentMode } from './store';
-import { openCard, passKey, registerCardHost, resetPlaceNotes, setCommentText, useCommentCard } from '../../../side/card/store'; // UX wave U5a
+import { closeCard, editComment, openCard, passKey, registerCardHost, resetPlaceNotes, setCommentText, useCommentCard } from '../../../side/card/store'; // UX wave U5a
 import { useZoom } from '../../../stores/zoom'; // UX wave U6b-5b
 
 const A = 'app-a' as AppSessionId;
@@ -187,6 +187,39 @@ describe('connectBrowserComment', () => {
       useZoom.setState({ factor: 1 });
       expect(useCommentCard.getState().open).not.toBeNull();
       expect(pin()).toBeNull();
+    } finally {
+      useZoom.setState({ factor: 1 });
+      off();
+      undock();
+      useCommentCard.setState({ open: null, passes: new Map() });
+    }
+  });
+
+  // a draft left in its pass and reopened after a change of the factor opens on the element, as the open card stays on it
+  it('reopens a saved draft at its pin scaled to the factor now, and a draft from before any change at its own point', () => {
+    unregister();
+    unregister = registerCommentComposer(openCard);
+    const undock = registerDock(T1, 'pane-1');
+    const off = registerCardHost('pane-1', { kind: 'browser', subject: T1, holds: 'many' });
+    const key = passKey('browser', T1, A);
+    const pin = () => useCommentCard.getState().open?.rect ?? null;
+    const draft = () => {
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none', position: { x: 296, y: 342 } });
+      const { open } = useCommentCard.getState();
+      const id = open!.phase.kind === 'composing' ? open!.phase.comment : '';
+      setCommentText(key, id, 'Make it bolder');
+      closeCard();
+      return id;
+    };
+    try {
+      const first = draft();
+      editComment(key, first, 'pane-1');
+      expect(pin()).toEqual({ x: 296, y: 342, width: 0, height: 0 }); // the control: reopened at 100 %, its own point
+      closeCard();
+      useZoom.setState({ factor: 2 });
+      editComment(key, first, 'pane-1');
+      expect(pin()!.x).toBeCloseTo(148);
+      expect(pin()!.y).toBeCloseTo(171);
     } finally {
       useZoom.setState({ factor: 1 });
       off();
