@@ -981,7 +981,7 @@ test('zoom: a popup under its icon and the menus at their buttons, at 50 % and 1
       const times = (p: { x: number; y: number }, f: number) => ({ x: Math.round(p.x * f), y: Math.round(p.y * f) });
       for (const f of [0.5, 1.25] as const) {
         await zoomTo(s.maws.app, s.page, f);
-        await zoomLineGone(s.page);
+        await zoomLineGone(s.page, f);
         await expect(probe, `at ${f} the extension's icon inline`).toBeVisible();
         await expect(folder, `at ${f} the folder chip on the bar`).toBeVisible();
 

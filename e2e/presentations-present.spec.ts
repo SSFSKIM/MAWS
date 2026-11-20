@@ -326,12 +326,16 @@ test('zoom: the presenter’s window at 100 % while the app is at 150 %', async 
   const appPage = async () => (await windowFactors(app)).filter((w) => w.url.split('#', 1)[0] === own).map((w) => w.factor);
   await expect.poll(appPage, { message: 'the app’s page at 150 %' }).toEqual([1.5]);
 
+  // the audience, and the presenter where a second display calls for one, as the show's scene above polls for them
+  const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().length);
+  const windows = displays > 1 ? 2 : 1;
   await deckAction(page, 'Present');
-  await expect.poll(() => presentPages(app).length, { timeout: 15_000, message: 'the show’s windows opened' }).toBeGreaterThan(0);
+  await expect.poll(() => presentPages(app).length, { timeout: 15_000, message: 'the show’s windows opened' }).toBe(windows);
   const audience = presentPages(app).find((w) => w.url().includes('role=audience'))!;
   await expect(audience.locator('[data-present-view="audience"]')).toBeVisible({ timeout: 15_000 });
+  if (displays > 1) await expect(presentPages(app).find((w) => w.url().includes('role=presenter'))!.locator('[data-present-view="presenter"]')).toBeVisible({ timeout: 15_000 });
   const shown = async () => (await windowFactors(app)).filter((w) => w.url.includes('present=1')).map((w) => w.factor);
-  await expect.poll(shown, { message: 'every window of the show at 100 %' }).toEqual(Array.from({ length: presentPages(app).length }, () => 1));
+  await expect.poll(shown, { message: 'every window of the show at 100 %' }).toEqual(Array.from({ length: windows }, () => 1));
   expect(await appPage(), 'the app’s page still at 150 %').toEqual([1.5]);
 
   const closed = Promise.all(presentPages(app).map((w) => w.waitForEvent('close')));

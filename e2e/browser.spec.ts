@@ -1428,7 +1428,8 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
 // still of the pane at 150 % is the whole view at the same pixels per point as at 100 %, laid on the pane. At the
 // Mobile size, in a room the panel's Expand surface makes ample: the page reads 375 wide (376 where its element's
 // edges round over, as at 200 %), the chip says what the page reads, and the chip's menu offers exactly the sizes whose
-// width over the factor fits the room (decision 35). Every read is polled; no time is asserted.
+// width over the factor fits the room (decision 35). Before that, in a room the panel's separator sets to 390 to 450
+// CSS pixels, the chip's menu offers Mobile at 100 % and not at 80 %. Every read is polled; no time is asserted.
 
 // macOS's standard window buttons, in points (three 14-point circles, 54 points from the first's left to the last's
 // right): Electron reports only the group's position; M1's look confirmed where they stand
@@ -1462,7 +1463,7 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
     // the view, the cover's still under a menu, and the lights, at each factor
     for (const f of ZOOM_FACTORS) {
       await zoomTo(app, s.page, f);
-      await zoomLineGone(s.page);
+      await zoomLineGone(s.page, f);
       await expectOnPane(s, t, pane, 'panel', 5_000, f);
 
       await panel.getByRole('button', { name: 'Browser options', exact: true }).click();
@@ -1489,7 +1490,7 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
     const layer = s.page.getByRole('region', { name: 'Mark-up' });
     const stillOf = async (f: number) => {
       await zoomTo(app, s.page, f);
-      await zoomLineGone(s.page);
+      await zoomLineGone(s.page, f);
       await expectOnPane(s, t, pane, 'panel', 5_000, f);
       const bounds = (await viewOf(s, t))!.bounds!;
       await markUp.click();
@@ -1511,13 +1512,64 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
       expect(Math.abs(atLarger[side] - atActual[side]) / atActual[side], `the still's ${side} at 150 % covers the view as at 100 %: ${JSON.stringify({ atActual, atLarger })}`).toBeLessThanOrEqual(0.02);
     }
 
-    // the Mobile size in an ample room, at each factor
+    // the Mobile size: the chip's own menu in a room the panel's separator sets, then the chip in an ample room
     await zoomTo(app, s.page, 1);
+    await zoomLineGone(s.page, 1);
     await (await viewportItem(s, panel, 'mobile')).click();
     await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
-    await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
     const chip = panel.locator('[data-browser-viewport-chip]');
     const box = panel.locator('[data-browser-page-box]'); // the room
+    // the chip's menu, opened by the chip: whether it offers `size`
+    const chipOffers = async (size: 'mobile' | 'tablet'): Promise<boolean> => {
+      await chip.click();
+      const item = s.page.locator(`[data-viewport="${size}"]`);
+      await expect(item).toBeVisible();
+      const offered = (await item.getAttribute('aria-disabled')) !== 'true';
+      await closeMenus(s);
+      return offered;
+    };
+    // the room's width once two reads in a row agree (a drag's layout lands after the pointer's last event)
+    const settledRoom = async (): Promise<number> => {
+      let last = Number.NaN;
+      await expect
+        .poll(
+          async () => {
+            const previous = last;
+            last = (await rectOf(box)).width;
+            return last === previous;
+          },
+          { message: 'the room settled' },
+        )
+        .toBe(true);
+      return last;
+    };
+    // the room dragged by the panel's separator into [lo, hi] CSS pixels (a few drags, since the panel's own bounds and
+    // the pointer's rounding can leave one short), and the width it settled at
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    const roomIn = async (lo: number, hi: number, at: string): Promise<number> => {
+      let room = await settledRoom();
+      for (let k = 0; k < 3 && (room < lo || room > hi); k++) {
+        const handle = await rectOf(resizer);
+        const [hx, hy] = [handle.x + handle.width / 2, handle.y + handle.height / 2];
+        await s.page.mouse.move(hx, hy);
+        await s.page.mouse.down();
+        await s.page.mouse.move(hx + room - (lo + hi) / 2, hy, { steps: 4 });
+        await s.page.mouse.up();
+        room = await settledRoom();
+      }
+      expect(room >= lo && room <= hi, `${at}, the separator set the room within ${lo} to ${hi} CSS pixels: ${room}`).toBe(true);
+      return room;
+    };
+    // a room of 390 to 450 CSS pixels holds Mobile's 375 at 100 % and not its 468.75 at 80 % (decision 35's `fits`), so the
+    // chip's menu offers Mobile at one factor and not at the other; at 80 % the room is set again if the zoom moved it
+    const atActualRoom = await roomIn(390, 450, 'at 1');
+    expect(await chipOffers('mobile'), `at 1 Mobile (375 CSS pixels) in a room of ${atActualRoom}, by the chip's menu`).toBe(true);
+    await zoomTo(app, s.page, 0.8);
+    await zoomLineGone(s.page, 0.8);
+    const atSmallerRoom = await roomIn(390, 450, 'at 0.8');
+    expect(await chipOffers('mobile'), `at 0.8 Mobile (468.75 CSS pixels) in a room of ${atSmallerRoom}, by the chip's menu`).toBe(false);
+
+    await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
     const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
     const chipAgainstPage = async () => {
       const [text, page] = [(await chip.textContent())?.trim(), await reads()];
@@ -1525,7 +1577,7 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
     };
     for (const f of ZOOM_FACTORS) {
       await zoomTo(app, s.page, f);
-      await zoomLineGone(s.page);
+      await zoomLineGone(s.page, f);
       await expectOnPane(s, t, pane, 'panel', 5_000, f);
       const room = (await rectOf(box)).width;
       expect(room, `at ${f} the room holds Mobile's ${375 / f} CSS pixels`).toBeGreaterThanOrEqual(375 / f);
@@ -1539,9 +1591,7 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
       // threshold is said, not judged
       for (const [size, wide] of [['mobile', 375], ['tablet', 768]] as const) {
         const needs = wide / f;
-        const item = await viewportItem(s, panel, size);
-        const offered = (await item.getAttribute('aria-disabled')) !== 'true';
-        await closeMenus(s);
+        const offered = await chipOffers(size);
         if (Math.abs(needs - room) <= 1) test.info().annotations.push({ type: 'zoom: an offer at its threshold', description: JSON.stringify({ f, size, needs, room, offered }) });
         else expect(offered, `at ${f} ${size} (${needs} CSS pixels) against a room of ${room}`).toBe(needs <= room);
       }

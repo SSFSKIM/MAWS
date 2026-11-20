@@ -17,7 +17,7 @@ import { goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { activeMainTab, backToTabs, hideSurface, mainTab, mountedTab, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
 import { formatChord } from '../src/shared/keymap/chord'; // UX wave U6b-5a
-import { zoomAct, zoomItemEnabled, zoomLineOf, zoomLines, zoomOfPage, zoomTo, type ZoomItem } from './support/zoom'; // UX wave U6b-5b
+import { pointerOffToasts, zoomAct, zoomItemEnabled, zoomLineOf, zoomLines, zoomOfPage, zoomTo, type ZoomItem } from './support/zoom'; // UX wave U6b-5b
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -1160,14 +1160,18 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
   await expect(composer, 'the composer has the keyboard back').toBeFocused();
 
   // U6b-5b (B10): the items' ends and the line. At 100 % Actual Size is disabled; Zoom In twice draws "Zoom 110 %", then
-  // "Zoom 125 %" alone; at 200 % Zoom In is disabled, at 50 % Zoom Out; Actual Size returns to 100 % each time.
+  // "Zoom 125 %" alone: the first line's timer is held through the second act by the pointer over the toasts (Radix
+  // pauses them while it moves there), so a line that was only left to expire would still be drawn beside it; at 200 %
+  // Zoom In is disabled, at 50 % Zoom Out; Actual Size returns to 100 % each time.
   const enabledItems = async () => Object.fromEntries(await Promise.all(zoomIds.map(async (id) => [id, await zoomItemEnabled(app, id)] as const)));
   await expect.poll(() => zoomOfPage(page), { message: 'the window opens at 100 %' }).toBe(1);
   await expect.poll(enabledItems, { message: 'at 100 %: Actual Size disabled' }).toEqual({ 'zoom.in': true, 'zoom.out': true, 'zoom.reset': false });
   expect(await zoomAct(app, page, 'zoom.in')).toBe(1.1);
+  await zoomLines(page).hover(); // the first line held
   await expect(zoomLines(page), 'the line says the size reached').toHaveText([zoomLineOf(1.1)]);
   expect(await zoomAct(app, page, 'zoom.in')).toBe(1.25);
-  await expect(zoomLines(page), 'the second press’s line replaces the first').toHaveText([zoomLineOf(1.25)]);
+  await expect(zoomLines(page), 'the second press’s line replaces the first, which was held').toHaveText([zoomLineOf(1.25)]);
+  await pointerOffToasts(page);
   await zoomTo(app, page, 2);
   await expect.poll(enabledItems, { message: 'at 200 %: Zoom In disabled' }).toEqual({ 'zoom.in': false, 'zoom.out': true, 'zoom.reset': true });
   expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);

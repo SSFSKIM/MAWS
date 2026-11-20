@@ -242,20 +242,25 @@ export async function placedOn(s: Scene, tabId: string, pane: Locator, timeout =
 }
 
 const within1 = (a: Rect, b: Rect) => Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1;
+const sameRect = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+// Each of the four edges (left, top, right, bottom) of `a` within a point of `b`'s.
+const edgesWithin1 = (a: Rect, b: Rect) =>
+  Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.x + a.width - (b.x + b.width)) <= 1 && Math.abs(a.y + a.height - (b.y + b.height)) <= 1;
 
-// The tab's view is visible and lies on the pane's rect within 1 px, polled until it settles. UX wave U6b-5b (decision
-// 36; Interfaces §G): first main's acknowledgment of the rect the pane now measures (`placedOn`), and the view's bounds
-// read against that rect times the window's zoom `factor`, as main places it (decision 27's edges): a window point is
-// `factor` CSS pixels.
+// The tab's view is visible and lies on the pane's rect, polled until it settles. UX wave U6b-5b (decision 36;
+// Interfaces §G): in one sample, main's acknowledged rect (`placed`, as `placedOn` reads it) is the rect the pane
+// measures now, and the view's bounds have each edge within a point of that rect times the window's zoom `factor`, as
+// main places it (decision 27's edges): a window point is `factor` CSS pixels. At factor 1 the rect is its own product.
 export async function expectOnPane(s: Scene, tabId: string, pane: Locator, surface: Surface, timeout = 2_000, factor = 1): Promise<void> {
-  await placedOn(s, tabId, pane, timeout);
   await expect
     .poll(
       async () => {
         const [view, rect] = await Promise.all([viewOf(s, tabId), paneRect(pane)]);
-        return view !== null && view.visible && view.attached && view.owner?.surface === surface && view.bounds !== null && within1(view.bounds, timesFactor(rect, factor)) ? 'on the pane' : JSON.stringify({ view, rect, factor });
+        const placed = view?.placed?.rect ?? null;
+        const on = view !== null && view.visible && view.attached && view.owner?.surface === surface && placed !== null && sameRect(placed, rect) && view.bounds !== null && edgesWithin1(view.bounds, timesFactor(rect, factor));
+        return on ? 'on the pane' : JSON.stringify({ view, rect, factor });
       },
-      { timeout, intervals: [16, 16, 33, 50, 100] },
+      { timeout, intervals: [16, 16, 33, 50, 100], message: 'main acknowledged the pane’s rect for the tab, and the view lies on it' },
     )
     .toBe('on the pane');
 }

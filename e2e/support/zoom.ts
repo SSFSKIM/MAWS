@@ -54,8 +54,17 @@ export const windowFactors = (app: ElectronApplication): Promise<{ url: string; 
 export const zoomLines = (page: Page): Locator => page.getByRole('region', { name: /^Notifications/ }).locator('li').filter({ hasText: /Zoom \d+ %/ });
 export const zoomLineOf = (factor: number): string => `Zoom ${Math.round(factor * 100)} %`;
 
-// Polled until no zoom's line is drawn (each lasts a second and a half; no time is asserted).
-export async function zoomLineGone(page: Page): Promise<void> {
+// The pointer moved off the toast host's corner (bottom right), since Radix pauses its toasts while the pointer moves
+// over their viewport: to the window's top-left corner, the title bar's inset under the traffic lights, where nothing
+// draws a tooltip. A move of Playwright's mouse is dispatched to the page and does not activate the window.
+export const pointerOffToasts = (page: Page): Promise<void> => page.mouse.move(2, 2);
+
+// The line for the act that reached `factor` witnessed, then polled until no zoom's line is drawn (each lasts a second
+// and a half; no time is asserted), with the pointer off the toasts so nothing holds it. Call it after an act that
+// changed the factor: a factor already held draws no line.
+export async function zoomLineGone(page: Page, factor: number): Promise<void> {
+  await pointerOffToasts(page);
+  await expect(zoomLines(page), `the zoom’s line says ${zoomLineOf(factor)}`).toHaveText([zoomLineOf(factor)]);
   await expect(zoomLines(page), 'the zoom’s line is gone').toHaveCount(0, { timeout: 15_000 });
 }
 

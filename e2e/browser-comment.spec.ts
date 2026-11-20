@@ -1583,7 +1583,7 @@ test('zoom: the pin on the picked element at 50 %, 80 % and 125 %', async () => 
     let picks = 0;
     for (const f of [0.5, 0.8, 1.25] as const) {
       await zoomTo(s.maws.app, s.page, f);
-      await zoomLineGone(s.page);
+      await zoomLineGone(s.page, f);
       await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel', 5_000, f);
       const bounds = (await viewOf(s, t.tabId))!.bounds!;
       const target = t.page.locator('#increment');
