@@ -1867,6 +1867,7 @@ describe('a framed file (UX wave U6b-2)', () => {
     offs.push(connectCodeEvents());
     show();
     await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file asks a new token
     changed(main);
     await waitFor(() => expect(tokenOf()).toBe(main.issued[1]));
     await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
@@ -2019,6 +2020,7 @@ describe('a framed file (UX wave U6b-2)', () => {
     const first = main.hold('layout.frameFile');
     show();
     await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file
     changed(main);
     await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
     await waitFor(() => expect(entry()!.pending).toBe(0));
@@ -2050,6 +2052,7 @@ describe('a framed file (UX wave U6b-2)', () => {
       return invoke(name, input, ...rest);
     }) as typeof invoke;
     const next = main.hold('layout.frameFile');
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file
     changed(main);
     await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
     expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`);

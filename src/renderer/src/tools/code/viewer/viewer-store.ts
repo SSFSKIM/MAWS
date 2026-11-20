@@ -757,8 +757,8 @@ export function createViewerStore(client: MawsBridge) {
       if (out.again) ask(tabId);
     };
 
-    // After a load committed: a framed file asks (event L); an entry that is no longer one gives its frame up. Ticket 775: a
-    // re-read that found the file as the entry shows it (`landed` false) keeps a frame that is drawn or being asked with the
+    // After a load committed: a framed file asks (event L); an entry that is no longer one gives its frame up. Ticket 775: an
+    // event's re-read that found the file as the entry shows it (`landed` false) keeps a frame that is drawn or being asked with the
     // keys it would ask with now, so its token and the page's state stay; one with no frame, a failed one, or one asked
     // under other keys (the tab's mark moved) asks as before.
     const settleFrame = (tabId: string, landed: boolean) => {
@@ -833,7 +833,8 @@ export function createViewerStore(client: MawsBridge) {
       // U6b-4c: `answer`, the read whose admission the commit draws (the last that landed)
       const commit = ({ utf8, real, ...loaded }: LoadedFile, answer: FilesReadOutput): Landed | null => {
         let landedContent = true;
-        if (reason === 'change') landedContent = commitChange(tabId, { ...loaded, utf8, real }, cause);
+        // ticket 775: only an event's re-read keeps the frame; a revisit asks again, as U6b-2 decided (M5, decision 6)
+        if (reason === 'change') landedContent = commitChange(tabId, { ...loaded, utf8, real }, cause) || cause !== 'event';
         else {
           const textEditable = isEditable({ ...loaded, utf8 });
           patch(tabId, { ...opened, ...loaded, pin: real, textEditable, editable: editableWith(get().entries.get(tabId) ?? entry, real, textEditable) });

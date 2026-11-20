@@ -129,6 +129,7 @@ describe('what a framed file’s body draws', () => {
     show();
     await drawn();
     const first = body().querySelector('iframe')!;
+    main.files[PDF] = '%PDF-1.4 invented, revised\n'; // ticket 775: a change of the file asks a new token
     act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: PDF, kind: 'changed' }));
     await waitFor(() => expect(body().querySelector('iframe')?.getAttribute('src')).toBe(`${frameUrl(main.issued[1]!, 'ledger.pdf')}#navpanes=0`));
     expect(body().querySelector('iframe')).not.toBe(first);
