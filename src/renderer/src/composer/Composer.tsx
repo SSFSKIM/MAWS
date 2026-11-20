@@ -62,7 +62,7 @@ import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { offlineActs, remoteStandingOf, useRemoteStanding } from '../lane-b/remote-standing'; // the UX wave, U9 (the ticket on a pane kept through a link's loss)
 import { followStop, useStopping } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
 import { Editor } from './editor/Editor';
-import { serializeDraft, type Serialized } from './editor/serialize';
+import { draftState, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
 import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
 import { firstSendPending, sendFirstOnce, SPAWN_WORDS, spawnOnMachine, spawnTargetOf, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
@@ -264,7 +264,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const [dismissedNote, setDismissedNote] = useState<string | null>(null);
 
   // ---- the submit control's state ------------------------------------------------------------------------------
-  const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
+  const draft = useMemo(() => draftState(doc), [doc]); // board ticket 741: no fold of the wire text on an edit
   const messageHeld = setup !== null && setup.intent.message !== null;
   // P5 O7 M2: a send on its way to a session on another machine says so (A4's hold can take a minute)
   const sendingRemote = useRemoteSending(appSessionId);

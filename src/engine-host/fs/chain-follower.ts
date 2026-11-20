@@ -10,7 +10,6 @@
 // method is serialised behind one promise chain, so a watcher event, a reconcile tick and a follow request never
 // interleave.
 import type { SessionEvent } from '@shared/graph/events';
-import { flatPersonsWords } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
@@ -251,8 +250,10 @@ class FollowerCore {
     if (leafUuid === null) return;
     this.facts.leafUuid = leafUuid;
     if (record.rewound !== true) return;
-    // the engine's one-line form of the message's text: what stands before an answer envelope's opening (UX wave, ticket 704)
-    const prefillText = typeof record.lastPrompt === 'string' ? flatPersonsWords(record.lastPrompt) : null;
+    // Board ticket 740: no text. The anchor's `lastPrompt` is the session's latest prompt when the rewind was made, not the
+    // rewound message (p5-o3-rewind-resume-post: T3 cut, the anchor reads T4; often it is empty), trimmed and on one line;
+    // the window reads the rewound message's own row from the branch the rewind hid
+    const prefillText = null;
     if (!this.onChain.has(leafUuid)) {
       this.rewind = { phase: 'unanchored', leafUuid, prefillText, anchorOffset: offset };
       return;

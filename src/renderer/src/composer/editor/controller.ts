@@ -29,7 +29,7 @@ import { holdsBlock, pastedBlock, type AttachedBlock } from './pasted-block'; //
 import { UNREAD, type Unread } from './unread'; // UX wave U6b-5a
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
-import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { draftState, modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -358,7 +358,7 @@ export class EditorController {
     const doc = editor.getJSON();
     const mode = modeOf(doc);
     this.view.setMode(mode);
-    this.view.setCommandEmpty(mode === 'send' || serializeDraft(doc, { sessionId: null, cwd: '' }).empty);
+    this.view.setCommandEmpty(mode === 'send' || draftState(doc).empty); // board ticket 741: no fold on an edit
     this.inputs.onDocChange?.(doc);
     if (!this.silent && transaction.docChanged) {
       if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
@@ -1085,12 +1085,13 @@ export class EditorController {
       insertText: (text, options) => {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
+        // board ticket 739: text nodes and hard breaks, never a string the editor would parse as markup
         if (!options?.separated) {
-          at.insertContent(text).run();
+          at.insertContent(inlineContent(text)).run();
           return;
         }
         at.run(); // P3-G: the caret first, so the text before it can be read
-        editor().chain().insertContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text).run();
+        editor().chain().insertContent(inlineContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text)).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),
