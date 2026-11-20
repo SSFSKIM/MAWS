@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -63,6 +64,43 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.querySelector('.transcript-group')!.closest('[inert]')).not.toBeNull(); // concealed: the mod drew nothing
     await waitFor(() => expect(asks().filter((x) => x.component === 'ToolUse').map((x) => x.instanceId)).toEqual(['t1', 't2']));
     expect(asks().filter((x) => x.component === 'ToolResult')).toHaveLength(0);
+  });
+
+  // Board ticket 788: an engine that draws the run's own node answers `rewritten: true` with the props it was handed, the
+  // props having crossed the wire. Once the reader closes the run, the answer to its opening (`isExpanded: true`) stays
+  // the site's until the close's own ask is answered: it is no rewrite of the close, and the run stays folded.
+  it.each(['pointer', 'keyboard'] as const)('a click on an open run’s line folds it while the engine draws the run (%s)', async (by) => {
+    const user = userEvent.setup();
+    const b = builder(); b.turn('u'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' }); b.result('t2', 'ok');
+    const store = await mounted(b);
+    const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+    const line = () => view.container.querySelector<HTMLButtonElement>('.transcript-run-line')!;
+    const expanded = () => rowOf(store.rows(), 'group').expanded;
+    const press = async () => {
+      if (by === 'pointer') await user.click(line());
+      else { line().focus(); await user.keyboard('{Enter}'); }
+      view.rerenderRow(rowOf(store.rows(), 'group'));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); // the gesture's release
+      view.rerenderRow(rowOf(store.rows(), 'group'));
+    };
+    let answered = 0;
+    const echo = async () => { // every ask so far answered as the engine draws it: its own props, handed back
+      while (fake.pending('session.ui.render') > 0) await act(() => fake.reply('session.ui.render', answer(asks()[answered++]!.props, engine, true)));
+      view.rerenderRow(rowOf(store.rows(), 'group'));
+    };
+    await echo();
+    await press();
+    expect(expanded()).toBe(true);
+    expect(asks().filter((x) => x.component === 'ToolGroup').at(-1)!.props).toMatchObject({ isExpanded: true });
+    await echo();
+    await press();
+    expect(expanded()).toBe(false);
+    expect(line().getAttribute('aria-expanded')).toBe('false');
+    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(0);
+    await echo(); // the close's own answer keeps it folded
+    expect(expanded()).toBe(false);
+    await press(); // and the next click opens it again
+    expect(expanded()).toBe(true);
   });
 
   // UX wave U2 (the U2a document, M4 "The mods' site"; C13)
