@@ -43,6 +43,8 @@ import { useSessionActionUnavailable } from '../lane-b/remote-unavailable'; // t
 import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { displayTitle } from '../sessions/title';
+import { OpenInSubmenu } from '../open-in/OpenInMenu'; // UX wave U6b-4a
+import { useOtherMachine } from '../open-in/open'; // UX wave U6b-4a
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
 // P3-L end
@@ -223,6 +225,8 @@ const BoardIcon = () => (
 // another machine's terminal session (a listed lane A row, no record here) offers Take over, disabled in place with the
 // reason its controls port gives (Q2: a gap is shown where the control would be). P5 O8 M6b: and Share, for a session you
 // own, listed or a record. P5 O8 M5b: and Add owner after it, for the session's owners (`useCanAddOwner`).
+// UX wave U6b-4a: Open in, after the session's actions and before Share, for a record and for another machine's terminal
+// session (drawn disabled there, saying where the folder is).
 function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5: Take over and Fork for a bridged terminal session
@@ -232,17 +236,20 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
   const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
   const mine = useSessions((s) => s.listed.get(appSessionId)?.mine ?? false); // the UX wave, U9: the listing's
+  const elsewhere = useOtherMachine(appSessionId) !== null; // UX wave U6b-4a: by its address, before any record arrives
   if (remote) {
     const takeOver = controls?.capability('take-over') ?? null;
     return <SessionMenu disabled={false}>
       <SessionMenuItem id="takeOver" appSessionId={appSessionId} label={SESSION_ACTIONS.takeOver} gap={takeOver === null || takeOver.available ? null : takeOver.reason} />
+      <OpenInSubmenu appSessionId={appSessionId} menu="dropdown" />
       {shareable && <ShareMenuItem appSessionId={appSessionId} />}
       {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
     </SessionMenu>;
   }
   const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading, mine }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
-  return <SessionMenu disabled={ids.length === 0 && !shareable}>
+  return <SessionMenu disabled={!record && !shareable && !elsewhere}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
+    {(record || elsewhere) && <OpenInSubmenu appSessionId={appSessionId} menu="dropdown" /> /* UX wave U6b-4a: the working folder; disabled for another machine */}
     {shareable && <ShareMenuItem appSessionId={appSessionId} />}
     {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
   </SessionMenu>;

@@ -51,6 +51,13 @@ it('opens from Cmd+/ and shows effective bindings for navigation and composer ke
   expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search keyboard shortcuts' }));
 });
 
+// UX wave U6b-3b (decision 11; B4): the sheet lists Go to file under Go with ⌘P
+it('lists Go to file under Go with ⌘P', () => {
+  const dialog = openSheet();
+  const go = within(dialog).getByRole('table', { name: 'Go' });
+  expect(within(go).getByRole('row', { name: /Go to file/ }).textContent).toContain('⌘P');
+});
+
 it('searches action names and effective chords, updates when bindings change, and explains an empty result', () => {
   const dialog = openSheet();
   const search = screen.getByRole('searchbox', { name: 'Search keyboard shortcuts' });

@@ -58,6 +58,10 @@ export const OwnerChannelStateSchema = z.strictObject({
     applied: ContractSourceSchema.nullable(), // the instructions in effect after the last decided launch; null before one
     pending: LanePendingSchema.nullable(),
     mismatch: StyleMismatchSchema.nullable(),
+    // the UX wave, U2b (2026-11; docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A): who draws
+    // the session's to-human view, the to-human mod on MAWS's surface or MAWS's mirror. This build always sends it; absent
+    // (an earlier daemon's) reads as `maws`, and an earlier build's tolerant reader drops it
+    drawnBy: z.enum(['mod', 'maws']).optional(),
   }),
   marks: z.array(OwnerMarkSchema),
 });

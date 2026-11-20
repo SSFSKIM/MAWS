@@ -3,6 +3,9 @@
 // do; with one it is the session's last applied state (or, before its first decided launch, what its next launch would
 // do), plus `pending` while the effective lane differs from what is applied, and the style mismatch when the engine
 // reported another style than the resolver read. The app's switch is `settings.set` on `mods.toHuman.enabled`.
+// The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M, "The switch"): the to-human row
+// carries `summaries`, the machine's switch for new fold summaries kept in the index's own facts, which
+// `mods.setFoldSummaries` writes; a launch decided while it is off carries TO_HUMAN_FOLD_SUMMARIES=off (./launch.ts).
 import type { AppSessionId } from '@shared/graph/ids';
 import { BUILT_IN_MODS, type ModId, type ModRow } from '@shared/mods/registry';
 import type { ContractSource, LaneOverride, LanePending } from '@shared/owner/state';
@@ -22,7 +25,7 @@ export interface ModsDeps {
 export async function modsList(deps: ModsDeps, appSessionId?: AppSessionId): Promise<ModRow[]> {
   const appEnabled = deps.appEnabled();
   const [mod] = BUILT_IN_MODS; // the to-human lane, the one entry today
-  const base = { id: mod!.id, name: mod!.name, description: mod!.description, version: mod!.version, enabled: appEnabled };
+  const base = { id: mod!.id, name: mod!.name, description: mod!.description, version: mod!.version, enabled: appEnabled, summaries: deps.store.foldSummaries() };
   if (appSessionId === undefined) return [{ ...base, source: await nextLaunchSource(deps, appEnabled, null) }];
 
   const row = deps.store.session(appSessionId);
@@ -37,6 +40,11 @@ export async function modsList(deps: ModsDeps, appSessionId?: AppSessionId): Pro
 
 export function setSessionOverride(deps: Pick<ModsDeps, 'store'>, input: { appSessionId: AppSessionId; id: ModId; value: LaneOverride }): void {
   deps.store.setOverride(input.appSessionId, input.value); // one mod today: the id names the to-human lane
+}
+
+// U2b: the summaries' switch; it reaches a session at its next launch, as the lane's switch does
+export function setFoldSummaries(deps: Pick<ModsDeps, 'store'>, input: { on: boolean }): void {
+  deps.store.setFoldSummaries(input.on);
 }
 
 // What a launch with the lane `on` in `directory` (null: no project) would desire.

@@ -8,10 +8,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useLayout } from '../../stores/layout';
+import { useNotices } from '../../stores/notices';
 import { useTranscriptStore } from '../../stores/transcript';
 import { mainShowing } from '../../test-support/panel';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { builder } from '../../transcript/model/test-events';
+import { MOD_DRAWS_NOTICE } from './copy';
 import { toggleView, ViewSwitch } from './Switch';
 
 const APP = 'app-switch' as AppSessionId;
@@ -89,5 +91,22 @@ describe('the action "Toggle report and transcript"', () => {
     act(() => useTranscriptStore.getState().setToHumanView(APP, { lane: false, tailMessage: false }));
     act(() => toggleView());
     expect(viewOf()).toBe('report');
+  });
+
+  // UX wave U2b (M5, "the action's notice"; decision 20): where the mod draws the view, the switch is the mod's, above
+  // the composer; the action changes nothing of the tab's and says so, once however often it is pressed.
+  it('in a session the mod draws, changes nothing and says in one notice where the mod’s switch is', async () => {
+    act(() => useLayout.setState({ main: mainShowing(APP) }));
+    useNotices.setState({ notices: [] });
+    await withSession({ lane: true, message: true, modDraws: true });
+    const before = viewOf();
+    act(() => toggleView());
+    act(() => toggleView());
+    expect(viewOf()).toBe(before);
+    expect(useNotices.getState().notices.map((n) => [n.kind, n.text])).toEqual([['toast', MOD_DRAWS_NOTICE]]);
+    act(() => useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false, modDraws: false }));
+    act(() => toggleView());
+    expect(viewOf()).toBe('transcript'); // MAWS draws again: the action is the switch's
+    expect(useNotices.getState().notices).toHaveLength(1);
   });
 });

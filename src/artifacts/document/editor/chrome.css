@@ -48,6 +48,9 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* UX wave U10b (O-43, B6): the room the float's bar takes over the page's end, so the last line can be scrolled
+     above it (set by the app's shell around the editor; nothing elsewhere) */
+  padding-bottom: var(--float-bar-room, 0px);
 }
 .doc-editor-loading {
   padding: calc(var(--space) * 6);

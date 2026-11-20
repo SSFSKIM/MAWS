@@ -250,7 +250,7 @@ async function showSession(page: Page, id: string): Promise<void> {
 async function openFile(page: Page, repo: ScratchRepo, relative: string): Promise<Locator> {
   await openSurface(page, 'Files');
   const files = surface(page, 'files');
-  const row = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
+  const row = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${path}"]`);
   let at = repo.root;
   for (const segment of ['', ...relative.split('/').slice(0, -1)]) {
     at = segment ? `${at}/${segment}` : at;

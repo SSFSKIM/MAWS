@@ -1069,7 +1069,8 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 
 // The product app over nine-sessions.json copied with *Charter + research* pointed at a scratch repository.
 // A Files case may point one more session at that real root instead of a recorded, nonexistent probe directory.
-async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<void>, { filesFor }: { filesFor?: string } = {}): Promise<void> {
+// UX wave U6b-4a: `env`, more of the launch's environment; the body is told the scratch repository's real path.
+async function withScenario(body: (maws: MawsLaunch, panel: Locator, repo: string) => Promise<void>, { filesFor, env = {} }: { filesFor?: string; env?: Record<string, string> } = {}): Promise<void> {
   const repo = scratchRepository();
   const dir = mkdtempSync(join(tmpdir(), 'maws-panel-scenario-'));
   let maws: MawsLaunch | null = null;
@@ -1082,8 +1083,8 @@ async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<
       session.directory = repo.dir;
       writeFileSync(scenario, JSON.stringify(fixture, null, 2));
     }
-    maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0' } });
-    await body(maws, maws.page.locator('[data-region="panel"]'));
+    maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0', ...env } });
+    await body(maws, maws.page.locator('[data-region="panel"]'), realpathSync(repo.dir));
   } finally {
     await maws?.cleanup();
     repo.cleanup();
@@ -1161,6 +1162,41 @@ test.describe('the product host over a scenario derived from C5’s records', ()
     });
   });
 
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, A1, A2): "Open in" in the title bar's
+  // Session actions and in the session row's menu lists the apps found (the seam's Zed and VS Code), then Terminal and
+  // Finder; a row hands the session's working folder, by the real path the daemon admits, to the app (the open log's line).
+  test('Open in, in the title bar and in a session row’s menu, hands the working folder to the app chosen', async () => {
+    const logs = mkdtempSync(join(tmpdir(), 'maws-open-in-'));
+    const log = join(logs, 'open.log');
+    const logged = () => readFileSync(log, { encoding: 'utf8', flag: 'a+' });
+    try {
+      await withScenario(
+        async (maws, _panel, repo) => {
+          const { page } = maws;
+          const row = await sidebarRow(page, CHARTER);
+          await row.click();
+          await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Session actions', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Open in', exact: true }).click();
+          const apps = page.getByRole('menu').filter({ has: page.getByRole('menuitem', { name: 'Finder', exact: true }) });
+          await expect(apps.getByRole('menuitem')).toHaveText(['VS Code', 'Zed', 'Terminal', 'Finder']);
+          await apps.getByRole('menuitem', { name: 'VS Code', exact: true }).click();
+          await expect.poll(logged).toBe(`open-in vscode ${repo}\n`);
+          await expect(page.getByRole('menu')).toHaveCount(0);
+
+          await row.click({ button: 'right' });
+          await page.getByRole('menuitem', { name: 'Open in', exact: true }).click();
+          await page.getByRole('menuitem', { name: 'Finder', exact: true }).click();
+          await expect.poll(logged).toBe(`open-in vscode ${repo}\nopen-in finder ${repo}\n`);
+          expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+        },
+        { filesFor: CHARTER, env: { MAWS_E2E_OPEN_LOG: log, MAWS_E2E_OPEN_IN_APPS: 'zed,vscode' } },
+      );
+    } finally {
+      rmSync(logs, { recursive: true, force: true });
+    }
+  });
+
   // UX wave U8b, A3 (O-05): Artifacts is no card. The title bar's three-dot menu lists it; it opens the session's artifact
   // list beside the chat as a tab like any other; "Pin to toolbar" in its context menu makes it an icon of the row.
   test('Artifacts is an entry of More surfaces: it opens the session’s artifact list beside the chat, and Pin to toolbar makes it an icon', async () => {
@@ -1236,13 +1272,15 @@ async function dragBy(page: Page, element: Locator, dx: number, dy = 0): Promise
 }
 
 test.describe('the floating session card (P3-G)', () => {
-  test('the divider, ⌥⌘B, the Float button, Close, the pill and Dock; one composer; over a DOM tool', async () => {
+  test('the divider, ⌥⌘B, the Float button, Close, the bar and Dock; one composer; over a DOM tool', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const usageId = await addressed(page, USAGE_ID); // the page's composer and Session info name the session's address
       const main = page.locator('[data-region="main"]');
       const card = panel.getByRole('region', { name: 'Session card' });
-      const pill = panel.getByRole('button', { name: 'Show session card' });
+      // UX wave U10b (O-43, §F.4): Close leaves the bar, the composer's box alone with Open conversation and Hide chat
+      const bar = panel.getByRole('region', { name: 'Chat' });
+      const openConversation = bar.getByRole('button', { name: 'Open conversation' });
       const composers = page.locator(`section[data-composer="${usageId}"]`);
       const divider = panel.getByRole('separator', { name: 'Resize right panel' });
       const mainWidth = () => main.evaluate((el) => el.getBoundingClientRect().width);
@@ -1288,24 +1326,23 @@ test.describe('the floating session card (P3-G)', () => {
         await expect(card).toBeVisible();
       });
 
-      await test.step('acceptance 3 and 2: Close leaves the pill; ⌥⌘B and a click reopen the card; a turn ending behind the pill marks it', async () => {
+      await test.step('acceptance 3 and 2: Close leaves the bar; ⌥⌘B and Open conversation reopen the card; a turn ending behind the bar marks it', async () => {
         await card.getByRole('button', { name: 'Close session card' }).click();
         await expect(card).toHaveCount(0);
-        await expect(pill).toHaveText(USAGE);
+        await expect(openConversation).toHaveAttribute('title', USAGE);
         await expect(composers, 'the compact composer remains usable').toHaveCount(1);
-        const compact = panel.getByRole('region', { name: 'Compact session composer' });
-        await compact.getByRole('textbox', { name: 'Message' }).fill('Continue from the compact composer');
+        await bar.getByRole('textbox', { name: 'Message' }).fill('Continue from the compact composer');
         await menu(app, 'panel.float');
         await expect(card).toBeVisible();
         await expect(card.getByRole('textbox', { name: 'Message' })).toHaveText('Continue from the compact composer');
         await card.getByRole('textbox', { name: 'Message' }).fill('');
         await card.getByRole('button', { name: 'Close session card' }).click();
-        await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(0);
+        await expect(openConversation.locator('[data-session-mark="unread"]')).toHaveCount(0);
         await advanceTo(app, 8000);
-        await expect(pill.locator('[aria-label="Unread"]')).toHaveCount(1);
-        await pill.click();
+        await expect(openConversation.locator('[data-session-mark="unread"]')).toHaveCount(1);
+        await openConversation.click();
         await expect(card).toBeVisible();
-        await expect(pill).toHaveCount(0);
+        await expect(bar).toHaveCount(0);
       });
 
       await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s right and bottom edges', async () => {
@@ -1549,7 +1586,7 @@ test.describe('the floating session card (P3-G)', () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const card = panel.getByRole('region', { name: 'Session card' });
-      const compact = panel.getByRole('region', { name: 'Compact session composer' });
+      const compact = panel.getByRole('region', { name: 'Chat' });
       const waitingLine = compact.getByRole('button', { name: /^Waiting for you · \d+$/ });
 
       await (await sidebarRow(page, SIDEBAR_DRAG)).click();
@@ -1641,7 +1678,7 @@ async function watchComposers(page: Page, id: string): Promise<() => Promise<num
 }
 
 test.describe('the main split’s float (P4-B3)', () => {
-  test('the divider holds a session at 320, arms past 160, disarms, floats on release; the card at the bottom right; the round trip; Close, the pill, ⌥⌘B; the panel card at the bottom right', async () => {
+  test('the divider holds a session at 320, arms past 160, disarms, floats on release; the card at the bottom right; the round trip; Close, the bar, ⌥⌘B; the panel card at the bottom right', async () => {
     test.setTimeout(120_000);
     await withLongSession(async (s, id) => {
       const { page } = s;
@@ -1652,7 +1689,8 @@ test.describe('the main split’s float (P4-B3)', () => {
       const divider = main.getByRole('separator', { name: 'Resize panes' });
       const card = main.getByRole('region', { name: 'Session card' });
       const outline = main.locator('[data-split-card-outline]'); // LC-3: the card's place while the drag is armed
-      const pill = main.getByRole('button', { name: 'Show session card' });
+      const bar = main.getByRole('region', { name: 'Chat' }); // UX wave U10b (O-43): what Close leaves
+      const openConversation = bar.getByRole('button', { name: 'Open conversation' });
       const composers = page.locator(`section[data-composer="${address}"]`);
       const left = page.locator('[data-pane="0"]');
       const right = page.locator('[data-pane="1"]');
@@ -1768,13 +1806,13 @@ test.describe('the main split’s float (P4-B3)', () => {
         await expect(card.getByRole('button', { name: 'Jump to latest' })).toHaveCount(0);
       });
 
-      await test.step('Close leaves the pill at the bottom right with no composer behind it; the pill reopens the card', async () => {
+      await test.step('Close leaves the bar at the bottom right with no composer behind it; Open conversation reopens the card', async () => {
         await card.getByRole('button', { name: 'Close session card' }).click();
         await expect(card).toHaveCount(0);
-        await expect(pill).toBeVisible();
-        expect(await corner(main.getByRole('region', { name: 'Compact session composer' }), area)).toEqual({ right: 16, bottom: 16 });
+        await expect(openConversation).toBeVisible();
+        expect(await corner(bar, area)).toEqual({ right: 16, bottom: 16 });
         await expect(composers, 'the compact composer remains usable').toHaveCount(1);
-        await pill.click();
+        await openConversation.click();
         await expect(card).toBeVisible();
         await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
       });
@@ -1797,6 +1835,218 @@ test.describe('the main split’s float (P4-B3)', () => {
         await expect(composers).toHaveCount(1);
       });
       expect(await maxComposers(), 'never two composers of the session at once').toBe(1);
+    });
+  });
+});
+
+// ---- UX wave U10b (O-43; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M7 and A6): the chat over an
+// artifact is the card, the bar (the composer's box alone, with Open conversation and Hide chat) or hidden ("Show chat"
+// in the header of what it floated over) -------------------------------------------------------------------------------
+
+type Invoked<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
+async function invokeOk<T>(page: Page, name: string, input?: unknown): Promise<T> {
+  const result = (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Invoked<T>;
+  if (!result.ok) throw new Error(`${name} failed: ${result.error.code} ${result.error.message}`);
+  return result.value;
+}
+
+// An invented document of `lines` paragraphs, opened from the library in a main tab and typed there; its tab's body.
+const PROGRAMME_LINE = (k: number) => `Programme note ${k}: the choir sings this piece after the interval.`;
+async function programmeInMain(page: Page, lines: number): Promise<{ id: string; body: Locator }> {
+  await expect.poll(async () => (await invokeOk<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  const { artifact } = await invokeOk<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Spring programme' });
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator('[data-library]').getByRole('article', { name: 'Spring programme', exact: true }).click({ timeout: 15_000 });
+  const body = page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`);
+  const editor = body.locator('.ds-doc .ProseMirror').first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await editor.click();
+  for (let k = 1; k <= lines; k++) {
+    await page.keyboard.insertText(PROGRAMME_LINE(k));
+    if (k < lines) await page.keyboard.press('Enter');
+  }
+  await expect(editor.locator(':scope > p').filter({ hasText: PROGRAMME_LINE(lines) })).toHaveCount(1);
+  return { id: artifact.id, body };
+}
+
+// The element's right and bottom gaps to `within`'s right and bottom edges, in px.
+async function cornerIn(of: Locator, within: Locator): Promise<{ right: number; bottom: number }> {
+  const [region, box] = [(await within.boundingBox())!, (await of.boundingBox())!];
+  return { right: Math.round(region.x + region.width - (box.x + box.width)), bottom: Math.round(region.y + region.height - (box.y + box.height)) };
+}
+// The accessible name of the element right after `button`, in its row.
+const nextControl = (button: Locator) => button.evaluate((el) => el.nextElementSibling?.getAttribute('aria-label') ?? null);
+
+test.describe('the chat over an artifact (UX wave U10b, O-43)', () => {
+  test('the split’s float over a document: Expand leaves the bar, its parts and width; the document scrolls clear of it; Hide chat, Show chat and where the keyboard is; Open conversation; ⇧⌘\\ from the document', async ({ maws }) => {
+    test.setTimeout(120_000);
+    const { page, app } = maws;
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.setContentSize(1440, 860));
+    await page.waitForFunction(() => window.innerWidth === 1440 && window.innerHeight === 860);
+    const main = page.locator('[data-region="main"]');
+    const area = main.locator('[data-main-area]');
+    await (await sidebarRow(page, 'Harness A')).click();
+    const { body } = await programmeInMain(page, 40);
+    await menu(app, 'pane.split'); // the document into a right pane
+    const rightTab = mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: /^Spring programme/ });
+    await expect(rightTab).toBeVisible();
+    await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
+    // The document's pane takes the focus before Expand is pressed. With the session's pane focused, the session's card
+    // column is placed beside main (no surface is open), and the press that focuses the document's pane takes it away and
+    // widens the pane, so Expand moves out from under the pointer before the click (a finding of its own, outside U10b).
+    await rightTab.click();
+    const header = body.locator('xpath=ancestor::*[@role="tabpanel"][1]');
+    const card = main.getByRole('region', { name: 'Session card' });
+    const bar = main.getByRole('region', { name: 'Chat' });
+    const openConversation = bar.getByRole('button', { name: 'Open conversation' });
+    const hideChat = bar.getByRole('button', { name: 'Hide chat' });
+    const showChat = header.getByRole('button', { name: 'Show chat' });
+
+    await test.step('Expand leaves the bar: the box alone at the lower right, 484 px with its two buttons, the keyboard in it', async () => {
+      await header.getByRole('button', { name: 'Expand pane' }).click();
+      await expect(bar).toBeVisible();
+      await expect(card).toHaveCount(0);
+      await expect(bar).toHaveAttribute('data-chat-presentation', 'bar');
+      await expect(bar.getByRole('toolbar'), 'no toolbar row under the box').toHaveCount(0);
+      await expect(bar.getByRole('button', { name: 'Show session card' }), 'no title button').toHaveCount(0);
+      await expect(openConversation).toHaveAttribute('title', 'Harness A');
+      await expect(hideChat).toBeVisible();
+      await expect(bar.getByRole('textbox', { name: 'Message' })).toBeFocused();
+      expect(Math.round((await bar.boundingBox())!.width)).toBe(484);
+      expect(Math.round((await bar.locator('[data-composer-box]').boundingBox())!.width)).toBe(420);
+      expect(await cornerIn(bar, area)).toEqual({ right: 16, bottom: 16 });
+      await expect(showChat, 'no Show chat while the bar shows').toHaveCount(0);
+    });
+
+    await test.step('the document scrolls until its last line stands above the bar', async () => {
+      await body.locator('.ds-doc').first().evaluate((scroller) => scroller.scrollTo({ top: scroller.scrollHeight }));
+      const last = body.locator('.ds-doc .ProseMirror > p').filter({ hasText: PROGRAMME_LINE(40) });
+      await expect.poll(async () => Math.round((await last.boundingBox())!.y + (await last.boundingBox())!.height) <= Math.round((await bar.locator('[data-composer-box]').boundingBox())!.y)).toBe(true);
+    });
+
+    await test.step('Hide chat: nothing floats, Show chat stands before Restore split with the keyboard; Show chat brings the bar back with the keyboard in it', async () => {
+      await hideChat.click();
+      await expect(bar).toHaveCount(0);
+      await expect(card).toHaveCount(0);
+      await expect(showChat).toBeFocused();
+      expect(await nextControl(showChat)).toBe('Restore split');
+      await showChat.click();
+      await expect(bar).toBeVisible();
+      await expect(showChat).toHaveCount(0);
+      await expect(bar.getByRole('textbox', { name: 'Message' })).toBeFocused();
+    });
+
+    await test.step('Open conversation brings the card with the keyboard in its composer; its Close leaves the bar with the keyboard on Open conversation', async () => {
+      await openConversation.click();
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+      await expect(showChat, 'no Show chat while the card shows').toHaveCount(0);
+      await card.getByRole('button', { name: 'Close session card' }).click();
+      await expect(bar).toBeVisible();
+      await expect(openConversation).toBeFocused();
+    });
+
+    await test.step('⇧⌘\\ from the document opens the bar, then a hidden chat, as the card with the keyboard in its composer', async () => {
+      await menu(app, 'pane.focusOther');
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+      await card.getByRole('button', { name: 'Close session card' }).click();
+      await hideChat.click();
+      await expect(showChat).toBeFocused();
+      await menu(app, 'pane.focusOther');
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+    });
+
+    await test.step('Restore split ends the float', async () => {
+      await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
+      await expect(card).toHaveCount(0);
+      await expect(bar).toHaveCount(0);
+      await expect(showChat).toHaveCount(0);
+    });
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  });
+
+  test('the panel’s float over a side surface: the bar, Hide chat, Show chat before the float control, ⌥⌘B from hidden; while the bar shows, a request opens the card', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const bar = panel.getByRole('region', { name: 'Chat' });
+      const openConversation = bar.getByRole('button', { name: 'Open conversation' });
+      const showChat = panel.getByRole('button', { name: 'Show chat' });
+      await (await sidebarRow(page, CHARTER)).click(); // its permission arrives at 3 s on the scenario clock
+      await openSurface(page, 'Session info');
+      await menu(app, 'panel.float');
+      await expect(card).toBeVisible();
+
+      await test.step('Close leaves the bar at the panel’s lower right, 484 px, the keyboard on Open conversation', async () => {
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await expect(bar).toBeVisible();
+        await expect(openConversation).toBeFocused();
+        expect(Math.round((await bar.boundingBox())!.width)).toBe(484);
+        expect(await cornerIn(bar, panel)).toEqual({ right: 16, bottom: 16 });
+      });
+
+      await test.step('Hide chat: Show chat directly before the float control, which keeps its label; ⌥⌘B opens the card', async () => {
+        await bar.getByRole('button', { name: 'Hide chat' }).click();
+        await expect(bar).toHaveCount(0);
+        await expect(showChat).toBeFocused();
+        expect(await nextControl(showChat)).toBe('Open session card');
+        await menu(app, 'panel.float');
+        await expect(card).toBeVisible();
+        await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+        await expect(showChat).toHaveCount(0);
+      });
+
+      await test.step('with the keyboard in the bar, a new request opens the card and its composer takes the keyboard', async () => {
+        await card.getByRole('button', { name: 'Close session card' }).click();
+        await bar.getByRole('textbox', { name: 'Message' }).click();
+        await advanceTo(app, 3000);
+        await expect(card).toBeVisible();
+        await expect(card.getByRole('group', { name: 'Approval needed' })).toBeVisible();
+        await expect(bar).toHaveCount(0);
+      });
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+
+  // M7 decision 11 (ruled 2026-11-15 as F6), on a head that holds U1b: its compact pane draws "Waiting for you · N"
+  // above the composer (`SessionPane`'s compact branch) and docks nothing of a request in it, so the bar shows the line
+  // on its raised surface and the box stays the box.
+  test('the combined scene with U1b: a request while the chat is hidden opens nothing; Show chat carries the waiting mark and brings the bar with “Waiting for you · 1”; Open conversation draws the request', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const bar = panel.getByRole('region', { name: 'Chat' });
+      const showChat = panel.getByRole('button', { name: 'Show chat' });
+      const waitingLine = bar.getByRole('button', { name: /^Waiting for you · \d+$/ });
+      await (await sidebarRow(page, CHARTER)).click(); // its permission arrives at 3 s on the scenario clock
+      await openSurface(page, 'Session info');
+      await menu(app, 'panel.float');
+      await card.getByRole('button', { name: 'Close session card' }).click();
+      await bar.getByRole('button', { name: 'Hide chat' }).click();
+      await expect(showChat).toBeFocused();
+      await expect(showChat, 'nothing waits yet').not.toHaveAttribute('aria-description', /.+/);
+
+      await advanceTo(app, 3000);
+      await expect(showChat.locator('[data-session-mark="waiting"]')).toHaveCount(1);
+      await expect(showChat).toHaveAttribute('aria-description', 'Waiting for you');
+      await expect(card, 'a request while hidden opens nothing').toHaveCount(0);
+      await expect(bar).toHaveCount(0);
+      await expect(showChat, 'a request takes no keyboard').toBeFocused();
+
+      await showChat.click();
+      await expect(bar).toBeVisible();
+      await expect(waitingLine).toHaveText('Waiting for you · 1');
+      await expect(bar.locator('[data-bar-surface][data-raised]'), 'the line stands on the raised surface').toHaveCount(1);
+      const [line, box] = [(await waitingLine.boundingBox())!, (await bar.locator('[data-composer-box]').boundingBox())!];
+      expect(line.y + line.height, 'the line above the box').toBeLessThanOrEqual(box.y);
+      await expect(bar.locator('[data-request-card]'), 'nothing of the request is drawn in the bar').toHaveCount(0);
+      await expect(bar.getByRole('textbox', { name: 'Message' }), 'the keyboard in the box, as after any Show chat').toBeFocused();
+      await bar.getByRole('button', { name: 'Open conversation' }).click();
+      await expect(card.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }), 'the card draws the request').toBeVisible();
+      await expect(bar).toHaveCount(0);
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
   });
 });

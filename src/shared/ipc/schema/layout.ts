@@ -810,8 +810,10 @@ const FrameTokenSchema = z.string().regex(FRAME_TOKEN);
 const u6b2Commands = {
   'layout.frameFile': {
     // agent: the asking tab holds the agent's mark (UX wave U6e, decision 19), so main's reads for the frame carry it as
-    // the tab's own reads do
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1), agent: z.literal(true).optional() }),
+    // the tab's own reads do. open (UX wave U6f, Decision Log 26): the person opened the protected folder the path lies in
+    // on another machine, sent under the same test as `files.read`'s, from an app page alone (main's guard); main passes
+    // it into the copy's act there and nowhere else
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1), agent: z.literal(true).optional(), open: z.literal(true).optional() }),
     output: z.discriminatedUnion('status', [
       // neighbours: present exactly for 'html' (M5, decision 14)
       z.strictObject({ status: z.literal('ready'), token: FrameTokenSchema, url: z.string(), framed: z.enum(['pdf', 'html', 'video', 'audio']), neighbours: z.boolean().optional() }),
@@ -822,6 +824,24 @@ const u6b2Commands = {
   'layout.releaseFrame': { input: z.strictObject({ token: FrameTokenSchema }), output: z.void(), owner: 'main' },
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // UX wave U6b-2 end
+// UX wave U6b-4a start (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, Interfaces §A): "Open in". The apps
+// found installed on this Mac, in the menu's order (Terminal and Finder always), and the hand-off of a file (at a line) or
+// of the session's working folder to one of them. Main launches with the path the daemon admits (`files.admit`), never
+// with the window's; a refusal is an answer with the sentence the window shows.
+export const OPEN_IN_APP_IDS = ['vscode', 'vscodeInsiders', 'cursor', 'windsurf', 'zed', 'xcode', 'terminal', 'iterm', 'ghostty', 'finder'] as const;
+export const OpenInAppIdSchema = z.enum(OPEN_IN_APP_IDS);
+export type OpenInAppId = z.infer<typeof OpenInAppIdSchema>;
+export const OpenInAppSchema = z.strictObject({ id: OpenInAppIdSchema, name: z.string() });
+export type OpenInApp = z.infer<typeof OpenInAppSchema>;
+export const OpenInInputSchema = z.strictObject({ appSessionId: AppSessionIdSchema, app: OpenInAppIdSchema, path: z.string().optional(), line: z.number().int().min(1).optional() });
+export type OpenInInput = z.infer<typeof OpenInInputSchema>;
+export const OpenInOutputSchema = z.discriminatedUnion('opened', [z.strictObject({ opened: z.literal(true) }), z.strictObject({ opened: z.literal(false), message: z.string() })]);
+export type OpenInOutput = z.infer<typeof OpenInOutputSchema>;
+const u6b4aCommands = {
+  'layout.openInApps': { input: z.strictObject({}), output: z.strictObject({ apps: z.array(OpenInAppSchema) }), owner: 'main' },
+  'layout.openIn': { input: OpenInInputSchema, output: OpenInOutputSchema, owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// UX wave U6b-4a end
 
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
@@ -839,6 +859,7 @@ export const commands = {
   ...p4b2Commands, // P4-B2 K6
   ...u6eCommands, // UX wave U6e: Open File…
   ...u6b2Commands, // UX wave U6b-2
+  ...u6b4aCommands, // UX wave U6b-4a: Open in
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

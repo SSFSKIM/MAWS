@@ -6,16 +6,19 @@
 // R1 adds one case in the product app: a mod's pushes (pass3/mods-pushes) replayed through C3's replay transport into a
 // session tab, showing its toast, its log lines in the transcript and its status line in the panel summary.
 // UX wave U2b adds the to-human view where MAWS draws it: over the harness's synthetic session in that view, the fold by
-// stretch, its record lines and a jump into a closed record, and the anchoring bound of 40 mounted rows there; and,
-// in the product app, the report scene redrawn as that view, with its switch above the composer.
+// stretch, its record lines and a jump into a closed record, and the anchoring bound of 40 mounted rows there (and its
+// labelled variant, read under MAWS_TRANSCRIPT_PERF=1 alone); and, in the product app, the report scene redrawn as that
+// view, with its switch above the composer.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics, HarnessQuestion } from '../src/renderer/src/harness/api';
 import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // decision 17: the tiers' words live in the copy only
+import { FOLDS_SHAPE, foldsFileOf } from '../src/shared/owner/folds'; // UX wave U2b (M6): the labelled variant's folds file
+import { synthesise } from '../test/support/synth-transcript'; // the harness's `synthetic/<turns>` seed, for the folds file's runs
 import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -272,14 +275,26 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
 // lane on, each turn's final answer a message, the last one streaming), so no turn folds and the list holds every
 // turn's rows, the mirror folding each stretch of work to one line. Far up the history, with one record opened, the
 // list mounts at most 40 rows while the last turn streams below. A count, never a time: the measured half of the
-// anchoring spike stays the lane-off case's above.
-test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({ harness }) => {
-  test.setTimeout(120_000);
+// anchoring spike stays the lane-off case's above. The frames, the batches and the long tasks of the window are
+// reported, not asserted, so the Mac reads this scene and its labelled variant below side by side, base against landing.
+// U2b's M6 (the architect's ruling on M7's batch 0): the labelled variant, run only under MAWS_TRANSCRIPT_PERF=1, hands
+// the transcript the runs of an invented folds file in the to-human mod's form (shape 2, one run per turn's work from its
+// first call to its last, as Step 0's scratch run recorded the mod's file), written to a scratch configuration directory
+// under the synthetic session's id, read back whole and parsed by MAWS's `storedRunsOf` in the harness's `foldsFile` (the
+// owner service's file read is not exercised here: e2e/to-human.spec.ts reads the file through the product), so each
+// record line reads its summary while the rows change; the measured cost of those labels is the reading the Mac takes.
+// Base against landing: a base build has no `foldsFile`, so its reading is this unlabelled scene on the base build, and
+// the labelled variant is read from this landing on, against the unlabelled scene on the same build and on the base.
+async function mirroredStream(harness: MawsLaunch, label: string, folds: string | null): Promise<void> {
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
   await load(page, 'synthetic/500/report');
   const list = page.locator('[data-transcript-scroller]');
+  if (folds !== null) {
+    const read = await page.evaluate((text) => (window as unknown as HarnessWindow).__maws_harness.foldsFile(text), folds);
+    expect(read, 'the folds file reads as the contract’s shape, every run kept').toBe((JSON.parse(folds) as { runs: unknown[] }).runs.length);
+  }
   await play(page, 1);
   await page.waitForTimeout(1500);
   // In force: the work between the messages is folded to record lines, and no turn's line offers a fold of its own (its
@@ -297,6 +312,9 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
     return lines.find((line) => line.getBoundingClientRect().top >= top && line.getBoundingClientRect().bottom <= bottom)?.getAttribute('data-row-id') ?? null;
   });
   expect(shown, 'a closed record line in view far up the history').not.toBeNull();
+  const closedWords = await list.locator('[data-row-id^="record-fold:closed:"]').getByRole('button').allTextContents();
+  if (folds !== null) expect(closedWords.filter((words) => /^› Checked fixture batch \d+; its cases pass$/.test(words)).length, 'the mounted record lines read their stored summaries').toBeGreaterThan(0);
+  else expect(new Set(closedWords), 'with no folds file every line reads working record').toEqual(new Set(['› working record']));
   const stretch = shown!.slice('record-fold:closed:'.length);
   await list.locator(rowSelector(shown!)).getByRole('button').click();
   await expect(list.locator(rowSelector(`record-fold:open:${stretch}`)).getByRole('button')).toHaveAttribute('aria-expanded', 'true');
@@ -315,12 +333,58 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
     return { domRows: most };
   }, STREAM_WINDOW_MS);
   const after = await metrics(page);
-  console.log(`mirrored anchoring: ${JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches })}`);
-  test.info().annotations.push({ type: 'mirrored anchoring', description: JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches }) });
+  const intervals = after.frameIntervals.slice(before.frameIntervals.length);
+  let elapsed = 0;
+  const measured = intervals.filter((interval) => (elapsed += interval) > WARMUP_MS);
+  const report = {
+    domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches, framesP95: round(p95(measured)), framesMax: round(measured.length > 0 ? Math.max(...measured) : 0),
+    frames: measured.length, lastBatchMs: round(after.lastBatchMs), longTasks: after.longTasks.slice(before.longTasks.length).map((task) => round(task.duration)), labelled: folds !== null,
+  };
+  console.log(`${label}: ${JSON.stringify(report)}`);
+  test.info().annotations.push({ type: label, description: JSON.stringify(report) });
   expect(after.batches - before.batches, 'the stream ran during the window').toBeGreaterThan(0);
   await expect.poll(async () => (await metrics(page)).batches, { message: 'the stream still runs at the window’s end' }).toBeGreaterThan(after.batches);
   expect(streamWindow.domRows, 'DOM rows').toBeLessThanOrEqual(40);
   expect(harness.consoleErrors()).toEqual([]);
+}
+
+test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({ harness }) => {
+  test.setTimeout(120_000);
+  await mirroredStream(harness, 'mirrored anchoring', null);
+});
+
+// The folds file of the labelled variant: one run for each turn's work of `synthetic/500` (the harness's seed), from its
+// first call to its last as the mod's tracker bounds a run, each with an invented summary, written as the mod writes it (a
+// temporary beside it, then a rename over it) under the synthetic session's id, and read back whole.
+function syntheticFoldsFile(config: string): string {
+  const all = synthesise({ turns: 500, seed: 1, streamLast: true });
+  const last = all.findLast((event) => event.kind === 'assistant.block.delta');
+  const streamed = all.findIndex((event) => event.kind === 'assistant.block.delta' && last?.kind === 'assistant.block.delta' && event.apiMessageId === last.apiMessageId);
+  const turnsCalls: string[][] = [];
+  for (const event of all.slice(0, streamed)) {
+    if (event.agentId !== null) continue;
+    if (event.kind === 'turn.started') turnsCalls.push([]);
+    else if (event.kind === 'tool.use') turnsCalls.at(-1)?.push(event.toolUseId);
+  }
+  const runs = turnsCalls.filter((calls) => calls.length > 0).map((calls, i) => [calls[0]!, calls.at(-1)!, `Checked fixture batch ${i + 1}; its cases pass`]);
+  const file = foldsFileOf(config, SYNTHETIC_SESSION)!;
+  mkdirSync(dirname(file), { recursive: true });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, JSON.stringify({ shape: FOLDS_SHAPE, runs }));
+  renameSync(temporary, file);
+  return readFileSync(file, 'utf8');
+}
+const SYNTHETIC_SESSION = 'synth-session'; // test/support/synth-transcript.ts's session id
+
+test('the mirrored view whose record lines read a folds file’s summaries mounts at most 40 rows while 500 turns stream (measured, labelled)', async ({ harness }) => {
+  test.skip(!MEASURED, 'the labelled variant is a measured reading, taken on the quiet Mac under MAWS_TRANSCRIPT_PERF=1');
+  test.setTimeout(180_000);
+  const config = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u2b-folds-')));
+  try {
+    await mirroredStream(harness, 'mirrored anchoring, labelled', syntheticFoldsFile(config));
+  } finally {
+    rmSync(config, { recursive: true, force: true });
+  }
 });
 
 // UX wave U2b (A13): the to-human view where MAWS draws it, over the synthetic session in that view
@@ -2440,14 +2504,20 @@ for (const { site, component, outcome } of r3DomCases) {
         await expect(group.locator('[data-cell-count]')).toHaveAttribute('data-cell-count', '1');
       } else if (component === 'ToolGroup') {
         const group = pane.locator('[data-kind="group"]').first();
-        await expect(group.getByText('R3 slot', { exact: true })).toBeVisible();
+        // UX wave U2b (§E): the run's row is a full ToolGroup site, one site for the run. The mod's answer keeps the
+        // engine's slot beside its own words, so its drawing stands and MAWS's run is drawn inside that slot, not beside it
+        await expect(group.locator('[data-surface-row="ToolGroup"]')).toHaveCount(1);
+        const drawing = group.locator('[data-plugin-drawn="ToolGroup"]');
+        await expect(drawing.getByText('R3 slot', { exact: true })).toBeVisible();
+        const slotted = drawing.locator('[data-engine-slot] [data-engine-native="ToolGroup"]');
+        await expect(slotted.locator('.transcript-run-line')).toHaveCount(1);
+        await expect(group.locator('.transcript-run-line')).toHaveCount(1); // drawn once, in the slot
         // the mod's rewrite says isExpanded, which opens the run (Rows.tsx, SurfaceGroupRow) onto its call's row
-        await expect(group.locator('.transcript-run-line')).toHaveAttribute('aria-expanded', 'true');
-        await expect(group.locator('.transcript-cell-line')).toBeVisible();
-        // the call's row in MAWS's words, drawn beside the mod's drawing (whose engine slot a drawing-only site leaves
-        // empty): UX wave U2 (M3) reads a shell call with no description by its short command, and `printf` is no
-        // command that rule knows, so `Ran a command` where the tool's name stood
-        await expect(group.locator('.transcript-cell-line')).toHaveText('Ran a command');
+        await expect(slotted.locator('.transcript-run-line')).toHaveAttribute('aria-expanded', 'true');
+        await expect(slotted.locator('.transcript-cell-line')).toBeVisible();
+        // the call's row in MAWS's words: UX wave U2 (M3) reads a shell call with no description by its short command,
+        // and `printf` is no command that rule knows, so `Ran a command` where the tool's name stood
+        await expect(slotted.locator('.transcript-cell-line')).toHaveText('Ran a command');
       } else if (component === 'ToolResult') {
         // X3 renders a completed one-tool run as a standalone cell, so opening it mounts ToolResult.
         const cell = pane.locator('[data-kind="cell"] .transcript-cell');
@@ -2706,6 +2776,21 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     const switchBox = (await viewSwitch.boundingBox())!;
     const frameBox = (await frame.boundingBox())!;
     expect(switchBox.y + switchBox.height, 'the switch’s bottom at or above the frame’s top (a pixel for rounding)').toBeLessThanOrEqual(frameBox.y + 1);
+    // UX wave U2b (M7, the rulings on the drawing): the button's hit area is at least 24 px tall, by padding with an equal
+    // negative margin, so the line keeps its height and the caption and the button's words stand where they stood: on
+    // one line, at the caption's height, inside the line's box
+    const button = viewSwitch.getByRole('button', { name: 'full transcript ›', exact: true });
+    expect((await button.boundingBox())!.height, 'the switch’s button is at least 24 px tall').toBeGreaterThanOrEqual(24);
+    const placed = await viewSwitch.evaluate((el) => {
+      const boxOf = (node: Element) => { const range = document.createRange(); range.selectNodeContents(node); const r = range.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
+      const caption = el.querySelector('.owner-view-switch > span')!;
+      const line = el.querySelector('.owner-view-switch')!.getBoundingClientRect();
+      const item = caption.getBoundingClientRect();
+      return { line: line.height, item: item.height, caption: boxOf(caption), words: boxOf(el.querySelector('.owner-view-switch > button')!) };
+    });
+    expect(Math.abs(placed.words.top - placed.caption.top), 'the button’s words on the caption’s line').toBeLessThanOrEqual(1);
+    expect(Math.abs(placed.words.bottom - placed.caption.bottom), 'the button’s words the caption’s height').toBeLessThanOrEqual(1);
+    expect(placed.line - placed.item, 'the line no taller than its caption (the padding is taken back)').toBeLessThanOrEqual(1);
 
     // A closed stretch's head is its messages alone, each under its label: the outer mark's words, the insight, the
     // must-read and the question, each a message as the mod reads them; its own words are the record's.

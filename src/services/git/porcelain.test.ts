@@ -46,6 +46,85 @@ describe('porcelain v2 parsing', () => {
     expect(parseStatus(z('# branch.oid (initial)', '# branch.head main'))).toMatchObject({ branch: 'main', head: '' });
   });
 
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, R2, M1 decision 8): a record whose
+  // `sub` field begins with S is a submodule
+  it('marks a submodule’s record of each of the three types, and no ordinary record in the same output', () => {
+    const out = z(
+      '# branch.oid 1111111111111111111111111111111111111111',
+      '# branch.head main',
+      '1 .M SC.. 160000 160000 160000 aaaaaaa aaaaaaa lib/gauges',
+      '2 R. S..U 160000 160000 160000 bbbbbbb bbbbbbb R100 lib/tides',
+      'lib/old-tides',
+      'u UU S... 160000 160000 160000 160000 ccccccc ddddddd eeeeeee lib/harbor',
+      '1 .M N... 100644 100644 100644 fffffff fffffff src/cart.ts',
+      '2 R. N... 100644 100644 100644 ggggggg ggggggg R100 src/rates.ts',
+      'src/old-rates.ts',
+      'u UU N... 100644 100644 100644 100644 hhhhhhh iiiiiii jjjjjjj src/merge.ts',
+      '? notes/',
+    );
+    const files = parseStatus(out).files;
+    expect(files.filter((file) => file.submodule === true).map((file) => file.path)).toEqual(['lib/gauges', 'lib/tides', 'lib/harbor']);
+    expect(files.filter((file) => !('submodule' in file)).map((file) => file.path)).toEqual(['src/cart.ts', 'src/rates.ts', 'src/merge.ts', 'notes/']);
+    expect(files.find((file) => file.path === 'lib/tides')).toEqual({ path: 'lib/tides', oldPath: 'lib/old-tides', index: 'R', worktree: '.', untracked: false, submodule: true });
+  });
+
+  // The panel's scalpel 3, third finding: `sub` says what the index or HEAD held at the path; the work tree's own mode
+  // (seen on the build VM's git: `1 .T S... 160000 160000 100644`) says whether a submodule's folder stands there now
+  it('marks no submodule whose work tree holds something else in its place, a file, a link or nothing, beside one that holds its folder', () => {
+    const out = z(
+      '# branch.oid 1111111111111111111111111111111111111111',
+      '1 .T S... 160000 160000 100644 aaaaaaa aaaaaaa lib/gauges',
+      '1 .T S... 160000 160000 120000 bbbbbbb bbbbbbb lib/tides',
+      '1 .D S... 160000 160000 000000 ccccccc ccccccc lib/harbor',
+      '2 R. S... 160000 160000 100644 ddddddd ddddddd R100 lib/berth',
+      'lib/old-berth',
+      'u UU S... 160000 160000 160000 100644 eeeeeee fffffff 0000000 lib/quay',
+      '1 .M SC.. 160000 160000 160000 ggggggg ggggggg lib/kept',
+    );
+    const files = parseStatus(out).files;
+    expect(files.filter((file) => file.submodule === true).map((file) => file.path)).toEqual(['lib/kept']);
+    expect(files.map((file) => [file.path, file.index, file.worktree])).toEqual([
+      ['lib/gauges', '.', 'T'],
+      ['lib/tides', '.', 'T'],
+      ['lib/harbor', '.', 'D'],
+      ['lib/berth', 'R', '.'],
+      ['lib/quay', 'U', 'U'],
+      ['lib/kept', '.', 'M'],
+    ]);
+  });
+
+  // The ruling on the panel's sweep 1 and scalpel 3's second finding (option A): the work tree's mode says when the path
+  // holds a symbolic link (120000) or nothing (000000), which the window cannot tell from XY (seen on the build VM's git:
+  // `1 .M N... 120000 120000 120000` for a changed link, `u UU N... 100644 100644 100644 000000` for a conflict deleted)
+  it('says what the work tree holds at a path when it is a link or nothing, on each record type, and nothing for a file, a folder or an untracked path', () => {
+    const out = z(
+      '# branch.oid 1111111111111111111111111111111111111111',
+      '1 .M N... 120000 120000 120000 aaaaaaa aaaaaaa docs/latest',
+      '1 .T S... 160000 160000 120000 bbbbbbb bbbbbbb lib/tides',
+      '1 .D N... 100644 100644 000000 ccccccc ccccccc src/old.ts',
+      '1 D. N... 100644 000000 000000 ddddddd 0000000 src/gone.ts',
+      '2 RD N... 100644 100644 000000 eeeeeee eeeeeee R100 src/berth.ts',
+      'src/dock.ts',
+      'u UU N... 100644 100644 100644 000000 fffffff ggggggg hhhhhhh src/merge.ts',
+      '1 .M N... 100644 100644 100644 iiiiiii iiiiiii src/cart.ts',
+      '1 .M SC.. 160000 160000 160000 jjjjjjj jjjjjjj lib/kept',
+      '? src/fresh-link',
+    );
+    const files = parseStatus(out).files;
+    expect(files.map((file) => [file.path, (file as { worktreeKind?: unknown }).worktreeKind ?? null])).toEqual([
+      ['docs/latest', 'link'],
+      ['lib/tides', 'link'],
+      ['src/old.ts', 'none'],
+      ['src/gone.ts', 'none'],
+      ['src/berth.ts', 'none'],
+      ['src/merge.ts', 'none'],
+      ['src/cart.ts', null],
+      ['lib/kept', null],
+      ['src/fresh-link', null],
+    ]);
+    expect(files.filter((file) => !('worktreeKind' in file)).map((file) => file.path)).toEqual(['src/cart.ts', 'lib/kept', 'src/fresh-link']); // the key is absent, never undefined
+  });
+
   it('refuses a record type it does not know rather than guessing its fields', () => {
     expect(() => parseStatus(z('# branch.oid (initial)', '9 what is this'))).toThrow(/unknown porcelain record/);
   });

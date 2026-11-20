@@ -1175,7 +1175,7 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
 async function openByPath(s: Scene, id: string, path: string): Promise<Locator> {
   await show(s, id);
   await openSurface(s.page, 'Files');
-  const row = surface(s.page, 'files').locator(`[role="treeitem"][data-path="${path}"]`).first();
+  const row = surface(s.page, 'files').locator(`[role="treeitem"][data-kind][data-path="${path}"]`).first();
   await expect(row, `${path} in Files' tree`).toBeVisible({ timeout: 20_000 });
   await row.click();
   await expect(sideColumn(s.page).locator(`[data-file-viewer][data-path="${path}"]`), `${path} beside the chat, as a framed file`).toHaveAttribute('data-kind', 'frame', { timeout: 20_000 });

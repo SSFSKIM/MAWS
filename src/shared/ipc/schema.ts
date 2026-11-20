@@ -304,6 +304,7 @@ export const MACHINE_EVENTS = [
   'session.changed', 'session.removed', 'session.projects.changed', 'session.digest', 'session.setup', 'session.intent.changed',
   'session.eventBatch', 'session.status', 'engine.budget', // the side threads', setups' and yield's rows; the scenario stub's statuses and budget
   'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
+  'mods.foldSummariesChanged', // UX wave U2b (panel finding 3): the owner channel's, after the summaries switch's write
   'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
   'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
   'render.request', 'render.exit', // P5 O5 M3: the render host's work, posted to it alone

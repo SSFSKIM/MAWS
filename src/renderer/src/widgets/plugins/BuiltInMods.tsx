@@ -6,6 +6,9 @@
 // is MAWS's, never the engine's. Hidden while the registry is empty or no row matches the library's search. A registry
 // main cannot read says so, in main's words. UX wave U11c: Customize's My items, All draws the same rows, with no heading,
 // after the plugins (customize/MineAll.tsx).
+// UX wave U2b (M7; the execution document, §M, "The switch"; frame 11): in the mods list alone, a row that carries
+// `summaries` draws a second line, the summaries' switch: its words and sentence in one label with the control, so the
+// whole line is its hit area and the words are its name. Customize's All passes no such switch and draws the row as before.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModRow } from '@shared/mods/registry';
 import { Segment } from '../../settings-tab/parts';
@@ -41,7 +44,7 @@ export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSession
       <GroupHeading label={L.group.builtIn} count={rows.length} />
       <ul className="m-0 list-none p-0">
         {rows.map((row) => (
-          <BuiltInModRow key={row.id} row={row} mods={mods} appSessionId={appSessionId} />
+          <BuiltInModRow key={row.id} row={row} mods={mods} appSessionId={appSessionId} summariesSwitch />
         ))}
       </ul>
     </section>
@@ -58,11 +61,13 @@ export function ModsUnavailable({ read }: { read: Extract<ModRowsRead, { state: 
 }
 
 // One mod's row. UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): under Customize's All,
-// `kindWord` draws "Mod" before the switch.
-export function BuiltInModRow({ row, mods, appSessionId, kindWord = false }: { row: ModRow; mods: BuiltInModsState; appSessionId: AppSessionId | null; kindWord?: boolean }) {
-  const { failure, setEnabled, setOverride } = mods;
+// `kindWord` draws "Mod" before the switch. UX wave U2b (M7): `summariesSwitch`, passed by the mods list alone, draws the
+// summaries' switch on a second line where the row carries `summaries`.
+export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summariesSwitch = false }: { row: ModRow; mods: BuiltInModsState; appSessionId: AppSessionId | null; kindWord?: boolean; summariesSwitch?: boolean }) {
+  const { failure, setEnabled, setOverride, setFoldSummaries } = mods;
+  const summaries = summariesSwitch ? row.summaries : undefined;
   return (
-    <li data-mod-row={row.id} className="flex items-start gap-3 border-b border-border px-2 py-2 last:border-b-0">
+    <li data-mod-row={row.id} className={`flex items-start gap-3 border-b border-border px-2 py-2 last:border-b-0${summaries === undefined ? '' : ' flex-wrap gap-y-2'}`}>
       <ItemImage kind="mod" seed={row.name} iconUrl={null} size="row" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-ui-sm text-fg-muted">
         <span className="flex min-w-0 items-center gap-2 text-ui">
@@ -88,6 +93,16 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false }: { r
       <span className="shrink-0 text-ui-sm text-fg-muted tabular-nums">{L.mod.version(row.version)}</span>
       {kindWord && <KindWord kind="mod" />}
       <Switch checked={row.enabled} label={L.mod.appSwitch(row.name)} disabled={false} onClick={() => void setEnabled(row.id, !row.enabled)} />
+      {summaries !== undefined && (
+        // the line starts at the row's middle column: past the image (size-9) and the gap
+        <label data-mod-summaries="" className="flex min-w-0 basis-full cursor-pointer items-start gap-3 pl-12 text-ui-sm text-fg-muted">
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-ui text-fg">{L.mod.summaries.label}</span>
+            <span>{L.mod.summaries.sentence}</span>
+          </span>
+          <Switch checked={summaries} label={L.mod.summaries.label} disabled={false} onClick={() => void setFoldSummaries(!summaries)} />
+        </label>
+      )}
     </li>
   );
 }

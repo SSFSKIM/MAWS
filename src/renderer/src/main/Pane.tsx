@@ -20,6 +20,7 @@ import { useRemoteTranscriptHold } from '../lane-b/transcript-hold'; // P5 O15 M
 import { LinkMiddleWords, LinkStatusLine, usePaneToKeep } from '../lane-b/link-status'; // the UX wave, U9
 import { cardSession, expandPane } from '../shell/floating'; // P3-G; P4-B3: expandPane
 import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
+import { ShowChat } from '../shell/ShowChat'; // UX wave U10b (O-43): Show chat, before Restore split
 import { dropPanelRecord, useCoverState } from '../shell/transfer'; // P4-B3 M4
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3 M4
 import { useLayout } from '../stores/layout';
@@ -123,7 +124,7 @@ function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 function TabHeader({ scope, paneIndex }: { scope: EditorHostScope; paneIndex: PaneIndex }) {
   const registration = useEditorHostRegistration(scope);
   const expand = useLayout((s) => expandOf(currentSet(s.main), paneIndex));
-  const controls = expand && <ExpandButton expand={expand} paneIndex={paneIndex} />;
+  const controls = expand && <><ShowChat host="split" /><ExpandButton expand={expand} paneIndex={paneIndex} /></>;
   return registration && <EditorHeader title={registration.title} registration={registration} scope={scope} controls={controls} />;
 }
 

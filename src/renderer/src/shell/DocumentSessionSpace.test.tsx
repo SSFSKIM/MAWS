@@ -46,6 +46,22 @@ it('keeps a document reading column beside the session, clamps a resize, and rel
   expect(column()).toBeNull();
 });
 
+// UX wave U10b (O-43, B6): under the bar a scrolling document keeps the bar's published height and its margin at the end
+// of its scroll (the editor's page reads `--float-bar-room`), only while the bar floats over this surface.
+it('gives the page the bar’s height and margin at the end of its scroll while the bar floats over its surface', () => {
+  render(<DocumentSessionSpace surface="panel" enabled><p>Next steps</p></DocumentSessionSpace>);
+  const room = () => screen.getByText('Next steps').parentElement!.parentElement!.style.getPropertyValue('--float-bar-room');
+  const bar = { left: 900, top: 640, width: 484, height: 60 };
+  act(() => useFloatingCard.setState({ closed: false, hidden: false, rect: { left: 1004, top: 300, width: 420, height: 420 }, host: 'panel' }));
+  expect(room(), 'the open card: no room').toBe('');
+  act(() => useFloatingCard.setState({ closed: true, hidden: false, rect: bar, host: 'panel' }));
+  expect(room()).toBe('76px');
+  act(() => useFloatingCard.setState({ rect: bar, host: 'split' }));
+  expect(room(), 'the bar over the other surface').toBe('');
+  act(() => useFloatingCard.setState({ closed: true, hidden: true, rect: null, host: null }));
+  expect(room(), 'hidden: nothing floats').toBe('');
+});
+
 // Ticket 760: the render that floats the panel reserves the column at the floated width, before any frame lets the observer
 // report it (the stub here never fires), so no frame shows the document across the whole panel.
 it('reserves the column in the render that floats the panel, with no resize reported', () => {

@@ -108,7 +108,7 @@ function availableFocus(element: Element | null): element is HTMLElement {
     && !element.closest('[inert], [hidden], [aria-hidden="true"]');
 }
 
-function dismissSheet(opener: HTMLElement | null): void {
+export function dismissSheet(opener: HTMLElement | null): void {
   useLayout.getState().setPanel({ collapsed: true });
   requestAnimationFrame(() => {
     // Main must have left inert before focus returns. Do not undo a deliberate focus move or a reopened sheet.

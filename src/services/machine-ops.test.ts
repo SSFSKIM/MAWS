@@ -9,7 +9,9 @@ import { toWire } from '@shared/host/json-bytes';
 import { OpLedger } from '@shared/host/op-ledger';
 import { validateCommandInput } from '@shared/ipc/validate';
 import type { HandlerContext } from '@shared/ipc/client';
-import { claimable, machineOps, registerMachineOps, type LateOutcome } from './machine-ops';
+import { NOT_KEPT_REFUSAL } from '@shared/files/outside';
+import { HostOpResultSchema } from '@shared/ipc/schema/host';
+import { ANSWER_NOT_KEPT, claimable, machineOps, NOT_KEPT, registerMachineOps, type LateOutcome } from './machine-ops';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -270,5 +272,39 @@ describe('a claim the last process left unfinished', () => {
     expect(after.query('op-kept', opCreated)).toMatchObject({ state: 'done', outcome: { ok: true } });
     after.ledger.finish('op-orphan-2', { ok: true, value: { status: 'ok', appSessionId: 'app-2' } });
     expect(after.query('op-orphan-2', opCreated)).toMatchObject({ state: 'done', outcome: { ok: true, value: { appSessionId: 'app-2' } } });
+  });
+});
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 4, §C, point 3):
+// an act whose answer is a file's bytes or a folder's names is kept as ended, never as what it answered
+describe('machine.op for an act whose answer the ledger does not keep', () => {
+  const READ_TEXT = 'an invented line the ledger must not hold';
+  const answer = { encoding: 'utf8', content: READ_TEXT, bytes: READ_TEXT.length, offset: 0, length: READ_TEXT.length, truncated: false, mime: 'text/plain', hash: null, utf8: null };
+  const read = (opId: string, opCreated = now()) => ({ opId, opCreated, claim: CLAIM, name: 'files.readOutside', input: { appSessionId: 'app-1', path: '/srv/elsewhere/notes.txt' } });
+
+  it('names the read and the listing alone, and its marker is an error of the ledger’s shape under its named word', () => {
+    expect([...ANSWER_NOT_KEPT].sort()).toEqual(['files.listOutside', 'files.readOutside']);
+    expect(HostOpResultSchema.safeParse(NOT_KEPT).success).toBe(true);
+    expect(NOT_KEPT).toEqual({ ok: false, error: { code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: NOT_KEPT_REFUSAL } } });
+  });
+
+  it('answers the run’s own caller what ran, and the same operation met again, reopened or queried, the marker, running nothing', async () => {
+    const { ops, reopen, invoke, file } = lab(vi.fn<Invoke>(async () => ({ ok: true, value: answer })));
+    const input = read('op-read-1');
+    expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true, value: answer } });
+    expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: NOT_KEPT });
+    expect(await reopen().op(input, CONTEXT)).toEqual({ state: 'done', result: NOT_KEPT });
+    expect(ops.opQuery({ opId: input.opId, opCreated: input.opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', outcome: NOT_KEPT });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(readFileSync(file, 'utf8')).not.toContain(READ_TEXT);
+  });
+
+  it('keeps the answer of every other act, a save’s among them, as it ran', async () => {
+    const saved = { status: 'ok', hash: 'b'.repeat(64) };
+    const { ops, invoke } = lab(vi.fn<Invoke>(async () => ({ ok: true, value: saved })));
+    const input = { opId: 'op-save-1', opCreated: now(), claim: CLAIM, name: 'files.writeOutside', input: { appSessionId: 'app-1', path: '/srv/elsewhere/notes.txt', content: 'x', expectedHash: 'a'.repeat(64), real: '/srv/elsewhere/notes.txt' } };
+    expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true, value: saved } });
+    expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true, value: saved } });
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 });

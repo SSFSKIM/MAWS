@@ -1,13 +1,14 @@
 // Open File… and the sender's guard (UX wave U6e, docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md,
 // §C; write rule line 2, decisions 3, 9 and 14).
 //
-// The guard: `files.writeOutside` and `layout.openFile` are answered only for a live page of an app window, the window
-// `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's own origin test,
-// ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a web contents that
-// is no window's and a page at another origin; this refuses, too, a window of the app's origin that is not an app window
-// (a presentation, the repair window), main's in-process callers, whose asker is no page, and, through `dispatchLocal`
-// and `invokeOwn`, which have no sender check, a page an app window navigated to elsewhere. The app registers it with
-// `guardCommand`, which runs it before anything is forwarded (src/main/ipc/router.ts).
+// The guard: `files.writeOutside` and `layout.openFile` (and, UX wave U6f, the open, the chooser's listing and the pick of
+// a file outside a session's folders on another machine: `APP_PAGE_ONLY`) are answered only for a live page of an app
+// window, the window `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's
+// own origin test, ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a
+// web contents that is no window's and a page at another origin; this refuses, too, a window of the app's origin that is
+// not an app window (a presentation, the repair window), main's in-process callers, whose asker is no page, and, through
+// `dispatchLocal` and `invokeOwn`, which have no sender check, a page an app window navigated to elsewhere. The app
+// registers it with `guardCommand`, which runs it before anything is forwarded (src/main/ipc/router.ts).
 //
 // Open File…: `layout.openFile` is main's own command, as `layout.pickFiles` is, since a request to the daemon has ten
 // seconds and a person choosing takes longer. Its handler shows the system's chooser for one file on the asking page's
@@ -16,9 +17,10 @@
 // session's id is bare here and its machine is the router's target: `layout.*` is graded `client`, so a session of
 // another machine is refused by the router before this runs.
 import type { ClientPort, PickAnswer } from '@shared/client/port';
+import { OUTSIDE_ACTS } from '@shared/files/outside';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
-import type { CommandInput, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import type { OpenFileOutput } from '@shared/ipc/schema/layout';
 import { atAppOrigin } from '../ipc/app-origin';
 import { pageOf } from '../ipc/clients';
@@ -32,10 +34,26 @@ export function isAppPage(client: ClientRef, appUrl: string): boolean {
   return page !== null && appWindows().some((win) => win.webContents === page) && atAppOrigin(page.mainFrame.url, appUrl);
 }
 
+/** The commands the guard answers only for a live page of an app window: U6e's save and Open File…, U6f's three acts, U6b-4a's Open in and U11's skill file. */
+export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile', 'layout.openIn' /* UX wave U6b-4a: Open in */, 'customization.skillFile' /* UX wave U11: a skill's Open in */];
+
 export const appPageOnly =
   (appUrl: string): CommandGuard =>
   (name, _input, ctx) =>
     isAppPage(ctx.client, appUrl) ? undefined : ipcError('forbidden_sender', `${name} may only be invoked by the app window`);
+
+/**
+ * UX wave U6f (Decision Log 26): the commands that carry `open` (the person opened a protected folder on another machine)
+ * only from a live page of an app window, as `files.read`'s comes from the page's own record of what the person opened.
+ * A frame, which is no app page, asks the same command without it. "Open externally"'s copy carries it under the same
+ * rule (the branch review, Decision Log 33 (3)).
+ */
+export const OPENS_FROM_APP_PAGE_ONLY: readonly CommandName[] = ['layout.frameFile', 'remote.openCopy'];
+
+export const openFromAppPageOnly =
+  (appUrl: string): CommandGuard =>
+  (name, input, ctx) =>
+    (input as { open?: unknown }).open !== true || isAppPage(ctx.client, appUrl) ? undefined : ipcError('forbidden_sender', `${name} with open may only be invoked by the app window`);
 
 export interface OpenFileDeps {
   port: Pick<ClientPort, 'pick'>;

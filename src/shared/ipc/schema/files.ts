@@ -12,6 +12,14 @@
 // names; neither writes a file of MAWS's own (its profile folder, an app bundle of it). The other write, P5 O3-E's
 // `files.upload`, creates new files in the session's attachments directory alone; nothing here renames a file, or
 // deletes one but the upload's own.
+//
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §B): from another machine,
+// `files.read` and the rest take the session's directories less the machine's home, as P5's Decision Log 237 has them,
+// and admit nothing by name; four acts of their own reach outside them there, each on the terminal's offer row and run
+// only under the claim `machine.op` makes: `files.readOutside` (the keyed read), `files.listOutside` (one page of one
+// folder of the machine, for the chooser another machine's page draws), `files.chooseOutside` (the pick, which the
+// machine's daemon records as its own grant) and `files.writeOutside`. None of them enters a folder macOS protects
+// unasked (`open`).
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
 import { AppSessionIdSchema } from '@shared/graph/ids';
@@ -46,6 +54,9 @@ export const FilesEntrySchema = z.strictObject({
   size: z.number().int(),
   mtimeMs: z.number(),
   target: z.string().nullable(), // readlink for a symlink, else null; shown, never followed
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §A): git ignores the
+  // entry, by the rules of the repository that holds the listed directory; sent only when true, never on a root
+  ignored: z.literal(true).optional(),
 });
 export type FilesEntry = z.infer<typeof FilesEntrySchema>;
 
@@ -73,7 +84,9 @@ export const FilesReadInputSchema = z.strictObject({
   // a file outside the session's directories is read when it stands admitted for the session, for a caller on the
   // session's machine alone; U6e (decision 5): admitted by the session's transcript (`src/services/files/named.ts`), by a
   // grant (`files.grant`) or by the agent's delivery, and the answer says which kind (`outside`). Sent by the window only
-  // for a session on this Mac; a peer that does not know the key drops it and answers the plain read.
+  // for a session on this Mac; a peer that does not know the key drops it and answers the plain read. U6f (decision 9):
+  // from another machine it admits nothing, and a file the session's deliveries admit there is answered `outside`
+  // read-only (`why: 'added'`); `files.readOutside` asks by the outside rule there.
   named: z.literal(true).optional(),
   // UX wave U6e (decision 19): the open was asked by the agent (`show_pane`), so no grant admits the file; a peer that does
   // not know the key drops it
@@ -83,6 +96,10 @@ export const FilesReadInputSchema = z.strictObject({
   // honoured for a caller on the file's machine alone (a remote caller's is passed over and the plain read answered).
   // Sent by main alone, to serve a file's frame; a daemon that does not know the key drops it and answers the plain read.
   raw: z.literal(true).optional(),
+  // UX wave U6f (decision 18): the person said to open the folder macOS protects that the path lies in; read only by
+  // `files.readOutside`, and carried here so the window's keyed read can hand it on. Main takes it off a read it sends to
+  // another machine as a call.
+  open: z.literal(true).optional(),
 });
 export type FilesReadInput = z.infer<typeof FilesReadInputSchema>;
 
@@ -145,8 +162,43 @@ export type FilesWriteOutput = z.infer<typeof FilesWriteOutputSchema>;
 // that a daemon that cannot compare the real path does not know it and writes nothing (`unknown_command`). `real` is the
 // real path the read answered (`outside.real`); a path that no longer resolves there is refused with FILES_MOVED.
 export const FILES_MOVED = 'the path no longer leads to the file that was opened';
-export const FilesWriteOutsideInputSchema = FilesWriteInputSchema.extend({ real: z.string() });
+// UX wave U6f (decision 18): `open`, a save from another machine of a file in a folder macOS protects, which the person
+// opened
+export const FilesWriteOutsideInputSchema = FilesWriteInputSchema.extend({ real: z.string(), open: z.literal(true).optional() });
 export type FilesWriteOutsideInput = z.infer<typeof FilesWriteOutsideInputSchema>;
+
+// UX wave U6f (§B; decisions 2, 7, 8, 18): the acts of another machine on a file outside the session's directories. The
+// open is the keyed read, with no key to ask it (it always asks) and no raw read (no raw read crosses a link, U6b-2).
+// The listing is one page of one folder of the machine, its entries by name and directory entry type alone, never a link's
+// target, a size or a date. The choice is the daemon's own grant of the file the path leads to, answered with its real
+// path, which the tab opens. A path is absolute, or `~` and `~/…` under the daemon user's home.
+export const OUTSIDE_LIST_PAGE = 200;
+export const FilesReadOutsideInputSchema = FilesReadInputSchema.omit({ named: true, raw: true }).extend({ open: z.literal(true).optional() });
+export type FilesReadOutsideInput = z.infer<typeof FilesReadOutsideInputSchema>;
+export const FilesListOutsideInputSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema, // the session the chooser is open for; it places the request on its machine
+  path: z.string().min(1).max(4096).optional(), // absent: the home
+  open: z.literal(true).optional(), // read inside the folders macOS protects that the path leads into
+  cursor: z.string().min(1).max(1024).optional(), // the last name of the page before
+});
+export type FilesListOutsideInput = z.infer<typeof FilesListOutsideInputSchema>;
+export const OutsideEntrySchema = z.strictObject({ name: z.string(), path: z.string(), kind: z.enum(['dir', 'file', 'link', 'other']), protected: z.boolean() });
+export type OutsideEntry = z.infer<typeof OutsideEntrySchema>;
+export const FilesListOutsideOutputSchema = z.discriminatedUnion('status', [
+  // `path`: the folder's real path; `parent`: its parent, null at the filesystem's root; `home`: the daemon user's home
+  z.strictObject({ status: z.literal('listed'), path: z.string(), parent: z.string().nullable(), home: z.string(), entries: z.array(OutsideEntrySchema), cursor: z.string().nullable() }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['no-folder', 'not-a-folder', 'unreadable', 'protected']) }),
+]);
+export type FilesListOutsideOutput = z.infer<typeof FilesListOutsideOutputSchema>;
+export const FilesChooseOutsideInputSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1).max(4096), open: z.literal(true).optional() });
+export type FilesChooseOutsideInput = z.infer<typeof FilesChooseOutsideInputSchema>;
+export const FilesChooseOutsideOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('granted'), path: z.string() }), // the real path: what the tab opens
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['not-a-file', 'no-file', 'protected']) }),
+]);
+export type FilesChooseOutsideOutput = z.infer<typeof FilesChooseOutsideOutputSchema>;
+// The message of a read's or a save's refusal whose `issues.refusal` is 'protected' (decision 18)
+export const FILES_PROTECTED = 'the file is in a folder macOS protects';
 
 const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string() });
 // UX wave U6c: `files.openExternal` takes `named` as `files.read` does; U6e: and `agent`
@@ -175,13 +227,22 @@ export const FilesGrantOutputSchema = z.discriminatedUnion('status', [
 ]);
 export type FilesGrantOutput = z.infer<typeof FilesGrantOutputSchema>;
 
+// UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission, which
+// main sends before it hands a path to another app (main-only). Without `path`, the session's working folder as U8c-2
+// admits it (`admittedFolder`, UC-4); with `path`, a file or folder the session's directories hold, or one file outside
+// them that `files.writeOutside` would save. Answered with the real path main launches with, never the window's string.
+export const FilesAdmitInputSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().optional() });
+export type FilesAdmitInput = z.infer<typeof FilesAdmitInputSchema>;
+export const FilesAdmitOutputSchema = z.strictObject({ path: z.string(), kind: z.enum(['file', 'folder']) });
+export type FilesAdmitOutput = z.infer<typeof FilesAdmitOutputSchema>;
+
 // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach to a File artifact's stored bytes, a path main resolved itself
 // (the artifact's admission), read with `files.read`'s rules (no link on the path, a regular file, the same answer).
 // Main-only: a page could otherwise read any absolute path outside every session's allowlist. `path` must be absolute,
 // which the files service refuses (`path must be absolute`), as `library.read`'s caller has always been told. UX wave
 // U6c: `named` is left out as the session is; the caller's resolution is the admission. U6e: `agent` too; its answer is
-// the read's, and sets neither `outside` nor `own`. UX wave U6b-2: `raw` too.
-export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true, agent: true, raw: true });
+// the read's, and sets neither `outside` nor `own`. UX wave U6b-2: `raw` too. U6f: `open` too.
+export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true, agent: true, raw: true, open: true });
 export type FilesReadResolvedInput = z.infer<typeof FilesReadResolvedInputSchema>;
 
 // P5 O3-E (Interfaces §F; D7; O7's C8): bounded bytes written into a session's attachments directory on its machine,
@@ -283,10 +344,14 @@ export const commands = {
   // E5 start: the hash-checked save. Not a read: never in the renderer's QUERY_COMMANDS.
   'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'machine' },
   // E5 end
-  // UX wave U6e: the save of a file outside the session's directories (bridged; offered to no other machine), and the
-  // grant of a chosen file (main-only)
+  // UX wave U6e: the save of a file outside the session's directories (bridged), and the grant of a chosen file
+  // (main-only); U6f: from another machine too, beside the open, the chooser's listing and the pick (bridged)
   'files.writeOutside': { input: FilesWriteOutsideInputSchema, output: FilesWriteOutputSchema, owner: 'machine' },
   'files.grant': { input: SessionPathSchema, output: FilesGrantOutputSchema, owner: 'machine' },
+  'files.readOutside': { input: FilesReadOutsideInputSchema, output: FilesReadOutputSchema, owner: 'machine' },
+  'files.listOutside': { input: FilesListOutsideInputSchema, output: FilesListOutsideOutputSchema, owner: 'machine' },
+  'files.chooseOutside': { input: FilesChooseOutsideInputSchema, output: FilesChooseOutsideOutputSchema, owner: 'machine' },
+  'files.admit': { input: FilesAdmitInputSchema, output: FilesAdmitOutputSchema, owner: 'machine' }, // UX wave U6b-4a: main-only
   'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'machine' }, // E1
   'files.readResolved': { input: FilesReadResolvedInputSchema, output: FilesReadOutputSchema, owner: 'machine' }, // P5 O3-E: main-only
   'files.upload': { input: FilesUploadInputSchema, output: FilesUploadOutputSchema, owner: 'machine' }, // P5 O3-E

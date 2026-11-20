@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -36,6 +36,13 @@ const json = (path: string, value: unknown) => file(path, JSON.stringify(value))
 const skill = (base: string, name: string, words = '---\nname: Shared\ndescription: >\n  One line\n  continued\n---\nDo not return the skill body.\n') => file(join(base, name, 'SKILL.md'), words);
 const environment = () => Promise.resolve({ HOME: home, CLAUDE_CONFIG_DIR: configHome });
 const read = (cwd: string | null = null) => readCustomizationInventory(cwd, { userData, captureEnv: environment });
+// a skill's row without the file the inventory read (UX wave U11's skill actions), which its own case pins
+const bare = (row: CommandOutput<'customization.inventory'>['skills'][number]) => {
+  const copy: Partial<typeof row> = { ...row };
+  delete copy.realPath;
+  delete copy.fileId;
+  return copy;
+};
 
 describe('cold customization inventory', () => {
   it('reads user and app configuration without a project, returns metadata only, and never writes configuration', async () => {
@@ -52,13 +59,13 @@ describe('cold customization inventory', () => {
     const before = await Promise.all([readFile(global, 'utf8'), readFile(appFile, 'utf8'), readFile(path, 'utf8')]);
 
     const answer = await read();
-    expect(answer).toEqual({
+    expect({ ...answer, skills: answer.skills.map(bare) }).toEqual({
       skills: [{ name: 'Shared', description: 'One line continued', source: 'user', path, plugin: null }],
       servers: [
         { name: 'shared', scope: 'app', path: appFile, transport: 'http' },
         { name: 'process', scope: 'user', path: global, transport: 'stdio' },
         { name: 'shared', scope: 'user', path: global, transport: 'http' },
-      ], warnings: [], serversRead: true, pluginServers: [], plugins: [],
+      ], warnings: [], serversRead: true, pluginServers: [], plugins: [], skillsRead: true,
     });
     expect(JSON.stringify(answer)).not.toMatch(/SECRET|Do not return|Authorization|mcpServers|command|args|env|url/);
     expect(await Promise.all([readFile(global, 'utf8'), readFile(appFile, 'utf8'), readFile(path, 'utf8')])).toEqual(before);
@@ -83,7 +90,7 @@ describe('cold customization inventory', () => {
     const child = await json(join(cwd, '.mcp.json'), { mcpServers: { same: { command: 'x' } } });
 
     const answer = await read(cwd);
-    expect(answer.skills).toEqual([
+    expect(answer.skills.map(bare)).toEqual([
       { name: 'Shared', description: 'One line continued', source: 'user', path: userSkill, plugin: null },
       { name: 'Shared', description: 'One line continued', source: 'project', path: childSkill, plugin: null },
       { name: 'Shared', description: 'One line continued', source: 'project', path: repoSkill, plugin: null },
@@ -104,7 +111,7 @@ describe('cold customization inventory', () => {
     const path = await skill(join(home, '.claude', 'skills'), 'plain', 'No front matter\nPRIVATE_BODY');
     const global = await json(join(home, '.claude.json'), { projects: { [cwd]: { mcpServers: { local: { command: 'x' } } } } });
     const answer = await readCustomizationInventory(cwd, { userData, captureEnv: async () => ({ HOME: home }) });
-    expect(answer.skills).toEqual([{ name: 'plain', description: '', source: 'user', path, plugin: null }]);
+    expect(answer.skills.map(bare)).toEqual([{ name: 'plain', description: '', source: 'user', path, plugin: null }]);
     expect(answer.servers).toEqual([{ name: 'local', scope: 'local', path: global, transport: 'stdio' }]);
     expect(answer.warnings).toEqual([]);
   });
@@ -122,7 +129,7 @@ describe('cold customization inventory', () => {
       'project@market': [{ scope: 'project', projectPath: cwd, installPath: pluginRoot }],
     } });
     const answer = await read(cwd);
-    expect(answer.skills).toEqual([
+    expect(answer.skills.map(bare)).toEqual([
       { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'example@market', pluginName: 'example' },
       { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'example@market', pluginName: 'example' },
       { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'project@market', pluginName: 'example' },
@@ -189,8 +196,37 @@ describe('cold customization inventory', () => {
     await json(join(pluginRoot, '.claude-plugin', 'plugin.json'), { skills: ['../outside'] });
     await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: pluginRoot }] } });
     const answer = await read();
-    expect(answer.skills).toEqual([{ name: 'Shared', description: 'One line continued', source: 'user', path: join(configHome, 'skills', 'linked', 'SKILL.md'), plugin: null }]);
+    expect(answer.skills.map(bare)).toEqual([{ name: 'Shared', description: 'One line continued', source: 'user', path: join(configHome, 'skills', 'linked', 'SKILL.md'), plugin: null }]);
     expect(answer.warnings.join(' ')).toMatch(/outside the plugin/);
+  });
+
+  // UX wave U11's skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md, decision 12)
+  it('names the file each skill was read from, by its real path and identity; a plugin’s skill folder it cannot read leaves the skills not wholly read', async () => {
+    const outside = await skill(root, 'target');
+    await mkdir(join(configHome, 'skills'), { recursive: true });
+    await symlink(dirname(outside), join(configHome, 'skills', 'linked'));
+    const pluginRoot = join(root, 'plugin');
+    const own = await skill(join(pluginRoot, 'skills'), 'own');
+    await json(join(pluginRoot, '.claude-plugin', 'plugin.json'), { name: 'p' });
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: pluginRoot }] } });
+    const answer = await read();
+    const identity = async (path: string) => { const id = await stat(path, { bigint: true }); return `${id.dev}:${id.ino}`; };
+    expect(answer.skills.map(({ path, realPath, fileId }) => ({ path, realPath, fileId }))).toEqual([
+      { path: join(configHome, 'skills', 'linked', 'SKILL.md'), realPath: outside, fileId: await identity(outside) },
+      { path: own, realPath: own, fileId: await identity(own) },
+    ]);
+    expect(answer.skillsRead).toBe(true); // the plugins' coverage note is no failure
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: join(root, 'gone') }] } });
+    expect((await read()).skillsRead).toBe(false);
+  });
+
+  it('an unreadable plugin directory leaves the skills not wholly read though MAWS’s own settings file is invalid', async () => {
+    await file(join(userData, 'machine-settings.json'), '{ not json');
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: join(root, 'gone') }] } });
+    const answer = await read();
+    expect(answer.serversRead).toBe(false);
+    expect(answer.warnings.join(' ')).toMatch(/installed plugin directory could not be read/);
+    expect(answer.skillsRead).toBe(false);
   });
 
   it('does not mistake a linked checkout for an attested local key', async () => {
@@ -220,6 +256,7 @@ describe('cold customization inventory', () => {
     const legacy = await read();
     expect(legacy.servers).toEqual([]);
     expect(legacy.skills).toHaveLength(1);
+    expect(legacy.skillsRead).toBe(true); // an MCP file's warning leaves the skills wholly read
     expect(legacy.warnings.join(' ')).toMatch(/User.*MCP.*not inventoried/);
     await rm(join(configHome, '.config.json'));
     const custom = await readCustomizationInventory(null, { userData, captureEnv: async () => ({ HOME: home, CLAUDE_CONFIG_DIR: configHome, CLAUDE_CODE_CUSTOM_OAUTH_URL: 'OAUTH_SECRET' }) });
@@ -231,9 +268,10 @@ describe('cold customization inventory', () => {
     const path = await skill(join(configHome, 'skills'), 'large', `---\nname: Large\ndescription: Prefix only\n---\n${'PRIVATE_BODY'.repeat(INVENTORY_BOUNDS.frontMatterBytes)}`);
     await file(join(configHome, '.claude.json'), ' '.repeat(INVENTORY_BOUNDS.jsonBytes + 1));
     const answer = await read();
-    expect(answer.skills).toEqual([{ name: 'Large', description: 'Prefix only', source: 'user', path, plugin: null }]);
+    expect(answer.skills.map(bare)).toEqual([{ name: 'Large', description: 'Prefix only', source: 'user', path, plugin: null }]);
     expect(answer.servers).toEqual([]);
     expect(answer.serversRead).toBe(false); // the servers it lists are not the whole set
+    expect(answer.skillsRead).toBe(true); // an MCP file it could not read leaves the skills wholly read
     expect(answer.warnings.join(' ')).toMatch(/could not be read/);
     expect(JSON.stringify(answer)).not.toContain('PRIVATE_BODY');
   });
@@ -247,6 +285,7 @@ describe('cold customization inventory', () => {
     expect(answer.servers[0].name).toBe('server-0000');
     expect(answer.servers.at(-1)?.name).toBe('server-1023');
     expect(answer.warnings).toContain('Customization inventory reached its read limit; some configured items are not inventoried.');
+    expect(answer.skillsRead).toBe(false); // the read stopped before the plugins' skills
     expect(JSON.stringify(answer)).not.toContain('NOT_EXECUTED');
   });
 
@@ -268,12 +307,12 @@ describe('cold customization inventory', () => {
   it('retains app configuration when the user environment is unavailable', async () => {
     const path = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'app', type: 'http', url: 'https://app.test/' }]));
     const answer = await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('CAPTURE_SECRET'); } });
-    expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false, pluginServers: [], plugins: [] });
+    expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false, pluginServers: [], plugins: [], skillsRead: false });
   });
 
   it('returns a warning within its deadline even when environment capture never settles', async () => {
     const answer = await readCustomizationInventory(null, { userData, captureEnv: () => new Promise(() => {}), timeoutMs: 5 });
-    expect(answer).toEqual({ skills: [], servers: [], warnings: ['Customization inventory reached its read limit; some configured items are not inventoried.'], serversRead: false, pluginServers: [], plugins: [] });
+    expect(answer).toEqual({ skills: [], servers: [], warnings: ['Customization inventory reached its read limit; some configured items are not inventoried.'], serversRead: false, pluginServers: [], plugins: [], skillsRead: false });
   });
 
   it('a project .mcp.json it cannot read leaves the servers not wholly read; one that reads clean leaves them read', async () => {

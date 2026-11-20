@@ -560,6 +560,11 @@ export const LIBRARY = {
       'next-launch': 'Applies the next time this session starts',
       'next-compaction': 'Applies after this session’s next compaction',
     } satisfies Record<NonNullable<ModRow['pending']>, string>,
+    // UX wave U2b (M7; the execution document, §M, "The switch"): the to-human row's second line, in the mods list alone
+    summaries: {
+      label: 'Summaries on fold lines',
+      sentence: 'Each summary is one small model call by the to-human mod, on the session’s own account. Off: sessions MAWS starts make no new summaries from their next start, and summaries already made stay. A session started in a terminal follows the mod’s own setting.',
+    },
   },
   // P2-C end
   // the detail (§5.7; Desktop's words where it has them, c24c8737b-BY-86Rbf.js)
