@@ -1004,7 +1004,7 @@ test('ticket 790, Stop with nothing waiting: the pause ends with the stopped tur
   await expect(row).toHaveAttribute('data-queue-state', 'after');
   await expect(row.locator('[data-mark]')).toHaveText('After the turn');
   await expect(row).toContainText(later);
-  await expect(list.locator('header')).not.toContainText('Queue paused');
+  await expect(list, 'no pause line: the stack has no header while nothing is paused').not.toContainText('Queue paused');
   expect((await queueOf(page, id)).paused).toBe(false);
   expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'kept for after the turn, not written while it runs').toBe(false);
 
