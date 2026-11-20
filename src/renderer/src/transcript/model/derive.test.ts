@@ -99,6 +99,24 @@ describe('the turn’s line ends its turn', () => {
     b.end(['u2']);
     expect(kinds(rowsOf(reduce(b.events))).filter((kind) => kind === 'time')).toHaveLength(1);
   });
+
+  // the review's finding: the gap runs from the turn's recorded end, whichever of its rows the disclosure draws; a late
+  // call that folds away must not decide it
+  it.each([false, true])('a prompt a minute after a long turn with a late call and no answer gets no separator (open=%s)', (open) => {
+    const b = builder('2026-09-28T09:00:00.000Z');
+    b.turn('u1', 'tidy the notes');
+    b.tick(80 * 60_000);
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.end(['u1']);
+    b.tick(60_000);
+    b.turn('u2', 'and the drafts');
+    b.text('m2', 0, 'None.');
+    b.end(['u2']);
+    const list = open ? rows(b.events) : rowsOf(reduce(b.events));
+    expect(list.some((row) => row.kind === 'cell' || row.kind === 'group')).toBe(open);
+    expect(kinds(list).filter((kind) => kind === 'time')).toHaveLength(1);
+  });
 });
 
 describe('group state machine', () => {
