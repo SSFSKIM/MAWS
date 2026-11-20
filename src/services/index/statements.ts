@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
+import { isChannelId } from 'org-protocol';
 import type { ProjectId } from '@shared/graph/ids';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
@@ -295,8 +296,11 @@ export class Statements {
   }
 
   // A link's target (§G): a hub project a verified record names, or the id the folder's own `.smns` names, which waives the
-  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub.
+  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub. Never a sminos declared
+  // channel, which a record can name as `known` and a `.smns` can name too: that is refused first, before either is read
+  // (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §D).
   private async target(into: string, folder: string, files?: GitFiles): Promise<void> {
+    if (isChannelId(into)) refuse('channel-id', `${into} is a sminos channel, not a project: a folder is linked to a project`);
     const known = this.registry.project(into);
     if (known === null) {
       const own = await folderSmns(folder, files).catch(() => null); // a file the setup did not open names nothing

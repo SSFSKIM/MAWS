@@ -17,6 +17,9 @@ import {
   ABORT_REASON,
   ALARM_PATH,
   BACKDATE_PATH,
+  UNLISTED_PATH,
+  PROJECTS_BEFORE_UNLISTED_PATH,
+  PASS_HOLD_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
@@ -368,12 +371,49 @@ export async function startLocalHub(options: { script?: string } = {}) {
       key?: { id: string; expires: string };
       enrollment?: { machine: string; expires: string };
       pendingDevice?: { member: string; device: string; expires: string };
+      /** A project row's `unlisted` (a sminos channel's: since when no counted record listed it) or `created`. */
+      projects?: Array<{ id: string; unlisted?: string; created?: string }>;
+      /** The alarm deleted rather than scheduled, so that nothing but what the suite does next acts on the times. */
+      clearAlarm?: boolean;
     }): Promise<number | null> {
       return (JSON.parse(await seam('REGISTRY', ORG, BACKDATE_PATH, change)) as { alarm: number | null }).alarm;
     },
     /** The Registry's alarm (ms, or null); with `clear`, deleted first. */
     async registryAlarm(clear = false): Promise<number | null> {
       return (JSON.parse(await seam('REGISTRY', ORG, ALARM_PATH, clear ? { clear } : undefined)) as { alarm: number | null }).alarm;
+    },
+    /** Runs the Registry's sweep as its alarm does (with `clear`, the alarm deleted first), and answers the alarm the
+     * sweep left (ms, or null). */
+    async registrySweep(options: { clear?: boolean } = {}): Promise<number | null> {
+      return (JSON.parse(await seam('REGISTRY', ORG, ALARM_PATH, { ...options, sweep: true })) as { alarm: number | null }).alarm;
+    },
+    /** A project row's `unlisted` at the Registry: since when no counted projects record has listed it as known (an ISO
+     * time), or null. */
+    async unlisted(id: string): Promise<string | null> {
+      return (JSON.parse(await seam('REGISTRY', ORG, UNLISTED_PATH, { id })) as { unlisted: string | null }).unlisted;
+    },
+    /** Drops `unlisted` from the Registry's `projects`, as a registry stored before it; evict the Registry next, and its
+     * construction adds the column again. */
+    async projectsBeforeUnlisted() {
+      await seam('REGISTRY', ORG, PROJECTS_BEFORE_UNLISTED_PATH);
+    },
+    /** Holds the Registry's next `hold` passes over sminos channels' rows between their verification and their apply
+     * (`release` lets the one held go on); answers whether one is held, and the projects records held now. */
+    async passHold(change: { hold?: number; release?: boolean } = {}): Promise<{ held: boolean; records: Array<{ machine: string; revision: number }> }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PASS_HOLD_PATH, change)) as { held: boolean; records: Array<{ machine: string; revision: number }> };
+    },
+    /** Resets the Registry (`ctx.abort()`) once what it stored is durable, as a code update would: a pass held and every
+     * call in flight end with it. The seam's request fails with the abort's own reason, and only that failure counts. */
+    async resetRegistry() {
+      let failure: unknown;
+      try {
+        await seam('REGISTRY', ORG, PASS_HOLD_PATH, { reset: true });
+      } catch (error) {
+        failure = error;
+      }
+      if (!(failure instanceof Error && failure.message.includes(ABORT_REASON))) {
+        throw new Error(`the Registry was not reset: ${failure === undefined ? 'its seam answered' : String(failure)}`);
+      }
     },
     /** Sets how long an unfinished offline revocation waits before it is tried again (null: the deployed minute), and
      * wakes the Registry's alarm. */
@@ -496,11 +536,11 @@ export async function startLocalHub(options: { script?: string } = {}) {
     },
     /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
      * answers its result (the suites' Worker only). */
-    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push' | 'policies', ...args: unknown[]): Promise<T> {
+    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'storeProjects' | 'notify' | 'ownersOf' | 'push' | 'policies', ...args: unknown[]): Promise<T> {
       return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
     },
     /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
-    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
+    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint' | 'storeProjects'; args: unknown[] }>): Promise<T[]> {
       return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
     },
     /** Makes every `Registry.head()` fail from now on (`true`), or answer again (`false`) (the suites' Worker only). */
