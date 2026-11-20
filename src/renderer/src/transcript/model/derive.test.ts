@@ -1541,7 +1541,7 @@ describe('the line of a turn an answer opened', () => {
 
   it('with one call reads `Worked for …` and folds its notice with the call', () => {
     const list = opened(true);
-    expect(kinds(list)).toEqual(['divider', 'assistant_text']);
+    expect(kinds(list)).toEqual(['assistant_text', 'divider']);
     const line = find(list, 'divider');
     expect(line.opener).toMatchObject({ class: 'answer' });
     expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
