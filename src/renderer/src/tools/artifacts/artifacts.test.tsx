@@ -383,7 +383,7 @@ describe('the record view', () => {
     await openRow(1);
     expect(screen.getByText(`panel editor for ${NOTES.id} in panel:${TAB}`)).toBeTruthy();
     expect(editor.createState).toHaveBeenCalledTimes(1);
-    expect(editor.createState).toHaveBeenCalledWith({ artifactId: NOTES.id, kind: 'document', surface: 'panel' });
+    expect(editor.createState).toHaveBeenCalledWith({ artifactId: NOTES.id, machine: TEST_MACHINE, kind: 'document', surface: 'panel' });
     expect(editorHostOf(SCOPE)?.title).toBe('Editing 1');
     await waitFor(() => expect(main.callsOf('artifacts.markViewed')).toEqual([{ artifactId: NOTES.id }]));
     expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
@@ -427,7 +427,7 @@ describe('the record view', () => {
     act(() => artifactsTool.open!(handle, { target: SPEC.id }));
     await screen.findByText(`panel editor for ${SPEC.id} in panel:${TAB}`);
     expect(editor.dispose).toHaveBeenCalledTimes(1);
-    expect(editor.createState).toHaveBeenLastCalledWith({ artifactId: SPEC.id, kind: 'document', surface: 'panel' });
+    expect(editor.createState).toHaveBeenLastCalledWith({ artifactId: SPEC.id, machine: TEST_MACHINE, kind: 'document', surface: 'panel' });
     expect(editorHostOf(SCOPE)?.title).toBe('Editing 4');
 
     act(() => artifactsTool.open!(handle, {}));

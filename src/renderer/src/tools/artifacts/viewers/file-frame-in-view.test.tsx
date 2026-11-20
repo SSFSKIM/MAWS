@@ -6,7 +6,6 @@
 // main tab) or while it is in the main area and the main area is not on screen (the side column a sheet over a narrow
 // window), its frame element is not in the document; shown again it is a new element from the same token. Every id, path
 // and byte here is invented.
-import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { cleanup, render, waitFor, act } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -14,7 +13,7 @@ import { frameUrl } from '@shared/files/framed';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record as sessionRecord } from '../../../../../../test/support/builders';
-import { at } from '../../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../../test/support/machine';
 import { resetArtifactEditors, type ArtifactEditor } from '../../../artifacts/registry';
 import { resetExportFormats } from '../../../library/export';
 import { connectLibrary, resetLibrary } from '../../../library/store';

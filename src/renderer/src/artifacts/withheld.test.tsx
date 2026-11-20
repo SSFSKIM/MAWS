@@ -2,7 +2,6 @@
 // reserved WITHHELD_SESSION in an artifact answer's actor fields for every session the member can't view. The page shows
 // it as the untitled agent ("Claude") and treats it as no session wherever an actor's session is looked up: no title, no
 // session to open or resume, no link.
-import { TEST_MACHINE } from '../../../../test/support/machine';
 import { cleanup, render, screen } from '@testing-library/react';
 import { WITHHELD_SESSION } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE, at } from '../../../../test/support/machine';
 import { actorSessionOnPage } from '../ipc/machine';
 import { useSessions } from '../stores/sessions';
 import { preloadOf } from '../test-support/preload-of';

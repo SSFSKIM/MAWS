@@ -4,7 +4,6 @@
 // tab's close asks about it. A tab closed while a comment is in flight withdraws its ordinary draft at once and leaves
 // the comment in flight its thread, its replica hold and its settlement: success records the message under its mark, a
 // refusal withdraws both, and the replica closes once all is written.
-import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,7 +20,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { holdArtifactEditorState, releaseArtifactEditorState, type ArtifactEditor } from '../../artifacts/registry';
 import { cardHostEntry, resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';

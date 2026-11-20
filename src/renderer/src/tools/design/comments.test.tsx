@@ -2,7 +2,6 @@
 // comment opens P2's card through B's surface on an `artifact-comment` anchor naming the design kind and its target, a
 // board or an element, so the agent's lead says which; a deck's and a document's anchors stay as they were written.
 // P3-F (L230): a design opened as its own main tab with no chat shown offers a new comment as the document and the deck do.
-import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Awareness } from '@y/protocols/awareness';
@@ -17,7 +16,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { NO_SESSION_CONTEXT } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';

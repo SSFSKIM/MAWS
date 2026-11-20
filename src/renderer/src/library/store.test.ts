@@ -1,7 +1,6 @@
 // The renderer's library store over a fake main (the P3-L execution document, M3): the lists, rows and Spaces the
 // window watches, read on first watch and read again on every `library.changed`; a failed read keeps the last good
 // answer; an answer a newer read superseded is dropped; what nobody watches is not refreshed and is forgotten past a cap.
-import { TEST_MACHINE } from '../../../../test/support/machine';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -9,7 +8,7 @@ import {
   connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, spaceInstructionsOf, spaceInstructionsReadOf, UNWATCHED_KEPT, watchLibraryList,
   watchLibraryRow, watchLibrarySpaces, watchSpaceInstructions,
 } from './store';
-import { OTHER_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { preloadOf } from '../test-support/preload-of';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

@@ -3,7 +3,6 @@
 // the card host's id is the document's; the composing card survives that remount (P2's host keeps it), so its draft
 // must too, or the card would send an anchor naming a deleted thread. The draft goes when its card closes unsent or
 // the editor as a whole goes (P2's host closes the card then).
-import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -18,7 +17,7 @@ import { getThread } from '@artifacts/document/threads';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { resetShellStores } from '../../test-support/shell-stores';

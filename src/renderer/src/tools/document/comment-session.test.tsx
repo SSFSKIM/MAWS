@@ -5,7 +5,6 @@
 // and with no context the card says why. The notice in the card's place is withdrawn with its draft by Close, Escape,
 // a later card, or the editor going, and a start that settles after that opens nothing.
 // Runs in `renderer` and, compiled, in `renderer-compiled` (vitest.config.ts): every render reads stores through hooks.
-import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +16,7 @@ import type { LibraryRow } from '@shared/ipc/schema/library';
 import { bareOf } from '@shared/machine/address';
 import { project, record } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { NO_SESSION_CONTEXT, type ArtifactSessionContext } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
 import { useCommentCard } from '../../side/card/store';

@@ -122,12 +122,13 @@ afterEach(() => {
   offs.splice(0).forEach((off) => off());
 });
 
-function mount(kind: 'html' | 'file', over: { visible?: boolean } = {}) {
+function mount(kind: 'html' | 'file', over: { visible?: boolean; machine?: typeof TEST_MACHINE } = {}) {
+  const machine = over.machine ?? TEST_MACHINE;
   const editor = byteViewer(kind) as ArtifactEditor<ByteViewerState>;
-  const state = editor.createState!({ artifactId: ID, machine: TEST_MACHINE, kind, surface: 'panel' });
+  const state = editor.createState!({ artifactId: ID, machine, kind, surface: 'panel' });
   const onShown = vi.fn();
   const Body = editor.Panel;
-  const draw = (visible: boolean) => <Body artifactId={ID} machine={TEST_MACHINE} state={state} scope={SCOPE} visible={visible} onShown={onShown} />;
+  const draw = (visible: boolean) => <Body artifactId={ID} machine={machine} state={state} scope={SCOPE} visible={visible} onShown={onShown} />;
   const view = render(draw(over.visible ?? true));
   return { onShown, view, state, show: (visible: boolean) => view.rerender(draw(visible)) };
 }
@@ -269,7 +270,7 @@ describe('the HTML viewer', () => {
     const sentTo: [string, unknown][] = [];
     const bridge = window.maws;
     window.maws = { ...bridge, invoke: (name: string, input: unknown, target: unknown) => (sentTo.push([name, target]), bridge.invoke(name as never, input as never, target as never)) } as typeof bridge;
-    mount('html');
+    mount('html', { machine: OTHER_MACHINE });
     await waitFor(() => expect(frame('html')).not.toBeNull());
     const reads = sentTo.filter(([name]) => name === 'artifacts.versions' || name === 'library.content' || name === 'library.get');
     expect(reads.length).toBeGreaterThan(0);

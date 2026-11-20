@@ -1,7 +1,6 @@
 // P3-C M7 fix wave 1 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9; Decision Log 33, 35): a deck's
 // comment opens P2's card through B's surface on an `artifact-comment` anchor that names the presentation kind, so the
 // agent's lead names the element and the presentation (Decision Log 36); a document's anchor stays as B writes it.
-import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Awareness } from '@y/protocols/awareness';
@@ -16,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';

@@ -9,7 +9,7 @@ import { disabledWords } from '@shared/ipc/remote-unavailable';
 import type { MachineRef } from '@shared/machine/ref';
 import { useLinkPhase } from '../app/machine-mark';
 import { subscribeDeletedReplicas, unsentWhileDeleted } from '../artifacts/deleted-replicas';
-import { sessionArtifactMachine } from '../artifacts/machines';
+import { recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useMachines } from '../stores/machines';
@@ -64,7 +64,10 @@ export function useListed(artifactId: string, machine: MachineRef): boolean | nu
  * For a row of a session's call, read on the same machine as the side column's open.
  */
 export function useSessionArtifactListed(appSessionId: AppSessionId | null, artifactId: string): boolean | null {
-  return useListed(artifactId, sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine));
+  const local = ipc.localMachine;
+  const machine = sessionArtifactMachine(appSessionId, artifactId, local);
+  useEffect(() => recordArtifactMachine(artifactId, machine, local), [artifactId, machine, local]);
+  return useListed(artifactId, machine);
 }
 
 /** Why the row's Undo is disabled for a session on another machine (the one helper every session control reads). */

@@ -6,7 +6,6 @@
 // which carries the editor's state, so the tab's own guard is not asked.
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TEST_MACHINE } from '../../../../test/support/machine';
 import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { resetSlots } from '../app/slots';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -28,7 +27,7 @@ import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // P5 O9
 import { useSessions } from '../stores/sessions';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
-import { OTHER_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
 import { useMachines } from '../stores/machines'; // the UX wave, U9
 

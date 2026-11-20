@@ -4,7 +4,6 @@
 // scope given (the title, the saved word, History toggling the rail the tab holds, the close guard the tab's), the page
 // a Mark-up surface while visible, Comment offered only with a session to send to, and the page inside the governing
 // system's scope once D's apply API is provided.
-import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
@@ -15,7 +14,7 @@ import type { ArtifactHost } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';

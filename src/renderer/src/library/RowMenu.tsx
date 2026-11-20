@@ -237,18 +237,19 @@ export function DeleteSheet({ dialog }: SheetOf<'delete'>) {
 // The artifacts a design system still styles, by title (main's index), each a way to open it.
 export function InUseSheet({ dialog }: SheetOf<'inUse'>) {
   const { artifact, artifactIds } = dialog;
+  const machine = artifact.machine;
   const close = () => closeLibraryDialog(dialog);
   const [titles, setTitles] = useState<Map<string, string> | null>(null);
   useEffect(() => {
     let live = true;
-    void Promise.all(artifactIds.map(async (artifactId) => [artifactId, await ipc.invoke('library.get', { artifactId }, { machine: dialog.artifact.machine })] as const)).then((answers) => {
+    void Promise.all(artifactIds.map(async (artifactId) => [artifactId, await ipc.invoke('library.get', { artifactId }, { machine })] as const)).then((answers) => {
       if (!live) return;
       setTitles(new Map(answers.map(([artifactId, result]) => [artifactId, (result.ok && result.value.row?.title) || artifactId])));
     });
     return () => {
       live = false;
     };
-  }, [artifactIds]);
+  }, [artifactIds, machine]);
   return (
     <Sheet title={D.inUseTitle} onClose={close}>
       <div className="flex flex-col gap-3">

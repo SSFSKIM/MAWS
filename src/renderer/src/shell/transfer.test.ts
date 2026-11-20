@@ -36,9 +36,9 @@ const DOC_TAB = artifactTab(DOC);
 const mainScope = (artifactId = DOC): EditorHostScope => ({ surface: 'main', tabId: tabId({ kind: 'artifact', artifactId, machine: TEST_MACHINE }) });
 const panelScope = (panelTabId: string): EditorHostScope => ({ surface: 'panel', tabId: panelTabId });
 
-function metadata(artifactId: string, projectId?: ProjectId): void {
+function metadata(artifactId: string, projectId?: ProjectId, machine = TEST_MACHINE): void {
   const row: LibraryRow = { id: artifactId, kind: 'document', title: 'Launch notes', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [], ...(projectId ? { project: { id: projectId, name: projectId } } : {}) };
-  library.setState((state) => ({ reads: new Map(state.reads).set(rowKey(artifactId, TEST_MACHINE), { status: 'ready', value: row, error: null }) }));
+  library.setState((state) => ({ reads: new Map(state.reads).set(rowKey(artifactId, machine), { status: 'ready', value: row, error: null }) }));
 }
 
 // UX wave U13a: the sessions sit under these projects' rows (a project on this Mac each), as the current project reads
@@ -271,6 +271,7 @@ describe('main → panel', () => {
   // P5 O6 M4: an artifact id names no machine, so the panel shows the moved artifact only when the machines agree too.
   it('a panel showing another machine’s artifact of the same id is not T5: its record goes Back and the moved one shows', async () => {
     const onOther: TabRef = { id: tabId({ kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE }), kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE, pinned: false };
+    metadata(DOC, undefined, OTHER_MACHINE);
     useLayout.setState({ main: panes([sessionTab(A), onOther]) });
     const dest = addArtifacts(A, DOC);
     expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
