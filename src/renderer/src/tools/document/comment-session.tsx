@@ -57,7 +57,7 @@ export function useArtifactCommentTarget(artifactId: string, machine: MachineRef
   const row = useLibraryRow(shown === null ? artifactId : null, machine);
   const spaces = useLibrarySpaces();
   const artifact = shown === null ? (row.value ?? null) : null;
-  const context = useArtifactSessionContext(artifact);
+  const context = useArtifactSessionContext(artifact, machine);
   const rowUnread = row.value === undefined && row.status !== 'error';
   const spacesUnread = artifact?.spaceId !== undefined && spaces.value === undefined && spaces.status !== 'error';
   const waiting = shown === null && (rowUnread || spacesUnread);

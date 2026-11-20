@@ -98,8 +98,8 @@ export function openArtifactTab(artifactId: string, location?: ArtifactLocation,
 // The tab is looked for in this window's one strip on the machine the side column would read the artifact on
 // (`sessionArtifactMachine`, `openArtifactInPanel`'s rule), so a tab of the same id on another machine is not taken.
 // False, and nothing done, when the strip holds none; it awaits nothing.
-export function showOpenArtifactTab(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean {
-  const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
+export function showOpenArtifactTab(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation, on?: MachineRef): boolean {
+  const machine = on ?? sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
   if (!isOpen(useLayout.getState().main, tabId({ kind: 'artifact', artifactId, machine }))) return false;
   openArtifactTab(artifactId, location, machine);
   return true;

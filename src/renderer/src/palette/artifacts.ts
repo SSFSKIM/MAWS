@@ -45,9 +45,9 @@ export function openPaletteArtifact(artifactId: string, machine: MachineRef): vo
   // taken only when that is the row's machine: a main tab of another machine's artifact with the same id is not reused
   // (Decision Log 16 (iii)), and the side column would read the wrong one.
   if (session !== null && sessionArtifactMachine(session, artifactId, local) === machine) {
-    if (showOpenArtifactTab(session, artifactId)) return;
+    if (showOpenArtifactTab(session, artifactId, undefined, machine)) return;
     if (canShowArtifactInPanel(session)) {
-      openArtifactInPanel(session, artifactId);
+      openArtifactInPanel(session, artifactId, undefined, undefined, machine);
       return;
     }
   }

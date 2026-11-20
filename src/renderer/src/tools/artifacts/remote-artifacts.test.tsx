@@ -28,6 +28,7 @@ import { ArtifactTab } from '../../library/ArtifactTab';
 import { openArtifactTab } from '../../library/actions';
 import { connectLibrary, resetLibrary } from '../../library/store';
 import { resetLibraryView, useLibraryView } from '../../library/view';
+import { openPaletteArtifact } from '../../palette/artifacts';
 import { editorHostOf } from '../../panel/editor-host';
 import { panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
@@ -223,12 +224,12 @@ it('opens and edits each machine’s document when both copies have the same art
     if (name === 'artifacts.markViewed' || name === 'layout.set') return ok();
     return fail(`unexpected ${name}`);
   });
+  offs.push(connectLibrary());
   offs.push(registerDocumentEditor((machine) => ({
     host: createArtifactHost({ ipc, machine, ports: { take: async (id) => ports.get(id)! }, log: () => {} }),
     ipc: artifactClient(ipc, machine), log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [],
   })));
-  // Open as a palette pick would: the selected row's machine is already known.
-  openArtifactTab(DECK.id, undefined, TEST_MACHINE);
+  openPaletteArtifact(DECK.id, TEST_MACHINE);
   const tab = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
   if (tab.kind !== 'artifact') throw new Error('expected an artifact tab');
   try {
@@ -240,7 +241,10 @@ it('opens and edits each machine’s document when both copies have the same art
       expect(editorAt(mainView.container)).toBeDefined();
       expect(editorAt(panel)).toBeDefined();
     });
-    expect.soft(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
+    expect(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
+    expect(main.targetsOf('artifacts.open')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
+    await act(() => main.emit('library.changed', { revision: 2 }, OTHER_MACHINE));
+    expect(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE, OTHER_MACHINE]);
     await waitFor(() => {
       expect(editorHostOf({ surface: 'main', tabId: tab.id })?.title).toBe('Field notes');
       expect(editorHostOf({ surface: 'panel', tabId: TAB })?.title).toBe('Lab notes');

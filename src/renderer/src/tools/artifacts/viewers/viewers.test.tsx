@@ -597,7 +597,7 @@ describe('the File viewer', () => {
   it('a file read while hidden counts as shown only once it shows', async () => {
     names = { 9: 'budget.csv' };
     const { onShown, show } = mount('file', { visible: false });
-    await waitFor(() => expect(useViewer.getState().entries.get(`artifact:${ID}:9`)?.status).toBe('ready'));
+    await waitFor(() => expect(useViewer.getState().entries.get(`artifact:${TEST_MACHINE}:${ID}:9`)?.status).toBe('ready'));
     expect(onShown).not.toHaveBeenCalled();
     show(true);
     expect(onShown).toHaveBeenCalled();

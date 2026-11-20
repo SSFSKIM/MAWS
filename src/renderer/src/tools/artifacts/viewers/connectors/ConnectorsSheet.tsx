@@ -32,7 +32,7 @@ import { sheetTools, type ConnectorsTab } from './tab';
 
 // The sheet for an artifact as the library knows it (null while its row is read: no context, so no Start yet).
 export function ArtifactConnectorsSheet({ tab, artifact }: { tab: ConnectorsTab; artifact: ArtifactContextOf | null }) {
-  return <ConnectorsSheet tab={tab} context={useArtifactSessionContext(artifact)} />;
+  return <ConnectorsSheet tab={tab} context={useArtifactSessionContext(artifact, tab.machine)} />;
 }
 
 export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessionContext }) {

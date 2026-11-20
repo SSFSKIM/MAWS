@@ -50,7 +50,7 @@ const canSendFrom = (status: DeliveryStatus | null): boolean => status !== null 
 
 export function SendToHost() {
   const sheet = useDelivery((s) => s.sheet);
-  return sheet ? <SendToSheet key={sheet.subject.artifactId} subject={sheet.subject} run={sheet.run} /> : null;
+  return sheet ? <SendToSheet key={`${sheet.subject.machine ?? ''}:${sheet.subject.artifactId}`} subject={sheet.subject} run={sheet.run} /> : null;
 }
 
 function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun }) {

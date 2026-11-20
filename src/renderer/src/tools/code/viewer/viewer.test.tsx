@@ -3704,10 +3704,10 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     const main = disk({});
     overRl2(T); // the roster names the other machine studio
     main.answers.by = (name) => (name === 'library.read' ? unreachable('library.read: machine studio is not reachable') : null);
-    const artifactView = (tabId: string) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, machine: TEST_MACHINE, revision: 3 }} />);
+    const artifactView = (tabId: string, machine: typeof TEST_MACHINE) => render(<FileBody tabId={tabId} appSessionId={null} path="/r/notes.txt" readOnly artifactView artifact={{ artifactId: ARTIFACT, machine, revision: 3 }} />);
     try {
       recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
-      artifactView(`artifact:${ARTIFACT}:3`);
+      artifactView(`artifact:${ARTIFACT}:3`, OTHER_MACHINE);
       await waitFor(() => expect(noticeCause()).toBe('unreachable'));
       expect(noticeLines()[0]).toBe('studio is not reachable.');
       expect(retry()).not.toBeNull();
@@ -3715,7 +3715,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       cleanup();
       useViewer.getState().reset();
       resetArtifactMachines();
-      artifactView(`artifact:${ARTIFACT}:3:r1`);
+      artifactView(`artifact:${ARTIFACT}:3:r1`, TEST_MACHINE);
       await waitFor(() => expect(noticeCause()).toBe('unreachable'));
       expect(noticeLines()[0]).toBe("MAWS's service on this Mac is not answering.");
     } finally {

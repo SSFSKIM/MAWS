@@ -59,7 +59,7 @@ export class DashboardTabState {
       artifactId: target.artifactId,
       host: deps.host,
       onGrantChanged: (listener) => deps.ipc.on('connectors.grantChanged', (change) => listener(change.artifactId)),
-      startSession: (previous) => liveDeps.startSession(target.artifactId, previous),
+      startSession: (previous) => liveDeps.startSession(target.artifactId, target.machine, previous),
       ...(liveDeps.openSession && { openSession: liveDeps.openSession as (appSessionId: string) => void }),
       notOffered: () => leaseNotOfferedPause(target.artifactId, target.machine), // P5 O7 M5c
       log: deps.log,
