@@ -46,9 +46,10 @@ async function scene(ios = false, observedMeasurements = ios) {
   let frozenSize: number | null = null;
   let pendingContentSize: string | null = null;
   let overflow = 0;
+  let extent = 0; // the bottom of a row that overflows the sizer, wherever the sizer stands
   let endShortfall = 0;
   const writes: number[] = [];
-  const size = (el: HTMLElement) => frozenSize !== null && el.hasAttribute('data-transcript-scroller') ? frozenSize : (Number.parseFloat((el.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0) + overflow;
+  const size = (el: HTMLElement) => frozenSize !== null && el.hasAttribute('data-transcript-scroller') ? frozenSize : Math.max((Number.parseFloat((el.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0) + overflow, extent);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return this.hasAttribute('data-transcript-scroller') ? 200 : this.hasAttribute('data-index') ? heights.get(this) ?? 56 : 0;
   });
@@ -83,6 +84,7 @@ async function scene(ios = false, observedMeasurements = ios) {
       pendingContentSize = null;
     },
     extendDOMEnd: (pixels: number) => { overflow = pixels; },
+    reachDOMEnd: (bottom: number) => { extent = bottom; },
     roundDOMEnd: (pixels: number) => { endShortfall = pixels; },
     reportContentSize: () => act(() => {
       const content = scroller.firstElementChild!;
@@ -105,6 +107,18 @@ async function scene(ios = false, observedMeasurements = ios) {
         pendingContentSize = style.height;
         style.height = `${frozenSize}px`;
       }
+    },
+    // The observers' delivery of a row's growth as the browser runs it, outside React's act: the virtualiser's own
+    // re-render waits for a later task, so only what the list commits in the delivery's microtasks reaches the DOM.
+    growUnacted: (row: HTMLElement, delta: number) => {
+      const height = (heights.get(row) ?? 56) + delta;
+      heights.set(row, height);
+      const acting = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+      for (const { targets, callback, observer } of observers) {
+        if (targets.has(row)) callback([resizeEntry(row, height)], observer);
+      }
+      return Promise.resolve().then(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = acting; });
     },
     move: (by: number, report = true) => act(() => {
       top += by;
@@ -485,6 +499,27 @@ for (const grow of [24, 182]) {
     s.extendDOMEnd(0); // the sizer has committed: the row no longer overflows it
     expect(s.writes.length).toBeGreaterThan(0);
     expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+    expect(s.handle.current!.following).toBe(true);
+    expect(s.changed.mock.calls).toEqual([]);
+  });
+}
+
+// Board ticket 789: the running turn's line is the list's last row, so the streamed answer grows in the row above it.
+// That growth overflows the sizer only by what passes the line, which keeps its place until the list re-renders: the
+// DOM's end stays short of the measured end, by the line's height or more. The list commits the measured sizes in the
+// observer pass that measured the growth and follows them, before the frame paints, and the line moves below the grown
+// answer in that same frame (e2e: transcript.spec.ts, painted frames while following).
+for (const grow of [24, 182]) {
+  it(`a following list pins a measured ${grow}px growth of the row above the last before its sizer commits`, async () => {
+    const s = await scene(false, true);
+    const end = s.scroller.scrollHeight;
+    const mounted = [...s.scroller.querySelectorAll<HTMLElement>('[data-index]')].sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+    const [answer, line] = mounted.slice(-2);
+    s.reachDOMEnd(end - 56 + grow); // the grown answer's bottom, the line still where it stood
+    await s.growUnacted(answer!, grow);
+    expect((s.scroller.firstElementChild as HTMLElement).style.height, 'the measured sizes committed').toBe(`${end + grow}px`);
+    expect(Number.parseFloat(line!.style.top), 'the line stands below the grown answer').toBe(end - 56 + grow);
+    expect(s.scroller.scrollTop, 'the reader is at the measured end').toBe(end + grow - 200);
     expect(s.handle.current!.following).toBe(true);
     expect(s.changed.mock.calls).toEqual([]);
   });
