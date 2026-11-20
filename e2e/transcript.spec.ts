@@ -21,11 +21,13 @@ import { FOLDS_SHAPE, foldsFileOf } from '../src/shared/owner/folds'; // UX wave
 import { synthesise } from '../test/support/synth-transcript'; // the harness's `synthetic/<turns>` seed, for the folds file's runs
 import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
-import { invoke, launchReady, value } from './support/c7-replay';
+import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
+import { idle, scene, show } from './support/maws-tools'; // UX wave U6b-5b
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
-import { unfoldSessionCard } from './support/shell';
+import { openSurface, unfoldSessionCard } from './support/shell';
 import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
@@ -3064,4 +3066,184 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(createdGroup.locator('.transcript-diff-line[data-diff="add"]')).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: testInfo.outputPath('transcript-create-diff-1280x820.png'), animations: 'disabled' });
   await testInfo.attach('Recorded create diff', { path: testInfo.outputPath('transcript-create-diff-1280x820.png'), contentType: 'image/png' });
+});
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; the child's probe 4; docs/tech-debt-
+// tracker.md's row of 2026-10-27, "At a zoom other than 100% a follower sits at the browser's reachable maximum"). The
+// scene's journal: turnsJournal's `fill` human turns, then one human turn per zoom whose reply streams in `holds + 1`
+// parts, the engine held before each later part at a `get_context_usage` (reads.jsonl seq 56 and 57) until the scene
+// asks one, as SideJournal's holdAtContextUsage holds a reply (e2e/support/side-replay.ts). The streamed frames are
+// side-replay's shapes, the whole message bash-context-echoed's assistant (seq 26) and its result seq 30, re-addressed
+// to the journal's session; the text is the scene's own.
+const followLine = (turn: number, part: number, line: number) => `Turn ${turn}, part ${part}, line ${line}: the reply streams on.`;
+function followJournal(dir: string, fill: number, streams: number, holds: number): string {
+  type Row = { seq: number; direction: 'in' | 'out' | 'meta'; at: string; frame: Record<string, unknown> };
+  const rowsOf = (path: string) => readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Row);
+  const fixture = (file: string, seq: number) => rowsOf(join(REPO_ROOT, 'spikes/protocol-probe/fixtures', file)).find((row) => row.seq === seq)!.frame;
+  const path = turnsJournal(dir, 'u6b5b-follow', fill);
+  const rows = rowsOf(path);
+  const session = rows.find((row) => row.frame.type === 'system' && row.frame.subtype === 'init')!.frame.session_id as string;
+  const assistant = fixture('pass2/bash-context-echoed.jsonl', 26) as { message: Record<string, unknown> };
+  const result = fixture('pass2/bash-context-echoed.jsonl', 30);
+  const read = { request: (fixture('reads.jsonl', 56).request as Record<string, unknown>), response: (fixture('reads.jsonl', 57).response as { response: unknown }).response };
+  let seq = rows.at(-1)!.seq;
+  let minted = 0;
+  const at = rows.at(-1)!.at;
+  const push = (direction: Row['direction'], frame: Record<string, unknown>) => rows.push({ seq: ++seq, direction, at, frame });
+  const uuid = (lead: string, n = ++minted) => `${lead}-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const stream = (event: Record<string, unknown>) => push('in', { type: 'stream_event', event, session_id: session, parent_tool_use_id: null, uuid: uuid('50000000') });
+  for (let k = fill + 1; k <= fill + streams; k++) {
+    const user = uuid('00000000', k);
+    push('out', { type: 'user', uuid: user, message: { role: 'user', content: `turn ${k}` }, parent_tool_use_id: null, origin: { kind: 'human' } });
+    push('in', { type: 'command_lifecycle', command_uuid: user, state: 'started', uuid: uuid('10000000', k), session_id: session });
+    const message = { ...assistant.message, id: `msg_e2efollow${k}`, content: [], stop_reason: null };
+    stream({ type: 'message_start', message });
+    stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+    const chunks: string[] = [];
+    for (let part = 0; part <= holds; part++) {
+      if (part > 0) {
+        const requestId = uuid('40000000');
+        push('out', { type: 'control_request', request_id: requestId, request: read.request });
+        push('in', { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: read.response } });
+      }
+      for (const line of [1, 2, 3]) {
+        const chunk = `${followLine(k, part, line)}\n\n`;
+        chunks.push(chunk);
+        stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: chunk } });
+      }
+    }
+    const text = chunks.join('').trim();
+    push('in', { ...assistant, session_id: session, uuid: uuid('60000000'), user_message_uuid: user, user_message_uuids: [user], message: { ...message, content: [{ type: 'text', text }] } });
+    stream({ type: 'content_block_stop', index: 0 });
+    push('in', { ...result, session_id: session, result: text, uuid: uuid('20000000', k), user_message_uuid: user, user_message_uuids: [user] });
+    push('in', { type: 'command_lifecycle', command_uuid: user, state: 'completed', uuid: uuid('30000000', k), session_id: session });
+  }
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+// The child's probe 4: a follower at the end at 110 % and at 80 %, a page key pressed in Files' field in the side column
+// (witnessed by the transcript as a key that may scroll, and consumed by the field), and, in that key's own dispatch,
+// the transcript's viewport growing (the composer below shrinking back: E11's case), so the browser clamps the offset
+// onto the new reachable end. Then the held engine goes on, its next part appended, and the follower is still at the
+// end: no "Jump to latest", and the end's gap within the 3 px the list reads as the end. The gap is the product's own
+// (`Transcript.tsx`, `leaveIfAway`): min(scrollHeight, the virtualiser's total) - clientHeight - scrollTop, the total
+// read as the list commits it, its sizer's height. Each clamp's gap is measured in the key's dispatch, the moment the
+// list judges it, and the largest at each zoom is annotated: a clamp more than 1 px short is docs/tech-debt-tracker.md's
+// row of 2026-10-27 ("At a zoom other than 100% a follower sits at the browser's reachable maximum"), and a release
+// after it turns this scene red. Every read is polled; no time is asserted.
+test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key is pressed in a side surface', async () => {
+  test.setTimeout(300_000);
+  const FILL = 24;
+  const HOLDS = 6;
+  const FACTORS = [1.1, 0.8] as const;
+  await scene({ titles: ['Zoom follow'], label: 'u6b5b-follow' }, async (s) => {
+    const { page } = s;
+    const id = s.ids[0]!;
+    await launchReady(page, id, followJournal(s.scratch.root, FILL, FACTORS.length, HOLDS), { cwd: s.repo });
+    await show(s, id);
+    const scroller = s.pane.locator('[data-transcript-scroller]');
+    const composer = s.pane.locator('section[data-composer]');
+    const jump = s.pane.getByRole('button', { name: 'Jump to latest' });
+    // `sizer` is the list's inner box, the virtualiser's total: it grows with every row, where the scroller's
+    // scrollHeight stays at its clientHeight while the rows still fit; `gap` is the end's gap as the list judges it
+    const heights = () =>
+      scroller.evaluate((el) => {
+        const total = Number.parseFloat((el.firstElementChild as HTMLElement).style.height);
+        return { scroll: el.scrollHeight, client: el.clientHeight, gap: Math.min(el.scrollHeight, total) - el.clientHeight - el.scrollTop, sizer: (el.firstElementChild as HTMLElement).offsetHeight };
+      });
+    let sent = 0;
+    const send = async () => value(await invoke(page, 'session.send', { appSessionId: id, content: `turn ${++sent}` }));
+    // the list's sizer grown past `before` and settled (two reads in a row the same height)
+    const grownFrom = async (before: number, message: string) => {
+      let last = before;
+      await expect
+        .poll(
+          async () => {
+            const previous = last;
+            last = (await heights()).sizer;
+            return last > before && last === previous;
+          },
+          { message },
+        )
+        .toBe(true);
+    };
+    const following = async (message: string) => {
+      await expect(jump, message).toHaveCount(0);
+      await expect.poll(async () => (await heights()).gap, { message }).toBeLessThanOrEqual(3);
+    };
+    // the transcript filled past its viewport, so following is a scroll the list keeps doing
+    while (sent < FILL) {
+      const before = (await heights()).sizer;
+      await send();
+      await idle(s, id);
+      await grownFrom(before, `turn ${sent}'s rows grew the list, and it settled`);
+    }
+    const filled = await heights();
+    expect(filled.scroll, `the transcript overflows its viewport: ${JSON.stringify(filled)}`).toBeGreaterThan(filled.client + 400);
+
+    await openSurface(page, 'Files');
+    const field = s.panel.locator('[data-files-filter]');
+    await expect(field).toBeVisible();
+    for (const f of FACTORS) {
+      await zoomTo(s.maws.app, page, f);
+      const before = (await heights()).sizer;
+      await send();
+      const turn = sent;
+      await expect(s.pane.getByText(followLine(turn, 0, 3)).first()).toBeVisible(); // the reply streams, and the engine holds
+      await grownFrom(before, `at ${f}, turn ${turn}'s first part grew the list`);
+      await following(`at ${f}, turn ${turn}'s first part followed`);
+      let largest = Number.NEGATIVE_INFINITY;
+      for (let part = 1; part <= HOLDS; part++) {
+        const at = `at ${f}, before part ${part}`;
+        // the composer grows by `grow` px (a different growth each time, so the offset drops a different distance), followed
+        const grow = 40 + part;
+        const open = (await heights()).client;
+        await composer.evaluate((el, px) => { el.style.paddingTop = `${px}px`; }, grow);
+        await expect.poll(async () => (await heights()).client, { message: `${at}, the composer's growth narrowed the transcript` }).toBeLessThanOrEqual(open - grow + 1);
+        await following(`${at}, the composer's growth followed`);
+        // the clamp, made in the key's own dispatch, after the transcript's witness (an earlier listener of the same
+        // phase); `observed` is a resize observer made after the list's, so its report follows theirs
+        await page.evaluate(() => {
+          const pane = document.querySelector('[data-region="main"] [data-pane="0"]')!;
+          const list = pane.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+          const dock = pane.querySelector<HTMLElement>('section[data-composer]')!;
+          const w = window as unknown as { u6b5bClamp?: { before: number; after: number; gap: number; observed: boolean } };
+          delete w.u6b5bClamp;
+          const key = (event: KeyboardEvent) => {
+            if (event.key !== 'PageUp') return;
+            window.removeEventListener('keydown', key, true);
+            const before = list.scrollTop;
+            dock.style.paddingTop = '';
+            const after = list.scrollTop; // a forced layout: the browser's clamp onto the new reachable end
+            const total = Number.parseFloat((list.firstElementChild as HTMLElement).style.height);
+            const clamp = { before, after, gap: Math.min(list.scrollHeight, total) - list.clientHeight - after, observed: false };
+            w.u6b5bClamp = clamp;
+            const observer = new ResizeObserver(() => {
+              clamp.observed = true;
+              observer.disconnect();
+            });
+            observer.observe(list);
+          };
+          window.addEventListener('keydown', key, true);
+        });
+        await field.press('PageUp');
+        const clampOf = () => page.evaluate(() => (window as unknown as { u6b5bClamp?: { before: number; after: number; gap: number; observed: boolean } }).u6b5bClamp ?? null);
+        await expect.poll(async () => (await clampOf())?.observed ?? false, { message: `${at}, the key pressed and the list's observers past the clamp` }).toBe(true);
+        const clamp = (await clampOf())!;
+        expect(clamp.after, `${at}, the viewport's growth clamped the offset: ${JSON.stringify(clamp)}`).toBeLessThan(clamp.before);
+        largest = Math.max(largest, clamp.gap);
+        // the engine goes on: the next part appended, and the follower at the end
+        const held = (await heights()).sizer;
+        value(await invoke(page, 'session.getContextUsage', { appSessionId: id, detail: 'summary' }));
+        await expect(s.pane.getByText(followLine(turn, part, 3)).first()).toBeVisible();
+        await grownFrom(held, `${at}, part ${part} grew the list`);
+        await following(`at ${f}, part ${part} followed after a clamp ${clamp.gap.toFixed(2)} px short of the end`);
+      }
+      test.info().annotations.push({ type: `zoom follow at ${f}: the largest gap a clamp left, as the list judges it`, description: `${largest.toFixed(2)} px (the row of 2026-10-27's condition is more than 1 px)` });
+      await idle(s, id);
+      await following(`at ${f}, the end of turn ${turn} followed`);
+    }
+    await zoomTo(s.maws.app, page, 1);
+  });
 });

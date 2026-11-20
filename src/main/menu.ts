@@ -194,7 +194,8 @@ export function menuTemplate(
     },
     {
       label: 'View',
-      // No zoom roles: ⌘0 is the Overview. U6a: the developer roles under Developer ▸, the menu's own
+      // No zoom roles: ⌘0 is the Overview, and Zoom In, Zoom Out and Actual Size are the table's own rows (UX wave U6b-5b),
+      // which the page runs as every action. U6a: the developer roles under Developer ▸, the menu's own
       submenu: [
         ...section('view'), { type: 'separator' },
         { label: 'Developer', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }] },

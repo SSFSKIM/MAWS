@@ -17,6 +17,7 @@ import { goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { activeMainTab, backToTabs, hideSurface, mainTab, mountedTab, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
 import { formatChord } from '../src/shared/keymap/chord'; // UX wave U6b-5a
+import { pointerOffToasts, zoomAct, zoomItemEnabled, zoomLineOf, zoomLines, zoomOfPage, zoomTo, type ZoomItem } from './support/zoom'; // UX wave U6b-5b
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -1068,6 +1069,11 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
 // F6's stop for its tab); then in the composer once the same item hides the column, the column gone. Each item is
 // clicked once main reads it enabled. And the open-column path, View ▸ Terminal over a column open on Review. Edit and
 // Go hold this half's three rows in their places, and the sheet lists them under those groups.
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B10 and B13): View holds Zoom In, Zoom
+// Out and Actual Size in no submenu, Actual Size disabled at 100 %, Zoom In at 200 % and Zoom Out at 50 %, each read
+// from the installed menu (polled); each click waits on the window's zoom store reading the next factor; after a click
+// the line "Zoom 110 %" is drawn, and after the next "Zoom 125 %" alone (polled; no time is asserted). The sheet lists
+// the three under View.
 test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; View in groups; the sheet in the same groups', async ({ maws }) => {
   const { app, page } = maws;
   await size(maws, 1512, 982);
@@ -1081,6 +1087,9 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
       submenus: rows('View').filter((item) => item.type === 'submenu').map((item) => item.label),
       edit: shape('Edit'),
       go: shape('Go'),
+      view: shape('View'),
+      // UX wave U6b-5b: every id inside View's submenus
+      nested: rows('View').flatMap((item) => item.submenu?.items.map((inner) => inner.id ?? null) ?? []),
     };
   });
   expect({ chords: installed.chords, submenus: installed.submenus }).toEqual({ chords: ['Cmd+J', 'Cmd+Shift+D', 'Cmd+Shift+F'], submenus: ['Tabs', 'More surfaces', 'Comments', 'Appearance', 'Developer'] });
@@ -1095,6 +1104,16 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
     { id: 'go.forward', label: 'Forward', accelerator: 'Cmd+]' },
     'separator',
   ]);
+
+  // U6b-5b (B13): the three zoom items stand together in View, outside every submenu, with their chords
+  const zoomIds: ZoomItem[] = ['zoom.in', 'zoom.out', 'zoom.reset'];
+  const zoomAt = installed.view.findIndex((item) => item.id === 'zoom.in');
+  expect(read(installed.view.slice(zoomAt, zoomAt + 3)), JSON.stringify(installed.view)).toEqual([
+    { id: 'zoom.in', label: 'Zoom In', accelerator: 'Cmd+=' },
+    { id: 'zoom.out', label: 'Zoom Out', accelerator: 'Cmd+-' },
+    { id: 'zoom.reset', label: 'Actual Size', accelerator: null },
+  ]);
+  expect(installed.nested.filter((id) => id !== null && zoomIds.includes(id as ZoomItem)), 'no zoom item in a submenu').toEqual([]);
 
   // U6b-5a (B1): the keyboard follows each show and hide. The composer holds it first.
   const composer = main(page).getByRole('textbox', { name: 'Message' });
@@ -1140,6 +1159,28 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
   await expect(sideColumn(page), 'the column is hidden').toHaveCount(0);
   await expect(composer, 'the composer has the keyboard back').toBeFocused();
 
+  // U6b-5b (B10): the items' ends and the line. At 100 % Actual Size is disabled; Zoom In twice draws "Zoom 110 %", then
+  // "Zoom 125 %" alone: the first line's timer is held through the second act by the pointer over the toasts (Radix
+  // pauses them while it moves there), so a line that was only left to expire would still be drawn beside it; at 200 %
+  // Zoom In is disabled, at 50 % Zoom Out; Actual Size returns to 100 % each time.
+  const enabledItems = async () => Object.fromEntries(await Promise.all(zoomIds.map(async (id) => [id, await zoomItemEnabled(app, id)] as const)));
+  await expect.poll(() => zoomOfPage(page), { message: 'the window opens at 100 %' }).toBe(1);
+  await expect.poll(enabledItems, { message: 'at 100 %: Actual Size disabled' }).toEqual({ 'zoom.in': true, 'zoom.out': true, 'zoom.reset': false });
+  expect(await zoomAct(app, page, 'zoom.in')).toBe(1.1);
+  await zoomLines(page).hover(); // the first line held
+  await expect(zoomLines(page), 'the line says the size reached').toHaveText([zoomLineOf(1.1)]);
+  expect(await zoomAct(app, page, 'zoom.in')).toBe(1.25);
+  await expect(zoomLines(page), 'the second press’s line replaces the first, which was held').toHaveText([zoomLineOf(1.25)]);
+  await pointerOffToasts(page);
+  await zoomTo(app, page, 2);
+  await expect.poll(enabledItems, { message: 'at 200 %: Zoom In disabled' }).toEqual({ 'zoom.in': false, 'zoom.out': true, 'zoom.reset': true });
+  expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);
+  await expect.poll(enabledItems, { message: 'back at 100 %: Actual Size disabled again' }).toEqual({ 'zoom.in': true, 'zoom.out': true, 'zoom.reset': false });
+  await zoomTo(app, page, 0.5);
+  await expect.poll(enabledItems, { message: 'at 50 %: Zoom Out disabled' }).toEqual({ 'zoom.in': true, 'zoom.out': false, 'zoom.reset': true });
+  expect(await zoomAct(app, page, 'zoom.reset')).toBe(1);
+  await expect(zoomLines(page), 'Actual Size says it too').toHaveText([zoomLineOf(1)]);
+
   await menu(app, 'shortcuts.open');
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
   await expect(sheet.getByRole('table', { name: 'View › Tabs' })).toBeVisible();
@@ -1148,6 +1189,11 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
   await expect(sheet.getByRole('table', { name: 'Edit', exact: true }).getByRole('row', { name: /^Attach selection to chat/ })).toContainText(formatChord('Cmd+Shift+L'));
   await expect(sheet.getByRole('table', { name: 'Go', exact: true }).getByRole('row', { name: /^Back/ })).toContainText(formatChord('Cmd+['));
   await expect(sheet.getByRole('table', { name: 'Go', exact: true }).getByRole('row', { name: /^Forward/ })).toContainText(formatChord('Cmd+]'));
+  // U6b-5b (B13): the zoom's three rows under View, the two with chords showing them
+  const viewTable = sheet.getByRole('table', { name: 'View', exact: true });
+  await expect(viewTable.getByRole('row', { name: /^Zoom In/ })).toContainText(formatChord('Cmd+='));
+  await expect(viewTable.getByRole('row', { name: /^Zoom Out/ })).toContainText(formatChord('Cmd+-'));
+  await expect(viewTable.getByRole('row', { name: /^Actual Size/ })).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveCount(0);
   expect(maws.consoleErrors()).toEqual([]);

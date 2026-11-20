@@ -58,6 +58,8 @@ const LANDED = [
   'go.back', 'go.forward',
   // U6b-5a: Attach selection to chat (M2)
   'terminal.attachSelection',
+  // U6b-5b: zoom (M2)
+  'zoom.in', 'zoom.out', 'zoom.reset',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -249,6 +251,20 @@ describe('keymap: the table', () => {
     const go = ACTION_IDS.filter((id) => ACTIONS[id].menu === 'go');
     expect(go.slice(0, 3)).toEqual(['go.back', 'go.forward', 'palette.open']);
     for (const id of ['go.back', 'go.forward'] as const) {
+      expect(BUILD_F_ACTION_IDS as readonly string[], id).not.toContain(id);
+      expect(isRebindable(id), id).toBe(false);
+      expect(effectiveChord(id, over(id, 'Cmd+Alt+Y')), id).toBe(ACTIONS[id].chord); // a stored value is never read
+    }
+  });
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M2; Interfaces §A; B13, B14): Zoom In,
+  // Zoom Out and Actual Size in View, after Move to tab and before Comments ▸, in no submenu; build F knows none of them
+  it('carries zoom.in, zoom.out and zoom.reset in View between artifact.moveToTab and comments.expand, none taking a rebinding', () => {
+    expect(ACTIONS['zoom.in']).toEqual({ title: 'Zoom In', chord: 'Cmd+=', sink: 'menu', menu: 'view', scope: 'app' });
+    expect(ACTIONS['zoom.out']).toEqual({ title: 'Zoom Out', chord: 'Cmd+-', sink: 'menu', menu: 'view', scope: 'app' });
+    expect(ACTIONS['zoom.reset']).toEqual({ title: 'Actual Size', chord: null, sink: 'menu', menu: 'view', scope: 'app' });
+    const at = ACTION_IDS.indexOf('artifact.moveToTab');
+    expect(ACTION_IDS.slice(at, at + 5)).toEqual(['artifact.moveToTab', 'zoom.in', 'zoom.out', 'zoom.reset', 'comments.expand']);
+    for (const id of ['zoom.in', 'zoom.out', 'zoom.reset'] as const) {
       expect(BUILD_F_ACTION_IDS as readonly string[], id).not.toContain(id);
       expect(isRebindable(id), id).toBe(false);
       expect(effectiveChord(id, over(id, 'Cmd+Alt+Y')), id).toBe(ACTIONS[id].chord); // a stored value is never read

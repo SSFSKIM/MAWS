@@ -75,6 +75,7 @@
   "layout.set",
   "layout.setEnabledActions",
   "layout.unsavedFiles",
+  "layout.zoom",
   "library.saveAs",
   "machines.list",
   "org.cancel",

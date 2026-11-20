@@ -4,12 +4,14 @@
 // refused change leaves the old mark), and a size whose width does not fit this mount's room at the page's zoom is
 // disabled with "Wider than this pane". `ViewportChip`, in the navigation row while a size is on, reads the page's real
 // size (`pageBox`'s `reads`, so in a pane shorter than the size its height is the pane's) and opens the same choices.
+// UX wave U6b-5b (decision 35): both read the app window's zoom (`useZoom`), so a change of it redraws them.
 import { DropdownMenu } from 'radix-ui';
 import { BROWSER_VIEWPORTS, type BrowserTab, type BrowserViewport } from '@shared/browser/tab';
 import { setViewport } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { CheckIcon } from '../icons';
 import { fits, pageBox, type Room } from '../viewport';
+import { useZoom } from '../../../stores/zoom'; // UX wave U6b-5b
 
 const V = BROWSER_COPY.viewport;
 const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
@@ -26,11 +28,12 @@ const choiceOf = (viewport: BrowserViewport | null): ChoiceId | '' =>
   CHOICES.find((choice) => (choice.viewport === null ? viewport === null : viewport !== null && choice.viewport.width === viewport.width && choice.viewport.height === viewport.height))?.id ?? '';
 
 export function ViewportChoices({ tab, room }: { tab: BrowserTab; room: Room }) {
+  const app = useZoom((s) => s.factor);
   const current = choiceOf(tab.viewport);
   return (
     <DropdownMenu.RadioGroup value={current}>
       {CHOICES.map(({ id, label, viewport }) => {
-        const fitting = viewport === null || fits(viewport, tab.zoom, room);
+        const fitting = viewport === null || fits(viewport, tab.zoom, room, app);
         return (
           <DropdownMenu.RadioItem
             key={id}
@@ -57,7 +60,8 @@ export function ViewportChoices({ tab, room }: { tab: BrowserTab; room: Room }) 
 }
 
 export function ViewportChip({ tab, room }: { tab: BrowserTab; room: Room }) {
-  const box = pageBox(tab.viewport, tab.zoom, room);
+  const app = useZoom((s) => s.factor);
+  const box = pageBox(tab.viewport, tab.zoom, room, app);
   if (box === null) return null;
   const { width, height } = box.reads;
   return (

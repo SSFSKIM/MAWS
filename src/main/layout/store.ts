@@ -16,19 +16,28 @@ export interface LayoutStore {
   set(key: LayoutKey, value: unknown): void;
   delete(key: LayoutKey): void;
   list(): string[];
+  // UX wave U6b-5b (decision 34): the value (null: the key's removal) is in the map and in the file, or in neither: when
+  // the write throws, the map holds what it held before the call, and the error is thrown on. `set` and `delete` keep
+  // their own rule (the map changes first) for every other key.
+  publish(key: LayoutKey, value: unknown | null): void;
 }
 
 const WINDOW_KEY = 'window.main';
 export const WINDOW_DEBOUNCE_MS = 500;
-// Main's own keys: the window's state, and (UX wave U5, l6-artifacts-20) the folder the last export saved to.
-const MAIN_KEYS: ReadonlySet<string> = new Set<LayoutKey>([WINDOW_KEY, 'library.exportFolder']);
+// Main's own keys: the window's state, (UX wave U5, l6-artifacts-20) the folder the last export saved to, and (UX wave
+// U6b-5b) the window's zoom.
+const MAIN_KEYS: ReadonlySet<string> = new Set<LayoutKey>([WINDOW_KEY, 'library.exportFolder', 'window.zoom']);
 
 export class LayoutFileStore implements LayoutStore {
   private readonly values: Map<string, unknown>;
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly changed = new Set<(key: string) => void>(); // P5 O2 M2: main's interest report follows `main.tabs`
 
-  constructor(private readonly file: string) {
+  // `writeFile` writes the file's whole text (UX wave U6b-5b: a test gives the real store a writer that fails).
+  constructor(
+    private readonly file: string,
+    private readonly writeFile: (file: string, text: string) => void = atomicWriteFileSync,
+  ) {
     this.values = read(file);
   }
 
@@ -56,6 +65,24 @@ export class LayoutFileStore implements LayoutStore {
     this.write();
     this.cancelWindowWrite();
     this.fire(key);
+  }
+
+  // UX wave U6b-5b (decision 34): written at once with the whole file, a pending window write with it; on a failed
+  // write the map is put back as it was before the call. Main's own key, never reported to `onChange`. A removal of an
+  // absent key writes nothing.
+  publish(key: LayoutKey, value: unknown | null): void {
+    if (value === null && !this.values.has(key)) return;
+    const before = new Map(this.values);
+    if (value === null) this.values.delete(key);
+    else this.values.set(key, value);
+    try {
+      this.write();
+    } catch (error) {
+      this.values.clear();
+      for (const [k, v] of before) this.values.set(k, v);
+      throw error;
+    }
+    this.cancelWindowWrite(); // the whole file just went out, window key included
   }
 
   // P5 O2 M2: a renderer key set or deleted (the window key is main's own and never reported)
@@ -91,7 +118,7 @@ export class LayoutFileStore implements LayoutStore {
 
   private write(): void {
     mkdirSync(dirname(this.file), { recursive: true });
-    atomicWriteFileSync(this.file, JSON.stringify(Object.fromEntries(this.values)));
+    this.writeFile(this.file, JSON.stringify(Object.fromEntries(this.values)));
   }
 }
 
@@ -129,7 +156,7 @@ function panelKeyAllowed(session: string, local: MachineRef, known: (appSessionI
   return machineOf(session) !== local || known(bareOf(session) as AppSessionId);
 }
 
-// `layout.get/set/list` for the renderer. `window.main` and `library.exportFolder` are main's own keys: listed (they
+// `layout.get/set/list` for the renderer. `window.main`, `library.exportFolder` and `window.zoom` are main's own keys: listed (they
 // exist in the file), but never read or written across IPC. A session's own panel key is written only while the session
 // exists (`known`), so a write already on its way when the session was removed cannot bring the key back. P5 O6 M2: a
 // null value deletes the key (the renderer's migration of a bare panel key to its address), whatever main knows of the

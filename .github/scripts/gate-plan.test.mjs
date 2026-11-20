@@ -2661,3 +2661,13 @@ test('the workflow entry point writes the hold to its output on one line and esc
   // The plan step reads the variable at plan time.
   assert.match(jobBody(readWorkflow(), 'plan'), /^ {10}MAC_MINI_LANES: \$\{\{ vars\.MAC_MINI_LANES \}\}$/m);
 });
+
+test("the Change: trailer (ci-gate's name for the work, read by ci-kit's ledger) changes no plan", () => {
+  const scripts = { e2e: 'x', 'e2e:library': 'x' };
+  for (const message of ['ci-gate: test\n\nNonce: 1-2', 'ci-gate: test\n\nNonce: 1-2\nGates: static,unit,probes\nClass1a: pool', 'ci-gate: test\n\nNonce: 1-2\nGates: e2e:library\nRunner: macos\nLane: hosted']) {
+    const without = planOf({ CLASS1_E2E: 'library', HEAD_MESSAGE: message }, scripts, 0);
+    for (const change of ['ux-wave/U6b-4c', 'land-798', 'gates-e2e', 'Live-yes']) {
+      assert.deepEqual(planOf({ CLASS1_E2E: 'library', HEAD_MESSAGE: `${message}\nChange: ${change}` }, scripts, 0), without);
+    }
+  }
+});

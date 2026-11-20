@@ -13,6 +13,8 @@
 //   answers, for Stop); cua #90: `/later.html` (a page answered after LATER_MS);
 // - U12a: `/marker.html` ("Marker"), whose `#marker` reads `marker-<n>` for the n-th request of it, so a case sees each
 //   load of the page, and a text field `#field` a person types in (autocomplete off: a reload leaves it empty).
+// - UX wave U6b-5b M1: `/cells.html` ("Cells"), the viewport filled with 48 numbered cells (8 across, 6 down), each
+//   showing in `#pressed` which took the last press, for the zoom probe's look at the frame's corners.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 // E4d start
@@ -96,6 +98,19 @@ const HTML: Record<string, string> = {
   ),
   '/framed.html': page('Framed', '<h1 id="heading">Framed</h1><iframe id="sub" src="/plain.html" title="Plain"></iframe>'),
 };
+
+// UX wave U6b-5b M1: the numbered cells, a press on one named in `#pressed` (and kept in `window.__cellsPressed`)
+const CELLS = Array.from({ length: 48 }, (_, k) => `<div class="cell" data-cell="${k + 1}">${k + 1}</div>`).join('');
+HTML['/cells.html'] =
+  '<!doctype html><html><head><meta charset="utf-8"><title>Cells</title><style>' +
+  'html,body{margin:0;height:100%;font:600 15px system-ui;background:#fdfdfb;color:#1b1b1b}' +
+  '#grid{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(6,1fr);width:100vw;height:100vh;box-sizing:border-box}' +
+  '.cell{display:flex;align-items:center;justify-content:center;border:1px solid #c8c8c0}' +
+  '#pressed{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);padding:4px 10px;background:#1b1b1b;color:#fdfdfb;pointer-events:none}' +
+  `</style></head><body><div id="grid">${CELLS}</div><div id="pressed">none</div><script>` +
+  "window.__cellsPressed=[];document.getElementById('grid').addEventListener('pointerdown',(e)=>{const c=e.target.closest('[data-cell]');if(!c)return;" +
+  "window.__cellsPressed.push(Number(c.dataset.cell));document.getElementById('pressed').textContent='pressed: '+c.dataset.cell;});" +
+  '</script></body></html>';
 
 // E4d start: comment mode's page (E4d execution document, Interfaces "e2e"): `/comment.html` is the naming module's
 // fixture (`test/fixtures/browser/probe-page.html`, E0b's four targets and the discriminating cases, each with a

@@ -156,8 +156,41 @@ exec '${process.execPath}' "$@"
 const trailers = (message) => {
   const lines = message.trimEnd().split('\n\n').at(-1).split('\n');
   assert.match(lines[0], /^Nonce: \d+-\d+$/);
-  return lines.slice(1).filter((line) => !/^(E2E|Unit)-Coverage:/.test(line));
+  return lines.slice(1).filter((line) => !/^((E2E|Unit)-Coverage|Change):/.test(line));
 };
+
+test('the Change: trailer names the work: the branch, else the --label less a short sha of a commit here, else nothing', () => {
+  const change = (message) => message.split('\n').filter((line) => line.startsWith('Change:'));
+  // A worktree on a branch: the branch, whatever the label; last in the paragraph, and the plan reads past it.
+  const onBranch = gate(['--gates', 'static', '--peer', 'none', '--label', 'retry-3']);
+  assert.deepEqual(change(onBranch.message), ['Change: gates']);
+  assert.match(onBranch.message.trimEnd(), /\nChange: gates$/);
+  assert.deepEqual(planOf({ HEAD_MESSAGE: onBranch.message }, {}).outputs, planOf({ HEAD_MESSAGE: onBranch.message.replace(/\nChange: .*$/m, '') }, {}).outputs);
+  // A detached commit: the label, less a trailing short sha when it names a commit here; a hex-like tail that names none stays.
+  // A commit of fixed content, so its sha is known before the call; the tree holds it.
+  const object = 'tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nauthor a <a@a> 0 +0000\ncommitter a <a@a> 0 +0000\n\nmerge\n';
+  const store = (write, cwd) => execFileSync('git', ['hash-object', '-t', 'commit', ...(write ? ['-w'] : []), '--stdin'], { cwd, encoding: 'utf8', input: object }).trim();
+  const short = store(false).slice(0, 8);
+  const detach = (tree, git) => {
+    store(true, tree);
+    git('checkout', '--quiet', '--detach');
+  };
+  const detached = (label) => change(gate(['--gates', 'static', '--peer', 'none', '--label', label], { change: detach }).message);
+  assert.deepEqual(detached('land-798'), ['Change: land-798']);
+  assert.deepEqual(detached(`land-798-${short}`), ['Change: land-798']);
+  assert.deepEqual(detached('release-20261120'), ['Change: release-20261120']);
+  // A tag of that name resolves to a commit too, but the tail is not that commit's id: the label stays whole.
+  const tagged = gate(['--gates', 'static', '--peer', 'none', '--label', 'release-20261120'], {
+    change: (tree, git) => {
+      git('tag', '20261120');
+      detach(tree, git);
+    },
+  });
+  assert.deepEqual(change(tagged.message), ['Change: release-20261120']);
+  // Neither: a detached commit or a bare sha without a label has no trailer.
+  assert.deepEqual(change(gate(['--gates', 'static', '--peer', 'none'], { change: detach }).message), []);
+  assert.deepEqual(change(gate(['--gates', 'static', '--peer', 'none'], { bare: true }).message), []);
+});
 
 test('omitting unit warns for non-doc changes, including fixture additions, deletes and moves into docs, without refusing the push', () => {
   const base = { 'fixtures/recording.json': '{}', 'docs/note.md': 'note' };

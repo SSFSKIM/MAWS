@@ -15,6 +15,7 @@ import { emit } from './ipc/events';
 import type { ResolvedTheme } from './client/settings-store'; // P5 O3-A: the client half's
 import { localMachineArgument } from '@shared/machine/page-argument'; // P5 O6 M2
 import { localMachine } from './machine/local'; // P5 O6 M2
+import { openAt, trafficLightsAt } from './zoom'; // UX wave U6b-5b
 
 // Each theme's `--bg` (X7), so the window's first frame and any area the page has not painted match the page.
 export const THEME_BACKGROUND: Record<ResolvedTheme, string> = { light: '#faf9f6', dark: '#131313' };
@@ -55,7 +56,8 @@ export function installContentSecurityPolicy(): void {
 // The toolbar is the title bar (C5 execution document, "Window state"): the traffic lights are centred in its 44 px
 // (`--toolbar-h`), and the window opens where it was left (`window-state.ts` validates the saved bounds against the
 // displays before they get here). Maximized is applied just before the first show, so the window never flashes small.
-const TRAFFIC_LIGHTS = { x: 16, y: 15 };
+// UX wave U6b-5b (placement 5): the toolbar is 44 CSS pixels, so the lights' place follows the window's zoom
+// (`trafficLightsAt`, { x: 16, y: 15 } at 100 %), here at the window's making and in `layout.zoom` after.
 
 function placementOptions(placement: WindowState | null) {
   if (!placement) return {};
@@ -64,6 +66,8 @@ function placementOptions(placement: WindowState | null) {
 // ---- end C5 -----------------------------------------------------------------------------------------------------------
 
 export function createWindow(theme: ResolvedTheme, placement: WindowState | null = null): BrowserWindow {
+  // UX wave U6b-5b (P7; M1's rows c, f): the page's zoom is its own (isolated), at the stored factor from its first show
+  const zoom = openAt();
   const win = new BrowserWindow({
     title: 'MAWS',
     width: 1440,
@@ -73,7 +77,7 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
     show: false,
     backgroundColor: THEME_BACKGROUND[theme],
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: TRAFFIC_LIGHTS, // C5
+    trafficLightPosition: trafficLightsAt(zoom.zoomFactor), // C5; UX wave U6b-5b
     ...placementOptions(placement), // C5
     webPreferences: {
       sandbox: true,
@@ -83,6 +87,7 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
       plugins: true, // E2: Chromium's own PDF viewer, for a delivered PDF's frame (Design §3); Chromium ships no other plugin
       preload: join(__dirname, '../preload/index.js'),
       additionalArguments: [localMachineArgument(localMachine())], // P5 O6 M2: window.maws.localMachine, read by the preload
+      ...zoom, // UX wave U6b-5b: zoomMode and zoomFactor
     },
   });
   // E2 start: an app window (a capture window is not one), its store frames guarded and their console attributed
