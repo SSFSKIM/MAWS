@@ -214,20 +214,44 @@ describe('ExtensionPopups: the app window’s zoom (U6b-5b, placement 2)', () =>
     expect(h.views[0]!.bounds).toEqual(bounds);
   });
 
-  it('keeps the anchor in CSS pixels: a layout and a change of factor place it again from it', () => {
-    const zoom = { factor: 2 };
-    const h = harness({ zoom });
+  it('keeps the anchor in CSS pixels: a later layout places it from it at the factor', () => {
+    const h = harness({ zoom: { factor: 2 } });
     h.w.getContentSize = () => MAC;
     h.popups.open(h.placedTab(), PROBE, ANCHOR);
     const [view] = h.views;
     sized(view!, 344, 179);
     expect(view!.bounds).toEqual({ x: 904, y: 128, width: 344, height: 179 }); // the anchor (1200, 80, 48 × 48) in points
+  });
+
+  // The branch review (sweep#1): a change of the factor reflows the toolbar, so the button moves (or folds into the
+  // puzzle) and the anchor main kept no longer names it; main learns a button's box only from a click on it. The popup
+  // closes, its focus handed to the app's page, and the next click on the action opens it under the button again.
+  it('closes an open popup when the factor changes, and the next click opens it again', () => {
+    const zoom = { factor: 2 };
+    const h = harness({ zoom });
+    const entry = h.placedTab();
+    h.popups.open(entry, PROBE, ANCHOR);
+    const [view] = h.views;
+    loaded(view!); // the popup holds the keyboard
+    expect(h.popups.current(h.w.id)).not.toBeNull(); // the control: open before the change
     zoom.factor = 1;
     h.popups.placeAgain(h.w.id);
-    expect(view!.bounds).toEqual({ x: 280, y: 64, width: 344, height: 179 }); // as at 100 %, its size kept
-    h.popups.close(h.w.id, 'toggle');
-    h.popups.placeAgain(h.w.id); // no popup: nothing to place
-    expect(view!.bounds).toEqual({ x: 280, y: 64, width: 344, height: 179 });
+    expect(h.popups.current(h.w.id)).toBeNull();
+    expect(h.w.children).not.toContain(view);
+    expect(view!.webContents.close).toHaveBeenCalledTimes(1);
+    expect(h.w.webContents.focus).toHaveBeenCalledTimes(1);
+    expect(h.states.at(-1)).toEqual([h.w.id, null]);
+    h.popups.open(entry, PROBE, ANCHOR); // no blur's guard: a zoom is no click on the action
+    expect(h.popups.current(h.w.id)).toMatchObject({ tabId: entry.tab.tabId, extensionId: PROBE });
+    expect(h.views).toHaveLength(2);
+  });
+
+  it('a change of the factor with no popup open changes nothing', () => {
+    const h = harness({ zoom: { factor: 2 } });
+    h.popups.placeAgain(h.w.id);
+    expect(h.states).toEqual([]);
+    h.popups.open(h.placedTab(), PROBE, ANCHOR);
+    expect(h.states).toHaveLength(1); // the control: the same listener hears an open
   });
 });
 
