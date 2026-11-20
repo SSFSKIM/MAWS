@@ -1189,6 +1189,22 @@ describe('the three menu chords', () => {
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull());
   });
 
+  it('EXPERIMENT flake order: ⇧⌘M before the closed chip menu has returned focus', async () => {
+    live(A);
+    live(B);
+    tabs(1);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <ComposerAppKeys />);
+    act(() => editorOf(1).focus());
+    await chord(...EFFORT);
+    expect(await screen.findByText('effort view')).toBeTruthy();
+    await chord(...EFFORT); // closed: Radix returns focus (the chip's onCloseAutoFocus) in a 0 ms timer
+    act(() => editorOf(1).focus());
+    act(() => void (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'M', code: 'KeyM', metaKey: true, shiftKey: true })));
+    const opened = useComposerStore.getState().modeMenus.has(B);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20))); // the timer runs
+    console.log('EXPERIMENT', JSON.stringify({ opened, after: useComposerStore.getState().modeMenus.has(B) }));
+  });
+
   // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on
   // screen, not the request that opened the menu
   describe('beside the real selector', () => {
