@@ -689,6 +689,10 @@ test('collapsing a divider keeps its position', async ({ harness }) => {
   const toggle = divider.locator('button[aria-expanded]').first();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const rowsOpen = (await metrics(page)).rows;
+  // Board ticket 789: the line ends its turn, so the open work stands between the turn's start and it, past the
+  // viewport's bottom; the reader brings it into view before clicking it (the click would, after its place was read).
+  await toggle.scrollIntoViewIfNeeded();
+  await settle(page, 500);
   const top = await divider.evaluate((element) => element.getBoundingClientRect().top);
 
   await toggle.click();
