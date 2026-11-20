@@ -133,6 +133,8 @@ function mount(kind: 'html' | 'file', over: { visible?: boolean; machine?: typeo
   return { onShown, view, state, show: (visible: boolean) => view.rerender(draw(visible)) };
 }
 
+// The frame's URL names the copy it draws, the viewer's machine (the fix wave's review; main serves the copy it names)
+const frameSrc = (revision: number, name: string, machine: string = TEST_MACHINE) => `${artifactUrl(ID, revision, name)}?machine=${machine}`;
 const frame = (kind: 'html' | 'pdf') => document.querySelector<HTMLIFrameElement>(`[data-artifact-frame="${kind}"]`);
 const header = () => editorHostOf(SCOPE)!;
 const actionLabels = () => header().actions!.map((a) => a.label);
@@ -147,12 +149,12 @@ const load = (el: HTMLIFrameElement) =>
 describe('the HTML viewer', () => {
   it('frames the latest version on the scheme, and the picker’s v1 frames that version', async () => {
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     expect(frame('html')!.getAttribute('sandbox')).toBe('allow-scripts');
     const picker = screen.getByRole('combobox', { name: 'Version' });
     expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual(['v1', 'v2 · latest']);
     fireEvent.change(picker, { target: { value: '1' } });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     expect(main.callsOf('library.content')).toContainEqual({ artifactId: ID, revision: 4 });
   });
 
@@ -196,12 +198,12 @@ describe('the HTML viewer', () => {
   // its own load
   it('a page loaded hidden, then switched away and back, is not shown until the new frame loads', async () => {
     const { onShown, show } = mount('html', { visible: false });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     load(frame('html')!);
     fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '1' } });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '2' } });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     show(true);
     expect(onShown).not.toHaveBeenCalled();
     load(frame('html')!);
@@ -213,7 +215,7 @@ describe('the HTML viewer', () => {
     mount('html');
     await waitFor(() => expect(frame('html')).not.toBeNull());
     fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '1' } });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     const pending = deferred<ReturnType<typeof ok>>();
     versionsAnswer = () => pending.promise;
     act(() => action('Reload').onSelect());
@@ -297,24 +299,24 @@ describe('a version asked for from outside', () => {
   it('shows the n-th version by revision when it mounts, never revision n, and takes the request once', async () => {
     requestArtifactOpen(ID, TEST_MACHINE, { version: 2 }, 'panel');
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     expect(main.callsOf('library.content')).not.toContainEqual({ artifactId: ID, revision: 2 });
     cleanup();
     mount('html'); // a later mount: the request was taken, the latest shows
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
   });
 
   it('moves a viewer already showing the artifact, follows the latest for the last place, and leaves another surface’s or artifact’s alone', async () => {
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { version: 1 }, 'main'));
     act(() => void requestArtifactOpen('00000000-0000-4000-8000-0000000000ff', TEST_MACHINE, { version: 1 }, 'panel'));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
+    expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html'));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { version: 1 }, 'panel'));
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { version: 3 }, 'panel'));
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
     expect(document.querySelector('[data-artifact-viewer]')?.getAttribute('data-version')).toBe('3');
   });
 
@@ -324,7 +326,7 @@ describe('a version asked for from outside', () => {
     names = { 4: 'index.html', 14: 'index.html', 20: 'index.html' };
     requestArtifactOpen(ID, TEST_MACHINE, { version: 3 }, 'panel');
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
   });
 
   // M6b fix wave 2: a row of a call whose answer named its revision opens that revision, wherever thinning moved its
@@ -332,11 +334,11 @@ describe('a version asked for from outside', () => {
   it('shows the version that captured a revision, the next kept one when thinning dropped it', async () => {
     requestArtifactOpen(ID, TEST_MACHINE, { revision: 4 }, 'panel');
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { revision: 5 }, 'panel')); // revision 5's version thinned: 9 kept after it
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { revision: 14 }, 'panel'));
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
   });
 
   // P4-B4: a link's `#v<id>` (a location's version) names a retained version by its id, over the version the open asked
@@ -344,13 +346,13 @@ describe('a version asked for from outside', () => {
   it('shows the retained version a link names by its id, the latest for an id not retained', async () => {
     requestArtifactOpen(ID, TEST_MACHINE, 'latest', 'panel', { version: 1 }); // version 1 captured revision 4
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { revision: 9 }, 'panel', { version: 42 })); // not retained: the latest
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, { revision: 9 }, 'panel', { block: 'b1' })); // no version in the place
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     act(() => void requestArtifactOpen(ID, TEST_MACHINE, 'latest', 'panel', { version: 3 })); // the latest now, kept by its revision
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
   });
 
   // M6b fix wave 3: the identity asked for (a revision, or the latest) is what the tab keeps, its place derived from each
@@ -359,18 +361,18 @@ describe('a version asked for from outside', () => {
   it('keeps showing a revision asked for after an earlier version thins, across a Reload and a refresh', async () => {
     requestArtifactOpen(ID, TEST_MACHINE, { revision: 9 }, 'panel');
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     versions = [version(2, 9), version(3, 14)]; // revision 4's version thinned: 9 is now the first place
     act(() => header().actions!.find((a) => a.id === 'reload')!.onSelect());
     await waitFor(() => expect(main.callsOf('artifacts.versions').length).toBeGreaterThan(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
+    expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html'));
     const reads = main.callsOf('artifacts.versions').length;
     row = { ...row, revision: 15 }; // the row moves on: its versions read again
     await act(async () => main.emit('library.changed', { revision: 2 }));
     await waitFor(() => expect(main.callsOf('artifacts.versions').length).toBeGreaterThan(reads));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
+    expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html'));
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Version' }).value).toBe('1');
   });
 
@@ -382,7 +384,7 @@ describe('a version asked for from outside', () => {
       requestArtifactOpen(ID, TEST_MACHINE, { revision: 9 }, 'panel');
       const mounted = mount('html');
       await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(2)); // before the row is read, and after
-      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
       const reread = deferred<ReturnType<typeof ok>>();
       const publish = async () => {
         versionsAnswer = () => reread.promise;
@@ -417,7 +419,7 @@ describe('a version asked for from outside', () => {
       await publish();
       act(() => cardFrames.at(-1)!.showVersion!({ revision: 4 }));
       await answer();
-      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     });
 
     // the review of 1586d7eeb: while the frame shows the version read before, the latest followed exports that version,
@@ -432,14 +434,14 @@ describe('a version asked for from outside', () => {
       row = { ...row, revision: 20 };
       await act(async () => main.emit('library.changed', { revision: 2 }));
       await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(3));
-      expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
+      expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html'));
       act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
       await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 3, ownFile: true }]));
 
       versions = [...versions, version(4, 20)];
       names[20] = 'index.html';
       await act(async () => reread.resolve(ok({ versions })));
-      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 20, 'index.html')));
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(20, 'index.html')));
       await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
       act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
       await waitFor(() => expect(main.callsOf('artifacts.export')).toHaveLength(2));
@@ -449,14 +451,14 @@ describe('a version asked for from outside', () => {
 
   it('keeps the picker’s choice by its revision when an earlier version thins', async () => {
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
     fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '2' } }); // revision 9
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     versions = [version(2, 9), version(3, 14)];
     act(() => header().actions!.find((a) => a.id === 'reload')!.onSelect());
     await waitFor(() => expect(main.callsOf('artifacts.versions').length).toBeGreaterThan(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
+    expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html'));
   });
 
   // M6b fix wave 2: no wall-clock lapse. A request waits for a versions read however slow; a later open supersedes it,
@@ -470,14 +472,14 @@ describe('a version asked for from outside', () => {
     const later = Date.now() + 60_000; // the read answers a minute later
     const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
     slow.resolve(ok({ versions }));
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     clock.mockRestore();
     cleanup();
     versionsAnswer = null;
     requestArtifactOpen(ID, TEST_MACHINE, { version: 1 }, 'panel');
     requestArtifactOpen(ID, TEST_MACHINE, 'latest', 'panel'); // the next open, naming no version
     mount('html');
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(14, 'index.html')));
   });
 });
 
@@ -518,9 +520,9 @@ describe('Comment on an HTML page', () => {
     act(() => action('Comment').onSelect());
     const picker = screen.getByRole('combobox', { name: 'Version' });
     fireEvent.change(picker, { target: { value: '1' } });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(4, 'index.html')));
     fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '2' } });
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     expect(action('Comment').pressed).toBe(false);
     expect(screen.queryByRole('status')).toBeNull();
 
@@ -530,7 +532,7 @@ describe('Comment on an HTML page', () => {
     expect(state.view.getState().pickingIn).toBeNull();
     const Body = byteViewer('html').Panel;
     render(<Body artifactId={ID} machine={TEST_MACHINE} state={state} scope={SCOPE} visible onShown={() => {}} />);
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
     expect(action('Comment').pressed).toBe(false);
   });
 
@@ -569,7 +571,7 @@ describe('the File viewer', () => {
   it('frames a PDF in the PDF frame, unsandboxed, and says it is shown once it loaded', async () => {
     names = { 9: 'report.pdf' };
     const { onShown } = mount('file');
-    await waitFor(() => expect(frame('pdf')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'report.pdf')));
+    await waitFor(() => expect(frame('pdf')?.getAttribute('src')).toBe(frameSrc(9, 'report.pdf')));
     expect(frame('pdf')!.hasAttribute('sandbox')).toBe(false);
     load(frame('pdf')!);
     expect(onShown).toHaveBeenCalled();
@@ -578,11 +580,11 @@ describe('the File viewer', () => {
   it('plays a video and an audio file in the native elements', async () => {
     names = { 9: 'clip.webm' };
     mount('file');
-    await waitFor(() => expect(document.querySelector('video[data-artifact-media="video"]')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'clip.webm')));
+    await waitFor(() => expect(document.querySelector('video[data-artifact-media="video"]')?.getAttribute('src')).toBe(frameSrc(9, 'clip.webm')));
     cleanup();
     names = { 9: 'tone.wav' };
     mount('file');
-    await waitFor(() => expect(document.querySelector('audio[data-artifact-media="audio"]')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'tone.wav')));
+    await waitFor(() => expect(document.querySelector('audio[data-artifact-media="audio"]')?.getAttribute('src')).toBe(frameSrc(9, 'tone.wav')));
   });
 
   it('draws any other file in the file viewer, read-only, under the session that made it', async () => {
@@ -734,28 +736,23 @@ describe('an HTML page’s connectors', () => {
     ports[0]!.close();
   });
 
-  // The branch's third review: main draws a page by its bare id, from the latest other machine it heard the id on before
-  // this Mac's own copy. A page the window cannot tie to the viewer's machine is handed no connector port, so one
-  // machine's page never holds another machine's connector authority (ticket 806 puts the machine in the frame's URL).
-  it('hands no port to a page whose drawn copy may be another machine’s; a page only its own machine is known to hold gets one', async () => {
+  // The fix wave's review: the frame's URL names the viewer's machine and main serves that copy alone, so a page's
+  // connector port carries the authority of the machine that drew it: this Mac's copy keeps its connectors while another
+  // machine holds a copy of the same id, and that machine's viewer frames its own copy.
+  it('frames the copy its machine names, and hands that page its machine’s port, another copy of the same id on record or not', async () => {
     recordArtifactMachine(ID, OTHER_MACHINE, TEST_MACHINE); // another machine holds a copy of the same id
     try {
       mount('html'); // this Mac's copy
-      await waitFor(() => expect(frame('html')).not.toBeNull());
-      const refused = pagePorts(frame('html')!);
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html')));
+      const here = pagePorts(frame('html')!);
       load(frame('html')!);
-      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-      expect(refused.length, 'ports handed to the page').toBe(0);
-      expect(main.callsOf('connectors.open')).toEqual([]);
+      await waitFor(() => expect(here.length, 'ports handed to the page').toBe(1));
+      await waitFor(() => expect(main.callsOf('connectors.open')).toEqual([{ artifactId: ID }]));
+      here[0]!.close();
       cleanup();
 
-      mount('html', { machine: OTHER_MACHINE }); // that machine's copy, the only other one known: main draws it
-      await waitFor(() => expect(frame('html')).not.toBeNull());
-      const handed = pagePorts(frame('html')!);
-      load(frame('html')!);
-      await waitFor(() => expect(handed.length, 'ports handed to the page').toBe(1));
-      await waitFor(() => expect(main.callsOf('connectors.open')).toEqual([{ artifactId: ID }]));
-      handed[0]!.close();
+      mount('html', { machine: OTHER_MACHINE }); // that machine's copy
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(frameSrc(9, 'index.html', OTHER_MACHINE)));
     } finally {
       resetArtifactMachines();
     }

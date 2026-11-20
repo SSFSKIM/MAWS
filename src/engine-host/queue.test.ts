@@ -1393,14 +1393,52 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     const store = new MemorySessionStateStore();
     await store.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
     const t = await harness({ store, recovered: false });
-    t.h.turn = true; // the fold left the interrupted turn open
-    await t.queue.adopt({ written: new Set(), unended: [], ended: new Set() });
+    t.h.turn = true; // the fold left the interrupted turn open, a plain interrupt written while it ran
+    await t.queue.adopt({ written: new Set(), unended: [], ended: new Set(), interrupted: true });
     expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
     expect((await t.queue.send('follow-up during the interrupted turn')).disposition).toBe('queued');
     t.h.turn = false;
     await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
     expect(t.writes).toEqual([]); // held: it was sent while the Stop's phase lasted
     expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+  });
+
+  // The fix wave's review: a saved interrupt pause can outlive its turn (it holds a row), and a fresh instruction can then
+  // start an unrelated turn. Adopted during that turn, the pause has no Stop's phase to restore: the journal shows no
+  // interrupt written while the open turn ran, so removing the last held row ends it.
+  it('an adopted interrupt pause whose open turn was not the one interrupted restores no Stop phase', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [{ queueId: 'q1', appSessionId: ID, content: 'held', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }], paused: true, pauseReason: 'interrupt' });
+    const t = await harness({ store, recovered: false });
+    t.h.turn = true; // an unrelated turn, started after the interrupted one ended
+    await t.queue.adopt({ written: new Set(), unended: [], ended: new Set(), interrupted: false });
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    await t.queue.remove('q1');
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
+  });
+
+  // The fix wave's review: the Stop's turn is the one its interrupt request reaches. A turn that ends while the Stop saves
+  // its pause or withdraws steers, and a successor that starts before the interrupt goes out, make the successor the
+  // interrupted turn: the phase waits for its end, and a follow-up sent meanwhile is held.
+  it('a Stop takes its turn at the interrupt request: a successor started while it withdrew steers is the one it waits on', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.steer('steer a', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    t.h.cancelled = false; // the engine had already taken it
+    const stopping = t.queue.stop({ hold: true }, async () => {}); // answered while the successor runs
+    await flush();
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded()); // the turn ends while the Stop withdraws
+    t.h.turn = true; // the steer's own turn starts before the interrupt is written
+    answer();
+    await stopping;
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    expect((await t.queue.send('follow-up')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    expect(t.writes.map((w) => w.message.content)).toEqual(['steer a']);
   });
 
   // The branch's third review: the Stop's phase follows the turn it interrupted. When the inbound drain carries that

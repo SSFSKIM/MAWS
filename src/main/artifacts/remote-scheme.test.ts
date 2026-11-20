@@ -96,7 +96,7 @@ const scratch = (prefix: string) => {
  * main's chain as startArtifacts installs it, with the remote responder over the mini's link. `asked`: in order, each
  * engine host read of this Mac (`local:<name> <id>`) and each stream the link sent (`stream <url>`).
  */
-function scene(options: { openTimeoutMs?: number; idleMs?: number; peers?: string[] } = {}) {
+function scene(options: { openTimeoutMs?: number; idleMs?: number; peers?: string[]; local?: MachineRef } = {}) {
   const root = scratch('maws-remote-scheme-');
   const file = join(root, 'page.html');
   writeFileSync(file, '<p>from main</p>');
@@ -112,7 +112,7 @@ function scene(options: { openTimeoutMs?: number; idleMs?: number; peers?: strin
     return { ok: false, error: { code: 'invalid_input', message: 'no such artifact' } };
   });
   const logged: string[] = [];
-  const scheme = createRemoteScheme({ machines, remote: (machine) => (machine === MINI ? link : null), ...(options.openTimeoutMs !== undefined && { openTimeoutMs: options.openTimeoutMs }), ...(options.idleMs !== undefined && { idleMs: options.idleMs }), log: (line) => void logged.push(line) });
+  const scheme = createRemoteScheme({ machines, remote: (machine) => (machine === MINI ? link : null), ...(options.local !== undefined && { local: options.local }), ...(options.openTimeoutMs !== undefined && { openTimeoutMs: options.openTimeoutMs }), ...(options.idleMs !== undefined && { idleMs: options.idleMs }), log: (line) => void logged.push(line) });
   stops.push(() => scheme.stop());
   sessions.default.protocol.handle.mockClear();
   const hosts = { dispatch, postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent: vi.fn(() => () => {}), peer: () => null };
@@ -152,6 +152,36 @@ describe('the responder chain', () => {
     expect(await (await s.handler(new Request(url(HERE)))).text()).toContain('from main');
     expect(s.asked).toEqual([`local:artifacts.content ${HERE}`]);
     expect(s.link.sent).toEqual([]);
+  });
+});
+
+// The fix wave's review (ticket 806's frame bytes): a viewer's frame names the machine whose copy it draws, and that copy
+// alone answers it, whatever the table places, so a page never draws one machine's bytes under another's connectors.
+describe('a URL that names its machine', () => {
+  const on = (id: string, machine: MachineRef, path = 'index.html') => `${url(id, path, 3)}?machine=${machine}`;
+
+  it('serves this Mac’s copy for a URL naming this Mac, though the table places the id on another machine', async () => {
+    const s = scene({ local: LOCAL });
+    s.machines.record(HERE, MINI); // the same id on the mini (a copied profile)
+    expect(await (await s.handler(new Request(on(HERE, LOCAL)))).text()).toContain('from main');
+    expect(s.link.sent).toEqual([]);
+  });
+
+  it('answers this Mac’s 404 for a URL naming this Mac, never another machine’s copy', async () => {
+    const s = scene({ local: LOCAL });
+    const missing = await s.handler(new Request(on(PAGE, LOCAL))); // the table places it on the mini; this Mac has none
+    expect(missing.status).toBe(404);
+    expect(s.link.sent).toEqual([]);
+  });
+
+  it('fetches a URL naming another machine from that machine, though the table does not place the id there', async () => {
+    const s = scene({ local: LOCAL });
+    const page = s.handler(new Request(on(HERE, MINI)));
+    const id = await s.opened(0);
+    expect(s.link.opens()[0]!.http).toEqual({ url: on(HERE, MINI), method: 'GET' });
+    s.link.answer(id, 200, { 'content-length': '13' }, ['<p>from B</p>']);
+    expect(await (await page).text()).toBe('<p>from B</p>');
+    expect(s.asked).toEqual([`stream ${on(HERE, MINI)}`]); // never this Mac's content
   });
 });
 
