@@ -57,6 +57,31 @@ describe('divider row', () => {
     await waitFor(() => expect(store.rows()).toHaveLength(before));
   });
 
+  // Board ticket 789: the line ends its turn, so a click opens or folds the work above it; the list scrolls by however far
+  // the line moved, frame by frame through the motion, so the line stays under the pointer.
+  it.each([false, true])('keeps the clicked line where it is on screen while the work above it opens or folds (folding=%s)', async (folding) => {
+    const store = await storeWith(deniedTurn().events);
+    if (folding) act(() => useTranscriptStore.getState().toggleTurn(store.key, rowOf(store.rows(), 'divider').turnId!));
+    const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    const scroller = document.createElement('div');
+    scroller.setAttribute('data-transcript-scroller', '');
+    let offset = 1000;
+    Object.defineProperty(scroller, 'scrollTop', { get: () => offset, set: (value: number) => { offset = value; } });
+    view.container.replaceWith(scroller);
+    scroller.append(view.container);
+    const frames: (() => void)[] = [];
+    vi.stubGlobal('requestAnimationFrame', (step: () => void) => frames.push(step));
+    let top = 400;
+    const line = document.getElementById(`t-${rowOf(store.rows(), 'divider').id}`)!;
+    vi.spyOn(line, 'getBoundingClientRect').mockImplementation(() => ({ top: top - (offset - 1000) }) as DOMRect);
+    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
+    top = folding ? 280 : 640; // the rows above it grew or shrank by this much, the scroll not yet moved
+    frames.shift()!();
+    expect(line.getBoundingClientRect().top).toBe(400);
+    expect(offset).toBe(folding ? 880 : 1240);
+    vi.unstubAllGlobals();
+  });
+
   it('a second click while a fold runs takes it back, and the turn stays open (W8)', async () => {
     const store = await storeWith(deniedTurn().events);
     const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });

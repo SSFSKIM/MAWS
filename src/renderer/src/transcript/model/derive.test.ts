@@ -22,6 +22,47 @@ const group = (list: Row[], n = 0) => find(list, 'group', n);
 
 afterEach(() => configureTime(null));
 
+// Board ticket 789 (the owner, 2026-11-20): the turn's line ends its turn, as the engine's terminal draws its spinner
+// and duration: while the turn runs it is the turn's last row (after the held messages too), and once the turn ends its
+// closing line stays at the end of that turn, folded or open.
+describe('the turn’s line ends its turn', () => {
+  const work = (b: Builder) => {
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.toolUse('t2', 'Bash', { command: 'wc -l notes/a.md' });
+    b.result('t2', '3', { structured: BASH_RESULT('3') });
+  };
+
+  it('while the turn runs, the line is its last row, after the messages held for the next turn', () => {
+    const b = builder(); work(b); b.text('m1', 0, 'Still counting.');
+    const list = rowsOf(reduce(b.events));
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
+    expect(list.at(-1)).toMatchObject({ kind: 'divider', state: 'working' });
+    const held = heldRow({ queueId: 'q-1', content: 'then sort them', createdAt: '2026-09-28T10:00:09.000Z' });
+    expect(withQueueTail(list, new Set(), [held]).map((row) => row.id).slice(-2)).toEqual(['held:q-1', list.at(-1)!.id]);
+  });
+
+  it('once the turn ends, its closing line ends that turn, folded and open, and the next turn follows it', () => {
+    const b = builder(); work(b); b.text('m1', 0, 'Two notes, three lines.'); b.end(['u1']);
+    b.turn('u2', 'and the rest'); b.text('m2', 0, 'Nothing else.'); b.end(['u2']);
+    const first = turnId.ofMessage(uuid('u1'));
+    const ofFirst = (list: Row[]) => kinds(list.filter((row) => row.turnId === first && row.kind !== 'time'));
+    expect(ofFirst(rowsOf(reduce(b.events)))).toEqual(['user', 'assistant_text', 'divider']);
+    expect(ofFirst(rows(b.events))).toEqual(['user', 'group', 'assistant_text', 'divider']);
+    const list = rowsOf(reduce(b.events));
+    expect(list.findIndex((row) => row.id === rowId.divider(first))).toBeLessThan(list.findIndex((row) => row.kind === 'user' && row.turnId !== first));
+  });
+
+  it('keeps a mount’s placed rows before their turn’s line', () => {
+    const b = builder(); work(b); b.end(['u1']);
+    const list = rows(b.events);
+    const first = turnId.ofMessage(uuid('u1'));
+    const kept = { id: 'k1', turnId: first, at: '2026-09-28T10:00:01.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: 'cut short', live: false, phase: 'answer', model: null } as Row;
+    expect(kinds(withPlacedRows(list, [kept]).filter((row) => row.kind !== 'time'))).toEqual(['user', 'group', 'assistant_text', 'divider']);
+  });
+});
+
 describe('group state machine', () => {
   it('starts a group at the first groupable cell and folds consecutive groupable cells into it', () => {
     const b = builder();

@@ -148,17 +148,33 @@ describe('a stretch’s key (decision 9)', () => {
 });
 
 describe('the rows of no stretch (decision 11)', () => {
-  it('a closed turn’s line is drawn in its place only while a stretch that holds a row of that turn is open', () => {
-    const rows = [prompt(), divider(T1), cell(), text('<message>Done.</message>')];
+  // board ticket 789: a turn's line ends its turn
+  it('a closed turn’s line is drawn in its place, the turn’s end, only while a stretch that holds a row of that turn is open', () => {
+    const rows = [prompt(), cell(), text('<message>Done.</message>'), divider(T1)];
     expect(closed(rows)).toEqual(['user', '› record', 'assistant_text']);
-    expect(opened(rows)).toEqual(['user', 'divider', 'cell', '‹ fold', 'assistant_text']);
+    expect(opened(rows)).toEqual(['user', 'cell', '‹ fold', 'assistant_text', 'divider']);
   });
 
-  it('the running turn’s line is always drawn, directly after the record line that covers its place (ruling 5)', () => {
-    const rows = [prompt(), divider(T1, 'working'), cell(), cell()];
+  // board ticket 789 (the owner, 2026-11-20), reversing ruling 5: the running turn's line is the last row, below the
+  // record lines and the messages, as the engine's terminal draws its spinner
+  it('the running turn’s line is always drawn, in its place at the turn’s end', () => {
+    const rows = [prompt(), cell(), cell(), divider(T1, 'working')];
     expect(closed(rows)).toEqual(['user', '› record', 'divider']);
-    expect(opened(rows)).toEqual(['user', 'divider', 'cell', 'cell', '‹ fold']);
-    expect(closed([prompt(), divider(T1, 'working')])).toEqual(['user', 'divider']); // nothing folded yet: in its place
+    expect(opened(rows)).toEqual(['user', 'cell', 'cell', '‹ fold', 'divider']);
+    expect(closed([prompt(), divider(T1, 'working')])).toEqual(['user', 'divider']); // nothing folded yet
+  });
+
+  it('the running turn’s line, derived, is the view’s last row below its messages and record lines, folded or open', () => {
+    const b = builder();
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.text('m1', 0, '<message>Found one note.</message>');
+    b.toolUse('t2', 'Bash', { command: 'wc -l notes/a.md' });
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+    expect(closed(rows).filter((kind) => kind !== 'time')).toEqual(['user', '› record', 'assistant_text', '› record', 'divider']);
+    expect(opened(rows).at(-1)).toBe('divider');
   });
 
   it('a turn’s line whose place a closed stretch covers is drawn after that record line while another record of its turn is open', () => {
