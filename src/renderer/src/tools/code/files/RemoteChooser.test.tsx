@@ -205,9 +205,10 @@ describe('the chooser’s sheet', () => {
     expect(lists[2].input).toEqual({ appSessionId: R, path: '~/notes' });
   });
 
-  // Chromium returns a text field's scroll to its start as the keyboard leaves it, and happy-dom does not: what this pins is
-  // that the field scrolls to its end again on the frame after the keyboard leaves it (the scene measures the scroll)
-  it('the path field scrolls to its end again on the frame after the keyboard leaves it', async () => {
+  // Chromium returns a text field's scroll to its start as the keyboard leaves it, between the blur and the focusout that
+  // React's onBlur listens to, and happy-dom does not: what this pins is that the field scrolls to its end again within the
+  // blur's own dispatch, with no frame awaited (a window covered by another draws no frame; the scene measures the scroll)
+  it('the path field scrolls to its end again as the keyboard leaves it, with no frame awaited', async () => {
     open();
     await lists[0].answer(listed(`${HOME}/garden-club/north-field/plots/autumn-term`, []));
     const input = field();
@@ -215,8 +216,8 @@ describe('the chooser’s sheet', () => {
     Object.defineProperty(input, 'scrollWidth', { configurable: true, get: () => 900 });
     Object.defineProperty(input, 'scrollLeft', { configurable: true, get: () => 0, set: (left: number) => void scrolledTo.push(left) });
     act(() => input.focus());
+    scrolledTo.length = 0;
     act(() => input.blur());
-    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     expect(scrolledTo).toContain(900);
   });
 

@@ -58,21 +58,56 @@ let made = 0;
 const takers = new Set<() => void>();
 const tell = () => takers.forEach((taker) => taker());
 
+// Decision Log 19: what happened to the requests, kept as a short trace (the last 60 entries) that a scene prints when
+// the keyboard is not where it waits for it (`keyboardTrace`, read under the e2e harness through `window.__maws_keyboard`).
+// An entry: the time in ms since the page loaded, the taker, what happened and what it says about the page then.
+export interface KeyboardTraceEntry {
+  at: number;
+  taker: string;
+  event: string;
+  detail?: string;
+}
+const trace: KeyboardTraceEntry[] = [];
+export function traceKeyboard(taker: string, event: string, detail?: string): void {
+  trace.push({ at: Math.round(performance.now()), taker: taker.replace('\n', ' '), event, ...(detail !== undefined && { detail }) });
+  if (trace.length > 60) trace.shift();
+}
+export const keyboardTrace = (): KeyboardTraceEntry[] => [...trace];
+declare global {
+  interface Window {
+    __maws_keyboard?: { trace(): KeyboardTraceEntry[] };
+  }
+}
+// in a window main loaded for the e2e harness only (`e2e=1` in its address, as `artifacts/e2e-seam.ts` reads it)
+if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('e2e') === '1') window.__maws_keyboard = { trace: keyboardTrace };
+/** The element as the trace names it: its tag, its markers and the view's key it is in. */
+export function describeElement(element: Element | null): string {
+  if (element === null) return 'none';
+  if (element === document.body) return 'the document’s body';
+  const marks = [element.getAttribute('role') && `role=${element.getAttribute('role')}`, element.hasAttribute('data-files-filter') && 'the field', element.hasAttribute('data-file-keyboard') && 'a view’s body', element.classList.contains('cm-content') && 'a text'].filter(Boolean);
+  const key = element.closest('[data-file-keyboard]')?.getAttribute('data-key');
+  return `<${element.tagName.toLowerCase()}>${marks.length > 0 ? ` ${marks.join(' ')}` : ''}${key ? ` in ${key.slice(key.lastIndexOf('/') + 1)}` : ''}`;
+}
+const taken = (reason: string) => `${reason}; the keyboard on ${describeElement(document.activeElement)}`;
+
 // Ends the waiting request and takes down its pair of capture listeners on the window.
-function end(): void {
+function end(reason: string): void {
+  if (pending !== null) traceKeyboard(pending.taker, 'ended', taken(reason));
   pending = null;
   window.removeEventListener('keydown', drop, true);
   window.removeEventListener('pointerdown', drop, true);
   tell();
 }
-function drop(): void {
-  if (pending !== null) end();
+function drop(event: Event): void {
+  if (pending !== null) end(`the person’s ${event.type}`);
 }
 
 /** Replaces any earlier request; the next keydown or pointerdown anywhere drops it. Answers the request's number. */
 export function requestKeyboard(request: KeyboardRequest): number {
   made += 1;
+  if (pending !== null) traceKeyboard(pending.taker, 'ended', taken('replaced'));
   pending = { taker: takerOf(request), made };
+  traceKeyboard(pending.taker, 'asked', taken('made'));
   window.addEventListener('keydown', drop, true);
   window.addEventListener('pointerdown', drop, true);
   tell();
@@ -85,26 +120,28 @@ export function withdrawKeyboard(number: number): void {
 }
 
 /**
- * Decision Log 18: how long a file's view holds a request it has not taken, once the view is ready (in view, its read
- * settled and its editor drawn where it draws one). Some frames' worth: long enough for a refusal while the view settles
- * to pass, short enough that no later, unrelated change of the page moves the keyboard.
+ * Decision Log 18 and 19: how long a file's view holds a request once the view is ready (in view, its read settled and
+ * its editor drawn where it draws one), counted again each time it is ready again. Held that long whether or not the
+ * keyboard has landed, so that a view drawn again in that time (its editor made anew, an ancestor hidden for a moment)
+ * takes the keyboard back from the document's body. Long enough for a loaded Mac's settling; short enough that no
+ * later, unrelated change of the page moves the keyboard.
  */
-export const FILE_TAKE_BOUND_MS = 500;
+export const FILE_TAKE_BOUND_MS = 1500;
 
 /** True while the waiting request names this taker, which it leaves waiting: a taker whose focus the page may refuse reads it first. */
 export function keyboardWaits(request: KeyboardRequest): boolean {
   return pending?.taker === takerOf(request);
 }
 
-/** Ends the waiting request when it names this taker, which gives it up (the keyboard put elsewhere, or the bound passed). */
-export function releaseKeyboard(request: KeyboardRequest): void {
-  if (keyboardWaits(request)) end();
+/** Ends the waiting request when it names this taker, which gives it up (`reason`: the keyboard put elsewhere, or the bound passed). */
+export function releaseKeyboard(request: KeyboardRequest, reason = 'given up'): void {
+  if (keyboardWaits(request)) end(reason);
 }
 
 /** True once, for the taker the waiting request names; false for any other, and while none waits. */
 export function takeKeyboard(request: KeyboardRequest): boolean {
   if (pending?.taker !== takerOf(request)) return false;
-  end();
+  end('taken');
   return true;
 }
 
