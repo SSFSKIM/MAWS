@@ -67,10 +67,12 @@ describe('session.mcpStatus through the engine host', () => {
     await rm(userData, { recursive: true, force: true, maxRetries: 10 });
   });
 
-  it('answers the renderer-safe status', async () => {
+  // A session launched over a scripted engine whose mcp_status answers what `answer` gives at each ask, ready.
+  async function readySession(answer: (asked: number) => McpStatusResponse) {
     const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
     const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
-    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ mcp_status: () => ({ response: PROBE_ANSWER }) })) });
+    let asked = 0;
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ mcp_status: () => ({ response: answer(++asked) }) })) });
     const ipc = registerEngineIpc(on, () => true, {
       userData, replayEnabled: false, cwd: REPO_ROOT, spawn: () => transport, log: () => {} /* the scripted engine refuses the ready context sample */, captureEnv: async () => ({ PATH: '/usr/bin' }),
       binaryProbe: async () => ({ path: '/x/claude', testedVersion: TESTED_ENGINE_VERSION, version: TESTED_ENGINE_VERSION, ok: true, error: null }),
@@ -83,6 +85,43 @@ describe('session.mcpStatus through the engine host', () => {
       if (Date.now() - start > 3_000) throw new Error('the session never became ready');
       await new Promise((r) => setTimeout(r, 5));
     }
+    const servers = () => ipc.table.get(id)!.status().mcpServers;
+    return { handlers, transport, ipc, id, servers, asked: () => asked };
+  }
+  const listed = (answer: McpStatusResponse) => answer.mcpServers.map(({ name, status, source }) => ({ name, status, source: source ?? null }));
+  const servers = (...entries: [string, string][]): McpStatusResponse => ({ mcpServers: entries.map(([name, status]) => ({ name, status, source: 'user' })) });
+
+  // Ticket 619: the session's own servers before its first turn, which sends the init frame the list was filled from
+  it('fills a ready session’s servers from mcp_status before any system/init', async () => {
+    const s = await readySession(() => PROBE_ANSWER);
+    await expect.poll(s.servers).toEqual(listed(PROBE_ANSWER));
+    expect(s.servers().length).toBeGreaterThan(0);
+    s.transport.exit(0);
+    await s.ipc.table.get(s.id)!.exited;
+  });
+
+  it('asks again while a server is pending, and stops once none is', async () => {
+    const s = await readySession((asked) => (asked < 3 ? servers(['notes', 'connected'], ['tracker', 'pending']) : servers(['notes', 'connected'], ['tracker', 'connected'])));
+    await expect.poll(s.servers, { timeout: 8_000 }).toEqual(listed(servers(['notes', 'connected'], ['tracker', 'connected'])));
+    const asked = s.asked();
+    expect(asked).toBe(3);
+    await new Promise((r) => setTimeout(r, 1_200));
+    expect(s.asked(), 'none pending: nothing is asked again').toBe(asked);
+    s.transport.exit(0);
+    await s.ipc.table.get(s.id)!.exited;
+  }, 15_000);
+
+  it('keeps the servers a page’s read answered', async () => {
+    const s = await readySession((asked) => (asked === 1 ? servers(['notes', 'connected']) : servers(['notes', 'failed'])));
+    await expect.poll(s.servers).toEqual(listed(servers(['notes', 'connected'])));
+    await s.handlers.get('session.mcpStatus')!({ appSessionId: s.id });
+    expect(s.servers()).toEqual(listed(servers(['notes', 'failed'])));
+    s.transport.exit(0);
+    await s.ipc.table.get(s.id)!.exited;
+  });
+
+  it('answers the renderer-safe status', async () => {
+    const { handlers, transport, ipc, id } = await readySession(() => PROBE_ANSWER);
     const value = await handlers.get('session.mcpStatus')!({ appSessionId: id });
     const checked = validateCommandOutput('session.mcpStatus', value);
     expect(checked.ok).toBe(true);
