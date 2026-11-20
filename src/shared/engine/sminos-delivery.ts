@@ -5,7 +5,10 @@
 // sminos pushes a send to a session as its frame: the first line names the event — `[sminos chat <project>
 // <writer_short>:<seq> from <from> → <@you | @all | a broadcast's scope>[ | unread N]]`, or `[sminos message from <via or
 // from> id=<msg_id>]` for an event with a `msg_id` (doperpowers' `sminos.py`: `compose_chat_frame`, `compose_frame`) —
-// and the text follows it. A row is a delivery only when it marks a delivery's provenance:
+// and the text follows it. From sminos's wake release (T2), the first text sminos pushes to a session it woke ends with a
+// line of sminos's own after one blank line, opening with `[sminos] ` (before the reply line on the inbox route); the
+// reader carries it apart from the sender's words (`sminosParts`). A row is a delivery only when it marks a delivery's
+// provenance:
 // - idle, the bridge submits it as the user (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is
 //   `{kind: "plugin", asUser: true}`);
 // - while the main turn runs (doperpowers PR 233 on), the bridge appends it into the turn (`$.session.append`), read at the

@@ -2,7 +2,7 @@
 // C8b's recorded hand-back (test/fixtures/engine/handback-pointer.jsonl) and SPEC 38 §38.23's literals.
 import { describe, expect, it } from 'vitest';
 import { loadEngineJournal, loadJournal, loadTranscript } from '../../../test/support/fixtures';
-import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel, sminosFrameOwners, sminosFrameSender } from './peer-envelope';
+import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
 import { sendMessageOutcome } from './peer-envelope'; // E7 M2
 
 const frameOf = (rows: ReturnType<typeof loadJournal>, seq: number) => rows.find((row) => row.seq === seq)!.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
@@ -27,7 +27,7 @@ describe('parsePeerMessage', () => {
   it('reads the idle form: the header, the envelope attributes, the body inside the tags, the default trailer', () => {
     expect(parsePeerMessage(IDLE.message.content)).toEqual({
       kind: 'cross-session', from: 'uds:/tmp/cc-socks/10562.sock', fromSession: null, fromName: 'repo-b-gen1il-79', fromMode: 'prompting', fromPlugin: null,
-      hopChain: [], body: 'E7 probe: hello from B', frame: null, midTurn: false, lineage: 'peer', replyable: true,
+      hopChain: [], body: 'E7 probe: hello from B', frame: null, note: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -44,7 +44,7 @@ describe('parsePeerMessage', () => {
     const text = `Another Claude session sent a message:\n${ENVELOPE('from="uds:/tmp/cc-socks/1.sock" from-session="local_0a1b2c3d-1111" hop-chain="aaaaaaaaaaaaaaaaaaaaaaaa,bbbbbbbbbbbbbbbbbbbbbbbb" from-name="worker" from-mode="bypass" from-plugin="sminos"', 'line one\nline two')}\n\n${DEFAULT_TRAILER}`;
     expect(parsePeerMessage(text)).toEqual({
       kind: 'cross-session', from: 'uds:/tmp/cc-socks/1.sock', fromSession: 'local_0a1b2c3d-1111', fromName: 'worker', fromMode: 'bypass', fromPlugin: 'sminos',
-      hopChain: ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'], body: 'line one\nline two', frame: null, midTurn: false, lineage: 'peer', replyable: true,
+      hopChain: ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'], body: 'line one\nline two', frame: null, note: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -154,13 +154,13 @@ describe('parsePeerMessage', () => {
     expect(parsed).toMatchObject({ kind: 'agent', fromAgentId: 'a6a89722837fede78', handback: true });
     expect(parsed?.kind === 'agent' && parsed.body.startsWith('[Subagent hand-back] ')).toBe(true);
     const plain = `Another Claude session sent a message:\n<agent-message from="a1b2">\nstill working on it\n</agent-message>\n\n${DESCENDANT_TRAILER}`;
-    expect(parsePeerMessage(plain)).toEqual({ kind: 'agent', fromAgentId: 'a1b2', body: 'still working on it', handback: false });
+    expect(parsePeerMessage(plain)).toEqual({ kind: 'agent', fromAgentId: 'a1b2', body: 'still working on it', handback: false, note: null });
   });
 
   it("reads a teammate's <teammate-message> in a terminal team: the teammate's id as its name, no address", () => {
     expect(parsePeerMessage(TEAMMATE.message.content)).toEqual({
       kind: 'teammate', from: '', fromSession: null, fromName: 'scout', fromMode: null, fromPlugin: null, hopChain: [],
-      body: 'one.txt contains a single line: "ONE" (followed by a trailing newline).', frame: null, midTurn: false, lineage: 'peer', replyable: true,
+      body: 'one.txt contains a single line: "ONE" (followed by a trailing newline).', frame: null, note: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -374,5 +374,43 @@ describe('sendMessageOutcome', () => {
     expect(sendMessageOutcome({ ...resultOf(311), structured: null })).toEqual({ ok: false, message: NOBODY });
     expect(sendMessageOutcome({ isError: true, content: '<tool_use_error>InputValidationError: to is required</tool_use_error>', structured: null })).toEqual({ ok: false, message: 'InputValidationError: to is required' });
     expect(sendMessageOutcome({ isError: false, content: 'Message sent.', structured: null })).toEqual({ ok: true });
+  });
+});
+
+// sminos's wake release (T2): the first text sminos pushes to a session it woke ends with one line of its own, a
+// paragraph after one blank line that opens with `[sminos] `, before the inbox's reply line. It is not the sender's.
+describe("sminos's note after the words", () => {
+  const FRAME = '[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]';
+  const NOTE = '[sminos] A note from sminos on this machine, not from the sender above: it woke this session to deliver the message.';
+  const NOTE_TEXT = NOTE.slice('[sminos] '.length);
+  const REPLY = '[To reply, run in Bash: /opt/tools/sminos say "@MAWS/5e0c1f2a <your reply>"]';
+
+  it('on the inbox route: frame, words, the note, the reply line last; both cut, the note returned', () => {
+    expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `${FRAME}\nRebase on main.\n\nThen tell me.\n\n${NOTE}\n${REPLY}`))).toMatchObject({ frame: FRAME, body: 'Rebase on main.\n\nThen tell me.', note: NOTE_TEXT });
+    expect(peerEventsOf(ENVELOPE('from-name="maws-fe"', `${FRAME}\nRebase on main.\n\n${NOTE}\n${REPLY}`), null)).toMatchObject({ text: 'Rebase on main.' });
+  });
+
+  it('on the bridge route and in a seat’s prompt: the note last, cut', () => {
+    expect(sminosParts(`${FRAME}\nRebase on main.\n\n${NOTE}`)).toEqual({ frame: FRAME, body: 'Rebase on main.', note: NOTE_TEXT });
+  });
+
+  it('a text with no note is as it was', () => {
+    expect(sminosParts(`${FRAME}\nRebase on main.\n\nThen tell me.`)).toEqual({ frame: FRAME, body: 'Rebase on main.\n\nThen tell me.', note: null });
+    expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `${FRAME}\nRebase on main.\n${REPLY}`))).toMatchObject({ body: 'Rebase on main.', note: null });
+  });
+
+  it('keeps as the sender’s words: a line that opens with a space before the marker, a marker line that is not the last paragraph, one with no blank line before it, one with no words before it', () => {
+    for (const body of [`Rebase on main.\n\n ${NOTE}`, `Rebase on main.\n\n${NOTE}\n\nThen tell me.`, `Rebase on main.\n\n${NOTE}\nThen tell me.`, `Rebase on main.\n${NOTE}`, NOTE, `\n${NOTE}`]) {
+      expect(sminosParts(`${FRAME}\n${body}`), body).toEqual({ frame: FRAME, body, note: null });
+    }
+  });
+
+  it('a text that opens with no frame line carries no note', () => {
+    expect(sminosParts(`Rebase on main.\n\n${NOTE}`)).toEqual({ frame: null, body: `Rebase on main.\n\n${NOTE}`, note: null });
+  });
+
+  it('two frames in one text: the note at the end cut, the second frame still among the words', () => {
+    const SECOND = '[sminos chat MAWS 5e0c1f2a:4 from maws-fe → @you]';
+    expect(sminosParts(`${FRAME}\nRebase on main.\n\n${SECOND}\nThen tell me.\n\n${NOTE}`)).toEqual({ frame: FRAME, body: `Rebase on main.\n\n${SECOND}\nThen tell me.`, note: NOTE_TEXT });
   });
 });
