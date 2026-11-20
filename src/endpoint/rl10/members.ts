@@ -11,7 +11,19 @@
 // sminos restates the whole set after each RL10 welcome and closes the restatement with `restated {}`, and the set
 // replaces what was held: a session held before the welcome, or listed at the hub, that the restatement left out left
 // while sminos or the endpoint was away, and is withdrawn as if it had sent `gone` (M3's note: its listing would
-// otherwise stay at the hub for good). A connection that ends before its `restated` withdraws nothing.
+// otherwise stay at the hub for good). A frame restates its held session and the one listing it reports (lane A its
+// session id, lane B its appSessionId once joined), so a listing made under the other lane before a restart is left out
+// too. A connection that ends before its `restated` withdraws nothing.
+//
+// A session whose lane changes (a sminos thread reopened under the other lane) leaves and arrives: a `member` frame whose
+// lane is not the held one is taken after `gone`, so its old listing, under its session id or its appSessionId, is
+// withdrawn then and not left at the hub (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §E).
+//
+// sminos's declared channels (the same document, Interfaces §C and §D). A member frame may carry `channels`, the ids of
+// the declared channels its thread is in, which `readMember` neither requires nor checks; what counts of it is
+// `memberChannels`'s, read by RL10's one reader of the logs this machine holds a member of (link.ts, `sminosView`). A
+// frame whose `project` is a declared channel's id (an older sminos's `join` allows one) is no project's member: the
+// session is handled as `gone`, held by nothing and listed nowhere, whatever the hello listed.
 //
 // P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): the handed-off mark. Until the
 // endpoint first sees a sminos record for a lane B session, authorization ranks the spawner the spine's record names
@@ -39,6 +51,7 @@
 // `session.changed` the spine says of it (`recordChanged`), so it holds alike for the listing the hub keeps and for the
 // one a channel's `endpoint.listings` signs afresh (`recordSays`). No listing field is added. Each read runs inside an
 // operation's hold, so the daemon does not collect over it.
+import { isChannelId, LISTING_GONE } from 'org-protocol';
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -64,7 +77,36 @@ export type Member = {
   /** P5 O18: the record's policy revision, bumped by sminos on each access, share or owner change. */
   policyRev?: number;
   controller?: unknown;
+  /** The declared channels the session's thread is in, as sminos states them; absent for a thread in none (`memberChannels` counts it). */
+  channels?: unknown;
 };
+
+/** The most declared channels one member frame counts for (Interfaces §C): far past any use, a frame's list kept under five kilobytes. */
+export const MEMBER_CHANNELS_MAX = 128;
+
+/**
+ * The declared channels a member frame states, as the endpoint counts them: one pass in the frame's order, stopped at the
+ * MEMBER_CHANNELS_MAXth distinct id, so a long list costs no more than the bound.
+ */
+export function memberChannels(member: Member): string[] {
+  if (!Array.isArray(member.channels)) return [];
+  const counted = new Set<string>();
+  for (const entry of member.channels) {
+    if (!isChannelId(entry)) continue;
+    counted.add(entry);
+    if (counted.size === MEMBER_CHANNELS_MAX) break;
+  }
+  return [...counted];
+}
+
+/**
+ * Whether a held member's listing is withdrawn by its state word (the plan of 2026-11-18, Decision Log 18). A sminos
+ * thread whose process ended stays a member (Interfaces §G). With no transcript to reopen, its state word is `gone`,
+ * which in a listing is RL6's withdrawal: the member is held and its listing withdrawn by the one path that withdraws,
+ * not signed as a listing in that state, here and in `endpoint.listings` alike. `stopped` is listed like any state;
+ * lane B is not under the rule.
+ */
+export const listingWithdrawn = (member: Member): boolean => member.lane === 'A' && member.state === LISTING_GONE;
 
 const ACCESS: ReadonlySet<string> = new Set(['private', 'listed', 'org-view', 'org-converse']);
 const SHARE_GRADES: ReadonlySet<string> = new Set(['list', 'view', 'converse', 'approve']);
@@ -144,8 +186,14 @@ export class Members implements RecordSource, CheckoutSource {
   readonly #listeners = new Set<(target: SessionTarget) => void>();
   /** U9: what the spine's record says of each joined lane B app session's listing, by its appSessionId (read, or heard). */
   readonly #records = new Map<string, RecordSays>();
-  /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
+  /** The members held at the latest welcome, by engine session id, not restated since; null outside a restatement. */
   #unrestated: Set<string> | null = null;
+  /**
+   * The ids listed at the hub at the latest welcome that no restated member has reported under since; null outside a
+   * restatement. Kept apart from the held members, so a frame confirms only the listing it reports: a session listed
+   * under one lane before a restart and restated under the other leaves its old listing here, to be withdrawn.
+   */
+  #unreported: Set<string> | null = null;
   /** P5 O12 M11: the handed-off mark as on disk, read on first use (null until then), and the marks not written yet. */
   #durable: MarkSets | null = null;
   readonly #pending: MarkSets = { apps: new Set(), engines: new Set() };
@@ -158,14 +206,25 @@ export class Members implements RecordSource, CheckoutSource {
 
   /** A welcome: every session held now, and every session listed at the hub, is to be restated before `restated`. */
   welcome(): void {
-    this.#unrestated = new Set([...this.#members.keys(), ...this.#ctx.listed()]);
+    this.#unrestated = new Set(this.#members.keys());
+    this.#unreported = new Set(this.#ctx.listed());
   }
 
-  /** sminos's `restated`: what the restatement left out left. Nothing outside a restatement (a second `restated`). */
+  /**
+   * sminos's `restated`: what the restatement left out left. A held member not restated is `gone`, its listing with it;
+   * a listing no restated member reported under is withdrawn. Nothing outside a restatement (a second `restated`).
+   */
   async restated(): Promise<void> {
-    const left = this.#unrestated ?? new Set<string>();
+    const held = this.#unrestated ?? new Set<string>();
+    const listed = this.#unreported ?? new Set<string>();
     this.#unrestated = null;
-    for (const session of left) await this.gone(session);
+    this.#unreported = null;
+    for (const session of held) {
+      const listing = this.listingId(session);
+      if (listing !== null) listed.delete(listing); // `gone` settles it
+      await this.gone(session);
+    }
+    for (const listing of listed) await this.#withdraw(listing);
   }
 
   /** A `member` frame: the session's record as it stands. */
@@ -176,6 +235,19 @@ export class Members implements RecordSource, CheckoutSource {
     }
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
+    // A session whose project is a declared channel's id is not held (Interfaces §D): a channel is no project, and its
+    // frame is not kept, restates nothing and reports no listing. A lane B frame is still a sminos record seen (P5 O12
+    // M11), handed off as the join hands one off (`#refusedSight`), so a spawner's bridge ends at it as at any first
+    // record, and the session stays closed with no record to decide on.
+    if (isChannelId(member.project)) {
+      this.#ctx.log(`endpoint: session ${member.session.slice(0, 8)} names a sminos channel as its project; a channel is no project, and the session is not held`);
+      return member.lane === 'B' ? this.#refusedSight(member) : this.gone(member.session);
+    }
+    // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
+    // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
+    // and the frame is then the session's first.
+    const held = this.#members.get(member.session);
+    if (held !== undefined && held.lane !== member.lane) await this.gone(member.session);
     this.#unrestated?.delete(member.session);
     const before = this.#members.get(member.session);
     this.#members.set(member.session, member);
@@ -187,9 +259,9 @@ export class Members implements RecordSource, CheckoutSource {
       await this.#join(member.session);
       if (this.#apps.has(member.session)) this.#changed(member, undefined);
     }
-    // A lane B session the join placed is restated under its appSessionId too, which its listing went by.
+    // The listing the frame reports is restated: lane A its session id, lane B its appSessionId once the join placed it.
     const listing = this.listingId(member.session);
-    if (listing !== null) this.#unrestated?.delete(listing);
+    if (listing !== null) this.#unreported?.delete(listing);
     await this.#report(member);
   }
 
@@ -207,10 +279,7 @@ export class Members implements RecordSource, CheckoutSource {
     // A lane B app's listing outlives an engine session it superseded: while another member holds the listing (the
     // app's engine session now), retiring the old record withdraws and forgets nothing.
     if (listing !== null && !this.#listedBy(listing)) {
-      // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
-      await this.#ctx.listings.gone(listing);
-      this.#ctx.forget(listing);
-      this.#records.delete(listing); // U9: read again if the session comes back
+      await this.#withdraw(listing);
     } else if (listing !== null && member !== undefined) {
       // P5 Decision Log 190 (b): a superseded record that deferred to the one that left reports the listing now (the
       // spine's index can lag a `/clear`, so the record it deferred to may have been the older).
@@ -362,6 +431,7 @@ export class Members implements RecordSource, CheckoutSource {
   /** The connection ended (or the endpoint stops): a restatement it left unfinished withdraws nothing. */
   stop(): void {
     this.#unrestated = null;
+    this.#unreported = null;
   }
 
   // ---- Inside -----------------------------------------------------------------------------------------------------
@@ -372,6 +442,14 @@ export class Members implements RecordSource, CheckoutSource {
     return false;
   }
 
+  /** A listing no member held now reports under: withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten. */
+  async #withdraw(listing: string): Promise<void> {
+    if (this.#listedBy(listing)) return;
+    await this.#ctx.listings.gone(listing);
+    this.#ctx.forget(listing);
+    this.#records.delete(listing); // U9: read again if the session comes back
+  }
+
   /**
    * Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined.
    * P5 O12 M11: each app session joined is marked handed off in its engine session's stead.
@@ -380,21 +458,52 @@ export class Members implements RecordSource, CheckoutSource {
    */
   async #join(session: string): Promise<void> {
     if (this.#apps.has(session)) return;
+    for (const status of await this.#liveRows()) {
+      if (this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
+      this.#apps.set(status.engineSessionId, status.appSessionId);
+      this.#superseded.delete(status.engineSessionId); // Decision Log 190 (b): the live rows name it now
+      this.#placed(status.engineSessionId, status.appSessionId);
+    }
+    if (!this.#apps.has(session)) await this.#bySpawn(session);
+  }
+
+  /** The engine host's live rows (`engine.sessions`), each naming both its sessions; none while it can't answer. */
+  async #liveRows(): Promise<Array<{ appSessionId: string; engineSessionId: string }>> {
     let response;
     try {
       response = await this.#ctx.dispatch('engine-host', 'engine.sessions', undefined);
     } catch (error) {
       this.#ctx.log(`endpoint: engine.sessions could not be read (${(error as Error).message}); a lane B session waits for its appSessionId`);
     }
-    if (response?.ok === true && Array.isArray(response.value)) {
-      for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
-        if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
-        this.#apps.set(status.engineSessionId, status.appSessionId);
-        this.#superseded.delete(status.engineSessionId); // Decision Log 190 (b): the live rows name it now
-        this.#placed(status.engineSessionId, status.appSessionId);
+    if (response?.ok !== true || !Array.isArray(response.value)) return [];
+    return (response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>).flatMap((status) => (isId(status.appSessionId) && isId(status.engineSessionId) ? [{ appSessionId: status.appSessionId, engineSessionId: status.engineSessionId }] : []));
+  }
+
+  /**
+   * P5 O12 M11 for a lane B record refused, its member held by nothing (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
+   * M2's review): the session leaves, and its sight is handed off as the join hands one off. Before anything is awaited,
+   * the app session it is joined to keeps its mark (placed again), or else its engine session is marked, authorization is
+   * told, and the record held before goes with `gone`'s own steps, its readers told. Then an unjoined session's app
+   * session is placed as the join finds it, the live rows' first and else the spawn's (`#bySpawn`, joining nothing, which
+   * tells each app session it passes the sight to), so a `/clear` either side of it finds its app session handed off.
+   */
+  async #refusedSight(member: Member): Promise<void> {
+    const { session } = member;
+    const joined = this.#apps.get(session);
+    if (joined !== undefined) this.#placed(session, joined);
+    else this.#mark('engines', session);
+    this.#tell({ lane: 'B', session, appSessionId: joined ?? '' });
+    const leaving = this.gone(session); // its synchronous part runs now: the held record dropped, its readers told
+    if (joined === undefined) {
+      const live = (await this.#liveRows()).find((status) => status.engineSessionId === session);
+      if (live === undefined) {
+        await this.#bySpawn(session, member.ownersProof, false);
+      } else {
+        this.#placed(session, live.appSessionId);
+        this.#tell({ lane: 'B', session, appSessionId: live.appSessionId });
       }
     }
-    if (!this.#apps.has(session)) await this.#bySpawn(session);
+    await leaving;
   }
 
   /**
@@ -406,8 +515,8 @@ export class Members implements RecordSource, CheckoutSource {
    * op ledger's `KEPT_S`) joins neither and marks each handed off, the mark's closed side: a spawner's bridge on either
    * ends until that session's own record decides. Every record counts, the archived too, so a reuse is never missed.
    */
-  async #bySpawn(session: string): Promise<void> {
-    const proof = this.#members.get(session)?.ownersProof.find((act) => isObject(act) && act.action === 'session.spawn');
+  async #bySpawn(session: string, ownersProof: readonly unknown[] | undefined = this.#members.get(session)?.ownersProof, join = true): Promise<void> {
+    const proof = ownersProof?.find((act) => isObject(act) && act.action === 'session.spawn');
     const opId = isObject(proof) ? proof.opId : undefined;
     if (!isId(opId)) return;
     let response;
@@ -421,9 +530,10 @@ export class Members implements RecordSource, CheckoutSource {
     const spawned = sessions.filter((record): record is Record<string, unknown> & { appId: string } => isObject(record) && isId(record.appId) && isObject(record.launchedBy) && record.launchedBy.opId === opId);
     const spawns = [...new Set(spawned.map((record) => record.appId))];
     if (spawns.length > 1) this.#ctx.log(`endpoint: a lane B record's spawn ${opId.slice(0, 64)} names ${spawns.length} app sessions; it is placed under none, and each is handed off`);
-    // A member gone or joined meanwhile is not joined here; its sight is passed on all the same, and each app session
-    // it passed to, but not joined under, is told, so a subscription held there by the bridge is decided again.
-    if (spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) {
+    // A member gone or joined meanwhile is not joined here, nor any for a refused record (`join` false); its sight is
+    // passed on all the same, and each app session it passed to, but not joined under, is told, so a subscription held
+    // there by the bridge is decided again.
+    if (join && spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) {
       this.#apps.set(session, spawns[0]!);
       const current = spawned[0]!.engineSessionId;
       if (isId(current) && current !== session) this.#superseded.add(session);
@@ -520,6 +630,7 @@ export class Members implements RecordSource, CheckoutSource {
     // U9: a lane B session's listing follows its record: withdrawn while archived, under the record's title
     const says = member.lane === 'B' ? await this.#recordOf(session) : null;
     if (says?.archived === true) return this.#ctx.listings.gone(session);
+    if (listingWithdrawn(member)) return this.#ctx.listings.gone(session);
     await this.#ctx.listings.report({
       session,
       project: member.project,

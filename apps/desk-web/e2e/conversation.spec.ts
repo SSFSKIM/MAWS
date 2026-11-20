@@ -257,7 +257,7 @@ test('a retired session ends with who retired it and no Resume; an ended one off
   // Ended: no live process, never retired.
   presence(hub, 'mini', S.rests, null);
   await nav(page).locator(`[data-session="${S.rests}"]`).click();
-  await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: a closed terminal session is reopened only by Resume');
+  await expect(page.getByTestId('composer-note')).toHaveText('recorded: mini wakes it for this, or holds it until its human reopens it');
   // Resume waits until mini is known to serve the session's transcript: resuming one it holds none of starts it empty.
   const markerResume = center(page).getByTestId('end-marker').getByRole('button', { name: 'Resume' });
   await expect(markerResume).toBeDisabled();
@@ -286,6 +286,8 @@ test('a retired session ends with who retired it and no Resume; an ended one off
 
   await nav(page).locator(`[data-session="${S.works}"]`).click();
   await header.getByRole('button', { name: 'Retire…' }).click();
+  // A session with no seat: the confirmation says what holds for a session its human opened and for a sminos thread alike.
+  await expect(header).toContainText('This records it retired; it returns only if its human reopens it.');
   await header.getByRole('button', { name: 'Retire', exact: true }).click();
   expect((await lastRpc(hub, 2)).args).toEqual({ session: S.works });
 

@@ -35,11 +35,11 @@ export function isAppPage(client: ClientRef, appUrl: string): boolean {
 }
 
 /**
- * The commands the guard answers only for a live page of an app window: U6e's save and Open File…, U6f's three acts, and
- * (UX wave U6b-4c, R1) the follow of a link, which writes an admission a save may use. The follow is not among
- * `OUTSIDE_ACTS`, the list offered to another machine under a claim: no machine is offered it.
+ * The commands the guard answers only for a live page of an app window: U6e's save and Open File…, U6f's three acts,
+ * U6b-4a's Open in, U11's skill file, and (UX wave U6b-4c, R1) the follow of a link, which writes an admission a save may
+ * use. The follow is not among `OUTSIDE_ACTS`, the list offered to another machine under a claim: no machine is offered it.
  */
-export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile', 'files.follow'];
+export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile', 'layout.openIn' /* UX wave U6b-4a: Open in */, 'customization.skillFile' /* UX wave U11: a skill's Open in */, 'files.follow' /* UX wave U6b-4c */];
 
 export const appPageOnly =
   (appUrl: string): CommandGuard =>

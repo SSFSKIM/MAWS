@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '../ipc/query';
 import userEvent from '@testing-library/user-event';
@@ -37,7 +37,7 @@ import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
-import { registerPanelTool } from '../panel/host';
+import { registerPanelTool, usePanelHost } from '../panel/host';
 import { surfaceTabs } from '../panel/surface-model';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
@@ -386,12 +386,14 @@ describe('toolbar', () => {
       ['Fork to a new worktree…', true], // C10
       ['Archive', true],
       ['Delete conversation…', true],
+      ['Open in', false], // UX wave U6b-4a: the session's working folder, to an app
     ]); // no worktree, so no "Remove worktree…", as in the sidebar's menu
     await user.click(within(menu).getByRole('menuitem', { name: 'Open in split' }));
     expect(split).toHaveBeenCalledWith(A);
   });
 
-  it('offers a foreign-live session no actions, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
+  // UX wave U6b-4a: and Open in, which the child's file gives a terminal session on this Mac as it gives one MAWS runs
+  it('offers a foreign-live session no actions but Open in, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
     const user = userEvent.setup();
     const nine = pageScenario(scenarioFile('nine-sessions')); // P5 O6 M2: the store holds the page's records
     const held = nine.sessions.find((r) => r.holder.kind === 'terminal')!;
@@ -401,7 +403,12 @@ describe('toolbar', () => {
     act(() => useLayout.setState({ main: withActive(sessionTab(held.appId)) }));
     expect(within(chromeTabs()).getByRole('tab', { name: held.title.text })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'More surfaces' }));
-    expect((await screen.findByRole('menuitem', { name: 'Session actions' })).getAttribute('aria-disabled')).toBe('true');
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    expect(actions.getAttribute('aria-disabled')).toBeNull();
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const menu = (await screen.findByRole('menuitem', { name: 'Open in' })).closest<HTMLElement>('[role="menu"]')!;
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open in']);
   });
 });
 
@@ -482,6 +489,21 @@ describe('another machine’s lane B session in the toolbar', () => {
       ['Fork', 'true', 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
       ['Archive', 'true', 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
     ]);
+  });
+
+  // UX wave U6b-4a, review of 785e66161, finding 6: before its record arrives, the session's address alone says where its
+  // folder is; Session actions stays reachable and holds the disabled Open in
+  it('holds Open in, disabled with the machine’s name, before the session’s record arrives', async () => {
+    const user = userEvent.setup();
+    useSessions.setState({ records: new Map(), listed: new Map(), listedMachines: new Set() });
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    expect(actions.getAttribute('aria-disabled')).toBeNull();
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    expect((await screen.findByRole('menuitem', { name: 'Open in (the folder is on Studio)' })).getAttribute('aria-disabled')).toBe('true');
   });
 });
 
@@ -1063,14 +1085,26 @@ describe('a page beside the sidebar', () => {
     const inView = (toolId: string) => !useLayout.getState().regions.panel.collapsed && surfaceTabs(useLayout.getState(), A).some((tab) => tab.toolId === toolId);
     beforeEach(() => offs.push(registerShellActions(fakeClient({}).client)));
 
-    it('a surface’s key for a tool in view behind the page leaves the page, and the tool stays in view', () => {
+    it('a surface’s key for a tool in view behind the page leaves the page, and the tool stays in view', async () => {
       openSurface('terminal');
       renderShell();
       expect(inView('terminal')).toBe(true);
       act(() => useLayout.getState().openDestination(PAGE));
+      const asked = usePanelHost.getState().focus;
+      const inColumn = () => document.getElementById('region-panel')?.contains(document.activeElement) ?? false;
       act(() => runAction('surface.terminal'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('terminal')).toBe(true);
+      // UX wave U6b-5a (M1, decision 3): leaving the page is all it does: no tool is asked for the keyboard, and the
+      // keyboard is where the page's close leaves it, outside the side column, also once two frames have passed
+      expect(usePanelHost.getState().focus).toBe(asked);
+      await act(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      expect(inColumn()).toBe(false);
+      // the control: with no page, hidden and shown again by the same key, the tool is asked and the keyboard goes in
+      act(() => runAction('surface.terminal'));
+      act(() => runAction('surface.terminal'));
+      expect(usePanelHost.getState().focus).not.toBe(asked);
+      await waitFor(() => expect(inColumn()).toBe(true));
     });
 
     it('a surface’s key for a tool not in view leaves the page and shows the tool', () => {
@@ -1081,6 +1115,9 @@ describe('a page beside the sidebar', () => {
       act(() => runAction('surface.files'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('files')).toBe(true);
+      // UX wave U6b-5a (M1, decision 3): a tool the key brings into view from behind a page is asked for the keyboard
+      const files = surfaceTabs(useLayout.getState(), A).find((tab) => tab.toolId === 'files')!;
+      expect(usePanelHost.getState().focus[files.id]).toBeGreaterThan(0);
     });
 
     it('Session cards with the card column placed behind the page leaves the page, and the column is still shown', () => {

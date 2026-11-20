@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { record } from '../../../../test/support/builders';
 import { sessionActionsFor } from '../app/session-actions';
-import { withHide } from './menus';
+import { withHide, withOpenIn } from './menus';
 
 describe('withHide', () => {
   it('puts Hide directly after Pin in a local record’s menu, so Archive and the deletes keep the end', () => {
@@ -36,5 +36,20 @@ describe('withHide', () => {
   it('puts Hide after Resume for a session at rest, which has Resume among its opens', () => {
     const ids = withHide(sessionActionsFor(record('n', { holder: { kind: 'none' } })));
     expect(ids.slice(0, 6)).toEqual(['open', 'openInNewTab', 'resume', 'openInSplit', 'pin', 'hide']);
+  });
+});
+
+// UX wave U6b-4a: Open in sits with the opens, after the last of them and so before Pin and Hide (the coordinator's ruling
+// of 2026-11-19; U7's O-16 keeps Hide after the opens)
+describe('withOpenIn', () => {
+  it('puts Open in after the last opening item: before Hide for a session a terminal holds or a background job', () => {
+    expect(withOpenIn(withHide(sessionActionsFor(record('t', { holder: { kind: 'terminal', pid: 7 } }))))).toEqual(['open', 'openInNewTab', 'openIn', 'hide']);
+    expect(withOpenIn(withHide(sessionActionsFor(record('j', { holder: { kind: 'background_job', pid: 9, jobId: 'job-1' } }))))).toEqual(['open', 'openInNewTab', 'attach', 'openIn', 'hide']);
+  });
+
+  it('puts Open in before Pin and Hide in a session at rest, and after the opens where nothing is hidable', () => {
+    const rest = sessionActionsFor(record('n', { holder: { kind: 'none' } }));
+    expect(withOpenIn(withHide(rest)).slice(0, 7)).toEqual(['open', 'openInNewTab', 'resume', 'openInSplit', 'openIn', 'pin', 'hide']);
+    expect(withOpenIn(rest).slice(0, 6)).toEqual(['open', 'openInNewTab', 'resume', 'openInSplit', 'openIn', 'pin']);
   });
 });

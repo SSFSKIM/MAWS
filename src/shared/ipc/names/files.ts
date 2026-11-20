@@ -14,7 +14,8 @@ export const commands = [
 // P5 O3-E (Interfaces §D): `library.read`'s reach to a path main resolved, main's alone to send
 // P5 O7 M8: the machine's endpoint's read of a send's uploads, which no page sends
 // UX wave U6e: the grant of a file the person chose in main's chooser
-export const mainOnlyCommands = ['files.readResolved', 'files.readUploads', 'files.grant'] as const;
+// UX wave U6b-4a: "Open in"'s admission of the path main hands another app
+export const mainOnlyCommands = ['files.readResolved', 'files.readUploads', 'files.grant', 'files.admit'] as const;
 
 export const events = [
   'files.changed',

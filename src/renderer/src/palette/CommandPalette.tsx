@@ -2,26 +2,38 @@
 // projects and every action of the table, in a Radix Dialog with cmdk for the combobox and its keyboard. Sessions are
 // found with the sidebar search's own rule (title, project name, directory), so the two agree. ⏎ opens a session in
 // the focused pane and ⌘⏎ in the split; a project is revealed in the sidebar; an action runs through `runAction`.
-// Actions with no handler are listed greyed with what they wait for.
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Search"): "Conversations" asks this Mac and each
 // RL2 machine that is up (`search.ts`) and draws each machine's hits under its name ("Sessions" while only this Mac has
 // any); another machine's hit with no record is its listed row. A listed session opens through its lane's opener.
 // UX wave U11a M5 (S-10; its execution document's Interfaces §F): "Channels", after Projects, lists "<project> · channel"
 // for each project that has one, with what waits in it; Enter opens its tab or brings it forward.
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M4; Interfaces §E; decisions 18
+// to 22; S5; P9): with nothing typed the palette opens on "Recent" (`recent.ts`), then Projects, Channels and Actions;
+// with text typed it lists Sessions, the Library's matches under "Artifacts" (`artifacts.ts`, one group per machine by
+// name when more than one has any), Projects, Channels and Actions, and ends on "Search the Library for “…”". What the
+// rules admit is ordered by the `@` menu's scorer over the title. A row is listed only when it can run: listable, and
+// with a handler; nothing is drawn greyed.
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
+import type { LibraryRow } from '@shared/ipc/schema/library';
+import { fuzzyScore } from '@shared/composer/fuzzy';
 import { ACTIONS, effectiveChord, idsOf, type ActionId, type ActionTable } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
-import { runAction, useActionEnabled } from '../keymap/actions-runtime';
+import { enabledActions, runAction, subscribeActions } from '../keymap/actions-runtime';
 import { modalHandoff } from '../keymap/modal-handoff';
+import { useVisits } from '../keymap/visits'; // U6b-5a M4
+import { KindIcon } from '../library/icons'; // U6b-5a M4
+import { setLibraryView } from '../library/view'; // U6b-5a M4
+import { openArtifacts } from '../main/artifacts'; // U6b-5a M4
+import { lastActivity } from '../overview/derive'; // U6b-5a M4: Recent's fill
 import { sessionMatcher } from '../sidebar/derive';
 import { revealProject } from '../sidebar/reveal';
 import { selectPendingOf, useAttention } from '../stores/attention';
@@ -38,6 +50,8 @@ import { machineName } from '../stores/org-projects'; // P5 O7 M6
 import type { MachineRef } from '@shared/machine/ref';
 import { conversationSnippet } from './snippet';
 import { searchConversations, searchedMachines, type ConversationSearch } from './search'; // P5 O7 M6
+import { openPaletteArtifact, searchArtifacts, type ArtifactSearch } from './artifacts'; // U6b-5a M4
+import { artifactKey, recentRows, type RecentRow } from './recent'; // U6b-5a M4
 import { CHANNEL } from '../channel/copy'; // U11a M5
 import { openProjectChannel, usePaletteChannels } from '../channel/open-action'; // U11a M5
 
@@ -67,27 +81,50 @@ export function paletteEntries(
   const q = query.trim().toLowerCase();
   const matches = sessionMatcher(query, input.projects);
   return {
-    sessions: [...input.records.values()].filter((r) => !r.archived && matches(r)),
-    projects: [...input.projects.values()].filter((p) => !p.hidden && (q === '' || p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q))), // W11: a hidden project is not revealed
+    sessions: ranked([...input.records.values()].filter((r) => !r.archived && matches(r)), query, (r) => r.title.text),
+    projects: ranked([...input.projects.values()].filter((p) => !p.hidden && (q === '' || p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q))), query, (p) => p.name), // W11: a hidden project is not revealed
     channels: (input.channels ?? []).filter((c) => CHANNEL.title(c.name).toLowerCase().includes(q)), // U11a M5: "<name> · channel"
-    // U6a: a fixed row (a key its own editor handles) is not an act the palette can run
-    actions: idsOf(table).filter((id) => !table[id].fixed && (q === '' || table[id].title.toLowerCase().includes(q))),
+    actions: ranked(idsOf(table).filter((id) => listable(id, table) && (q === '' || table[id].title.toLowerCase().includes(q))), query, (id) => table[id].title),
   };
 }
 
-// What an action without a handler waits for. The request and composer keys belong to the element holding focus
-// (`useKeyChord`), so the palette, which holds focus itself, can never run them.
-const UNAVAILABLE: Partial<Record<ActionId, string>> = {
-  'session.new': 'Not available here',
-  'request.accept': 'Keyboard only, in a focused request',
-  'request.decline': 'Keyboard only, in a focused request',
-  'request.allowOnce': 'Keyboard only, in a focused request', // UX wave U1a (§D)
-  'request.allowLasting': 'Keyboard only, in a focused request',
-  'composer.queue': 'Keyboard only, in the composer', // UX wave U4a
-  'composer.send': 'Keyboard only, in the composer',
-  'composer.cycleMode': 'Keyboard only, in the composer',
-  'composer.historySearch': 'Keyboard only, in the composer', // UX wave U4a M6
-  'channel.open': 'This project has no channel', // U11a M5: registered while the tab in front has a project with a channel
+// U6b-5a M4 (P9; Interfaces §E): a row the palette may list. U6a: a fixed row is a key its own editor handles. A renderer
+// row of a pane or of the composer is a key the element holding the keyboard handles (`useKeyChord`): the palette, which
+// holds the keyboard itself, can never run it, whether or not a handler is registered. The rest is listed while it has a
+// handler (`Palette`), so nothing is drawn that cannot run.
+export const listable = (id: ActionId, table: ActionTable): boolean => {
+  const row = table[id];
+  return !row.fixed && !(row.sink === 'renderer' && (row.scope === 'pane' || row.scope === 'composer'));
+};
+
+// U6b-5a M4 (decision 19): ranking orders what the rules admit and admits nothing new. Best first by the `@` menu's
+// scorer over the title; an entry whose title does not hold the text (a session found by its folder, project or branch
+// alone, an artifact by its text) has no score and follows; ties keep the order they came in.
+function ranked<T>(items: readonly T[], query: string, titleOf: (item: T) => string): T[] {
+  const q = query.trim().toLowerCase();
+  if (q === '') return [...items];
+  return items
+    .map((item, at) => {
+      const title = titleOf(item);
+      return { item, at, score: title.toLowerCase().includes(q) ? (fuzzyScore(q, title) ?? -Infinity) : -Infinity };
+    })
+    .sort((a, b) => (a.score === b.score ? a.at - b.at : b.score - a.score))
+    .map(({ item }) => item);
+}
+
+// The actions with a handler, re-read when a registration changes (the key is a string, so a snapshot is stable).
+const handledKey = (): string => enabledActions().sort().join('\n');
+function useHandled(): ReadonlySet<string> {
+  const key = useSyncExternalStore(subscribeActions, handledKey);
+  return new Set(key.split('\n'));
+}
+
+// U6b-5a M4: the words of the palette's new groups and its last row (the execution document, "The sentences a person reads").
+const PALETTE = {
+  recent: 'Recent',
+  artifacts: 'Artifacts',
+  artifactsOn: (machine: string) => `Artifacts · ${machine}`,
+  searchLibrary: (text: string) => `Search the Library for “${text}”`,
 };
 
 // Bound item registration and subscriptions; filtering still searches the complete index.
@@ -111,8 +148,21 @@ function hitGroups(search: ConversationSearch, records: ReadonlyMap<AppSessionId
     .filter((group) => group.entries.length > 0);
 }
 
-const ITEM =
-  'flex h-(--row-h) cursor-default items-center gap-2 rounded-sm px-2 text-ui data-[disabled=true]:text-fg-faint data-[selected=true]:bg-bg-hover';
+// The value cmdk selects each kind of row by (U6b-5a M4).
+const ROW = {
+  session: (appSessionId: AppSessionId) => `session:${appSessionId}`,
+  artifact: (machine: MachineRef, artifactId: string) => `artifact:${artifactKey(machine, artifactId)}`,
+  project: (projectId: ProjectId) => `project:${projectId}`,
+  channel: (project: string) => `channel:${project}`,
+  action: (id: ActionId) => `action:${id}`,
+  library: 'library:search',
+};
+
+// cmdk's keys that move the selection (its arrows, Home and End, and its Ctrl bindings, `vimBindings`).
+const movesSelection = (event: KeyboardEvent) =>
+  ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || (event.ctrlKey && ['j', 'k', 'n', 'p'].includes(event.key));
+
+const ITEM = 'flex h-(--row-h) cursor-default items-center gap-2 rounded-sm px-2 text-ui data-[selected=true]:bg-bg-hover';
 const GROUP = '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-ui-sm [&_[cmdk-group-heading]]:text-fg-muted';
 
 export function CommandPalette() {
@@ -125,7 +175,9 @@ export function CommandPalette() {
     // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
     // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop. UX wave
     // U6b-3b: Go to file records where the keyboard is for Esc's second step, which is the opener, not the palette's field.
-    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile';
+    // The branch panel's sweep#4: a surface's toggle moves the keyboard too (into the tool it shows, or back to the composer
+    // when it hides the column), and asks where the keyboard is as it runs.
+    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile' || id.startsWith('surface.');
     if (afterClose) {
       closeThen(() => runAction(id));
       return;
@@ -177,6 +229,21 @@ function Palette({ run }: { run(id: ActionId): void }) {
     timer = setTimeout(search, 150);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [query, scope]);
+  // U6b-5a M4 (decision 21; S5): the Library's matches, asked as conversations are, 150 ms after the last keystroke; an
+  // answer for a query that is no longer the query is dropped
+  const typed = query.trim() !== '';
+  const [found, setFound] = useState<ArtifactSearch | null>(null);
+  useEffect(() => {
+    if (scope !== 'all' || query.trim() === '') return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const machines = searchedMachines(useSessions.getState().listedMachines, useMachines.getState().machines);
+      void searchArtifacts(ipc, query, machines).then((result) => {
+        if (!cancelled) setFound(result);
+      });
+    }, 150);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, scope]);
   const [selected, setSelected] = useState('');
   const records = useSessions((s) => s.records);
   const listed = useSessions((s) => s.listed); // P5 O7 M6
@@ -184,6 +251,9 @@ function Palette({ run }: { run(id: ActionId): void }) {
   const machines = useMachines((s) => s.machines); // P5 O7 M6
   const channels = usePaletteChannels(); // U11a M5
   const entries = paletteEntries(query, { records, projects, channels });
+  const handled = useHandled(); // U6b-5a M4: a row is listed while it has a handler
+  const actions = entries.actions.filter((id) => handled.has(id));
+  const recent = useRecent(scope === 'all' && !typed); // U6b-5a M4
   const searching = scope === 'sessions' && content?.query !== query;
   const answered = scope === 'sessions' && !searching && content !== null ? content : null;
   const groups = answered === null ? [] : hitGroups(answered, records, listed);
@@ -191,6 +261,71 @@ function Palette({ run }: { run(id: ActionId): void }) {
   // "Sessions" while only this Mac has hits, as before machines; each machine's name once another's are drawn
   const headingOf = (machine: MachineRef) => (groups.every((g) => g.machine === local) ? 'Sessions' : machineName(machines, machine, local));
   const errorOf = ({ machine, message }: ConversationSearch['errors'][number]) => (machine === local ? message : `${machineName(machines, machine, local)}: ${message}`);
+  // U6b-5a M4 (decision 20): one group "Artifacts" while one machine has matches, else one per machine by its name
+  const artifactGroups = scope === 'all' && typed && found?.query === query
+    ? found.groups.map(({ machine, rows }) => ({ machine, rows: ranked(rows, query, (row) => row.title) })).filter((group) => group.rows.length > 0)
+    : [];
+  const artifactsHeading = (machine: MachineRef) => (artifactGroups.length > 1 ? PALETTE.artifactsOn(machineName(machines, machine, local)) : PALETTE.artifacts);
+  // U6b-5a M4 (S5; Decision Logs 15 (viii) and 16 (i), (ii); M4's re-reviews; the branch panel's scalpel-4#1, #2; the
+  // delta review's H6): one effective selection, cmdk's controlled value, always a row that is drawn, and none while no
+  // row is. In the All scope, until the person moves it, it is the first row and follows the first row as answers
+  // arrive; a move is the person's key or pointer making cmdk report another row, and is forgotten at every change of the
+  // text or the scope, and when its row goes. The Conversations scope keeps cmdk's selection by value while its row is
+  // drawn. Following sends no event: an answer that changes the first row must never look like a key to the rest of the
+  // app (the window's key dispatcher, Back and Forward's hand-off). cmdk 1.1.1 neither moves its active descendant nor
+  // scrolls when its controlled value changes, so the input's `aria-activedescendant` is kept on the effective row here,
+  // and a row the palette selected by itself is scrolled into view.
+  const rowValues = [
+    ...recent.map((row) => (row.kind === 'session' ? ROW.session(row.record.appId) : ROW.artifact(row.machine, row.artifactId))),
+    ...(scope === 'all' && typed ? entries.sessions.slice(0, RESULT_LIMIT).map((record) => ROW.session(record.appId)) : []),
+    ...artifactGroups.flatMap(({ machine, rows }) => rows.slice(0, RESULT_LIMIT).map((row) => ROW.artifact(machine, row.id))),
+    ...groups.flatMap((group) => group.entries.slice(0, RESULT_LIMIT).map((entry) => ROW.session(entry.appId))),
+    ...(scope === 'all'
+      ? [
+          ...entries.projects.slice(0, RESULT_LIMIT).map((project) => ROW.project(project.id)),
+          ...entries.channels.slice(0, RESULT_LIMIT).map((entry) => ROW.channel(entry.project)),
+          ...actions.map(ROW.action),
+          ...(typed ? [ROW.library] : []),
+        ]
+      : []),
+  ]; // the rows as the list below draws them, in its order
+  const listKey = `${scope}\n${query}`;
+  const [moved, setMoved] = useState(false);
+  const [movedIn, setMovedIn] = useState(listKey);
+  if (movedIn !== listKey) {
+    setMovedIn(listKey); // a new text or scope: whatever was moved is forgotten
+    setMoved(false);
+  }
+  const drawn = rowValues.includes(selected);
+  if (moved && !drawn) setMoved(false); // the moved row went: the selection follows the first row again
+  // no row drawn, no selection (the delta review's H6): cmdk leaves its value behind when several rows go at once
+  const value = (scope === 'sessions' || moved) && drawn ? selected : (rowValues[0] ?? '');
+  // the row the palette selected by itself is the selection held from now on (cmdk reports none for its controlled value)
+  if (value !== selected) setSelected(value);
+  const root = useRef<HTMLDivElement>(null);
+  const acting = useRef(false); // the person's key or pointer is being handled (one task)
+  const personActs = () => {
+    acting.current = true;
+    queueMicrotask(() => void (acting.current = false));
+  };
+  // cmdk reports a row only when it differs from the value it holds, which is `value`
+  const onValueChange = (next: string) => {
+    if (acting.current) setMoved(true);
+    setSelected(next);
+  };
+  const shown = useRef<string | null>(null); // the value last brought into view
+  useLayoutEffect(() => {
+    const input = root.current?.querySelector('[cmdk-input]');
+    if (!input) return;
+    const row = [...root.current!.querySelectorAll('[cmdk-item]')].find((item) => item.getAttribute('data-value') === value);
+    if (row?.id) input.setAttribute('aria-activedescendant', row.id);
+    else input.removeAttribute('aria-activedescendant');
+    if (row === undefined || shown.current === value) return;
+    shown.current = value;
+    // as cmdk brings its own selection into view: the group's heading too when the row is its first
+    if (row.parentElement?.firstElementChild === row) row.closest('[cmdk-group]')?.querySelector('[cmdk-group-heading]')?.scrollIntoView({ block: 'nearest' });
+    row.scrollIntoView({ block: 'nearest' });
+  });
   const close = () => usePalette.setState({ open: false });
 
   const openSession = (appSessionId: AppSessionId, split: boolean) => {
@@ -206,15 +341,25 @@ function Palette({ run }: { run(id: ActionId): void }) {
     close();
     openProjectChannel(project);
   };
-  // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
+  const openArtifact = (artifactId: string, machine: MachineRef) => { // U6b-5a M4 (decision 22)
+    close();
+    openPaletteArtifact(artifactId, machine);
+  };
+  const searchLibrary = () => { // U6b-5a M4: the Library's page on the text typed
+    close();
+    setLibraryView({ view: 'all', query: query.trim(), kind: null, spaceId: null, machine: null });
+    openArtifacts();
+  };
+  // ⌘⏎ on a session opens it in the split, only while its row is drawn; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Enter' || !event.metaKey || !selected.startsWith('session:')) return;
+    if (movesSelection(event)) personActs();
+    if (event.key !== 'Enter' || !event.metaKey || !value.startsWith('session:') || !rowValues.includes(value)) return;
     event.preventDefault();
-    openSession(selected.slice('session:'.length) as AppSessionId, true);
+    openSession(value.slice('session:'.length) as AppSessionId, true);
   };
 
   return (
-    <Command label="Command palette" shouldFilter={false} value={selected} onValueChange={setSelected} onKeyDown={onKeyDown} loop>
+    <Command ref={root} label="Command palette" shouldFilter={false} value={value} onValueChange={onValueChange} onKeyDown={onKeyDown} loop>
       <Command.Input
         value={query}
         onValueChange={setQuery}
@@ -233,18 +378,42 @@ function Palette({ run }: { run(id: ActionId): void }) {
       {answered?.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Some conversations could not be indexed. Results may be incomplete. Indexing will retry after a restart or when those conversations change.</p>}
       {searching && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Searching conversations…</p>}
       {answered?.errors.map((error) => <p key={error.machine} role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{errorOf(error)}</p>)}
-      {(scope === 'sessions' ? groups.some((g) => g.entries.length >= RESULT_LIMIT) : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT || entries.channels.length > RESULT_LIMIT) && (
+      {(scope === 'sessions'
+        ? groups.some((g) => g.entries.length >= RESULT_LIMIT)
+        : typed && (entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT || entries.channels.length > RESULT_LIMIT || artifactGroups.some((g) => g.rows.length > RESULT_LIMIT))) && (
         <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
       )}
-      <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto p-1">
+      <Command.List
+        // the pointer selects the row it moves over (cmdk, in the bubble after this): the person's move when the row changes
+        onPointerMoveCapture={personActs}
+        className="max-h-[min(420px,60vh)] overflow-y-auto p-1"
+      >
         <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>
-        {scope === 'all' && entries.sessions.length > 0 && (
+        {recent.length > 0 && (
+          <Command.Group heading={PALETTE.recent} className={GROUP}>
+            {recent.map((row) =>
+              row.kind === 'session' ? (
+                <SessionItem key={row.record.appId} record={row.record} project={row.record.projectId ? (projects.get(row.record.projectId) ?? null) : null} onOpen={openSession} />
+              ) : (
+                <ArtifactItem key={artifactKey(row.machine, row.artifactId)} row={row.row} machine={row.machine} onOpen={openArtifact} />
+              ),
+            )}
+          </Command.Group>
+        )}
+        {scope === 'all' && typed && entries.sessions.length > 0 && (
           <Command.Group heading="Sessions" className={GROUP}>
             {entries.sessions.slice(0, RESULT_LIMIT).map((record) => (
               <SessionItem key={record.appId} record={record} project={record.projectId ? (projects.get(record.projectId) ?? null) : null} onOpen={openSession} />
             ))}
           </Command.Group>
         )}
+        {artifactGroups.map(({ machine, rows }) => (
+          <Command.Group key={machine} heading={artifactsHeading(machine)} data-artifact-machine={machine} className={GROUP}>
+            {rows.slice(0, RESULT_LIMIT).map((row) => (
+              <ArtifactItem key={row.id} row={row} machine={machine} onOpen={openArtifact} />
+            ))}
+          </Command.Group>
+        ))}
         {groups.map((group) => (
           <Command.Group key={group.machine} heading={headingOf(group.machine)} data-search-machine={group.machine} className={GROUP}>
             {group.entries.slice(0, RESULT_LIMIT).map((entry) =>
@@ -259,7 +428,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
         {scope === 'all' && entries.projects.length > 0 && (
           <Command.Group heading="Projects" className={GROUP}>
             {entries.projects.slice(0, RESULT_LIMIT).map((project) => (
-              <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => reveal(project.id)} className={ITEM}>
+              <Command.Item key={project.id} value={ROW.project(project.id)} onSelect={() => reveal(project.id)} className={ITEM}>
                 <span className="truncate">{project.name}</span>
               </Command.Item>
             ))}
@@ -268,19 +437,24 @@ function Palette({ run }: { run(id: ActionId): void }) {
         {scope === 'all' && entries.channels.length > 0 && (
           <Command.Group heading="Channels" className={GROUP}>
             {entries.channels.slice(0, RESULT_LIMIT).map((entry) => (
-              <Command.Item key={entry.project} value={`channel:${entry.project}`} onSelect={() => openChannelTab(entry.project)} className={ITEM}>
+              <Command.Item key={entry.project} value={ROW.channel(entry.project)} onSelect={() => openChannelTab(entry.project)} className={ITEM}>
                 <span data-channel-name className="truncate">{CHANNEL.title(entry.name)}</span>
                 {entry.waiting > 0 && <span data-channel-count className="ml-auto shrink-0 text-ui-sm text-fg-muted">{CHANNEL.waitingCount(entry.waiting)}</span>}
               </Command.Item>
             ))}
           </Command.Group>
         )}
-        {scope === 'all' && entries.actions.length > 0 && (
+        {scope === 'all' && actions.length > 0 && (
           <Command.Group heading="Actions" className={GROUP}>
-            {entries.actions.map((id) => (
+            {actions.map((id) => (
               <ActionItem key={id} id={id} onRun={run} />
             ))}
           </Command.Group>
+        )}
+        {scope === 'all' && typed && (
+          <Command.Item value={ROW.library} onSelect={searchLibrary} className={ITEM}>
+            <span className="truncate">{PALETTE.searchLibrary(query.trim())}</span>
+          </Command.Item>
         )}
       </Command.List>
     </Command>
@@ -294,7 +468,7 @@ function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | 
   const listing = useSessions((s) => s.listed.get(record.appId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
   return (
-    <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
+    <Command.Item value={ROW.session(record.appId)} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
       <GlyphMark glyph={glyphFor(record, digest, pending, listing)} className="w-4 shrink-0" />
       <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
@@ -309,7 +483,7 @@ function ListedItem({ listed, snippet, onOpen }: { listed: ListedSession; snippe
   const pending = useAttention((s) => selectPendingOf(s, listed.appId));
   const issued = Date.parse(listed.issued);
   return (
-    <Command.Item value={`session:${listed.appId}`} onSelect={() => onOpen(listed.appId, false)} className={`${ITEM} ${snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
+    <Command.Item value={ROW.session(listed.appId)} onSelect={() => onOpen(listed.appId, false)} className={`${ITEM} ${snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
       <GlyphMark glyph={listedGlyph(listed.state, pending)} className="w-4 shrink-0" />
       <span className="min-w-0 flex-1"><span className="block truncate">{listedTitle(listed)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       <span className="ml-auto shrink-0 text-ui-sm text-fg-faint">{Number.isFinite(issued) ? formatAge(now - issued) : null}</span>
@@ -318,14 +492,59 @@ function ListedItem({ listed, snippet, onOpen }: { listed: ListedSession; snippe
 }
 
 function ActionItem({ id, onRun }: { id: ActionId; onRun(id: ActionId): void }) {
-  const enabled = useActionEnabled(id);
   const overrides = useSettings((s) => s.state?.settings.keymap);
   const chord = effectiveChord(id, overrides ?? {});
   return (
-    <Command.Item value={`action:${id}`} disabled={!enabled} onSelect={() => onRun(id)} className={ITEM}>
+    <Command.Item value={ROW.action(id)} onSelect={() => onRun(id)} className={ITEM}>
       <span className="truncate">{ACTIONS[id].title}</span>
-      {!enabled && <span className="text-ui-sm">{UNAVAILABLE[id] ?? 'Unavailable'}</span>}
       {chord && <kbd className="ml-auto shrink-0 font-ui text-ui-sm text-fg-muted">{formatChord(chord)}</kbd>}
     </Command.Item>
   );
+}
+
+// U6b-5a M4: an artifact, in Recent or found by the text typed (with the passage the Library matched, as its rows show it).
+function ArtifactItem({ row, machine, onOpen }: { row: LibraryRow; machine: MachineRef; onOpen(artifactId: string, machine: MachineRef): void }) {
+  const now = useNow();
+  return (
+    <Command.Item value={ROW.artifact(machine, row.id)} onSelect={() => onOpen(row.id, machine)} className={`${ITEM} ${row.snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
+      <KindIcon kind={row.kind} className="w-4 shrink-0 text-fg-muted" />
+      <span className="min-w-0 flex-1"><span className="block truncate">{row.title}</span>{row.snippet && <span className="block truncate text-ui-sm text-fg-muted">{row.snippet}</span>}</span>
+      <span className="ml-auto shrink-0 text-ui-sm text-fg-faint">{formatAge(now - row.lastEditedAt)}</span>
+    </Command.Item>
+  );
+}
+
+// U6b-5a M4 (decision 18; Interfaces §E): Recent's rows while `on`, from the window's opened list; each artifact's row is
+// asked of its machine once per opening of the palette, and drawn once its answer names a row.
+function useRecent(on: boolean): RecentRow[] {
+  const opened = useVisits((s) => s.opened);
+  const records = useSessions((s) => s.records);
+  const digests = useSessions((s) => s.digests);
+  const listed = useSessions((s) => s.listed);
+  const turnsSeen = useSessions((s) => s.turnsSeen);
+  const [answered, setAnswered] = useState<ReadonlyMap<string, LibraryRow | null>>(() => new Map());
+  const asked = useRef(new Set<string>());
+  const live = useRef(true);
+  const activity = (record: SessionRecord) => lastActivity(record, digests.get(record.appId), selectSeenAt({ listed, turnsSeen }, record.appId));
+  const { rows, ask } = on ? recentRows({ opened, records, activity, answered }) : { rows: [], ask: [] };
+  const askKey = ask.map(({ machine, artifactId }) => artifactKey(machine, artifactId)).join('\n');
+  useEffect(() => {
+    live.current = true;
+    return () => void (live.current = false);
+  }, []);
+  useEffect(() => {
+    for (const key of askKey === '' ? [] : askKey.split('\n')) {
+      if (asked.current.has(key)) continue;
+      asked.current.add(key);
+      const slash = key.indexOf('/'); // a machine's ref holds no '/'
+      const machine = key.slice(0, slash) as MachineRef;
+      void ipc.invoke('library.get', { artifactId: key.slice(slash + 1) }, { machine }).then(
+        (answer) => (answer.ok ? answer.value.row : null),
+        () => null,
+      ).then((row) => {
+        if (live.current) setAnswered((before) => new Map(before).set(key, row));
+      });
+    }
+  }, [askKey]);
+  return rows;
 }

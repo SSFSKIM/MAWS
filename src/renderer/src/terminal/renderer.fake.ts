@@ -1,7 +1,7 @@
 // A `TerminalRenderer` for tests (C9 Interfaces *Testing and harness*): no emulator, just a record of what the owner
 // asked of it and handles to drive it the way a user or a program would. Exported for tests only; production code
 // never imports it.
-import type { Acceleration, RendererOptions, TerminalFont, TerminalModes, TerminalProbe, TerminalRenderer, TerminalTheme } from './renderer';
+import { screenTextOf, type Acceleration, type RendererOptions, type TerminalFont, type TerminalModes, type TerminalProbe, type TerminalRenderer, type TerminalTheme } from './renderer';
 
 const decoder = new TextDecoder();
 
@@ -27,6 +27,9 @@ export class FakeRenderer implements TerminalRenderer {
   theme: TerminalTheme;
   font: TerminalFont;
   keyFilter: ((ev: KeyboardEvent) => boolean) | null = null;
+  /** UX wave U6b-5a: what is selected ('' for nothing), and the rows the viewport shows, as a user leaves them. */
+  selection = '';
+  screen: { text: string; wrapped?: boolean }[] = [];
   linkHandler: ((url: string, ev: MouseEvent) => void) | null = null;
   private readonly dataListeners = new Set<(input: string) => void>();
   private readonly titleListeners = new Set<(title: string) => void>();
@@ -111,11 +114,15 @@ export class FakeRenderer implements TerminalRenderer {
   }
 
   hasSelection(): boolean {
-    return false;
+    return this.selection !== '';
   }
 
   getSelection(): string {
-    return '';
+    return this.selection;
+  }
+
+  screenText(): string {
+    return screenTextOf(this.screen);
   }
 
   selectAll(): void {}

@@ -49,7 +49,7 @@ import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
 import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { useTakesRemoteRoute } from '../files/elsewhere';
-import { takeKeyboard, useKeyboardRequest } from '../files/finder';
+import { describeElement, FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, traceKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosenFor } from '../files/open-chosen';
 import { ExternalRow, OpenExternally, rowButton } from './ExternalRow';
 import { FrameBody } from './FrameBody';
@@ -60,6 +60,8 @@ import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
 import { classifyFailure, type NoticeCause } from './notice'; // UX wave U6b-4b
 import { useNoticePlace } from './notice-place'; // UX wave U6b-4b
 import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
+import { OpenInButton } from '../../../open-in/OpenInMenu'; // UX wave U6b-4a
+import { shownLine } from './shown-line'; // UX wave U6b-4a
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -177,7 +179,8 @@ function ReadOnlyLabel({ reason, sentence, appSessionId }: { reason: LabelledRea
 // what it puts at the bar's end (Move to main area). UX wave U6e: "Read-only" between the two (K2), drawn from the entry
 // as it is drawn (K11); `agent`, the tab holds the mark of an open the agent asked for (decision 19).
 // UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent. (Decision Log 29) `inView`,
-// whether the mounted body is in view; in view when absent.
+// whether the mounted body is in view; in view when absent. UX wave U6b-4a: "Open in" at the head of the controls,
+// handing the file at the line shown to an app.
 export function FileViewer({ tab, start, end, host, inView = true, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean; agent?: boolean }) {
   const mainOnScreen = useMainAreaOnScreen();
   // UX wave U6f (§E): a session that takes the remote route, and its machine's standing as it moves (W1, R9)
@@ -209,7 +212,13 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
       line={tab.line}
       agent={agent}
       lead={lead}
-      controls={(entry) => <EditorControls entry={entry} />}
+      controls={(entry) => (
+        <>
+          {/* UX wave U6b-4a: Open in, the file at the line shown */}
+          <OpenInButton appSessionId={appSessionId} path={tab.path} line={() => shownLine(tab.id)} outside={entry.named} />
+          <EditorControls entry={entry} />
+        </>
+      )}
       below={(entry) => <SaveFailure entry={entry} />}
       end={end}
       host={host}
@@ -352,22 +361,91 @@ interface FileBodyProps {
 // The app's own focus outline, inside the body's box.
 const TAKES_KEYBOARD = 'outline-accent focus-visible:outline-2 -outline-offset-2';
 
+// Decision Log 19: why the page may refuse the view the keyboard, as the trace says it.
+function refusalOf(element: HTMLElement): string {
+  if (!element.isConnected) return 'is out of the page';
+  if (element.closest('[inert]') !== null) return 'is under an inert ancestor';
+  if (element.closest('[hidden]') !== null) return 'is under a hidden ancestor';
+  if (element.getClientRects().length === 0) return 'has no box';
+  if (getComputedStyle(element).visibility !== 'visible') return 'is not visible';
+  return 'looks focusable';
+}
+
 export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, below, end, host = 'main', inView = true, agent = false, artifactView = false, takesKeyboard }: FileBodyProps) {
   // UX wave U6b-3b: the request for the keyboard by this body's key, taken while it is in view; the editor, when one is
-  // drawn in it, is told through `editorFocus`.
+  // drawn in it, is told through `editorFocus`. Decision Log 17: the page can refuse the focus (an inert or hidden
+  // ancestor while the view mounts), so the take is tried again when the editor is drawn and when an attribute that can
+  // hide or free an element changes in the page. Decision Log 18: the person's own key or pointer press drops the request
+  // (`files/finder.ts`), and so does the keyboard landing anywhere outside this view but the document's body, by any means
+  // (a native menu's command makes no press in the page). Decision Log 19: the request is held, landed or not, until
+  // `FILE_TAKE_BOUND_MS` after the view is ready (in view, its read settled, its editor drawn where it draws one), counted
+  // again each time it is ready again; so a view drawn again meanwhile (its editor made anew, an ancestor hidden for a
+  // moment), which leaves the keyboard on the document's body, takes it back. Each take that moves the keyboard, or that
+  // the page refuses, is traced (`traceKeyboard`).
   const body = useRef<HTMLDivElement>(null);
   const editorFocus = useRef<(() => void) | null>(null);
+  const [editorDrawn, setEditorDrawn] = useState(false);
+  const shown = useRef(inView);
   const asked = useKeyboardRequest(takesKeyboard === undefined ? null : { into: 'file', key: takesKeyboard });
+  const take = useCallback(
+    (why: string) => {
+      const element = body.current;
+      if (!shown.current || takesKeyboard === undefined || element === null || !keyboardWaits({ into: 'file', key: takesKeyboard })) return;
+      const before = document.activeElement;
+      if (element.contains(before) && (editorFocus.current === null || before !== element)) return; // in place already
+      if (!element.contains(before)) element.focus({ preventScroll: true });
+      editorFocus.current?.();
+      const now = document.activeElement;
+      const landed = element.contains(now);
+      traceKeyboard(`file ${takesKeyboard}`, landed ? 'took' : 'refused', `${why}; from ${describeElement(before)} to ${describeElement(now)}${landed ? '' : `; the view ${refusalOf(element)}`}`);
+    },
+    [takesKeyboard],
+  );
   useEffect(() => {
-    const element = body.current;
-    if (asked === 0 || !inView || takesKeyboard === undefined || element === null || !takeKeyboard({ into: 'file', key: takesKeyboard })) return;
-    element.focus({ preventScroll: true });
-    editorFocus.current?.();
-  }, [asked, inView, takesKeyboard]);
-  const onEditor = useCallback((focus: (() => void) | null) => {
-    editorFocus.current = focus;
-    if (focus !== null && body.current !== null && document.activeElement === body.current) focus(); // the body still has it
-  }, []);
+    shown.current = inView;
+    if (asked === 0 || !inView) return;
+    take('asked in view');
+    // One try a task for any number of changes, posted as a message, never waiting on a frame: a window that is covered
+    // or not in front draws no frames, so a try held for one would never run there (Decision Log 19). A task, not a
+    // microtask, so that a change the try itself makes cannot spin within one turn of the page.
+    let queued = false;
+    const tries = new MessageChannel();
+    tries.port1.onmessage = () => {
+      queued = false;
+      take('the page changed');
+    };
+    const retry = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      tries.port2.postMessage(null);
+    });
+    retry.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] });
+    return () => {
+      retry.disconnect();
+      tries.port1.close();
+    };
+  }, [asked, inView, take]);
+  // Decision Log 18: the keyboard landing outside this view (the document's body aside) gives the request up
+  useEffect(() => {
+    if (asked === 0 || takesKeyboard === undefined) return;
+    const elsewhere = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target !== document.body && !(body.current?.contains(target) ?? false)) releaseKeyboard({ into: 'file', key: takesKeyboard }, `focus landed on ${describeElement(target)}`);
+    };
+    document.addEventListener('focusin', elsewhere, true);
+    return () => document.removeEventListener('focusin', elsewhere, true);
+  }, [asked, takesKeyboard]);
+  const onEditor = useCallback(
+    (focus: (() => void) | null) => {
+      editorFocus.current = focus;
+      setEditorDrawn(focus !== null);
+      if (takesKeyboard !== undefined) traceKeyboard(`file ${takesKeyboard}`, focus === null ? 'editor gone' : 'editor drawn', `the keyboard on ${describeElement(document.activeElement)}`);
+      if (focus === null) return;
+      if (body.current !== null && document.activeElement === body.current) focus(); // the body still has it
+      else take('the editor drawn'); // a request still held
+    },
+    [take, takesKeyboard],
+  );
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -378,6 +456,14 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
     [tabId, appSessionId, path, line, readOnly, agent, artifactId, revision],
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
+  // Decision Log 18 and 19: the bound on the request, from the moment the view is ready, again each time it is
+  const needsEditor = entry !== null && entry.status === 'ready' && entry.kind !== 'frame' && showsCode(entry);
+  const ready = entry !== null && entry.status !== 'loading' && (!needsEditor || editorDrawn);
+  useEffect(() => {
+    if (asked === 0 || !inView || !ready || takesKeyboard === undefined) return;
+    const bound = setTimeout(() => releaseKeyboard({ into: 'file', key: takesKeyboard }, 'the bound passed'), FILE_TAKE_BOUND_MS);
+    return () => clearTimeout(bound);
+  }, [asked, inView, ready, takesKeyboard]);
 
   // The keyboard's place is the same element whatever the body draws, a failed read's notice among them, so a request
   // taken while the read is on its way stays on the view when it fails, and one made after is taken (S3; B5).

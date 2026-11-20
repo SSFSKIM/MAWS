@@ -12,6 +12,7 @@ export * from './audience.ts';
 export * from './base64url.ts';
 export * from './canonical.ts';
 export * from './channel.ts';
+export * from './channel-id.ts';
 export * from './delegations.ts';
 export * from './enrollment.ts';
 export * from './events.ts';

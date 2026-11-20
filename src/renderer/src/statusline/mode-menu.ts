@@ -70,7 +70,9 @@ export interface ModeBinding {
   value: PermissionMode | null; // the effective mode; null while nothing is known (an unstarted session's default)
   options: PermissionMode[];
   disabled: string | null; // why no mode can be chosen now
-  set: (mode: PermissionMode) => Promise<{ ok: true } | { ok: false; error: string }>;
+  // UX wave U6b-5a: a taken change may say the mode the engine answered it with (`session.setPermissionMode`'s
+  // `effective`), which the chip shows once the session's status reports it
+  set: (mode: PermissionMode) => Promise<{ ok: true; effective?: PermissionMode } | { ok: false; error: string }>;
   refusal: AutoModeRefusalCode | null; // why the requested mode was refused, shown in words
   autoUnavailable: string | null; // why auto is disabled in the list
   starts?: boolean; // P2-A: a choice starts the session first (no ready process); the menu says "Starting…" meanwhile
@@ -123,7 +125,7 @@ export function liveModeBinding(
       // C3's host answers a refusal with the control error's message beside its code: the code's words come first
       if (result.value.refusal !== null) return { ok: false, error: MODE_REFUSAL_WORDS[result.value.refusal] };
       if (result.value.error !== null) return { ok: false, error: result.value.error };
-      return { ok: true };
+      return { ok: true, effective: result.value.effective }; // UX wave U6b-5a: the mode said aloud waits for this one
     },
   };
 }

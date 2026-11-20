@@ -135,6 +135,19 @@ describe('the chrome yields to the tab strip', () => {
     expect(panel.className).toContain('row-start-3');
     expect(within(chrome()).getByRole('button', { name: 'browser' }).closest('[inert]')).toBeNull();
   });
+
+  it.each(['maximized', 'floating'] as const)('lays the banner row across the whole window while %s, as the title bar is, and back to two columns when docked', (mode) => {
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }]]) });
+    renderShell();
+    const banner = () => document.querySelector<HTMLElement>('[data-banner-host]')!;
+    const classes = (element: HTMLElement) => element.className.split(/\s+/);
+    expect(classes(banner())).toEqual(expect.arrayContaining(['col-span-2', 'row-start-2']));
+    act(() => useLayout.getState().setPanel({ [mode]: true }));
+    expect(classes(banner())).toEqual(expect.arrayContaining(['col-start-1', 'col-span-3', 'row-start-2']));
+    expect(classes(banner())).not.toContain('col-span-2');
+    act(() => useLayout.getState().setPanel({ [mode]: false }));
+    expect(classes(banner())).toEqual(expect.arrayContaining(['col-span-2', 'row-start-2']));
+  });
 });
 
 it('dismisses a narrow sheet with Escape or its backdrop without forgetting its tools', async () => {

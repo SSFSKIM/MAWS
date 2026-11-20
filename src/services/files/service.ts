@@ -104,6 +104,8 @@ import {
   type FilesListOutsideOutput, // U6f
   type FilesFollowInput, // U6b-4c
   type FilesFollowOutput, // U6b-4c
+  type FilesAdmitInput, // U6b-4a
+  type FilesAdmitOutput, // U6b-4a
 } from '@shared/ipc/schema/files';
 import { isMarkdownName, MARKDOWN_RENDER_CAP } from '@shared/files/markdown'; // U6b-4c
 import { fileLinkSteps, PAUSE, resolveRelative } from '@shared/files/named'; // U6b-4c
@@ -113,7 +115,7 @@ import { expandHome, type Home } from '@shared/machine/home-folders';
 import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
 import { machineHome, machineHomes } from '@shared/machine/machine-home';
-import { rootsOf, under, type AllowlistRecord } from './allowlist';
+import { admittedFolder, rootsOf, under, type AllowlistRecord } from './allowlist';
 import type { FileGrants } from './grants';
 import type { FileLinks, LinkWhy } from './links';
 import { fileMime, isTextMime } from './mime';
@@ -234,6 +236,7 @@ export interface FilesService {
   listOutside(input: FilesListOutsideInput, caller: FilesCaller): Promise<FilesListOutsideOutput>; // U6f: another machine's under a claim alone
   chooseOutside(input: FilesChooseOutsideInput, caller: FilesCaller): Promise<FilesChooseOutsideOutput>; // U6f: another machine's under a claim alone
   follow(input: FilesFollowInput, caller?: FilesCaller, signal?: AbortSignal): Promise<FilesFollowOutput>; // U6b-4c: this machine's own caller alone
+  admit(input: FilesAdmitInput, remote?: boolean, signal?: AbortSignal): Promise<FilesAdmitOutput>; // U6b-4a
   watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; agent?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c; U6e: `agent`
@@ -977,6 +980,53 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1; Decision Log 7): "Open in"'s
+  // admission of the path main hands another app, main's alone. Without a path, the session's working folder as U8c-2
+  // admits it (UC-4): the real path the admission checked, never one of MAWS's own folders. With one, the outside save's
+  // admission (an editor writes, so a file is handed to one exactly when MAWS would save it): under a root a regular file
+  // or a directory; outside every root, where the evidence is of one file (precheck's mark), a regular file only; never
+  // one of MAWS's own. Either way the answer is confirmed as files.read confirms a file: the real path opened with no link
+  // on its way, and a fresh resolution of the path naming the opened object. A caller on another machine is refused.
+  async function admit({ appSessionId, path }: FilesAdmitInput, remote = false, signal?: AbortSignal): Promise<FilesAdmitOutput> {
+    if (remote) throw new Refusal();
+    if (path === undefined) {
+      const record = records(appSessionId);
+      if (!record) throw new Error(`unknown app session: ${appSessionId}`);
+      const fact = await admittedFolder(record, 'path');
+      if (fact === null) throw new Refusal();
+      const real = await fs.promises.realpath(fact.folder).catch(() => null);
+      if (real === null || (fact.checked && real !== fact.folder) || isOwn(real)) throw new Refusal();
+      await opened(fact.folder, real, [real], 'folder');
+      return { path: real, kind: 'folder' };
+    }
+    const { roots, real0, mark } = await precheck(appSessionId, path, OUTSIDE_SAVE, THIS_MACHINE, { signal });
+    if (isOwn(real0)) throw new Refusal();
+    const kind = await opened(path, real0, roots, mark === null ? 'any' : 'file');
+    return { path: real0, kind };
+  }
+
+  // `admit`'s confirmation: `real` opened with no link on its way, its type judged from the descriptor, and `path` resolved
+  // again to `real`, under `roots`, naming the opened object (`confirm`); the descriptor is closed before the answer.
+  async function opened(path: string, real: string, roots: readonly string[], want: 'file' | 'folder' | 'any'): Promise<'file' | 'folder'> {
+    await at('before-open', path);
+    let handle: FileHandle;
+    try {
+      handle = await openNoLink(real, want === 'folder' ? OPEN_FLAGS | O_DIRECTORY : OPEN_FLAGS, path);
+    } catch {
+      throw new Refusal();
+    }
+    try {
+      const stat = await handle.stat({ bigint: true });
+      await at('after-open', path);
+      if ((await confirm(path, roots, stat)) !== real) throw new Refusal();
+      if (stat.isFile() && want !== 'folder') return 'file';
+      if (stat.isDirectory() && want !== 'file') return 'folder';
+      throw new Refusal();
+    } finally {
+      await handle.close();
+    }
+  }
+
   // Runs `task` after every earlier task of the same key has settled, and before any later one starts.
   async function exclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
     const before = writing.get(key) ?? Promise.resolve();
@@ -1076,6 +1126,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     listOutside, // U6f
     chooseOutside, // U6f
     follow, // U6b-4c
+    admit, // U6b-4a
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new

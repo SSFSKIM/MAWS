@@ -23,4 +23,5 @@ export const grades = {
   'files.follow': 'manage', // UX wave U6b-4c (decision 12): it writes an admission a save may use, as the outside save does
   // UX wave U6e's files.writeOutside, and U6f's readOutside, listOutside and chooseOutside: the terminal's grade
   ...outsideGrades(pty[TERMINAL_ACT]),
+  'files.admit': 'internal', // UX wave U6b-4a: main's admission of the path "Open in" hands another app
 } as const satisfies CommandGrades<'files'>;

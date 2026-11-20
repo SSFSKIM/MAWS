@@ -641,10 +641,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await row.click({ button: 'right' });
       await expect(page.getByRole('menu')).toBeVisible();
       const items = await page.getByRole('menuitem').allTextContents();
-      expect(items.slice(0, 3), 'a listed row’s menu: its two opens, then Hide').toEqual(['Open', 'Open in new tab', 'Hide']);
+      // UX wave U6b-4a: "Open in" with the opens, disabled, its label saying the folder is on B
+      const elsewhere = `Open in (the folder is on ${B_NAME})`;
+      expect(items.slice(0, 4), 'a listed row’s menu: its two opens, Open in, then Hide').toEqual(['Open', 'Open in new tab', elsewhere, 'Hide']);
       // after Hide, U9's acts over the link for a lane B listing that is yours, in their order, then Share and Add owner
       const acts = remoteSessionActions({ lane: 'B', record: false, mine: true, remoteReading: true }).map((id) => SESSION_ACTIONS[id]);
-      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'after Hide, the acts over the link (U9) and nothing else but Share and Add owner').toEqual(acts);
+      expect(items.slice(4).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'after Hide, the acts over the link (U9) and nothing else but Share and Add owner').toEqual(acts);
+      await expect(page.getByRole('menuitem', { name: elsewhere, exact: true }), 'drawn disabled').toHaveAttribute('aria-disabled', 'true');
       await page.keyboard.press('Escape');
       await expect(page.getByRole('menu')).toHaveCount(0);
 

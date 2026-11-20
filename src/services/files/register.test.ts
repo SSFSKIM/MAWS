@@ -333,6 +333,20 @@ describe('main answers files.* on the services bus', () => {
     });
   });
 
+  // UX wave U6b-4a: Open in's admission is main's alone, answers the real path, and refuses a caller on another machine
+  it('admits for main the working folder and a file outside named by the transcript, and refuses a page and another machine', async () => {
+    const named = vi.fn(async () => 'counted' as const);
+    await install(undefined, undefined, { named });
+    const path = join(root, 'outside', 'notes.txt');
+    mkdirSync(join(root, 'outside'));
+    writeFileSync(path, 'outside notes\n');
+    expect(await invoke('files.admit', { appSessionId: 'A' })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await bus.main('files.admit', { appSessionId: 'A', path }, { client: page, remote: true as const })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+    expect(named).not.toHaveBeenCalled();
+    expect(await bus.main('files.admit', { appSessionId: 'A', path })).toEqual({ ok: true, value: { path, kind: 'file' } });
+    expect(await bus.main('files.admit', { appSessionId: 'A' })).toEqual({ ok: true, value: { path: join(root, 'repo'), kind: 'folder' } });
+  });
+
   it('forgets an ended client: it is no longer followed once its page closes', async () => {
     const { files, followed } = await install();
     await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });

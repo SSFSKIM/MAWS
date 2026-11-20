@@ -837,11 +837,21 @@ test('a page beside the sidebar', async () => {
     await expect(files).toBeVisible();
     await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(CHARTER_TITLE);
     await expect(composer).toHaveText(DRAFT);
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; card K2, as answered): the
+    // page's Back, which is its Esc ("Back · Esc"), was a step back, so Go ▸ Forward can open the page again
+    await expect.poll(() => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('go.forward')?.enabled ?? null), { message: 'Go ▸ Forward enabled after the page’s Back' }).toBe(true);
     // Back's own write: the page's key deleted. The store schedules every key a change touches in one pass, `regions` and
     // `panelTools.surfaces` before `destination` (persistedKeys' order), so once the key is gone a write of either made
     // by the visit or by Back has landed, and the side column reads as it was drawn.
     await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed', timeout: 15_000 }).toBe(false);
     expect(sideColumn(), 'nothing of the side column written by the visit').toEqual(drawn);
+    // and the page's Esc, the same step back: opened again, the page is the newest place, so Forward has nothing until Esc
+    const forward = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('go.forward')?.enabled ?? null);
+    await openAppDestination(page, 'Customize');
+    await expect.poll(forward, { message: 'Go ▸ Forward disabled with the page the newest place' }).toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(region).toHaveCount(0);
+    await expect.poll(forward, { message: 'Go ▸ Forward enabled after the page’s Esc' }).toBe(true);
 
     // a session's row leaves the page and shows that session
     await openAppDestination(page, 'Projects');
@@ -1156,7 +1166,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
-    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2), then Hide (UX wave U7, O-16)').toEqual(['Open', 'Open in new tab', 'Hide']);
+    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2) with Open in (UX wave U6b-4a), then Hide (UX wave U7, O-16)').toEqual(['Open', 'Open in new tab', 'Open in', 'Hide']);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour in the light theme').toEqual([]);
@@ -1417,14 +1427,36 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await openPalette(app, page);
     await expect(palette).toBeVisible();
     const actions = palette.getByRole('group', { name: 'Actions' }).getByRole('option');
-    // U6a: the palette lists every row but the fixed ones (a key its own editor handles is not an act to run)
-    const ids = (Object.keys(ACTIONS) as ActionId[]).filter((id) => !(ACTIONS as ActionTable)[id].fixed);
-    await expect(actions).toHaveCount(ids.length);
-    const actionTexts = await actions.allTextContents();
-    for (const [i, id] of ids.entries()) {
-      const { title, chord } = ACTIONS[id] as { title: string; chord: string | null };
-      expect(actionTexts[i], `${id} is listed with its chord`).toContain(title);
-      if (chord) expect(actionTexts[i], `${id} is listed with its chord`).toContain(formatChord(chord));
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B6): with nothing typed,
+    // Recent comes first (the sessions opened in this run), and the palette lists only the rows that can run: none drawn
+    // disabled, no fixed key and no key of a pane or the composer (`listable`), each with its chord. Which rows can run is
+    // read from the application menu, whose items are enabled exactly while the page has a handler: a menu row is listed
+    // when, and only when, its item is enabled. Waited on: Recent's first option, then a named action's option, then the
+    // two reads agreeing (the menu's state crosses to main after the page's).
+    await expect(palette.getByRole('group', { name: 'Recent' }).getByRole('option').first(), 'Recent lists what was opened').toBeVisible();
+    await expect(palette.getByRole('group').first(), 'Recent first').toHaveAccessibleName('Recent');
+    await expect(actions.filter({ hasText: 'Appearance: Dark' })).toHaveCount(1);
+    await expect(palette.locator('[cmdk-item][aria-disabled="true"]'), 'no row drawn disabled').toHaveCount(0);
+    const table = ACTIONS as ActionTable;
+    const listedIds = () => actions.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-value')!.replace(/^action:/, '') as ActionId));
+    for (const id of await listedIds()) {
+      const row = table[id];
+      expect(row, `${id} is a row of the table`).toBeDefined();
+      expect(row.fixed === true || (row.sink === 'renderer' && (row.scope === 'pane' || row.scope === 'composer')), `${id} is a row the palette may list`).toBe(false);
+    }
+    const menuIds = (Object.keys(ACTIONS) as ActionId[]).filter((id) => table[id].sink === 'menu' && !table[id].fixed);
+    // `tab.select` is nine items, `tab.select:1` to `:9`, each enabled with the one handler
+    const menuEnabled = () => app.evaluate(({ Menu }, ids) => ids.filter((id) => (Menu.getApplicationMenu()?.getMenuItemById(id) ?? Menu.getApplicationMenu()?.getMenuItemById(`${id}:1`))?.enabled === true), menuIds);
+    await expect.poll(async () => {
+      const listed = new Set(await listedIds());
+      const enabledNow = await menuEnabled();
+      return menuIds.filter((id) => listed.has(id) !== enabledNow.includes(id));
+    }, { message: 'a menu row is listed exactly while its item is enabled' }).toEqual([]);
+    const drawn = await actions.evaluateAll((nodes) => nodes.map((node) => [node.getAttribute('data-value')!.replace(/^action:/, ''), node.textContent ?? ''] as const));
+    for (const [id, text] of drawn) {
+      const { title, chord } = table[id as ActionId] as { title: string; chord: string | null };
+      expect(text, `${id} is listed with its chord`).toContain(title);
+      if (chord) expect(text, `${id} is listed with its chord`).toContain(formatChord(chord));
     }
     await menu(app, 'theme.dark');
     await expect.poll(() => regionBackground(page)).toBe(tokens.dark['--bg']);

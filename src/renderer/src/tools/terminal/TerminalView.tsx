@@ -4,7 +4,7 @@
 // start), the lossy-reconnect notice, the worktree warning and the busy-close confirmation, and over it a note while
 // the shell starts. Tokens only. P5 O7 M3: a terminal of another machine's session reads its readiness from that machine
 // and names it where its shell was lost.
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import { workingFolder } from '@shared/sessions/working-folder';
@@ -15,7 +15,7 @@ import { machineName } from '../../stores/org-projects';
 import { useTerminals } from '../../stores/terminals';
 import { terminalMachine } from '../../terminal/machine';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
-import { TERMINAL } from './copy';
+import { ATTACH, TERMINAL } from './copy';
 import { ensureTerminal, hostReadyOf, takeFocusRequest, type TerminalTabState } from './index';
 
 const bar = 'flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-bg-raised px-2 py-1 text-ui-sm';
@@ -196,7 +196,8 @@ function StatusBar({ info, hostReady, remoteName, close }: { info: TerminalInfo;
 
 function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; state: TerminalTabState; dismiss(): void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const renderer = (state.terminalId && terminals.get(state.terminalId)?.renderer) || null;
+  const handle = state.terminalId ? terminals.get(state.terminalId) : undefined;
+  const renderer = handle?.renderer || null;
 
   useEffect(() => {
     const outside = (ev: Event) => {
@@ -216,11 +217,16 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
     };
   }, [dismiss]);
 
-  const items: { label: string; enabled: boolean; run(): void }[] = [
+  // UX wave U6b-5a (Interfaces §C): the attach last, after a separator, so the four a hand already knows keep their places
+  const items: { label: string; enabled: boolean; run(): void; separated?: true }[] = [
     { label: 'Copy', enabled: !!renderer?.hasSelection(), run: () => void navigator.clipboard.writeText(renderer!.getSelection()) },
     { label: 'Paste', enabled: !!renderer, run: () => void navigator.clipboard.readText().then((text) => renderer!.paste(text)) },
     { label: 'Select all', enabled: !!renderer, run: () => renderer!.selectAll() },
     { label: 'Clear', enabled: !!renderer, run: () => renderer!.clear() },
+    // the attach's module is loaded at the press, so the terminal's view imports nothing of the composer's hand-over (a
+    // static import, joined to this module's cycle with `./index`, left a transcript row's imports unset under vitest);
+    // the selection and the session are read at the press, so what the module receives is what the press saw
+    { label: ATTACH.menuItem, enabled: !!renderer?.hasSelection(), run: () => attachAtPress(handle!.info.appSessionId, renderer!.getSelection()), separated: true },
   ];
   return (
     <div
@@ -232,22 +238,28 @@ function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; sta
       className="absolute z-10 flex min-w-32 flex-col rounded-md border border-border bg-bg-overlay py-1 text-ui-sm"
     >
       {items.map((item) => (
-        <button
-          key={item.label}
-          type="button"
-          role="menuitem"
-          disabled={!item.enabled}
-          onClick={() => {
-            item.run();
-            dismiss();
-          }}
-          className="px-3 py-1 text-left text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent"
-        >
-          {item.label}
-        </button>
+        <Fragment key={item.label}>
+          {item.separated ? <div role="separator" className="my-1 border-t border-border" /> : null}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!item.enabled}
+            onClick={() => {
+              item.run();
+              dismiss();
+            }}
+            className="px-3 py-1 text-left text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent"
+          >
+            {item.label}
+          </button>
+        </Fragment>
       ))}
     </div>
   );
+}
+
+function attachAtPress(appSessionId: AppSessionId, text: string): void {
+  void import('./attach').then(({ attachText }) => attachText(appSessionId, text));
 }
 
 export function TerminalIcon({ className }: { className?: string }) {

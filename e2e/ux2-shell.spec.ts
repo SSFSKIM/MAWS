@@ -15,7 +15,8 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
-import { backToTabs, hideSurface, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
+import { activeMainTab, backToTabs, hideSurface, mainTab, mountedTab, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
+import { formatChord } from '../src/shared/keymap/chord'; // UX wave U6b-5a
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -36,6 +37,8 @@ const panel = (page: Page) => page.locator('[data-region="panel"]');
 const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
 const surfaces = (page: Page) => page.locator('[data-surface-row]');
 const surface = (page: Page, id: string) => panel(page).locator(`[data-surface="${id}"]`);
+// What a terminal shows, read from its emulator through the page's terminals seam (`window.__maws_terminals`).
+const terminalLines = (page: Page, id: string) => page.evaluate((tid) => (window as unknown as { __maws_terminals?: { lines(id: string): string[] | null } }).__maws_terminals?.lines(tid) ?? null, id);
 const stack = (page: Page) => panel(page).locator('[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-surface')));
 
 async function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -1059,31 +1062,183 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
 // with five submenus, and the shortcut sheet groups its keys as the menus do. A key equivalent cannot be pressed through
 // Playwright (support/menu.ts), so the scene reads the installed menu and clicks its items by id. Free of how two surfaces
 // arrange: each surface is shown and hidden again before the next.
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B1 and B13): after each click,
+// where the keyboard is, polled: for Terminal, in its emulator's own input once its shell has drawn a prompt, and the
+// first time a typed command reaches the shell; for Review and Files, inside the surface (the tool's own answer, else
+// F6's stop for its tab); then in the composer once the same item hides the column, the column gone. Each item is
+// clicked once main reads it enabled. And the open-column path, View ▸ Terminal over a column open on Review. Edit and
+// Go hold this half's three rows in their places, and the sheet lists them under those groups.
 test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; View in groups; the sheet in the same groups', async ({ maws }) => {
-  const { page } = maws;
+  const { app, page } = maws;
   await size(maws, 1512, 982);
   await openSession(page);
-  const installed = await maws.app.evaluate(({ Menu }) => {
+  const installed = await app.evaluate(({ Menu }) => {
     const menu = Menu.getApplicationMenu()!;
-    const view = menu.items.find((item) => item.label === 'View')!.submenu!.items;
+    const rows = (label: string) => menu.items.find((item) => item.label === label)!.submenu!.items;
+    const shape = (label: string) => rows(label).map((item) => ({ id: item.id ?? null, type: item.type, label: item.label, accelerator: item.accelerator ?? null }));
     return {
       chords: ['surface.terminal', 'surface.review', 'surface.files'].map((id) => menu.getMenuItemById(id)?.accelerator ?? null),
-      submenus: view.filter((item) => item.type === 'submenu').map((item) => item.label),
+      submenus: rows('View').filter((item) => item.type === 'submenu').map((item) => item.label),
+      edit: shape('Edit'),
+      go: shape('Go'),
     };
   });
-  expect(installed).toEqual({ chords: ['Cmd+J', 'Cmd+Shift+D', 'Cmd+Shift+F'], submenus: ['Tabs', 'More surfaces', 'Comments', 'Appearance', 'Developer'] });
+  expect({ chords: installed.chords, submenus: installed.submenus }).toEqual({ chords: ['Cmd+J', 'Cmd+Shift+D', 'Cmd+Shift+F'], submenus: ['Tabs', 'More surfaces', 'Comments', 'Appearance', 'Developer'] });
+  // U6b-5a (B13): Attach selection to chat after the Edit menu's own items and a separator; Back and Forward lead Go
+  const read = (items: typeof installed.edit) => items.map(({ id, type, label, accelerator }) => (type === 'separator' ? type : { id, label, accelerator }));
+  expect(read(installed.edit.slice(-2)), JSON.stringify(installed.edit)).toEqual([
+    'separator',
+    { id: 'terminal.attachSelection', label: 'Attach selection to chat', accelerator: 'Cmd+Shift+L' },
+  ]);
+  expect(read(installed.go.slice(0, 3)), JSON.stringify(installed.go)).toEqual([
+    { id: 'go.back', label: 'Back', accelerator: 'Cmd+[' },
+    { id: 'go.forward', label: 'Forward', accelerator: 'Cmd+]' },
+    'separator',
+  ]);
+
+  // U6b-5a (B1): the keyboard follows each show and hide. The composer holds it first.
+  const composer = main(page).getByRole('textbox', { name: 'Message' });
+  const holds = (id: string) => page.evaluate((tool) => document.activeElement?.closest(`[data-region="panel"] [data-surface="${tool}"]`) != null, id);
+  const click = async (id: string) => {
+    await expect.poll(() => app.evaluate(({ Menu }, item) => Menu.getApplicationMenu()?.getMenuItemById(item)?.enabled ?? null, id), { message: `${id} enabled` }).toBe(true);
+    await menu(app, id);
+  };
+  // The terminal's shell has the keyboard: its emulator's input is focused once the shell has drawn a prompt (read
+  // through the page's terminals seam, the terminal drawing on a canvas).
+  const shellHasKeyboard = async (): Promise<string> => {
+    const element = panel(page).locator('[data-surface="terminal"] [data-terminal-id]:visible');
+    await expect(element).toHaveCount(1, { timeout: 15_000 });
+    const terminal = (await element.getAttribute('data-terminal-id'))!;
+    await expect.poll(async () => (await terminalLines(page, terminal))?.some((line) => line.trim() !== '') ?? false, { timeout: 15_000, message: 'a prompt' }).toBe(true);
+    await expect(element.locator('textarea.xterm-helper-textarea'), 'the shell has the keyboard').toBeFocused();
+    return terminal;
+  };
+  await composer.click();
+  await expect(composer).toBeFocused();
   for (const id of ['terminal', 'review', 'files']) {
-    await menu(maws.app, `surface.${id}`);
+    await click(`surface.${id}`);
     await expect.poll(() => stack(page), { message: `View ▸ ${id} shows it` }).toContain(id);
-    await menu(maws.app, `surface.${id}`);
+    if (id === 'terminal') {
+      const terminal = await shellHasKeyboard();
+      await page.keyboard.type('echo b1-$((40 + 2))');
+      await page.keyboard.press('Enter');
+      await expect.poll(async () => (await terminalLines(page, terminal))?.some((line) => line.trim() === 'b1-42') ?? false, { timeout: 10_000, message: 'what is typed goes to the shell' }).toBe(true);
+    } else await expect.poll(() => holds(id), { message: `View ▸ ${id} gives it the keyboard` }).toBe(true);
+    await click(`surface.${id}`);
     await expect.poll(() => stack(page), { message: `View ▸ ${id} again hides it` }).not.toContain(id);
+    await expect(sideColumn(page), `hiding ${id} hides the column`).toHaveCount(0);
+    await expect(composer, `hiding ${id} gives the composer the keyboard`).toBeFocused();
   }
-  await menu(maws.app, 'shortcuts.open');
+  // the open-column path: with the column open on Review, View ▸ Terminal shows the terminal and gives it the keyboard
+  await click('surface.review');
+  await expect.poll(() => holds('review'), { message: 'Review has the keyboard' }).toBe(true);
+  await click('surface.terminal');
+  await expect.poll(() => stack(page), { message: 'View ▸ Terminal over Review shows the terminal' }).toContain('terminal');
+  await shellHasKeyboard();
+  await click('surface.terminal');
+  await expect.poll(() => stack(page), { message: 'View ▸ Terminal again hides the column' }).not.toContain('terminal');
+  await expect(sideColumn(page), 'the column is hidden').toHaveCount(0);
+  await expect(composer, 'the composer has the keyboard back').toBeFocused();
+
+  await menu(app, 'shortcuts.open');
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
   await expect(sheet.getByRole('table', { name: 'View › Tabs' })).toBeVisible();
   await expect(sheet.getByRole('table', { name: 'View', exact: true }).getByRole('row', { name: /Terminal/ })).toContainText('⌘J');
+  // U6b-5a (B13): this half's three rows, each under its menu's group with its chord
+  await expect(sheet.getByRole('table', { name: 'Edit', exact: true }).getByRole('row', { name: /^Attach selection to chat/ })).toContainText(formatChord('Cmd+Shift+L'));
+  await expect(sheet.getByRole('table', { name: 'Go', exact: true }).getByRole('row', { name: /^Back/ })).toContainText(formatChord('Cmd+['));
+  await expect(sheet.getByRole('table', { name: 'Go', exact: true }).getByRole('row', { name: /^Forward/ })).toContainText(formatChord('Cmd+]'));
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveCount(0);
+  expect(maws.consoleErrors()).toEqual([]);
+});
+
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B7): Go ▸ Back and Forward,
+// clicked in main by id once the item reads enabled (a menu accelerator cannot be pressed through Playwright). Each step
+// waits on what it shows: the tab in front by its `aria-selected`, the page by its region, the Overview by its panel
+// drawn or gone, the ends by the items' `enabled`. A, then B, then Customize; back twice and forward twice; the Settings
+// dialog over B, which Back closes as it shows A; the Overview, out of it and into it again; a closed tab, which Back
+// never reopens; and a move between the panes of a split, which adds nothing: Back then shows the page before, not a
+// tab already in view.
+test('U6b-5: Back and Forward walk the places the window showed', async ({ maws }) => {
+  const { app, page } = maws;
+  await size(maws, 1512, 982);
+  const enabled = (id: 'go.back' | 'go.forward') => app.evaluate(({ Menu }, item) => Menu.getApplicationMenu()?.getMenuItemById(item)?.enabled ?? null, id);
+  const step = async (id: 'go.back' | 'go.forward') => {
+    await expect.poll(() => enabled(id), { message: `${id} enabled` }).toBe(true);
+    await menu(app, id);
+  };
+  const inFront = (title: string) => expect(mountedTab(page, title), `${title} in front`).toHaveAttribute('aria-selected', 'true');
+  const overview = page.getByRole('dialog', { name: 'Overview' });
+  const customize = pageRegion(page);
+
+  // A, B, Customize
+  await openSession(page);
+  await expect.poll(() => enabled('go.back'), { message: 'Back disabled at the first place' }).toBe(false);
+  await expect.poll(() => enabled('go.forward'), { message: 'Forward disabled at the last place' }).toBe(false);
+  await (await sidebarRow(page, 'Harness B')).click({ modifiers: ['Meta'] }); // a tab of its own
+  await inFront('Harness B');
+  await openAppDestination(page, 'Customize');
+
+  // back twice, then forward twice to the end
+  await step('go.back');
+  await expect(customize).toHaveCount(0);
+  await inFront('Harness B');
+  await step('go.back');
+  await inFront('Harness A');
+  await expect.poll(() => enabled('go.back'), { message: 'Back disabled at the first place' }).toBe(false);
+  await step('go.forward');
+  await inFront('Harness B');
+  await step('go.forward');
+  await expect(customize).toHaveAttribute('data-destination', 'customize');
+  await expect.poll(() => enabled('go.forward'), { message: 'Forward disabled at the last place' }).toBe(false);
+
+  // the Settings dialog over B: Back closes it and shows A
+  await step('go.back');
+  await expect(customize).toHaveCount(0);
+  await inFront('Harness B');
+  await menu(app, 'settings.open');
+  await expect(settingsDialog(page)).toBeVisible();
+  await step('go.back');
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await inFront('Harness A');
+
+  // the Overview over A: Back closes it and shows A; Forward opens it again over A
+  await menu(app, 'tab.overview');
+  await expect(overview).toBeVisible();
+  await step('go.back');
+  await expect(overview).toHaveCount(0);
+  await inFront('Harness A');
+  await step('go.forward');
+  await expect(overview).toBeVisible();
+  await inFront('Harness A');
+  await expect.poll(() => enabled('go.forward'), { message: 'Forward disabled at the last place' }).toBe(false);
+  await overview.getByRole('button', { name: 'Close Overview' }).click();
+  await expect(overview).toHaveCount(0);
+
+  // a closed tab leaves the record: Back never reopens it
+  await mainTab(page, 'Harness B').click();
+  await inFront('Harness B');
+  await expect.poll(() => enabled('go.back'), { message: 'Back enabled on B, after A' }).toBe(true);
+  await menu(app, 'tab.close');
+  await expect(mountedTab(page, 'Harness B'), 'B closed').toHaveCount(0);
+  await inFront('Harness A');
+  await expect.poll(() => enabled('go.back'), { message: 'Back cannot reopen the closed tab' }).toBe(false);
+
+  // a move between the panes of a split adds nothing: Back shows the page before, not the tab in the other pane
+  await openAppDestination(page, 'Customize');
+  await (await sidebarRow(page, 'Harness B')).click({ modifiers: ['Meta'] });
+  await expect(customize).toHaveCount(0);
+  await inFront('Harness B');
+  await menu(app, 'pane.split');
+  await expect(main(page).locator('[data-pane="1"]')).toBeVisible();
+  const front = () => activeMainTab(page).getAttribute('aria-label');
+  await expect.poll(front, { message: 'a tab in front of the focused pane' }).not.toBeNull();
+  const before = await front();
+  await menu(app, 'pane.focusOther');
+  await expect.poll(front, { message: 'the other pane’s tab in front' }).not.toBe(before);
+  await step('go.back');
+  await expect(customize, 'Back shows the page before, not a tab already in view').toHaveAttribute('data-destination', 'customize');
   expect(maws.consoleErrors()).toEqual([]);
 });
 

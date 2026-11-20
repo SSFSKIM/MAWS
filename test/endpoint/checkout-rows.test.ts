@@ -141,9 +141,9 @@ describe('the checkout’s offer rows (M4)', () => {
 
   it('leave unoffered what the spec keeps local or for later', () => {
     // UX wave U6e: the grant stays on the session's own machine, main's alone; U6f offers the outside save on the
-    // terminal's row (outside-rows.test.ts), and the choice made from another machine is its own act, never the grant.
+    // terminal's row (outside-rows.test.ts), and the choice made from another machine is its own act, never the grant; U6b-4a: Open in's admission.
     // UX wave U6b-4c (R1, Q6): the follow of a link is offered to no machine (REMOTE_UNAVAILABLE holds its row)
-    for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'files.grant', 'files.follow' /* UX wave U6b-4c: a link followed for this Mac's own page alone */, 'session.create', 'session.launch']) {
+    for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'files.grant', 'files.admit', 'files.follow' /* UX wave U6b-4c: a link followed for this Mac's own page alone */, 'session.create', 'session.launch']) {
       expect([name, Object.hasOwn(OFFERS.commands, name)]).toEqual([name, false]);
     }
     expect(REMOTE_UNAVAILABLE['files.follow']).toBe('Not on another machine yet: following a link to a file outside that session’s folders');

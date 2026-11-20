@@ -83,6 +83,11 @@ const SHELL_FOCUS_ACTIONS: ReadonlySet<ActionId> = new Set([
   'shortcuts.open', 'palette.open',
   'file.open', // UX wave U6e (decision 13): the chosen file opens beside the chat, so a browser page does not keep the keyboard
   'files.goToFile', // UX wave U6b-3b (decision 11): the keyboard goes to Files' field
+  // UX wave U6b-5a (M1, decision 1): a surface's key gives the tool it shows the keyboard, and the composer when it hides
+  // the column; all nine, since the six with no default chord can be bound
+  'surface.terminal', 'surface.review', 'surface.files', 'surface.browser', 'surface.source-control', 'surface.subagents',
+  'surface.background', 'surface.session-info', 'surface.ask-sheet',
+  'go.back', 'go.forward', // UX wave U6b-5a (M3): a step shows a tab, a page or the Overview, and a browser page keeps no keyboard over it
 ]);
 
 function dispatchAction(id: ActionId, arg: number | null, emit: Emit, menuWindow?: BaseWindow): void {

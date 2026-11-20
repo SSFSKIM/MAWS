@@ -3440,6 +3440,21 @@ describe('files saves outside the folders', () => {
         await expect(files.read({ appSessionId: B, path: out('unnamed.txt'), named: true })).rejects.toThrow(new Error(OUT));
       });
 
+      // the chain merge onto U6b-4a: Open in's admission asks the outside save's evidence through the same precheck, so a
+      // link record answers it exactly where a grant does, for this machine's own caller alone
+      it('admits for Open in (files.admit) a file whose link record admits a save, as a grant would; a read-only record admits none, nor does no record (the control)', async () => {
+        write(out('report.txt'), 'the report\n');
+        write(out('plain.txt'), 'plain\n');
+        links.add(A, out('notes.txt'), { file: guide() });
+        links.add(A, out('report.txt'), { file: guide() }, 'linked');
+        const files = followService();
+        expect(await files.admit({ appSessionId: A, path: out('notes.txt') })).toEqual({ path: out('notes.txt'), kind: 'file' });
+        await expect(files.admit({ appSessionId: A, path: out('report.txt') }), 'a read-only record').rejects.toThrow(new Error(OUT));
+        await expect(files.admit({ appSessionId: A, path: out('plain.txt') }), 'the control: no record').rejects.toThrow(new Error(OUT));
+        await expect(files.admit({ appSessionId: A, path: out('notes.txt') }, true), 'another machine').rejects.toThrow(new Error(OUT));
+        expect((await shown(files, A, out('report.txt'))).outside, 'the read-only record still admits its read').toMatchObject({ real: out('report.txt'), writable: false });
+      });
+
       it('reads a recorded file under MAWS’s own folders with own, and its save answers not writable (X4.5)', async () => {
         const settings = join(profile, 'settings.json');
         write(guide(), `${link(settings)}\n`);
@@ -4426,6 +4441,91 @@ describe('files saves outside the folders', () => {
         expect(followLog).toEqual([]);
         expect(await follow(files, out('notes.txt'))).toEqual(LINKED);
       });
+    });
+  });
+
+  // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): "Open in"'s admission. The
+  // working folder as U8c-2 admits it; a path by the outside save's rule; the real path, which main launches with.
+  describe('Open in’s admission (files.admit)', () => {
+    it('admits the working folder by its real path, and refuses one U8c-2 does not admit or that is gone', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A })).toEqual({ path: root, kind: 'folder' });
+      records.set(B, { ...record(root), agentFolder: { checkout: outside, cwd: outside, branch: null, linked: true } }); // no work tree of root's repository
+      await expect(files.admit({ appSessionId: B })).rejects.toThrow(new Error(OUT));
+      records.set(H, record(at('gone')));
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: 'Z' as AppSessionId })).rejects.toThrow('unknown app session: Z');
+    });
+
+    it('admits a file and a folder inside the folders by their real paths, through a link in the path as given too', async () => {
+      const files = outsideService();
+      expect(await files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+      expect(await files.admit({ appSessionId: A, path: inRoot('src') })).toEqual({ path: inRoot('src'), kind: 'folder' });
+      symlinkSync(inRoot('src'), at('src-link'));
+      records.set(B, record(at('src-link')));
+      expect(await files.admit({ appSessionId: B, path: join(at('src-link'), 'a.ts') })).toEqual({ path: inRoot('src', 'a.ts'), kind: 'file' });
+    });
+
+    it('admits outside the folders what a save would write (named, chosen, sent), and refuses a result’s name, an added record, an unnamed file and MAWS’s own', async () => {
+      await transcriptOf(A, [said(link(out('named.txt'))), called('t-mcp', 'mcp__docs__find', {}), answered('t-mcp', link(out('result.txt')))]);
+      index.library.reconcile({
+        artifacts: [artifact(1, out('sent.txt'), { kind: 'session', appSessionId: A }), artifact(2, out('added.txt'), { kind: 'human' })],
+        links: [linked(1, A), linked(2, A)],
+        spaces: [],
+      });
+      const files = outsideService();
+      await files.grant(A, out('chosen.txt'));
+      for (const name of ['named.txt', 'chosen.txt', 'sent.txt']) expect(await files.admit({ appSessionId: A, path: out(name) }), name).toEqual({ path: out(name), kind: 'file' });
+      for (const name of ['result.txt', 'added.txt', 'unnamed.txt']) await expect(files.admit({ appSessionId: A, path: out(name) }), name).rejects.toThrow(new Error(OUT));
+      records.set(H, record(base));
+      await expect(files.admit({ appSessionId: H, path: join(profile, 'settings.json') })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Review of 785e66161, finding 1: outside the session's roots the evidence is of one file, so only a regular file is
+    // admitted there; a directory only under a root (and a terminal is handed only a folder the daemon admitted)
+    it('refuses a directory outside the folders though the transcript names it, and the folder of a file admitted alone', async () => {
+      await transcriptOf(A, [said(link(join(outside, 'dirs'))), said(link(out('named.txt')))]);
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A, path: join(outside, 'dirs') })).rejects.toThrow(new Error(OUT));
+      expect(await files.admit({ appSessionId: A, path: out('named.txt') })).toEqual({ path: out('named.txt'), kind: 'file' });
+      await expect(files.admit({ appSessionId: A, path: outside })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Finding 3: the path is confirmed again after precheck's await, through an open with no link and the opened object's
+    // identity, as files.read is; the working folder too, against the real path the admission checked
+    it('refuses a path turned into a link after precheck, a file and a folder', async () => {
+      const files = outsideService();
+      points['before-open'] = () => swapToLink(inRoot('src', 'a.ts'), out('unnamed.txt'));
+      await expect(files.admit({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(new Error(OUT));
+      restore(inRoot('src', 'a.ts'));
+      points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      await expect(files.admit({ appSessionId: A, path: inRoot('src') })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses the working folder when it is replaced after its admission', async () => {
+      const files = outsideService();
+      points['before-open'] = () => swapToLink(root, outside);
+      await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
+      restore(root);
+      points['after-open'] = () => {
+        renameSync(root, `${root}.away`);
+        mkdirSync(root); // another directory at the same path once the first is open: the identity differs
+      };
+      await expect(files.admit({ appSessionId: A })).rejects.toThrow(new Error(OUT));
+    });
+
+    // Finding 4: MAWS's own folders are no working folder an app is handed
+    it('refuses a working folder that is one of MAWS’s own folders', async () => {
+      records.set(H, record(profile));
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: H })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('refuses a caller on another machine before anything is read', async () => {
+      const files = outsideService();
+      await expect(files.admit({ appSessionId: A }, true)).rejects.toThrow(new Error(OUT));
+      await expect(files.admit({ appSessionId: A, path: inRoot('README.md') }, true)).rejects.toThrow(new Error(OUT));
+      nothingAsked();
     });
   });
 });

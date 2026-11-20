@@ -423,38 +423,36 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
 // document keeps WR #12's reading column beside the conversation), then after Restore split, the panel back and the tier as it was in the split. What
 // the margin draws in each is asserted; the widths go to the report.
-type MarginReading = { host: number; body: number; scrollBox: number; page: number; conversation: number; tier: string | null; threads: number };
+// `current`: whether the app has read the layout measured here (ticket 760). The session space and the margin write the widths
+// they last drew from (`data-document-session-width`, `data-margin-measured`), each read the way the app reads it, in
+// the same evaluate as the reading.
+type MarginReading = { host: number; body: number; scrollBox: number; page: number; conversation: number; tier: string | null; threads: number; current: boolean };
 const marginOf = (scope: Locator): Promise<MarginReading> =>
   scope.evaluate((root) => {
     const scroll = root.querySelector<HTMLElement>('.ds-doc')!;
+    const space = root.querySelector<HTMLElement>('[data-document-session-width]');
+    const margin = root.querySelector<HTMLElement>('.doc-margin');
+    const scroller = margin?.parentElement;
+    const widths = margin && scroller && `${margin.closest<HTMLElement>('.doc-editor-body')?.clientWidth ?? scroller.clientWidth} ${scroller.clientWidth} ${margin.previousElementSibling!.getBoundingClientRect().width}`;
     return {
       host: Math.round(root.getBoundingClientRect().width),
       body: Math.round(root.querySelector('.doc-editor-body')!.getBoundingClientRect().width),
       scrollBox: scroll.clientWidth,
       conversation: Math.round(root.querySelector('[data-document-session-column]')?.getBoundingClientRect().width ?? 0),
       page: Math.round(root.querySelector('.ds-doc-page')!.getBoundingClientRect().width),
-      tier: root.querySelector('.doc-margin')?.getAttribute('data-margin-tier') ?? null,
+      tier: margin?.getAttribute('data-margin-tier') ?? null,
       threads: new Set(Array.from(root.querySelectorAll<HTMLElement>('[data-thread]')).map((el) => el.dataset.thread)).size,
+      current: (space === null || space.dataset.documentSessionWidth === String(space.clientWidth)) && (!widths || margin!.dataset.marginMeasured === widths),
     };
   });
-// A reading taken once it holds still: two consecutive polls (expect.poll's intervals, 100 ms and up) that agree. The tier
-// follows the widths through a ResizeObserver and a React commit, so a single read can land between them, the scroll box
-// already at its new width and the tier still the old layout's (measured: two frames at 1211 px drawn 'off' after ⌥⌘B).
-async function settled<T>(read: () => Promise<T>, message: string): Promise<T> {
-  let last: string | undefined;
+// A reading taken once the app has read the layout it is taken in (ticket 760): its `current`, polled until it holds. The
+// column and the tier follow the widths through a ResizeObserver, which reports only in a frame's rendering, so a read
+// can land after the layout changed and before the app has drawn from it (the docked panel's readings after ⌥⌘B). A
+// reading that merely holds still is no proof: a late frame holds the old drawing as still as a settled one. The wait
+// asks only that the app has read the layout, never what it drew from it, so what it drew is still the scene's to assert.
+async function settled<T extends { current: boolean }>(read: () => Promise<T>, message: string): Promise<T> {
   let value: T | undefined;
-  await expect
-    .poll(
-      async () => {
-        value = await read();
-        const now = JSON.stringify(value);
-        const same = now === last;
-        last = now;
-        return same;
-      },
-      { message, timeout: 10_000 },
-    )
-    .toBe(true);
+  await expect.poll(async () => (value = await read()), { message, timeout: 10_000 }).toMatchObject({ current: true });
   return value!;
 }
 

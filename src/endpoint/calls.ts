@@ -100,7 +100,7 @@ import { OFFERS, type Offers } from './offers';
 import { READER_ROUTED } from './readers';
 import { placeListings, policies, unsupported, type HeldSession } from './record-policy';
 import type { MachineSetup } from './policy';
-import type { Member, RecordSays } from './rl10/members';
+import { listingWithdrawn, type Member, type RecordSays } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
 import { namedSessions, projectSessions, SESSION_NAMING, type SessionSafe } from './session-safe';
@@ -682,6 +682,8 @@ export class Calls {
       // U9: a lane B session's listing follows its record, as the one the hub keeps: none while archived, its title
       const says = m.lane === 'B' ? (this.ctx.recordSays?.(listingId) ?? null) : null;
       if (says?.archived === true) continue;
+      // The plan of 2026-11-18, Decision Log 18: a lane A member whose state word withdraws its listing gets none here
+      if (listingWithdrawn(m)) continue;
       const record = await this.ctx.recordFor({
         session: listingId,
         project: m.project,
