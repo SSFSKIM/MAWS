@@ -89,6 +89,7 @@ describe('opening an artifact', () => {
     expect(asked.result.current).toBeNull();
     act(() => openArtifactTab(A, { block: 'b7' }));
     expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
+    expect(other.result.current, 'the other machine’s copy does not take the place').toBeNull();
     expect(takeOpenRequest(asked.result.current!.serial)).toBe(true);
     expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${A}`);
   });
@@ -174,10 +175,12 @@ describe('showing the main tab that already shows an artifact', () => {
     resetOpenRequests();
     openArtifactTab(A);
     const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
+    const other = renderHook(() => useOpenRequest(A, OTHER_MACHINE, 'main'));
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A));
     expect(asked.result.current).toBeNull();
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A, { block: 'b7' }));
     expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
+    expect(other.result.current, 'the other machine’s copy does not take the place').toBeNull();
   });
 
   it('for a session on another machine looks for that machine’s tab, and takes no tab of the same id on another machine', () => {

@@ -47,9 +47,9 @@ export function withdrawVersionRequest(artifactId: string, machine: MachineRef, 
   if (request?.artifactId === artifactId && request.machine === machine && request.surface === surface) store.setState({ request: null });
 }
 
-// The request an editor of `artifactId` on `surface` should take, or null.
+// The request an editor of this artifact copy on `surface` should take, or null.
 export function useOpenRequest(artifactId: string, machine: MachineRef, surface: EditorHostScope['surface']): OpenRequest | null {
-  return useStore(store, (s) => (s.request?.artifactId === artifactId && s.request.surface === surface ? s.request : null));
+  return useStore(store, (s) => (s.request?.artifactId === artifactId && s.request.machine === machine && s.request.surface === surface ? s.request : null));
 }
 
 // Takes the request (once): true when it was still the open request.
