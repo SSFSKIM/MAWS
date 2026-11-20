@@ -282,6 +282,8 @@ describe('a long transcript is read in windows', () => {
     const whole = [...(await pagesBefore(newest.earlier!)), ...newest.events];
     // the earlier process ended before the launch: the seam's page closes what it left open, as a holder-less read does
     const closed = (events: readonly SessionEvent[], upTo: number) => {
+      // after an exit the log holds (this holder-less read's own, at its end), none again
+      if (whole[upTo - 1]!.kind === 'process.exited') return expect(ids(events)).toEqual(ids(whole.slice(0, upTo)));
       const closer = events.at(-1)!;
       expect(closer).toMatchObject({ kind: 'process.exited', reason: 'unknown', at: whole[upTo - 1]!.at, seq: null, agentId: null });
       expect(ids(events.slice(0, -1))).toEqual(ids(whole.slice(0, upTo)));

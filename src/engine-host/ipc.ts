@@ -18,6 +18,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
+import type { SessionEvent } from '@shared/graph/events'; // UX wave, ticket 777
 import { utf8Length } from '@shared/graph/history-window'; // UX wave, ticket 777
 import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, U4A_SESSION_COMMANDS /* UX wave U4a */, EventsSnapshot } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
@@ -187,7 +188,7 @@ export interface EngineIpcDeps {
   diskEvents?: (appSessionId: AppSessionId, request: HistoryRequest, quiet: boolean) => Promise<HistoryPage>;
   // UX wave, ticket 777: the cursor before a launch's seam in the session's transcript (FsService.historySeam), given the
   // launch's message uuids in order; null when the transcript holds nothing before it. Absent, a live answer has none.
-  diskSeam?: (appSessionId: AppSessionId, journal: readonly MessageUuid[]) => Promise<EventId | null>;
+  diskSeam?: (appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[]>) => Promise<EventId | null>;
   // C4 end
   // W7: whether a foreign process holds the app session's engine session now, or held it at or after `since` (C4's
   // registry); absent, never
@@ -428,13 +429,17 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // UX wave, ticket 777: the stream is one launch's, and the session's history from before it is in the transcript. An
   // answer that starts at the launch's first row carries the cursor whose pages are the transcript's rows before the
   // seam, where the launch's messages begin in it (Follow.seamCursor), so a window pages up from the launch into them
-  // as it pages any transcript; none of the launch's own messages is on them. A page the journal could not give back
-  // in full does not start there, nor can a page cut short that names no message of the launch place the seam; and a
-  // bounded answer carries the cursor only within its bound. A failed read of the transcript costs only the cursor.
+  // as it pages any transcript; none of the launch's own messages is on them. The launch's messages are the page's and
+  // those the stream took after it, read once the transcript has been. A page the journal could not give back in full
+  // does not start there, nor can a page cut short that names no message of the launch place the seam; and a bounded
+  // answer carries the cursor only within its bound. A failed read of the transcript costs only the cursor.
+  const uuidsOf = (events: readonly SessionEvent[]): MessageUuid[] => events.flatMap((event) => (event.agentId === null ? (messageOf(event) ?? []) : []));
   const withEarlier = async (id: AppSessionId, page: EventsSnapshot, maxBytes: number | null): Promise<EventsSnapshot> => {
     if (!deps.diskSeam || page.historyUnavailable === true) return page;
-    const journal = [...new Set(page.events.flatMap((event) => (event.agentId === null ? (messageOf(event) ?? []) : [])))];
-    if (journal.length === 0 && !page.complete) return page;
+    const held = uuidsOf(page.events);
+    if (held.length === 0 && !page.complete) return page;
+    const stream = streamOf(id);
+    const journal = async (): Promise<readonly MessageUuid[]> => [...held, ...uuidsOf((await stream.snapshot(page.lastSeq, null).catch(() => null))?.events ?? [])];
     const earlier = await deps.diskSeam(id, journal).catch(() => null);
     if (earlier === null) return page;
     const answer = { ...page, earlier };

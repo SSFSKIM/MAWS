@@ -644,13 +644,12 @@ describe('session.events of a live launch reaches the transcript before it (tick
     transport!.push({ type: 'assistant', message: { id: 'msg_7', model: 'm', role: 'assistant', content: [{ type: 'text', text: 'reply 7' }] }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'a7' });
     await fixture.appendLines(path, turn.lines);
     await until(() => host.events(id).some((e) => e.kind === 'user.message' && e.messageUuid === 'u7'), 'the launch\'s prompt');
-    let second = first;
+    const followed = async () => (await service.eventsSnapshot(id, null, {}, true)).events.some((e) => e.kind === 'user.message' && e.messageUuid === 'u7');
     const deadline = Date.now() + 5_000;
-    while (second.earlier === first.earlier && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50)); // the transcript's follow reads the appended turn
-      second = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
-    }
-    expect(second.earlier).not.toBe(first.earlier);
+    while (!(await followed()) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50)); // the transcript's follow reads the appended turn
+    expect(await followed()).toBe(true);
+    const second = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(second.earlier, 'the seam is where it was: just before the launch').toBe(first.earlier);
     const older = await pagesBefore(second.earlier!);
     expect(prompts(older)).toEqual(before);
     expect(prompts(second.events)).toEqual(['prompt 7']);

@@ -166,7 +166,10 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
     return { ok: true, value } as Result;
   }
 
-  // A live launch: budgeted pages from `afterSeq` while it says more follows, assembled into one answer.
+  // A live launch: budgeted pages from `afterSeq` while it says more follows, assembled into one answer. UX wave, ticket
+  // 777: the first page of a read from the launch's first row carries the cursor into the transcript before the launch,
+  // which the answer keeps.
+  const earlier = (first.value as Events).earlier;
   const total = typeof input.limit === 'number' ? input.limit : null;
   const events: SessionEvent[] = [];
   let cursor = typeof input.afterSeq === 'number' ? input.afterSeq : 0;
@@ -184,7 +187,7 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
     lost ||= page.historyUnavailable === true;
     const full = total !== null && events.length >= total;
     if (page.complete || page.lastSeq <= cursor || full) {
-      const value: Events = { events, lastSeq: Math.max(cursor, page.lastSeq), complete: page.complete && !full, ...(lost && { historyUnavailable: true as const }) };
+      const value: Events = { events, lastSeq: Math.max(cursor, page.lastSeq), complete: page.complete && !full, ...(lost && { historyUnavailable: true as const }), ...(earlier !== undefined && { earlier }) };
       for (const [launch, at] of gaps) deps.gap(launch, at);
       return { ok: true, value } as Result;
     }
@@ -219,6 +222,7 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
   let lastSeq = cursor ?? 0;
   let size = Math.min(most, total ?? most);
   let lost = false;
+  let earlier: Events['earlier']; // ticket 777: the first page's cursor into the transcript before the launch
   let leftOut: Array<[string, { seq: number }] | null> = []; // since the last page that crossed; null: no launch to name
   for (;;) {
     const read = await pageOver(link, count, { appSessionId: app, afterSeq: cursor, limit: size, ...(agentId !== undefined && { agentId }) });
@@ -257,6 +261,7 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
       deps.tooLarge('newest');
       return unavailable();
     }
+    if (cursor === null) earlier ??= page.earlier;
     events.push(...page.events);
     lost ||= page.historyUnavailable === true;
     const advanced = page.lastSeq > (cursor ?? 0) || (cursor === null && page.events.length > 0);
@@ -264,7 +269,7 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
     const full = total !== null && events.length >= total;
     // a subagent's slice of a page may hold none of its events while the launch reads on
     if (page.complete || (page.events.length === 0 && agentId === undefined) || !advanced || full) {
-      const value: Events = { events, lastSeq, complete: page.complete && !full, ...(lost && { historyUnavailable: true as const }) };
+      const value: Events = { events, lastSeq, complete: page.complete && !full, ...(lost && { historyUnavailable: true as const }), ...(earlier !== undefined && { earlier }) };
       return { ok: true, value } as Result;
     }
     cursor = page.lastSeq;

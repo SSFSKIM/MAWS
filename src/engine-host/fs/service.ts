@@ -422,11 +422,14 @@ export class FsService {
   // UX wave, ticket 777: the cursor before a live launch's seam in its session's transcript (Follow.seamCursor), read
   // through the quiet follow its older pages come from, given the backfill the same SNAPSHOT_WAIT_MS a window is; null
   // when the transcript holds nothing before the seam or was not read through in that time, and for a replay.
-  async historySeam(appSessionId: AppSessionId, journal: readonly MessageUuid[]): Promise<EventId | null> {
+  // `journal`, the launch's message uuids, is read once the transcript has been: a message of the launch it already
+  // holds has reached the stream by then, so the seam is never past it.
+  async historySeam(appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[]>): Promise<EventId | null> {
     if (this.replays?.snapshot(appSessionId)) return null;
     const follow = await this.historyFollow(appSessionId, true);
     await backfilled(follow);
-    return follow.seamCursor(journal);
+    if (!follow.backfillDone) return null;
+    return follow.seamCursor(await journal());
   }
 
   // The session's own follow, started if none follows it (quiet: a live process writes the transcript, and only its
