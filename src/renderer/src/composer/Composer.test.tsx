@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums'; // UX wave U6b-5a
 import type { OrgKey } from '@shared/machine/org-key'; // P5 O7 M4
 import type { SessionRecord } from '@shared/graph/session';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -64,7 +65,9 @@ import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX w
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, hardBreak, mentionNode, paragraph, textNode } from './editor/doc';
+import { docOf, hardBreak, mentionNode, paragraph, textNode, type ComposerDoc } from './editor/doc';
+import { attachPasted, type AttachOutcome } from './attach-pasted'; // UX wave U6b-5a
+import { attachedIn } from '../test-support/attach'; // UX wave U6b-5a
 import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
 import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
@@ -2082,6 +2085,32 @@ describe('a lane B session on another machine', () => {
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
   });
 
+  // UX wave U6b-5a (Decision Log 14 (v)): an attach to a spawned session's box waits for its first send, which goes as
+  // handed; the block is never sent without a press. The box cannot send until the session's send is available.
+  const docNow = () => (editorOf().editor as unknown as { getJSON(): ComposerDoc }).getJSON();
+  it('an attach to a spawned session waits for its first send, which goes without the block; the box takes the block after', async () => {
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], []));
+    queueFirstSend(R);
+    act(() => applyRemoteSession(remoteSessionState(R, { controls: { ...ALL_OPEN, send: { available: false, reason: 'not yet' } } })));
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('read this'));
+    const watch: { outcome: AttachOutcome | null } = { outcome: null };
+    void attachPasted(R, 'npm test').then((said) => (watch.outcome = said));
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 300))));
+    expect(attachedIn(docNow())).toEqual([]); // not put in before the first send
+    expect(remote.invoked('session.send')).toEqual([]);
+    expect(watch.outcome).toBeNull();
+    act(() => applyRemoteSession(remoteSessionState(R))); // the session can take a message now
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(watch.outcome).not.toBeNull());
+    expect(['taken', 'added']).toContain(watch.outcome!.kind);
+    expect(attachedIn(docNow())).toHaveLength(1);
+    expect(editorOf().editor.getText()).not.toContain('read this');
+    expect(remote.invoked('session.send')).toHaveLength(1);
+  });
+
   // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload
   // is named in the send's `uploads` (main drops them for a machine that doesn't read them), its mention kept in the text
   const dropPdf = async () => {
@@ -2759,5 +2788,179 @@ describe('a Stop that fails says so (S-01)', () => {
       await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
       expect(stops.calls.filter((c) => c === 'invoke session.interrupt'), 'nothing sent to an offline machine').toEqual([]);
     });
+  });
+});
+
+// UX wave U6b-5a (M1, decision 5; sequence S4): a change of the permission mode with ⇧Tab is said once per press, in the
+// composer's polite live region, with the mode the chip shows once the change is answered; a refusal says the mode in
+// force; a later press supersedes an earlier one; a press while the chip takes no change says nothing.
+describe('the mode said aloud', () => {
+  type ModeAnswer = { effective: PermissionMode; refusal: AutoModeRefusalCode | null; error: string | null };
+  let held: ((value: unknown) => void)[] = [];
+  // `session.setPermissionMode` held open until the test answers it; every other command as the suite's fake answers it
+  beforeEach(() => {
+    held = [];
+    const bridge = window.maws!;
+    window.maws = {
+      ...bridge,
+      invoke: ((name: string, input: unknown, target?: unknown) =>
+        name === 'session.setPermissionMode' ? new Promise<unknown>((resolve) => held.push(resolve)) : (bridge.invoke as (n: string, i: unknown, t?: unknown) => Promise<unknown>)(name, input, target)) as PreloadBridge['invoke'],
+    };
+  });
+  const answer = (nth: number, value: ModeAnswer) => act(async () => {
+    held[nth]!({ ok: true, value });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const taken = (effective: PermissionMode): ModeAnswer => ({ effective, refusal: null, error: null });
+  const mode = (id: AppSessionId, effective: PermissionMode, requested: PermissionMode = effective) => act(() => live(id, { status: { permissionMode: { requested, effective, refusal: null } } }));
+  const region = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLElement>('[data-mode-announcement]')!;
+  const said = (index: 0 | 1 = 0) => region(index).textContent;
+  const shiftTab = async (index: 0 | 1 = 0) => {
+    act(() => editorOf(index).focus()); // the chord is the box's: it answers only with the keyboard in it
+    await key(editorOf(index), { key: 'Tab', code: 'Tab', shiftKey: true });
+  };
+
+  it('is one polite region, visually hidden and empty, mounted with the composer', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    expect(composerOf(0).querySelectorAll('[data-mode-announcement]')).toHaveLength(1);
+    expect(region().getAttribute('aria-live')).toBe('polite');
+    expect(said()).toBe('');
+  });
+
+  it('the answer before the chip’s mode: said when the chip shows it', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    expect(held).toHaveLength(1);
+    await answer(0, taken('acceptEdits'));
+    expect(said(), 'the chip still shows Manual').toBe('');
+    mode(A, 'acceptEdits');
+    await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
+  });
+
+  it('the chip’s mode before the answer: said when the answer comes', async () => {
+    mode(A, 'acceptEdits');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    mode(A, 'plan');
+    expect(said(), 'not answered yet').toBe('');
+    await answer(0, taken('plan'));
+    await waitFor(() => expect(said()).toBe('Permission mode: Plan'));
+  });
+
+  it('a refused answer says the mode in force at once', async () => {
+    mode(A, 'plan');
+    mount([{ index: 0, id: A }]);
+    await shiftTab(); // asks for Auto
+    await answer(0, { effective: 'plan', refusal: 'auto_mode_model', error: 'model does not support auto' });
+    expect(said()).toBe('Permission mode: Plan');
+  });
+
+  it('a taken answer naming another mode than the one asked (a fallback): that mode is said once the chip shows it', async () => {
+    mode(A, 'plan');
+    mount([{ index: 0, id: A }]);
+    await shiftTab(); // asks for Auto
+    await answer(0, taken('default')); // the engine set the fallback, and its answer says so
+    expect(said()).toBe('');
+    mode(A, 'default', 'auto');
+    await waitFor(() => expect(said()).toBe('Permission mode: Manual'));
+  });
+
+  it('a report of another mode before the answer reaches the chip is not this press’s', async () => {
+    mode(A, 'acceptEdits');
+    mount([{ index: 0, id: A }]);
+    await shiftTab(); // asks for Plan
+    mode(A, 'default'); // a report that is not this press's answer (a change made elsewhere)
+    await answer(0, taken('plan'));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(said(), 'Manual is not what the press changed').toBe('');
+    mode(A, 'plan');
+    await waitFor(() => expect(said()).toBe('Permission mode: Plan'));
+  });
+
+  it('a press after the prior one was answered, before the chip shows its mode: both are said', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    await answer(0, taken('acceptEdits'));
+    await shiftTab(); // the chip still shows Manual: it asks for Accept edits again
+    expect(held).toHaveLength(2);
+    mode(A, 'acceptEdits');
+    await waitFor(() => expect(said(), 'the first press, answered, is not superseded').toBe('Permission mode: Accept edits'));
+    const first = region().firstChild;
+    await answer(1, taken('acceptEdits'));
+    await waitFor(() => expect(region().firstChild).not.toBe(first));
+    expect(said()).toBe('Permission mode: Accept edits');
+  });
+
+  it('two presses before the first is answered: only the last is said', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    await shiftTab();
+    expect(held).toHaveLength(2);
+    await answer(0, { effective: 'default', refusal: null, error: 'refused for the test' }); // the first, superseded
+    expect(said(), 'a superseded press says nothing, even refused').toBe('');
+    await answer(1, taken('acceptEdits'));
+    mode(A, 'acceptEdits');
+    await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
+  });
+
+  // Decision Log 10 (vii), as amended: presses answered with one mode before the chip shows it are one change heard once
+  it('two presses answered with the same mode before the chip shows it are said once', async () => {
+    mode(A, 'default');
+    mount([{ index: 0, id: A }]);
+    const written: Node[] = [];
+    const observer = new MutationObserver((records) => records.forEach((record) => written.push(...record.addedNodes)));
+    observer.observe(region(), { childList: true, subtree: true });
+    try {
+      await shiftTab();
+      await answer(0, taken('acceptEdits'));
+      await shiftTab(); // the chip still shows Manual: Accept edits asked again
+      await answer(1, taken('acceptEdits'));
+      expect(said(), 'both answered, the chip not yet').toBe('');
+      mode(A, 'acceptEdits');
+      await waitFor(() => expect(said()).toBe('Permission mode: Accept edits'));
+      mode(A, 'acceptEdits'); // a render more: nothing is left waiting to be said
+      await act(async () => {});
+      expect(written.filter((node) => node.nodeName === 'SPAN'), 'one sentence').toHaveLength(1);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  it('a repeat of one sentence is written again', async () => {
+    mode(A, 'plan');
+    mount([{ index: 0, id: A }]);
+    await shiftTab();
+    await answer(0, { effective: 'plan', refusal: 'auto_mode_model', error: 'model does not support auto' });
+    expect(said()).toBe('Permission mode: Plan');
+    const first = region().firstChild;
+    await shiftTab();
+    await answer(1, { effective: 'plan', refusal: 'auto_mode_model', error: 'model does not support auto' });
+    expect(said()).toBe('Permission mode: Plan');
+    expect(region().firstChild, 'a new node, which a screen reader hears again').not.toBe(first);
+  });
+
+  it('a press while the chip takes no change asks nothing and says nothing; the same reader hears a press that changes the mode', async () => {
+    live(A, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 4242 } } }); // a terminal session: its mode is the terminal's
+    act(() => applyLaneAState(A, laneAState(A, { turn: { running: false, unknown: false } })));
+    mode(B, 'default');
+    try {
+      mount([{ index: 0, id: A }, { index: 1, id: B }]);
+      await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).not.toBe('Permission mode'));
+      await shiftTab(0);
+      expect(held).toHaveLength(0);
+      expect(said(0)).toBe('');
+      await shiftTab(1);
+      await answer(0, taken('acceptEdits'));
+      mode(B, 'acceptEdits');
+      await waitFor(() => expect(said(1)).toBe('Permission mode: Accept edits'));
+      expect(said(0)).toBe('');
+    } finally {
+      resetLaneAStore();
+    }
   });
 });

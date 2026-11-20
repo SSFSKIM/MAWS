@@ -3,7 +3,7 @@
 import { StrictMode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { HostState, PtyInfo } from '@shared/ipc/schema';
@@ -113,9 +113,12 @@ const registry = vi.hoisted(() => {
 });
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
+// UX wave U6b-5a (M2): the menu's fifth item hands the terminal to the attach (./attach.test.ts holds what it does)
+vi.mock('./attach', () => ({ attachText: vi.fn(async () => {}) }));
 
 const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, REMOTE_ATTACH_TIMEOUT_MS, REMOTE_LIST_TIMEOUT_MS, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
 const { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } = await import('@shared/machine/remote-pending');
+const { attachText } = await import('./attach');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -945,7 +948,7 @@ describe('terminal view', () => {
     expect(ctx.close).toHaveBeenCalled();
   });
 
-  it('offers Copy, Paste, Select all and Clear from its context menu', async () => {
+  it('offers Copy, Paste, Select all and Clear from its context menu, then Attach selection to chat', async () => {
     const clipboard = { writeText: vi.fn(async () => {}), readText: vi.fn(async () => 'from the clipboard') };
     Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
     const state = newState();
@@ -953,7 +956,8 @@ describe('terminal view', () => {
     const open = () => fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
     open();
     const menu = screen.getByRole('menu', { name: 'terminal' });
-    expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(['Copy', 'Paste', 'Select all', 'Clear']);
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(['Copy', 'Paste', 'Select all', 'Clear', 'Attach selection to chat']);
+    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1); // the four a hand knows, then the attach after a separator
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
     expect(clipboard.writeText).toHaveBeenCalledWith('picked');
     expect(screen.queryByRole('menu', { name: 'terminal' })).toBeNull();
@@ -966,6 +970,39 @@ describe('terminal view', () => {
     open();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
     expect(registry.renderer.clear).toHaveBeenCalled();
+    open();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Attach selection to chat' }));
+    expect(screen.queryByRole('menu', { name: 'terminal' })).toBeNull();
+    await vi.waitFor(() => expect(attachText).toHaveBeenCalledWith(A, 'picked')); // the attach's module is loaded at the press
+  });
+
+  // The attach's module is loaded at the press (Decision Log 20): what is attached is what was selected at the press, in
+  // the session of the terminal pressed, whatever the selection or the terminal does while the module loads.
+  it('attaches the selection the press saw, though it changes before the attach’s module has loaded', async () => {
+    const state = newState();
+    render(<View state={state} ctx={context()} />);
+    fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Attach selection to chat' }));
+    const get = registry.terminals.get.getMockImplementation()!;
+    onTestFinished(() => {
+      registry.renderer.getSelection.mockImplementation(() => 'picked');
+      registry.terminals.get.mockImplementation(get);
+    });
+    registry.renderer.getSelection.mockImplementation(() => 'selected after the press');
+    registry.terminals.get.mockImplementation(() => undefined); // and the terminal gone
+    await vi.waitFor(() => expect(attachText).toHaveBeenCalledWith(A, 'picked'));
+    expect(attachText).toHaveBeenCalledTimes(1);
+  });
+
+  // UX wave U6b-5a (decision 6): with nothing selected the menu's item is drawn disabled; the chord attaches the screen
+  it('draws Attach selection to chat disabled while nothing is selected', () => {
+    registry.renderer.hasSelection.mockReturnValue(false);
+    onTestFinished(() => void registry.renderer.hasSelection.mockReturnValue(true));
+    render(<View state={newState()} ctx={context()} />);
+    fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    expect((screen.getByRole('menuitem', { name: 'Attach selection to chat' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('menuitem', { name: 'Copy' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('menuitem', { name: 'Paste' }) as HTMLButtonElement).disabled).toBe(false); // the control: an item that needs none
   });
 
   it('leaves composing Escape to the input method while its context menu is open', () => {

@@ -47,9 +47,11 @@ import { useTreeState } from './tree-state';
 
 // ---- the request for the keyboard ---------------------------------------------------------------------------------------
 
-export type KeyboardRequest = { into: 'filter'; tabId: string } | { into: 'file'; key: string };
+// UX wave U6b-5a (M1, decision 4): `tree`, a Files tab's tree, which a surface's key asks for and whose rows are drawn only
+// once the list has measured itself.
+export type KeyboardRequest = { into: 'filter'; tabId: string } | { into: 'file'; key: string } | { into: 'tree'; tabId: string };
 
-const takerOf = (request: KeyboardRequest): string => (request.into === 'filter' ? `filter\n${request.tabId}` : `file\n${request.key}`);
+const takerOf = (request: KeyboardRequest): string => (request.into === 'file' ? `file\n${request.key}` : `${request.into}\n${request.tabId}`);
 
 let pending: { taker: string; made: number } | null = null;
 let made = 0;
@@ -100,8 +102,8 @@ function drop(event: Event): void {
   if (pending !== null) end(`the person’s ${event.type}`);
 }
 
-/** Replaces any earlier request; the next keydown or pointerdown anywhere drops it. */
-export function requestKeyboard(request: KeyboardRequest): void {
+/** Replaces any earlier request; the next keydown or pointerdown anywhere drops it. Answers the request's number. */
+export function requestKeyboard(request: KeyboardRequest): number {
   made += 1;
   if (pending !== null) traceKeyboard(pending.taker, 'ended', taken('replaced'));
   pending = { taker: takerOf(request), made };
@@ -109,6 +111,12 @@ export function requestKeyboard(request: KeyboardRequest): void {
   window.addEventListener('keydown', drop, true);
   window.addEventListener('pointerdown', drop, true);
   tell();
+  return made;
+}
+
+/** UX wave U6b-5a: ends the request of this number while it still waits (the showing that made it has ended). */
+export function withdrawKeyboard(number: number): void {
+  if (pending?.made === number) end('withdrawn: the showing that made it ended');
 }
 
 /**

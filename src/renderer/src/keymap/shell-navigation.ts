@@ -5,7 +5,8 @@ import { currentSet } from '../stores/layout-model';
 import { focusPaneElement } from '../main/pane-dom';
 import { showSidebar } from '../app/shell-view';
 
-function available(element: HTMLElement): boolean {
+// UX wave U6b-5a (M1, Interfaces §B): exported, for the attach of a terminal's selection (M2).
+export function available(element: HTMLElement): boolean {
   for (let at: HTMLElement | null = element; at !== null; at = at.parentElement) {
     if (at.hidden || at.hasAttribute('inert') || at.getAttribute('aria-hidden') === 'true') return false;
     const style = getComputedStyle(at);
@@ -79,10 +80,8 @@ function regionStops(): FocusStop[] {
         const tabs = strip && stop(strip);
         const selected = strip?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
         if (row && tabs) result.push({ root: row, target: selected && available(selected) ? selected : tabs.target });
-        const surface = group.querySelector<HTMLElement>('[data-surface]');
-        const content = surface?.querySelector<HTMLElement>('[role="tabpanel"]');
-        const next = content && stop(content);
-        if (surface && next) result.push({ root: surface, target: next.target });
+        const next = contentStop(group);
+        if (next) result.push(next);
       }
     } else {
       const next = stop(panel.querySelector<HTMLElement>('[data-panel-content]') ?? panel);
@@ -90,6 +89,37 @@ function regionStops(): FocusStop[] {
     }
   }
   return result;
+}
+
+// A side group's content stop: its surface, entered at the first control of its tool's content, else the content.
+function contentStop(group: HTMLElement): FocusStop | null {
+  const surface = group.querySelector<HTMLElement>('[data-surface]');
+  const content = surface?.querySelector<HTMLElement>('[role="tabpanel"]');
+  const next = content && stop(content);
+  return surface && next ? { root: surface, target: next.target } : null;
+}
+
+// The surface of the side group whose strip has this tab selected, while the side column is on screen; else null.
+export function sideSurfaceOf(tabId: string): HTMLElement | null {
+  const panel = document.getElementById('region-panel');
+  if (!panel || !available(panel)) return null;
+  for (const group of panel.querySelectorAll<HTMLElement>('section[data-side-group]')) {
+    const selected = group.querySelector<HTMLElement>('[role="tablist"] [role="tab"][aria-selected="true"]')?.closest<HTMLElement>('[data-tab-id]');
+    if (selected?.dataset.tabId === tabId) return group.querySelector<HTMLElement>('[data-surface]');
+  }
+  return null;
+}
+
+// UX wave U6b-5a (M1, decision 2): F6's stop of the side group that shows this tab, where a surface's key leaves the
+// keyboard when the tool takes none itself. False, and nothing moved, when no group shows the tab or a dialog holds the
+// keyboard (as F6 itself).
+export function focusSurfaceStop(tabId: string): boolean {
+  if (modalOwnsFocus()) return false;
+  const group = sideSurfaceOf(tabId)?.closest<HTMLElement>('section[data-side-group]');
+  const next = group ? contentStop(group) : null;
+  if (!next) return false;
+  focus(next.target);
+  return true;
 }
 
 export function focusRegion(delta: 1 | -1): void {

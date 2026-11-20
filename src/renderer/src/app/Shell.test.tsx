@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '../ipc/query';
 import userEvent from '@testing-library/user-event';
@@ -37,7 +37,7 @@ import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
-import { registerPanelTool } from '../panel/host';
+import { registerPanelTool, usePanelHost } from '../panel/host';
 import { surfaceTabs } from '../panel/surface-model';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
@@ -1085,14 +1085,26 @@ describe('a page beside the sidebar', () => {
     const inView = (toolId: string) => !useLayout.getState().regions.panel.collapsed && surfaceTabs(useLayout.getState(), A).some((tab) => tab.toolId === toolId);
     beforeEach(() => offs.push(registerShellActions(fakeClient({}).client)));
 
-    it('a surface’s key for a tool in view behind the page leaves the page, and the tool stays in view', () => {
+    it('a surface’s key for a tool in view behind the page leaves the page, and the tool stays in view', async () => {
       openSurface('terminal');
       renderShell();
       expect(inView('terminal')).toBe(true);
       act(() => useLayout.getState().openDestination(PAGE));
+      const asked = usePanelHost.getState().focus;
+      const inColumn = () => document.getElementById('region-panel')?.contains(document.activeElement) ?? false;
       act(() => runAction('surface.terminal'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('terminal')).toBe(true);
+      // UX wave U6b-5a (M1, decision 3): leaving the page is all it does: no tool is asked for the keyboard, and the
+      // keyboard is where the page's close leaves it, outside the side column, also once two frames have passed
+      expect(usePanelHost.getState().focus).toBe(asked);
+      await act(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      expect(inColumn()).toBe(false);
+      // the control: with no page, hidden and shown again by the same key, the tool is asked and the keyboard goes in
+      act(() => runAction('surface.terminal'));
+      act(() => runAction('surface.terminal'));
+      expect(usePanelHost.getState().focus).not.toBe(asked);
+      await waitFor(() => expect(inColumn()).toBe(true));
     });
 
     it('a surface’s key for a tool not in view leaves the page and shows the tool', () => {
@@ -1103,6 +1115,9 @@ describe('a page beside the sidebar', () => {
       act(() => runAction('surface.files'));
       expect(useLayout.getState().destination).toBeNull();
       expect(inView('files')).toBe(true);
+      // UX wave U6b-5a (M1, decision 3): a tool the key brings into view from behind a page is asked for the keyboard
+      const files = surfaceTabs(useLayout.getState(), A).find((tab) => tab.toolId === 'files')!;
+      expect(usePanelHost.getState().focus[files.id]).toBeGreaterThan(0);
     });
 
     it('Session cards with the card column placed behind the page leaves the page, and the column is still shown', () => {

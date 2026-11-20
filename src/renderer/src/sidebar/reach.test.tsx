@@ -134,7 +134,7 @@ describe('a listed lane B row’s menu order', () => {
     fill([mine('m', { title: 'Mine' })]);
     render(<Sidebar />);
     expect(actsOf(true)).toEqual(['Rename…', 'Fork', 'Archive']);
-    expect(within(await menuOf('Mine')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', ...actsOf(true), 'Open in (the folder is on studio-mini)', SHARE.menuItem, OWNER.menuItem]); // UX wave U6b-4a: Open in before Share
+    expect(within(await menuOf('Mine')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on studio-mini)', 'Hide', ...actsOf(true), SHARE.menuItem, OWNER.menuItem]); // UX wave U6b-4a: Open in before Share
     await userEvent.keyboard('{Escape}');
   });
 
@@ -143,7 +143,7 @@ describe('a listed lane B row’s menu order', () => {
     act(() => usePeople.setState({ on: new Set([ORG]) }));
     render(<Sidebar />);
     expect(actsOf(false)).toEqual(['Fork']);
-    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', ...actsOf(false), 'Open in (the folder is on studio-mini)']);
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on studio-mini)', 'Hide', ...actsOf(false)]);
     await userEvent.keyboard('{Escape}');
   });
 });
@@ -161,10 +161,10 @@ describe('Share on a row', () => {
     );
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
     expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`); // UX wave U7, O-38: every listed row's menu
-    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive', 'Open in (the folder is on studio-mini)']);
+    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on studio-mini)', 'Hide', 'Rename…', 'Fork', 'Archive']);
     await userEvent.keyboard('{Escape}');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive', 'Open in (the folder is on studio-mini)', SHARE.menuItem, OWNER.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on studio-mini)', 'Hide', 'Rename…', 'Fork', 'Archive', SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
@@ -245,7 +245,7 @@ describe('Add owner beside Share', () => {
     expect(await itemsOf('Theirs')).toEqual([]);
     // its menu holds the two opens (UX wave U7, O-38), Hide, then Fork, the one act over the link for a session another
     // member owns (the UX wave, U9): the order ruled on 2026-11-13, with no Share or Add owner for a row not yours
-    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Fork', 'Open in (the folder is on studio-mini)']);
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on studio-mini)', 'Hide', 'Fork']);
     await userEvent.keyboard('{Escape}');
   });
 });

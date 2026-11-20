@@ -15,9 +15,10 @@
 // only through its sessions (`registry:<id>`) offers Channel alone. The UX wave, U9 (Interfaces §6): a session on another
 // machine offers its acts over the link (`remoteSessionActions`), from its listing alone where this Mac holds no record:
 // there after the opens and Hide (U7's rule, the architect's ruling of 2026-11-13), before Share and Add owner; an item is
-// drawn disabled with the window's helper's sentence as its title. UX wave U6b-4a: Open in, a submenu after the session's
-// own items and before Share, handing the session's working folder to an app; drawn disabled for a session on another
-// machine, its label saying where the folder is.
+// drawn disabled with the window's helper's sentence as its title. UX wave U6b-4a: Open in, a submenu with the opens
+// (after the last of them, before Hide and Pin: the coordinator's ruling of 2026-11-19, U7's O-16 keeping Hide after the
+// opens), handing the session's working folder to an app; drawn disabled for a session on another machine, its label
+// saying where the folder is.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -107,7 +108,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 }
 
 // P5 O8 M6b: the listing-capable session menu. A record's actions, then Share for a session you own (sessions/share/
-// target.ts); another machine's listed session with no record here offers its two opens and Hide (UX wave U7: Hide follows
+// target.ts); another machine's listed session with no record here offers its two opens, Open in and Hide (UX wave U7: Hide follows
 // the opening items, the architect's ruling of 2026-11-13), then the acts that machine offers for it in
 // `remoteSessionActions`' order (the UX wave, U9), then Share and Add owner.
 function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionId: AppSessionId; dropdown?: boolean; hidable: boolean }) {
@@ -131,9 +132,9 @@ function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionI
     return (
       <>
         <ListedOpenItems listed={listed} dropdown={dropdown} />
+        <OpenInSubmenu appSessionId={appSessionId} menu={dropdown ? 'dropdown' : 'context'} />
         {hidable && <HideItem appSessionId={appSessionId} dropdown={dropdown} />}
         {acts.map((id) => <SessionItem key={id} id={id} appSessionId={appSessionId} label={SESSION_ACTIONS[id]} dropdown={dropdown} />)}
-        <OpenInSubmenu appSessionId={appSessionId} menu={dropdown ? 'dropdown' : 'context'} />
         {reach}
       </>
     );
@@ -141,12 +142,11 @@ function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionI
   if (!record) return shareable ? reach : null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   const actions = sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading, mine }); // the UX wave, U9: `mine`
-  const items: (SessionActionId | 'hide')[] = hidable ? withHide(actions) : actions;
+  const items = withOpenIn(hidable ? withHide(actions) : actions);
   return (
     <>
-      {items.map((id) => (id === 'hide' ? <HideItem key={id} appSessionId={appSessionId} dropdown={dropdown} /> : <SessionItem key={id} id={id} appSessionId={appSessionId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} dropdown={dropdown} />))}
+      {items.map((id) => (id === 'hide' ? <HideItem key={id} appSessionId={appSessionId} dropdown={dropdown} /> : id === 'openIn' ? <OpenInSubmenu key={id} appSessionId={appSessionId} menu={dropdown ? 'dropdown' : 'context'} /> : <SessionItem key={id} id={id} appSessionId={appSessionId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} dropdown={dropdown} />))}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
-      <OpenInSubmenu appSessionId={appSessionId} menu={dropdown ? 'dropdown' : 'context'} />
       {reach}
     </>
   );
@@ -176,6 +176,12 @@ export function withHide(ids: readonly SessionActionId[]): (SessionActionId | 'h
   const pin = ids.indexOf('pin');
   const at = pin !== -1 ? pin + 1 : Math.max(-1, ...OPENING.map((id) => ids.lastIndexOf(id))) + 1;
   return [...ids.slice(0, at), 'hide', ...ids.slice(at)];
+}
+
+/** UX wave U6b-4a: where Open in stands, directly after the last of the opening items, so before Pin and Hide. */
+export function withOpenIn<T extends SessionActionId | 'hide'>(ids: readonly T[]): (T | 'openIn')[] {
+  const at = Math.max(-1, ...OPENING.map((id) => ids.lastIndexOf(id as T))) + 1;
+  return [...ids.slice(0, at), 'openIn', ...ids.slice(at)];
 }
 
 // A Hide or an Unhide moves the keyboard to a row of the sidebar's choosing (its row is gone, or has moved); the menu then
