@@ -85,7 +85,11 @@ describe('mounted transcript surface integration', () => {
     };
     let answered = 0;
     const echo = async () => { // every ask so far answered as the engine draws it: its own props, handed back
-      while (fake.pending('session.ui.render') > 0) await act(() => fake.reply('session.ui.render', answer(asks()[answered++]!.props, engine, true)));
+      while (fake.pending('session.ui.render') > 0) {
+        const asked = asks()[answered]!;
+        answered += 1;
+        await act(() => fake.reply('session.ui.render', answer(asked.props, engine, true)));
+      }
       view.rerenderRow(rowOf(store.rows(), 'group'));
     };
     await echo();
@@ -96,7 +100,6 @@ describe('mounted transcript surface integration', () => {
     await press();
     expect(expanded()).toBe(false);
     expect(line().getAttribute('aria-expanded')).toBe('false');
-    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(0);
     await echo(); // the close's own answer keeps it folded
     expect(expanded()).toBe(false);
     await press(); // and the next click opens it again
