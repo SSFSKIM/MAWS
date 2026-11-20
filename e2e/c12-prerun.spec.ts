@@ -1199,8 +1199,9 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
         await pick.evaluate((b) => b.scrollIntoView({ block: 'center' }));
         await settle(page);
         // What the reader sees: the collapsed turn's divider they click (C6's own anchoring criterion: it stays put) and a
-        // row 120 px above it (old work above the expansion must not move); measured once with no click first (the
-        // baseline: the virtual list's own settling), then across the click.
+        // row 120 px above it, measured once with no click first (the baseline: the virtual list's own settling), then
+        // across the click. Board ticket 789: the turn's line ends its turn, so the work opens above it and the list keeps
+        // the line put; the row above moves by the work's height, recorded and not bounded.
         const measure = (rowId: string | null) =>
           scroller(page).evaluate((s, id) => {
             const b = s.querySelector('[data-c12-pick="1"]')!.getBoundingClientRect();
@@ -1223,7 +1224,7 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
         trials.push({
           at: where === 'above' ? '50%' : '40%', expanded: button, rowAbove: first.aboveId, before: baseline, after,
           baselineDriftPx: { divider: d(first.divider, baseline.divider), rowAbove: d(first.above, baseline.above) },
-          driftPx: Math.max(d(baseline.divider, after.divider) ?? 0, d(baseline.above, after.above) ?? 0),
+          driftPx: d(baseline.divider, after.divider) ?? 0,
           dividerDriftPx: d(baseline.divider, after.divider), rowAboveDriftPx: d(baseline.above, after.above),
         });
       }
