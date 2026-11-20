@@ -399,7 +399,6 @@ const BASE_ENV = (extra: Record<string, string>) => ({
   ...extra,
 });
 const REPOS = ['MAWS', 'orbit', 'ledger', 'stages'] as const;
-const repoPath = (name: string) => join(SCRATCH, 'repos', name);
 
 // ======================================================================================================================
 // Launch 1: the scenario (eleven sessions, three waiting on the person), on a manual clock, with the plugin CLI stub as
