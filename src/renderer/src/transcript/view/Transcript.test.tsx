@@ -1,10 +1,12 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { Anchor } from '@shared/anchor/anchor'; // UX wave U6b-4c
 import { anchoredMessage } from '@shared/anchor/message'; // UX wave U6b-4c
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
+import { useSessions } from '../../stores/sessions'; // UX wave U6b-4c (the branch panel)
+import { record } from '../../../../../test/support/builders'; // UX wave U6b-4c (the branch panel)
 import { useAttention } from '../../stores/attention'; // UX wave U1b
 import type { AttentionItem } from '@shared/graph/attention'; // UX wave U1b
 import { afterAccepted } from '../../composer/editor/submit';
@@ -916,5 +918,23 @@ describe('the agent’s id on what a child’s transcript opens', () => {
     const calls = await clicked('child', `${SESSION}:unnamed`);
     expect(calls.every(([, , , options]) => options === undefined || !('agent' in options))).toBe(true);
     expect(calls).toHaveLength(4);
+  });
+
+  // The branch panel (scalpel-2, finding 3): a drill-in left on screen after `/clear` names the conversation it was drawn
+  // for, not the one the session is in when the link is clicked, so the daemon can keep Q11's refusal
+  it('a child’s opens carry the conversation the session was in when the mount took its source, also after the session moved to another (`/clear`; the branch panel)', async () => {
+    const engine = (id: string) => useSessions.setState({ records: new Map([[SESSION, record(SESSION, { engineSessionId: id as SessionId })]]) });
+    onTestFinished(() => useSessions.setState({ records: new Map() }));
+    engine('engine-drawn');
+    const key = `${SESSION}:agent-y`;
+    const source: TranscriptSource = { key, agentId: 'agent-y' as AgentId, subscribe: () => () => {}, snapshot: () => Promise.resolve(events()) };
+    const openFile = vi.fn();
+    render(<Transcript source={source} variant="child" actions={{ openFile }} browserActivity={false} />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    act(() => engine('engine-cleared'));
+    const link = '[data-chip="path"][title="/x/linked.txt"]';
+    await waitFor(() => expect(document.querySelector(link)).not.toBeNull());
+    fireEvent.click(document.querySelector(link)!);
+    expect(openFile.mock.calls[0]?.[3]).toEqual({ main: false, agent: 'agent-y', conversation: 'engine-drawn' });
   });
 });

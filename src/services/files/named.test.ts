@@ -1193,12 +1193,12 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
   // descriptor is closed with nothing asked of it (no stat), and the job waiting behind runs.
   it('closes, unread, an agent file whose open answered after its last waiter left, and the next job runs', async () => {
     await writeTranscript([linkTo('/work/out/next.md')]);
-    const agent = await realpath(await writeAgent(AGENT, linking())); // as the search opens it: under the real path of the transcript's folder
+    const agentPath = await realpath(await writeAgent(AGENT, linking())); // as the search opens it: under the real path of the transcript's folder
     const client = new AbortController();
     const asked: string[] = [];
     const open: NonNullable<NamedPathsOptions['open']> = async (path, flags) => {
       const handle = await counting(path, flags);
-      if (path !== agent) return handle;
+      if (path !== agentPath) return handle;
       client.abort(); // while the open was pending: it answers after the last waiter left
       const stat = handle.stat.bind(handle);
       const close = handle.close.bind(handle);

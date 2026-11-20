@@ -306,7 +306,7 @@ describe('main answers files.* on the services bus', () => {
       const added: unknown[][] = [];
       const signals: (AbortSignal | undefined)[] = [];
       const links = { add: (...args: unknown[]) => void added.push(args.slice(0, 3)), get: () => null };
-      const agentNames = vi.fn(async (_appSessionId: string, _agentId: string, _path: string, signal?: AbortSignal, located?: () => void) => (signals.push(signal), located?.(), 'counted' as const));
+      const agentNames = vi.fn(async (_appSessionId: string, _agent: { id: string; engineSessionId: string }, _path: string, signal?: AbortSignal, located?: () => void) => (signals.push(signal), located?.(), 'counted' as const));
       await install(undefined, undefined, { links, agentNames, log: () => {} });
       const path = join(outside(), 'notes.txt');
       const byFile = { appSessionId: 'A', path, from: { file: join(root, 'repo', 'guide.md') } };
@@ -317,7 +317,7 @@ describe('main answers files.* on the services bus', () => {
       expect(added).toEqual([]);
       expect(await invoke('files.follow', byFile)).toEqual({ ok: true, value: { status: 'linked' } });
       expect(added).toEqual([['A', path, { file: join(root, 'repo', 'guide.md') }]]);
-      expect(await invoke('files.follow', { appSessionId: 'A', path, from: { agent: 'a1b2c3' } })).toEqual({ ok: true, value: { status: 'linked' } });
+      expect(await invoke('files.follow', { appSessionId: 'A', path, from: { agent: 'a1b2c3', engineSessionId: 'engine-session-1' } })).toEqual({ ok: true, value: { status: 'linked' } });
       expect(signals).toHaveLength(1);
       expect(signals[0]).toBeInstanceOf(AbortSignal);
       close();

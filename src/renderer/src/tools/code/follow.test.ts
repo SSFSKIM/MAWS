@@ -142,21 +142,23 @@ describe('the window’s follow', () => {
     expect(following(B, '/elsewhere/other.txt')).toBeNull();
   });
 
-  it('a subagent’s follow is shared only under the engine session the record holds at the call: after /clear it is a follow of its own', () => {
+  // The branch panel (scalpel-2, finding 3): the conversation is the one whose subagent drew the link, which the follow
+  // carries to the daemon; the session's record (here already in its next conversation) decides nothing
+  it('a subagent’s follow carries the conversation whose subagent drew the link, and is shared only within it: a click in a drill-in drawn before /clear is a follow of its own (W3, Q11)', () => {
     const main = held();
-    const engine = (id: string | null) => useSessions.setState({ records: new Map([[A, record(A, { engineSessionId: id as SessionId | null })]]) });
-    engine('engine-one');
-    follow(A, OUT, AGENT);
-    follow(A, OUT, AGENT);
-    expect(main.follows()).toHaveLength(1);
-    engine('engine-two'); // the session was bound to a new transcript
-    follow(A, OUT, AGENT);
-    expect(main.follows()).toHaveLength(2);
-    useSessions.setState({ records: new Map() }); // no record known: its own key again
-    follow(A, OUT, AGENT);
-    follow(A, OUT, AGENT);
+    useSessions.setState({ records: new Map([[A, record(A, { engineSessionId: 'engine-two' as SessionId })]]) });
+    const drawnBefore = { agent: 'agent-1', engineSessionId: 'engine-one' as SessionId };
+    const drawnNow = { agent: 'agent-1', engineSessionId: 'engine-two' as SessionId };
+    follow(A, OUT, drawnBefore);
+    follow(A, OUT, drawnBefore);
+    follow(A, OUT, drawnNow);
+    follow(A, OUT, drawnNow);
+    expect(main.follows()).toEqual([
+      { appSessionId: MAIN_A, path: OUT, from: drawnBefore },
+      { appSessionId: MAIN_A, path: OUT, from: drawnNow },
+    ]);
+    follow(A, OUT, AGENT); // no conversation known to the window: a follow of its own, which the daemon refuses
     expect(main.follows()).toHaveLength(3);
-    expect(main.follows().every((input) => JSON.stringify(input) === JSON.stringify({ appSessionId: MAIN_A, path: OUT, from: AGENT }))).toBe(true); // the engine session is the window’s key, never sent
   });
 
   it('resetFollows forgets what is under way and every count', async () => {
