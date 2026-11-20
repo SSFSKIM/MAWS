@@ -1278,6 +1278,18 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     expect(t.writes.map((w) => w.message.content)).toEqual(['fresh', 'follow-up']);
   });
 
+  it('a host sequence that drops without releasing ends the empty pause it held, and releases nothing', async () => {
+    let staged = true;
+    const t = await harness({ holdsSequence: () => staged, mainTurnOpen: () => false });
+    await t.queue.stop({ hold: true }, async () => {});
+    expect(t.queue.isPaused).toBe(true);
+    staged = false;
+    await t.queue.onSequenceDropped();
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+    expect(t.writes).toEqual([]);
+  });
+
   // The branch review: the Stop's phase lasts through the engine's interrupt and the interrupted turn's end, which the
   // interrupt's answer can precede, so a message sent in between is held as a message sent before the Stop was.
   it('a send while the interrupt is answered, or after its answer before the interrupted turn ends, is held', async () => {

@@ -467,6 +467,9 @@ export class EngineSession {
       released: () => {
         void this.queue.onSequenceEnded().catch((error: unknown) => this.log(`queue release after sequence failed: ${messageOf(error)}`));
       },
+      dropped: () => {
+        void this.queue.onSequenceDropped().catch((error: unknown) => this.log(`queue settle after a dropped sequence failed: ${messageOf(error)}`)); // ticket 790
+      },
       log: this.log,
     });
     const writeFrame = (frame: Parameters<OutboundWriter['write']>[0], writeOpts?: WriteOptions) => (this.writer ? this.writer.write(frame, writeOpts) : Promise.reject(new Error('no engine process')));
@@ -485,6 +488,7 @@ export class EngineSession {
       unsettled: opts.unsettledPrompts, // P2-C
       onPauseChange: (paused) => this.clearAndImplement.setPaused(paused),
       holdsSequence: () => this.clearAndImplement.holding, // ticket 790
+      mainTurnOpen: () => this.processState !== 'exited' && this.normalizer.state.currentTurn !== null, // ticket 790: the turn a Stop interrupts
       onChange: (queue) => {
         this.emit('queue', queue);
         this.touch();

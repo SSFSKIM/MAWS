@@ -65,6 +65,9 @@ export interface MessageQueueDeps {
   // Ticket 790: a host sequence the queue's pause also holds (clear and implement), so an interrupt pause is not
   // empty while one is staged; absent, none
   holdsSequence?: () => boolean;
+  // Ticket 790: a main-lane turn is open (the normaliser's current turn), which a Stop's phase waits to end; `turnOpen`
+  // also counts work that holds the queue like a turn and may end with no turn end. Absent, `turnOpen`
+  mainTurnOpen?: () => boolean;
 }
 
 // P4-A3: a submission's prepared content, and what keeps or undoes the preparation's effects: `settle(true)` once that
@@ -325,7 +328,7 @@ export class MessageQueue {
     } finally {
       this.stopping--;
       if (paused) {
-        if (this.deps.turnOpen()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
+        if ((this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
         else await this.settleEmptyPause();
       }
     }
@@ -654,8 +657,15 @@ export class MessageQueue {
 
   // A sequence can outlive the turn-ended callback (the writer drains inbound frames before resolving its write).
   // Reconsider the head once the hold drops, through the same paused/busy/ready checks as every ordinary release.
-  onSequenceEnded(): Promise<void> {
-    return this.releaseHead('hold');
+  async onSequenceEnded(): Promise<void> {
+    await this.settleEmptyPause(); // ticket 790: the sequence was what the empty pause still held
+    await this.releaseHead('hold');
+  }
+
+  // Ticket 790: a host sequence dropped without releasing (it failed, or its mode restore did): an empty interrupt pause
+  // it held ends now. Nothing is released, as before.
+  onSequenceDropped(): Promise<void> {
+    return this.settleEmptyPause();
   }
 
   // Concern 1, as ruled (the coordinator's reading of "no release at an engine turn"): nothing is released into an
