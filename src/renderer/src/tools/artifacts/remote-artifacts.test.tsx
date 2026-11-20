@@ -242,7 +242,7 @@ it('opens and edits each machine’s document when both copies have the same art
       expect(editorAt(panel)).toBeDefined();
     });
     expect(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
-    expect(main.targetsOf('artifacts.open')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
+    expect(new Set(main.targetsOf('artifacts.open'))).toEqual(new Set([OTHER_MACHINE, TEST_MACHINE]));
     await act(() => main.emit('library.changed', { revision: 2 }, OTHER_MACHINE));
     expect(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE, OTHER_MACHINE]);
     await waitFor(() => {

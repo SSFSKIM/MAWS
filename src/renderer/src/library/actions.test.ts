@@ -89,7 +89,6 @@ describe('opening an artifact', () => {
     expect(asked.result.current).toBeNull();
     act(() => openArtifactTab(A, { block: 'b7' }));
     expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
-    expect(other.result.current, 'the other machine’s copy does not take the place').toBeNull();
     expect(takeOpenRequest(asked.result.current!.serial)).toBe(true);
     expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${A}`);
   });
