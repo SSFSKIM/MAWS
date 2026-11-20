@@ -4,23 +4,30 @@
 // there, and the tab keeps the machine beside the artifact, so a restored tab reads there before any list is read. A
 // transcript row's Open from a remote session opens the artifact on the session's machine; the library's Open a main tab
 // on the artifact's machine.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { Editor } from '@tiptap/core';
 import { useEffect, type ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { MemoryDocumentHost } from '@artifacts/document/editor/memory-host';
+import type { PortLike } from '@artifacts/provider/port';
+import { createDocument, tabBody } from '@artifacts/document/tabs';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { createArtifactHost } from '../../artifacts/host';
 import { artifactMachineOf, recordArtifactMachine, resetArtifactMachines } from '../../artifacts/machines';
 import { TranscriptLink } from '../../transcript/view/markdown/Link';
 import { NO_ACTIONS, setHostActions, TranscriptProvider, useTranscriptContext } from '../../transcript/view/context';
 import { MarkdownView } from '../code/viewer/MarkdownView';
-import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
+import { registerArtifactEditor, releaseArtifactEditorState, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectArtifactTabMachines } from '../../artifacts/tab-machines';
+import { ArtifactTab } from '../../library/ArtifactTab';
 import { openArtifactTab } from '../../library/actions';
 import { connectLibrary, resetLibrary } from '../../library/store';
 import { resetLibraryView, useLibraryView } from '../../library/view';
+import { editorHostOf } from '../../panel/editor-host';
 import { panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
@@ -29,6 +36,7 @@ import { fail, installFakeMain, ok } from '../../test-support/code';
 import { resetPanelStores } from '../../test-support/panel';
 import { countsOf, libraryRow } from '../../test-support/remote-artifacts';
 import { ipc } from '../../ipc/client';
+import { registerDocumentEditor } from '../document';
 import { artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
 
 const R = addressOf(OTHER_MACHINE, 'app-r') as AppSessionId; // a session on another machine
@@ -186,4 +194,65 @@ describe('opening an artifact of another machine', () => {
     }
     expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'artifact')).toMatchObject([{ artifactId: LOOSE.id, machine: OTHER_MACHINE }]);
   });
+});
+
+
+it('opens and edits each machine’s document when both copies have the same artifact id', async () => {
+  const localRow = { ...DECK, title: 'Field notes' };
+  const remoteRow = { ...DECK, title: 'Lab notes' };
+  const local = new MemoryDocumentHost();
+  const remote = new MemoryDocumentHost();
+  local.write((doc) => createDocument(doc, { title: localRow.title, id: 'page' }));
+  remote.write((doc) => createDocument(doc, { title: remoteRow.title, id: 'page' }));
+  const ports = new Map<number, PortLike>();
+  let channel = 0;
+  const main = installFakeMain((name, input, machine) => {
+    const row = machine === OTHER_MACHINE ? remoteRow : localRow;
+    if (name === 'library.get') return ok({ row: input.artifactId === DECK.id ? row : null });
+    if (name === 'artifacts.get') return ok({ artifact: input.artifactId === DECK.id ? row : null });
+    if (name === 'artifacts.open') {
+      const host = machine === OTHER_MACHINE ? remote : local;
+      ports.set(++channel, host.connect() as unknown as PortLike);
+      return ok({ channel });
+    }
+    if (name === 'artifacts.status') return ok({ status: 'ok', reason: null });
+    if (name === 'artifacts.versions') return ok({ versions: [] });
+    if (name === 'library.spaces') return ok({ spaces: [] });
+    if (name === 'artifacts.markViewed' || name === 'layout.set') return ok();
+    return fail(`unexpected ${name}`);
+  });
+  const host = createArtifactHost({ ipc, ports: { take: async (id) => ports.get(id)! }, log: () => {} });
+  offs.push(registerDocumentEditor(() => ({ host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [] })));
+  // Open as a palette pick would: the selected row's machine is already known.
+  openArtifactTab(DECK.id, undefined, TEST_MACHINE);
+  const tab = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
+  try {
+    await mount({ target: DECK.id, machine: OTHER_MACHINE });
+    const mainView = render(<ArtifactTab tab={tab} />);
+    const editorAt = (root: ParentNode) => (root.querySelector('.ProseMirror') as (HTMLElement & { editor?: Editor }) | null)?.editor;
+    const panel = document.querySelector('[data-artifact-record]')!;
+    await waitFor(() => {
+      expect(editorAt(mainView.container)).toBeDefined();
+      expect(editorAt(panel)).toBeDefined();
+    });
+    expect.soft(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
+    expect.soft(editorHostOf({ surface: 'main', tabId: tab.id })?.title).toBe('Field notes');
+    expect.soft(editorHostOf({ surface: 'panel', tabId: TAB })?.title).toBe('Lab notes');
+    act(() => {
+      editorAt(mainView.container)!.commands.insertContent('Field observation');
+      editorAt(panel)!.commands.insertContent('Lab result');
+    });
+    await waitFor(() => {
+      expect(tabBody(local.doc, 'page')?.toString()).toContain('Field observation');
+      expect(tabBody(remote.doc, 'page')?.toString()).toContain('Lab result');
+    });
+    expect(tabBody(local.doc, 'page')?.toString()).not.toContain('Lab result');
+    expect(tabBody(remote.doc, 'page')?.toString()).not.toContain('Field observation');
+  } finally {
+    cleanup();
+    releaseArtifactEditorState({ surface: 'main', tabId: tab.id });
+    for (const handle of handles.splice(0)) artifactsTool.dispose(handle);
+    local.destroy();
+    remote.destroy();
+  }
 });
