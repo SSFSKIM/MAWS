@@ -130,6 +130,14 @@ const answerBytes = (page: HistoryPage, events: number): number => utf8Length(JS
 // A cursor the log does not hold: the follow was started again since the page that named it (a rebind, a release).
 export const UNKNOWN_CURSOR = 'unknown history cursor';
 
+// UX wave, ticket 777: the cursor past the log's `n`th event, which no event's id names (a live launch's seam at the
+// transcript's end, `seamCursor`). Event ids derive from transcript uuids and never take this form.
+const PAST = 'history-past:';
+const pastCursor = (n: number): EventId => `${PAST}${n}` as EventId;
+
+// The message uuid an event belongs to (`ofMessage`'s two fields), or null.
+export const messageOf = (event: SessionEvent): MessageUuid | null => (event.kind === 'turn.started' ? event.userMessageUuid : 'messageUuid' in event ? (event.messageUuid as MessageUuid | null) : null);
+
 // The events of one agent and its parent's reports on it (its start, finish and notifications, by task id) with the
 // parent's own exits: what a child's view reads of its parent, whatever the parent's history holds besides. The
 // reports and the exits are the child's lifecycle, from which its view decides whether it runs, so they are never cut:
@@ -233,7 +241,7 @@ export class Follow {
     const maxBytes = request.maxBytes ?? null;
     if (request.agentId) return { events: agentSlice(this.delivered, request.agentId, this.budget.hard), complete };
     if (before === null && request.limit != null) return { events: this.firstEvents(request.limit, maxBytes === null ? null : maxBytes - ENVELOPE_RESERVE), complete };
-    const end = before === null ? this.delivered.length : this.positions.get(before);
+    const end = before === null ? this.delivered.length : (this.positions.get(before) ?? this.pastIndex(before));
     if (end === undefined) throw new HostCommandError({ code: 'invalid_input', message: `${UNKNOWN_CURSOR}: ${before}` });
     if (maxBytes !== null) return this.boundedPage(before, end, request.seek ?? null, complete, maxBytes);
     const start = this.windowStart(end);
@@ -242,6 +250,30 @@ export class Follow {
     // whatever is loaded; a page before a cursor needs none (the window it extends carried them).
     const crons = before === null ? cronHistoryOf(this.delivered, start) : [];
     return { events: this.delivered.slice(start, end), complete, ...(start > 0 && { earlier: this.delivered[start]!.id }), ...(sought && { sought }), ...(crons.length > 0 && { cronHistory: crons }) };
+  }
+
+  // UX wave, ticket 777: where a live launch's history meets this transcript's. The seam is the first event of the
+  // earliest message of `journal` (the launch's message uuids) the log holds, else the log's end (a launch that has
+  // written none of its messages yet). The cursor whose page ends just before the seam, so the pages before it are the
+  // transcript's history from before the launch and none of what the launch's stream carries; null when nothing is
+  // before the seam, or the backfill is not done (the log is no history yet).
+  seamCursor(journal: readonly MessageUuid[]): EventId | null {
+    if (!this.backfilled) return null;
+    const wanted = new Set(journal);
+    const found = this.delivered.findIndex((event) => {
+      const uuid = messageOf(event);
+      return uuid !== null && wanted.has(uuid);
+    });
+    const seam = found === -1 ? this.delivered.length : found;
+    if (seam === 0) return null;
+    return seam < this.delivered.length ? this.delivered[seam]!.id : pastCursor(seam);
+  }
+
+  // The index a past-the-end cursor names, when this log reaches it.
+  private pastIndex(cursor: EventId): number | undefined {
+    if (!cursor.startsWith(PAST)) return undefined;
+    const n = Number(cursor.slice(PAST.length));
+    return Number.isInteger(n) && n > 0 && n <= this.delivered.length ? n : undefined;
   }
 
   get backfillDone(): boolean {
