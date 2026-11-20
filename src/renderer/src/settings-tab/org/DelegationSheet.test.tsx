@@ -392,7 +392,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     await act(async () => answer.resolve(refused('busy', 'late')));
     expect(within(sheet).queryByRole('alert')).toBeNull();
     expect((within(sheet).getByRole('textbox', { name: 'Label' }) as HTMLInputElement).value).toBe('');
-    expect(within(screen.getByRole('group', { name: 'New delegation', hidden: true })).queryByText(/late/)).toBeNull(); // the page behind the open sheet
+    expect(within(foot('new-delegation')).queryByText(/late/)).toBeNull(); // the page behind the open sheet
   });
 
   // What this proves: an answer with an unexpected `code` property is refused at the boundary (main's strict output
