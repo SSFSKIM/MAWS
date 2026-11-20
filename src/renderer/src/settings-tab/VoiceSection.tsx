@@ -3,7 +3,9 @@
 // recognition language (`voice.locale`, settings version 9; null follows the system's), and what main's non-prompting
 // probe (`voice.status`) reports for that language: the helper, the two macOS permissions with the pane that grants
 // each, and whether the language has an on-device model, without which dictation is refused (recognition never leaves
-// this Mac).
+// this Mac). The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the Helper and Recognition rows are
+// drawn while the probe reads and on trouble only (G50, G56); a permission's words drop their mechanism (G53, G55); an
+// unbound shortcut is the empty key cap (G40), and its Change keeps "Change in Keyboard" as its name (G47).
 import type { Settings } from '@shared/ipc/schema';
 import type { PermissionState, VoicePrivacyPane, VoiceStatus } from '@shared/ipc/schema/voice';
 import { effectiveChord } from '@shared/keymap/actions';
@@ -12,8 +14,8 @@ import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { homeAbbreviated } from '../tools/session-info/model';
-import { KEYBOARD, VOICE } from './copy';
-import { Chip, INPUT, Setting, TEXT_ACTION, writeSettings } from './parts';
+import { VOICE } from './copy';
+import { Chip, INPUT, Setting, TEXT_ACTION, UnboundCap, writeSettings } from './parts';
 
 // main caches a probe for 10 s per locale; reading it no more often keeps the section and the toolbar in step
 const STATUS_STALE_MS = 10_000;
@@ -36,26 +38,28 @@ export function VoiceSection({ settings, showKeyboard }: { settings: Settings; s
   return (
     <>
       <Setting row="voice.shortcut" state={chord === null ? 'unbound' : 'bound'}>
-        <kbd className={`rounded-sm border px-1.5 py-0.5 font-ui text-ui-sm whitespace-nowrap ${chord === null ? 'border-border text-fg-muted' : 'border-border-strong bg-bg text-fg'}`}>
-          {chord === null ? KEYBOARD.unbound : formatChord(chord)}
-        </kbd>
-        <button type="button" className={TEXT_ACTION} onClick={showKeyboard}>
-          {VOICE.changeInKeyboard}
+        {chord === null ? <UnboundCap /> : <kbd className="rounded-sm border border-border-strong bg-bg px-1.5 py-0.5 font-ui text-ui-sm whitespace-nowrap text-fg">{formatChord(chord)}</kbd>}
+        <button type="button" aria-label={VOICE.changeInKeyboard} className={TEXT_ACTION} onClick={showKeyboard}>
+          {VOICE.change}
         </button>
       </Setting>
       <Setting row="voice.language">
         <LanguageSelect chosen={chosen} status={status} />
       </Setting>
-      <Setting row="voice.helper" state={status?.helper.state === 'missing' && import.meta.env.DEV ? 'build' : 'default'}>
-        <HelperState status={status} error={probe.isError ? probe.error.message : null} />
-      </Setting>
+      {status?.helper.state !== 'ready' && (
+        <Setting row="voice.helper" state={status?.helper.state === 'missing' && import.meta.env.DEV ? 'build' : 'default'}>
+          <HelperState status={status} error={probe.isError ? probe.error.message : null} />
+        </Setting>
+      )}
       <Permission row="voice.microphone" pane="microphone" status={status} />
       <Permission row="voice.speech" pane="speech" status={status} />
-      <Setting row="voice.recognition">
-        <span className={status?.supportsOnDevice === false ? 'text-warning' : status?.supportsOnDevice ? '' : 'text-fg-muted'}>
-          {status === null ? VOICE.reading : status.supportsOnDevice === null ? VOICE.permissionUnknown : status.supportsOnDevice ? VOICE.onDevice : VOICE.noOnDevice}
-        </span>
-      </Setting>
+      {status?.supportsOnDevice !== true && (
+        <Setting row="voice.recognition">
+          <span className={status?.supportsOnDevice === false ? 'text-warning' : 'text-fg-muted'}>
+            {status === null ? VOICE.reading : status.supportsOnDevice === null ? VOICE.permissionUnknown : VOICE.noOnDevice}
+          </span>
+        </Setting>
+      )}
     </>
   );
 }
@@ -91,8 +95,8 @@ function HelperState({ status, error }: { status: VoiceStatus | null; error: str
   const { helper } = status;
   return (
     <>
-      <span className={`min-w-0 truncate ${helper.state === 'ready' ? '' : 'text-warning'}`} title={helper.path}>
-        {helper.state === 'failed' ? VOICE.helperFailed(helper.message) : helper.state === 'ready' ? VOICE.helperFound : VOICE.helperMissing}{' '}
+      <span className="min-w-0 truncate text-warning" title={helper.path}>
+        {helper.state === 'failed' ? VOICE.helperFailed(helper.message) : VOICE.helperMissing}{' '}
         <span className="font-mono">{homeAbbreviated(helper.path)}</span>
       </span>
       {status.backend === 'scripted' && <Chip>{VOICE.scripted}</Chip>}

@@ -124,16 +124,25 @@ function newestRecorded(accounts: readonly AccountUsage[]): string | null {
   return newest;
 }
 
+function hostPortOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url; // not a URL: shown as it came
+  }
+}
+
 export function relayLine(relay: RelayHealth | null, now: number): string {
   if (relay === null) return RELAY.unchecked;
   if (!relay.ok) return RELAY.down(relay.error);
-  let hostPort = relay.url;
-  try {
-    hostPort = new URL(relay.url).host;
-  } catch {
-    // not a URL: shown as it came
-  }
-  return RELAY.listening(hostPort, ago(Math.max(0, now - Date.parse(relay.checkedAt))), relay.latencyMs);
+  return RELAY.listening(hostPortOf(relay.url), ago(Math.max(0, now - Date.parse(relay.checkedAt))), relay.latencyMs);
+}
+
+// The word cut (G109): Settings › Gateway's Relay row reads the relay's address while it listens, when it was checked
+// and how fast it answered being the address's tooltip; otherwise the same line as `relayLine`.
+export function relayAddress(relay: RelayHealth | null, now: number): { line: string; checked: string | null } {
+  if (relay === null || !relay.ok) return { line: relayLine(relay, now), checked: null };
+  return { line: hostPortOf(relay.url), checked: RELAY.checked(ago(Math.max(0, now - Date.parse(relay.checkedAt))), relay.latencyMs) };
 }
 
 // W6 start: the relay's last ten minutes in one sentence (PanelView.swift `GatewayHealthText.line`), null when it served

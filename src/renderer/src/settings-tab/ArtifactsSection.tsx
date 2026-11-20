@@ -5,13 +5,16 @@
 //   longer has stays shown, marked, since the chain skips it (the house system applies) and the owner should see why.
 // - By Space: per Space, "Use my default" (no entry) or a system; the Spaces' record is written whole.
 //
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G79): the export author's field has no "Use
+// <account name>" button; its placeholder shows the name a blank field uses.
+//
 // The systems and Spaces are main's index (P3-L's library store), read again at each committed change. Main relays the
 // settings to the engine host (`artifacts.setDefaults`), which resolves the chain for the agent.
 import type { ArtifactsSettings } from '@shared/ipc/schema/settings';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { useLibraryList, useLibrarySpaces } from '../library/store';
 import { ARTIFACTS } from './copy';
-import { INPUT, TEXT_ACTION, Setting, useCommittedDraft, writeSettings } from './parts';
+import { INPUT, Setting, useCommittedDraft, writeSettings } from './parts';
 import { routedAccountName, resolveExportHumanName } from '@shared/artifacts/export-author';
 import { useUsage } from '../stores/usage';
 
@@ -29,11 +32,6 @@ export function ArtifactsSection({ artifacts }: { artifacts: ArtifactsSettings }
     <>
       <Setting row="artifacts.exportAuthor" values={{ name: resolveExportHumanName(null, accountName) }}>
         <input {...authorField} aria-label={ARTIFACTS.exportAuthorName} placeholder={resolveExportHumanName(null, accountName)} maxLength={200} className={`${INPUT} max-w-[260px]`} />
-        {savedName === null && accountName && (
-          <button type="button" className={TEXT_ACTION} onClick={() => void writeSettings({ artifacts: { exportAuthorName: accountName } })}>
-            {ARTIFACTS.suggestedAuthor(accountName)}
-          </button>
-        )}
       </Setting>
       <Setting row="artifacts.defaultSystem" state={readFailed ? 'readFailed' : 'default'} values={{ why: systems.error ?? '' }}>
         <SystemSelect

@@ -8,15 +8,18 @@
 // then Org with no heading of its own and the Customize link; the body in the same order, opening at its first section.
 // The index's list scrolls by itself and its footer stays. The stored tab keeps build F's ten sections (UC-14): every one
 // of them is a section here, and `supervisor`, reached by the index and the search only, is never stored.
-// U11a M10: "Search settings" at the index's top (SettingsSearch.tsx); a chosen result scrolls the body, opens the More it
-// was found behind, gives the row the keyboard and marks it. ⌘F focuses the field while Settings holds the keyboard
-// (UC-6's focus first: a region keeps a key it handles), so it needs no row in the action table.
+// U11a M10: "Search settings" at the index's top (SettingsSearch.tsx); a chosen result scrolls the body, gives the row the
+// keyboard (which opens its note, where the words may have been found) and marks it. ⌘F focuses the field while
+// Settings holds the keyboard (UC-6's focus first: a region keeps a key it handles), so it needs no row in the action
+// table. The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the index has no title, the Settings
+// dialog naming the page (G1), and no group headings, a gap parting its two runs (G3); the wait for the settings is
+// the quiet spinner (G7).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { flushSync } from 'react-dom';
 import type { Settings } from '@shared/ipc/schema';
 import { SessionsSection } from './SessionsSection';
 import { AppearanceSection } from './AppearanceSection';
 import { INDEX, SECTIONS } from './copy';
+import { QuietSpinner } from '../ui/spinner';
 import { DrawnRows, DrawnRowsContext } from './drawn';
 import { EngineSection } from './EngineSection';
 import { GatewaySection } from './GatewaySection';
@@ -104,15 +107,13 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
     setActive(current);
   };
 
-  // A chosen result: its row's section heading at the body's top (or the row in the middle), its More open when the
-  // words were found there, the row itself holding the keyboard, and the mark. The query stays in the field.
+  // A chosen result: its row's section heading at the body's top (or the row in the middle), the row itself holding the
+  // keyboard, which opens its note, and the mark. The query stays in the field.
   const choose = (result: SettingsResult) => {
     if (result.target === 'customize') return openCustomize();
     const root = body.current;
     const landing = root === null ? null : landingOf(root, result.target);
     if (root === null || landing === null) return;
-    const more = result.openMore ? landing.querySelector<HTMLElement>('[data-settings-more][aria-expanded="false"]') : null;
-    if (more !== null) flushSync(() => more.click()); // drawn before the row is measured
     const section = landing.closest<HTMLElement>('section[aria-labelledby]');
     const landed = ORDER.find((s) => section?.getAttribute('aria-labelledby') === sectionHeadingId(s));
     if (section !== null && landed !== undefined) {
@@ -148,8 +149,8 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
   );
 
   // W9 (H1): the view is the `settings` query container and never scrolls sideways. Narrower than 32rem (a pane of a
-  // 50/50 split at the default window is about 300px) the index becomes a top row of section links, its title, group
-  // headings and footer set aside. U11a M9: the rows stack by the body's own column (parts.tsx `Setting`, KeymapSection's
+  // 50/50 split at the default window is about 300px) the index becomes a top row of section links, its groups' gap
+  // and footer set aside. U11a M9: the rows stack by the body's own column (parts.tsx `Setting`, KeymapSection's
   // rows), the `settings-body` container, so a view between 32rem and the body's 760 px stacks them while its index stays
   // a column.
   return (
@@ -160,13 +161,9 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
             aria-label="Settings sections"
             className="flex min-h-0 flex-col border-r border-border bg-bg-raised px-2 py-3.5 @max-lg/settings:border-r-0 @max-lg/settings:border-b @max-lg/settings:py-1.5"
           >
-            <div className="shrink-0 px-2 pb-2.5 text-ui font-semibold @max-lg/settings:hidden">{INDEX.title}</div>
             <SettingsSearch keymap={settings?.keymap ?? null} field={field} onChoose={choose}>
               {GROUPS.map(({ group, sections }, i) => (
-                <div key={group} className="flex flex-col @max-lg/settings:contents">
-                  <div data-settings-group className={`px-2 pb-1 text-ui-sm font-semibold whitespace-nowrap text-fg-muted @max-lg/settings:hidden ${i === 0 ? '' : 'pt-3'}`}>
-                    {INDEX.groups[group]}
-                  </div>
+                <div key={group} data-settings-group={group} className={`flex flex-col @max-lg/settings:contents ${i === 0 ? '' : 'pt-3'}`}>
                   {sections.map(entry)}
                 </div>
               ))}
@@ -181,7 +178,7 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
           </nav>
           <div ref={body} onScroll={onScroll} data-settings-body className="min-h-0 overflow-x-hidden overflow-y-auto px-5 pt-2 pb-3 @max-lg/settings:px-3">
             {settings === null ? (
-              <p className="text-ui-sm text-fg-muted">{INDEX.reading}</p>
+              <QuietSpinner label={INDEX.reading} className="mt-2" />
             ) : (
               <div data-settings-column className={`@container/settings-body max-w-[760px] ${MARK}`}>
                 {SECTION_TABLE.map(({ section: s }) => (

@@ -3,6 +3,9 @@
 // it shows (`<Setting row="engine.binary" state="chosen">`, parts.tsx) and tells the view both (drawn.ts), so the search
 // knows what the page shows now. A row made at run time is declared once with `repeats` (an imported Chrome profile, one
 // of its extensions) and drawn under its own name. A {name} in a state's words is a value the drawn row fills in.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): a state's `note` waits for the pointer and the
+// keyboard in its row and is the row's description; its `line` stands at rest. A row whose label the cut changed keeps
+// its old label among its keywords, so the search finds it by the words it was found by.
 import type { SettingsSection } from './SettingsView';
 import { APPEARANCE, ARTIFACTS, BROWSER, BUDGET_SETTINGS, ENGINE, GATEWAY, KEYBOARD, LAUNCH_PROFILE, MCP_SERVERS, NOTIFICATIONS, SESSIONS, SUPERVISOR, VOICE } from './copy';
 import { USAGE } from '../accounts/copy'; // UX wave U7b (O-47)
@@ -11,10 +14,18 @@ export interface SettingsRow {
   id: string; // '<section>.<row>': the search's result and the row's mark in the page (data-settings-row)
   section: SettingsSection;
   label: string;
-  states: Readonly<Record<string, { line?: string; more?: string; state?: true }>>; // most rows have one, 'default'; `state`: the line reports a condition the person must act on
+  states: Readonly<Record<string, RowWords>>; // most rows have one, 'default'
   keywords?: readonly string[]; // other words people use
   revealedBy?: string; // the row whose control makes this one drawn
   repeats?: true; // drawn once per thing made at run time
+}
+
+// `note`: what the row keeps for the pointer and the keyboard; `line`: what stands at rest under the control, a
+// condition the person must act on (`state`) or a line the owner kept (a consent)
+export interface RowWords {
+  note?: string;
+  line?: string;
+  state?: true;
 }
 
 const NO_NOTE = { default: {} } as const;
@@ -26,24 +37,24 @@ export const SETTINGS_ROWS: readonly SettingsRow[] = [
   { id: 'appearance.monoFont', section: 'appearance', label: APPEARANCE.monoFont, states: APPEARANCE.monoFontNotes },
 
   { id: 'notifications.toHuman', section: 'notifications', label: NOTIFICATIONS.toHuman.label, states: NOTIFICATIONS.toHuman.notes },
-  { id: 'notifications.when', section: 'notifications', label: NOTIFICATIONS.when, states: NO_NOTE },
+  { id: 'notifications.when', section: 'notifications', label: NOTIFICATIONS.when, states: NO_NOTE, keywords: [NOTIFICATIONS.whenWas] },
   { id: 'notifications.kinds', section: 'notifications', label: NOTIFICATIONS.kinds, states: NO_NOTE },
   { id: 'notifications.sound', section: 'notifications', label: NOTIFICATIONS.sound, states: NO_NOTE },
 
   { id: 'keyboard.bindings', section: 'keyboard', label: KEYBOARD.table, states: NO_NOTE, keywords: ['shortcut', 'hotkey'] },
-  { id: 'keyboard.reset', section: 'keyboard', label: KEYBOARD.reset, states: NO_NOTE },
+  { id: 'keyboard.reset', section: 'keyboard', label: KEYBOARD.reset, states: NO_NOTE, revealedBy: 'keyboard.bindings' }, // the word cut (G44): drawn once a binding differs
 
   { id: 'voice.shortcut', section: 'voice', label: VOICE.shortcut, states: VOICE.shortcutNotes },
   { id: 'voice.language', section: 'voice', label: VOICE.language, states: VOICE.languageNotes },
-  { id: 'voice.helper', section: 'voice', label: VOICE.helper, states: VOICE.helperNotes },
+  { id: 'voice.helper', section: 'voice', label: VOICE.helper, states: VOICE.helperNotes, revealedBy: 'voice.language' }, // the word cut (G50): drawn on trouble
   { id: 'voice.microphone', section: 'voice', label: VOICE.microphone, states: NO_NOTE },
   { id: 'voice.speech', section: 'voice', label: VOICE.speech, states: NO_NOTE },
-  { id: 'voice.recognition', section: 'voice', label: VOICE.recognition, states: NO_NOTE },
+  { id: 'voice.recognition', section: 'voice', label: VOICE.recognition, states: NO_NOTE, revealedBy: 'voice.language' }, // the word cut (G56): drawn on trouble
 
   { id: 'browser.profile', section: 'browser', label: BROWSER.profile, states: BROWSER.profileNotes },
   { id: 'browser.bookmarksBar', section: 'browser', label: BROWSER.bookmarksBar, states: BROWSER.bookmarksBarNotes },
   { id: 'browser.search', section: 'browser', label: BROWSER.search, states: BROWSER.searchNotes },
-  { id: 'browser.links', section: 'browser', label: BROWSER.links, states: BROWSER.linksNotes },
+  { id: 'browser.links', section: 'browser', label: BROWSER.links, states: BROWSER.linksNotes, keywords: [BROWSER.linksWas] },
   { id: 'browser.chromeProfile', section: 'browser', label: BROWSER.chromeProfile, states: BROWSER.chromeProfileNotes },
   { id: 'browser.importedProfile', section: 'browser', label: BROWSER.importedProfile, states: BROWSER.importedProfileNotes, revealedBy: 'browser.chromeProfile', repeats: true },
   { id: 'browser.extension', section: 'browser', label: BROWSER.extensions, states: BROWSER.extensionNotes, revealedBy: 'browser.chromeProfile', repeats: true },
@@ -57,11 +68,11 @@ export const SETTINGS_ROWS: readonly SettingsRow[] = [
   { id: 'sessions.mcpServers', section: 'sessions', label: MCP_SERVERS.label, states: MCP_SERVERS.notes, keywords: ['connectors', 'integrations', 'tools'] },
   { id: 'sessions.subagent', section: 'sessions', label: SESSIONS.subagent, states: SESSIONS.subagentNotes },
   { id: 'sessions.autoFallback', section: 'sessions', label: SESSIONS.autoFallback, states: SESSIONS.autoFallbackNotes },
-  { id: 'sessions.archive', section: 'sessions', label: SESSIONS.archive, states: SESSIONS.archiveNotes },
+  { id: 'sessions.archive', section: 'sessions', label: SESSIONS.archive, states: SESSIONS.archiveNotes, keywords: [SESSIONS.archiveWas] },
 
   { id: 'gateway.defaultRoute', section: 'gateway', label: GATEWAY.defaultRoute, states: GATEWAY.defaultRouteNotes, keywords: GATEWAY_WORDS },
-  { id: 'gateway.policy', section: 'gateway', label: GATEWAY.policy, states: GATEWAY.policyNotes, keywords: GATEWAY_WORDS },
-  { id: 'gateway.offerDirect', section: 'gateway', label: GATEWAY.offerDirect, states: GATEWAY.offerDirectNotes, keywords: GATEWAY_WORDS },
+  { id: 'gateway.policy', section: 'gateway', label: GATEWAY.policy, states: GATEWAY.policyNotes, keywords: [...GATEWAY_WORDS, GATEWAY.policyWas] },
+  { id: 'gateway.offerDirect', section: 'gateway', label: GATEWAY.offerDirect, states: GATEWAY.offerDirectNotes, keywords: [...GATEWAY_WORDS, GATEWAY.offerDirectWas] },
   { id: 'gateway.directLogin', section: 'gateway', label: GATEWAY.directLogin, states: GATEWAY.directLoginNotes, keywords: GATEWAY_WORDS },
   { id: 'gateway.relay', section: 'gateway', label: GATEWAY.relay, states: NO_NOTE, keywords: GATEWAY_WORDS },
 
@@ -69,14 +80,16 @@ export const SETTINGS_ROWS: readonly SettingsRow[] = [
   { id: 'usage.accounts', section: 'usage', label: USAGE.claudeTitle, states: NO_NOTE, keywords: ['limit', 'account', 'route', 'codex'] },
 
   { id: 'engine.binary', section: 'engine', label: ENGINE.binary, states: ENGINE.binaryNotes },
+  // the word cut (G126 to G128): Update… is a button on the Binary row, drawn and landed on as this row, its words its
+  // tooltip; the config home is in the Binary row's note
   { id: 'engine.update', section: 'engine', label: ENGINE.update, states: ENGINE.updateNotes },
-  { id: 'engine.configHome', section: 'engine', label: ENGINE.configHome, states: ENGINE.configHomeNotes },
+  { id: 'engine.configHome', section: 'engine', label: ENGINE.configHome, states: NO_NOTE, keywords: [ENGINE.configHomeNote], revealedBy: 'engine.binary' },
 
   { id: 'supervisor.status', section: 'supervisor', label: SUPERVISOR.status, states: SUPERVISOR.statusNotes },
-  { id: 'supervisor.daemon', section: 'supervisor', label: SUPERVISOR.daemon, states: NO_NOTE },
+  { id: 'supervisor.daemon', section: 'supervisor', label: SUPERVISOR.daemon, states: NO_NOTE, revealedBy: 'supervisor.status' }, // the word cut (G133): drawn while the daemon is not connected
   { id: 'supervisor.idleExit', section: 'supervisor', label: SUPERVISOR.idle, states: SUPERVISOR.idleNotes },
   { id: 'supervisor.stopAll', section: 'supervisor', label: SUPERVISOR.stopAll, states: SUPERVISOR.stopAllNotes },
-  { id: 'supervisor.memoryBudget', section: 'supervisor', label: BUDGET_SETTINGS.enabled, states: BUDGET_SETTINGS.enabledNotes, keywords: ['RAM'] },
+  { id: 'supervisor.memoryBudget', section: 'supervisor', label: BUDGET_SETTINGS.enabled, states: BUDGET_SETTINGS.enabledNotes, keywords: ['RAM', BUDGET_SETTINGS.enabledWas] },
   { id: 'supervisor.limit', section: 'supervisor', label: BUDGET_SETTINGS.limit, states: BUDGET_SETTINGS.limitNotes, keywords: ['RAM'], revealedBy: 'supervisor.memoryBudget' },
   { id: 'supervisor.stateful', section: 'supervisor', label: BUDGET_SETTINGS.stateful, states: BUDGET_SETTINGS.statefulNotes, revealedBy: 'supervisor.memoryBudget' },
 ];

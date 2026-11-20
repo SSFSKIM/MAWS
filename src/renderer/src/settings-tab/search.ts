@@ -1,7 +1,8 @@
 // U11a M10 (l8-settings-06, A7; the execution document's Interfaces §G, "Search"): "Search settings", a pure function
 // over the row table, the state each drawn row shows now, the keyboard's bindings and the Org page's group headings.
 // A result never names text the page will not show in its present state: a drawn row is matched by its label, its
-// keywords, its section's name and the line and More of the state it shows; a row not drawn counts, by its label and
+// keywords, its section's name and the words of the state it shows (the word cut: its line and its note, which the
+// row shows when the landing gives it the keyboard); a row not drawn counts, by its label and
 // keywords, for the drawn row that reveals it; a repeating row is one result by its declared label. A row is never
 // matched by its group's name, and a binding only by its action's title. Every word of the query must be found, case
 // ignored, and the results stand in the page's order, a section's own result before its rows, the Customize link last.
@@ -12,9 +13,8 @@ import { SECTION_TABLE } from './SettingsView'; // read when a search runs, neve
 export interface SettingsResult {
   id: string;
   name: string;
-  under: string;
+  under: string | null; // a whole section's result has nothing under its name (the word cut, G9)
   target: string; // a row's id (data-settings-row), `section:<section>`, `binding:<action>`, `org:<heading>`, or `customize`
-  openMore: boolean;
 }
 
 type Input = { rows: readonly SettingsRow[]; shown: ReadonlyMap<string, string>; bindings: readonly { id: string; title: string }[]; orgGroups: readonly string[] };
@@ -49,29 +49,27 @@ export function searchSettings(query: string, { rows, shown, bindings, orgGroups
   const results: SettingsResult[] = [];
   for (const { section } of SECTION_TABLE) {
     const sectionName = SECTIONS[section];
-    if (findsAll(words, text([sectionName]))) results.push({ id: `section:${section}`, name: sectionName, under: INDEX.under.section, target: `section:${section}`, openMore: false });
+    if (findsAll(words, text([sectionName]))) results.push({ id: `section:${section}`, name: sectionName, under: null, target: `section:${section}` });
     for (const row of rows) {
       if (row.section !== section) continue;
-      const result = { id: row.id, name: row.label, under: sectionName, target: row.id, openMore: false };
+      const result = { id: row.id, name: row.label, under: sectionName, target: row.id };
       const state = shown.get(row.id);
       if (state !== undefined) {
         const now = row.states[state] ?? {};
-        const onLine = text([row.label, ...(row.keywords ?? []), sectionName, now.line, ...(borrowed.get(row.id) ?? [])]);
-        if (findsAll(words, onLine)) results.push(result);
-        else if (now.more !== undefined && findsAll(words, `${onLine} ${text([now.more])}`)) results.push({ ...result, openMore: true });
+        if (findsAll(words, text([row.label, ...(row.keywords ?? []), sectionName, now.line, now.note, ...(borrowed.get(row.id) ?? [])]))) results.push(result);
       } else if (row.repeats) {
         const at = drawnRevealer(row);
         if (at !== null && findsAll(words, text([row.label, ...(row.keywords ?? [])]))) results.push({ ...result, target: at });
       }
       if (row.id === BINDINGS_ROW && shown.has(row.id))
         for (const binding of bindings)
-          if (findsAll(words, text([binding.title]))) results.push({ id: `binding:${binding.id}`, name: binding.title, under: SECTIONS.keyboard, target: `binding:${binding.id}`, openMore: false });
+          if (findsAll(words, text([binding.title]))) results.push({ id: `binding:${binding.id}`, name: binding.title, under: SECTIONS.keyboard, target: `binding:${binding.id}` });
     }
     // the Org page's groups; its own group headed Org is the section's result
     if (section === 'org')
       for (const heading of orgGroups)
-        if (heading !== SECTIONS.org && findsAll(words, text([heading]))) results.push({ id: `org:${heading}`, name: heading, under: SECTIONS.org, target: `org:${heading}`, openMore: false });
+        if (heading !== SECTIONS.org && findsAll(words, text([heading]))) results.push({ id: `org:${heading}`, name: heading, under: SECTIONS.org, target: `org:${heading}` });
   }
-  if (findsAll(words, text([INDEX.customize, ...CUSTOMIZE_KEYWORDS]))) results.push({ id: 'customize', name: INDEX.customize, under: INDEX.under.customize, target: 'customize', openMore: false });
+  if (findsAll(words, text([INDEX.customize, ...CUSTOMIZE_KEYWORDS]))) results.push({ id: 'customize', name: INDEX.customize, under: INDEX.under.customize, target: 'customize' });
   return results;
 }

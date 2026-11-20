@@ -3,7 +3,9 @@
 // action with its effective chord, `Change` to record a new one. The whole override map is written as one field
 // (settings v3's patch replaces `keymap` whole, M1 decision (2)); a chord equal to the default drops the override. A
 // `menu` action's change rebuilds the application menu in main; a `renderer` action's reaches the dispatcher through
-// the settings store.
+// the settings store. The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): a row's Change shows on
+// pointing at the row or with the keyboard on it (G39); an unbound action's key cap is empty, named Unbound (G40); Reset
+// to defaults is drawn only once a binding differs from its default (G44).
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { ACTIONS, type ActionId, type KeymapOverrides } from '@shared/keymap/actions';
 import { GatewaySheet } from '../gateway/GatewaySheet';
@@ -11,7 +13,7 @@ import { ipc } from '../ipc/client';
 import { KEYBOARD } from './copy';
 import { useDrawnRow } from './drawn';
 import { captureChord, displayChord, keymapGroups, type KeymapRow } from './keymap';
-import { LANDING, TEXT_ACTION, writeSettings } from './parts';
+import { LANDING, TEXT_ACTION, UnboundCap, writeSettings } from './parts';
 
 // The table's rounded corners on the rows that touch them (a group's raised heading on top, a recording row's tint at the
 // bottom), in place of clipping the table
@@ -29,8 +31,9 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   // U11a M9: the section's two rows of the table (rows.ts), the bindings and their reset
+  const changed = Object.keys(keymap).length > 0; // a chord equal to its default is no override
   useDrawnRow('keyboard.bindings', 'default');
-  useDrawnRow('keyboard.reset', 'default');
+  useDrawnRow(changed ? 'keyboard.reset' : null, 'default');
 
   // While a row records, the macOS menu sets its key equivalents aside (⌘W, ⌘K, ⌘1… would otherwise run before the page
   // sees them) and C5's dispatcher skips the recording element; both come back when recording ends, however it ends.
@@ -95,11 +98,13 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
           </div>
         ))}
       </div>
-      <div data-settings-row="keyboard.reset" data-settings-state="default" tabIndex={-1} className={`mt-2 flex items-center gap-2 ${LANDING}`}>
-        <button type="button" className={TEXT_ACTION} disabled={Object.keys(keymap).length === 0} onClick={() => setConfirmReset(true)}>
-          {KEYBOARD.reset}
-        </button>
-      </div>
+      {changed && (
+        <div data-settings-row="keyboard.reset" data-settings-state="default" tabIndex={-1} className={`mt-2 flex items-center gap-2 ${LANDING}`}>
+          <button type="button" className={TEXT_ACTION} onClick={() => setConfirmReset(true)}>
+            {KEYBOARD.reset}
+          </button>
+        </div>
+      )}
       {confirmReset && (
         <GatewaySheet
           title={KEYBOARD.resetTitle}
@@ -135,7 +140,7 @@ function KeyRow({
   onKeyDown(e: KeyboardEvent<HTMLElement>): void;
 }) {
   return (
-    <div role="row" aria-label={row.title} data-recording={recording || undefined} data-settings-binding={row.id} tabIndex={-1} className={`border-t border-border px-2.5 text-ui-sm ${LANDING} -outline-offset-2 ${recording ? 'bg-accent-soft' : ''}`}>
+    <div role="row" aria-label={row.title} data-recording={recording || undefined} data-settings-binding={row.id} tabIndex={-1} className={`group/binding border-t border-border px-2.5 text-ui-sm ${LANDING} -outline-offset-2 ${recording ? 'bg-accent-soft' : ''}`}>
       {/* W9 (H1): narrower than 32rem (U11a M9: the Settings body's own column) the title stacks over the chord and its action */}
       <div className="grid h-[30px] grid-cols-[minmax(0,1fr)_160px_96px] items-center gap-2.5 @max-lg/settings-body:h-auto @max-lg/settings-body:grid-cols-[minmax(0,1fr)_auto] @max-lg/settings-body:gap-y-1 @max-lg/settings-body:py-1.5">
         <span role="cell" className="truncate @max-lg/settings-body:col-span-2">
@@ -155,10 +160,10 @@ function KeyRow({
             >
               {KEYBOARD.recording}
             </kbd>
+          ) : row.chord === null ? (
+            <UnboundCap />
           ) : (
-            <kbd className={`rounded-sm border px-1.5 py-0.5 font-ui text-ui-sm whitespace-nowrap ${row.chord === null ? 'border-border text-fg-muted' : 'border-border-strong bg-bg text-fg'}`}>
-              {row.display}
-            </kbd>
+            <kbd className="rounded-sm border border-border-strong bg-bg px-1.5 py-0.5 font-ui text-ui-sm whitespace-nowrap text-fg">{row.display}</kbd>
           )}
         </span>
         <span role="cell" className="justify-self-end">
@@ -169,7 +174,7 @@ function KeyRow({
           ) : (
             // U6a: no Change on a row that takes no rebinding (a fixed key, or an action build F does not know: UC-14)
             row.rebindable && (
-              <button type="button" className={TEXT_ACTION} onClick={onRecord} aria-label={`${KEYBOARD.change} ${row.title}`}>
+              <button type="button" className={`${TEXT_ACTION} opacity-0 group-hover/binding:opacity-100 focus-visible:opacity-100`} onClick={onRecord} aria-label={`${KEYBOARD.change} ${row.title}`}>
                 {KEYBOARD.change}
               </button>
             )

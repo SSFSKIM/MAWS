@@ -10,6 +10,10 @@
 // P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, M2 "Settings", "`host.status`"): every launch
 // that reaches the app runs on `mawsd`, so the group has no shape switch and no quit default (both settings are retired
 // and read by nothing), and it reads host.status as the daemon's: no branch for another transport or an unavailable daemon.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the status reads its state and its sessions,
+// the start, the pid, the exit rule and the machine daemon's line its tooltip (G129); the daemon's row is drawn only while
+// it is not connected (G133); what the process is for is the status row's note (G130); Stop all is its one button, the
+// label its name (G136).
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host';
@@ -22,7 +26,8 @@ import { useHosts } from '../stores/hosts';
 import { toast, useNotices } from '../stores/notices';
 import { SUPERVISOR } from './copy';
 import { ENGINE_HOST_UPDATE } from '../app/copy'; // P5 O16 M3c fix wave 2
-import { INPUT, sectionHeadingId, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+import { INPUT, sectionHeadingId, Setting, TEXT_ACTION, useCommittedDraft, WORD_OWNER, writeSettings } from './parts';
+import { Tip } from '../ui/tip';
 
 // Whole minutes from 1 to MAX_IDLE_MINUTES as typed, or null when the text is not one.
 function idleMinutesOf(text: string): number | null {
@@ -31,23 +36,25 @@ function idleMinutesOf(text: string): number | null {
   return minutes >= 1 && minutes <= MAX_IDLE_MINUTES ? minutes : null;
 }
 
-// What the status line says, whether the way back (Restart now) is offered, and the state its note shows: what the
-// background process is for, once main has answered; while an incompatible supervisor is waited for, why, whole.
+// What the status line says, the facts its tooltip holds (the running supervisor's, then the connected daemon's line),
+// whether the way back (Restart now) is offered, and the state its note shows: what the background process is for,
+// once main has answered; while an incompatible supervisor is waited for, why, whole.
 type StatusNote = keyof typeof SUPERVISOR.statusNotes;
-function describe(status: HostStatus | null): { text: string; restart: boolean; note: StatusNote } {
-  if (status === null) return { text: SUPERVISOR.reading, restart: false, note: 'reading' };
+function describe(status: HostStatus | null): { text: string; facts: string[]; restart: boolean; note: StatusNote } {
+  if (status === null) return { text: SUPERVISOR.reading, facts: [], restart: false, note: 'reading' };
   const note = 'default';
+  const daemon = status.daemon === null ? [] : [SUPERVISOR.daemonFact(daemonText(status))];
   if (status.state === 'crashed') {
-    if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), restart: true, note: 'waiting' };
-    return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, restart: true, note };
+    if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), facts: daemon, restart: true, note: 'waiting' };
+    return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, facts: daemon, restart: true, note };
   }
   // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls, served or deferred, says what it waits for
-  if (status.handover) return { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool), restart: false, note };
-  if (status.state === 'restarting') return { text: SUPERVISOR.restarting, restart: false, note };
+  if (status.handover) return { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool), facts: daemon, restart: false, note };
+  if (status.state === 'restarting') return { text: SUPERVISOR.restarting, facts: daemon, restart: false, note };
   const s = status.supervisor;
-  if (status.state === 'starting' || s === null) return { text: SUPERVISOR.starting, restart: false, note };
+  if (status.state === 'starting' || s === null) return { text: SUPERVISOR.starting, facts: daemon, restart: false, note };
   const exit = s.exitWhenIdle ? SUPERVISOR.exitsWithLast : s.idleExitMs === null ? SUPERVISOR.exitsNever : SUPERVISOR.exitsAfter(s.idleExitMs);
-  return { text: SUPERVISOR.running(clockTime(s.startedAt), s.pid, s.liveSessions, exit), restart: false, note };
+  return { text: SUPERVISOR.running(s.liveSessions), facts: [SUPERVISOR.runningFacts(clockTime(s.startedAt), s.pid, exit), ...daemon], restart: false, note };
 }
 
 // `host.restart {stopSessions: true}`: Stop all and Restart now are the same act (the app's `restartSupervisor`); a
@@ -94,7 +101,7 @@ function StatusRow({ status, keepFocus, returnFocus }: { status: HostStatus | nu
   const button = useRef<HTMLButtonElement>(null);
   const acted = useRef(false); // Restart now was pressed, and its button may take focus with it as it goes
   const refused = useRef(false); // main refused that press: the button stays offered
-  const { text, restart: offered, note } = describe(status);
+  const { text, facts, restart: offered, note } = describe(status);
   useEffect(() => {
     if (!acted.current) return;
     if (refused.current && !busy) {
@@ -115,9 +122,11 @@ function StatusRow({ status, keepFocus, returnFocus }: { status: HostStatus | nu
   };
   return (
     <Setting row="supervisor.status" state={note}>
-      <span role="status" className="min-w-0 text-ui-sm text-fg tabular-nums">
-        {text}
-      </span>
+      <Tip content={facts.length === 0 ? null : facts.map((fact) => <span key={fact} className="block">{fact}</span>)} description={facts.join('; ')}>
+        <span role="status" tabIndex={facts.length === 0 ? undefined : 0} className={`min-w-0 text-ui-sm text-fg tabular-nums ${WORD_OWNER}`}>
+          {text}
+        </span>
+      </Tip>
       {offered && (
         <button ref={button} type="button" disabled={busy} className={TEXT_ACTION} onClick={restartNow}>
           {SUPERVISOR.restartNow}
@@ -133,8 +142,10 @@ function daemonText(status: HostStatus | null): string {
   return d === null ? SUPERVISOR.daemonConnecting : SUPERVISOR.daemonLine(d.kind, d.pid, d.machine);
 }
 
-// A plain line, not a second status: the group's one live line is the supervisor's
+// A plain line, not a second status: the group's one live line is the supervisor's. Drawn while the daemon has not
+// connected; once it has, its line is in the status's tooltip.
 function DaemonLine({ status }: { status: HostStatus | null }) {
+  if (status === null || status.daemon !== null) return null;
   return (
     <Setting row="supervisor.daemon">
       <span data-daemon-line className="min-w-0 text-ui-sm text-fg tabular-nums">
@@ -192,7 +203,7 @@ function StopAll({ status, keepFocus }: { status: HostStatus | null; keepFocus: 
     void restart(SUPERVISOR.stopFailed).finally(() => setBusy(false));
   };
   return (
-    <Setting row="supervisor.stopAll">
+    <Setting row="supervisor.stopAll" bare>
       {open ? (
         <>
           <span id={questionId} className="text-ui-sm text-fg">

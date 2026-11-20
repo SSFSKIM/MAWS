@@ -115,7 +115,7 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
                 <div title={result.name} className="truncate text-fg">
                   {result.name}
                 </div>
-                <div className="truncate text-fg-muted">{result.under}</div>
+                {result.under !== null && <div className="truncate text-fg-muted">{result.under}</div>}
               </div>
             ))}
           </div>

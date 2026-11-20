@@ -23,7 +23,9 @@ export const ROUTING = {
 };
 
 export const STATE = {
-  needsReauth: 'Needs reauthentication · the relay skips it until it is reconnected; readings are last known',
+  // the word cut (W181): the state in orange, what follows from it its tooltip
+  needsReauth: 'Sign in again',
+  needsReauthWhy: 'The relay skips it until it is reconnected; readings are last known',
   noReadings: 'No readings yet',
   resetPassed: (name: string) => `${name} · no reading since the window reset`,
 };
@@ -35,6 +37,7 @@ export const RELAY = {
     `Relay listening on ${hostPort} · checked ${checked}${latencyMs === null ? '' : ` · ${Math.round(latencyMs)} ms`}`,
   down: (error: string | null) => `Relay not answering${error ? ` · ${error}` : ''}`,
   unchecked: 'Relay not checked yet',
+  checked: (checked: string, latencyMs: number | null) => `checked ${checked}${latencyMs === null ? '' : ` · ${Math.round(latencyMs)} ms`}`, // the word cut (G109): the address's tooltip
 };
 
 // ClaudeUsage's repository, whose README says how to install it (the Accounts tab's `Install ClaudeUsage`).
@@ -55,14 +58,13 @@ export const USAGE = {
   claudeTitle: 'Claude accounts', // the panel's own title in Settings › Usage, beside `codexTitle`
   updated: (ago: string) => `updated ${ago}`,
   note: 'Usage includes all machines. Activity below is from this Mac.',
-  controlsUnavailable: "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now",
+  controlsUnavailable: "Use ClaudeUsage's own panel to route or remove accounts", // the word cut (G124); also the greyed actions' description
   route: 'Route requests here',
   reconnect: 'Reconnect…',
   remove: 'Remove account…',
   add: 'Add account…',
   addHint: 'Signs in without changing what this Mac is using.',
-  codexTitle: 'Codex accounts',
-  codexNote: 'Used by GPT models routed through this app.',
+  codexTitle: 'Codex accounts', // the word cut (P485, G119): no sentence under it
   codexEmpty: 'No Codex accounts connected.',
   codexLimits: "Limits show in ClaudeUsage's own panel",
   routingToggle: 'Route Claude Code through this app',

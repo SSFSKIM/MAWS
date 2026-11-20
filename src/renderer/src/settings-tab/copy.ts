@@ -1,8 +1,12 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
-// Amended 2026-11-13, UX wave U11 (l8-settings-06): a Settings row's note is one line; where its value comes from and
-// what MAWS will not touch sit behind the row's More, and what a whole section shares is said once under its heading.
-// Engine is split into Sessions, Engine and Supervisor, and the index is grouped.
+// Amended 2026-11-13, UX wave U11 (l8-settings-06): what a whole section shares is said once under its heading. Engine
+// is split into Sessions, Engine and Supervisor.
+// Amended 2026-11-20, the word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; the rows of
+// 2026-11-16-word-cut/settings.md by id): a row is its label and its control at rest. Its `note` waits for the pointer
+// and the keyboard in the row and is its accessible description; a `line` stands at rest (a condition the person must
+// act on, `state`, or a line the owner kept: a consent). Words cut from view but kept as a control's name, a tooltip or
+// a search keyword are named for that here.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 
@@ -22,25 +26,20 @@ export const SECTIONS = {
 } as const;
 
 export const INDEX = {
-  title: 'Settings',
   footer: "Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.",
   writeFailed: (why: string) => `The setting was not saved · ${why}`,
-  reading: 'Reading settings…',
-  // U11a M9 (l8-settings-06): the index's two group headings (an ampersand: "Sessions and engine" does not fit its width),
-  // and its last link
-  groups: { app: 'App', sessions: 'Sessions & engine' },
+  reading: 'Reading settings…', // the word cut (G7): the quiet spinner's name while the settings are read
+  // the word cut (G1, G3): the index has no title (the Settings dialog is named) and no group headings
   customize: 'Customize',
   // U11a M10 (l8-settings-06): the search at the index's top; a result is a name with what stands under it, a row's
-  // section, or one of these
+  // section or one of these, and a whole section nothing (the word cut, G9)
   search: 'Search settings',
-  noMatch: 'No matching settings',
-  under: { section: 'Section', customize: 'Plugins, skills and connectors' },
+  noMatch: 'No matches', // the word cut (G8)
+  under: { customize: 'Plugins, skills and connectors' },
 };
 
-// U11a M9 (l8-settings-06): a row's note is one line; the rest is behind More, opened in place. A note's words are its
-// row's states (rows.ts): `line`, `more`, and `state` for a line that reports a condition the person must act on, which
-// is never cut. A {name} in the words is a value the row fills in (a size, a number of minutes, a name).
-export const NOTE = { more: 'More', less: 'Less' };
+// A row's words are its states (rows.ts): `note`, `line`, and `state` for a line that reports a condition. A {name} in
+// the words is a value the row fills in (a size, a version, a name).
 
 export const ENGINE = {
   // W13 (charter D-1 as amended 2026-10-01): the installed Claude Code by default, never refused for its version
@@ -48,45 +47,49 @@ export const ENGINE = {
   change: 'Change…',
   useInstalled: 'Use installed',
   // E11 2.8: {version} is the release E11's live sittings ran, as the compat notice words it
+  // the word cut (G125, G128): the binary's path and the config home wait in this note, after its words
   binaryNotes: {
-    installed: { line: 'New sessions start on your installed Claude Code.', more: "Found again at every launch: ~/.local/bin/claude, else claude on your shell's PATH. Running sessions keep the binary they started on. MAWS was verified against Claude Code {version}." },
-    chosen: { line: 'New sessions start on the binary you chose.', more: 'Running sessions keep the binary they started on. MAWS was verified against Claude Code {version}.' },
+    installed: { note: "New sessions start on your installed Claude Code. Found again at every launch: ~/.local/bin/claude, else claude on your shell's PATH. Running sessions keep the binary they started on. MAWS was verified against Claude Code {version}." },
+    chosen: { note: 'New sessions start on the binary you chose. Running sessions keep the binary they started on. MAWS was verified against Claude Code {version}.' },
   },
   binaryReading: 'Reading the binary…',
-  update: 'Update',
-  updateAction: 'Update Claude Code…',
+  // the word cut (G126, G127): Update… is a button on the Binary row, named in full, its words its tooltip
+  update: 'Update', // its name in the search
+  updateAction: 'Update…',
+  updateName: 'Update Claude Code…', // the button's accessible name
   updateNotes: {
-    installed: { line: 'Runs claude update in a terminal tab.', more: 'New sessions start on the new version; running sessions keep theirs.' },
-    chosen: { line: 'Runs claude update in a terminal tab.', more: 'New sessions stay on your chosen binary until Use installed. Running sessions keep theirs.' },
+    installed: { note: 'Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.' },
+    chosen: { note: 'Runs claude update in a terminal tab. New sessions stay on your chosen binary until Use installed. Running sessions keep theirs.' },
   },
-  configHome: 'Config home',
+  configHome: 'Config home', // in the Binary row's note (G128), and its name in the search
   readOnly: 'read-only to MAWS',
-  configHomeNotes: { default: { line: 'Where the engine keeps transcripts, settings and trust.' } },
+  configHomeNote: 'Where the engine keeps transcripts, settings and trust.',
 };
 
 // U11a M9 (l8-settings-06): Settings › Sessions, what shapes a session MAWS runs; the line under its heading says once
-// what its rows' notes each said before
+// what its rows' notes each said before (the word cut, G85: that MAWS runs them)
 export const SESSIONS = {
-  line: 'For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed.',
+  line: 'For sessions MAWS runs.',
   subagent: 'Subagent model',
   subagentPlaceholder: 'inherit', // W3: the engine's own word for no override (each agent's model, else the session's)
-  subagentNotes: { default: { line: 'The model subagents use in new sessions; empty inherits.', more: 'Set as CLAUDE_CODE_SUBAGENT_MODEL at launch. Session info shows what a session actually got.' } },
+  subagentNotes: { default: { note: 'Set as CLAUDE_CODE_SUBAGENT_MODEL at launch. Session info shows what a session actually got.' } }, // the word cut (G96)
   // W3 (charter D-18 as amended 2026-10-01)
   autoFallback: 'When auto mode is unavailable',
-  autoFallbackNotes: { default: { line: 'The mode MAWS sets when the engine refuses auto for a session.', more: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS says so in the session, and the next resume asks for auto again." } },
-  archive: 'Archive sessions inactive for',
-  archiveNotes: { default: { line: 'Archived sessions can be restored from the sidebar.', more: 'Pinned, live, waiting and background-running sessions stay, as do worktrees with uncommitted changes.' } },
+  autoFallbackNotes: { default: { note: "The mode MAWS sets when the engine refuses auto for a session. Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS says so in the session, and the next resume asks for auto again." } },
+  archive: 'Archive after', // the word cut (G98)
+  archiveWas: 'Archive sessions inactive for', // a search keyword
+  archiveNotes: { default: { note: 'Archived sessions can be restored from the sidebar. Pinned, live, waiting and background-running sessions stay, as do worktrees with uncommitted changes.' } },
 };
 
 // P4-A2 start: the launch profile every session MAWS launches runs under (settings version 17); Settings › Sessions (U11a M9)
 export const LAUNCH_PROFILE = {
   plugins: 'Plugins in sessions',
-  pluginsNotes: { default: { line: 'Switch a plugin off to keep it out of the sessions MAWS runs.', more: "The list is what your Claude Code settings turn on. A change applies at a session's next launch." } },
+  pluginsNotes: { default: { note: "The list is what your Claude Code settings turn on. A change applies at a session's next launch." } }, // the word cut (G87)
   pluginsReading: 'Reading your plugins…',
   pluginsNone: 'Your settings turn on no plugins.',
   pluginOn: (id: string) => `Load ${id} in MAWS sessions`,
   hooks: 'Hooks in sessions',
-  hooksNotes: { default: { line: "None turns off every hook in the sessions MAWS runs, the to-human plugin's included.", more: "Hooks come from your settings and your plugins. Without the to-human plugin's hooks a session runs without MAWS's report. A change applies at a session's next launch." } }, // P4-R7z: the plugin's message tool needs its hooks
+  hooksNotes: { default: { line: "None turns off every hook in the sessions MAWS runs, the to-human plugin's included.", note: "Hooks come from your settings and your plugins. Without the to-human plugin's hooks a session runs without MAWS's report. A change applies at a session's next launch." } }, // P4-R7z: the plugin's message tool needs its hooks; its line a consent, at rest (G91)
   hooksYours: 'Yours',
   hooksNone: 'None',
 };
@@ -95,7 +98,7 @@ export const LAUNCH_PROFILE = {
 // P4-R8 start: Settings › Sessions › MCP servers (settings version 16; Engine's until U11a M9)
 export const MCP_SERVERS = {
   label: 'MCP servers',
-  notes: { default: { line: 'Extra HTTP servers for the sessions MAWS runs.', more: "An entry wins over a server of the same name in your own or a project's config. A Claude Code sign-in for a server of the same name and URL, without custom headers, carries over. A change applies at a session's next launch." } },
+  notes: { default: { note: "Extra HTTP servers for the sessions MAWS runs. An entry wins over a server of the same name in your own or a project's config. A Claude Code sign-in for a server of the same name and URL, without custom headers, carries over. A change applies at a session's next launch." } },
   name: 'Server name',
   url: 'Server URL',
   namePlaceholder: 'name',
@@ -113,22 +116,24 @@ export const MCP_SERVERS = {
 // C12 start: the memory budget's rows in Settings › Supervisor (Engine's until U11a M9; C12 execution document, "Surfaces of the budget")
 export const BUDGET_SETTINGS = {
   // W7 start: the switch (settings version 7); off hides the rows below it
-  enabled: 'Memory budget',
-  enabledLabel: 'Release idle sessions to stay under a memory limit',
-  enabledNotes: { on: {}, off: { line: 'Off: an engine process ends only on archive, quit or stop.', more: 'Session info still shows the memory they use.' } },
+  enabled: 'Release idle sessions over a memory limit', // the word cut (G139): the row's one label
+  enabledWas: 'Memory budget', // a search keyword
+  enabledLabel: 'Release idle sessions to stay under a memory limit', // the switch's accessible name
+  enabledNotes: { on: {}, off: { note: 'Session info still shows the memory they use.' } }, // the word cut (G140)
   limit: 'Limit',
   // W7 end
   budget: 'Memory budget', // the limit's field
   placeholder: 'default',
   // the default's size while the setting is the default and the host has said it ({size}); without it once a limit is set
+  // the word cut (G142): the field's placeholder shows the default's size
   limitNotes: {
-    sized: { line: 'Default: 25% of physical memory ({size}).', more: 'Past it the least recently used idle session is released. Send resumes a released session.' },
-    unsized: { line: 'Default: 25% of physical memory.', more: 'Past it the least recently used idle session is released. Send resumes a released session.' },
+    sized: { note: 'Past it the least recently used idle session is released. Send resumes a released session.' },
+    unsized: { note: 'Past it the least recently used idle session is released. Send resumes a released session.' },
   },
   useDefault: 'Use default',
   invalid: 'Enter the memory budget in GB, at least 0.5',
   stateful: 'Stateful MCP servers',
-  statefulNotes: { default: { line: 'A session connected to one of these is never released.', more: 'For servers whose state is lost when their process ends. Names match exactly; the field suggests those live sessions report.' } },
+  statefulNotes: { default: { line: 'A session connected to one of these is never released.', note: 'For servers whose state is lost when their process ends. Names match exactly; the field suggests those live sessions report.' } },
   addServer: 'Add a stateful MCP server',
   addPlaceholder: 'server name',
   remove: (name: string) => `Remove ${name}`,
@@ -144,7 +149,11 @@ export const SUPERVISOR = {
   title: 'Background supervisor', // U11a M9: its group's name; the section's heading stands where it was drawn
   status: 'Status',
   reading: 'Reading…',
-  running: (since: string, pid: number, live: number, exit: string) => `Running since ${since} · pid ${pid} · ${sessions(live)} · ${exit}`,
+  // the word cut (G129, G133): the status reads its state and its sessions; the rest, and the machine daemon's line while
+  // it is connected, are the status's tooltip
+  running: (live: number) => `Running · ${sessions(live)}`,
+  runningFacts: (since: string, pid: number, exit: string) => `Since ${since} · pid ${pid} · ${exit}`,
+  daemonFact: (line: string) => `Machine daemon · ${line}`,
   exitsAfter: (idleExitMs: number) => `exits ${idleSpan(idleExitMs)} after the last session ends`,
   exitsNever: 'never exits on its own',
   exitsWithLast: 'exits when its last session ends', // exit-when-idle armed (an update, or the incompatible wait)
@@ -156,7 +165,7 @@ export const SUPERVISOR = {
   // what the background process is for, once main has answered; while an older version's is waited for, a state, whole
   statusNotes: {
     reading: {},
-    default: { line: 'Sessions run in this background process, so they can keep running after MAWS quits.' },
+    default: { note: 'Sessions run in this background process, so they can keep running after MAWS quits.' }, // the word cut (G130)
     waiting: { line: "This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.", state: true as const },
   },
   restartNow: 'Restart now',
@@ -165,13 +174,13 @@ export const SUPERVISOR = {
   idleNever: 'never', // the empty field's placeholder
   idleUnit: 'min',
   idleNotes: {
-    minutes: { line: 'With MAWS closed, the supervisor exits {minutes} min after its last session ends.', more: 'A kept session idle that long is stopped; Send resumes it. Empty means never.' },
-    never: { line: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.' },
+    minutes: { note: 'A kept session idle that long is stopped; Send resumes it. Empty means never.' }, // the word cut (G135)
+    never: { note: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.' },
   },
   idleInvalid: `Enter whole minutes from 1 to ${MAX_IDLE_MINUTES}, or leave the field empty for never`,
   stopAll: 'Stop all',
-  stopAllAction: 'Stop all sessions and the supervisor…',
-  stopAllNotes: { default: { line: 'Every session stops; Send resumes each from its transcript.', more: 'A fresh supervisor starts in its place.' } },
+  stopAllAction: 'Stop all sessions…', // the word cut (G136): the row's one control, its label its name alone
+  stopAllNotes: { default: { line: 'Every session stops; Send resumes each from its transcript.', note: 'A fresh supervisor starts in its place.' } }, // the line a consent, at rest (G137)
   confirm: (live: number) => (live === 0 ? 'No session is running. Stop the supervisor and start a fresh one?' : `Stop ${sessions(live)} and the supervisor?`),
   confirmAction: 'Stop all',
   cancel: 'Cancel',
@@ -188,42 +197,43 @@ export const GATEWAY = {
   defaultRoute: 'Default route',
   routes: { machine: 'Machine’s own', gateway: 'ClaudeUsage relay', direct: 'Direct' }, // P5 O7 M9: machine
   // W2: no status line. P5 O7 M9: the machine's own route, every machine's default, says what it means
+  // the word cut (G101, G102): no address beside the routes, and only the explanation in the note
   defaultRouteNotes: {
-    default: { line: 'New sessions start on this route.', more: 'A session can be switched from its Session info.' },
-    machine: { line: 'New sessions start on this route.', more: 'A session can be switched from its Session info. Machine’s own: MAWS injects nothing; the machine’s own settings, environment and login decide, as claude in its terminal would.' },
+    default: { note: 'A session can be switched from its Session info.' },
+    machine: { note: 'A session can be switched from its Session info. Machine’s own: MAWS injects nothing; the machine’s own settings, environment and login decide, as claude in its terminal would.' },
   },
   // P5 O7 M9: a choice an older daemon dropped (main's mirror's words)
   routeDropped: 'This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.',
-  policy: 'Relay unreachable at launch',
+  policy: 'If the relay is down', // the word cut (G104)
+  policyWas: 'Relay unreachable at launch', // a search keyword
   policies: { ask: 'Ask each time', wait: 'Wait for the relay', direct: 'Run direct' },
-  policyNotes: { default: {}, direct: { line: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.' } },
-  offerDirect: 'Per-session Direct',
-  offerDirectLabel: 'Offer "Switch to Direct…" in Session info', // W2: no status line
-  offerDirectNotes: { default: { line: "The relay card's Run direct stays either way: Direct is the fallback when the relay is unreachable." } },
+  policyNotes: { default: {}, direct: { line: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.' } }, // kept at rest (G13)
+  offerDirect: 'Switch to Direct in Session info', // the word cut (G106): the row's one label
+  offerDirectWas: 'Per-session Direct', // a search keyword
+  offerDirectLabel: 'Offer "Switch to Direct…" in Session info', // W2: no status line; the switch's accessible name
+  offerDirectNotes: { default: { note: "The relay card's Run direct stays either way: Direct is the fallback when the relay is unreachable." } },
   directLogin: 'Direct login',
   directLoginKnown: (login: string, email: string | null) => ["engine's own", login, email].filter(Boolean).join(' · '),
-  directLoginUnknown: 'unknown until a Direct session runs',
-  directLoginNotes: { default: { line: 'Only Direct sessions use it.', more: "MAWS never stores a token; ClaudeUsage holds the relay's accounts." } }, // the sign-in and its Copy follow the line
-  signIn: 'Sign in: run claude /login in a terminal',
+  directLoginUnknown: 'Unknown', // the word cut (G107)
+  directLoginNotes: { default: { note: "MAWS never stores a token; ClaudeUsage holds the relay's accounts." } }, // the word cut (G108): the sign-in command and its Copy stand at rest
   signInCommand: 'claude /login',
   copy: 'Copy',
   copied: 'Copied',
-  relay: 'Relay',
+  relay: 'Relay', // the word cut (G109): the row reads the relay's address; when it was checked is the address's tooltip
   openClaudeUsage: 'Open ClaudeUsage',
 };
 
 export const KEYBOARD = {
-  hint: '⇧Tab cycles permission mode as in the terminal',
-  change: 'Change',
+  change: 'Change', // the word cut (G39): drawn only on a pointed row or with the keyboard on it
   recording: 'Press keys… esc cancels',
   was: (display: string) => `Was ${display}`,
-  unbound: 'Unbound',
+  unbound: 'Unbound', // the word cut (G40): the empty key cap's accessible name and tooltip
   conflict: (title: string) => `Already bound to ${title} · unbind it first`,
   fixedKey: (title: string) => `${title} keeps this key`, // UX wave U4a: a key an editor handles itself, which cannot be unbound
   menuNeedsModifier: 'A menu shortcut needs ⌘, ⌃ or ⌥',
   appNeedsModifier: 'An app-wide shortcut needs ⌘, ⌃ or ⌥',
   reserved: (item: string) => `Reserved by macOS · ${item}`,
-  reset: 'Reset to defaults',
+  reset: 'Reset to defaults', // the word cut (G44): drawn only once a binding differs from its default
   resetTitle: 'Reset every key binding?',
   resetBody: 'Every shortcut you changed or unbound returns to its default.',
   resetConfirm: 'Reset',
@@ -236,18 +246,18 @@ export const KEYBOARD = {
 // this Mac is refused when dictation starts and said so here.
 export const VOICE = {
   shortcut: 'Shortcut',
-  changeInKeyboard: 'Change in Keyboard',
+  change: 'Change', // the word cut (G47)
+  changeInKeyboard: 'Change in Keyboard', // the Change button's accessible name
   // the default, unbound: the toolbar's microphone is the primary control (the owner's ruling of 2026-10-06)
   shortcutNotes: {
-    bound: { line: 'Hold the shortcut to dictate into the focused composer.', more: "Or click the microphone in the composer's toolbar to start, and again to stop." },
-    unbound: { line: "Click the microphone in the composer's toolbar to start dictating, and again to stop.", more: 'A shortcut, once bound, dictates into the focused composer while you hold it.' },
+    bound: { note: "Hold the shortcut to dictate into the focused composer. Or click the microphone in the composer's toolbar to start, and again to stop." },
+    unbound: { note: "Click the microphone in the composer's toolbar to start dictating, and again to stop. A shortcut, once bound, dictates into the focused composer while you hold it." },
   },
   language: 'Language',
   system: (locale: string | null) => (locale === null ? 'System' : `System (${locale})`),
   noOnDeviceMark: 'no on-device model',
-  languageNotes: { default: { line: "Recognised on this Mac by Apple's speech recognition.", more: 'MAWS stores no audio and no transcript.' } },
-  helper: 'Helper',
-  helperFound: 'Found at',
+  languageNotes: { default: { note: "Recognised on this Mac by Apple's speech recognition. MAWS stores no audio and no transcript." } },
+  helper: 'Helper', // the word cut (G50): drawn only while the helper is missing or failed, or the probe did
   helperMissing: 'Not found at',
   helperNotes: { default: {}, build: { line: 'run pnpm build:helper', state: true as const } }, // a development build without the helper
   helperFailed: (message: string) => `Did not start · ${message}`,
@@ -257,17 +267,16 @@ export const VOICE = {
   speech: 'Speech recognition',
   permission: {
     authorized: 'Allowed',
-    notDetermined: 'Not asked yet · macOS asks the first time you dictate',
+    notDetermined: 'Not asked yet', // the word cut (G53)
     denied: 'Off for MAWS',
     restricted: 'Off for MAWS and cannot be turned on here',
   },
-  permissionUnknown: 'Unknown until the helper answers',
+  permissionUnknown: 'Unknown', // the word cut (G55)
   openSystemSettings: 'Open System Settings',
   // the pane as System Settings names it, for the toast when the button could not open it
   paneByHand: { microphone: 'Microphone', speech: 'Speech Recognition' },
   openFailed: (why: string, pane: string) => `Could not open System Settings: ${why}. Open System Settings › Privacy & Security › ${pane} by hand.`,
-  recognition: 'Recognition',
-  onDevice: 'On this Mac',
+  recognition: 'Recognition', // the word cut (G56): drawn only while the language has no on-device model, or it is not known
   noOnDevice: 'No on-device model · download it in System Settings › Keyboard › Dictation',
 };
 // E9 end
@@ -275,22 +284,24 @@ export const VOICE = {
 export const APPEARANCE = {
   theme: 'Theme',
   themes: { light: 'Light', dark: 'Dark', system: 'System' },
-  themeHint: 'native chrome follows',
   monoFont: 'Monospace font',
-  monoFontPlaceholder: 'the default stack (SF Mono)',
-  monoFontNotes: { default: { line: 'Name a Nerd Font to draw prompt glyphs in the terminal' } },
+  monoFontPlaceholder: 'SF Mono', // the word cut (G24)
+  monoFontNotes: { default: { note: 'Name a Nerd Font to draw prompt glyphs in the terminal' } },
   // W2: Claude Desktop's setting, in its words
   transcriptWidth: 'Transcript width',
   transcriptWidths: { 768: 'Narrow', 960: 'Medium', 1280: 'Wide' },
-  transcriptWidthNotes: { default: { line: 'Maximum width of the transcript and composer columns' } },
+  transcriptWidthNotes: { default: {} }, // the word cut (G22)
   // U+E0A0 (branch) and U+E0B0 (right arrow): the powerline glyphs a prompt draws
   preview: 'main  ~/project  $',
 };
 
 export const NOTIFICATIONS = {
-  when: 'When a session finishes or needs you',
-  enabledLabel: 'Notify when I am not looking at that session',
-  delivery: { os: 'macOS: allowed', fallback: 'macOS: not delivered · MAWS falls back to a dock bounce and a toast' },
+  when: 'Notify me', // the word cut (G28): the row's one label
+  whenWas: 'When a session finishes or needs you', // a search keyword
+  enabledLabel: 'Notify when I am not looking at that session', // the switch's accessible name
+  // the word cut (G30): what macOS did with the last one; a refusal's fallback is the chip's tooltip
+  delivery: { os: 'macOS: allowed', fallback: 'Blocked in macOS' },
+  fallbackWhy: 'MAWS falls back to a dock bounce and a toast',
   kinds: 'For',
   kind: {
     turnFinished: 'Turn finished',
@@ -307,15 +318,13 @@ export const NOTIFICATIONS = {
   // P2-C start (2026-10-10): the to-human mod's app switch (BUILT_IN_MODS' name)
   toHuman: {
     label: 'Messages to you',
-    name: 'To-human',
-    notes: { default: { line: 'Agents message you and ask questions you answer in place; a session reads as their report.', more: 'The view follows at once; the instructions, the next time each session starts.' } },
+    name: 'To-human', // the switch's accessible name (the word cut, G26)
+    notes: { default: { note: 'Agents message you and ask questions you answer in place; a session reads as their report. The view follows at once; the instructions, the next time each session starts.' } }, // both sentences (G27)
   },
   // P2-C end
-  approvalsCaption: 'permission requests, dialogs and MCP elicitations',
-  heldNever: 'Never notifies in this version',
+  approvalsCaption: 'permission requests, dialogs and MCP elicitations', // the word cut (G33): approvals' tooltip and description
+  // the word cut (G34, G35): held peer messages, which never notify, are not drawn; Sound is its switch alone
   sound: 'Sound',
-  on: 'on',
-  off: 'off',
 };
 
 // E4a start: Settings › Browser (E4a execution document, Design §9 and §16; settings version 11): which profile new tabs
@@ -324,39 +333,41 @@ export const BROWSER = {
   profile: 'Profile',
   defaultProfile: 'Default',
   missingProfile: (profileDir: string) => `${profileDir} · not found`,
-  profileNotes: { default: { line: 'Applies to tabs opened from now on. The address bar shows which profile a tab browses with.' } },
+  profileNotes: { default: { note: 'Applies to tabs opened from now on. The address bar shows which profile a tab browses with.' } },
   search: 'Search engine',
-  searchNotes: { default: { line: 'Use %s for the search text' } },
+  searchNotes: { default: { note: 'Use %s for the search text' } }, // the word cut (G64)
   searchInvalid: 'Enter an http or https address with %s where the search text goes',
   useDefault: 'Use default',
-  links: 'Links that open a new window',
-  linkTargets: { 'in-app': 'In MAWS', external: 'In the system browser' },
-  linksNotes: { inApp: { line: 'In MAWS, such a link opens as a new tab of the same session.' }, external: {} },
+  links: 'New-window links', // the word cut (G67, G68, G69)
+  linksWas: 'Links that open a new window', // a search keyword
+  linkTargets: { 'in-app': 'In MAWS', external: 'System browser' },
+  linksNotes: { inApp: {}, external: {} },
   // cua #90: settings 12's switch
   bookmarksBar: 'Bookmarks bar',
   bookmarksBarLabel: 'Show the bookmarks bar',
-  bookmarksBarNotes: { default: { line: 'An imported profile’s Chrome bookmarks, under the address bar. ⌘⇧B in the browser.' } },
+  bookmarksBarNotes: { default: { note: 'An imported profile’s Chrome bookmarks, under the address bar. ⌘⇧B in the browser.' } },
   // E4b start: the imported Chrome profiles (E4b execution document, Design §11; Decision Log 35)
   chromeProfile: 'Chrome profile',
-  import: 'Import a Chrome profile…',
-  chromeProfileNotes: { default: { line: 'A one-time copy of its history, cookies and extensions. Chrome is never changed.' }, running: {} },
+  import: 'Import…', // the word cut (G70)
+  importName: 'Import a Chrome profile…', // the button's accessible name
+  chromeProfileNotes: { default: { line: 'A one-time copy of its history, cookies and extensions. Chrome is never changed.' }, running: {} }, // a consent, at rest (G71)
   // U11a M9: the rows made at run time, one per imported profile and one per extension of each; drawn by their own names
   importedProfile: 'Imported Chrome profile',
-  importedProfileNotes: { default: { line: '{summary}', state: true as const } }, // the import's summary
+  importedProfileNotes: { default: {} }, // the word cut (G74): the import's summary is in its report
   importing: (step: string) => `Import running · ${step}`,
   show: 'Show',
   lastImport: (outcome: 'cancelled' | 'failed') => (outcome === 'cancelled' ? 'The last import was cancelled' : 'The last import failed'),
   importedOn: (date: string) => `Imported ${date}`,
+  // the word cut (G73): a profile's actions in its "…" menu, named by the profile
+  actions: (profile: string) => `Actions for ${profile}`,
   showReport: 'Show report',
   remove: 'Remove imported profile',
   extensions: 'Extensions',
-  extensionNotes: { default: {}, wallet: { line: 'Wallet extensions start off' } },
-  // cua #90: what an extension's popup cannot do in MAWS's browser (its spec's S1: `chrome.tabs.query` never answers the page)
+  extensionNotes: { default: {}, wallet: { note: 'Wallet extensions start off' } },
+  // cua #90: what an extension's popup cannot do in MAWS's browser (its spec's S1: `chrome.tabs.query` never answers the
+  // page); the word cut (G76): the name and tooltip of an ⓘ beside the Extensions heading. Each extension's On/Off is a
+  // switch (G77).
   popupLimit: 'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.',
-  toggles: [
-    { value: 'on', label: 'On' },
-    { value: 'off', label: 'Off' },
-  ] as const,
   // E4b end
 };
 // E4a end
@@ -365,18 +376,17 @@ export const BROWSER = {
 // D9): the design-system defaults
 export const ARTIFACTS = {
   exportAuthorName: 'Export author name',
-  exportAuthorNotes: { default: { line: 'Name on your DOCX comments; blank uses “{name}”.', more: 'Agent comments keep their session name.' } },
-  suggestedAuthor: (name: string) => `Use ${name}`,
+  exportAuthorNotes: { default: { note: 'Name on your DOCX comments; blank uses “{name}”. Agent comments keep their session name.' } }, // the word cut (G79): no Use button; the placeholder shows the name
   defaultSystem: 'Default design system',
   house: 'House system',
   defaultSystemNotes: {
-    default: { line: 'Used by documents, decks and designs that name no system of their own.', more: 'A Space’s default comes first. The house system is MAWS.' },
+    default: { note: 'Used by documents, decks and designs that name no system of their own. A Space’s default comes first. The house system is MAWS.' },
     readFailed: { line: 'Could not read the design systems · {why}', state: true as const },
   },
   missing: 'A deleted system · the house system applies', // the owner's default: the chain's next link is the house
   missingSpace: 'A deleted system · the next default applies', // a Space's: yours first, then the house
   bySpace: 'By Space',
-  bySpaceNotes: { spaces: { line: 'A Space’s default comes before yours.' }, none: { line: 'No Spaces yet. A Space can have its own default design system.' } },
+  bySpaceNotes: { spaces: { note: 'A Space’s default comes before yours.' }, none: { line: 'No Spaces yet. A Space can have its own default design system.' } }, // the empty line at rest (G83)
   useMine: 'Use my default',
   spaceSystem: (space: string) => `Design system for ${space}`,
   reading: 'Reading design systems…',
