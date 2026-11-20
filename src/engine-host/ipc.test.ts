@@ -35,6 +35,7 @@ import { ProcessTable } from './process-table';
 // C12 end
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { FsService } from './fs/service'; // UX wave, ticket 777
+import { SessionStream } from './session-stream'; // UX wave, ticket 777
 import { DEBOUNCE_MS, SETTLE_MS } from './fs/watcher'; // UX wave, ticket 777
 import { longTranscript, turnLines, LONG_DIR, LONG_SESSION } from '../../test/support/long-transcript'; // UX wave, ticket 777
 import { StoreFixture } from '../../test/support/store-fixture'; // UX wave, ticket 777
@@ -664,7 +665,11 @@ describe('session.events of a live launch reaches the transcript before it (tick
 
   // the review's race: the snapshot holds only the handshake, and the launch's first turn reaches the transcript and the
   // stream before the transcript is read through; the seam is still where the launch's messages begin
-  it('places the seam by what the stream holds once the transcript is read, not when the snapshot was taken', async () => {
+  // the review's second round: a scheduled turn names its prompt in its started command before the prompt streams
+  it.each([
+    ['its prompt', (content: string) => ({ type: 'user', message: { role: 'user', content }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'u7', isReplay: true }), (e: SessionEvent) => e.kind === 'user.message' && e.messageUuid === 'u7'],
+    ['a scheduled turn’s started command', () => ({ type: 'command_lifecycle', command_uuid: 'u7', state: 'started', uuid: 'lifecycle-u7', session_id: LONG_SESSION }), (e: SessionEvent) => e.kind === 'command.lifecycle' && e.commandUuid === 'u7'],
+  ] as const)('places the seam by what the stream holds once the transcript is read, not when the snapshot was taken (%s)', async (_what, frame, streamed) => {
     const turn = turnLines(7, 'd6', 7);
     await fixture.addTranscript(LONG_DIR, LONG_SESSION, [...longTranscript(6), ...turn.lines]); // the engine wrote it first
     fs = new FsService({ paths: fixture.paths, emit: () => true });
@@ -679,8 +684,8 @@ describe('session.events of a live launch reaches the transcript before it (tick
       diskEvents: (appSessionId, request, quiet) => service.eventsSnapshot(appSessionId, null, request, quiet),
       diskSeam: async (appSessionId, journal) => {
         // between the snapshot and the transcript's read: the turn streams
-        transport!.push({ type: 'user', message: { role: 'user', content: JSON.parse(turn.lines[0]!).message.content }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'u7', isReplay: true });
-        await until(() => host!.ipc.table.get(appSessionId)!.status().process === 'ready' && host!.events(appSessionId).some((e) => e.kind === 'user.message' && e.messageUuid === 'u7'), 'the streamed prompt');
+        transport!.push(frame(JSON.parse(turn.lines[0]!).message.content));
+        await until(() => host!.events(appSessionId).some(streamed), 'the streamed turn');
         return service.historySeam(appSessionId, journal);
       },
       checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
@@ -689,7 +694,7 @@ describe('session.events of a live launch reaches the transcript before it (tick
     await host.call('session.launch', { spec: spec({ appSessionId: id }) });
     await until(() => host!.statuses(id).some((s) => s.process === 'ready'), 'ready');
     const answer = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
-    expect(answer.events.some((e) => e.kind === 'user.message' && e.messageUuid === 'u7')).toBe(false); // taken before it streamed
+    expect(answer.events.some(streamed)).toBe(false); // taken before it streamed
     const pages: SessionEvent[][] = [];
     for (let earlier: EventId | undefined = answer.earlier; earlier !== undefined; ) {
       const page: CommandOutput<'session.events'> = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
@@ -699,6 +704,46 @@ describe('session.events of a live launch reaches the transcript before it (tick
     const older = pages.flat();
     expect(older.length).toBeGreaterThan(0);
     expect(older.some((e) => ('messageUuid' in e && (e.messageUuid === 'u7' || e.messageUuid === 'a7')) || (e.kind === 'turn.started' && e.userMessageUuid === 'u7'))).toBe(false);
+    transport!.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+
+  // the review's second round: a bounded first page cut short before the launch's first message (a prompt too large to
+  // cross beside the handshake) still answers the cursor, placed by the ring, which holds the launch whole; and the seam
+  // reads no more of the stream than the page did (the journal past the ring is never replayed for it)
+  it('answers a bounded first page cut short before the launch’s first message with the cursor, reading the stream once', async () => {
+    await fixture.addTranscript(LONG_DIR, LONG_SESSION, longTranscript(6));
+    fs = new FsService({ paths: fixture.paths, emit: () => true });
+    await fs.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
+    const id = 'app-bounded' as AppSessionId;
+    fs.bind([{ sessionId: LONG_SESSION, appSessionId: id }]);
+    const service = fs;
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      diskEvents: (appSessionId, request, quiet) => service.eventsSnapshot(appSessionId, null, request, quiet),
+      diskSeam: (appSessionId, journal) => service.historySeam(appSessionId, journal),
+      checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })),
+    });
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transport!.push({ type: 'user', message: { role: 'user', content: `prompt 7 ${'y'.repeat(12_000)}` }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'u7', isReplay: true });
+    await until(() => host.events(id).some((e) => e.kind === 'user.message' && e.messageUuid === 'u7'), 'the launch’s prompt');
+    const reads = vi.spyOn(SessionStream.prototype, 'snapshot');
+    const page = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, maxBytes: 4096 });
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockRestore();
+    expect(page.complete).toBe(false);
+    expect(page.events.some((e) => e.kind === 'user.message' && e.messageUuid === 'u7')).toBe(false);
+    expect(page.earlier).toBeDefined();
+    const older: SessionEvent[] = [];
+    for (let earlier: EventId | undefined = page.earlier; earlier !== undefined; ) {
+      const before: CommandOutput<'session.events'> = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
+      older.unshift(...before.events);
+      earlier = before.earlier;
+    }
+    expect(older.flatMap((e) => (e.kind === 'user.message' && typeof e.content === 'string' ? [e.content.split(' ').slice(0, 2).join(' ')] : []))).toEqual(Array.from({ length: 6 }, (_, i) => `prompt ${i + 1}`));
     transport!.exit(0);
     await host.ipc.table.get(id)!.exited;
   });

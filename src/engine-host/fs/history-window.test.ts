@@ -202,6 +202,37 @@ describe('a long transcript is read in windows', () => {
       expect(ids(whole)).toEqual(ids(unbounded.filter((event) => event !== left))); // everything else, in order, once
     });
 
+    // ticket 777, the review's second round: the seam's last row alone past the budget is left out like any other, and
+    // the pages before the seam go on past it, the earlier process's exit at their end once
+    it('pages before a live launch’s seam past its last row alone over the budget, ending with the earlier process’s exit', async () => {
+      const big = `the long reply ${'z'.repeat(20_000)}`;
+      await fixture.addTranscript(DIR, SESSION, [...transcript(4), ...turnOf(5, 'd4', [big]).slice(0, -1), ...turnOf(6, 'a5-0', ['six'])]);
+      const fs = await start();
+      const maxBytes = 8 * 1024;
+      const { whole: unbounded } = await allPages(fs);
+      const seam = (await fs.historySeam(APP, async () => ['u6'] as MessageUuid[]))!;
+      const pages: SessionEvent[][] = [];
+      const omitted: number[] = [];
+      for (let earlier: EventId | undefined = seam; earlier !== undefined; ) {
+        const page = await fs.eventsSnapshot(APP, null, { before: earlier, maxBytes }, true);
+        expect(answerBytes(page)).toBeLessThanOrEqual(maxBytes);
+        if (page.omitted) {
+          omitted.push(page.omitted.events);
+          expect(page.events, 'the page that left the row out holds nothing, so a reader reads on past it').toEqual([]);
+        }
+        pages.unshift(page.events);
+        earlier = page.earlier;
+      }
+      const read = pages.flat();
+      const left = unbounded.find((event) => event.kind === 'assistant.block.complete' && event.block.type === 'text' && event.block.text === big)!;
+      const before = unbounded.slice(0, unbounded.findIndex((event) => event.kind === 'turn.started' && event.userMessageUuid === 'u6'));
+      expect(before.at(-1)!.id).toBe(left.id); // the seam's last row is the one past the budget
+      expect(omitted).toEqual([1]);
+      expect(read.filter((event) => event.kind === 'process.exited')).toHaveLength(1);
+      expect(read.at(-1)!.kind).toBe('process.exited');
+      expect(ids(read.slice(0, -1))).toEqual(ids(before.filter((event) => event !== left)));
+    });
+
     it('bounds the first N events the same way', async () => {
       await fixture.addTranscript(DIR, SESSION, transcript(12));
       const fs = await start();
