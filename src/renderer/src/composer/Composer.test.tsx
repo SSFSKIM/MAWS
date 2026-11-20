@@ -1197,12 +1197,10 @@ describe('the three menu chords', () => {
     act(() => editorOf(1).focus());
     await chord(...EFFORT);
     expect(await screen.findByText('effort view')).toBeTruthy();
-    await chord(...EFFORT); // closed: Radix returns focus (the chip's onCloseAutoFocus) in a 0 ms timer
-    act(() => editorOf(1).focus());
-    act(() => void (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'M', code: 'KeyM', metaKey: true, shiftKey: true })));
+    await chord(...MODE); // the effort menu still open: a person's ⇧⌘M from it
     const opened = useComposerStore.getState().modeMenus.has(B);
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20))); // the timer runs
-    console.log('EXPERIMENT', JSON.stringify({ opened, after: useComposerStore.getState().modeMenus.has(B) }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    console.log('EXPERIMENT2', JSON.stringify({ opened, after: useComposerStore.getState().modeMenus.has(B), effort: useComposerStore.getState().chipWidgets.has(B), menu: document.querySelector('[aria-label="Permission mode"][role="dialog"]') !== null }));
   });
 
   // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on
