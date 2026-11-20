@@ -708,6 +708,49 @@ describe('session.events of a live launch reaches the transcript before it (tick
     await host.ipc.table.get(id)!.exited;
   });
 
+  // The Mac run's cross-build scene (to-human, from the peer): a launch another host started and this one adopted
+  // answers from its journal, the ring not holding it whole (an adopted stream's history is the journal's, as an
+  // evicted one's is). Its turn, which the engine also wrote to the transcript, is the seam: the pages are the turns
+  // before it, and the turn is drawn once, from the stream.
+  it('places the seam for a launch whose answer is rebuilt from its journal, as an adopted one\'s is, drawing its turn once', async () => {
+    const turn = turnLines(7, 'd6', 7);
+    await fixture.addTranscript(LONG_DIR, LONG_SESSION, [...longTranscript(6), ...turn.lines]); // the engine wrote the launch's turn
+    fs = new FsService({ paths: fixture.paths, emit: () => true });
+    await fs.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
+    const id = 'app-adopted' as AppSessionId;
+    fs.bind([{ sessionId: LONG_SESSION, appSessionId: id }]);
+    const service = fs;
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      ringSize: 2, // the ring holds the launch's newest events only: its answer is the journal's
+      diskEvents: (appSessionId, request, quiet) => service.eventsSnapshot(appSessionId, null, request, quiet),
+      diskSeam: (appSessionId, journal) => service.historySeam(appSessionId, journal),
+      checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })),
+    });
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transport!.push({ type: 'user', message: { role: 'user', content: JSON.parse(turn.lines[0]!).message.content }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'u7', isReplay: true });
+    transport!.push({ type: 'assistant', message: { id: 'msg_7', model: 'm', role: 'assistant', content: [{ type: 'text', text: 'reply 7' }] }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'a7' });
+    await until(() => host.events(id).some((e) => 'messageUuid' in e && e.messageUuid === 'a7'), 'the launch\'s reply');
+    expect(host.ipc.table.get(id)).toBeDefined();
+    const answer = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(answer.historyUnavailable).toBeUndefined(); // the journal gave the launch back whole
+    expect(answer.events.filter((e) => e.kind === 'user.message' && e.messageUuid === 'u7')).toHaveLength(1);
+    expect(answer.earlier).toBeDefined();
+    const older: SessionEvent[] = [];
+    for (let earlier: EventId | undefined = answer.earlier; earlier !== undefined; ) {
+      const page: CommandOutput<'session.events'> = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
+      older.unshift(...page.events);
+      earlier = page.earlier;
+    }
+    expect(older.flatMap((e) => (e.kind === 'user.message' && typeof e.content === 'string' ? [e.content.split(' ').slice(0, 2).join(' ')] : []))).toEqual(Array.from({ length: 6 }, (_, i) => `prompt ${i + 1}`));
+    expect(older.some((e) => ('messageUuid' in e && (e.messageUuid === 'u7' || e.messageUuid === 'a7')) || (e.kind === 'turn.started' && e.userMessageUuid === 'u7'))).toBe(false);
+    transport!.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+
   // the review's second round: a bounded first page cut short before the launch's first message (a prompt too large to
   // cross beside the handshake) still answers the cursor, placed by the ring, which holds the launch whole; and the seam
   // reads no more of the stream than the page did (the journal past the ring is never replayed for it)

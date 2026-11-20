@@ -5216,7 +5216,8 @@ test('(composed forms, to the peer) a promotion and a message with an attached r
 // session's history from its stream alone (the launch's journal, with no `earlier` cursor into the transcript), so where
 // a scene draws the session while such a host runs a launch of it, that launch plays the turn (`exchangeJournal`): the
 // prompt the scene sends, the work and the message; this build's host pages the window into the transcript before the
-// launch, so on this build's daemon the launch plays nothing. What the peer draws follows its source (`drawsOwnReport`): a build of
+// launch, so where it serves the launch (on its daemon, or once the peer's supervisor hands the launch over to it) the
+// launch plays nothing. What the peer draws follows its source (`drawsOwnReport`): a build of
 // before U2b's first landing (f1852de3a, 2c7044231) draws its own report, its bar and record row; a later one (master
 // since that landing) draws MAWS's mirror, the record line, and no bar:
 //   (to-human, from the peer) the peer starts the session (its launch decided at 8) and quits with keep; this build's
@@ -5299,7 +5300,10 @@ test('(to-human, from the peer) a lane-on session the peer started and kept is d
     await startResume(first, peer, id);
     const peerLaunch = spawnEnvs(s, id).at(-1)!;
     expect(peerLaunch.env[NATIVE_TO_HUMAN_ENV], `${peer.label}'s launch advertises 8, the lane on`).toBe('8');
-    await playExchange(first, id); // the peer's launch carries the turn this build's window draws
+    // ticket 777: the peer's supervisor hands its launch over to this build's, which answers the launch's history with a
+    // cursor into the transcript before it, so the window draws the seeded turn and the launch plays nothing. (A turn
+    // the stub played would be a second turn of the same words and the same call id, which a real engine also writes to
+    // the transcript: two turns drawn, as the Mac run of 33c31a734 drew them.)
     expect(first.maws.consoleErrors()).toEqual([]);
     await s.quit(first);
 
