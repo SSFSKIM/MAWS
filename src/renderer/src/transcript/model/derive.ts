@@ -1937,8 +1937,13 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
         const revealed = state.ui.revealedBoundaries.has(id);
         const hiddenRows = state.hidden?.branches.get(id)?.rows ?? 0;
         // UX wave U3b (Probes, 5): the one place the rewind's text reaches a fork's window, as the person's own words (a
-        // prompt sminos delivered opens with its frame line)
-        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: event.prefillText === null ? null : ownWordsOf(event.prefillText), hiddenRows, revealed });
+        // prompt sminos delivered opens with its frame line). Board ticket 740: read from the rewound message's own row in
+        // the branch the rewind hid, never the event's text, which on the file's route is the engine's `last-prompt`
+        // anchor (the session's latest prompt, not the rewound one); no title where the state holds no such row
+        const branch = state.hidden?.branches.get(id);
+        const rewound = branch === undefined ? undefined : state.turns.get(branch.fromTurn)?.events.find((e) => e.kind === 'user.message' && e.messageUuid === event.targetMessageUuid); // the branch opens with the rewound message's turn
+        const detail = rewound?.kind === 'user.message' ? ownWordsOf(messageText(rewound.content)) : null;
+        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: detail === '' ? null : detail, hiddenRows, revealed });
         break;
       }
       case 'api.retry':
