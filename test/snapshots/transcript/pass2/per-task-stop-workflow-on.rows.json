@@ -21,69 +21,6 @@
     "turnId": "turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe"
   },
   {
-    "at": "2026-09-28T10:04:32.984Z",
-    "autoDenied": 0,
-    "caption": "Ran an agent, ran a command (1 stopped)",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T10:04:42.955Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran an agent",
-      "ran a command (1 stopped)"
-    ],
-    "startedAt": "2026-09-28T10:04:33.030Z",
-    "state": "stopped",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 1,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 1,
-      "costUsd": 0.08525339999999998,
-      "denials": [
-        {
-          "cellId": "cell:toolu_013CsJz1vgmcK71LCJ4GoqAu",
-          "disposition": "stopped",
-          "interruption": true,
-          "kind": "user-rejected"
-        }
-      ],
-      "durationMs": 9923,
-      "model": "claude-sonnet-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 1
-      },
-      "terminalReason": "aborted_tools",
-      "toolCalls": 1,
-      "usage": {
-        "cacheCreationInputTokens": 13374,
-        "cacheReadInputTokens": 45900,
-        "inputTokens": 4,
-        "outputTokens": 294,
-        "thinkingTokens": 75
-      }
-    },
-    "toolCalls": 1,
-    "turnId": "turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe"
-  },
-  {
     "agents": [
       {
         "agentId": null,
@@ -147,6 +84,69 @@
     "status": "stopped",
     "toolName": "Bash",
     "toolUseId": "toolu_013CsJz1vgmcK71LCJ4GoqAu",
+    "turnId": "turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe"
+  },
+  {
+    "at": "2026-09-28T10:04:32.984Z",
+    "autoDenied": 0,
+    "caption": "Ran an agent, ran a command (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T10:04:42.955Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran an agent",
+      "ran a command (1 stopped)"
+    ],
+    "startedAt": "2026-09-28T10:04:33.030Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.08525339999999998,
+      "denials": [
+        {
+          "cellId": "cell:toolu_013CsJz1vgmcK71LCJ4GoqAu",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 9923,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "aborted_tools",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 13374,
+        "cacheReadInputTokens": 45900,
+        "inputTokens": 4,
+        "outputTokens": 294,
+        "thinkingTokens": 75
+      }
+    },
+    "toolCalls": 1,
     "turnId": "turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe"
   },
   {

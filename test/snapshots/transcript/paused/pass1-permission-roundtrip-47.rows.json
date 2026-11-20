@@ -21,53 +21,6 @@
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
   {
-    "at": "2026-09-28T09:21:49.996Z",
-    "autoDenied": 0,
-    "caption": "",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": null,
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [],
-    "startedAt": "2026-09-28T09:21:50.042Z",
-    "state": "working",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 1,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": null,
-      "denials": [],
-      "durationMs": null,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 0
-      },
-      "terminalReason": null,
-      "toolCalls": 1,
-      "usage": null
-    },
-    "toolCalls": 1,
-    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
-  },
-  {
     "at": "2026-09-28T09:21:50.808Z",
     "cells": [
       {
@@ -146,6 +99,53 @@
     "kind": "group",
     "state": "active",
     "summary": "Ran a command",
+    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
+  },
+  {
+    "at": "2026-09-28T09:21:49.996Z",
+    "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": null,
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [],
+    "startedAt": "2026-09-28T09:21:50.042Z",
+    "state": "working",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 1,
+      "usage": null
+    },
+    "toolCalls": 1,
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   }
 ]

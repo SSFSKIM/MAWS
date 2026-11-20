@@ -21,6 +21,38 @@
     "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
   },
   {
+    "agents": [
+      {
+        "agentId": "a36a6515462b8275c",
+        "glyph": 1,
+        "kind": "agent",
+        "name": "Call maws ask tool",
+        "subagentType": "general-purpose",
+        "taskId": "a36a6515462b8275c",
+        "toolUseId": "toolu_019F92j3rcKrWs3k31f3bt7W"
+      }
+    ],
+    "at": "2026-10-14T08:54:03.367Z",
+    "id": "subagent:a36a6515462b8275c",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Call maws ask tool finished",
+    "status": "finished",
+    "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
+  },
+  {
+    "at": "2026-10-14T08:54:06.390Z",
+    "blockIndex": 1,
+    "id": "text:msg_011Cg1r86uCF7EaKoETTeNHv:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The agent is still running. I'll reply OK once it finishes and the completion notification arrives.",
+    "messageUuid": "73d32d1b-571e-4055-b9d7-61578d2569c1",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
+  },
+  {
     "at": "2026-10-14T08:53:55.467Z",
     "autoDenied": 0,
     "caption": "Ran an agent",
@@ -76,38 +108,6 @@
     "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
   },
   {
-    "agents": [
-      {
-        "agentId": "a36a6515462b8275c",
-        "glyph": 1,
-        "kind": "agent",
-        "name": "Call maws ask tool",
-        "subagentType": "general-purpose",
-        "taskId": "a36a6515462b8275c",
-        "toolUseId": "toolu_019F92j3rcKrWs3k31f3bt7W"
-      }
-    ],
-    "at": "2026-10-14T08:54:03.367Z",
-    "id": "subagent:a36a6515462b8275c",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "Call maws ask tool finished",
-    "status": "finished",
-    "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
-  },
-  {
-    "at": "2026-10-14T08:54:06.390Z",
-    "blockIndex": 1,
-    "id": "text:msg_011Cg1r86uCF7EaKoETTeNHv:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "The agent is still running. I'll reply OK once it finishes and the completion notification arrives.",
-    "messageUuid": "73d32d1b-571e-4055-b9d7-61578d2569c1",
-    "model": "claude-haiku-5-5",
-    "phase": "answer",
-    "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
-  },
-  {
     "at": "2026-10-14T08:54:31.502Z",
     "blockIndex": 0,
     "id": "text:msg_011Cg1r9KzHMjhcAfWkM1CJX:0",
@@ -131,6 +131,38 @@
     "placeholders": [],
     "steer": false,
     "text": "Use the Agent tool exactly once with run_in_background set to true. Give the agent this task, verbatim: \"Call the tool mcp__maws__ask (load it with ToolSearch first if needed) with {\\\"blocking\\\": false, \\\"questions\\\": [{\\\"question\\\": \\\"Which name?\\\", \\\"modality\\\": \\\"text\\\"}]}, then reply DONE.\" Do not call mcp__maws__ask yourself. When the agent has finished, reply OK.",
+    "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "a074eb64fc2b83f49",
+        "glyph": 4,
+        "kind": "agent",
+        "name": "Call maws ask tool",
+        "subagentType": "general-purpose",
+        "taskId": "a074eb64fc2b83f49",
+        "toolUseId": "toolu_01CafVpCvATWa5AC4RxshzDU"
+      }
+    ],
+    "at": "2026-10-14T08:54:33.246Z",
+    "id": "subagent:a074eb64fc2b83f49",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Call maws ask tool finished",
+    "status": "finished",
+    "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
+  },
+  {
+    "at": "2026-10-14T08:54:34.340Z",
+    "blockIndex": 0,
+    "id": "text:msg_011Cg1rAJsarGKxb2q2zsnj6:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The background agent is still running. I'll reply OK when its completion notification arrives.",
+    "messageUuid": "0e64a34b-ac36-4866-bae6-0e30c43e0976",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
     "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
   },
   {
@@ -186,38 +218,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
-  },
-  {
-    "agents": [
-      {
-        "agentId": "a074eb64fc2b83f49",
-        "glyph": 4,
-        "kind": "agent",
-        "name": "Call maws ask tool",
-        "subagentType": "general-purpose",
-        "taskId": "a074eb64fc2b83f49",
-        "toolUseId": "toolu_01CafVpCvATWa5AC4RxshzDU"
-      }
-    ],
-    "at": "2026-10-14T08:54:33.246Z",
-    "id": "subagent:a074eb64fc2b83f49",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "Call maws ask tool finished",
-    "status": "finished",
-    "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
-  },
-  {
-    "at": "2026-10-14T08:54:34.340Z",
-    "blockIndex": 0,
-    "id": "text:msg_011Cg1rAJsarGKxb2q2zsnj6:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "The background agent is still running. I'll reply OK when its completion notification arrives.",
-    "messageUuid": "0e64a34b-ac36-4866-bae6-0e30c43e0976",
-    "model": "claude-haiku-5-5",
-    "phase": "answer",
     "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
   },
   {

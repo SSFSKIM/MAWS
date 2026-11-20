@@ -21,6 +21,49 @@
     "turnId": "turn:u-disk-1"
   },
   {
+    "at": "2026-09-27T09:00:02.000Z",
+    "durationMs": null,
+    "id": "think:msg_disk_1:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-disk-1",
+    "recordedMs": null,
+    "text": "One agent, one file.",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "ad286defbc77bc090",
+        "glyph": 5,
+        "kind": "agent",
+        "name": "Read and report one.txt content",
+        "subagentType": "general-purpose",
+        "taskId": "toolu_disk_agent",
+        "toolUseId": "toolu_disk_agent"
+      }
+    ],
+    "at": "2026-09-27T09:00:03.000Z",
+    "id": "subagent:toolu_disk_agent",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Read and report one.txt content started working",
+    "status": "started",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "at": "2026-09-27T09:00:10.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_disk_2:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The file contains: ONE",
+    "messageUuid": "a-disk-3",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-disk-1"
+  },
+  {
     "at": "2026-09-27T09:00:00.000Z",
     "autoDenied": 0,
     "caption": "Ran an agent",
@@ -73,49 +116,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:u-disk-1"
-  },
-  {
-    "at": "2026-09-27T09:00:02.000Z",
-    "durationMs": null,
-    "id": "think:msg_disk_1:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "a-disk-1",
-    "recordedMs": null,
-    "text": "One agent, one file.",
-    "turnId": "turn:u-disk-1"
-  },
-  {
-    "agents": [
-      {
-        "agentId": "ad286defbc77bc090",
-        "glyph": 5,
-        "kind": "agent",
-        "name": "Read and report one.txt content",
-        "subagentType": "general-purpose",
-        "taskId": "toolu_disk_agent",
-        "toolUseId": "toolu_disk_agent"
-      }
-    ],
-    "at": "2026-09-27T09:00:03.000Z",
-    "id": "subagent:toolu_disk_agent",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "Read and report one.txt content started working",
-    "status": "started",
-    "turnId": "turn:u-disk-1"
-  },
-  {
-    "at": "2026-09-27T09:00:10.000Z",
-    "blockIndex": 0,
-    "id": "text:msg_disk_2:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "The file contains: ONE",
-    "messageUuid": "a-disk-3",
-    "model": "claude-opus-5-5",
-    "phase": "answer",
     "turnId": "turn:u-disk-1"
   },
   {

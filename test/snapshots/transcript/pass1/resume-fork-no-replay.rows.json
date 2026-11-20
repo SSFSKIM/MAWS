@@ -21,6 +21,29 @@
     "turnId": "turn:b1c9ce12-75be-4f51-ad78-712eb5ecfe6c"
   },
   {
+    "at": "2026-09-28T09:22:33.283Z",
+    "durationMs": 313,
+    "id": "think:msg_011CfVbMTHngQQqBCgCTzKc2:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "bfac5453-d886-4e61-ae22-3c84e451db0d",
+    "recordedMs": null,
+    "text": "The user is asking me what word they asked me to remember. I just saved it to memory - it's ZEBRA. They want me to reply with just that word.",
+    "turnId": "turn:b1c9ce12-75be-4f51-ad78-712eb5ecfe6c"
+  },
+  {
+    "at": "2026-09-28T09:22:33.597Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbMTHngQQqBCgCTzKc2:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ZEBRA",
+    "messageUuid": "f9c90145-63cf-4563-b36d-6e15735644b6",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:b1c9ce12-75be-4f51-ad78-712eb5ecfe6c"
+  },
+  {
     "at": "2026-09-28T09:22:32.667Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:b1c9ce12-75be-4f51-ad78-712eb5ecfe6c"
-  },
-  {
-    "at": "2026-09-28T09:22:33.283Z",
-    "durationMs": 313,
-    "id": "think:msg_011CfVbMTHngQQqBCgCTzKc2:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "bfac5453-d886-4e61-ae22-3c84e451db0d",
-    "recordedMs": null,
-    "text": "The user is asking me what word they asked me to remember. I just saved it to memory - it's ZEBRA. They want me to reply with just that word.",
-    "turnId": "turn:b1c9ce12-75be-4f51-ad78-712eb5ecfe6c"
-  },
-  {
-    "at": "2026-09-28T09:22:33.597Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfVbMTHngQQqBCgCTzKc2:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "ZEBRA",
-    "messageUuid": "f9c90145-63cf-4563-b36d-6e15735644b6",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:b1c9ce12-75be-4f51-ad78-712eb5ecfe6c"
   },
   {

@@ -21,6 +21,38 @@
     "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
   },
   {
+    "agents": [
+      {
+        "agentId": "a7aea42f9bed9b3ea",
+        "glyph": 3,
+        "kind": "agent",
+        "name": "Loop rounds until stop.txt",
+        "subagentType": "general-purpose",
+        "taskId": "a7aea42f9bed9b3ea",
+        "toolUseId": "toolu_019WWfE6Ry9diHmJymKAtX7Q"
+      }
+    ],
+    "at": "2026-09-29T15:47:23.019Z",
+    "id": "subagent:a7aea42f9bed9b3ea",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Loop rounds until stop.txt finished",
+    "status": "finished",
+    "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
+  },
+  {
+    "at": "2026-09-29T15:47:23.946Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfXzWTdpkyiPU6uJ2ppKc:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STARTED",
+    "messageUuid": "bd9812bf-c77f-491e-9961-39570ebb408b",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
+  },
+  {
     "at": "2026-09-29T15:47:19.928Z",
     "autoDenied": 0,
     "caption": "Ran an agent",
@@ -76,38 +108,6 @@
     "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
   },
   {
-    "agents": [
-      {
-        "agentId": "a7aea42f9bed9b3ea",
-        "glyph": 3,
-        "kind": "agent",
-        "name": "Loop rounds until stop.txt",
-        "subagentType": "general-purpose",
-        "taskId": "a7aea42f9bed9b3ea",
-        "toolUseId": "toolu_019WWfE6Ry9diHmJymKAtX7Q"
-      }
-    ],
-    "at": "2026-09-29T15:47:23.019Z",
-    "id": "subagent:a7aea42f9bed9b3ea",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "Loop rounds until stop.txt finished",
-    "status": "finished",
-    "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
-  },
-  {
-    "at": "2026-09-29T15:47:23.946Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfXzWTdpkyiPU6uJ2ppKc:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "STARTED",
-    "messageUuid": "bd9812bf-c77f-491e-9961-39570ebb408b",
-    "model": "claude-sonnet-5-5",
-    "phase": "answer",
-    "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
-  },
-  {
     "at": "2026-09-29T15:47:28.851Z",
     "attachments": [],
     "dropped": false,
@@ -119,62 +119,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Say PING in your next inbox line",
-    "turnId": "turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3"
-  },
-  {
-    "at": "2026-09-29T15:47:28.851Z",
-    "autoDenied": 0,
-    "caption": "Messaged a subagent, loaded 1 tool",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-29T15:47:33.667Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "messaged a subagent",
-      "loaded 1 tool"
-    ],
-    "startedAt": "2026-09-29T15:47:28.892Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.18072709999999997,
-      "denials": [],
-      "durationMs": 4774,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 1,
-      "usage": {
-        "cacheCreationInputTokens": 2542,
-        "cacheReadInputTokens": 90793,
-        "inputTokens": 6,
-        "outputTokens": 248,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 1,
     "turnId": "turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3"
   },
   {
@@ -258,6 +202,62 @@
     "turnId": "turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3"
   },
   {
+    "at": "2026-09-29T15:47:28.851Z",
+    "autoDenied": 0,
+    "caption": "Messaged a subagent, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-29T15:47:33.667Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "messaged a subagent",
+      "loaded 1 tool"
+    ],
+    "startedAt": "2026-09-29T15:47:28.892Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.18072709999999997,
+      "denials": [],
+      "durationMs": 4774,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 2542,
+        "cacheReadInputTokens": 90793,
+        "inputTokens": 6,
+        "outputTokens": 248,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3"
+  },
+  {
     "at": "2026-09-29T15:47:38.988Z",
     "attachments": [],
     "dropped": false,
@@ -269,62 +269,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Run \"sleep 45\" with Bash, then reply DONE.",
-    "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
-  },
-  {
-    "at": "2026-09-29T15:47:38.988Z",
-    "autoDenied": 0,
-    "caption": "Ran a command, messaged a subagent",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-29T15:48:27.944Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:973fefba-82be-4059-9266-a70593597680",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran a command",
-      "messaged a subagent"
-    ],
-    "startedAt": "2026-09-29T15:47:39.078Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 1,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.2224949,
-      "denials": [],
-      "durationMs": 48865,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 1,
-      "usage": {
-        "cacheCreationInputTokens": 682,
-        "cacheReadInputTokens": 96566,
-        "inputTokens": 6,
-        "outputTokens": 213,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 1,
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
   },
   {
@@ -412,6 +356,62 @@
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
   },
   {
+    "at": "2026-09-29T15:47:38.988Z",
+    "autoDenied": 0,
+    "caption": "Ran a command, messaged a subagent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-29T15:48:27.944Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:973fefba-82be-4059-9266-a70593597680",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran a command",
+      "messaged a subagent"
+    ],
+    "startedAt": "2026-09-29T15:47:39.078Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.2224949,
+      "denials": [],
+      "durationMs": 48865,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 682,
+        "cacheReadInputTokens": 96566,
+        "inputTokens": 6,
+        "outputTokens": 213,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
+  },
+  {
     "at": "2026-09-29T15:48:51.711Z",
     "attachments": [],
     "dropped": false,
@@ -423,70 +423,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Dispatch one general-purpose Agent in the foreground (not in the background), model haiku, named \"walker\": Read one.txt, then run \"sleep 20\" with Bash, then reply the file's line. Wait for it and reply its answer.",
-    "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
-  },
-  {
-    "at": "2026-09-29T15:48:51.711Z",
-    "autoDenied": 0,
-    "caption": "Ran an agent, messaged a subagent",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-29T15:49:22.614Z",
-    "expanded": true,
-    "files": [
-      {
-        "added": 3,
-        "cellId": "cell:toolu_01QBbZY1sDgGPGeW7x12tdib",
-        "change": "update",
-        "path": "/private/tmp/maws-probe2-wqNOal/inbox.txt",
-        "removed": 2
-      }
-    ],
-    "firstDeniedCell": null,
-    "id": "divider:turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran an agent",
-      "messaged a subagent"
-    ],
-    "startedAt": "2026-09-29T15:48:51.803Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 2,
-      "costUsd": 0.3010571,
-      "denials": [],
-      "durationMs": 30809,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 1123,
-        "cacheReadInputTokens": 99084,
-        "inputTokens": 6,
-        "outputTokens": 479,
-        "thinkingTokens": 56
-      }
-    },
-    "toolCalls": 0,
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {
@@ -572,6 +508,70 @@
     "messageUuid": "f188f2c4-4c41-4e62-9e8a-0a492f2cdf77",
     "model": "claude-sonnet-5-5",
     "phase": "answer",
+    "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
+  },
+  {
+    "at": "2026-09-29T15:48:51.711Z",
+    "autoDenied": 0,
+    "caption": "Ran an agent, messaged a subagent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-29T15:49:22.614Z",
+    "expanded": true,
+    "files": [
+      {
+        "added": 3,
+        "cellId": "cell:toolu_01QBbZY1sDgGPGeW7x12tdib",
+        "change": "update",
+        "path": "/private/tmp/maws-probe2-wqNOal/inbox.txt",
+        "removed": 2
+      }
+    ],
+    "firstDeniedCell": null,
+    "id": "divider:turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran an agent",
+      "messaged a subagent"
+    ],
+    "startedAt": "2026-09-29T15:48:51.803Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 2,
+      "costUsd": 0.3010571,
+      "denials": [],
+      "durationMs": 30809,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 1123,
+        "cacheReadInputTokens": 99084,
+        "inputTokens": 6,
+        "outputTokens": 479,
+        "thinkingTokens": 56
+      }
+    },
+    "toolCalls": 0,
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {

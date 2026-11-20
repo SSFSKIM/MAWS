@@ -21,6 +21,29 @@
     "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
   },
   {
+    "at": "2026-09-30T00:07:28.264Z",
+    "durationMs": 324,
+    "id": "think:msg_011CfYeeED5gfhes3owvZQ4B:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "6d32723a-a53a-467b-b68f-8ce4fe78018b",
+    "recordedMs": null,
+    "text": "The user is asking me to reply with exactly \"OK\". This is a straightforward request. I should respond with just \"OK\" as requested.",
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
+    "at": "2026-09-30T00:07:28.589Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfYeeED5gfhes3owvZQ4B:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "e2df0d33-715a-4615-af43-8d2ab112c8d4",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
     "at": "2026-09-30T00:07:27.577Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
-  },
-  {
-    "at": "2026-09-30T00:07:28.264Z",
-    "durationMs": 324,
-    "id": "think:msg_011CfYeeED5gfhes3owvZQ4B:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "6d32723a-a53a-467b-b68f-8ce4fe78018b",
-    "recordedMs": null,
-    "text": "The user is asking me to reply with exactly \"OK\". This is a straightforward request. I should respond with just \"OK\" as requested.",
-    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
-  },
-  {
-    "at": "2026-09-30T00:07:28.589Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfYeeED5gfhes3owvZQ4B:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "OK",
-    "messageUuid": "e2df0d33-715a-4615-af43-8d2ab112c8d4",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
   },
   {
