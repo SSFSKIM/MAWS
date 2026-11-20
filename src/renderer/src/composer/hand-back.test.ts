@@ -18,6 +18,7 @@ const SETTER_FILES: Record<string, string> = {
   'src/renderer/src/stores/composer.ts': 'the setter itself, and `clearComposer`, an empty prefill',
   'src/renderer/src/composer/index.tsx': 'the composer’s public surface, which re-exports it',
   'src/renderer/src/composer/hand-back.ts': 'the helper: an edit, as its form’s reader says (`composedPrefill`)',
+  'src/renderer/src/customize/skill-actions.ts': 'a new chat’s first message for "New skill…" (UX wave U11, merged after this guard): a fixed sentence, skill-creator’s invocation matched by its exact name, and the skills folder under the configuration home the engine reports; no stored row',
   'src/renderer/src/library/MakeSomethingNew.tsx': 'the words the person chose in the dialog; no stored row',
   'src/renderer/src/sessions/connect.ts': 'a first message a card or a failed start hands back, the composer’s own draft as it serialised it; no stored row',
   'src/renderer/src/widgets/MemoryWidget.tsx': 'the memory mode’s mark; no stored row',
