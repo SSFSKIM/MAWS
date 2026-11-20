@@ -2,7 +2,7 @@
 // then a small spinner carrying the wait's words as its accessible name, never as drawn text.
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawnText } from '../test-support/drawn-text';
+import { accessibleText } from '../test-support/accessible-text';
 import { QUIET_MS, QuietSpinner } from './spinner';
 
 beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
@@ -24,7 +24,7 @@ describe('QuietSpinner', () => {
     const view = render(<QuietSpinner label="Reading settings…" />);
     act(() => vi.advanceTimersByTime(QUIET_MS));
     expect(screen.getByRole('progressbar', { name: 'Reading settings…' })).toBeTruthy();
-    expect(drawnText(view.container)).toBe('');
+    expect(accessibleText(view.container)).toBe('');
   });
 
   it('a wait that ends within the half second leaves no timer behind', () => {

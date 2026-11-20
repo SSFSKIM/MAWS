@@ -3,7 +3,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawnText } from '../test-support/drawn-text';
+import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { BareCount } from './count';
 import { POINTING_DELAY_MS } from './pointing';
@@ -27,7 +27,7 @@ describe('BareCount', () => {
   it('draws the number alone, and names its meaning in the heading', () => {
     render(<Heading />);
     const heading = screen.getByRole('heading', { name: 'Agents 2 running' });
-    expect(drawnText(heading)).toBe('Agents 2');
+    expect(accessibleText(heading)).toBe('Agents 2');
     expect(screen.getByRole('img', { name: '2 running' }).textContent).toBe('2');
     expect(tooltip()).toBeNull();
   });

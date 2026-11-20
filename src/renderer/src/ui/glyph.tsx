@@ -5,7 +5,7 @@
 // Only for the glyphs rule 4 allows. The shortcut comes formatted (a renderer caller reads it with
 // `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it.
 import type { ComponentPropsWithRef, ReactNode } from 'react';
-import { Tip, UNAVAILABLE_LOOK, unavailableProps } from './tip';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from './tip';
 
 // The square icon button's look, which IconButton (app/IconButton.tsx) shares.
 export const GLYPH_BUTTON =
@@ -35,7 +35,7 @@ export function NamedGlyph({ label, shortcut, unavailable, pressed, className = 
         )
       }
       description={description}
-      {...unavailableProps(unavailable)}
+      {...unavailableClickProps(unavailable)}
     >
       <button ref={ref} type="button" aria-label={label} aria-pressed={pressed} className={`${className} ${UNAVAILABLE_LOOK}`} {...button}>
         {children}

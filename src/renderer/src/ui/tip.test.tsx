@@ -4,10 +4,10 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawnText } from '../test-support/drawn-text';
+import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { POINTING_DELAY_MS } from './pointing';
-import { Tip, Unavailable } from './tip';
+import { Tip, UnavailableButton } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
@@ -34,7 +34,7 @@ describe('Tip', () => {
   it('is absent from the resting text, and its words are the owner’s description at rest', () => {
     render(<Chip />);
     expect(tooltip()).toBeNull();
-    expect(drawnText(screen.getByTestId('line'))).toBe('Blocked in macOS');
+    expect(accessibleText(screen.getByTestId('line'))).toBe('Blocked in macOS');
     const chip = screen.getByText('Blocked in macOS');
     expect(document.getElementById(chip.getAttribute('aria-describedby') ?? '')?.textContent).toBe(FACT);
   });
@@ -68,16 +68,40 @@ describe('Tip', () => {
   });
 });
 
-describe('Unavailable', () => {
+describe('UnavailableButton', () => {
   it('leaves an available control as it is', () => {
     render(
-      <Unavailable reason={null}>
+      <UnavailableButton reason={null}>
         <button type="button">Commit</button>
-      </Unavailable>,
+      </UnavailableButton>,
     );
     const button = screen.getByRole('button', { name: 'Commit' });
     expect(button.hasAttribute('aria-disabled')).toBe(false);
     expect(button.hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('keeps the focused control itself as its reason comes and goes, and shows the reason once it comes', async () => {
+    const Commit = ({ reason }: { reason: string | null }) => (
+      <UnavailableButton reason={reason}>
+        <button type="button">Commit</button>
+      </UnavailableButton>
+    );
+    const view = render(<Commit reason={null} />);
+    const button = screen.getByRole('button', { name: 'Commit' });
+    await user().tab();
+    expect(document.activeElement).toBe(button);
+    expect(tooltip()).toBeNull();
+    view.rerender(<Commit reason="Write a commit message" />);
+    expect(screen.getByRole('button', { name: 'Commit', description: 'Write a commit message' })).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(tooltip()).toBe('Write a commit message');
+    view.rerender(<Commit reason={null} />);
+    expect(screen.getByRole('button', { name: 'Commit' })).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(button.hasAttribute('aria-disabled')).toBe(false);
+    expect(button.hasAttribute('aria-describedby')).toBe(false);
+    expect(tooltip()).toBeNull();
   });
 
   it('keeps a greyed control in the Tab order, says why on pointing, and swallows its click', async () => {
@@ -85,11 +109,11 @@ describe('Unavailable', () => {
     const submit = vi.fn((event: SubmitEvent) => event.preventDefault());
     render(
       <form onSubmit={(event) => submit(event.nativeEvent as SubmitEvent)}>
-        <Unavailable reason="Write a commit message">
+        <UnavailableButton reason="Write a commit message">
           <button type="submit" onClick={commit}>
             Commit
           </button>
-        </Unavailable>
+        </UnavailableButton>
       </form>,
     );
     const button = screen.getByRole('button', { name: 'Commit', description: 'Write a commit message' });

@@ -3,9 +3,10 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawnText } from '../test-support/drawn-text';
+import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { NamedGlyph } from './glyph';
+import { RowNote, useRowNote } from './row-note';
 import { POINTING_DELAY_MS } from './pointing';
 
 beforeEach(fakeTimeouts);
@@ -33,7 +34,7 @@ describe('NamedGlyph', () => {
       </div>,
     );
     expect(screen.getByRole('button', { name: 'New slide', description: '⌘⇧N' })).toBeTruthy();
-    expect(drawnText(screen.getByTestId('bar'))).toBe('');
+    expect(accessibleText(screen.getByTestId('bar'))).toBe('');
     expect(tooltip()).toBeNull();
   });
 
@@ -81,6 +82,26 @@ describe('NamedGlyph', () => {
     await keys.keyboard('{Enter}');
     await keys.click(button);
     expect(add).not.toHaveBeenCalled();
+  });
+
+  it('adds its shortcut and reason to what its row already describes it by, at rest and on focus', async () => {
+    function Row() {
+      const note = useRowNote();
+      return (
+        <div role="group" aria-label="Slides" {...note.rowProps}>
+          <NamedGlyph label="New slide" shortcut="⌘⇧N" unavailable="The deck has reached its slide limit" aria-describedby={note.id}>
+            <Plus />
+          </NamedGlyph>
+          <RowNote note={note}>Twelve slides at most</RowNote>
+        </div>
+      );
+    }
+    render(<Row />);
+    const both = 'Twelve slides at most The deck has reached its slide limit · ⌘⇧N';
+    expect(screen.getByRole('button', { name: 'New slide', description: both })).toBeTruthy();
+    await user().tab();
+    expect(tooltip()).toBe('New slide · ⌘⇧NThe deck has reached its slide limit');
+    expect(screen.getByRole('button', { name: 'New slide', description: both })).toBe(document.activeElement);
   });
 
   it('says whether it is pressed', () => {

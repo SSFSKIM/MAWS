@@ -9,9 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOSE_MOTION } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
 import { RowNote, useRowNote, type RowNoteForm } from './row-note';
-import { drawnText } from '../test-support/drawn-text';
+import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
-import { Unavailable } from './tip';
+import { UnavailableButton } from './tip';
 
 const NOTE = 'Archived sessions can be restored from the sidebar.';
 
@@ -36,12 +36,12 @@ function Row({ form, label = 'Archive', note = NOTE }: { form?: RowNoteForm; lab
   );
 }
 const row = (name = 'Archive') => screen.getByRole('group', { name });
-const shown = (name = 'Archive') => drawnText(row(name)).includes(NOTE);
+const shown = (name = 'Archive') => accessibleText(row(name)).includes(NOTE);
 
 describe('the row note', () => {
   it('is absent from the resting text and is the row’s accessible description', () => {
     render(<Row />);
-    expect(drawnText(row())).toBe('ArchiveOpen Archive');
+    expect(accessibleText(row())).toBe('ArchiveOpen Archive');
     expect(screen.getByRole('group', { name: 'Archive', description: NOTE })).toBe(row());
   });
 
@@ -120,6 +120,50 @@ describe('the row note', () => {
     expect(shown()).toBe(true);
   });
 
+  it('stays open when focus hands over to a pointer that has not yet waited out the delay, and back', async () => {
+    render(
+      <>
+        <Row />
+        <button type="button">After</button>
+      </>,
+    );
+    const note = () => screen.getByText(NOTE).closest('[data-row-note]')!;
+    const keys = user();
+    await keys.tab(); // focus opens it
+    await keys.hover(row());
+    wait(POINTING_DELAY_MS / 3);
+    await keys.tab(); // focus leaves while the pointer is inside, before its delay has run
+    expect(note().hasAttribute('data-open')).toBe(true); // no close was started
+    wait(POINTING_DELAY_MS);
+    expect(shown()).toBe(true);
+    await keys.tab({ shift: true }); // and back: the pointer leaves while focus is inside
+    await keys.unhover(row());
+    expect(note().hasAttribute('data-open')).toBe(true);
+    await keys.tab();
+    wait(CLOSE_MOTION.ms);
+    expect(shown()).toBe(false); // both have left
+  });
+
+  it('moving down onto the next row closes the first row’s note and opens the next one’s after its delay', async () => {
+    // happy-dom does no hit-testing: under the overlay placement the floating note lets the pointer through
+    // (note-overlay:pointer-events-none), so the pointer moving down lands on the next row, as here.
+    render(
+      <>
+        <Row label="Archive" />
+        <Row label="Restore" note="Restored sessions return to their project." />
+      </>,
+    );
+    expect(screen.getByText(NOTE).closest('[data-row-note]')!.className).toContain('note-overlay:pointer-events-none');
+    const pointer = user();
+    await pointer.hover(row('Archive'));
+    wait(POINTING_DELAY_MS);
+    expect(shown('Archive')).toBe(true);
+    await pointer.hover(row('Restore'));
+    expect(screen.getByText(NOTE).closest('[data-row-note]')!.hasAttribute('data-open')).toBe(false);
+    wait(POINTING_DELAY_MS);
+    expect(accessibleText(row('Restore'))).toContain('Restored sessions return to their project.');
+  });
+
   it('gives each row its own note', async () => {
     render(
       <>
@@ -130,7 +174,7 @@ describe('the row note', () => {
     expect(screen.getByRole('group', { name: 'Restore', description: 'Restored sessions return to their project.' })).toBeTruthy();
     await user().tab();
     expect(shown('Archive')).toBe(true);
-    expect(drawnText(row('Restore'))).toBe('RestoreOpen Restore');
+    expect(accessibleText(row('Restore'))).toBe('RestoreOpen Restore');
   });
 });
 
@@ -138,7 +182,7 @@ describe('the pointed-row line', () => {
   it('keeps its line’s place at rest without drawing it, and is the row’s description', () => {
     render(<Row form="line" />);
     expect(screen.getByText(NOTE).hasAttribute('hidden')).toBe(false); // its height stays in the row
-    expect(drawnText(row())).toBe('ArchiveOpen Archive');
+    expect(accessibleText(row())).toBe('ArchiveOpen Archive');
     expect(screen.getByRole('group', { name: 'Archive', description: NOTE })).toBe(row());
   });
 
@@ -162,11 +206,11 @@ describe('every hidden fact has an owner that takes keyboard focus', () => {
   it('a greyed control keeps the keyboard, says why at once, and does not act', async () => {
     const commit = vi.fn();
     render(
-      <Unavailable reason="Write a commit message">
+      <UnavailableButton reason="Write a commit message">
         <button type="button" onClick={commit}>
           Commit
         </button>
-      </Unavailable>,
+      </UnavailableButton>,
     );
     const button = screen.getByRole('button', { name: 'Commit', description: 'Write a commit message' });
     expect(button.getAttribute('aria-disabled')).toBe('true');
@@ -216,9 +260,9 @@ describe('every hidden fact has an owner that takes keyboard focus', () => {
     await keys.tab();
     const select = screen.getByRole('combobox', { name: 'Theme', description: FACTS.light });
     expect(document.activeElement).toBe(select);
-    expect(drawnText(row('Theme'))).toContain(FACTS.light);
+    expect(accessibleText(row('Theme'))).toContain(FACTS.light);
     await keys.selectOptions(select, 'dark');
-    expect(drawnText(row('Theme'))).toContain(FACTS.dark);
+    expect(accessibleText(row('Theme'))).toContain(FACTS.dark);
     expect(screen.getByRole('combobox', { name: 'Theme', description: FACTS.dark })).toBe(select);
   });
 });
