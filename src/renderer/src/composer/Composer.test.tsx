@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useSyncExternalStore, type ReactNode } from 'react';
@@ -192,7 +193,7 @@ function mount(panes: { index: 0 | 1; id: AppSessionId }[], extra: ReactNode = n
   );
 }
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean; setContent(content: unknown): boolean }; getText(): string; isFocused: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean; setContent(content: unknown): boolean }; getJSON(): JSONContent; getText(): string; isFocused: boolean } };
 const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
@@ -562,7 +563,7 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A);
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
-    const lines = () => (editorOf().editor.getJSON().content ?? []).map((p) => (p.content ?? []).map((n) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
+    const lines = () => (editorOf().editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
     act(() => queueComposerAttachment(A, { files: [], text: 'a <p>b</p><br>c' }));
     await waitFor(() => expect(lines()).toEqual(['a <p>b</p><br>c']));
     act(() => editorOf().editor.commands.clearContent());

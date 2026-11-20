@@ -1,5 +1,5 @@
 import { PluginKey } from '@tiptap/pm/state';
-import { Editor } from '@tiptap/core';
+import { Editor, type JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -262,7 +262,7 @@ describe('what the slash palette puts in the draft', () => {
     act(() => options().find((o) => o.textContent!.includes('<br>'))!.click());
     const editor = new Editor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/x'))]) });
     command.mock.calls[0]![0].apply(editor, { from: 1, to: 3 });
-    expect((editor.getJSON().content ?? []).map((p) => (p.content ?? []).map((n) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''))).toEqual(['/x<br>y<p>z</p>\ufffdw ']);
+    expect((editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''))).toEqual(['/x<br>y<p>z</p>\ufffdw ']);
     editor.destroy();
   });
 });

@@ -1,6 +1,6 @@
 // The `@` menu's files belong to the folder they were listed for (UX wave U8c-2, M4 decision 8): when the agent's folder
 // changes, a list answered or in flight for the folder it left is never offered for the new one, whatever the query.
-import { Editor, type Range } from '@tiptap/core';
+import { Editor, type JSONContent, type Range } from '@tiptap/core';
 import { PluginKey } from '@tiptap/pm/state';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,7 +64,7 @@ describe('the @ menu across a change of the agent’s folder', () => {
 // editor parses; a path that holds a control character, which no mention can name, is not offered
 describe('what the @ menu puts in the draft', () => {
   const NAME = 'x<br>y<p>z</p>\nw';
-  const lines = (editor: Editor) => (editor.getJSON().content ?? []).map((p) => (p.content ?? []).map((n) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
+  const lines = (editor: Editor) => (editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
 
   it('a skill’s row puts /<name> at the start as one line of literal text', () => {
     const command = vi.fn<(item: PopupItem) => void>();
