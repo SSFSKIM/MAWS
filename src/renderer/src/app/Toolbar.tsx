@@ -30,6 +30,7 @@ import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
 import { DESTINATION } from '../destination/copy';
 import { PAGE_TITLE_ID } from '../destination/DestinationPage';
 import { useShellGeometry, useShellView } from './shell-view';
+import { useZoom } from '../stores/zoom'; // UX wave U6b-5b
 import { useSlot } from './slots';
 import { mountChromeTabs } from '../main/chrome-tabs';
 import { SurfaceRow } from '../panel/SurfaceRow';
@@ -92,6 +93,12 @@ export function toolbarTitle(
 
 // The room the usage ring takes from the surface icons' count: its 28 px button (UX wave U7b, M7 decision 1).
 const USAGE_RING_ROOM = 28;
+// UX wave U6b-5b (placement 5; its Decision Log 18): the traffic lights keep 78 window points clear, which is 78 ÷ the
+// window's zoom CSS pixels, and the leading box holds that clearance, its two 28 px buttons, the 4 px between them and its
+// 12 px of right padding: 150 at 100 %, as before. It is never narrower than that at any zoom, the sidebar's width or not.
+const LIGHTS_CLEAR_PT = 78;
+const LEADING_CONTROLS = 28 + 4 + 28 + 12;
+const leadingFloor = (zoom: number) => Math.ceil(LIGHTS_CLEAR_PT / zoom) + LEADING_CONTROLS;
 
 export function Toolbar() {
   const sidebar = useLayout((s) => s.regions.sidebar);
@@ -108,7 +115,8 @@ export function Toolbar() {
   const split = useLayout((s) => currentSet(s.main).panes.length === 2);
   // Budget against the grid's actual header, not the window: a full-height surface can leave only 360px.
   // Preserve a usable, scrolling strip (including New chat) before allocating optional chrome controls.
-  const leading = geometry.sidebar || 150;
+  const zoom = useZoom((s) => s.factor); // UX wave U6b-5b
+  const leading = Math.max(geometry.sidebar || 150, leadingFloor(zoom));
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
@@ -118,7 +126,7 @@ export function Toolbar() {
   return (
     <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-start-1 col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
       <div
-        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
+        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[calc(78px/var(--app-zoom,1))]"
         style={{ width: leading }}
       >
         <div className="flex items-center gap-1">

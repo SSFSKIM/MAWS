@@ -11,7 +11,8 @@ import { projectReveal } from '../sidebar/reveal';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { allTabs } from '../stores/layout-model';
-import { useShellView } from './shell-view';
+import { useShellView, shellGeometryOf } from './shell-view';
+import { useZoom } from '../stores/zoom'; // UX wave U6b-5b
 import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { project, remoteRow } from '../../../../test/support/builders';
@@ -125,5 +126,35 @@ describe('the title bar’s project chip', () => {
     fireEvent.contextMenu(chip()!);
     expect(screen.queryByRole('menu')).toBeNull();
     expect(useSessions.getState().unstarted.size).toBe(0);
+  });
+});
+
+// UX wave U6b-5b (placement 5; Decision Log 18): the traffic lights keep 78 points clear at every zoom, which is
+// 78 ÷ the factor CSS pixels, so the box that holds that clearance, the two buttons and its padding (150 CSS pixels at
+// 100 %) is never narrower than all three, the sidebar's width or not
+describe('the title bar’s leading box at the window’s zoom', () => {
+  const leading = () => toolbar().firstElementChild as HTMLElement;
+  const sidebarWidth = () => shellGeometryOf(useLayout.getState(), window.innerWidth).sidebar;
+  afterEach(() => useZoom.setState({ factor: 1 }));
+
+  it('holds the lights’ clearance, the buttons and the padding at 50 %: 228 CSS pixels with the sidebar hidden', () => {
+    act(() => useLayout.getState().setSidebar({ collapsed: true }));
+    render(<Toolbar />);
+    expect(sidebarWidth()).toBe(0);
+    expect(leading().style.width).toBe('150px'); // the control: at 100 % the box is as wide as today
+    act(() => useZoom.setState({ factor: 0.5 }));
+    expect(leading().style.width).toBe('228px'); // 156 of clearance, 2 × 28 of buttons, 4 between, 12 of padding
+    act(() => useZoom.setState({ factor: 2 }));
+    expect(leading().style.width).toBe('150px'); // a larger factor never narrows it below today's
+  });
+
+  it('is the sidebar’s width at 100 %, and at 50 % not narrower than the clearance and the controls, the sidebar at its narrowest', () => {
+    act(() => useLayout.getState().setSidebar({ collapsed: false, width: 200 }));
+    render(<Toolbar />);
+    const sidebar = sidebarWidth();
+    expect(sidebar).toBeGreaterThan(0);
+    expect(leading().style.width).toBe(`${sidebar}px`); // the control: the sidebar's width, as today
+    act(() => useZoom.setState({ factor: 0.5 }));
+    expect(leading().style.width).toBe(`${Math.max(sidebar, 228)}px`);
   });
 });

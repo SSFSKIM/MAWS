@@ -122,6 +122,7 @@ import { trackUnsavedFiles } from './lifecycle/quit-guard';
 // E5 end
 // E2 start
 import { appWindows } from './windows';
+import { startZoom, zoomOf } from './zoom'; // UX wave U6b-5b
 // E2 end
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
@@ -911,6 +912,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     hosts,
     // E4c end
     machineHost: true, // P5 O17 M9b: the app a tab engine to mawsd, whose machine host every launch runs (P5 O15 M2)
+    zoomOf: (win) => zoomOf(win.webContents), // UX wave U6b-5b: the view, the popup, the menus and the pin in window points
     // P5 O7 M3: a remote session's tabs are this Mac's, said from its machine; a forwarded port's tab opens its forward
     // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
     remote: {
@@ -925,6 +927,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   });
   shutdown.add('browser', browser.stop);
   cuaSockets = browser.cua; // E13
+  // UX wave U6b-5b: the window's zoom (`window.zoom`, main's own key; S3), before any window, which is made at it
+  // (`openAt`), and with the browser, whose placements follow it
+  startZoom({ layout, windows: appWindows, placeAgain: (win) => browser.placeAgain(win as BrowserWindow), emit, register: registerMainHandler });
   // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): a launch is told
   // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
   // socket admits that relay by the daemon the machine link is connected to: its socket's peer, pid and start read

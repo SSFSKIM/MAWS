@@ -4,10 +4,13 @@
 //
 // Placement has one owner. A pane reports `browser.view.place` with its own token; a report with `claim` makes that pane
 // the owner, and a report from any other pane is ignored, `null` included, so a pane that lost the view can neither move
-// it nor hide it. A rect (CSS px of the window's content area, which maps 1:1 onto `setBounds` under `hiddenInset`) is
+// it nor hide it. A rect (CSS px of the window's content area, which maps 1:1 onto `setBounds` under `hiddenInset` at 100 %) is
 // rounded and applied at once; the view moves into the reporting window's contentView first if it lives elsewhere (a view
 // lives in one contentView at a time). The owner's `null` hides the view and releases it; the view stays attached to its
-// last window, hidden, so a reselection is one `setVisible`.
+// last window, hidden, so a reselection is one `setVisible`. UX wave U6b-5b (placement 1; decision 27): the rect is kept in
+// CSS px as sent, and every `setBounds` of it is in window points, the rect times the window's zoom edge by edge; a change
+// of the zoom places every view of the window again (`placeAgain`), since a window whose CSS rect did not change sends
+// none.
 //
 // Cover is per window: the renderer says a layer opened over its window, and main hides every view placed there (moving
 // the native focus to the window's own page first when a hidden page held it, so the sheet takes the typing and its Esc),
@@ -33,6 +36,7 @@ import type { CommandInput } from '@shared/ipc/schema';
 import type { Partitions } from './partition';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
 import type { FocusEmulationMode } from './visibility';
+import { toPoints } from '../zoom'; // UX wave U6b-5b
 
 // out/preload/browser.js beside the app window's out/preload/index.js (main is bundled into out/main/index.js).
 export const BROWSER_PRELOAD = join(__dirname, '../preload/browser.js');
@@ -80,6 +84,14 @@ export function shown(entry: TabEntry): boolean {
 }
 
 export type PlaceInput = CommandInput<'browser.view.place'>;
+type PlaceRect = { x: number; y: number; width: number; height: number };
+// UX wave U6b-5b M1 (Interfaces §G, the e2e seam; decision 36): the last rect of `browser.view.place` the manager acted on
+// for a tab (the owner's report, a claim, or the owner's release, as `null`), as received, and how many it has acted on.
+// A report it ignores (another pane's, a window it does not know) is not counted: the acknowledgment says the view took it.
+export interface PlacedReport {
+  rect: PlaceInput['rect'];
+  count: number;
+}
 
 export interface ViewManagerDeps {
   store: TabStore;
@@ -90,6 +102,7 @@ export interface ViewManagerDeps {
   // Under focus emulation, called when a view's wanted state changes (the TabDebugger sends the command).
   setFocusEmulation?(entry: TabEntry, enabled: boolean): void;
   now?(): number;
+  zoomOf?(win: BrowserWindow): number; // UX wave U6b-5b: the app window's zoom (main's `zoomOf`); 1 without it
 }
 
 export class ViewManager {
@@ -103,6 +116,7 @@ export class ViewManager {
   private readonly staged = new WeakSet<TabEntry>(); // in the staging window for its still: left alone meanwhile
   private readonly added = new Set<(win: BrowserWindow) => void>(); // cua #90
   private readonly coverOn = new Set<(win: BrowserWindow) => void>(); // cua #90
+  private readonly acknowledged = new WeakMap<TabEntry, PlacedReport>(); // U6b-5b M1: read only by the e2e seam
   private readonly unhook: (() => void)[];
   private readonly now: () => number;
 
@@ -129,10 +143,14 @@ export class ViewManager {
     this.watch(win);
     const owns = entry.placement?.paneId === paneId;
     if (rect === null) {
-      if (owns) this.release(entry);
+      if (owns) {
+        this.acknowledge(entry, rect);
+        this.release(entry);
+      }
       return;
     }
     if (!owns && !claim) return;
+    this.acknowledge(entry, rect);
     entry.placement = {
       paneId,
       surface,
@@ -190,6 +208,18 @@ export class ViewManager {
   }
   // cua #90 end
 
+  // UX wave U6b-5b (S3 step 4): the window's zoom changed, so each view placed in it takes its rect at the new factor; the
+  // window sends no report for a CSS rect that did not change. A placement is no report, so nothing is acknowledged.
+  placeAgain(win: BrowserWindow): void {
+    for (const entry of this.placedIn(win)) if (entry.host === win) this.attach(entry);
+  }
+
+  // U6b-5b M1: the placement last acted on for the tab, for the e2e seam (inspect.ts); null before the first
+  placedOf(entry: TabEntry): PlacedReport | null {
+    const placed = this.acknowledged.get(entry);
+    return placed ? { rect: placed.rect && { ...placed.rect }, count: placed.count } : null;
+  }
+
   dispose(): void {
     for (const unhook of this.unhook) unhook();
   }
@@ -208,11 +238,21 @@ export class ViewManager {
     for (const listener of [...this.added]) listener(win);
   }
 
+  private acknowledge(entry: TabEntry, rect: PlaceInput['rect']): void {
+    this.acknowledged.set(entry, { rect: rect && { ...rect }, count: (this.acknowledged.get(entry)?.count ?? 0) + 1 });
+  }
+
   private stamp(): string {
     return new Date(this.now()).toISOString();
   }
 
-  // Puts the view in its owner's window at its owner's rect (no-op without a view or an owner).
+  // UX wave U6b-5b (decision 27): the placement's CSS rect in its window's points
+  private pointsOf(placement: NonNullable<TabEntry['placement']>): PlaceRect {
+    return toPoints(placement.rect, this.deps.zoomOf?.(placement.window) ?? 1);
+  }
+
+  // Puts the view in its owner's window at its owner's rect (no-op without a view or an owner). UX wave U6b-5b: a view
+  // staged for its still keeps the stage's bounds; staging's return places it at the latest rect and the factor then.
   private attach(entry: TabEntry): void {
     const { view, placement } = entry;
     if (!view || !placement) return;
@@ -222,7 +262,7 @@ export class ViewManager {
       entry.host = placement.window;
       this.viewAdded(placement.window); // cua #90
     }
-    view.setBounds(placement.rect);
+    if (!this.staged.has(entry)) view.setBounds(this.pointsOf(placement));
   }
 
   // Takes the view out of its window, hidden (`visible` always says what the view shows).
@@ -300,7 +340,7 @@ export class ViewManager {
         entry.visible = false;
         if (entry.view === view && entry.host && !entry.host.isDestroyed()) {
           entry.host.contentView.addChildView(view);
-          if (entry.placement) view.setBounds(entry.placement.rect);
+          if (entry.placement) view.setBounds(this.pointsOf(entry.placement));
           this.viewAdded(entry.host); // cua #90: back on top of its window's views
         }
       }

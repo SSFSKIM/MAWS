@@ -55,6 +55,18 @@ describe('the e2e seam (E4a Interfaces "Main": globalThis.__maws_browser)', () =
     expect(inspector.tab('b_ffffffffffff')).toBeNull();
   });
 
+  // UX wave U6b-5b M1: `placed`, main's acknowledgment of the tab's last placement (view.ts `placedOf`)
+  it('reads the placement main acknowledged for the tab, null before any', () => {
+    const placedTab = loadedEntry('b_000000000001');
+    const unplaced = loadedEntry('b_000000000002');
+    const rect = { x: 1, y: 2, width: 300, height: 200 };
+    const placedOf = (entry: TabEntry) => (entry === placedTab ? { rect, count: 3 } : null);
+    const store = { entry: (tabId: string) => [placedTab, unplaced].find((e) => e.tab.tabId === tabId), all: () => [placedTab, unplaced], loadedCount: () => 2 };
+    const inspector = browserInspector({ store, emit: vi.fn(), placedOf });
+    expect(inspector.tab('b_000000000001')?.placed).toEqual({ rect, count: 3 });
+    expect(inspector.tab('b_000000000002')?.placed).toBeNull();
+  });
+
   it('metrics counts the loaded tabs and those the memory sample has measured', () => {
     const measured = loadedEntry('b_000000000001');
     (measured.tab as { memoryKiB: number | null }).memoryKiB = 120_000;

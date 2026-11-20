@@ -508,6 +508,19 @@ describe('the menus drawn from the table', () => {
     ]), shape(submenuOf(template, 'Go')).join(' · ')).toBe(true);
   });
 
+  // UX wave U6b-5b (M2; B10, B13): the window's zoom, the app's own rows and no roles, a group of their own in View, outside
+  // any submenu, between the moves and Comments ▸; each disabled while the page registers no handler for it
+  it('holds Zoom In at ⌘=, Zoom Out at ⌘- and Actual Size in View, outside any submenu, a group of their own', () => {
+    const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
+    const view = submenuOf(template, 'View');
+    const at = shape(view).indexOf('Move to tab');
+    expect(shape(view).slice(at, at + 7)).toEqual(['Move to tab', '—', 'Zoom In', 'Zoom Out', 'Actual Size', '—', 'Comments ▸']);
+    expect(view.filter((item) => item.id?.startsWith('zoom.')).map((item) => [item.id, item.accelerator ?? null])).toEqual([['zoom.in', 'Cmd+='], ['zoom.out', 'Cmd+-'], ['zoom.reset', null]]);
+    expect(items(view).filter((item) => item.role !== undefined && /zoom/i.test(String(item.role)))).toEqual([]);
+    const none = menuTemplate(ACTIONS, {}, new Set<ActionId>(ACTION_IDS.filter((id) => id !== 'zoom.reset')), vi.fn());
+    expect(['zoom.in', 'zoom.out', 'zoom.reset'].map((id) => byId(none, id)?.enabled)).toEqual([true, true, false]);
+  });
+
   it('gives Terminal, Review and Files their chords (l5-code-08)', () => {
     const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
     expect(['surface.terminal', 'surface.review', 'surface.files'].map((id) => byId(template, id)?.accelerator)).toEqual(['Cmd+J', 'Cmd+Shift+D', 'Cmd+Shift+F']);

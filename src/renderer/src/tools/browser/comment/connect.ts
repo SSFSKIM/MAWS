@@ -18,12 +18,18 @@
 // its pass's, which ends with the tab: every tab id a change or a full list of this window's mirror no longer holds ends
 // its pass here, where the comment code is connected once for the window, so an end received while no pane is mounted
 // is seen. M4 (X-216): the tab's page is told here whenever its card opens on a comment, and when it closes (`page-card.ts`).
+//
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 4): the pin is in the window's CSS
+// pixels, into which main divides the tab's points by the app window's factor at the pick. The element stays put in the
+// tab's points when the factor changes, so the open browser card's pin, and every browser draft's held for its reopening,
+// is scaled by the old factor over the new one.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
 import { toast } from '../../../stores/notices';
-import { dropSubject } from '../../../side/card/store';
-import { openCommentComposer } from '../../code/anchor/anchor';
+import { dropSubject, useCommentCard, type CommentPass } from '../../../side/card/store';
+import { useZoom } from '../../../stores/zoom'; // UX wave U6b-5b
+import { openCommentComposer, type CardRect } from '../../code/anchor/anchor';
 import { browser, raiseNotice, type CommentNoticeKind } from '../store';
 import { COMMENT_COPY } from './copy';
 import { dockOf } from './dock';
@@ -42,6 +48,23 @@ function sessionOf(tabId: string): AppSessionId | null {
 function sayInChrome(tabId: string, kind: CommentNoticeKind): void {
   const appSessionId = sessionOf(tabId);
   if (appSessionId !== null) raiseNotice({ appSessionId, tabId, kind });
+}
+
+// UX wave U6b-5b (placement 4): the browser pins, the open card's and its pass's drafts', kept on their elements across a
+// change of the app's factor (the passes live in memory only, so their rects are rescaled in place)
+function keepPinsOnZoom(): () => void {
+  return useZoom.subscribe(({ factor }, previous) => {
+    if (factor === previous.factor) return;
+    const by = (value: number) => (value * previous.factor) / factor;
+    const scale = ({ x, y, width, height }: CardRect): CardRect => ({ x: by(x), y: by(y), width: by(width), height: by(height) });
+    const pinned = (pass: CommentPass) => pass.host === 'browser' && pass.comments.some((each) => each.rect !== null);
+    useCommentCard.setState(({ open, passes }) => ({
+      open: open !== null && open.host === 'browser' && open.rect !== null ? { ...open, rect: scale(open.rect) } : open,
+      passes: [...passes.values()].some(pinned)
+        ? new Map([...passes].map(([key, pass]) => [key, pinned(pass) ? { ...pass, comments: pass.comments.map((each) => (each.rect === null ? each : { ...each, rect: scale(each.rect) })) } : pass]))
+        : passes,
+    }));
+  });
 }
 
 export function connectBrowserComment(client: MawsBridge = ipc): () => void {
@@ -71,7 +94,9 @@ export function connectBrowserComment(client: MawsBridge = ipc): () => void {
     for (const { tabs } of previous.sessions.values()) for (const tab of tabs) if (!live.has(tab.tabId)) dropSubject('browser', tab.tabId);
   });
   const offCard = watchPageCard(client); // UX wave U5a M4
+  const offZoom = keepPinsOnZoom(); // UX wave U6b-5b
   return () => {
+    offZoom();
     offChanged();
     offPicked();
     offTabs();

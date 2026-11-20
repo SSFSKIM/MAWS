@@ -135,6 +135,18 @@ describe('the keymap table', () => {
     ]);
   });
 
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M2; B13, B14): Zoom In, Zoom Out and Actual
+  // Size under View, after Move to tab, with no control to change them
+  it('lists Zoom In, Zoom Out and Actual Size under View after Move to tab, not rebindable', () => {
+    const view = keymapGroups({}).find((g) => g.label === 'View')!.rows;
+    const at = view.findIndex((r) => r.id === 'artifact.moveToTab');
+    expect(view.slice(at + 1, at + 4)).toMatchObject([
+      { id: 'zoom.in', title: 'Zoom In', chord: 'Cmd+=', display: '⌘=', overridden: false, rebindable: false },
+      { id: 'zoom.out', title: 'Zoom Out', chord: 'Cmd+-', overridden: false, rebindable: false },
+      { id: 'zoom.reset', title: 'Actual Size', chord: null, display: 'Unbound', overridden: false, rebindable: false },
+    ]);
+  });
+
   // A9: the sheet and Settings list every row once, under the group the menus draw it in
   it.each(TABLES)('puts every row in exactly one group, labelled by its placement, its submenu’s path or its scope (%s)', (_name, table) => {
     const groups = keymapGroups({}, table);
@@ -159,7 +171,7 @@ describe('the keymap table', () => {
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
     for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U11a M5's channel.open, U1a's two)
-    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['terminal.attachSelection', 'channel.open', 'go.back', 'go.forward', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U6b-5a's Attach selection to chat (M2); U11a M5's one; U6b-5a's Back and Forward (M3); U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['terminal.attachSelection', 'channel.open', 'zoom.in', 'zoom.out', 'zoom.reset', 'go.back', 'go.forward', 'files.goToFile', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'file.open', 'transcript.markAllRead']); // U6b-5a's Attach selection to chat (M2); U11a M5's one; U6b-5b's three; U6b-5a's Back and Forward (M3); U6b-3b's Go to file; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6); U6e's Open File…; U2b's one (M2)
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {

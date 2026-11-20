@@ -1,0 +1,10 @@
+{
+  "name": "maws-spike-zoom-probe",
+  "private": true,
+  "type": "module",
+  "description": "Spike (UX wave U6b-5b, M1): what Chromium keeps of a window's zoom, in each zoom mode, across a quit and a forced exit; how a factor is in force before the first show; what a child view and a second window take. Findings only, never product code. Runs on the repository's own Electron (the root's node_modules); no dependencies of its own.",
+  "main": "main.mjs",
+  "scripts": {
+    "spike": "node run.mjs"
+  }
+}

@@ -2,9 +2,10 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
-import { LayoutFileStore, registerLayoutHandlers } from './store';
+import { LayoutFileStore, registerLayoutHandlers, WINDOW_DEBOUNCE_MS } from './store';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const OTHER = 'OtherMachineRef0000000' as MachineRef;
@@ -133,6 +134,79 @@ describe('layout file store', () => {
   });
 });
 
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, decision 34; finding 7): a key published is
+// in the map and in the file together, or in neither. The store is given the file's writer, here one that fails on demand.
+describe('a published key', () => {
+  const ZOOM = { version: 1, factor: 1.25 };
+  const failing = () => {
+    const writer = { fails: 0, writes: 0 };
+    const write = (target: string, text: string) => {
+      writer.writes++;
+      if (writer.fails > 0) {
+        writer.fails--;
+        throw Object.assign(new Error('EIO: i/o error, write'), { code: 'EIO' });
+      }
+      atomicWriteFileSync(target, text);
+    };
+    return { writer, write };
+  };
+  const onDisk = () => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+
+  it('writes the value with the whole file, and its removal likewise; a removal of an absent key writes nothing', () => {
+    const { writer, write } = failing();
+    const store = new LayoutFileStore(file, write);
+    store.set('regions', { width: 240 });
+    store.publish('window.zoom', ZOOM);
+    expect(store.get('window.zoom')).toEqual(ZOOM);
+    expect(onDisk()).toEqual({ regions: { width: 240 }, 'window.zoom': ZOOM });
+    store.publish('window.zoom', null);
+    expect(store.get('window.zoom')).toBeNull();
+    expect(onDisk()).toEqual({ regions: { width: 240 } });
+    const writes = writer.writes;
+    store.publish('window.zoom', null);
+    expect(writer.writes).toBe(writes);
+  });
+
+  it('leaves the map as it was for the key when the write throws, and throws on: a later write of another key carries the old value', () => {
+    const { writer, write } = failing();
+    const store = new LayoutFileStore(file, write);
+    store.publish('window.zoom', ZOOM); // the control: a publish that succeeds is read back from the file
+    expect(onDisk()['window.zoom']).toEqual(ZOOM);
+    writer.fails = 1;
+    expect(() => store.publish('window.zoom', { version: 1, factor: 1.5 })).toThrow(/EIO/);
+    expect(store.get('window.zoom')).toEqual(ZOOM);
+    store.set('regions', { width: 260 });
+    expect(onDisk()).toEqual({ 'window.zoom': ZOOM, regions: { width: 260 } });
+    writer.fails = 1;
+    expect(() => store.publish('window.zoom', null)).toThrow(/EIO/); // a removal that fails leaves the key
+    expect(store.list()).toEqual(['window.zoom', 'regions']);
+    store.set('regions', { width: 280 });
+    expect(onDisk()['window.zoom']).toEqual(ZOOM);
+  });
+
+  it('leaves an absent key absent when its first write throws', () => {
+    const { writer, write } = failing();
+    const store = new LayoutFileStore(file, write);
+    writer.fails = 1;
+    expect(() => store.publish('window.zoom', ZOOM)).toThrow(/EIO/);
+    expect(store.get('window.zoom')).toBeNull();
+    expect(store.list()).toEqual([]);
+    store.set('regions', { width: 240 });
+    expect(onDisk()).toEqual({ regions: { width: 240 } });
+  });
+
+  it('takes a pending window write with it, as a set of a renderer key does', () => {
+    vi.useFakeTimers();
+    const store = new LayoutFileStore(file);
+    store.set('window.main', WINDOW);
+    store.publish('window.zoom', ZOOM);
+    expect(onDisk()).toEqual({ 'window.main': WINDOW, 'window.zoom': ZOOM });
+    const written = readFileSync(file, 'utf8');
+    vi.advanceTimersByTime(WINDOW_DEBOUNCE_MS);
+    expect(readFileSync(file, 'utf8')).toBe(written);
+  });
+});
+
 describe('a session’s panel key', () => {
   it('layout.set refuses a panel key of a session main does not know, so a write in flight at removal cannot recreate it', () => {
     const store = new LayoutFileStore(file);
@@ -164,14 +238,16 @@ describe('a session’s panel key', () => {
 
 describe('main’s own keys', () => {
   // UX wave U5 (l6-artifacts-20): the last export's folder is main's, as the window's state is
-  it.each(['window.main', 'library.exportFolder'] as const)('%s is listed, and never read or written across IPC', (key) => {
+  // UX wave U6b-5b (decision 23): the window's zoom is main's too
+  const VALUE = { 'window.main': WINDOW, 'library.exportFolder': { path: '/srv/exports' }, 'window.zoom': { version: 1, factor: 1.25 } } as const;
+  it.each(['window.main', 'library.exportFolder', 'window.zoom'] as const)('%s is listed, and never read or written across IPC', (key) => {
     const store = new LayoutFileStore(file);
     registerLayoutHandlers(store, () => true, LOCAL);
-    store.set(key, key === 'window.main' ? WINDOW : { path: dir });
+    store.set(key, VALUE[key]);
     store.flush();
     expect(handlers.get('layout.list')!(undefined)).toEqual({ keys: [key] });
     expect(() => handlers.get('layout.get')!({ key })).toThrow(`${key} is main's own layout key`);
     for (const value of [{ path: '/elsewhere' }, null]) expect(() => handlers.get('layout.set')!({ key, value })).toThrow(`${key} is main's own layout key`);
-    expect(new LayoutFileStore(file).get(key)).toEqual(key === 'window.main' ? WINDOW : { path: dir });
+    expect(new LayoutFileStore(file).get(key)).toEqual(VALUE[key]);
   });
 });

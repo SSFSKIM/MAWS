@@ -4,7 +4,8 @@
 // from the view as Electron holds it (so the e2e checks what the screen shows), and `windowId` and `owner` from main's
 // records of the window holding the view and the pane placing it; `showPane` hands the windows a `maws.pane.show` as
 // the engine host would for `show_pane` (the e2e runs no engine; it answers whether the event was sent); `metrics` says
-// how many tabs are loaded and measured.
+// how many tabs are loaded and measured. UX wave U6b-5b M1: `tab(id).placed` is main's acknowledgment of the tab's last
+// placement (view.ts `placedOf`), which a scene waits on before it reads `bounds` (decision 36).
 import type { BrowserEngineRequest } from '@shared/ipc/schema/browser-engine'; // P5 O17 M9b
 import type { AppEngineInspection } from './engine'; // P5 O17 M9b
 import type { CuaBackend } from './cua';
@@ -12,6 +13,7 @@ import type { NativeMenuSeam } from './bookmarks/menu';
 import type { ExtensionsInspector } from './extensions';
 import type { MawsPaneShow } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
+import type { PlacedReport } from './view';
 
 export interface InspectedTab {
   visible: boolean;
@@ -19,6 +21,7 @@ export interface InspectedTab {
   attached: boolean; // the view is a child of its window's contentView
   windowId: number | null; // the window holding the view (it stays there, hidden, after its owner lets go)
   owner: { paneId: string; surface: 'panel' | 'main'; windowId: number } | null; // the pane that places it
+  placed?: PlacedReport | null; // U6b-5b M1: the last placement main acted on, as received; null before the first
 }
 
 export interface BrowserInspector {
@@ -42,13 +45,15 @@ declare global {
 export interface BrowserInspectorDeps {
   store: Pick<TabStore, 'entry' | 'all' | 'loadedCount'>;
   emit: BrowserEmit;
+  placedOf?(entry: TabEntry): PlacedReport | null; // U6b-5b M1: the view manager's (index.ts); without it `placed` is left out
 }
 
-export function browserInspector({ store, emit }: BrowserInspectorDeps): BrowserInspector {
+export function browserInspector({ store, emit, placedOf }: BrowserInspectorDeps): BrowserInspector {
   return {
     tab: (tabId) => {
       const entry = store.entry(tabId);
-      return entry ? inspect(entry) : null;
+      if (!entry) return null;
+      return placedOf ? { ...inspect(entry), placed: placedOf(entry) } : inspect(entry);
     },
     showPane: (request) => emit('maws.pane.show', request) === true,
     metrics: () => ({

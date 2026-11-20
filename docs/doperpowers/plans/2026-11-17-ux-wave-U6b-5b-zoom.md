@@ -25,9 +25,16 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-17) This document written.
 - [x] (2026-11-17) The delta review of revision 2 and the architect's rulings on its two findings here; revision 3.
 - [x] (2026-11-17) The owner's answer to K3; revision 4.
-- [ ] M1 — Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
-- [ ] M2 — Zoom (on the architect's word after M1's verdict; on a head that holds U6b-5a).
-- [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
+- [ ] (2026-11-17) M1 built on `ux-wave/U6b-5b` (`366e995bf` to the head): the seam's two additions, `placedOn`, the harness and the four probe scenes. On the build VM the node and e2e typechecks, `src/main/browser`, eslint and the gate's script tests are green, and the harness's rows a to i have run (j: not run, one display). The task review's fix wave is `d78e60abf`; the independent review's nine findings, as ruled, are `c9343eb08` and `ca7d21a89`, with the harness's run of record at `ca7d21a89`. The architect's review and the Mac runs are still to come.
+- [ ] (2026-11-19) M1's Mac rows 2 and 3 ran at `76d0bbc9d`. The harness and `e2e:browser` measured; the pin probe failed at 200 % and the chrome probe failed before any factor, both probe faults, fixed (Decision Log 13). The peers' probe passed against build F; build M is still to run. FINDINGS.md holds the run of record. The reruns at `ef018d192` and `e458d10c1` measured the pin, the popup and the menus, and the peers' probe established its default-mode control against build F. Every placement is now measured on the Mac (Decision Log 15, 16).
+- [x] (2026-11-19 22:30Z) M1 — reviewed clean (the task review, and the architect's acceptance at `76d0bbc9d`); Mac rows 2 and 3 in FINDINGS.md; its verdict is Decision Log 17. Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
+- [x] (2026-11-19 23:00Z) U6b-5a's merged head (`06f265e4a` on `ux-wave/U6b-5`) merged into the branch (`e4af0692e`, the resolution's fix `31e832468`); the statements to check again hold on it (Decision Log 17). On the build VM at `31e832468`: the three typechecks exit 0, `src/main/browser` passes, and the gate's script tests pass 588 of 588.
+- [x] (2026-11-20) M2 built, `0c5110117` to `34dee1867`. The red cases at `0c5110117` are 40 failures, each placement failing with the Mac's recorded reading. At `34dee1867`: step 5's vitest set and the store's importers pass (290 files, 4,311 cases); the typechecks of node, web and e2e exit 0; eslint on the changed files exits 0; the desk's web app's typecheck, build and 801 cases pass; the routes patch holds `layout.zoom` alone (client class, no wire minor); the gate's script tests pass 588 of 588. The Toolbar's leading box is fixed (`a7f6672a4`, `d74b2ba8c`; Decision Log 18).
+- [x] (2026-11-20) M2 — Zoom: reviewed clean (`31e832468` to `97b9eba20`). The task review found five Important items and the re-review one more. All were fixed red-first (Decision Log 19). At the fixes' heads, on the build VM: tsc node and web exit 0; eslint exits 0 on the changed files; vitest passes over the renderer's browser tools (655), main's browser (1,144) and the step-5 set at `8df3835e9` (2,754, none failed); the desk's web app passes 801; the gate's script tests pass 588 of 588.
+- [x] (2026-11-20) M3 built, `6b4f6aae1` and `e20ffca4a`, with master's last merge at `ea3310be2` (its fix `98f8e8c41`). At `e20ffca4a`, on the build VM: the e2e typecheck and eslint exit 0, and the gate's script tests pass 588 of 588. At `98f8e8c41`, the acceptance run (step 7): typecheck 0 and lint 0. The unit suite fails 11 of 2,935 files, each one on the build brief's list with its record or passing alone; `src/artifacts/document/markdown-runs.test.ts`, new to that list, passes alone 5 of 5. `src/shared/machine` fails only the two `git-reads` cases (board ticket 756). No scene has run. The unit suite exited 1. Its one failure not on the brief's list, `markdown-runs.test.ts`, timed out under load and passes alone; the controller set it aside as the VM's load and gave it to the architect for the brief's list (Decision Log 22). The task review returned six Important findings and the re-review two more; all were fixed (`f66f29155`, `945b3c59d`), and the second re-review approved. The architect ruled the transcript's zoom scene `test.fail()` against the row of 2026-10-27 (`0ad253794`; Decision Log 23).
+- [x] (2026-11-20) M3 — The scenes, the cross-build row, the record, and the acceptance run: reviewed clean (`2ab89eaf1` to `0ad253794`).
+- [x] (2026-11-20) The branch review (the xhigh panel) and its fix wave: five findings fixed red-first, three tracker rows, task review approved (`f39cc1289` to `8bcafe7ed`; Decision Log 24). Master `3f8fd97f8` merged; class 1a on the merged head.
+- [ ] (2026-11-20) U6b-5a's later heads merged before the gate: `72429dc03` (`a4160daf4`) and `17f422d11` (`abbb768b9`, with master `5e8534042`; the tracker keeps both sides' rows). Proof on the build VM at `0ad253794`, over the scope those merges touch: `pnpm typecheck` exits 0. The step-5 vitest set, with `App.test.tsx`, `src/shared/machine` and `src/main/window.test.ts`, passes 302 files and 4,494 cases; the only failures are the two `git-reads` cases (board ticket 756). The desk's web app builds, and its 93 files and 801 cases pass. The gate's script tests pass 588 of 588. Class 1a runs on this head. The architect owns the Mac runs (rows 6 and 7), the branch review (row 9) and the pull request.
 
 ## Words used in this document
 
@@ -129,7 +136,7 @@ Each is a means the child's file and the cut leave open, with its reason and wha
 28. **Every app window has the one factor**, applied where a window is made.
 29. **`zoom.in` has no handler at 200 %, `zoom.out` none at 50 %, `zoom.reset` none at 100 %.** The child's file asks it of Actual Size; Claude Desktop greys all three (`main-process/index.chunk-BV3uOqbK.js:327946-327949`), and the mechanism is the same registration.
 34. **The zoom key is published, not set** (finding 7). The layout store gains one act, `publish(key, value)`: it puts the value in the map (or removes the key) and writes the file, and when the write throws it puts the map back to what it held for that key before the call and throws on. Only the zoom uses it. It beat giving `set` and `delete` the same rule for every key: that changes what a failed write of any layout key leaves, in every caller, which is no part of this landing.
-35. **One formula for the device size, with the app's factor** (finding 8). With W the size named, z the tab's zoom and a the app's factor: the page's element is `min(round(W × z ÷ a), the room)` CSS pixels; the size the page then reads is `round(element × a ÷ z)`; a size fits when `W × z ÷ a` is no more than the room. The same for the height. The element is rounded to a whole CSS pixel, as today, and main rounds its edges to points (decision 27), so the page can read one pixel off the name: at 200 % and a tab at 100 %, 375 is 188 CSS pixels, 376 points. The chip says what the page reads (376), never the name. It beat sending main the unrounded rectangle, which changes the schema of the command every pane's placement uses.
+35. **One formula for the device size, with the app's factor** (finding 8). With W the size named, z the tab's zoom and a the app's factor: the page's element is `min(round(W × z ÷ a), the room)` CSS pixels; the size the page then reads is each side's placed points, from the two edges the pane sent main (decision 27's rounding), read as Blink reads `innerWidth` and `innerHeight`: `AdjustForAbsoluteZoom::AdjustInt` over the side in device pixels, at a layout zoom of the display's scale times z (amended 2026-11-20, Decision Log 19 and 24); a size fits when `W × z ÷ a` is no more than the room. The same for the height. The element is rounded to a whole CSS pixel, as today, and main rounds its edges to points (decision 27), so the page can read one pixel off the name: at 200 % and a tab at 100 %, 375 is 188 CSS pixels, 376 points. The chip says what the page reads (376), never the name. It beat sending main the unrounded rectangle, which changes the schema of the command every pane's placement uses.
 36. **A scene reads native bounds only after main's acknowledgment** (finding 9). The e2e seam says which rectangle main last received for a tab; a scene that has changed the factor or the layout waits until that rectangle is the one the page now measures, and only then reads the view's bounds. Two frames are not a wait: the window sends its rectangle from its own measuring, at a time no frame count names.
 37. **After each zoom act a line says the size reached** (card K3, as the owner answered it). "Zoom 125 %": the step reached as a whole percent, a space before the sign. It is the app's own line, a toast (`toast` in `stores/notices.ts`): level `info`, no action, no button to dismiss it, on screen for `ZOOM_LINE_MS` (1,500 ms, the toast's own `durationMs`). One line at a time: a press while a line shows takes that line away (`dismiss`) and shows a new one, with its own full time; replacing the text in place would leave the second press only what was left of the first one's time. It is shown for a change of the factor that an act made, Actual Size included ("Zoom 100 %"), and not for the factor a window opens with. It is said to a screen reader by the toast host itself, which announces every toast it draws; no live region is added. A press at an end changes nothing and shows nothing: the item has no handler there (decision 29). Nothing of `stores/notices.ts` or `app/ToastHost.tsx` is edited. One consequence is the toast host's own rule and is not changed here: while a line lies over a page of the in-app browser, that page is drawn as its still, as under any toast.
 
@@ -142,7 +149,7 @@ Each is a means the child's file and the cut leave open, with its reason and wha
 | 1 | The next factor, from the factor the store holds now (`readFactor(store.get('window.zoom'))`) and `to`. The same as now: answer it and stop | |
 | 2 | The key is published: the new value, or the key's removal at 100 % (decision 34) | The write throws: the store holds what it held, the command answers the error, and nothing below runs. The page, the placements, the next command and the next window all still have the old factor |
 | 3 | The factor is set on every app window's page | |
-| 4 | Each window's placements are applied again; its lights are placed; an open extension popup is placed again from its kept anchor | |
+| 4 | Each window's placements are applied again; its lights are placed; an open extension popup is closed (reason `'zoom'`; Decision Log 24) | |
 | 5 | `layout.zoomChanged` is sent to every app page | |
 | 6 | The answer: the factor | |
 
@@ -384,7 +391,7 @@ export const ZOOM_LINE_MS = 1_500;                              // the line's ti
 // src/renderer/src/tools/browser/viewport.ts: decision 35; `app` is the app's factor
 export function pageBox(viewport: BrowserViewport | null, zoom: number, room: Room, app: number): PageBox | null;
 //   width = min(round(viewport.width * zoom / app), room.width); height likewise;
-//   reads = { width: round(width * app / zoom), height: round(height * app / zoom) }
+//   reads = each side's placed points from `room.placed` (the rect the pane sent main), read as Blink's AdjustInt at the display's `room.scale` times zoom (Decision Log 19, 24)
 export function fits(viewport: BrowserViewport, zoom: number, room: Room, app: number): boolean;   // viewport.width * zoom / app <= room.width
 ```
 
@@ -397,7 +404,7 @@ The six placements. "Multiply" and "divide" are by `zoomOf` of the app page conc
 | # | what is placed | the narrowest place | today | under the factor | owner |
 |---|---|---|---|---|---|
 | 1 | the in-app browser's view | `ViewManager` in `src/main/browser/view.ts`: the placement keeps the CSS rectangle `browser.view.place` sent; `attach` and every later `setBounds` of it multiply, edge by edge (decision 27). A function of the manager applies every placement of one window again, called from S3 | `setBounds(rect)` as sent | multiply | U12 |
-| 2 | an extension's popup | the head of `ExtensionPopups.open` in `src/main/browser/extensions/popup.ts`, where the anchor arrives; the kept anchor stays in CSS pixels and `preferred-size-changed` and S3 place from it | the anchor mixed with window points | multiply the anchor | U12 |
+| 2 | an extension's popup | the head of `ExtensionPopups.open` in `src/main/browser/extensions/popup.ts`, where the anchor arrives; the kept anchor stays in CSS pixels and `preferred-size-changed` places from it; S3 closes an open popup (`zoomed`, Decision Log 24) | the anchor mixed with window points | multiply the anchor | U12 |
 | 3 | the bookmarks menu, an extension's action menu, the puzzle's menu | where `NativeMenus` hands a menu to its presenter (`present` in `src/main/browser/bookmarks/menu.ts`), which all three reach: before the presenter, so that the e2e seam, which stands in for the native call, records the point handed over | `popup({ window, x, y })` as sent | multiply | U12 |
 | 4 | the comment's pin | the call of `pickPosition` in `src/main/browser/comment/mode.ts`: its factor becomes the tab's over the app's | the tab's window points, drawn by the window as CSS pixels | divide | U12 |
 | 5 | the traffic lights | `src/main/window.ts`: `setWindowButtonPosition({ x: 16, y: Math.round(22 * factor - 7) })` at a window's making and in S3; in `app/Toolbar.tsx` the 78 px kept clear becomes `calc(78px / var(--app-zoom, 1))` | `{ x: 16, y: 15 }` in a toolbar 44 CSS pixels high | the lights stay centred in the toolbar's height and clear of its controls | no child (`window.ts`); U7 (`Toolbar.tsx`) |
@@ -409,10 +416,10 @@ The e2e seam (M1): `__maws_browser.tab(id).placed` (`{ rect, count }`, the last 
 
 | file | owner | the insertion | named by |
 |---|---|---|---|
-| `src/main/browser/view.ts`, `extensions/popup.ts`, `bookmarks/menu.ts`, `comment/mode.ts` | U12 | placements 1 to 4 (§G) | the cut's X8 |
+| `src/main/browser/view.ts`, `extensions/popup.ts`, `bookmarks/menu.ts`, `comment/mode.ts`; `browser/index.ts`, `extensions/index.ts` (the factor passed through, Decision Log 18) | U12 | placements 1 to 4 (§G) | the cut's X8 |
 | `src/main/browser/view.ts`, `bookmarks/menu.ts`, `inspect.ts` | U12 | M1's two seam additions | finding 9, as ruled |
 | `src/renderer/src/tools/browser/viewport.ts`, `chrome/ViewportChip.tsx`, `Pane.tsx`, their tests | U12 | placement 6: the two functions' fourth argument and the two callers that pass it | P6; finding 8, as ruled |
-| `src/renderer/src/app/Toolbar.tsx` | U7 | one class: the lights' clearance (placement 5) | P6 |
+| `src/renderer/src/app/Toolbar.tsx`, its test | U7 | the lights' clearance, and the leading box's width at the factor (placement 5; Decision Log 18) | P6 |
 | `src/main/layout/store.ts`, its test | no child | `MAIN_KEYS`; `publish`; the writer given to the constructor | P6; finding 7, as ruled |
 | `src/main/window.ts`, `src/main/app.ts`, `src/shared/ipc/names/layout.ts`, `src/shared/ipc/routes.json`, `src/renderer/src/App.tsx` | no child | `zoomMode` and placement 5; the zoom's start and its command; one name; one name; one mount | P6, P7 |
 | `src/shared/ipc/schema/layout.ts` | by key | the key `window.zoom`, its schema, one command, one event | the root's row ("a child adds a key of its own") |
@@ -422,7 +429,7 @@ Not edited: `src/main/presentations/`, `src/main/repair/` (unless M1's row g); t
 
 ### §I. The scenes (M3), by group, each with what it waits on
 
-No spec file is added. Every scene reads a state it polls for; a scene that reads a native rectangle calls `placedOn` first (decision 36).
+No spec file is added. Every scene reads a state it polls for; a scene that reads a native rectangle calls `placedOn` first (decision 36). The one exception is an extension's popup: it is placed by main from its kept anchor, not from a pane's report, so it has no `placed` record, and the seam's `popup()` bounds are its acknowledgment (amended 2026-11-20, Decision Log 22).
 
 | group, file | the scene | what it waits on |
 |---|---|---|
@@ -433,6 +440,7 @@ No spec file is added. Every scene reads a state it polls for; a scene that read
 | `e2e:terminal`, `e2e/terminal.spec.ts` | new, "zoom: the grid refits and a selection is under the pointer at 125 %" (the child's probe 3) | the pty's reported size after the zoom; the selection's text |
 | `e2e:presentations`, `e2e/presentations-present.spec.ts`, `presentations-export.spec.ts`; `e2e:render-host`, `e2e/render-host.spec.ts` | new: the presenter's window at 100 % while the app is at 150 %; an export made at 150 % equal to one made at 100 %; an artifact's capture the same size at both (the child's probe 5; B12). `e2e:render-host` is a group the cut did not list | the presenter's `getZoomFactor()`; the two exports' page sizes; the two captures' sizes |
 | `e2e:transcript`, `e2e/transcript.spec.ts` | new: at 110 % and 80 % a streaming transcript keeps following while a key is pressed in a side surface (the child's probe 4). A group the cut did not list | the follower at the end after each appended row |
+| `e2e` (the default lane, in the foreground), `e2e/browser-focus.spec.ts` | new (ruled 2026-11-20, Decision Log 22): with the keyboard in a page of the in-app browser, the zoom keys zoom that page alone. The tab's zoom changes and comes back; the app's factor and `layout.zoom { to: 'current' }` stay at 1; no zoom line is drawn (control: View's Zoom In afterwards draws one) (B10) | the tab's zoom; the root's `--app-zoom`; the line's absence, with its control |
 | `e2e:settings`, `e2e/settings.spec.ts` | new step: Settings › Keyboard lists the three rows with no control (B14) | the rows |
 | `e2e:cross-build`, `e2e/cross-build.spec.ts` | "(zoom, both ways)" (M3; B10's relaunch, B12) | as M3 says |
 
@@ -489,7 +497,7 @@ Each is a step with what it needs, handed to the architect.
 | 3 | **M1's probe scenes on real builds** | after 1 | A Mac under the load rule. `MAWS_ZOOM_PROBE=1` with the cross-build group and `--peer-exact f1852de3a`, then `--peer-exact 2c7044231`, for "(zoom probe)"; the three placement probes alone in their groups (`e2e:browser`, `e2e:browser-chrome`, `e2e:browser-comment`) | The recorded lines: the peer's factor after an ordinary quit and after a forced exit, in each mode (`zoomMode` in `createWindow`; P7); for each of the six placements its observation at four factors (that row of Interfaces §G) |
 | 4 | **M1's look** | with 3 | The first probe with `MAWS_ZOOM_PROBE_HOLD=1` and `MAWS_E2E_QUIET=0`, which stops with the window shown at each factor | Where the lights stand and whether the title bar drags over its whole height (placement 5; a band that does not follow is reported, not fixed here); whether a terminal's text is sharp (the child's probe 3: if not, the terminal is told the factor, which is a ruling); which cell takes a press at each corner of the frame; the window on a second display |
 | 5 | **The word to start M2** | after 2 to 4 | The findings read against "Promote or discard" | M2 starts, or one of its stops is ruled |
-| 6 | **The scenes of Interfaces §I** | after M3 | A Mac. The new scenes alone first, then each group whole: `e2e:layout`, `e2e:browser`, `e2e:browser-chrome`, `e2e:browser-comment`, `e2e:terminal`, `e2e:presentations`, `e2e:render-host`, `e2e:transcript`, `e2e:settings` | Each group's result. `e2e:transcript`'s zoom scene failing is the tracker's row of 2026-10-27 made reachable: its fix is one comparison in U3's scroll code, on a ruling |
+| 6 | **The scenes of Interfaces §I** | after M3 | A Mac. The new scenes alone first, then each group whole: `e2e:layout`, `e2e:browser`, `e2e:browser-chrome`, `e2e:browser-comment`, `e2e:terminal`, `e2e:presentations`, `e2e:render-host`, `e2e:transcript`, `e2e:settings` | Each group's result. `e2e:transcript`'s zoom scene failing is read from its failure and its annotated gap, not inferred to be the row of 2026-10-27: a red there is a follower defect at that zoom and display, and gets a ticket (Decision Log 25) |
 | 7 | **The cross-build run of record** | on the final head | `e2e:cross-build` with `--peer-exact f1852de3a` and with `--peer-exact 2c7044231`; and the group as the gate crosses it, against the master this landing merges into and against master at `b89d6d1d7` | "(zoom, both ways)" passed, not skipped, in all four. A skip is not evidence |
 | 8 | **The owner's hands and look** (the child's probe 6) | on the wave's build, on the owner's machines | About ten minutes: a page open in the in-app browser, a terminal, a transcript | ⌘= and ⌘− under the Korean input source; at 80 %, 125 % and 200 %: the page under its frame, text sharp, nothing cut; the line with the size after each press, heard with VoiceOver on, and what a page of the in-app browser looks like under it for that second and a half; after a relaunch the window is at its size from the first moment it is seen |
 | 9 | **The branch review** | after M3 | `doperpowers:review-code`, the xhigh panel | A verdict and findings |
@@ -552,6 +560,13 @@ Found while this document was written and reviewed; each changed a decision abov
 - Observation: Claude Desktop `app-5.1231.2`, read for zoom. It zooms by level in half steps between 25 % and 500 %, stores no zoom of its own, disables Actual Size at 100 % and the two others at their limits, moves its window controls with the factor, and shows a line with the percentage and a Reset button for a second and a half (`main-process/index.chunk-BV3uOqbK.js:327946-327999`, `:328474-328478`, `:197293-197308`; `web/app/v1/ccce0aa9f-CEzQPX52.js:281-411`).
   Evidence: the lines cited, read in the build's readable tree.
 
+- Observation (M1, 2026-11-17): the harness runs on the build VM only with Chromium's setuid sandbox helper set. The architect ruled `--setuid-sandbox` for that VM's checkout, and the run of record is at `d78e60abf`.
+  Evidence: `spikes/zoom-probe/FINDINGS.md`, "Build VM".
+- Observation (M1, the VM run; the Mac decides): an isolated zoom is kept nowhere after a quit or a forced exit (rows c and d PASS), so P7 stands on Linux. A default-mode zoom is kept under `partition.per_host_zoom_levels`, keyed by the page's whole `file:` URL, and written on a quit or within 15 s. `webPreferences.zoomFactor` (f1) has the factor in force at the first show. A call at `ready-to-show` (f3) failed at 2 in two of three runs, with a frame painted before the show. Row g's propagation control was established in both modes, and no other window took the zoom.
+  Evidence: `spikes/zoom-probe/FINDINGS.md`, "Build VM", the RECORD lines.
+- Observation (M1's verdict, 2026-11-19): every placement of Interfaces §G is off on the Mac in the direction §G gives, each by the RECORD lines in `spikes/zoom-probe/FINDINGS.md`; placement 6's five numbers match the pin's code; an isolated zoom is kept nowhere (P7); the first show at the factor is `webPreferences.zoomFactor` (row f, f1); the factor survives a reload (row e); no other window takes it (row g).
+  Evidence: FINDINGS.md, "Mac" and its reruns; Decision Log 13 to 16.
+
 ## Decision Log
 
 1. **2026-11-17 (UTC) · The verification call.** The first writing got an adversarial review (revision 2 got a delta review, Decision Log 5; there is no second adversarial read). M1's commits get one reviewer on the medium rung before its Mac run; the landing's branch gets `doperpowers:review-code` at the xhigh panel ("Size and review"). Class 1a on GitHub Actions is the gate of record. The cross-build runs of record are `e2e:cross-build` with `--peer-exact f1852de3a` and with `--peer-exact 2c7044231`.
@@ -561,6 +576,193 @@ Found while this document was written and reviewed; each changed a decision abov
 5. **2026-11-17 (UTC) · Ruled on the delta review of revision 2.** One reviewer on the medium rung read `ee20c0074`; the session that keeps master had ruled a delta review, and there is no second adversarial read. For this document it closed findings 7 and 8 and left 9 partly closed. Its two findings here, each read by the architect at the cited place, both accepted. (i) Placement 6 at M1: as the pin's code runs, the page is not "375 times the factor"; M1 records the element's size, the frame's size, the view's, the page's `innerWidth`, the chip's text and the menu's fit choices at each factor, each beside the value the code predicts; the formula's verdict is M2's unit proof. No separate diagnostic configuration is built for it: the choice was the author's to make, and a build made only to show one placement fixed alone would be product code written for a probe. (ii) Row j: a changed `devicePixelRatio` is expected between displays of different scale and is recorded; the row is a stop only when the app's factor changes across the move or the view no longer stands on the frame as drawn. Also ruled: M1 is built on `ux-wave/U6b-5b`, cut from the head that carries this revision, and U6b-5a's head is merged into it before M2; with one display row j is recorded as not run, B11 names the gap, and M2 may start; the pointer's row stands as arithmetic with the press by hand in the look; `publish` for the zoom key only and a 375 size that reads 376 at 200 % are accepted, the reviewer having found each sound. The reviewer also confirmed that `window.zoom` is a new stored key that both older builds keep.
 6. **2026-11-17 (UTC) · The owner's answer to K3** (recorded verbatim on board ticket 674, with the question as put; quoted under the card). "Up to 200 %, a brief line (Recommended)", which was not the built default: the range stays 50 % to 200 %, and after each zoom act a line "Zoom 125 %" (the step reached) shows for a second and a half in the app's own line, with no button, also said to a screen reader, at `connectZoom` in `stores/zoom.ts` (decision 37). M2 gains the line and its unit cases, the time held by state on a fake clock; the menus' scene draws it, and the browser's scene waits for it to be gone before it reads a view. It edits no file another landing owns: the notices' store and the toast host are called and drawn as they are.
 
+7. **2026-11-17 (UTC) · M1: the menu seam's `at` is a method beside `last()`** (ruled by the architect on the executor's report). The document says the menu's "record gains `at`". There is no record object: `NativeMenuSeam.last()` answers a bare array, which every scene compares whole. So the seam gains `at(): { x, y } | null`, the point the last menu was handed to its presenter with. A pick does not clear it, and it is recorded on the e2e path only. Interfaces §G's "`at` on `__maws_browser.menu`'s record" is this method.
+8. **2026-11-17 (UTC) · M1: `tab(id).placed` counts only the reports `place` acts on** (ruled by the architect on the executor's report). These are the owner's report, a claim, and the owner's release (`rect: null`). Each rect is kept as received. A report that `place` ignores, from another pane or an unknown window, is neither kept nor counted, since the acknowledgment must mean that the view took the rect. The record is a `WeakMap` in `ViewManager` (`placedOf`), which the e2e inspector reads through an optional dependency. In the product the map is written and nothing reads it: it is inert. Step 2 of Concrete Steps says the browser's suites pass "with no case edited". That holds for every case but one: the case in `index.test.ts` that pins the seam's whole shape (`toEqual` on `tab()`) now reads `placed: null`, because the seam's shape is the thing M1 changes.
+9. **2026-11-17 (UTC) · M1: how the probes measure.** (i) The app window's zoom is set in main on the visible window (`setZoomFactor`), the window the scenes' other helpers use. A probe waits until the page's `devicePixelRatio` equals the display's scale times the factor, which is a state of the page, not a number of frames. (ii) Electron reports only the position of the traffic lights. Their size is taken as macOS's standard (three 14-point buttons, a 54-point span) and named as assumed in every line, and the look confirms it. (iii) For the device box, the room is dragged by the panel's separator towards 440, 370 and 380 CSS pixels. Every line records the room's actual width, since the panel's bounds can stop a drag short. (iv) The look's page of numbered cells is `/cells.html` on the scenes' test server. (v) The cross-build probe uses a fresh profile for each mode and each way of exiting. This build's window has no zoom mode, so the isolated mode is set at run time with `setZoomMode('isolated')`. (vi) In the harness, row f's capture is judged by the vertical extent of a red line of text against the control at factor 1, within 10 %. The `Preferences` file is read by every key whose name holds "zoom".
+
+10. **2026-11-17 (UTC) · M1: the independent review's nine findings, as the architect ruled them.**
+    - The cross-build probe:
+      - It names each build's page URL and whether they match. A peer on another URL is not P7 evidence.
+      - This build relaunched is the same-URL reading: the control in default mode, P7's observation in isolated mode.
+      - The forced exit is taken after a default-mode write control's key reaches `Preferences`, bounded, and is "not established" otherwise. The kill at once stays as a labelled extra.
+    - The harness:
+      - Row h needs the page laid out at the factor, and f3 needs a painted frame before the show. Either failing is an experiment that did not stand.
+      - Row g's 500 ms is replaced by a propagation control.
+      - Windows show inactive unless `--look`.
+    - The popup's predictions go through `popupBounds`' clamp. It is mirrored in the e2e, which loads no main code; that mirror is what we used, not an unclamped anchor.
+    - The device box takes its ample room by Expand surface where the separator or the sheet cannot give it.
+    - Paths: every printed record replaces the builds' roots, the scratch and the home folder by placeholders, and is refused if a path of the machine is left. `scrub.test.mjs` holds the harness's scrub to that, and `record` checks each probe line.
+    - The placement map's running outside the e2e stands as accepted and is stated plainly. Decision Log 8's "inert" means only that nothing reads it.
+
+11. **2026-11-17 (UTC) · M1: the same-URL test compares Chromium's zoom key, which keeps the query.** For a hostless (`file:`) page in the default mode, Chromium keys the zoom by the whole spec less the fragment (Electron 44.4.5's zoom controller; `HostZoomMap`'s host-or-spec helper). The cross-build probe therefore compares the URLs with the query kept. On another key, the relaunch is labelled neither the control nor P7 evidence. This is the task review's finding on the second fix wave. Its other finding there, that `popupPlace` in the e2e duplicates `popupBounds`, is left as Decision Log 10 rules: extracting the pure clamp into a module both can load would edit U12's `popup.ts`, which M1 must not touch (it changes nothing of the product but the two seam additions). The architect decides whether M2 or M3 extracts it.
+
+12. **2026-11-17 (UTC) · Ruled by the architect: M2 extracts `popupBounds`' clamp** into one module that main and the e2e both load, and the e2e mirror `popupPlace` (`e2e/support/zoom-probe.ts`) is removed then. M2 already changes popup placement (placement 2), so the extraction belongs there. This closes the finding Decision Log 11 deferred. M1's review loop stops at `76d0bbc9d`: a later find goes to the tracker unless it makes a measurement invalid. M2 starts on the architect's word, once M1's Mac rows are in and U6b-5a's head is merged.
+
+13. **2026-11-19 (UTC) · M1: the Mac run's two reds are probe faults, and the write control's "not established" is the control working.**
+    - **The pin at 200 %:** the hover outline never showed. Today's view does not grow with the factor, so the tab's page is too short for its target at 200 %, and the hover landed outside the page's viewport. The probe now gives the window its display's work area and scrolls the target into the page's viewport. A target that still does not fit is recorded as not established.
+    - **The popup and the menu:** the main tab's chrome folded its actions into the puzzle, because the panel's Browser stood beside it. The probe now hides that surface and gives the window its work area. At any factor where the actions are still folded, or the folder chip sits in », the probe records that and does not assert it.
+    - **The cross-build write control:** nothing reached Preferences within 60 s, the app's own default-mode key included, so the control was right to refuse. The likely cause is App Nap's throttling of a quiet e2e window. The probe now holds the app out of App Nap (`powerSaveBlocker`'s prevent-app-suspension) for up to 120 s and records that it did. The cause is not verified.
+    - None of this changes a verdict. P7's evidence on the Mac is the harness's rows c and d and this build's same-URL relaunch.
+    - The view, the lights and the device box were measured and are recorded in FINDINGS.md.
+
+14. **2026-11-19 (UTC) · M1: the chrome probe's premise names one element.** The rerun at `ef018d192` (manual gate `ef018d1921f2-20261119T210723Z`) stopped at the premise "the bookmarks bar is drawn" before any line was recorded. `folder.or(moreIn(main))` matched the chip F and » together, which is a strict-mode violation. The premise is now the bar itself (`[data-bookmarks-bar]`). The actions' premise takes `.first()`, because an inline action and the puzzle can also be drawn together. The extension's id still comes from the fixture (`chrome.extensions.probe.id`), which differs with each unpacked path.
+
+15. **2026-11-19 (UTC) · M1: the reruns at `ef018d192`.**
+    - The pin probe measured placement 4 off at all four factors. Its button sits 34.5 px higher at 200 % because of the tab page's own scroll, not a placement.
+    - Against build F, the default-mode write control was established once the app was held out of App Nap, and a kill after the write kept the default-mode zoom.
+    - In isolated mode the control was still not established: nothing reached `Preferences` in 120 s, the control's default-mode key included. That cycle therefore does not answer "kill after a write" for isolated mode. P7 rests on the harness's rows c and d and on this build's same-key relaunches.
+    - The isolated-cycle write is left as an open observation in FINDINGS.md, with the harness row that would settle it.
+
+16. **2026-11-19 (UTC) · M1: the popup and the menus measured, and the architect's rulings on what stays open.**
+    - The rerun at `e458d10c1` measured placements 2 and 3 off at every factor: main took the CSS anchor and the CSS point as window points. At 0.5 and 0.8 the popup's x is held by the clamp at the content's edge, so there the reading rests on its y.
+    - Every placement of Interfaces §G now has its Mac observation, in the direction §G gives (FINDINGS.md).
+    - Ruled: no harness row for the isolated "kill after a write" cycle, since it does not bear on P7.
+    - Ruled: the peers' probe against `2c7044231` is dropped.
+    - Ruled: rows 4 (the look) and j (a second display) are owed to the owner.
+    - M2 waits for U6b-5a's merged head.
+
+17. **2026-11-19 (UTC) · M1's verdict, read against "Promote or discard", and what M2 builds from it** (the architect's word to start M2, on the head that merges U6b-5a's `06f265e4a`).
+    - **P7 stands; M2 is built as written.** The window's page is made with `zoomMode: 'isolated'`, and nothing resets at quit: no `leaveAtActualSize`. On the Mac, rows c and d and this build's relaunch on its own page's zoom key read 1. The peer's reading is on another key, and the run against `2c7044231` was dropped by the architect (Decision Log 16).
+    - **`openAt` is f1**, the factor given as `webPreferences.zoomFactor` when the window is made. It passed on the Mac and on Linux. f3 was unreliable on Linux.
+    - **No `applyAfterLoad`:** row e kept the factor across a reload and across another load.
+    - **`present.ts` and `repair/index.ts` are not edited:** row g found that no other window takes the zoom.
+    - **Placement 6:** decision 35's formula is built with placement 1, and its unit cases are its proof.
+    - **Row j was not run.** B11's sentence about a second display is not proven, and M3's tracker gains its row.
+    - **The pointer** needs no fix of its own: it is placement 1's fault, and placement 1's fix closes it.
+    - **The menu's offer** is placement 6's `fits`.
+    - **The architect's direction for every correction:** pin each one red-first with a unit case built from the numbers FINDINGS.md recorded on the Mac. The case fails on today's code with the recorded reading, and passes with the corrected one. For example:
+      - the bookmarks menu at 2: the CSS corner (332, 136) is handed as (664, 272);
+      - the popup at 2: anchor (799, 80, 24×24), corner times the factor;
+      - the view at 1.25: pane (415, 158, 602×491) placed at decision 27's rounding of it;
+      - the lights at 0.5 to 2 against the toolbar's 44 CSS pixels;
+      - the pin at 2: position (81, 272) drawn at its division;
+      - the device box at 2: 375 reading 376.
+    - **The popup's clamp** is extracted per Decision Log 12, and the e2e's `popupPlace` goes.
+    - **The wire:** this landing still moves no wire minor (`layout.*` is outside the manifest). If the routes' snapshot or a guard shows otherwise, the minor it takes is 61, since U6b-4c holds 60 at the chain merge, and the architect hears of it first.
+    - **The statements to check again hold on the merged head.** Statement 1: the three zoom rows go between `artifact.moveToTab` and `comments.expand`, where nothing new stands, and `listable` is exported by `palette/CommandPalette.tsx`. Statements 2 to 6 and 8: since M1, nothing changed in `src/main/browser`, `tools/browser`, `src/main/layout` or `window.ts`. Statement 10: Electron is still 44.4.5. The lights' clear width is still `pl-[78px]` in `Toolbar.tsx`.
+
+18. **2026-11-20 (UTC) · M2: the means its executor chose, and the architect's two rulings on its concerns.**
+    - **The range's one place is the shared schema.** `ZOOM_MIN` and `ZOOM_MAX` stand in `src/shared/ipc/schema/layout.ts` beside `WindowZoomSchema`, which bounds the factor by them, and `src/main/zoom.ts` re-exports them. The window's handlers need the bounds and cannot import main. Card K3's "the one place for the range" is this place.
+    - **`toPoints` (decision 27) and `trafficLightsAt` (placement 5) are pure exports of `src/main/zoom.ts`.** `window.ts` applies the lights' position, and the browser's placements import `toPoints`. A pure function inside `window.ts` could not be tested without mocking all of its Electron graph.
+    - **The factor reaches U12's placements as an optional dependency, `zoomOf?(win)`, which defaults to 1.** It is passed through `startBrowser`, `startExtensionUi` and `startCommentMode`, so every existing case at factor 1 stands unedited. Ruled by the architect: the wiring in `src/main/browser/index.ts` and `src/main/browser/extensions/index.ts` is a named insertion (UC-8), added to §H's first row. It only passes the factor through.
+    - **A menu's point at factor 1 is handed through as the same object.** At any other factor it is multiplied and rounded. An existing case pins identity at 100 %, and another pins a fractional point there.
+    - **`publish` puts the whole map back from a copy when a write fails.** It does not fire `onChange`, since the key is main's own, as `window.main` is. Removing a key that is absent writes nothing.
+    - **The popup keeps its last preferred size**, so that S3 can place it again with no new layout event. `Browser.placeAgain(win)` places a window's views and its open popup again, for S3's step 4. It acknowledges nothing, because no report arrived.
+    - **The popup's clamp lives in `src/shared/browser/popup-bounds.ts`** (Decision Log 12). It is not in U12's `extensions.ts`. `popup.test.ts`'s cases are unedited, and the e2e's `popupPlace` is gone.
+    - **The window follows the event, never the command's answer** (decision 25). The answer to `current` is applied once, at connect.
+    - **The line's test is `stores/zoom.test.tsx`.** It mounts the real `ToastHost` and reads the announcement from Radix's live `role="status"` region.
+    - **`App.test.tsx`'s fake main answers `layout.zoom`.** That is a test beside the mount §H names. Without it, the new mount's read at connect became unhandled rejections there.
+    - **M3 does `expectOnPane`'s factor and `placedOn`-first** in `e2e/support/browser-scene.ts`, as part of the scenes.
+    - **Ruled by the architect: the Toolbar's leading box follows the factor.** At 50 % with the sidebar hidden, the leading box (150 CSS px) was narrower than the lights' clearance (156). The edit in `src/renderer/src/app/Toolbar.tsx` therefore grows past §H's one class. At every factor from `ZOOM_MIN` to `ZOOM_MAX`, the box holds the clearance plus its own controls. It is pinned red-first in `Toolbar.test.tsx`.
+
+19. **2026-11-20 (UTC) · M2's task review, and the fix wave the architect ruled.** The review of `31e832468..d74b2ba8c` (one task reviewer) found nothing Critical and five Important items. All five were fixed, red-first, in `21ba78f11` to `d95dbd25a`.
+    - **Decision 35 is amended.** The size the page reads depends on where the element sits, not only on its rounded size, because main rounds each placed edge (decision 27). At 1.25, with the tab at 100 % and a top of 158, Mobile's 812 is 650 CSS pixels and is placed as 812 points, while the earlier formula said 813. `Room` gains an optional `at`: the element's origin as the pane last sent it to main. `reads` is now each side's placed points divided by z, rounded. The 375 that reads 376 at 2 stands. That the formula matches Chromium's own rounding is asserted by M3's Mac scene, against the page's own reading at 1.25 and at 2.
+    - **An open comment card's pin follows the factor.** `comment/connect.ts` scales the open card's rect by old ÷ new on `useZoom`'s change, through the card store's `setState`, so `side/card/store.ts` and `CardHost.tsx` are not edited. A pin on a page that reflows when the view's size in points changes does not follow the element, since that would need a new locate. It is a tracker row (M3), as ruled. A saved draft's pin follows the factor too (ruled by the architect; `41c119595` red, `da467479a`): the zoom subscription in `connect.ts` scales the pin of every browser draft by old ÷ new. A draft's pin lives only in memory and is never written to disk or sent between builds, so `side/card/store.ts`'s reopen path is unchanged and no field is added.
+    - **A view staged for capture keeps its stage's bounds.** The first fix guarded only `placeAgain`. The re-review found that a device-sized pane's own report after a change of factor still reached `setBounds` through `place` and `attach` (`4edef6d18` red, `97b9eba20`). The guard is now in `attach`, which `placeAgain` goes through. A report sent while the view is staged is recorded and acknowledged, and staging's return applies the latest rectangle at the current factor. A report that moves the view to another window while it is staged still takes attach's window-change step. That path is older than M2, and it is a tracker row (M3).
+    - **A late startup read yields to a heard change.** Once `layout.zoomChanged` has arrived, `connectZoom` drops the answer to `current`.
+    - **The matrix is completed.** The pin and the device box are pinned at 0.5, 0.8, 1.25 and 2. A new `src/main/window.test.ts` pins the `trafficLightPosition` `createWindow` gives a window at the four factors, and `zoom.test.ts` pins S3's live `setWindowButtonPosition`. It passed on arrival, because `createWindow` already read the stored factor: the lights' red stands on the pure `trafficLightsAt` cases and the Mac's `y = 15`. The preset steps are checked against a fixed table.
+
+20. **2026-11-20 (UTC) · M3's start: what becomes of M1's probes, and the tracker rows M2 left.**
+    - **M1's four probe scenes were spike instruments.** M3 removes the cross-build probe, as M3's section says. It also removes each of the other three (`e2e/browser.spec.ts`, `browser-chrome.spec.ts`, `browser-comment.spec.ts`) once the §I scene in the same file asserts that placement. `e2e/support/zoom-probe.ts` goes with them, except what a §I scene still uses. FINDINGS.md cites each probe at the commits that ran it, and the harness under `spikes/zoom-probe/` stays as the spike's record. A probe left in place records only today's readings, which M2 has made wrong.
+    - **The tracker rows M2 adds to M3's record:**
+      - an open or saved comment pin does not follow its element when the page reflows because the view's size in points changed;
+      - a report that moves a view to another window while it is staged for its still takes attach's window-change step, which is older than M2.
+      These come beside the rows "Left over" names and row j.
+    - **The chip against Chromium:** §I's `e2e:browser` scene asserts the chip's text against the page's own `innerWidth` and `innerHeight` at 1.25 and at 2 (Decision Log 19).
+
+21. **2026-11-20 (UTC) · M3: the means its executor chose.**
+    - **`e2e/support/zoom-probe.ts` is gone.** Its one surviving helper, `timesFactor`, is in a new `e2e/support/zoom.ts` with the scenes' own helpers. The rest set the zoom in main or wrote probe lines, which an asserting scene must not do.
+    - **The scenes zoom through View's items, never in main.** Each clicks the item by id once main reads it enabled, then waits on the root's `--app-zoom`. Main sends `layout.zoomChanged` only after S3's steps 3 and 4, so the store's factor implies main's.
+    - **`expectOnPane` takes the factor as a sixth argument, `factor = 1`, and calls `placedOn` first,** with the caller's own timeout. At 1 it is the old comparison with the acknowledgment ahead of it. Every existing call is unchanged.
+    - **§I's "with a menu open over it" is read as the in-app browser's own Browser options menu.** That is the one DOM menu that overlaps the page, the cover's path. The native menus over the page are browser-chrome's scene.
+    - **Mark up's "covering what it covers at 100 %"** was first read as: the layer lies on the pane, and the still's pixels per view point are the same at 150 % as at 100 %, within 2 %. ~~That ratio~~ is superseded by Decision Log 25: a still is capped at `CROP_MAX_EDGE`, so on a large display its pixels per point differ between factors by design.
+    - **Mobile reads exactly 375 at 0.5 and 1.25, and 375 or 376 at 0.8 and 2,** where 375 ÷ f is not a whole CSS pixel (decision 35 as amended in Decision Log 19). At all four factors the chip is held to the page's own `innerWidth × innerHeight`, which covers Decision Log 20's 1.25 and 2.
+    - **The terminal's size is read from inside the shell** (`stty size`) and set beside the emulator's columns, so the page's terminal seam is not widened.
+    - **The transcript scene runs in the product app,** because the transcript harness mounts no `connectZoom`.
+    - **The cross-build scene skips through the file's `layoutSchemaNames(peer, 'window.zoom')`** and reuses its `storedLayout`.
+    - **The merge of master's batch 5 (`ea3310be2`) is resolved in `finder.ts` with U6b-5a's own line** (`98f8e8c41`: `end('withdrawn: …')` for master's `end(reason)`). It is the same character for character as `ux-wave/U6b-5`'s, so the later merge of that branch meets no conflict.
+    - **The tracker gains seven rows:** four for "Left over", row j, and Decision Log 20's two. The 2026-10-24 row loses zoom. The 2026-10-27 row stays open and names `e2e:transcript`'s zoom scene, which has not run yet, as the one that decides it.
+    - **Found:** the toast host pauses a toast's timer while the window is blurred or the pointer rests over the toasts (Radix). A browser scene's wait for the zoom line to be gone can be held by that on a Mac run. The remedy, if a run shows it, is in the scene: a focus or a pointer move before the wait.
+
+22. **2026-11-20 (UTC) · M3's task review, and what goes back.** The review of `2ab89eaf1..e20ffca4a` found nothing Critical and six Important findings. Five are fixed in the scenes:
+    1. The transcript scene must hold a streaming turn and reach the clamp onto the rounded end while the key's witness is armed, or it cannot decide the row of 2026-10-27.
+    2. The device fit case drives the chip's own menu at a controlled width, where a size fits at one factor and not at another.
+    3. Each wait for the zoom line to be gone first witnesses the line it expects. The pointer is kept off the toasts. The menus' scene proves replacement while the first line's timer is held.
+    4. `expectOnPane` takes the acknowledged rectangle and the page's rectangle from the same sample, and compares the four edges.
+    5. Settings reads `settings.json` after View's zoom items have been used, with a known binding as the reader's control.
+
+    The sixth is the record of the acceptance run. Progress now says the unit suite exited 1, and `markdown-runs.test.ts` is set aside as the VM's load: it passes alone 5 of 5, and the architect adds it to the brief's list. §I's rule on `placedOn` names the popup's exception. The Minor, on the presenter scene, polls for the audience and the presenter, as the existing scene does, and is fixed with the rest. Ruled by the architect with the wave: B10's page-focused keys get a scene of their own in `e2e/browser-focus.spec.ts` (§I), since native key handling is beyond jsdom; if it needs a file beyond M3's and that spec, it stays the owner's (row 8).
+
+23. **2026-11-20 (UTC) · Ruled by the architect: the transcript's zoom scene is `test.fail()`.**
+    - **Why:** the scene reaches the 2026-10-27 condition, so on today's code it fails. A failing scene would keep `e2e:transcript` red at every landing until U3's fix, and would hide any new red in that group.
+    - **What stays:** the assertion is unchanged. The scene is marked expected-to-fail, and its annotation and the tracker row cite each other.
+    - **When it passes,** the row closes and the mark comes off.
+    - **Mac check:** `test.fail` counts any failure as the expected one. A Mac run should confirm that the failure reported is "followed after a clamp N px short", and not "the row's condition was never reached".
+    - **The page's keys (B10):** the tab binds ⌘= and ⌘+ to zoom in and ⌘- to zoom out, and has no reset. ⌘0 is View › Overview. The browser-focus scene therefore presses ⌘= and then ⌘-, which the architect confirmed.
+
+24. **2026-11-20 (UTC) · The branch review (xhigh panel, `17f422d11..f39cc1289`) and the fix wave the architect ruled.** The panel's verdict was "incorrect", with eight findings. The architect ruled five to fix (`e88d13d75` red, `21c0ee894`, `fdd1b3300`) and three for the tracker (`fefb2e054`).
+    - **An open extension popup is closed on a change of the app's factor (sweep#1), not placed again.** S3's step 4 and §G's row 2 are revised to match.
+      - Main learns a button's box only from the click. Re-anchoring would need the renderer to report the box again after the toolbar reflows: a new command or field, plus a wait.
+      - The button can also fold into the puzzle menu at the new width.
+      - Closing is exact, and it matches the cover under the zoom line.
+      - The close reason is `'zoom'`. Focus goes back to the app's page, and the next click opens the popup again.
+      - Accepted by the architect.
+    - **Decision 35 is amended again: the chip reads the page's size as Blink does (scalpel-3#1), from both edges the pane sent (scalpel-3#2).**
+      - `reads` mirrors `AdjustForAbsoluteZoom::AdjustInt` (`third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h`, at Electron 44.4.5's Chromium 152.0.7977.130). It works over the frame's side in device pixels, at a layout zoom of the display's scale times the tab's zoom.
+      - `Room.at` becomes `Room.placed`, the whole rectangle the pane sent main. A sent side counts only within a pixel of the element's own.
+      - `Room` gains an optional `scale`, sampled with the rect: `devicePixelRatio ÷ the app's factor`, rounded to a whole number of at least 1.
+      - The reading depends on the display's scale. 894 points at a tab zoom of 110 % read 812 at two device pixels a point and 813 at one. Both are pinned.
+      - Ruled: **a Mac scene that asserts the chip takes its expected value from Blink's rule at the display's actual scale, never a constant.**
+      - Re-sampling the scale after a move between displays with no resize stays on row j's ground.
+    - **A comment pin on a centred device view carries the view's inset in its column (scalpel-3#3).** The pane's `CardFrame.offset` is the inset, not `{0, 0}`. One frame feeds every card the dock draws, so open and reopened pins both follow it. `side/card` is unedited.
+    - **The probe finalises on `close` (sweep#3).** It bounds its drain at 10 s after `exit` (`DRAIN_MS`), in case a helper still holds the pipes.
+    - **Tracker rows, as ruled:**
+      - scalpel-1#1: a zoom menu action reaches every app renderer, so one click steps twice with two windows;
+      - scalpel-1#2: a crashed renderer misses a zoom change;
+      - scalpel-2#1: an intermediate device width before the post-zoom pane report.
+    - **The Mac scenes this wave owes, all written in it after its task review (`4f2a3c4b4` red, `8bcafe7ed`) and none yet run:**
+      - browser-chrome: "zoom: an extension popup open across a change of the zoom closes". The popup is opened at 125 % and View ▸ Actual Size is used. The scene first witnesses that the zoom line lies apart from the pane, so the cover cannot be what closes it. Its premise needs a work area of about 1,440 × 1,100 points.
+      - The U12a scene and the four-factor zoom scene in `e2e/browser.spec.ts`. Their chip and guest readings are now taken from `readsAsBlink`: one sample of the page's two sides and the chip's text and name, against the view's native bounds, Electron's display scale and the tab's zoom (`blinkInner`, `displayScale` in `e2e/support/zoom.ts`). No constant readout is left.
+      - browser-comment: "zoom: the pin of a page at the Mobile size, centred in a wider column, at 125 % and after a zoom to 150 %". It witnesses an inset above 2 px, and the card stays open through the zoom.
+      - The comment scenes' `dismiss` now takes the factor, without which the M3 pin scene failed at 0.5, 0.8 and 1.25.
+    - **The pin's inset is main's rounded native origin, back in CSS pixels** (`round(x × a) ÷ a` less the column's left), not the CSS origin the pane sent.
+    - The task review approved after one round. Master at `3f8fd97f8` (batch 6, docs only past `17f422d11`) is merged before the gate.
+
+25. **2026-11-20 (UTC) · What the Mac run at `8e92a8690` showed about two scenes, and the architect's rulings.** The run was on the Mac mini, 2,560 × 1,440 points at scale 2.
+    - **Mark up's still at 150 % (`e2e/browser.spec.ts`, the four-factor scene) failed on the scene's own check, not on the product.** It failed three times the same way, 0.0599 against 0.02.
+      - Every Mark up still is capped on its long edge at `CROP_MAX_EDGE` (1,568, the model's image edge; `src/shared/browser/comment.ts`), by `encodeCrop` and the markup image schema.
+      - At scale 2, 1,380 × 1,210 points is 2,760 × 2,420 px and becomes 1,568 × 1,375; 1,302 × 1,135 points becomes 1,568 × 1,367. Both are exactly the readings.
+      - The still is stretched over the pane, so on screen the page is at the same scale at both factors, which is what B12 asks. Only its sharpness differs, and a view wider than 784 points is capped at 100 % too.
+      - The check now holds each still to the view's device size, or that size capped at `CROP_MAX_EDGE`, within a pixel. It also holds the visible image's own rectangle to the pane. Decision Log 21's 2 % reading is superseded.
+    - **The transcript's zoom scene is no longer `test.fail`: Decision Log 23 is reversed on its own premise.** That ruling assumed the scene would fail on today's code. On the mini at 110 % the row's condition never arose (no clamp landed more than 1 px short), and following held. The first rework, a run-time verdict with a search for the condition, could still count an unrelated failure as the row and judged the raw DOM gap rather than the product's. Ruled by the architect:
+      - the scene asserts following at 110 % and at 80 % (the child's probe 4) and annotates the largest gap the product itself judges (`min(scrollHeight, the virtualizer's total) − clientHeight − scrollTop`);
+      - no search, no `test.fail`, no `test.skip`;
+      - if it goes red on a display of scale 1, that is a real defect a person would meet and gets a ticket, not a mask;
+      - the row of 2026-10-27 stays open, qualified to what was measured: not reached on the mini at 110 %, unproven at scale 1 and at other factors.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-20, at the end of M3 (before the architect's Mac runs, branch review and pull request).**
+
+What exists:
+- ⌘= and ⌘−, and View ▸ Zoom In, Zoom Out and Actual Size, zoom the whole window along the in-app browser's steps from 50 % to 200 %, and each item is disabled at its end.
+- A line, "Zoom 125 %", says the step reached.
+- The factor is main's own key, `window.zoom`. It is published atomically: map and file together, or neither. It is in force from the window's first show (`webPreferences.zoomFactor` under `zoomMode: 'isolated'`, M1's row f1), and builds F and M are left at 100 %.
+- All six placements of §G multiply or divide by `zoomOf`, and main re-places a window's views and popup when its factor changes. The device size follows decision 35, as amended: the placed edges.
+- The scenes of §I are written and typechecked, and so is the cross-build row "(zoom, both ways)". None has run.
+
+Against the purpose:
+- B13's first half, B14's unit half and the unit halves of B10 to B12 are proven on the build VM (Progress).
+- B10's relaunch and page keys, B11 and B12 rest on the Mac runs (rows 6 and 7).
+- B11's sentence about a second display is not proven (row j, tracker).
+- The keys under the Korean input source and the look are the owner's (row 8).
+
+What the reviews taught:
+- **M1's red-first numbers paid for themselves.** Each placement's case failed on today's code with the Mac's own reading, so no fix was built on a cause read from code alone.
+- **The task reviews found what the design had not foreseen:**
+  - an open pin drifting across a change of factor;
+  - the chip off by one at a non-integral edge (decision 35 amended);
+  - a staged view moved by a placement report;
+  - a startup read racing a change.
+  They also found scenes that could pass without reaching their condition (the transcript, the fit menu, the toast waits, the four edges). The scenes now witness their premise before asserting.
+- **Residue:** nine tracker rows: four for "Left over", row j, the pin on a reflowing page, a window change while a view is staged, and the 2026-10-27 row kept open under a `test.fail` scene (Decision Log 23). The 2026-10-24 row loses zoom.

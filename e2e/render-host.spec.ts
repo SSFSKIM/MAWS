@@ -41,6 +41,7 @@ import { startFakeArtifactsEndpoint, type FakeArtifactsEndpoint } from '../test/
 import { startFakeFront, type FakeFront, type FakeFrontClient, type FrontHandler } from '../test/support/fake-front';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { launchEnvironment } from './support/scratch-env';
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
 // P5 O17 M8: pass 3
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
@@ -381,6 +382,52 @@ test('part (b): on the daemon shape, with the app quit, a second client’s libr
     });
   } finally {
     for (const each of launches.reverse()) await each.cleanup().catch((error: unknown) => console.error(error));
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B12; the child's probe 5): an artifact's
+// capture is the same size with the app's window at 150 % as at 100 %. The app on the daemon shape (whose main never
+// captures: `mawsd`'s render host does), an `html` artifact made in it; the e2e's second client on `machine.sock` asks
+// the render seam's capture (`daemon.e2eRender`) at 640 × 480 before and after the window is zoomed by View's items
+// (support/zoom.ts), each PNG read from the file it wrote.
+test('zoom: an artifact’s capture is the same size with the app’s window at 150 % as at 100 %', async () => {
+  test.setTimeout(240_000);
+  const userData = mkdtempSync(join(tmpdir(), 'maws-e2e-rh-zoom-'));
+  let launch: MawsLaunch | null = null;
+  try {
+    launch = await launchMaws({ userData, env: DAEMON_SHAPE });
+    const { page, app } = launch;
+    await expect.poll(async () => {
+      const status = (await page.evaluate(() => window.maws.invoke('host.status', undefined))) as { ok: boolean; value?: { state: string; daemon: unknown } };
+      return status.ok && status.value!.state === 'ready' && status.value!.daemon !== null;
+    }, { timeout: 60_000, message: 'main is connected through mawsd' }).toBe(true);
+    const created = (await page.evaluate(
+      (html) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: 'Zoomed capture page', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+      '<!doctype html><html><head><title>Blue</title></head><body style="margin:0;background:#0000ff"><p>RH_ZOOM</p></body></html>',
+    )) as { ok: true; value: { artifact: { id: string; revision: number } } } | { ok: false; error: { message: string } };
+    if (!created.ok) throw new Error(`artifacts.create failed: ${created.error.message}`);
+    const { id, revision } = created.value.artifact;
+    const reached = await reachMachine(daemonPaths(userData), { build: 'e2e-render-host-zoom' });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    try {
+      const capture = async (name: string): Promise<number[]> => {
+        const to = join(userData, `${name}.png`);
+        const captured = await reached.link.request('daemon.e2eRender', { artifactId: id, revision, width: 640, height: 480, to }, 150_000);
+        expect(captured, JSON.stringify(captured)).toMatchObject({ ok: true });
+        const png = readFileSync(to);
+        expect(png.subarray(0, 8).toString('hex')).toBe(PNG_SIGNATURE);
+        return [png.readUInt32BE(16), png.readUInt32BE(20)];
+      };
+      expect(await capture('actual'), 'at 100 %').toEqual([640, 480]);
+      await zoomTo(app, page, 1.5);
+      expect(await capture('zoomed'), 'at 150 %').toEqual([640, 480]);
+      await zoomTo(app, page, 1);
+    } finally {
+      reached.link.close();
+    }
+  } finally {
+    await launch?.cleanup().catch((error: unknown) => console.error(error));
     rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

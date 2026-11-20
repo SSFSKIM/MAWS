@@ -80,6 +80,13 @@ export const ACTIONS = {
   // panel's Artifacts record into a main tab ("Move to tab"), as a drag does; refused with the drag's reason. No chords
   'artifact.moveToPanel':    { title: 'Move to side surface',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'artifact.moveToTab':      { title: 'Move to tab',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, Interfaces §A; l7-shell-08): the whole
+  // window larger and smaller in the in-app browser's steps, and back to 100 % (`stores/zoom.ts`); each registered while it
+  // can change the factor. Rows, not menu roles: ⌘0 is the Overview. A group of their own; no rebinding while build F may
+  // run (`isRebindable`)
+  'zoom.in':    { title: 'Zoom In',     chord: 'Cmd+=', sink: 'menu', menu: 'view', scope: 'app' },
+  'zoom.out':   { title: 'Zoom Out',    chord: 'Cmd+-', sink: 'menu', menu: 'view', scope: 'app' },
+  'zoom.reset': { title: 'Actual Size', chord: null,    sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B1 start (2026-10-20; the P4 spec §4.3, Docs' View › Comments): every document's comment view, per user
   // (settings.artifacts.commentsView): Expand draws the cards in the margin, Minimize the icons at the anchors, Hide an
   // empty margin. Unbound by default; U6a: in View › Comments

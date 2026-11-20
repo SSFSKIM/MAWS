@@ -208,6 +208,7 @@ import { machineProjectId } from '../src/shared/machine/project-ids'; // UX wave
 import type { MachineRef } from '../src/shared/machine/ref'; // UX wave U6f
 import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
 import { exchangeJournal } from './support/to-human-replay'; // UX wave U2b: the live launch's turn (the cross-build scenes' fix)
+import { zoomOfPage, zoomTo } from './support/zoom'; // UX wave U6b-5b: the window's zoom
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1345,6 +1346,58 @@ test('(export folder) the last export’s folder, kept as main’s layout key, s
   }
 });
 
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M3 "(zoom, both ways)"; B10's relaunch and
+// B12; UC-14): the window's zoom, main's own layout key `window.zoom` (`{ version: 1, factor }`, absent at 100 %), which a
+// build that does not name the key loads with the file and writes back whole with its own keys. This build zooms to
+// 125 % through View's items, and layout.json holds the key (polled from the file); the peer launches on the profile,
+// folds its sidebar from View's item so that it writes its layout whole (`regions`; every build has the fold, where U7b
+// retired the library's tab), and quits: the file still holds the key as written, and
+// the peer's page read 1 (its `getZoomFactor()` in main; this build's zoom is isolated, so Chromium kept none of it);
+// this build launches again at 125 % (main's factor and the window's zoom store). Skipped only for a peer whose
+// LayoutKeySchema names the key (`layoutSchemaNames`, U7a's form of `namesExportFolder`): a skipped scene is not
+// evidence. The runs of record are against build F and build M (`--peer-exact f1852de3a`, `--peer-exact 2c7044231`),
+// the master this landing merges into, and master at `b89d6d1d7`; none of the four names the key. It replaces M1's
+// "(zoom probe)", whose lines FINDINGS.md keeps.
+const WINDOW_ZOOM_KEY = 'window.zoom';
+// The factor main holds for the app's own window (the visible one, as the scenes' other helpers find it).
+const mainFactorOf = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents.getZoomFactor());
+
+test('(zoom, both ways) the window’s zoom, kept as main’s layout key, survives the peer’s launch on the profile, which does not name the key and opens at 100 %, and this build opens at it again', async () => {
+  const { here, peer } = builds();
+  test.skip(layoutSchemaNames(peer, WINDOW_ZOOM_KEY), `the peer (wire ${wireOf(peer)}) names ${WINDOW_ZOOM_KEY} in its LayoutKeySchema: there is no build that lacks the key to cross`);
+  await withScratch('xb-window-zoom', async (s) => {
+    // this build: 125 % through View's items, and the key in layout.json
+    const first = await s.launch();
+    await s.ready(first.page);
+    await zoomTo(first.maws.app, first.page, 1.25);
+    await expect.poll(() => storedLayout(s.userData)[WINDOW_ZOOM_KEY], { message: `${here.label} stored the zoom` }).toEqual({ version: 1, factor: 1.25 });
+    expect(await mainFactorOf(first), `${here.label}'s page at 125 %`).toBe(1.25);
+    await s.quit(first);
+
+    // the peer on the same profile: its page at 100 %; its sidebar folded, so its layout store writes the file whole; a quit
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    const theirs = await mainFactorOf(old);
+    expect(theirs, `${peer.label} opens at 100 %`).toBe(1);
+    await old.maws.app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.setBounds(bounds), WIDE);
+    expect(sidebarFolded(s.userData), 'the sidebar not folded before the peer folds it').not.toBe(true);
+    await menu(old.maws.app, 'sidebar.toggle');
+    await expect.poll(() => sidebarFolded(s.userData), { timeout: 20_000, message: `${peer.label} wrote its fold to layout.json` }).toBe(true);
+    await s.quit(old);
+    const written = storedLayout(s.userData);
+    expect(sidebarFolded(s.userData), `${peer.label} wrote layout.json`).toBe(true);
+    expect(written[WINDOW_ZOOM_KEY], `${peer.label} wrote the file back with the key it does not name`).toEqual({ version: 1, factor: 1.25 });
+
+    // this build again: the window at 125 % as it opens
+    const again = await s.launch();
+    await s.ready(again.page);
+    expect(await mainFactorOf(again), `${here.label} opens at the stored factor`).toBe(1.25);
+    await expect.poll(() => zoomOfPage(again.page), { message: `${here.label}'s zoom store reads the stored factor` }).toBe(1.25);
+    await s.quit(again);
+    record([`${WINDOW_ZOOM_KEY}: ${here.label} (wire ${wireOf(here)}) stored 1.25; ${peer.label} (wire ${wireOf(peer)}) opened at ${theirs} and wrote layout.json with the key kept; ${here.label} opened again at 1.25`]);
+  });
+});
+
 // P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
 // architect's rulings D29 and D32). This build's app on the daemon shape leaves its private `mawsd` running the spine
 // over a post-D profile (the index at 14, the settings split); an O2-era app (the peer, before O3-A: it takes no
@@ -1905,6 +1958,10 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   |                                               | before its read is held by the unit (viewer.test.tsx, | and keeps `why: 'result'`, the file read-only      |
 //   |                                               | W1 (b) and K11), since the page cannot observe its    |                                                    |
 //   |                                               | own click's call                                      |                                                    |
+//   | U6b-5b: the window's zoom, `window.zoom`      | (zoom, both ways): F opens at 100 % (its page's       | the return: this build opens at 125 %, in main's   |
+//   | in `layout.json` (`{ version: 1, factor }`,   | factor in main), and after it opens a tab the file    | factor and in the window's zoom store, the key as  |
+//   | main's own key, absent at 100 %)              | it writes keeps the key as this build wrote it        | this build wrote it. Run against F, M, the master  |
+//   |                                               |                                                       | this landing merges into and master at b89d6d1d7   |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');

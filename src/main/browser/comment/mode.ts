@@ -17,7 +17,7 @@
 // An accepted pick is cropped, and sent to the window whose pane owns the tab only if nothing ended the mode meanwhile,
 // with the element's point in the pane's pixels for the comment card's pin (P2-E2).
 import { randomBytes } from 'node:crypto';
-import type { Event, Input, WebContents, WebContentsView } from 'electron';
+import type { BrowserWindow, Event, Input, WebContents, WebContentsView } from 'electron';
 import type { Anchor } from '@shared/anchor/anchor';
 import { browserElementAnchor, PickArmedSchema, PreloadMessageSchema, type CommentDisarmReason } from '@shared/browser/comment';
 import { ARM_ACK_MS, COMMENT_CHANNEL, PICK_AT_MS, type PickRect, type ToPreload } from '@shared/browser/comment-protocol';
@@ -41,6 +41,8 @@ export interface CommentModeDeps {
   away?(key: string): AwaySession | null;
   now?(): number;
   requestId?(): string;
+  // UX wave U6b-5b (placement 4): the app window's zoom (main's `zoomOf`), by which the pin's point is divided; 1 without it
+  zoomOf?(win: BrowserWindow): number;
 }
 
 // What the e2e seam reads: `arming` while main waits for the preload's acknowledgement, `armed` after it.
@@ -193,14 +195,16 @@ export class CommentMode {
     }
     // checked against the X2 registry before the mode ends, so a payload it refuses ends as a refusal the renderer
     // toasts rather than as a silent pick
-    // P2-E2: the card's pin, the element's point in the pane's pixels (`position.ts`)
-    const position = pickPosition(report.rect, report.viewport, view.webContents.getZoomFactor());
+    // P2-E2: the card's pin, the element's point in the pane's pixels (`position.ts`). UX wave U6b-5b (placement 4): the
+    // pane's pixels are the window's CSS px, so the tab's zoom is taken over the app window's
+    const owner = entry.placement?.window ?? null;
+    const appZoom = owner ? (this.deps.zoomOf?.(owner) ?? 1) : 1;
+    const position = pickPosition(report.rect, report.viewport, view.webContents.getZoomFactor() / appZoom);
     const payload = pickedPayload({ tabId, appSessionId: entry.tab.appSessionId, anchor, crop: outcome, ...(position && { position }) });
     if (payload === null) {
       if (screenshot && outcome === 'attached') this.deps.discard(screenshot.path);
       return this.refuse(tabId, state, via);
     }
-    const owner = entry.placement?.window ?? null;
     if (!ownerAlive(owner)) {
       // no window to open the sheet in; never broadcast, which would make a thread per window (Decision Log 14)
       if (screenshot && outcome === 'attached') this.deps.discard(screenshot.path);

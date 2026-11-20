@@ -9,6 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
+import { useZoom } from '../../stores/zoom'; // UX wave U6b-5b
 import { browserTab, T1, T2 } from '../../test-support/browser';
 import { installFakeMain, ok } from '../../test-support/code';
 import { mainShowing } from '../../test-support/panel';
@@ -518,7 +519,7 @@ describe('a device size (U12a)', () => {
     // happy-dom lays nothing out: the box is the room; the page's element fills it, or with a size of its own sits as
     // the box's flex centring lays it, top-aligned
     vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
-      if (this.matches('[data-browser-page-box]')) return rectOf(room);
+      if (this.matches('[data-browser-page-box]') || this.matches('[data-browser-column]')) return rectOf(room); // the box tops its column
       if (!this.matches('[data-browser-pane]')) return rectOf({ left: 0, top: 0, right: 0, bottom: 0 });
       const width = parseFloat(this.style.width);
       const height = parseFloat(this.style.height);
@@ -546,6 +547,141 @@ describe('a device size (U12a)', () => {
     await frames();
     expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['', '']);
     expect(places().at(-1)).toMatchObject({ rect: { x: 0, y: 40, width: 1000, height: 1100 } });
+  });
+
+  // UX wave U6b-5b (decision 35): the element is in the window's CSS pixels, so the app window's factor divides it; a change
+  // of the factor alone redraws it and reports the new rect
+  it('at the app window’s 200 % draws Mobile 188 CSS pixels wide, redrawn by the factor alone', async () => {
+    try {
+      const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+      await frames();
+      expect(pageOf(container).style.width).toBe('375px'); // the control: at 100 % the size itself
+      act(() => useZoom.setState({ factor: 2 }));
+      await frames();
+      expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['188px', '406px']);
+      expect(places().at(-1)).toMatchObject({ rect: { x: 406, y: 40, width: 188, height: 406 } });
+    } finally {
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
+  // UX wave U6b-5b (decision 35, decision 27): the room carries the element's rect as the placement sent it, so the chip
+  // reads the placed edges: at 125 % Mobile is 300 × 650 CSS pixels, centred at 350 from a top of 158
+  it('tells its surface where the page’s element sits, the rect its placement sent main', async () => {
+    room = { left: 0, top: 158, right: 1000, bottom: 1258 };
+    const onRoom = vi.fn();
+    try {
+      act(() => useZoom.setState({ factor: 1.25 }));
+      render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" onRoom={onRoom} />);
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 350, y: 158, width: 300, height: 650 } });
+      expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, placed: { x: 350, y: 158, width: 300, height: 650 }, scale: 1 });
+      act(() => useZoom.setState({ factor: 1 }));
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 313, y: 158, width: 375, height: 812 } });
+      expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, placed: { x: 313, y: 158, width: 375, height: 812 }, scale: 1 }); // it follows the element
+    } finally {
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
+  // The branch review (scalpel-3#2): the two edges the pane measured, which main gets, can be a pixel under the nominal
+  // size; the room carries that rect, not the origin alone
+  it('tells its surface the rect exactly as sent, when its measured edges are a pixel under the nominal size', async () => {
+    const onRoom = vi.fn();
+    try {
+      act(() => useZoom.setState({ factor: 0.8 }));
+      const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE, zoom: 0.75 })} surface="panel" onRoom={onRoom} />);
+      await frames();
+      expect(pageOf(container).style.width).toBe('352px'); // 375 × 0.75 ÷ 0.8, rounded
+      vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+        if (this.matches('[data-browser-page-box]') || this.matches('[data-browser-column]')) return rectOf(room);
+        // 352 CSS pixels laid out in device pixels' layout units at 80 % (563.2 snapped to 563.1875): 351.99 wide, 351
+        // apart once each edge is rounded
+        if (this.matches('[data-browser-pane]')) return rectOf({ left: 324.5, top: 40, right: 676.49, bottom: 801 });
+        return rectOf({ left: 0, top: 0, right: 0, bottom: 0 });
+      });
+      await resizeRoom({ ...room });
+      const sent = places().at(-1)!.rect;
+      expect(sent).toEqual({ x: 325, y: 40, width: 351, height: 761 });
+      expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, placed: sent, scale: 1 });
+    } finally {
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
+  // The branch review (scalpel-3#1): the page measures its size in device pixels, so the reading needs the display's
+  // scale: the window's devicePixelRatio is that scale times the app's factor
+  it('tells its surface the display’s scale, the window’s device pixel ratio over the app’s factor', async () => {
+    const ratio = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    const onRoom = vi.fn();
+    room = { left: 0, top: 40, right: 150, bottom: 340 }; // a room that cuts Mobile at 125 % and at 200 % alike
+    try {
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2.5 });
+      act(() => useZoom.setState({ factor: 1.25 }));
+      render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" onRoom={onRoom} />);
+      await frames();
+      expect(onRoom).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 2 }));
+      // the page's zoom reaches the window before the event: sampled then, the ratio over the old factor is off...
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 4 });
+      await resizeRoom({ ...room });
+      expect(onRoom).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 3 }));
+      // ...and the event's change of factor samples it again, the element and the room unchanged
+      act(() => useZoom.setState({ factor: 2 }));
+      await frames();
+      expect(onRoom).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 2 }));
+    } finally {
+      if (ratio) Object.defineProperty(window, 'devicePixelRatio', ratio);
+      else delete (window as { devicePixelRatio?: number }).devicePixelRatio;
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
+  // The branch review (scalpel-3#3): the pin is in the view's own pixels and the dock draws its caret from the column, so
+  // the frame carries the view's inset in the column. A centred device size's inset follows the app's factor: in a room of
+  // 375 CSS pixels Mobile fills it at 100 % and is 300 wide at 125 %, 37.5 in from the column's edge (38 once placed)
+  it('draws the pin’s caret at the view’s inset in its column, which follows the app’s factor', async () => {
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')!;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 375 });
+    room = { left: 0, top: 40, right: 375, bottom: 1140 };
+    try {
+      const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+      await frames();
+      const anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'https://example.com/', css: '#increment' } as const;
+      act(() => openCard(anchor, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)!, rect: { x: 100, y: 200, width: 0, height: 0 } } }));
+      const caret = () => container.querySelector('[data-card-caret]')?.getAttribute('data-card-caret');
+      expect(caret()).toBe('100'); // the control: at 100 % Mobile fills the room, no inset
+      act(() => useZoom.setState({ factor: 1.25 }));
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 38, width: 300 } });
+      expect(caret()).toBe('138');
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', width);
+      act(() => useCommentCard.setState({ open: null }));
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
+  // The task review of the fix wave: the pin is in CSS pixels from the view's native origin, which main rounds to a point
+  // (decision 27), so the inset is that origin back in CSS pixels. At 50 % in a room of 999, Mobile is 750 wide and sent
+  // from 125 (124.5 rounded); main places it at 63 points (62.5 rounded), which is 126 CSS pixels, not 125
+  it('draws the pin’s caret from the view’s native origin as main rounds it, back in CSS pixels', async () => {
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')!;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 999 });
+    room = { left: 0, top: 40, right: 999, bottom: 1140 };
+    try {
+      act(() => useZoom.setState({ factor: 0.5 }));
+      const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 125, width: 750 } });
+      const anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'https://example.com/', css: '#increment' } as const;
+      act(() => openCard(anchor, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: dockOf(T1)!, rect: { x: 100, y: 200, width: 0, height: 0 } } }));
+      expect(container.querySelector('[data-card-caret]')?.getAttribute('data-card-caret')).toBe('226');
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', width);
+      act(() => useCommentCard.setState({ open: null }));
+      useZoom.setState({ factor: 1 });
+    }
   });
 
   it('a pane made narrower narrows the page, and widening it restores the size', async () => {
@@ -580,13 +716,13 @@ describe('a device size (U12a)', () => {
     const onRoom = vi.fn();
     const { rerender, unmount } = render(<BrowserPane tab={tab()} surface="panel" onRoom={onRoom} />);
     await frames();
-    expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100 });
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, placed: { x: 0, y: 40, width: 1000, height: 1100 }, scale: 1 });
     await resizeRoom({ left: 0, top: 40, right: 700.6, bottom: 1140 });
-    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100 }); // whole points, never more than the box
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100, placed: { x: 0, y: 40, width: 701, height: 1100 }, scale: 1 }); // whole points, never more than the box
     rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" onRoom={onRoom} />);
     expect(onRoom).toHaveBeenLastCalledWith(null);
     rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" onRoom={onRoom} />); // the other let go: this one claims
-    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100 });
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100, placed: { x: 0, y: 40, width: 701, height: 1100 }, scale: 1 });
     unmount();
     expect(onRoom).toHaveBeenLastCalledWith(null);
   });

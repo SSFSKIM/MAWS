@@ -1,9 +1,12 @@
 // An extension's popup (cua board #90's spec, "The popup view"; its S1 spike found it hosts, reaches its background and
 // sizes itself): a click on an action with a `default_popup` opens the page in a `WebContentsView` of the tab's own
 // partition session (sandboxed, isolated, sized by `preferred-size-changed`), placed under the action's button in window
-// coordinates (flipped above when it would not fit below), on top of the window's views. Like the native menus it is
-// drawn by macOS above the page, so the page stays live under it and it takes no part in the cover protocol; instead it
-// closes the moment the window's cover goes on (a sheet or palette freezes the page to its still, and a live popup must
+// coordinates (flipped above when it would not fit below; `popupBounds`), on top of the window's views. UX wave U6b-5b
+// (placement 2): the button's box arrives in the window's CSS px and is kept so; each placement takes it times the
+// window's zoom (decision 27). A change of the zoom closes the popup (`zoomed`; the branch review, sweep#1): the toolbar
+// reflows in CSS px, so the button moves or folds into the puzzle, and main learns a button's box only from a click.
+// Like the native menus it is drawn by macOS above the page, so the page stays live under it and it takes no part in
+// the cover protocol; instead it closes the moment the window's cover goes on (a sheet or palette freezes the page to its still, and a live popup must
 // not float over that), and is raised again whenever a page view is added to its window after it (a place, a view
 // created for a placed tab, a page back from the cover's staging window), which would otherwise rise above it.
 //
@@ -11,8 +14,9 @@
 // (`handFocus`). It closes on its blur (a click anywhere else, the window
 // losing the focus), Esc in its page or its page's own `window.close()` (an extension's usual way to dismiss its popup,
 // which destroys the view's webContents), a second click on the same action, its tab leaving the pane it was opened in (the
-// pane showing another tab, the tab moving to another surface, the tab closing), the cover, its extension unloading, its
-// page failing to load or crashing (the chrome's notice names the extension), or its window closing. It is destroyed,
+// pane showing another tab, the tab moving to another surface, the tab closing), the cover, a change of the window's
+// zoom, its extension unloading, its page failing to load or crashing (the chrome's notice names the extension), or its
+// window closing. It is destroyed,
 // never hidden: its page runs again at every open, as in Chrome. A click on the same action that arrives right after the
 // popup closed on its blur is that blur's own click (the mouse down took the focus first) and leaves it closed.
 //
@@ -21,33 +25,22 @@
 // unselected tab of the tab's session and partition, or in the system browser under `linkTarget: 'external'`; anything
 // else is refused and only logged, by scheme (the popup has no chrome to tell it in).
 import { WebContentsView, type BrowserWindow, type Input, type MouseInputEvent, type WebContents } from 'electron';
-import { EXTENSION_POPUP_MAX, EXTENSION_POPUP_MIN } from '@shared/browser/extensions';
+import { EXTENSION_POPUP_MIN } from '@shared/browser/extensions';
+import { popupBounds } from '@shared/browser/popup-bounds';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { ImportLogEvent } from '../import/log';
 import type { BrowserSeam } from '../seam';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import { activationAllows, WINDOW_OPEN_INPUT_MS, type LinkTarget } from '../window-open';
 import type { ExtensionActions } from './actions';
+import { toPoints } from '../../zoom'; // UX wave U6b-5b
 
-export type PopupCloseReason = 'blur' | 'escape' | 'toggle' | 'tab' | 'cover' | 'unload' | 'load-failed' | 'window';
+export type PopupCloseReason = 'blur' | 'escape' | 'toggle' | 'tab' | 'cover' | 'unload' | 'load-failed' | 'window' | 'zoom';
 export type Rect = { x: number; y: number; width: number; height: number };
 export type PopupState = { tabId: string; extensionId: string } | null;
 
 // How soon after its blur closed a popup a click on the same action is that blur's own click.
 export const POPUP_REOPEN_GUARD_MS = 400;
-
-// The popup's box: its preferred size within Chrome's bounds and the window, under the anchor with its right edge on the
-// anchor's (the action buttons sit at the row's right), moved into the window, above the anchor when it would not fit
-// below, and when it fits neither, as low as the window allows.
-export function popupBounds(anchor: Rect, preferred: { width: number; height: number }, content: { width: number; height: number }): Rect {
-  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-  const width = Math.min(clamp(Math.round(preferred.width), EXTENSION_POPUP_MIN.width, EXTENSION_POPUP_MAX.width), content.width);
-  const height = Math.min(clamp(Math.round(preferred.height), EXTENSION_POPUP_MIN.height, EXTENSION_POPUP_MAX.height), content.height);
-  const x = clamp(anchor.x + anchor.width - width, 0, content.width - width);
-  const below = anchor.y + anchor.height;
-  const y = below + height <= content.height ? below : anchor.y - height >= 0 ? anchor.y - height : Math.max(0, content.height - height);
-  return { x, y, width, height };
-}
 
 // The popup's view in the partition's session: MAWS's tab preferences (sandboxed, isolated, no Node) and the preferred
 // size the page lays out at. P3-F1: its page runs the extension's script with WebRtcHideLocalIpsWithMdns off app-wide
@@ -78,7 +71,7 @@ interface Popup {
   view: View;
   contents: WebContents; // the view's, kept: Electron drops `view.webContents` once the page closed itself
   window: Window;
-  anchor: Rect;
+  anchor: Rect; // the button's box in the window's CSS px (UX wave U6b-5b)
   focused: boolean;
   lastActivationAt: number | null;
   opens: number[];
@@ -95,6 +88,7 @@ export interface ExtensionPopupsDeps {
   seam: Pick<BrowserSeam, 'openExternal'>;
   log(event: ImportLogEvent): void;
   now?(): number;
+  zoomOf?(window: Window): number; // UX wave U6b-5b: the app window's zoom (main's `zoomOf`); 1 without it
 }
 
 export class ExtensionPopups {
@@ -161,7 +155,7 @@ export class ExtensionPopups {
     };
     this.popups.set(window.id, popup);
     window.contentView.addChildView(view as unknown as WebContentsView);
-    view.setBounds(popupBounds(anchor, EXTENSION_POPUP_MIN, contentSize(window)));
+    this.place(popup, EXTENSION_POPUP_MIN);
     this.wire(popup);
     this.tell(window.id, { tabId, extensionId });
     view.webContents.loadURL(action.popupUrl).catch(() => {}); // a failure arrives as did-fail-load
@@ -204,6 +198,12 @@ export class ExtensionPopups {
     if (popup && !popup.window.isDestroyed()) popup.window.contentView.addChildView(popup.view as unknown as WebContentsView);
   }
 
+  // UX wave U6b-5b (S3 step 4; the branch review, sweep#1): the window's zoom changed, so its popup's button is no longer
+  // where the kept anchor says: the popup closes, and the focus it held goes to the app's page.
+  zoomed(windowId: number): void {
+    this.close(windowId, 'zoom');
+  }
+
   current(windowId: number): { tabId: string; extensionId: string; view: View; contents: WebContents } | null {
     const popup = this.popups.get(windowId);
     return popup ? { tabId: popup.tabId, extensionId: popup.extensionId, view: popup.view, contents: popup.contents } : null;
@@ -221,19 +221,26 @@ export class ExtensionPopups {
 
   // ---- internals ------------------------------------------------------------------------------------------------------
 
+  // The popup's box from its CSS anchor in window points (decision 27) and the page's preferred size.
+  private place(popup: Popup, size: { width: number; height: number }): void {
+    const anchor = toPoints(popup.anchor, this.deps.zoomOf?.(popup.window) ?? 1);
+    popup.view.setBounds(popupBounds(anchor, size, contentSize(popup.window)));
+  }
+
   private tell(windowId: number, state: PopupState): void {
     for (const listener of [...this.listeners]) listener(windowId, state);
   }
 
   private wire(popup: Popup): void {
-    const { view, window, contents: wc } = popup;
+    const { window, contents: wc } = popup;
     const live = () => this.popups.get(window.id) === popup;
     const closing = (reason: PopupCloseReason) => () => {
       if (live()) this.close(window.id, reason);
     };
     // every layout's size, not only the first (S1: the first event is the page's first layout, later ones its growth)
     wc.on('preferred-size-changed', (_event, size) => {
-      if (live() && !window.isDestroyed()) view.setBounds(popupBounds(popup.anchor, size, contentSize(window)));
+      if (!live() || window.isDestroyed()) return;
+      this.place(popup, { width: size.width, height: size.height });
     });
     wc.once('did-finish-load', () => {
       if (live()) wc.focus(); // the popup takes the keyboard (its Esc, its fields), and its blur closes it
