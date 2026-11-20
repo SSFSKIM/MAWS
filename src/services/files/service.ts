@@ -355,7 +355,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       real0 = await fs.promises.realpath(path);
     } catch (error) {
       halt();
-      const answer = await missing(path, roots, error);
+      const answer = await missing(path, roots, error, halt);
       // U6c (decision 16), U6e: a granted or named path that is gone says so, as one inside the roots does; U6b-4c: a
       // followed one too, by the path as given
       if (answer instanceof Refusal && outside && absent(error) && (chosen(path) || followed(path) !== null || (await namesIt()) !== false)) throw new Error(`not found: ${path}`, { cause: error });
@@ -449,12 +449,13 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // as the open's own would be.
   async function openNoLink(real: string, flags: number, path: string, halt: () => void = () => {}): Promise<FileHandle> {
     if (WALKED) {
-      await walk(dirname(real));
+      await walk(dirname(real), halt);
       await at('after-walk', path);
       halt();
     }
     const handle = await fs.promises.open(real, flags);
     try {
+      halt(); // U6b-4c: an open that answered after its follow ended is closed unconfirmed
       await confirmOpened(handle.fd, real);
     } catch {
       await handle.close();
@@ -485,14 +486,14 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       // path, which step 1 found in-root, so the message leaks nothing.
       const code = errno(error);
       if (kind === 'write' && (code === 'EACCES' || code === 'EPERM')) throw new Error(`not writable: ${path}`, { cause: error });
-      throw code === 'ENOENT' ? await missing(path, roots, error) : new Refusal();
+      throw code === 'ENOENT' ? await missing(path, roots, error, halt) : new Refusal();
     }
     try {
       halt();
       const stat = await handle.stat({ bigint: true });
       await at('after-open', path);
       halt();
-      const real = await confirm(path, roots, stat);
+      const real = await confirm(path, roots, stat, halt);
       halt();
       if (kind !== 'dir' && !stat.isFile()) throw new Error(`not a regular file: ${path}`);
       if (kind === 'dir' && !stat.isDirectory()) throw new Error(`not a directory: ${path}`);
@@ -1181,9 +1182,11 @@ function oneAtATime(): { enter(deadline: number, signal?: AbortSignal): Promise<
 const realOrNull = (path: string): Promise<string | null> => fs.promises.realpath(path).catch(() => null);
 
 // Step 5 (and the late confirmations): a fresh realpath of the path as given, under a root, whose `stat` names the
-// descriptor's object. Answers the confirmed realpath.
-async function confirm(path: string, roots: readonly string[], opened: Identity): Promise<string> {
+// descriptor's object. Answers the confirmed realpath. UX wave U6b-4c: `halt`, called between its two calls, may end it
+// by throwing (an ended follow's confirmation starts no stat).
+async function confirm(path: string, roots: readonly string[], opened: Identity, halt: () => void = () => {}): Promise<string> {
   const real = await fs.promises.realpath(path).catch(() => null);
+  halt();
   if (real === null || !roots.some((root) => under(root, real))) throw new Refusal();
   const now = await fs.promises.stat(real, { bigint: true }).catch(() => null);
   if (!now || !sameIdentity(now, opened)) throw new Refusal();
@@ -1247,14 +1250,15 @@ async function afterConfirmed(path: string, roots: readonly string[]): Promise<E
   return new Refusal();
 }
 
-async function missing(path: string, roots: readonly string[], error: unknown): Promise<Error> {
-  if (absent(error) && (await missingWithin(path, roots))) return new Error(`not found: ${path}`);
+async function missing(path: string, roots: readonly string[], error: unknown, halt: () => void = () => {}): Promise<Error> {
+  if (absent(error) && (await missingWithin(path, roots, halt))) return new Error(`not found: ${path}`);
   return new Refusal();
 }
 // A failure that says nothing is there: no such name, or a component of the path that is not a directory
 const absent = (error: unknown) => errno(error) === 'ENOENT' || errno(error) === 'ENOTDIR';
 
-async function missingWithin(path: string, roots: readonly string[]): Promise<boolean> {
+// UX wave U6b-4c: `halt`, called before each of its calls, may end it by throwing (an ended follow starts no further one).
+async function missingWithin(path: string, roots: readonly string[], halt: () => void): Promise<boolean> {
   let ancestor = path;
   const tail: string[] = [];
   for (;;) {
@@ -1262,12 +1266,14 @@ async function missingWithin(path: string, roots: readonly string[]): Promise<bo
     if (parent === ancestor) return false;
     tail.unshift(basename(ancestor));
     ancestor = parent;
+    halt();
     const real = await fs.promises.realpath(ancestor).then(
       (resolved) => resolved,
       (failure: unknown) => (errno(failure) === 'ENOENT' || errno(failure) === 'ENOTDIR' ? null : false),
     );
     if (real === false) return false;
     if (real === null) continue;
+    halt();
     const dangling = await fs.promises.lstat(join(ancestor, tail[0])).then(
       () => true,
       () => false,
