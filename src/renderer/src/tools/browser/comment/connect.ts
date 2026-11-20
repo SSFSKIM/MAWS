@@ -20,8 +20,8 @@
 // is seen. M4 (X-216): the tab's page is told here whenever its card opens on a comment, and when it closes (`page-card.ts`).
 //
 // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 4): the pin is in the window's CSS
-// pixels, main's division by the app window's factor at the pick. The element stays put in the window's points when the
-// factor changes, so the open browser card's pin is scaled by the old factor over the new one and stays on it.
+// pixels, into which main divides the tab's points by the app window's factor at the pick. The element stays put in the
+// tab's points when the factor changes, so the open browser card's pin is scaled by the old factor over the new one.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
