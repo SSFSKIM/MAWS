@@ -591,7 +591,7 @@ test('a PDF, a video and an audio file artifact play in their viewers from the l
   // the PDF: Chromium's viewer draws the page in the unsandboxed frame
   const pdfTab = await open('report.pdf', report.id);
   const pdfFrame = pdfTab.locator('[data-artifact-frame="pdf"]');
-  await expect(pdfFrame).toHaveAttribute('src', new RegExp(`^maws-artifact://${report.id}/\\d+/report\\.pdf$`));
+  await expect(pdfFrame).toHaveAttribute('src', new RegExp(`^maws-artifact://${report.id}/\\d+/report\\.pdf\\?machine=[A-Za-z0-9_-]{16,64}$`));
   await expect(pdfFrame).not.toHaveAttribute('sandbox');
   await expect.poll(() => darkPixels(launch!, pdfFrame), { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
 
