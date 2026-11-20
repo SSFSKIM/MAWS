@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS projects_records (machine TEXT PRIMARY KEY, revision 
 const LIVE = `json_extract(body, '$.body.fields.state') IS NOT ?`;
 /** What `storeListing` did: whether it stored the listing, and whether the revision it replaced was a live one. */
 export type StoredListing = { stored: boolean; replacedLive: boolean };
+/** The projects records held, each by its machine ref and revision, ordered by ref. */
+export type HeldProjects = Array<{ machine: string; revision: number }>;
 
 /** The `kv` key of a counter raised by every certificate or retirement kept, so a verification sees the set move. */
 const CERTS_VERSION = 'certs-version';
@@ -320,18 +322,22 @@ export class OrgRecords {
   /**
    * A machine's projects record, kept at its highest revision; `409 stale-projects` for one not above it, naming the
    * revision held (the same bytes again are taken, and nothing is stored). A record of a machine the head has since
-   * retired stays kept: every reader verifies it, and refuses it then. `stored` runs in the step that stores it, so
-   * what the caller keeps beside it (the Registry's owed pushes) commits with it or not at all.
+   * retired stays kept: every reader verifies it, and refuses it then. `accepted` runs in the step that judges it,
+   * whether it stores the record or holds its bytes already (`stored` says which), so what the caller keeps beside it
+   * (the Registry's owed pushes, the channels' rows it lists) commits with it or not at all.
    */
-  async storeProjects(body: unknown, stored?: (record: ProjectsRecord) => void): Promise<Result<{ stored: boolean }>> {
+  async storeProjects(body: unknown, accepted?: (record: ProjectsRecord, stored: boolean) => void): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isProjectsRecord)) return fail(400, 'malformed', 'a projects record is a machine-signed ProjectsRecord, {body, sig}');
     const r = body.body;
     return this.machineSigned<ProjectsRecord, { stored: boolean }>(verifyProjectsRecord, body, () => {
       const held = this.sql.exec<{ revision: number; body: string }>('SELECT revision, body FROM projects_records WHERE machine = ?', r.machine).toArray()[0];
-      if (held && held.body === canonicalize(body)) return ok({ stored: false });
+      if (held && held.body === canonicalize(body)) {
+        accepted?.(r, false);
+        return ok({ stored: false });
+      }
       if (held && r.revision <= held.revision) return fail(409, 'stale-projects', `the projects record held is at revision ${held.revision}`);
       this.sql.exec('INSERT OR REPLACE INTO projects_records (machine, revision, body, stored) VALUES (?, ?, ?, ?)', r.machine, r.revision, canonicalize(body), iso());
-      stored?.(r);
+      accepted?.(r, true);
       return ok({ stored: true });
     });
   }
@@ -340,6 +346,31 @@ export class OrgRecords {
   projectsRecord(machine: string): Signed<ProjectsRecord> | null {
     const row = this.sql.exec<{ body: string }>('SELECT body FROM projects_records WHERE machine = ?', machine).toArray()[0];
     return row ? (JSON.parse(row.body) as Signed<ProjectsRecord>) : null;
+  }
+
+  /** The machine and revision of each projects record held, by machine ref: which records are held, since a machine's
+   * record is replaced only by a higher revision. */
+  projectsHeld(): HeldProjects {
+    return this.sql.exec<{ machine: string; revision: number }>('SELECT machine, revision FROM projects_records ORDER BY machine').toArray().map(({ machine, revision }) => ({ machine, revision }));
+  }
+
+  /**
+   * The projects records held (`held`, as `projectsHeld` reads them, at this call's start) and the bodies of those that
+   * count: that verify under `state` and `certs` at `now`. A retired machine's record is kept and counts for nothing.
+   * The Registry's pass over sminos channels' rows (§F) reads which ids are listed as known from these, and applies
+   * them only while `projectsHeld` still answers `held`.
+   */
+  async countedProjects(state: OrgState, certs: Certificates, now: Date): Promise<{ held: HeldProjects; counted: ProjectsRecord[] }> {
+    const rows = this.sql.exec<{ machine: string; revision: number; body: string }>('SELECT machine, revision, body FROM projects_records ORDER BY machine').toArray();
+    const records = rows.map((r) => JSON.parse(r.body) as Signed<ProjectsRecord>);
+    const verdicts = await Promise.all(records.map((record) => verifyProjectsRecord(state, record, certs, now)));
+    return { held: rows.map(({ machine, revision }) => ({ machine, revision })), counted: records.filter((_, i) => verdicts[i].ok).map((r) => r.body) };
+  }
+
+  /** Whether the `known` of any projects record held names `id`, whether it still counts or not: nothing is verified,
+   * so it is read in the caller's synchronous step (the registration of a sminos channel's row, §F). */
+  knownHeld(id: string): boolean {
+    return this.sql.exec("SELECT 1 FROM projects_records, json_each(projects_records.body, '$.body.known') AS k WHERE json_extract(k.value, '$.id') = ? LIMIT 1", id).toArray().length > 0;
   }
 
   /** A machine-signed record verified by `verify`, then judged against what is held and committed by `keep`, in one
