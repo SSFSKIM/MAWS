@@ -67,9 +67,11 @@ export async function admittedFolder(record: AllowlistRecord, which: 'launch' | 
   const [real, anchor] = await Promise.all([realpathOrNull(folder), realpathOrNull(record.directory)]);
   if (real === null || anchor === null) return null;
   try {
-    const [at, home] = await Promise.all([discoverRepo(real, PLAIN_FILES), discoverRepo(anchor, PLAIN_FILES)]);
+    // UX wave U6b-4c (the branch panel): every read settles before the answer, a failed one included, so a caller that
+    // counts its work (a follow's place, decision 7) is never answered while one of git's reads is still out
+    const [at, home] = await allSettled([discoverRepo(real, PLAIN_FILES), discoverRepo(anchor, PLAIN_FILES)] as const);
     if (at === null || home === null || at.workTree === null || at.commonDir !== home.commonDir) return null;
-    const trees = await Promise.all((await worktreeList(home, PLAIN_FILES)).map((tree, i) => (i === 0 && !tree.bare && tree.path === home.commonDir ? mainOf(home) : realpathOrNull(tree.path))));
+    const trees = await allSettled((await worktreeList(home, PLAIN_FILES)).map((tree, i) => (i === 0 && !tree.bare && tree.path === home.commonDir ? mainOf(home) : realpathOrNull(tree.path))));
     return trees.includes(at.workTree) ? { folder: real, checked: true } : null;
   } catch {
     return null; // git's layout refused, or a read failed: no root
@@ -77,6 +79,14 @@ export async function admittedFolder(record: AllowlistRecord, which: 'launch' | 
 }
 
 const realpathOrNull = (path: string): Promise<string | null> => fs.promises.realpath(path).catch(() => null);
+
+// `Promise.all` that answers, or throws its first failure, only once every promise has settled
+async function allSettled<T extends readonly unknown[]>(promises: { [K in keyof T]: Promise<T[K]> }): Promise<{ -readonly [K in keyof T]: T[K] }> {
+  const settled = await Promise.allSettled(promises);
+  const failed = settled.find((outcome) => outcome.status === 'rejected');
+  if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
+  return settled.map((outcome) => (outcome as PromiseFulfilledResult<unknown>).value) as { -readonly [K in keyof T]: T[K] };
+}
 
 // The main work tree of a repository whose git dir is apart from it, which git's list names by the git dir itself: the
 // checkout the worktree service takes for it (src/services/git/main-checkout.ts, the one repair both readers use), read

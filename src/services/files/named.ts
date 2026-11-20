@@ -16,7 +16,10 @@
 // under the session's own transcript folder by reading directories alone, opened with no link anywhere on its way (only
 // where an open can be confirmed to have followed none, `OPENS_CONFIRMED`), and read by the subagent's rule
 // (`agentRowClaimSteps`: no `user` record of it counts). It takes the same slot, queue, patience and memory, keyed apart
-// by the agent's id, and `names` never reads a subagent's file.
+// by the agent's id, and `names` never reads a subagent's file. The branch panel (2026-11-19): the follow names the
+// conversation whose subagent drew the link (its engine session), which must be the transcript the session is bound to
+// now, and only a record that carries that conversation's id and the agent's own counts, so a file put in the found
+// file's place between the walk and the open, or one of another conversation, names nothing.
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open as openFile, readdir, realpath, type FileHandle } from 'node:fs/promises';
@@ -44,6 +47,16 @@ const AGENT_DEPTH_MAX = 3;
 const agentFileName = (agentId: string) => `agent-${agentId}.jsonl`;
 const TRANSCRIPT_EXTENSION = '.jsonl';
 const isTranscriptName = (path: string) => path.endsWith(TRANSCRIPT_EXTENSION) && basename(path).length > TRANSCRIPT_EXTENSION.length;
+// The conversation a transcript is of: its engine session, the file's name without `.jsonl` (`transcriptPathOf`)
+const conversationOf = (transcript: string) => basename(transcript).slice(0, -TRANSCRIPT_EXTENSION.length);
+// U6b-4c (the branch panel): a subagent's records, read by its rule, of which only those the engine wrote for this agent of
+// this conversation are its own (every record of a subagent's file carries `sessionId`, the conversation, and `agentId`:
+// test/fixtures/transcripts/…/subagents/). The open proves the way to the file; this proves the file is the one asked
+// for, whatever took the found file's place between the walk and the open.
+const agentReading = (conversation: string, agentId: string): Reading => ({
+  rule: agentRowClaimSteps,
+  own: (row) => (typeof row === 'object' && row !== null && (row as { sessionId?: unknown }).sessionId === conversation && (row as { agentId?: unknown }).agentId === agentId ? row : undefined),
+});
 
 // How a transcript is opened: read-only and without blocking (`O_RDONLY | O_NONBLOCK`), so a FIFO with no writer, or any
 // other special file, opens at once and is refused on its descriptor's type before anything is read (the branch
@@ -64,12 +77,20 @@ export interface NamedPathsOptions {
 // names the path: a counted one (the person's message, the agent's own text, a tool call's input), only a result one
 // (what a tool returned, or a `user` row someone other than the person wrote), or none.
 export type Naming = 'counted' | 'result' | false;
+// U6b-4c (the branch panel): the subagent a follow names, with the conversation (the engine session) whose transcript
+// drew the link
+export interface AgentOf {
+  id: string;
+  engineSessionId: string;
+}
 export interface NamedPaths {
-  names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<Naming>;
-  // U6b-4c (Interfaces §E): the search over the one transcript of the session's subagent `agentId`. `located` is called
-  // exactly once, when the request's call of the transcript locator has settled (answered, thrown, or never made), also
-  // after the request itself was answered: a follow keeps its place until then (decision 7).
-  namesInAgent(appSessionId: AppSessionId, agentId: string, path: string, signal?: AbortSignal, located?: () => void): Promise<Naming>;
+  // U6b-4c (the branch panel): `located` as `namesInAgent`'s, for a follow whose Markdown source is admitted by name
+  names(appSessionId: AppSessionId, path: string, signal?: AbortSignal, located?: () => void): Promise<Naming>;
+  // U6b-4c (Interfaces §E): the search over the one transcript of the session's subagent `agent.id`, in the conversation
+  // `agent.engineSessionId`, which must be the one the session's transcript is now (not named otherwise). `located` is
+  // called exactly once, when the request's call of the transcript locator has settled (answered, thrown, or never made),
+  // also after the request itself was answered: a follow keeps its place until then (decision 7).
+  namesInAgent(appSessionId: AppSessionId, agent: AgentOf, path: string, signal?: AbortSignal, located?: () => void): Promise<Naming>;
 }
 
 const NEWLINE = 0x0a;
@@ -112,6 +133,13 @@ interface Job {
   waiters: Set<Waiter>;
 }
 type Rule = typeof rowClaimSteps; // how one record names the path: the session's rule, or (U6b-4c) a subagent's
+// How a job reads its file's records: the rule, and which parsed records are the file's own to read (U6b-4c, the branch
+// panel: a subagent's are those that carry its conversation's id and its own; any other is passed over as unparsed)
+interface Reading {
+  rule: Rule;
+  own(row: unknown): unknown;
+}
+const EVERY_ROW: Reading = { rule: rowClaimSteps, own: (row) => row };
 type Read = (position: number, length: number) => Promise<Buffer>;
 
 class Left extends Error {} // every waiter of the running job left: it stops at its next read
@@ -176,31 +204,31 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   // The line at `span`, parsed, if those bytes are still one whole line there: read with the byte before and the byte
   // after, each a newline (or the file's start).
-  async function lineAt(read: Read, { offset, length }: Span): Promise<unknown> {
+  async function lineAt(read: Read, { offset, length }: Span, reading: Reading): Promise<unknown> {
     if (length > rowBytes) return undefined;
     const from = offset === 0 ? 0 : offset - 1;
     const want = offset - from + length + 1;
     const bytes = await read(from, want);
     if (bytes.length !== want || bytes[bytes.length - 1] !== NEWLINE || (offset > 0 && bytes[0] !== NEWLINE)) return undefined;
     const line = bytes.subarray(offset - from, offset - from + length);
-    return line.includes(NEWLINE) ? undefined : parse(line);
+    return line.includes(NEWLINE) ? undefined : reading.own(await parse(line));
   }
 
   // A remembered or just-found name, read again from its record (and its call's): does it still name the path, by the
   // same kind of form?
-  async function proves(read: Read, found: Found, path: string, kind: 'counted' | 'result', rule: Rule): Promise<boolean> {
-    const claim = await claimOf(await lineAt(read, found.record), path, rule);
+  async function proves(read: Read, found: Found, path: string, kind: 'counted' | 'result', reading: Reading): Promise<boolean> {
+    const claim = await claimOf(await lineAt(read, found.record, reading), path, reading.rule);
     if (claim.names) return kind === 'counted';
     if (kind === 'counted') return false;
     const { call } = found;
     if (call === null) return claim.other === true;
     if (!claim.pending.some((pending) => pending.toolUseId === call.toolUseId && pending.when === call.when)) return false;
-    return callClass(await lineAt(read, call), call.toolUseId) === call.when;
+    return callClass(await lineAt(read, call, reading), call.toolUseId) === call.when;
   }
 
   // The newest record of a region that names the path by a counted form (`found`), the newest result form whose call
   // resolves (`result`), and the calls the results it met wait for, newest first.
-  function scanner(read: Read, path: string, rule: Rule) {
+  function scanner(read: Read, path: string, reading: Reading) {
     const needles = needlesOf(path).map((needle) => Buffer.from(needle));
     const pending = new Map<string, { when: PendingCall['when']; record: Span }[]>(); // per call id, the newest results waiting for it
     const state = { found: null as Found | null, result: null as Found | null, pending };
@@ -229,10 +257,10 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       const candidate = names && needles.every((needle) => line.includes(needle));
       const calls = pending.size === 0 ? NO_CALLS : waitedIdsIn(line);
       if (!candidate && calls.length === 0) return;
-      const row = await parse(line);
+      const row = reading.own(await parse(line));
       const span = { offset: base + start, length };
       if (candidate) {
-        const claim = await claimOf(row, path, rule);
+        const claim = await claimOf(row, path, reading.rule);
         if (claim.names) {
           state.found = { record: span, call: null };
           return;
@@ -301,7 +329,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   }
 
   async function decide(job: Job, handle: FileHandle): Promise<Naming> {
-    const rule: Rule = job.agentId === null ? rowClaimSteps : agentRowClaimSteps;
+    const reading = job.agentId === null ? EVERY_ROW : agentReading(conversationOf(job.transcript), job.agentId);
     const stat = await handle.stat({ bigint: true });
     if (!stat.isFile()) return false; // judged on the descriptor, before any read
     await hooks?.at?.('opened', job.appSessionId);
@@ -317,7 +345,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
     const entry = entries.get(job.entry);
     if (entry?.kind === 'hit') {
-      if (sameFile(entry, identity) && (await proves(read, entry, job.path, 'counted', rule))) {
+      if (sameFile(entry, identity) && (await proves(read, entry, job.path, 'counted', reading))) {
         remember(job, entry);
         return 'counted';
       }
@@ -326,7 +354,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     // a remembered result form stands while its records prove it and its checkpoint holds
     let known: Found | null = null;
     if (entry?.kind === 'result') {
-      if (sameFile(entry, identity) && (await proves(read, entry.found, job.path, 'result', rule))) known = entry.found;
+      if (sameFile(entry, identity) && (await proves(read, entry.found, job.path, 'result', reading))) known = entry.found;
       else entries.delete(job.entry);
     }
 
@@ -350,7 +378,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
     let searchedTo: number | null = fromIsLine ? from : null;
     let began: string | null = verified; // the fingerprint before `searchedTo`, as the search began
-    const { state, region } = scanner(read, job.path, rule);
+    const { state, region } = scanner(read, job.path, reading);
     await region(from, fromIsLine, size, true, true, async (end) => {
       searchedTo = end;
       began = await fingerprint(read, end, NAMED_FINGERPRINT_BYTES);
@@ -360,12 +388,12 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     await hooks?.at?.('searched', job.appSessionId);
 
     if (state.found !== null) {
-      if (!(await proves(read, state.found, job.path, 'counted', rule))) return false;
+      if (!(await proves(read, state.found, job.path, 'counted', reading))) return false;
       remember(job, { kind: 'hit', ...state.found, ...identity });
       return 'counted';
     }
     const result = state.result ?? known;
-    if (state.result !== null && !(await proves(read, state.result, job.path, 'result', rule))) return false;
+    if (state.result !== null && !(await proves(read, state.result, job.path, 'result', reading))) return false;
     // the checkpoint up to which no counted form stands, if the file is still the one searched
     let reached: Checkpoint | null = null;
     if (searchedTo !== null && began !== null) {
@@ -498,7 +526,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   // queue only for what is left of its patience. A request that ended while the locator was asked queues nothing. No
   // transcript, a locator that throws, a full queue, a waiter that leaves: not named. U6b-4c: `located` is called once,
   // when the locator's call has settled, or at once when none is made, whatever the request has answered by then.
-  function ask(appSessionId: AppSessionId, path: string, signal: AbortSignal | undefined, agentId: string | null, located: () => void): Promise<Naming> {
+  function ask(appSessionId: AppSessionId, path: string, signal: AbortSignal | undefined, agent: AgentOf | null, located: () => void): Promise<Naming> {
     let settled = false;
     const locatorSettled = () => {
       if (settled) return;
@@ -543,8 +571,10 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         (found) => {
           locatorSettled();
           if (answered) return; // it ended while the locator was asked
-          // U6b-4c: a subagent's folder is named as the session's transcript without `.jsonl`, which it must end in
-          const job = found === null || (agentId !== null && !isTranscriptName(found)) ? null : jobFor(appSessionId, found, path, agentId);
+          // U6b-4c: a subagent's folder is named as the session's transcript without `.jsonl`, which it must end in; and
+          // (the branch panel) that transcript must be the conversation that drew the link, else the follow is of one left
+          // behind (`/clear`, Q11)
+          const job = found === null || (agent !== null && !(isTranscriptName(found) && conversationOf(found) === agent.engineSessionId)) ? null : jobFor(appSessionId, found, path, agent?.id ?? null);
           if (job === null) return waiter.answer(false);
           joined = job;
           job.waiters.add(waiter);
@@ -560,15 +590,15 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   const unlocated = () => {};
   return {
-    names: (appSessionId, path, signal) => ask(appSessionId, path, signal, null, unlocated),
+    names: (appSessionId, path, signal, located = unlocated) => ask(appSessionId, path, signal, null, located),
     // U6b-4c (Interfaces §E): where an open cannot be confirmed to have followed no link, no subagent's file is a source:
     // not named, nothing opened, and no locator asked
-    namesInAgent: (appSessionId, agentId, path, signal, located = unlocated) => {
+    namesInAgent: (appSessionId, agent, path, signal, located = unlocated) => {
       if (!OPENS_CONFIRMED) {
         located();
         return Promise.resolve(false);
       }
-      return ask(appSessionId, path, signal, agentId, located);
+      return ask(appSessionId, path, signal, agent, located);
     },
   };
 }
