@@ -9,6 +9,7 @@ import { addressOf } from '@shared/machine/address';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { recordArtifactMachine, resetArtifactMachines } from '../artifacts/machines';
+import { ipc } from '../ipc/client';
 import { surfaceTabs } from '../panel/surface-model';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
@@ -200,4 +201,13 @@ describe('showing the main tab that already shows an artifact', () => {
     expect(showOpenArtifactTab('app-bare' as AppSessionId, A)).toBe(true);
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(TEST_MACHINE));
   });
+});
+
+
+it('a bare open that guesses local does not mask a later confirmed peer copy', async () => {
+  installFakeMain((name) => name === 'artifacts.get' ? ok({ artifact }) : ok());
+  openArtifactTab(A);
+  await ipc.invoke('artifacts.get', { artifactId: A }, { machine: OTHER_MACHINE });
+  openArtifactTab(A);
+  expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
 });

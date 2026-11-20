@@ -1,7 +1,7 @@
 // The design system governing a deck in the renderer (P3-C; docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D10,
 // Decision Log 19, 27 (2) and 28): D's chain through D's `useGoverningSystem`, so a deck with no system of its own and no
 // default draws the house system the window follows, and moves when the house does.
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DesignSystemHouseContext, type HouseDesignSystem } from '@artifacts/design-system/apply';
@@ -9,6 +9,7 @@ import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { CommandName } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
 import { resetLibrary } from '../../library/store';
 import { useSettings } from '../../stores/settings';
 import { installFakeMain, ok } from '../../test-support/code';
@@ -78,4 +79,12 @@ describe('useDeckSystem', () => {
     rerender();
     expect(result.current).toBe(first);
   });
+});
+
+
+it('retains a deck’s system that exists on its machine but not in the local library', async () => {
+  const main = installFakeMain((name, _, machine) => name === 'library.list' ? ok({ rows: machine === OTHER_MACHINE ? [row(OWN)] : [], counts }) : ok());
+  const { result } = renderHook(() => Reflect.apply(useDeckSystem, undefined, [{ designSystemId: OWN }, OTHER_MACHINE]));
+  await waitFor(() => expect(main.targetsOf('library.list')).toContain(OTHER_MACHINE));
+  expect(result.current).toEqual({ id: OWN });
 });

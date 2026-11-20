@@ -4,10 +4,11 @@
 // the gesture itself, which resumes or starts without a message, docks a trust or relay card and never answers it.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { record, status } from '../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { continueSetup } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
@@ -249,4 +250,16 @@ describe('the owner’s Start', () => {
     await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, earlier, bridge)).resolves.toEqual({ status: 'refused', appSessionId: earlier, words });
     expect(listening('session.setup')).toBe(0);
   });
+});
+
+
+it('does not turn a peer Space’s linked directory into a local session', async () => {
+  const remoteProject = addressOf(OTHER_MACHINE, 'peer-project') as ProjectId;
+  const localProject = at('local-project') as ProjectId;
+  const world = facts({ projects: new Map([[localProject, { directory: '/work/research' }], [remoteProject, { directory: '/work/research' }]]) });
+  const context = Reflect.apply(artifactSessionContext, undefined, [{ createdBy: { kind: 'human' }, spaceId: SPACE, sessions: [] }, world, OTHER_MACHINE]);
+  const { bridge, calls } = client({ 'session.create': new Error('unexpected creation') });
+  await startArtifactSession(context, null, bridge);
+  expect(calls).toEqual([]);
+  expect(context).toEqual({ kind: 'directory', machine: OTHER_MACHINE, path: '/work/research', projectId: remoteProject });
 });

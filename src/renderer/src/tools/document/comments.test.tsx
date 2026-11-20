@@ -16,7 +16,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
 import { sendComments } from '../../side/actions';
 import { dropSubject, resetPlaceNotes, useCommentCard } from '../../side/card/store';
@@ -123,19 +123,20 @@ function editorReach(doc: Doc): CommentOverlayProps {
   };
 }
 
-function Editor({ reach, onOpen, holdReplica }: { reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; holdReplica?: () => () => void }) {
-  const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', holdReplica });
+function Editor({ reach, onOpen, holdReplica, machine }: { machine: typeof TEST_MACHINE; reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; holdReplica?: () => () => void }) {
+  const options = { artifactId: ARTIFACT, machine, appSessionId: PARENT, title: 'Q3 plan', holdReplica };
+  const comments = useDocumentComments(options);
   onOpen(comments.opened);
   return <div className="relative">{comments.overlay(reach)}</div>;
 }
 
-function mount() {
+function mount(machine = TEST_MACHINE, shown = passage) {
   const doc = newDoc();
-  addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+  addThread(doc, { threadId: shown.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
   const reach = editorReach(doc);
   let open: ((p: typeof passage) => void) | null = null;
-  render(<Editor reach={reach} onOpen={(o) => (open = o)} />);
-  return { doc, reach, comment: () => act(() => open!(passage)) };
+  render(<Editor reach={reach} machine={machine} onOpen={(o) => (open = o)} />);
+  return { doc, reach, comment: () => act(() => open!(shown)) };
 }
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
@@ -622,4 +623,17 @@ describe('a comment on its way outlives its card', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(getThread(doc, passage.threadId)).toBeNull();
   });
+});
+
+
+it('opens a fresh comment on the other machine’s copy without consuming the local draft', async () => {
+  const local = mount(TEST_MACHINE);
+  const remote = mount(OTHER_MACHINE, { ...passage, threadId: 'peer-thread' });
+  local.comment();
+  await userEvent.type(field(), 'Only on the local copy');
+  remote.comment();
+  expect(useCommentCard.getState().open?.target).toMatchObject({ threadId: 'peer-thread' });
+  expect(field().value).toBe('');
+  local.comment();
+  expect(field().value).toBe('Only on the local copy');
 });
