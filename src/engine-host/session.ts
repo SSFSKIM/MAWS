@@ -556,8 +556,7 @@ export class EngineSession {
     };
     let response: InterruptResponse;
     try {
-      await this.queue.stop({ hold: opts.holdEngineQueued === true });
-      response = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
+      response = await this.queue.stop({ hold: opts.holdEngineQueued === true }, () => interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued })); // ticket 790
     } catch (error) {
       if (!(error instanceof ControlTimeout)) settleOwed();
       else if (owed && generation === this.owedInterrupt.generation) this.owedInterrupt.lateRequestId = error.requestId;

@@ -99,7 +99,9 @@ export class MessageQueue {
   // exit abandons what is left, so no prompt the engine was handed outlives the process unrecorded
   private readonly unended = new Set<MessageUuid>();
   private preparing: QueueEntry | null = null; // P4-A3: the submission whose frame is being prepared (the queue is busy)
-  private stopping = 0; // ticket 790: Stops whose pause and hold (`stop`) are still running
+  private stopping = 0; // ticket 790: Stops whose pause, hold and interrupt (`stop`) are still running
+  private stoppedTurn = false; // ticket 790: a Stop's interrupted turn had not ended when its interrupt was answered
+  private removing = 0; // ticket 790: removals whose save has not committed (a failed one puts its row back)
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -258,11 +260,14 @@ export class MessageQueue {
     const entry = this.queued(queueId);
     const index = this.entries.indexOf(entry);
     this.entries = this.entries.filter((e) => e !== entry);
+    this.removing++; // ticket 790: still held until the removal is saved
     try {
       await this.persist(() => this.transition('remove', { queueId }));
     } catch (error) {
       this.entries.splice(index, 0, entry);
       throw error;
+    } finally {
+      this.removing--;
     }
     if (this.endEmptyInterruptPause()) await this.persist().catch((error: unknown) => this.log(`the empty pause's end not saved: ${messageOf(error)}`)); // ticket 790: the last held row removed
   }
@@ -302,19 +307,32 @@ export class MessageQueue {
   }
 
   // Ticket 790: the Stop's part in the queue (the session's `interrupt`): the interrupt pause, then with `hold` every
-  // waiting `next` steer held (holdAll). An interrupt pause holds what waited at the Stop; once the Stop's phase is over
-  // and it holds nothing (no queued or unacknowledged entry, no steer being withdrawn, no host sequence staged) it ends,
-  // so a message queued later behind a turn goes at that turn's end instead of waiting for a Resume. While a Stop runs
-  // the pause never ends this way, so whatever it holds (a message being queued or submitted as the Stop arrives
-  // among them) stays held.
-  async stop(opts: { hold: boolean }): Promise<void> {
+  // waiting `next` steer held (holdAll), then `interrupt` (the engine's interrupt, written and answered), whose answer
+  // or failure this resolves or rejects with. An interrupt pause holds what waited at the Stop; once the Stop's phase is
+  // over and it holds nothing (no queued or unacknowledged entry, no steer being withdrawn, no removal unsaved, no host
+  // sequence staged) it ends, so a message queued later behind a turn goes at that turn's end instead of waiting for a
+  // Resume. The phase lasts until the interrupted turn has ended (the interrupt's answer can precede that turn's end), so
+  // whatever reaches the queue meanwhile, a message being queued or submitted as the Stop arrives among it, stays held.
+  // A pause that failed to save ends nothing.
+  async stop<T>(opts: { hold: boolean }, interrupt: () => Promise<T>): Promise<T> {
     this.stopping++;
+    let paused = false;
     try {
       await this.pause('interrupt');
+      paused = true;
       if (opts.hold) await this.holdAll();
+      return await interrupt();
     } finally {
       this.stopping--;
+      if (paused) {
+        if (this.deps.turnOpen()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
+        else await this.settleEmptyPause();
+      }
     }
+  }
+
+  // Ticket 790: the empty interrupt pause ended and saved, where it holds nothing now.
+  private async settleEmptyPause(): Promise<void> {
     if (this.endEmptyInterruptPause()) await this.persist().catch((error: unknown) => this.log(`the empty pause's end not saved: ${messageOf(error)}`));
   }
 
@@ -443,6 +461,7 @@ export class MessageQueue {
     for (const uuid of uuids) if (this.withdrawing.delete(uuid)) this.transition('giveback', { messageUuid: uuid });
     for (const uuid of uuids) if (!this.steers.some((s) => s.messageUuid === uuid)) this.unended.delete(uuid); // P2-C: the engine ended it meanwhile (its lifecycle)
     this.withdrawn = this.withdrawn.filter((u) => !gone.has(u));
+    this.endEmptyInterruptPause(); // ticket 790: a late withdrawal that held nothing
     await this.persist().catch((error: unknown) => this.log(`withdrawal's end not saved: ${messageOf(error)}`));
   }
 
@@ -597,6 +616,7 @@ export class MessageQueue {
       const text = `The engine ${event.state} a message before starting it, so it was not answered. Re-send it if you still want an answer.`;
       this.notice(`queue:dropped:${entry.queueId}`, pause ? `${text} The queue is paused; resume it to send the next message.` : text);
       if (pause) this.pauseFor('refused'); // C7: through pauseFor
+      this.endEmptyInterruptPause(); // ticket 790: the submission the pause held back is gone
       void this.persist()
         .catch((error: unknown) => this.log(`retirement not saved: ${messageOf(error)}`)) // a stale released entry on disk retires at the next recovery
         .then(() => this.releaseHead('dropped'))
@@ -606,6 +626,7 @@ export class MessageQueue {
     if (entry.state !== 'submitting') return;
     entry.state = 'released';
     this.clearAck(entry.queueId);
+    this.endEmptyInterruptPause(); // ticket 790: an acknowledged submission is past the pause's hold
     // a lost save leaves `submitting` on disk, which recovery treats as uncertain: the safe side
     this.persist().catch((error: unknown) => this.log(`release not saved: ${messageOf(error)}`));
   }
@@ -624,7 +645,9 @@ export class MessageQueue {
       }
       return !done;
     });
-    if (this.entries.length !== before) await this.persist().catch((error: unknown) => this.log(`turn end not saved: ${messageOf(error)}`)); // a stale entry on disk is retired at the next recovery
+    this.stoppedTurn = false; // ticket 790: a Stop's interrupted turn has ended, or a later one has
+    const unpaused = this.endEmptyInterruptPause();
+    if (this.entries.length !== before || unpaused) await this.persist().catch((error: unknown) => this.log(`turn end not saved: ${messageOf(error)}`)); // a stale entry on disk is retired at the next recovery
     if (event.origin === 'human' || event.origin === null) await this.releaseHead('turn_ended');
     else await this.releaseAfterEngineTurn();
   }
@@ -663,6 +686,7 @@ export class MessageQueue {
   // takes the recovery path; an exit nobody asked for pauses a non-empty queue (Exit policy). The rows are journaled before
   // the returned promise's persist, so the session can call this right before it writes the exit row.
   onProcessExited(reason: ExitKind): Promise<void> {
+    this.stoppedTurn = false; // ticket 790: no turn of this process will end
     for (const queueId of [...this.ackTimers.keys()]) this.clearAck(queueId);
     if (!this.loaded) {
       this.exitedUnloaded = true; // the process never finished recovery: the stored queue stays as it was
@@ -813,7 +837,7 @@ export class MessageQueue {
   // when it ended.
   private endEmptyInterruptPause(): boolean {
     if (!this.loaded || !this.paused || !this.releasePaused || this.pauseReason !== 'interrupt') return false;
-    if (this.stopping > 0 || this.withdrawing.size > 0 || this.deps.holdsSequence?.()) return false;
+    if (this.stopping > 0 || this.stoppedTurn || this.removing > 0 || this.withdrawing.size > 0 || this.deps.holdsSequence?.()) return false;
     if (this.entries.some((e) => e.state === 'queued' || e.state === 'submitting')) return false; // a submission not yet acknowledged may still be held back
     ++this.pauseVersion;
     this.paused = false;

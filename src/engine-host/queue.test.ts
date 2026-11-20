@@ -1150,10 +1150,12 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     expect(queueRows(t.rows)).toEqual(['pause:interrupt', 'resume:empty', 'release:turn_ended']);
   });
 
-  it('stop() with nothing waiting ends its pause at once, saved and announced; with a held steer it stays paused', async () => {
+  it('stop() with nothing waiting ends its pause once its interrupt is answered and no turn runs, saved and announced; with a held steer it stays paused', async () => {
     const t = await harness();
     t.h.turn = true;
-    await t.queue.stop({ hold: true });
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false; // the interrupted turn ended before the interrupt's answer
+    });
     expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
     expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
     expect(t.changes.at(-1)).toMatchObject({ paused: false });
@@ -1162,7 +1164,7 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     const held = await harness();
     held.h.turn = true;
     await held.queue.steer('steer a', { priority: 'next' });
-    await held.queue.stop({ hold: true });
+    await held.queue.stop({ hold: true }, async () => {});
     expect(held.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'steer a', state: 'queued' }] });
     held.h.turn = false;
     await held.queue.onTurnEnded(turnEnded());
@@ -1175,7 +1177,7 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     const t = await harness({ prepare: async (content) => { await prepared; return { content, settle: () => {} }; } });
     const sending = t.queue.send('racing');
     await flush();
-    await t.queue.stop({ hold: true });
+    await t.queue.stop({ hold: true }, async () => {});
     finish();
     expect((await sending).disposition).toBe('queued');
     expect(t.writes).toEqual([]);
@@ -1191,7 +1193,7 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     });
     const submitting = s.queue.send('racing');
     await flush();
-    const stopping = s.queue.stop({ hold: true });
+    const stopping = s.queue.stop({ hold: true }, async () => {});
     land();
     await stopping;
     expect((await submitting).disposition).toBe('queued');
@@ -1205,7 +1207,7 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     await t.queue.steer('steer a', { priority: 'next' });
     let answer!: () => void;
     t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
-    const stopping = t.queue.stop({ hold: true });
+    const stopping = t.queue.stop({ hold: true }, async () => {});
     await flush();
     await t.queue.send('typed during the Stop');
     answer();
@@ -1222,7 +1224,9 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     t.h.turn = true;
     const a = (await t.queue.send('a')).entry;
     const b = (await t.queue.send('b')).entry;
-    await t.queue.stop({ hold: true });
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false;
+    });
     await t.queue.remove(a.queueId);
     expect(t.queue.isPaused).toBe(true);
     await t.queue.promote(b.queueId);
@@ -1232,7 +1236,9 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     const r = await harness();
     r.h.turn = true;
     const only = (await r.queue.send('only')).entry;
-    await r.queue.stop({ hold: false });
+    await r.queue.stop({ hold: false }, async () => {
+      r.h.turn = false;
+    });
     await r.queue.remove(only.queueId);
     expect(r.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
     expect(await r.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
@@ -1241,7 +1247,7 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
   it('a host sequence the pause holds keeps it; other pauses that hold nothing stay as they are', async () => {
     let staged = true;
     const t = await harness({ holdsSequence: () => staged });
-    await t.queue.stop({ hold: true });
+    await t.queue.stop({ hold: true }, async () => {});
     expect(t.queue.isPaused).toBe(true);
     staged = false;
     await t.queue.send('after the sequence');
