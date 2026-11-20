@@ -348,7 +348,7 @@ describe('over a derived session', () => {
     const flat = withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 });
     const rows = rowsOf(flat);
     expect(closed(rows)).toEqual(['time', 'user', 'head', '› record', 'user', '› record', 'assistant_text']);
-    expect(opened(rows)).toEqual(['time', 'user', 'divider', 'assistant_text', 'cell', 'assistant_text', '‹ fold', 'user', 'divider', 'cell', '‹ fold', 'assistant_text']);
+    expect(opened(rows)).toEqual(['time', 'user', 'assistant_text', 'cell', 'assistant_text', '‹ fold', 'divider', 'user', 'cell', '‹ fold', 'assistant_text', 'divider']);
   });
 });
 
@@ -389,9 +389,10 @@ describe('a stretch stays the one the reader opened', () => {
   const lines = (rows: readonly Row[]) => rows.filter((r): r is Extract<Row, { kind: 'record_fold' }> => r.kind === 'record_fold');
 
   it('the derivation’s own shapes: the thought alone, then inside its call’s run, then beside its one call', () => {
-    expect(windowAt(0, false).map((r) => r.kind)).toEqual(['thinking']);
-    expect(windowAt(1, false).map((r) => r.kind)).toEqual(['group']);
-    expect(windowAt(2, false).map((r) => r.kind)).toEqual(['thinking', 'cell']);
+    // each window ends with the turn's line, which ends its turn (board ticket 789)
+    expect(windowAt(0, false).map((r) => r.kind)).toEqual(['thinking', 'divider']);
+    expect(windowAt(1, false).map((r) => r.kind)).toEqual(['group', 'divider']);
+    expect(windowAt(2, false).map((r) => r.kind)).toEqual(['thinking', 'cell', 'divider']);
     expect(stretchesOf(windowAt(0, false))[0].key).not.toBe(stretchesOf(windowAt(1, false))[0].key); // the key as drawn moves
     expect(stretchesOf(windowAt(2, true)).at(-1)!.key).toBe(COMMENTARY);
   });
@@ -418,7 +419,8 @@ describe('a stretch stays the one the reader opened', () => {
       const drawn = mirrorRows(windowAt(step, paged), { openStretches });
       const at = `at ${STEPS[step]}${paged ? ', paged' : ''}`;
       expect(lines(drawn).map((line) => line.open), at).toEqual(paged ? [false, true] : [true]); // the earlier turn's stays closed
-      expect(drawn.at(-1)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
+      expect(drawn.at(-2)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
+      expect(drawn.at(-1)?.kind, at).toBe('divider'); // then the turn's line, which ends its turn (board ticket 789)
       expect(drawn.some((r) => r.kind === 'thinking' || r.kind === 'group'), at).toBe(true); // its rows in sight
     }
     // the press on `‹ fold to report` takes the key the line carries, and the stretch folds
@@ -434,9 +436,9 @@ describe('a stretch stays the one the reader opened', () => {
   // writes), gone once its call comes, where the run that call starts stands in its place, and the run unwrapped at the
   // completion; the opening passes to the run, then to the call.
   it('a thought with no text, opened while it streams alone: still open once its call’s run stands in its place, and once the run unwraps', () => {
-    expect(windowAt(0, false, true).map((r) => r.kind)).toEqual(['thinking']);
-    expect(windowAt(1, false, true).map((r) => r.kind)).toEqual(['group']); // the thought is gone: the run holds the call alone
-    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell']);
+    expect(windowAt(0, false, true).map((r) => r.kind)).toEqual(['thinking', 'divider']);
+    expect(windowAt(1, false, true).map((r) => r.kind)).toEqual(['group', 'divider']); // the thought is gone: the run holds the call alone
+    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell', 'divider']);
     const pressed = lines(mirrorRows(windowAt(0, false, true), {})).at(-1)!;
     const openStretches = new Set([pressed.stretch]);
     let before = windowAt(0, false, true);

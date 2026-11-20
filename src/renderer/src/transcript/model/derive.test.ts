@@ -76,7 +76,7 @@ describe('group state machine', () => {
     b.text('m9', 0, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
     const g = group(list);
     expect(g.id).toBe(rowId.group('cell:t1' as never));
     expect(g.cells.map((cell) => cell.id)).toEqual(['cell:t1', 'cell:t2', 'cell:t3']);
@@ -102,7 +102,7 @@ describe('group state machine', () => {
     b.result('t5', 'ok');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'cell', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'cell', 'group', 'divider']);
     expect(group(list, 0).cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2']);
     expect(find(list, 'cell')).toMatchObject({ id: 'cell:t3', status: 'denied' });
     expect(group(list, 1).cells.map((c) => c.id)).toEqual(['cell:t4', 'cell:t5']);
@@ -136,7 +136,7 @@ describe('group state machine', () => {
     b.text('m2', 0, 'Answer');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text', 'group', 'subagent', 'group', 'boundary', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'group', 'subagent', 'group', 'boundary', 'group', 'assistant_text', 'divider']);
     expect(find(list, 'assistant_text', 0)).toMatchObject({ phase: 'commentary', markdown: 'Now the agent.' });
     expect(find(list, 'assistant_text', 1)).toMatchObject({ phase: 'answer', markdown: 'Answer' });
     expect(list.filter((row) => row.kind === 'group').map((row) => (row as Extract<Row, { kind: 'group' }>).cells.length)).toEqual([2, 2, 2, 2]);
@@ -156,7 +156,7 @@ describe('group state machine', () => {
     b.text('m3', 1, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
     const g = group(list);
     expect(g.cells.map((c) => c.id)).toEqual(['cell:think:m1:0', 'cell:t1', 'cell:think:m2:0', 'cell:t2', 'cell:think:m3:0']);
     expect(g.id).toBe('group:cell:t1');
@@ -179,7 +179,7 @@ describe('group state machine', () => {
     b.text('m2', 0, 'DONE');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'thinking', 'cell', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'thinking', 'cell', 'assistant_text', 'divider']);
     expect(find(list, 'cell')).toMatchObject({ id: 'cell:t1', label: 'Ran `git log` in 0s', category: 'commands' });
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'shell', command: 'git log', stdout: '2299dcc seed', exitCode: 0 });
   });
@@ -195,7 +195,7 @@ describe('group state machine', () => {
     b.result('t2', 'ok');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'divider']);
     const g = group(list);
     expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2']);
     expect(g.summary).toBe('Updated todos, ran a command');
@@ -204,7 +204,7 @@ describe('group state machine', () => {
     alone.toolUse('t1', 'EnterPlanMode', {});
     alone.result('t1', 'ok');
     alone.end(['u1']);
-    expect(kinds(rows(alone.events))).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(rows(alone.events))).toEqual(['time', 'user', 'cell', 'divider']);
   });
 
   it('an active group never unwraps and carries its caption so far', () => {
@@ -213,7 +213,7 @@ describe('group state machine', () => {
     b.toolUse('t1', 'Bash', { command: 'pnpm test' });
     b.emit('tool.progress', { toolUseId: tool('t1'), toolName: 'Bash', elapsedSeconds: 3, taskId: null, heartbeat: true });
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'divider']);
     expect(group(list)).toMatchObject({ state: 'active', summary: 'Ran a command' });
     expect(group(list)).not.toHaveProperty('activeLabel');
     expect(group(list).cells[0].status).toBe('running');
@@ -261,7 +261,7 @@ describe('group state machine', () => {
     b.result('t1', [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }], { structured: { isImage: true } });
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(list)).toEqual(['time', 'user', 'cell', 'divider']);
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'image', images: [{ dataUrl: 'data:image/png;base64,AAAA', mediaType: 'image/png' }] });
   });
 
@@ -342,7 +342,7 @@ describe('group state machine', () => {
     b.emit('subagent.started', { taskId: task('k3'), toolUseId: tool('a3'), description: 'C', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'subagent', 'cell', 'subagent']);
+    expect(kinds(list)).toEqual(['time', 'user', 'subagent', 'cell', 'subagent', 'divider']);
     expect(list.filter((row) => row.kind === 'subagent').map((row) => (row as Extract<Row, { kind: 'subagent' }>).agents.map((a) => a.name))).toEqual([['A'], ['B', 'C']]);
   });
 
@@ -355,7 +355,7 @@ describe('group state machine', () => {
     b.end(['u1']);
     const state = reduce(b.events);
     const list = rowsOf(state);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'divider']);
     expect(find(list, 'divider').expanded).toBe(false);
   });
 
@@ -372,9 +372,9 @@ describe('group state machine', () => {
     b.text('m2', 0, 'Red it is.');
     b.end(['u1']);
     const list = rowsOf(reduce(b.events));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'question', 'assistant_text', 'divider']);
     expect(find(list, 'assistant_text')).toMatchObject({ id: 'text:m2:0', phase: 'answer' }); // 'Red it is.'
-    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'divider', 'assistant_text', 'cell', 'question', 'assistant_text']);
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'assistant_text', 'cell', 'question', 'assistant_text', 'divider']);
   });
 });
 
@@ -399,10 +399,10 @@ describe.each(['mcp__doperpowers__AskUserQuestion', 'mcp__sminos__AskUserQuestio
   it('a blocking ask is a question row with the summary’s answers, in view when its turn folds', () => {
     const events = asked({ questions: QUESTIONS }, 'Your questions have been answered: "Which colour?"="Red". You can now continue with these answers in mind.');
     const list = rowsOf(reduce(events));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question']);
+    expect(kinds(list)).toEqual(['time', 'user', 'question', 'divider']);
     expect(find(list, 'question')).toMatchObject({ id: rowId.question(tool('q1')), toolUseId: 'q1', answers: { 'Which colour?': 'Red' }, error: null });
     expect(find(list, 'question').questions).toEqual([{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red', description: null, preview: null }, { label: 'Blue', description: null, preview: null }] }]);
-    expect(kinds(rows(events))).toEqual(['time', 'user', 'divider', 'cell', 'question']);
+    expect(kinds(rows(events))).toEqual(['time', 'user', 'cell', 'question', 'divider']);
   });
 
   it('an async ask is a question row awaiting its answer: no answers, no refusal', () => {
@@ -437,7 +437,7 @@ describe('completed divider changed-file counts', () => {
     b.text('m9', 0, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
     const divider = find(list, 'divider');
     expect(divider).toMatchObject({ id: rowId.divider(turnId.ofMessage(uuid('u1'))), state: 'completed' });
     expect(divider.files).toEqual([
@@ -481,7 +481,7 @@ describe('divider changed files aggregate successful edits only', () => {
     b.toolUse('t1', 'Edit', { file_path: '/p/a.ts', old_string: 'x', new_string: 'y' });
     b.result('t1', 'String to replace not found in file.', { isError: true });
     b.end(['u1']);
-    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'cell', 'divider']);
     b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
     b.result('t2', 'ok');
     const list = rows(b.events);
@@ -894,7 +894,7 @@ describe('plugins: log lines, load issues and pinned status lines', () => {
     b.end(['u1']);
     b.emit('plugin.log', { plugin: 'mods-probe', text: 'after the turn' });
     const expanded = rows(b.events);
-    expect(kinds(expanded)).toEqual(['time', 'error', 'user', 'divider', 'cell', 'error', 'assistant_text', 'error']);
+    expect(kinds(expanded)).toEqual(['time', 'error', 'user', 'cell', 'error', 'assistant_text', 'divider', 'error']);
     expect(errors(expanded).map(({ text, severity, scope, turnId: turn }) => ({ text, severity, scope, turn }))).toEqual([
       { text: 'mods-probe: before any turn', severity: 'notice', scope: 'plugin', turn: null },
       { text: 'mods-probe: during the work', severity: 'notice', scope: 'plugin', turn: turnId.ofMessage(uuid('u1')) },
@@ -902,7 +902,7 @@ describe('plugins: log lines, load issues and pinned status lines', () => {
     ]);
     expect(find(expanded, 'assistant_text')).toMatchObject({ phase: 'answer' }); // the log line after the work is not work
     const folded = rowsOf(reduce(b.events)); // the completed turn folds its work area; the plugin's line stays
-    expect(kinds(folded)).toEqual(['time', 'error', 'user', 'divider', 'error', 'assistant_text', 'error']);
+    expect(kinds(folded)).toEqual(['time', 'error', 'user', 'error', 'assistant_text', 'divider', 'error']);
   });
 
   it('a turn whose only rows are a plugin’s gets no work divider', () => {
@@ -1265,7 +1265,7 @@ describe('what joins a run (O-29)', () => {
     b.result('t3', 'two');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'divider']);
     expect(group(list).cells.map((cell) => cell.toolUseId)).toEqual(['t1', 't2', 't3']);
     expect(group(list).summary).toBe('Read 2 files, updated todos');
   });

@@ -177,7 +177,7 @@ describe('fixture gates through the model', () => {
 
   it('pass1/init: a thinking disclosure then the answer', () => {
     const rows = rowsFor('pass1', 'init');
-    expect(rows.map((row) => row.kind)).toEqual(['time', 'user', 'divider', 'thinking', 'assistant_text', 'error']);
+    expect(rows.map((row) => row.kind)).toEqual(['time', 'user', 'thinking', 'assistant_text', 'divider', 'error']);
     expect(ofKind(rows, 'thinking')[0].durationMs).toBeGreaterThan(0);
     expect(ofKind(rows, 'thinking')[0].id).toBe('think:msg_011CfVbGCWehpRw3sXEAfrCv:0');
     expect(ofKind(rows, 'assistant_text')[0].id).toBe('text:msg_011CfVbGCWehpRw3sXEAfrCv:1');
@@ -202,8 +202,8 @@ describe('fixture gates through the model', () => {
     const STEER = 'user:42a15931-3c9a-4267-a6b2-09fa5697735d';
     const shape = (rows: Row[]) => rows.filter((row) => row.kind !== 'time' && row.kind !== 'error').map((row) =>
       row.kind === 'group' ? `group:${row.cells.map((cell) => (cell.detail.kind === 'shell' ? cell.detail.command.replace('sleep 1 && echo ', '') : cell.toolName)).join(',')}` : row.kind === 'user' ? (row.id === STEER ? 'steer' : 'prompt') : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : row.kind);
-    expect(shape(rowsFor('pass3', 'steer-next'))).toEqual(['prompt', 'divider', 'group:1,2', 'steer', 'commentary:NEXT_OK', 'group:3,4,5,6,7,8', 'answer:COUNTED']);
-    expect(shape(rowsOf(stateOf('pass3', 'steer-next')))).toEqual(['prompt', 'divider', 'steer', 'answer:COUNTED']);
+    expect(shape(rowsFor('pass3', 'steer-next'))).toEqual(['prompt', 'group:1,2', 'steer', 'commentary:NEXT_OK', 'group:3,4,5,6,7,8', 'answer:COUNTED', 'divider']);
+    expect(shape(rowsOf(stateOf('pass3', 'steer-next')))).toEqual(['prompt', 'steer', 'answer:COUNTED', 'divider']);
   });
 
   it('pass3/steer-next: written at seq 46 and not yet taken, the steer is a dimmed tail bubble reading Sends at the next step; taken at seq 71, it moves into the turn', () => {

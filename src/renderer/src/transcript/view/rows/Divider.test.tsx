@@ -46,8 +46,8 @@ describe('divider row', () => {
     expect(divider.expanded).toBe(true);
     view.rerenderRow(divider);
     // The work area's rows by their element ids (`t` is the test's id prefix): the denied call and the run call, not
-    // the answer after them.
-    const work = expanded.slice(expanded.indexOf(divider) + 1).filter((row) => row.kind !== 'time');
+    // the answer after them; the turn's line ends the turn, under them (board ticket 789).
+    const work = expanded.slice(expanded.findIndex((row) => row.kind === 'user') + 1, expanded.indexOf(divider)).filter((row) => row.kind !== 'time');
     expect(work.map((row) => row.kind)).toEqual(['cell', 'cell', 'assistant_text']);
     expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe(work.slice(0, 2).map((row) => `t-${row.id}`).join(' '));
     // W8: a fold reads closed at once and leaves the list once its rows have closed (the 150 ms close).

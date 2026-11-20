@@ -219,7 +219,8 @@ describe('the report view', () => {
     push([delta('<to-human>Halfway')]);
     await waitFor(() => expect(records()).toHaveLength(1));
     const kinds = [...document.querySelectorAll('[data-kind]')].map((element) => element.getAttribute('data-kind'));
-    expect(kinds.indexOf('divider')).toBe(kinds.indexOf('record_fold') + 1); // ruling 5: the running turn's line, after the closed record
+    expect(kinds.indexOf('divider')).toBeGreaterThan(kinds.indexOf('record_fold')); // ruling 5: the running turn's line, after the closed record
+    expect(kinds.at(-1)).toBe('divider'); // in its own place, the last row (board ticket 789)
     expect(turnLines()[0].textContent).toMatch(/^Working/);
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('● message …Halfway'); // UX wave U2b (M2): an open message streams under its label
     push([delta(' there.')]);
