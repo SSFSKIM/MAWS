@@ -1350,7 +1350,8 @@ test('(export folder) the last export’s folder, kept as main’s layout key, s
 // B12; UC-14): the window's zoom, main's own layout key `window.zoom` (`{ version: 1, factor }`, absent at 100 %), which a
 // build that does not name the key loads with the file and writes back whole with its own keys. This build zooms to
 // 125 % through View's items, and layout.json holds the key (polled from the file); the peer launches on the profile,
-// opens the library's tab so that it writes its layout whole, and quits: the file still holds the key as written, and
+// folds its sidebar from View's item so that it writes its layout whole (`regions`; every build has the fold, where U7b
+// retired the library's tab), and quits: the file still holds the key as written, and
 // the peer's page read 1 (its `getZoomFactor()` in main; this build's zoom is isolated, so Chromium kept none of it);
 // this build launches again at 125 % (main's factor and the window's zoom store). Skipped only for a peer whose
 // LayoutKeySchema names the key (`layoutSchemaNames`, U7a's form of `namesExportFolder`): a skipped scene is not
@@ -1373,16 +1374,18 @@ test('(zoom, both ways) the window’s zoom, kept as main’s layout key, surviv
     expect(await mainFactorOf(first), `${here.label}'s page at 125 %`).toBe(1.25);
     await s.quit(first);
 
-    // the peer on the same profile: its page at 100 %; a tab opened, so its layout store writes the file whole; a quit
+    // the peer on the same profile: its page at 100 %; its sidebar folded, so its layout store writes the file whole; a quit
     const old = await s.launch({}, peer.root);
     await s.ready(old.page);
     const theirs = await mainFactorOf(old);
     expect(theirs, `${peer.label} opens at 100 %`).toBe(1);
-    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
-    await expect.poll(async () => tabIdsOf(await mainTabsOf(old.page)), { timeout: 20_000, message: `${peer.label} saved its layout with the library's tab` }).toContain('artifacts');
+    await old.maws.app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.setBounds(bounds), WIDE);
+    expect(sidebarFolded(s.userData), 'the sidebar not folded before the peer folds it').not.toBe(true);
+    await menu(old.maws.app, 'sidebar.toggle');
+    await expect.poll(() => sidebarFolded(s.userData), { timeout: 20_000, message: `${peer.label} wrote its fold to layout.json` }).toBe(true);
     await s.quit(old);
     const written = storedLayout(s.userData);
-    expect(tabIdsOf(written['main.tabs']), `${peer.label} wrote layout.json`).toContain('artifacts');
+    expect(sidebarFolded(s.userData), `${peer.label} wrote layout.json`).toBe(true);
     expect(written[WINDOW_ZOOM_KEY], `${peer.label} wrote the file back with the key it does not name`).toEqual({ version: 1, factor: 1.25 });
 
     // this build again: the window at 125 % as it opens
