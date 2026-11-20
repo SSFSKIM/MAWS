@@ -1862,6 +1862,24 @@ describe('a framed file (UX wave U6b-2)', () => {
     await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
   });
 
+  // The branch's third review: an ask in flight may answer from a moment the file was briefly something else (main read
+  // it mid-write and found it unframed). A read that lands during that ask, even one that finds the file as it was, asks
+  // once more after the answer, so the tab does not end failed with no retry.
+  it('an unchanged event read that lands while an ask is out asks once more after it; an unframed answer is retried', async () => {
+    let frameCalls = 0;
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_input, issue) => (++frameCalls === 1 ? ok({ status: 'row', why: 'unframed' }) : issue()) });
+    offs.push(connectCodeEvents());
+    const first = main.hold('layout.frameFile');
+    show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    changed(main); // the file as it was
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    first.release();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[0] }));
+  });
+
   it('frameFailed for a token the entry no longer holds changes nothing', async () => {
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
     offs.push(connectCodeEvents());

@@ -733,4 +733,31 @@ describe('an HTML page’s connectors', () => {
     await waitFor(() => expect(main.callsOf('artifacts.grantConnectorTool')).toEqual([{ artifactId: ID, tool: { ...TOOL, mode: 'read' } }]));
     ports[0]!.close();
   });
+
+  // The branch's third review: main draws a page by its bare id, from the latest other machine it heard the id on before
+  // this Mac's own copy. A page the window cannot tie to the viewer's machine is handed no connector port, so one
+  // machine's page never holds another machine's connector authority (ticket 806 puts the machine in the frame's URL).
+  it('hands no port to a page whose drawn copy may be another machine’s; a page only its own machine is known to hold gets one', async () => {
+    recordArtifactMachine(ID, OTHER_MACHINE, TEST_MACHINE); // another machine holds a copy of the same id
+    try {
+      mount('html'); // this Mac's copy
+      await waitFor(() => expect(frame('html')).not.toBeNull());
+      const refused = pagePorts(frame('html')!);
+      load(frame('html')!);
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(refused).toEqual([]);
+      expect(main.callsOf('connectors.open')).toEqual([]);
+      cleanup();
+
+      mount('html', { machine: OTHER_MACHINE }); // that machine's copy, the only other one known: main draws it
+      await waitFor(() => expect(frame('html')).not.toBeNull());
+      const handed = pagePorts(frame('html')!);
+      load(frame('html')!);
+      await waitFor(() => expect(handed).toHaveLength(1));
+      await waitFor(() => expect(main.callsOf('connectors.open')).toEqual([{ artifactId: ID }]));
+      handed[0]!.close();
+    } finally {
+      resetArtifactMachines();
+    }
+  });
 });

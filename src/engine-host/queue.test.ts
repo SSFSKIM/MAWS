@@ -1386,6 +1386,40 @@ describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
     await kept.saveQueue(ID, { entries: [{ queueId: 'q1', appSessionId: ID, content: 'held', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }], paused: true, pauseReason: 'interrupt' });
     expect((await harness({ store: kept })).queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
   });
+
+  // The branch's third review: an adopted live process may still run the turn its old manager's Stop interrupted (the
+  // fold restored it open), so its empty pause lasts until that turn ends, as the live Stop's phase would have.
+  it('an adopted process whose restored turn is still open keeps the empty interrupt pause until that turn ends', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
+    const t = await harness({ store, recovered: false });
+    t.h.turn = true; // the fold left the interrupted turn open
+    await t.queue.adopt({ written: new Set(), unended: [], ended: new Set() });
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    expect((await t.queue.send('follow-up during the interrupted turn')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    expect(t.writes).toEqual([]); // held: it was sent while the Stop's phase lasted
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+  });
+
+  // The branch's third review: the Stop's phase follows the turn it interrupted. When the inbound drain carries that
+  // turn's end and a successor's start (a steer the hold's deadline left with the engine) before the interrupt's answer
+  // resumes the Stop, the successor is not the interrupted turn: a message queued behind it goes at its end.
+  it('a Stop whose interrupted turn ended and a successor started before its answer was read does not wait on the successor', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.stop({ hold: true }, async () => {
+      t.h.turn = false;
+      await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+      t.h.turn = true; // the successor's `started`, drained before the continuation
+    });
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect((await t.queue.send('follow-up')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes.map((w) => w.message.content)).toEqual(['follow-up']);
+  });
 });
 
 // P2-C start (2026-10-09; the P2-C document, Design §6's row table and M3): the host states each transition of a prompt

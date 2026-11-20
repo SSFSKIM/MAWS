@@ -8,7 +8,7 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { resetArtifactMachines } from '../artifacts/machines';
+import { artifactMachineOf, resetArtifactMachines } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { surfaceTabs } from '../panel/surface-model';
 import { useLayout } from '../stores/layout';
@@ -212,4 +212,27 @@ it('a bare open that guesses local does not mask a later confirmed peer copy', a
   await ipc.invoke('artifacts.get', { artifactId: A }, { machine: OTHER_MACHINE });
   openArtifactTab(A);
   expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
+});
+
+// The branch's third review: a bare link (no source machine) for an id the window has no copy of on record reuses the one
+// machine's tab the strip already holds for it (a tab restored at launch), without taking that tab as a confirmed copy.
+describe('a bare link with no route hint', () => {
+  afterEach(() => resetArtifactMachines());
+
+  it('reuses the strip’s one restored tab of the id on another machine, and records no route', () => {
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    openArtifactTab(A);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${OTHER_MACHINE}:${A}`);
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toHaveLength(1);
+    expect(artifactMachineOf(A)).toBeNull();
+  });
+
+  it('opens this Mac’s copy when the strip holds tabs of the id on more than one machine', () => {
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: OTHER_MACHINE });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: TEST_MACHINE });
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    openArtifactTab(A);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${A}`);
+  });
 });
