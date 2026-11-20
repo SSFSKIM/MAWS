@@ -92,6 +92,40 @@ Each is in the document's Decision Log with its reasons:
 
 Nothing in the build contradicts the owner's answers: Q2 (read-only inheritance), Q3 (record and log only), an outside file linked from Markdown being editable, and a relative link in an outside Markdown file opening its sibling.
 
+## The branch panel's fix wave (added after the first hand-back)
+
+ux-wave's xhigh panel on `8cd4a7479..6ee5cae21` returned "incorrect" with eleven findings. The findings are kept as `panel-findings.json` in the run's workspace, with a copy in `~/.local/share/maws-ux-wave/u6b4c/`. By ux-wave's ruling, nine were fixed and two recorded. The fixes went to one fresh executor, each finding red first. A task review followed, clean after two rounds. Commits `f7e676676..b91266d11`; Decision Log 17 holds the design statements that moved.
+
+**Fixed:**
+- **scalpel-2#1 (P1).** The subagent search counts only rows whose `sessionId` is the asked conversation's and whose `agentId` is the asked agent's.
+- **scalpel-2#3.** `files.follow`'s `from.agent` gains an optional `engineSessionId`, taken at the child mount, within minor 58. The daemon answers `not-linked` without it, and its search names nothing for a conversation that is not the current one.
+- **scalpel-3#1 (P1).** A Markdown proof holds its turn and its place until its transcript lookup settles.
+- **scalpel-3#2.** The subagent search's waiter is aborted when the follow ends.
+- **scalpel-3#3.** A stop check runs before each file-system stage, down to the open's confirmation, the Linux ancestor walk (an optional callback in the shared `fs/no-link.ts`), the not-found check and each read.
+- **scalpel-3#4.** Both root lookups settle before a place is released. This is one insertion in `allowlist.ts` (U8c-2's file; now in §G).
+- **scalpel-4#1.** A link's reopen is held back only by a load that can still land.
+- **scalpel-4#3.** A Save that wrote reissues a newer live load.
+- **scalpel-4#4.** A read-only continuation whose hash changed reaches W1 (g)'s comparison.
+
+**Recorded as tracker rows of 2026-11-19:**
+- sweep#2: one wide folder in the subagent walk.
+- scalpel-4#2: an owed read again drops a queued Load more.
+- The review's remainder of scalpel-2#3: a drill-in remounted after `/clear` while old rows still show labels them with the new conversation. Recording a link that way needs the same random agent id in two conversations.
+
+**Dismissed at the fix review:** the same-ids/different-inode part of scalpel-2#1. ux-wave ruled either binding sound.
+
+**Verified on the VM:**
+- node and web tsc, and eslint;
+- vitest over `src/services/files/`, `src/services/fs/`, `src/shared/files/`, `spine-root`, `tools/code/`, `transcript/view/`, `test/lane-b/` and the tokens guard;
+- `src/shared/machine` and `src/shared/ipc`: green except the two `git-reads` cases of ticket 756;
+- desk-web's typecheck, build and tests (801/801).
+
+The manifest diff is the one property; `routes.json` and `address-paths.json` are unchanged. The gates on the fix wave's head are named in its hand-back.
+
+**Mac scenes the fixes touch:** all four of §H's titled scenes.
+- The sessions subagent scene is the most exposed: the window now sends `engineSessionId`, and the daemon requires matching row ids. Its staged rows carry them.
+- The sessions Markdown scene and both cross-build scenes are touched through the Markdown proof's turn and stop checks, and through the viewer's reopen and Save paths.
+
 ## The scenes ux-wave runs on a Mac
 
 | group | spec | scene, by title |
