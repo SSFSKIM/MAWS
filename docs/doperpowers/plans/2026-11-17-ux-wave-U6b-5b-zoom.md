@@ -438,6 +438,7 @@ No spec file is added. Every scene reads a state it polls for; a scene that read
 | `e2e:terminal`, `e2e/terminal.spec.ts` | new, "zoom: the grid refits and a selection is under the pointer at 125 %" (the child's probe 3) | the pty's reported size after the zoom; the selection's text |
 | `e2e:presentations`, `e2e/presentations-present.spec.ts`, `presentations-export.spec.ts`; `e2e:render-host`, `e2e/render-host.spec.ts` | new: the presenter's window at 100 % while the app is at 150 %; an export made at 150 % equal to one made at 100 %; an artifact's capture the same size at both (the child's probe 5; B12). `e2e:render-host` is a group the cut did not list | the presenter's `getZoomFactor()`; the two exports' page sizes; the two captures' sizes |
 | `e2e:transcript`, `e2e/transcript.spec.ts` | new: at 110 % and 80 % a streaming transcript keeps following while a key is pressed in a side surface (the child's probe 4). A group the cut did not list | the follower at the end after each appended row |
+| `e2e` (the default lane, in the foreground), `e2e/browser-focus.spec.ts` | new (ruled 2026-11-20, Decision Log 22): with the keyboard in a page of the in-app browser, the zoom keys zoom that page alone. The tab's zoom changes and comes back; the app's factor and `layout.zoom { to: 'current' }` stay at 1; no zoom line is drawn (control: View's Zoom In afterwards draws one) (B10) | the tab's zoom; the root's `--app-zoom`; the line's absence, with its control |
 | `e2e:settings`, `e2e/settings.spec.ts` | new step: Settings › Keyboard lists the three rows with no control (B14) | the rows |
 | `e2e:cross-build`, `e2e/cross-build.spec.ts` | "(zoom, both ways)" (M3; B10's relaunch, B12) | as M3 says |
 
@@ -688,7 +689,7 @@ Found while this document was written and reviewed; each changed a decision abov
     4. `expectOnPane` takes the acknowledged rectangle and the page's rectangle from the same sample, and compares the four edges.
     5. Settings reads `settings.json` after View's zoom items have been used, with a known binding as the reader's control.
 
-    The sixth is the record of the acceptance run. Progress now says the unit suite exited 1, and `markdown-runs.test.ts` is set aside as the VM's load: it passes alone 5 of 5, and the architect adds it to the brief's list. §I's rule on `placedOn` names the popup's exception. The Minor, on the presenter scene, polls for the audience and the presenter, as the existing scene does, and is fixed with the rest.
+    The sixth is the record of the acceptance run. Progress now says the unit suite exited 1, and `markdown-runs.test.ts` is set aside as the VM's load: it passes alone 5 of 5, and the architect adds it to the brief's list. §I's rule on `placedOn` names the popup's exception. The Minor, on the presenter scene, polls for the audience and the presenter, as the existing scene does, and is fixed with the rest. Ruled by the architect with the wave: B10's page-focused keys get a scene of their own in `e2e/browser-focus.spec.ts` (§I), since native key handling is beyond jsdom; if it needs a file beyond M3's and that spec, it stays the owner's (row 8).
 
 ## Outcomes & Retrospective
 
