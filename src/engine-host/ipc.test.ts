@@ -625,7 +625,7 @@ describe('session.events of a live launch reaches the transcript before it (tick
     const pagesBefore = async (cursor: EventId): Promise<SessionEvent[]> => {
       const pages: SessionEvent[][] = [];
       for (let earlier: EventId | undefined = cursor; earlier !== undefined; ) {
-        const page = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
+        const page: CommandOutput<'session.events'> = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
         pages.unshift(page.events);
         earlier = page.earlier;
       }
