@@ -11,7 +11,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DelegationResult, DiscardResult, HubHalfResult, HubKeysRead, OrgDelegationRow, OrgView, ProvisioningSecret, ProvisioningSecretReading, ProvisioningSecretWrite } from '@shared/ipc/schema/org';
-import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer } from './test-support';
+import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer, foot, disclose } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -90,13 +90,21 @@ describe('Settings › Org: Delegations (M4c)', () => {
     may = false;
     emit(signing(notSigning));
     await vi.waitFor(() => expect(buttons('ci-runner-')).toEqual([]));
-    expect(within(row('New delegation')).getByText('This Mac can’t sign: create delegations from an admin’s Mac that does.')).toBeTruthy();
+    // the word cut (G170): no New delegation line of its own; the page's one line says who signs
+    expect(document.querySelector('[data-org-new-delegation]')).toBeNull();
+    expect(screen.getByText('View only: owner@example.com signs changes')).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Code destination' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Code destination' })).toBeNull();
   });
 
   it('none yet, a capless one, a delegation with no certified machine, and a member who is no admin reads them without the hub’s side', async () => {
     renderSection(signing(ROOT), withDelegations({ delegations: [] }));
-    expect((await delegationsGroup()).getByText('No delegations yet.')).toBeTruthy();
+    // the word cut (G187): New delegation… stands in the empty line's place where it is offered
+    expect((await delegationsGroup()).queryByText('No delegations yet.')).toBeNull();
+    expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' })).toBeTruthy();
+    resetHarness();
+    renderSection(signing(notSigning), withDelegations({ delegations: [], maySign: false }));
+    expect((await delegationsGroup()).getByText('No delegations yet.')).toBeTruthy(); // nothing stands in its place here
     resetHarness();
     const capless = delegation({ id: D1, prefix: 'ci-', maxUses: null, hub: { expires: IN_23_DAYS, uses: 1, revoked: false } });
     renderSection(signing(ROOT), withDelegations({ delegations: [capless] }));
@@ -111,7 +119,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(within(ci).getByText('no use cap')).toBeTruthy(); // the hub's count is an admin's read
     expect(within(ci).queryByText(/hub/i)).toBeNull();
     expect(screen.queryByRole('group', { name: 'Hub keys' })).toBeNull(); // the key list is an admin's read
-    expect(within(row('New delegation')).getByText('An admin creates delegations from their Org page.')).toBeTruthy();
+    expect(within(foot('new-delegation')).getByText('An admin creates delegations from their Org page.')).toBeTruthy();
     expect(sent('org.provisioningSecret.get')).toEqual([]); // the destination is an admin's who signs
   });
 
@@ -218,7 +226,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(await within(dc).findByText('The code still isn’t stored: Write the code again, or discard it.')).toBeTruthy();
     rewrite = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' }, run: RUN, rev: REV };
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
-    expect(await within(row('New delegation')).findByText(/^Published delegation dc- in version 13\. Its code is version 7, stored /)).toBeTruthy();
+    expect(await within(foot('new-delegation')).findByText(/^Published delegation dc- in version 13\. Its code is version 7, stored /)).toBeTruthy();
     expect(buttons('dc-'), 'published: its unsent actions withdraw before the status says so').toEqual([]);
 
     // Discard, behind its confirmation, names the slot shown and says the hub key goes with it
@@ -230,7 +238,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(within(sheet).getByText(/Discarding it also revokes the hub key minted for it\. Create the delegation again afterwards\./)).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
     await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH }]));
-    expect(await within(row('New delegation')).findByText(/^Discarded version 13\. Its hub key is revoked/)).toBeTruthy();
+    expect(await within(foot('new-delegation')).findByText(/^Discarded version 13\. Its hub key is revoked/)).toBeTruthy();
   });
 
   it('after a relaunch (rewrite false) the unsent row offers only Discard, worded to create it again', async () => {
@@ -295,7 +303,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
     expect(
-      await within(row('New delegation')).findByText(
+      await within(foot('new-delegation')).findByText(
         'Not published: its pending slot was discarded or replaced first, so nothing was published; its code’s version stays in the secret, unused. Create the delegation again if it’s still wanted. · nothing was published',
       ),
     ).toBeTruthy();
@@ -309,7 +317,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     renderSection(signing(PENDING), { ...withDelegations({ delegations: [UNSENT] }), 'org.delegation.rewrite': () => rewrite });
     const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
-    expect(await within(row('New delegation')).findByText('Published as version 13, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here. · the hub did not answer')).toBeTruthy();
+    expect(await within(foot('new-delegation')).findByText('Published as version 13, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here. · the hub did not answer')).toBeTruthy();
     expect(within(dc).queryByText(/Not written/)).toBeNull();
     // the answer outran its status (separate pipes): the status still says held at an earlier rev, and the row offers
     // nothing for the slot that is now exposed (branch fix wave, R6)
@@ -383,8 +391,8 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
       },
     });
     await delegationsGroup();
-    const create = await within(row('New delegation')).findByRole('button', { name: 'Create a delegation…' });
-    await vi.waitFor(() => expect(within(row('New delegation')).getByText('Set the code destination below first.')).toBeTruthy());
+    const create = await within(foot('new-delegation')).findByRole('button', { name: 'New delegation…' });
+    await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('Set the code destination below first.')).toBeTruthy());
     expect((create as HTMLButtonElement).disabled).toBe(true);
 
     const destination = row('Code destination');
@@ -401,9 +409,9 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     fireEvent.click(save);
     await vi.waitFor(() => expect(sent('org.provisioningSecret.set')).toEqual([{ value: DEST }]));
     expect(await within(row('Code destination')).findByText('Saved.')).toBeTruthy();
-    await vi.waitFor(() => expect((within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }) as HTMLButtonElement).disabled).toBe(false));
-    expect(within(row('New delegation')).queryByText('Set the code destination below first.')).toBeNull();
-    fireEvent.click(within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }));
+    await vi.waitFor(() => expect((within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(within(foot('new-delegation')).queryByText('Set the code destination below first.')).toBeNull();
+    fireEvent.click(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }));
     expect(await screen.findByRole('dialog', { name: 'Create a delegation' })).toBeTruthy();
   });
 
@@ -413,6 +421,8 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
       'org.provisioningSecret.set': (input: { value: ProvisioningSecret | null }) => (input.value === null ? { ok: true } : ({ ok: false, reason: 'io', detail: 'EACCES' } satisfies ProvisioningSecretWrite)),
     });
     await delegationsGroup();
+    // a set destination waits behind the chevron beside the Delegations heading (the word cut, G188)
+    disclose(document.querySelector<HTMLElement>('[data-org-section="delegations"]')!, 'Code destination');
     const destination = row('Code destination');
     await vi.waitFor(() => expect((within(destination).getByRole('textbox', { name: 'Project' }) as HTMLInputElement).value).toBe(DEST.project));
     expect((within(destination).getByRole('textbox', { name: 'Secret' }) as HTMLInputElement).value).toBe(DEST.secret);
@@ -439,25 +449,25 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     const destination = row('Code destination');
     expect(await within(destination).findByText('The destination’s file is damaged (version 2 is not this build’s): Reset it, then enter the destination again.')).toBeTruthy();
     expect(within(destination).queryByRole('textbox')).toBeNull(); // never edited over
-    expect(within(row('New delegation')).getByText('Reset the code destination below first.')).toBeTruthy();
+    expect(within(foot('new-delegation')).getByText('Reset the code destination below first.')).toBeTruthy();
     fireEvent.click(within(destination).getByRole('button', { name: 'Reset…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Reset the code destination?' });
     expect(sent('org.provisioningSecret.reset')).toEqual([]);
     fireEvent.click(within(sheet).getByRole('button', { name: 'Reset' }));
     await vi.waitFor(() => expect(sent('org.provisioningSecret.reset')).toEqual([{ confirmed: true }]));
     expect(await within(row('Code destination')).findByRole('textbox', { name: 'Project' })).toBeTruthy(); // read again: unset
-    expect(within(row('New delegation')).getByText('Set the code destination below first.')).toBeTruthy();
+    expect(within(foot('new-delegation')).getByText('Set the code destination below first.')).toBeTruthy();
   });
 
   it('Create waits while a delegation is being created, and while a signed state is pending, saying why', async () => {
     renderSection(signing(ROOT, { delegations: { creating: true, rev: 0 } }), { 'org.provisioningSecret.get': () => DEST });
     await delegationsGroup();
-    await vi.waitFor(() => expect(within(row('New delegation')).getByText('A delegation is being created, in this window or another: Create once it’s done.')).toBeTruthy());
-    expect((within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }) as HTMLButtonElement).disabled).toBe(true);
+    await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('A delegation is being created, in this window or another: Create once it’s done.')).toBeTruthy());
+    expect((within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }) as HTMLButtonElement).disabled).toBe(true);
     emit(signing(PENDING));
-    await vi.waitFor(() => expect(within(row('New delegation')).getByText('A signed state is pending: publish or discard it (Org › Pending) first.')).toBeTruthy());
+    await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('A signed state is pending: publish or discard it (Org › Pending) first.')).toBeTruthy());
     emit(signing(ROOT));
-    await vi.waitFor(() => expect((within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }) as HTMLButtonElement).disabled).toBe(false));
+    await vi.waitFor(() => expect((within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }) as HTMLButtonElement).disabled).toBe(false));
     await act(async () => {});
   });
 });

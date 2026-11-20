@@ -8,7 +8,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import type { SignResult } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
-import { DAY, DEVICE, FINGERPRINT, ME, MINI, REGISTERED, ROOT, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, type Signer } from './test-support';
+import { DAY, DEVICE, FINGERPRINT, ME, MINI, REGISTERED, ROOT, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, type Signer, disclose } from './test-support';
 
 // The file's own clock (see YouGroup.test.tsx). Only Date is faked; timers stay real for the waits.
 vi.hoisted(() => {
@@ -49,12 +49,14 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     expect(within(signer).getByText('Make this Mac a root: run')).toBeTruthy();
     // The id after `--`: a base64url id may start with '-', which the admin's option parser would take for an option.
     expect(within(signer).getByText(`deployment admin root add -- ${DEVICE}`).className).toContain('font-mono');
-    expect(within(signer).getByText(new RegExp(FINGERPRINT))).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Signer', description: new RegExp(FINGERPRINT) })).toBe(signer); // its note (the word cut)
     expect(within(signer).queryByRole('button')).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull(); // a marked, listed device is offered no new keys
 
     emit(signing(ROOT));
-    expect(within(row('Signer')).getByText('This Mac signs the org state.')).toBeTruthy();
+    // the word cut (G183): a root that signs has no Signer row; This Mac's chip says it
+    expect(screen.queryByRole('group', { name: 'Signer' })).toBeNull();
+    expect(within(row('This Mac')).getByText('signs')).toBeTruthy();
     expect(screen.queryByText(/root add/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Re-sign now' })).toBeNull(); // not due
 
@@ -64,20 +66,21 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
 
   it('the quiet weekly line: the org state’s age with Re-sign now, and the sign’s outcome in one line', async () => {
     renderSection(signing({ ...ROOT, due: true, ageDays: 8 }), { 'org.resign': () => ({ ok: false, reason: 'hub', detail: '503' }) });
-    const signer = await found('Signer');
-    expect(within(signer).getByText('This Mac signs the org state.')).toBeTruthy();
+    const signer = await found('Signer'); // the weekly line brings the row back (the word cut, G183)
+    expect(within(signer).queryByText('This Mac signs the org state.')).toBeNull();
+    expect(within(row('This Mac')).getByText('signs')).toBeTruthy();
     const line = within(signer).getByText('Org state is 8 days old');
     expect(line.className).not.toContain('text-warning'); // a quiet line, not a banner
     fireEvent.click(within(signer).getByRole('button', { name: 'Re-sign now' }));
     await vi.waitFor(() => expect(sent('org.resign')).toEqual([undefined]));
-    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not signed · The hub didn’t take it. · 503');
+    expect((await within(await found('Signer')).findByRole('alert')).textContent).toBe('Not signed · The hub didn’t take it. · 503');
   });
 
   it('Re-sign now: a signed version says so; a Touch ID cancel says nothing', async () => {
     let answer: SignResult = { ok: true, version: 13 };
     renderSection(signing({ ...ROOT, due: true, ageDays: 7 }), { 'org.resign': () => answer });
     fireEvent.click(within(await found('Signer')).getByRole('button', { name: 'Re-sign now' }));
-    expect(await within(row('Signer')).findByText('Signed version 13.')).toBeTruthy();
+    expect(await within(await found('Signer')).findByText('Signed version 13.')).toBeTruthy();
     answer = { ok: false, reason: 'cancelled' };
     fireEvent.click(within(row('Signer')).getByRole('button', { name: 'Re-sign now' }));
     await vi.waitFor(() => expect(sent('org.resign')).toHaveLength(2));
@@ -95,7 +98,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     fireEvent.click(within(revocations).getByRole('button', { name: 'Revoke again…' }));
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Sign these revocations?' })).getByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([{ offer: DIGEST_A }]));
-    expect(await within(row('Signer')).findByText('Signed version 13.')).toBeTruthy();
+    expect(await within(await found('Signer')).findByText('Signed version 13.')).toBeTruthy();
 
     emit(signing({ ...ROOT, offer: offerOf({ superseded: 0, lines: [], warnings: [], withheld: [withheld] }) }));
     expect(within(row('Revocations')).queryByRole('button')).toBeNull();
@@ -132,7 +135,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     expect(within(sheet).queryByText(OFFER_LINES[1])).toBeNull();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([{ offer: DIGEST_B }]));
-    expect((await within(row('Signer')).findByRole('alert')).textContent).toContain('What would be signed changed since it was shown.');
+    expect((await within(await found('Signer')).findByRole('alert')).textContent).toContain('What would be signed changed since it was shown.');
   });
 
   it('owing machines per version, a too-large one named; a discarded proposal where it may still be held', async () => {
@@ -185,7 +188,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
     await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH_A }]));
-    expect(await within(row('Signer')).findByText('Discarded version 13. The hub holds another version 13 (a fork); its head is version 13.')).toBeTruthy();
+    expect(await within(await found('Signer')).findByText('Discarded version 13. The hub holds another version 13 (a fork); its head is version 13.')).toBeTruthy();
   });
 
   it('a refused slot that isn’t a fork offers Discard too; a never-sent one is worded so; a slot merely waiting offers none', async () => {
@@ -206,7 +209,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     expect(within(sheet).getByText('Version 13 was never sent: nothing was posted, so nothing can show it as a fork.')).toBeTruthy();
     expect(within(sheet).queryByText(/A later sign/)).toBeNull();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
-    expect(await within(row('Signer')).findByText('Discarded version 13. It was never sent.')).toBeTruthy();
+    expect(await within(await found('Signer')).findByText('Discarded version 13. It was never sent.')).toBeTruthy();
 
     emit(signing({ ...ROOT, pending: { version: 14, hash: HASH_C, fork: false, exposed: true, refused: null, delegation: null, held: false } }));
     expect(within(row('Pending')).getByText('Version 14 is signed and waits for the hub.')).toBeTruthy();
@@ -217,7 +220,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null, delegation: null, held: false } }), { 'org.discardPending': () => ({ ok: false, reason: 'held' }) });
     fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard version 13?' })).getByRole('button', { name: 'Discard' }));
-    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The hub holds version 13 now: it settled.');
+    expect((await within(await found('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The hub holds version 13 now: it settled.');
   });
 
   it('signing: the problem in words, a successor sent before the damage named; Reset behind its confirmation', async () => {
@@ -266,7 +269,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null, delegation: null, held: false } }), { 'org.discardPending': () => ({ ok: false, reason: 'stale' }) });
     fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard version 13?' })).getByRole('button', { name: 'Discard' }));
-    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The pending state changed since you confirmed: nothing was discarded.');
+    expect((await within(await found('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The pending state changed since you confirmed: nothing was discarded.');
   });
 
   it('two discarded proposals of one version are two lines', async () => {
@@ -304,7 +307,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change: { kind: 'device.remove', member: ME, device: OLD_DEVICE }, digest: 'oldDigest' }]));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(await within(row('Signer')).findByText('Signed version 13.')).toBeTruthy();
+    expect(await within(await found('Signer')).findByText('Signed version 13.')).toBeTruthy();
 
     emit(signing({ oldDevice: OLD_DEVICE })); // not a root: the line, with nothing to press
     expect(within(row('Old device')).queryByRole('button')).toBeNull();
@@ -317,19 +320,23 @@ describe('Settings › Org: Org (M4a)', () => {
   it('the org’s id, its roots as rootLines reads them, an unlisted root named so, and the recovery key’s id', async () => {
     renderSection(signing(ROOT));
     const org = await group('org');
+    await found('mini'); // the view is drawn
+    expect(within(org).queryByRole('group', { name: 'Roots' })).toBeNull(); // behind Details (the word cut, G180)
+    disclose(org, 'Details');
     expect(within(org).getByRole('group', { name: 'Org' })).toBeTruthy();
     const roots = await found('Roots');
     expect(within(roots).getByText('stepUpKid0001').className).toContain('font-mono');
     expect(within(roots).getByText(`owner@example.com · device ${DEVICE.slice(0, 8)} (Mac)`)).toBeTruthy();
     expect(within(roots).getByText('orphanKid0002')).toBeTruthy();
     expect(within(roots).getByText('no listed device')).toBeTruthy();
-    expect(within(row('Recovery key')).getByText('recoveryKid00001').className).toContain('font-mono');
-    expect(within(org).getByRole('group', { name: 'Signer' })).toBeTruthy();
+    expect(within(await found('Recovery key')).getByText('recoveryKid00001').className).toContain('font-mono');
+    expect(within(org).queryByRole('group', { name: 'Signer' })).toBeNull(); // a root that signs: This Mac's chip says it (G183)
   });
 
   it('the root add guidance stays in the Org group, the fingerprint in its note', async () => {
     renderSection(signing({}));
     const org = await group('org');
-    expect(within(within(org).getByRole('group', { name: 'Signer' })).getByText(new RegExp(FINGERPRINT))).toBeTruthy();
+    const signer = within(org).getByRole('group', { name: 'Signer' });
+    expect(screen.getByRole('group', { name: 'Signer', description: new RegExp(FINGERPRINT) })).toBe(signer); // its note (the word cut)
   });
 });

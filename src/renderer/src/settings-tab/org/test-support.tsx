@@ -1,7 +1,8 @@
 // The Org page's suites' harness (P5 O8 M4a; the split's "Their tests split with them"): a fake `window.maws` standing for
 // main's `org.*`, the page mounted through its shell, and the fixtures every group's suite reads. Each suite freezes Date
 // itself (`vi.hoisted` is per file), so the fixtures' ages below are read against that clock.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { vi } from 'vitest';
 import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
@@ -181,6 +182,33 @@ export const group = async (name: 'you' | 'people' | 'machines' | 'org') => {
   await screen.findByRole('heading', { level: 4, name: { you: 'You', people: 'People', machines: 'Machines', org: 'Org' }[name] });
   return document.querySelector<HTMLElement>(`[data-org-group="${name}"]`)!;
 };
+
+/** The word cut (G162, G163, G173): the actions a row's "…" menu named `menu` offers, the menu closed again after. */
+export async function menuItems(scope: HTMLElement, menu: string): Promise<string[]> {
+  const user = userEvent.setup();
+  await user.click(within(scope).getByRole('button', { name: menu }));
+  const items = (await screen.findAllByRole('menuitem')).map((item) => item.textContent ?? '');
+  await user.keyboard('{Escape}');
+  return items;
+}
+/** The same menu's `item`, chosen. */
+export async function choose(scope: HTMLElement, menu: string, item: string) {
+  await userEvent.setup().click(within(scope).getByRole('button', { name: menu }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: item }));
+}
+/** The word cut (G178, G187): the line that ends the Machines group (Enroll a machine…) or the delegations (New
+ * delegation…), labelled by nothing, with the outcome of the group's acts. */
+export function foot(name: 'enroll' | 'new-delegation'): HTMLElement {
+  const line = document.querySelector<HTMLElement>(`[data-org-${name}]`);
+  if (line === null) throw new Error(`no ${name} line drawn`);
+  return line;
+}
+export const findFoot = (name: 'enroll' | 'new-delegation') => vi.waitFor(() => foot(name));
+/** The word cut (G156, G171, G180, G188): open what waits behind the chevron named `label`. */
+export function disclose(scope: HTMLElement, label: string) {
+  const chevron = within(scope).getByRole('button', { name: label });
+  if (chevron.getAttribute('aria-expanded') !== 'true') fireEvent.click(chevron);
+}
 
 export function resetHarness() {
   cleanup();

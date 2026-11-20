@@ -12,7 +12,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { DELEGATION_MAX_USES, DELEGATION_TTL_DAYS, type DelegationResult, type DelegationRun, type OrgDelegationRow, type ProvisioningSecret } from '@shared/ipc/schema/org';
-import { ANA, ME, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer } from './test-support';
+import { ANA, ME, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer, foot, findFoot } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -61,7 +61,7 @@ function deferred<T>() {
 
 async function openSheet() {
   await group('org');
-  const create = await within(await found('New delegation')).findByRole('button', { name: 'Create a delegation…' });
+  const create = await within(await findFoot('new-delegation')).findByRole('button', { name: 'New delegation…' });
   await vi.waitFor(() => expect((create as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(create);
   return screen.findByRole('dialog', { name: 'Create a delegation' });
@@ -100,7 +100,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     fireEvent.click(createButton(sheet));
     await vi.waitFor(() => expect(sent('org.delegation.create')).toEqual([{ label: 'devcloud VMs', prefix: 'dc-', ttlDays: 30, maxUses: 5, owners: [ME, ANA] }]));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('New delegation')).getByText(/^Created delegation dc-\. Signed version 13\. Its code is version 7, stored Oct 28, /)).toBeTruthy();
+    expect(within(foot('new-delegation')).getByText(/^Created delegation dc-\. Signed version 13\. Its code is version 7, stored Oct 28, /)).toBeTruthy();
   });
 
   it('uncapped sends no cap, and the org’s admins may own it', async () => {
@@ -162,7 +162,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     fireEvent.click(again);
     await vi.waitFor(() => expect(sent('org.delegation.rewrite')).toEqual([{ generation: 1, id: ID, hash: HASH }]));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('New delegation')).getByText(/^Created delegation dc-\. Signed version 13\. Its code is version 7, stored /)).toBeTruthy();
+    expect(within(foot('new-delegation')).getByText(/^Created delegation dc-\. Signed version 13\. Its code is version 7, stored /)).toBeTruthy();
   });
 
   it('signed and its code stored, but its publish refused: Discard only, said as such, with no Write again', async () => {
@@ -355,7 +355,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     expect(within(sheet).queryByRole('button', { name: 'Write the code again' })).toBeNull();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('New delegation')).queryByText(/Created delegation/)).toBeNull();
+    expect(within(foot('new-delegation')).queryByText(/Created delegation/)).toBeNull();
   });
 
   it('an ended run’s late refusal, under a sign-in that ended, offers no Write the code again', async () => {

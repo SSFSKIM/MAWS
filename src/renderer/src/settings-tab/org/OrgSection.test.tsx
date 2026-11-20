@@ -23,9 +23,11 @@ afterEach(resetHarness);
 describe('Settings › Org', () => {
   it('none: the code field signs in with the trimmed code, clears the field and never shows the code back', async () => {
     renderSection({ state: 'none' });
-    expect(await screen.findByText('This Mac isn’t signed in to an org.')).toBeTruthy();
-    expect(within(row('Pairing code')).getByText(/deployment admin pair --class native-mac/)).toBeTruthy();
-    expect(within(row('Pairing code')).getByText(/an admin pairs it from their Org page \(Pair a device\)/)).toBeTruthy();
+    expect(await screen.findByText('Not signed in')).toBeTruthy();
+    fireEvent.click(within(row('Org')).getByRole('button', { name: 'Sign in…' })); // the word cut (G148): it opens the field
+    // its note (G149), the row's description
+    expect(screen.getByRole('group', { name: 'Pairing code', description: /deployment admin pair --class native-mac/ })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Pairing code', description: /an admin pairs it from their Org page \(Pair a device\)/ })).toBeTruthy();
     const field = within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }) as HTMLInputElement;
     const button = within(row('Pairing code')).getByRole('button', { name: 'Sign in' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
@@ -41,6 +43,7 @@ describe('Settings › Org', () => {
 
   it('one Sign in under StrictMode sends one org.register and no org.cancel, through the browser, checking and approval', async () => {
     renderSection({ state: 'none' }, {}, true);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in…' }));
     const field = (await screen.findByRole('textbox', { name: 'Pairing code' })) as HTMLInputElement;
     fireEvent.change(field, { target: { value: CODE } });
     fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Sign in' }));
@@ -58,6 +61,7 @@ describe('Settings › Org', () => {
 
   it('Enter sends too; a refusal from the command is one line under the field, worded by its code', async () => {
     renderSection({ state: 'none' }, { 'org.register': () => ({ ok: false, reason: { code: 'not-member', detail: 'someone@example.com' } }) });
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in…' }));
     const field = (await screen.findByRole('textbox', { name: 'Pairing code' })) as HTMLInputElement;
     fireEvent.change(field, { target: { value: CODE } });
     fireEvent.keyDown(field, { key: 'Enter' });
@@ -88,7 +92,8 @@ describe('Settings › Org', () => {
 
   it('development: the session comes from MAWS_DEV_ORG', async () => {
     renderSection({ state: 'development', org: 'org-dev', member: 'dev-member', device: 'dev-device' });
-    expect(within(await found('Development')).getByText('This session comes from MAWS_DEV_ORG.')).toBeTruthy();
+    await found('Development');
+    expect(screen.getByRole('group', { name: 'Development', description: 'This session comes from MAWS_DEV_ORG.' })).toBeTruthy(); // its note (the word cut)
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
@@ -104,7 +109,7 @@ describe('Settings › Org', () => {
     await vi.waitFor(() => expect(sent('org.status')).toHaveLength(1));
     await act(async () => {});
     expect(screen.getByText('This Mac is no longer in the org.')).toBeTruthy();
-    expect(screen.queryByText('This Mac isn’t signed in to an org.')).toBeNull();
+    expect(screen.queryByText('Not signed in')).toBeNull();
   });
 });
 
@@ -128,7 +133,7 @@ describe('Settings › Org: the page (M4a)', () => {
 
   it('the view is read again at each org.changed, and not before a registration', async () => {
     renderSection({ state: 'none' });
-    await found('Pairing code');
+    await screen.findByRole('button', { name: 'Sign in…' });
     expect(sent('org.view')).toEqual([]);
     emit(signing(ROOT));
     await vi.waitFor(() => expect(sent('org.view')).toHaveLength(1));
@@ -139,6 +144,6 @@ describe('Settings › Org: the page (M4a)', () => {
   it('a refusal that names no attempt still shows, in a row of its own, never under a control', async () => {
     renderSection({ state: 'none', refused: { code: 'keys', detail: 'keys.json is gone' } });
     expect(within(await found('Refused')).getByRole('alert').textContent).toBe('This Mac’s device keys couldn’t be used. · keys.json is gone');
-    expect(within(row('Pairing code')).queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Pairing code' })).toBeNull(); // the word cut (G148): not drawn before Sign in…
   });
 });

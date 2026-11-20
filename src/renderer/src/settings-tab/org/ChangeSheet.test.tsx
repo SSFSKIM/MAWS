@@ -5,7 +5,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrgChange, PreviewResult, SignResult } from '@shared/ipc/schema/org';
-import { ANA, ANA_MAC, BEN, BEN_WEB, CAT, ME, MINI, ROOT, VIEW, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { ANA, ANA_MAC, BEN, BEN_WEB, CAT, ME, MINI, ROOT, VIEW, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, foot, choose } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -17,10 +17,13 @@ afterAll(() => {
 afterEach(resetHarness);
 
 const WARNING = 'ben@example.com owns no machine and no delegation after this';
-// Opens `button` on `member`'s row, once the page and its view are drawn.
+// Opens `button` on `member`'s row, once the page and its view are drawn: from the person's "…" menu, or a device's
+// actions from its line's (the word cut, G162, G163).
 async function press(member: string, button: string) {
   await group('people');
-  fireEvent.click(await within(row(member)).findByRole('button', { name: button }));
+  const person = await found(member);
+  const menu = ['Remove device…', 'Make a root…'].includes(button) ? within(person).getAllByRole('button', { name: /^Actions for (Mac|browser) / })[0]!.getAttribute('aria-label')! : `Actions for ${member}`;
+  await choose(person, menu, button);
 }
 const previewed = (change: OrgChange, lines: string[], warnings: string[] = [], digest = 'digest-1'): PreviewResult => ({ ok: true, change, lines, warnings, digest });
 
@@ -153,8 +156,9 @@ describe('Settings › Org: the change sheet (M4a)', () => {
 });
 
 describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
+  // A machine's action, from its row's "…" menu (the word cut, G173).
   async function pressOn(machine: string, button: string) {
-    fireEvent.click(await within(await found(machine)).findByRole('button', { name: button }));
+    await choose(await found(machine), `Actions for ${machine}`, button);
   }
 
   it('Owners…: the org’s admins or people ticked from the members, a former owner kept until unticked; Review waits for a change, then the preview signs it', async () => {
@@ -186,7 +190,7 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change: { kind: 'machine.owners', ref: MINI, owners: [ME, BEN] }, digest: 'digest-owners' }]));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('Enroll a machine')).getByText('Signed version 13.')).toBeTruthy();
+    expect(within(foot('enroll')).getByText('Signed version 13.')).toBeTruthy();
   });
 
   it('Owners…: a person ticked who leaves the org mid-edit stays listed and ticked, as a former member, never hidden in the change', async () => {
@@ -284,7 +288,7 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     await vi.waitFor(() => expect(sent('org.change')).toHaveLength(1));
     fireEvent.click(within(owners).getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    fireEvent.click(within(row('mini')).getByRole('button', { name: 'Drop…' }));
+    await choose(row('mini'), 'Actions for mini', 'Drop…');
     const drop = await screen.findByRole('dialog', { name: 'Drop mini?' });
     await act(async () => signed({ ok: true, version: 13 }));
     expect(screen.getByRole('dialog', { name: 'Drop mini?' })).toBe(drop);
@@ -306,7 +310,7 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     expect(screen.getByRole('dialog', { name: 'Drop mini?' })).toBe(sheet);
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('Enroll a machine')).queryByText('Signed version 13.')).toBeNull();
+    expect(within(foot('enroll')).queryByText('Signed version 13.')).toBeNull();
   });
 
   it('a long member list scrolls inside the owners field, so Review and Cancel stay in the sheet', async () => {
@@ -382,7 +386,7 @@ describe('Settings › Org: the change sheet’s delegation fields (M4c)', () =>
     fireEvent.click(await within(sheet).findByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change, digest: 'digest-renew' }]));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('New delegation')).getByText('Signed version 13.')).toBeTruthy();
+    expect(within(foot('new-delegation')).getByText('Signed version 13.')).toBeTruthy();
   });
 
   it('Drop…: the preview’s lines and drops-delegation’s warning, naming its machines and the id and prefix reserved for good', async () => {
