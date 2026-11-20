@@ -674,8 +674,10 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.exportConversation', read('export_conversation'));
   handle('session.getStatus', read('get_status'));
   handle('session.mcpStatus', async (input) => {
+    const session = table.get(input.appSessionId); // ticket 619: the answer is the asked session's servers now
+    const asked = session?.mcpAsked();
     const answer = await read('mcp_status')(input);
-    table.get(input.appSessionId)?.noteMcpStatus(answer); // ticket 619: the session's servers now
+    if (session !== undefined && asked !== undefined && table.get(input.appSessionId) === session) session.noteMcpStatus(answer, asked);
     return rendererMcpStatus(answer); // P3-H: never a header value
   });
   // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone; an engine refusal answers in its words

@@ -919,10 +919,14 @@ export class EngineSession {
     this.touch();
   }
 
-  // Ticket 619: an mcp_status answer (this session's own reads and a page's alike) is its servers now, published when they
-  // changed.
-  noteMcpStatus(answer: McpStatusResponse): void {
-    if (this.tracker.applyMcpStatus(answer)) this.touch();
+  // Ticket 619: an mcp_status answer (this session's own read and a page's alike) is its servers now, published when they
+  // changed, unless a newer report came since it was asked (`mcpAsked()` then).
+  mcpAsked(): number {
+    return this.tracker.mcpRevision;
+  }
+
+  noteMcpStatus(answer: McpStatusResponse, asked: number): void {
+    if (this.tracker.applyMcpStatus(answer, asked)) this.touch();
   }
 
   // E8 (D-13): a successful reload_plugins answer, published as the status and the catalogue an init frame would publish.
@@ -2101,8 +2105,9 @@ export class EngineSession {
   private async readMcpServers(): Promise<void> {
     const client = this.client;
     if (client === null) return;
+    const asked = this.mcpAsked();
     try {
-      this.noteMcpStatus(await mcpStatus(client, {}));
+      this.noteMcpStatus(await mcpStatus(client, {}), asked);
     } catch (error) {
       if (!(error instanceof ControlError && error.code === 'replay_unrecorded')) this.log(`mcp_status for the session's servers failed: ${messageOf(error)}`);
     }
