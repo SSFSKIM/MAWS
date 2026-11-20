@@ -62,6 +62,9 @@ export interface MessageQueueDeps {
   // P4-A3: the content a submission's frame carries, made from the entry's (the linked reads); the entry keeps its own.
   // A steer's frame is written as it is: its write must stay ordered with a stop's hold.
   prepare?: (content: SendContent) => Promise<Prepared>;
+  // Ticket 790: a host sequence the queue's pause also holds (clear and implement), so an interrupt pause is not
+  // empty while one is staged; absent, none
+  holdsSequence?: () => boolean;
 }
 
 // P4-A3: a submission's prepared content, and what keeps or undoes the preparation's effects: `settle(true)` once that
@@ -96,6 +99,7 @@ export class MessageQueue {
   // exit abandons what is left, so no prompt the engine was handed outlives the process unrecorded
   private readonly unended = new Set<MessageUuid>();
   private preparing: QueueEntry | null = null; // P4-A3: the submission whose frame is being prepared (the queue is busy)
+  private stopping = 0; // ticket 790: Stops whose pause and hold (`stop`) are still running
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -157,6 +161,7 @@ export class MessageQueue {
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
       }
       this.settleAfterExit();
+      this.endEmptyInterruptPause(); // ticket 790: a Stop's pause another launch or build left with nothing in it
       if (prior !== null) this.journal({ event: 'queue', action: RECOVERED_ACTION }); // P2-C: the earlier launches' leftovers are on record from here
       await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
       this.deps.onPauseChange?.(this.releasePaused);
@@ -203,6 +208,7 @@ export class MessageQueue {
         if (!this.paused) this.pauseFor('state_corrupt');
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session went on without them.`);
       }
+      this.endEmptyInterruptPause(); // ticket 790: as at a recovery
       await this.persist();
       this.deps.onPauseChange?.(this.releasePaused);
     });
@@ -212,6 +218,7 @@ export class MessageQueue {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    this.endEmptyInterruptPause(); // ticket 790: saved with this entry, so a message queued behind a turn goes at its end
     // Stop holds the text already waiting, not a fresh instruction written after the turn stopped. This one
     // submission may bypass that interrupt pause, without resuming the older entries. Other pauses retain FIFO.
     const interruptPauseVersion = this.releasePaused && this.pauseReason === 'interrupt' ? this.pauseVersion : undefined;
@@ -257,6 +264,7 @@ export class MessageQueue {
       this.entries.splice(index, 0, entry);
       throw error;
     }
+    if (this.endEmptyInterruptPause()) await this.persist().catch((error: unknown) => this.log(`the empty pause's end not saved: ${messageOf(error)}`)); // ticket 790: the last held row removed
   }
 
   // The composer's Resume is setPaused(false), which also submits the head when the session is not busy.
@@ -291,6 +299,23 @@ export class MessageQueue {
     }
     this.pauseFor(reason); // C7: through pauseFor
     await this.persist();
+  }
+
+  // Ticket 790: the Stop's part in the queue (the session's `interrupt`): the interrupt pause, then with `hold` every
+  // waiting `next` steer held (holdAll). An interrupt pause holds what waited at the Stop; once the Stop's phase is over
+  // and it holds nothing (no queued or unacknowledged entry, no steer being withdrawn, no host sequence staged) it ends,
+  // so a message queued later behind a turn goes at that turn's end instead of waiting for a Resume. While a Stop runs
+  // the pause never ends this way, so whatever it holds (a message being queued or submitted as the Stop arrives
+  // among them) stays held.
+  async stop(opts: { hold: boolean }): Promise<void> {
+    this.stopping++;
+    try {
+      await this.pause('interrupt');
+      if (opts.hold) await this.holdAll();
+    } finally {
+      this.stopping--;
+    }
+    if (this.endEmptyInterruptPause()) await this.persist().catch((error: unknown) => this.log(`the empty pause's end not saved: ${messageOf(error)}`));
   }
 
   // Steer: written at once, never entering the app queue (§4.2). On 2.1.283 `now` (the command's default)
@@ -537,6 +562,7 @@ export class MessageQueue {
     }
     // flushed: the steer is the engine's now and the entry leaves the app queue
     this.entries = this.entries.filter((e) => e !== entry);
+    this.endEmptyInterruptPause(); // ticket 790: the last held row sent now
     await this.persist().catch((e: unknown) => this.log(`promoted entry's removal not saved (a restart recovers it as uncertain): ${messageOf(e)}`));
     return { messageUuid: uuid };
   }
@@ -781,6 +807,22 @@ export class MessageQueue {
     this.journal({ event: 'queue', action: 'pause', reason });
   }
   // C7 end
+
+  // Ticket 790: an interrupt pause that holds nothing ends (`stop`'s rule), in memory and journaled; the caller's next
+  // save carries it. A queue loaded paused that way, from a state file another launch or build left, ends it too. True
+  // when it ended.
+  private endEmptyInterruptPause(): boolean {
+    if (!this.loaded || !this.paused || !this.releasePaused || this.pauseReason !== 'interrupt') return false;
+    if (this.stopping > 0 || this.withdrawing.size > 0 || this.deps.holdsSequence?.()) return false;
+    if (this.entries.some((e) => e.state === 'queued' || e.state === 'submitting')) return false; // a submission not yet acknowledged may still be held back
+    ++this.pauseVersion;
+    this.paused = false;
+    this.releasePaused = false;
+    this.pauseReason = null;
+    this.journal({ event: 'queue', action: 'resume', reason: 'empty' });
+    this.deps.onPauseChange?.(false);
+    return true;
+  }
 
   // P2-C: a `revert` row names the uuid that never reached the engine (a submission or a promotion whose persist or write
   // failed, or whose process stopped being ready before the write).

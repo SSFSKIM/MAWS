@@ -484,6 +484,7 @@ export class EngineSession {
       sendNow: async (messageUuid) => (await interrupt(this.readyClient(), { send_now: true, message_uuid: messageUuid })).send_now, // UX wave U4a (decision 3)
       unsettled: opts.unsettledPrompts, // P2-C
       onPauseChange: (paused) => this.clearAndImplement.setPaused(paused),
+      holdsSequence: () => this.clearAndImplement.holding, // ticket 790
       onChange: (queue) => {
         this.emit('queue', queue);
         this.touch();
@@ -555,8 +556,7 @@ export class EngineSession {
     };
     let response: InterruptResponse;
     try {
-      await this.queue.pause('interrupt');
-      if (opts.holdEngineQueued) await this.queue.holdAll();
+      await this.queue.stop({ hold: opts.holdEngineQueued === true });
       response = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
     } catch (error) {
       if (!(error instanceof ControlTimeout)) settleOwed();
