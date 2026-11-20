@@ -326,7 +326,7 @@ describe('the view manager: the app window’s zoom (U6b-5b, placement 1)', () =
   });
 
   // a view in the staging window for its still is placed back by staging's own return, at the factor of that moment
-  it('leaves a view staged for its still where it is, and the return from staging places it at the new factor', async () => {
+  it('leaves a view staged for its still where it is, across a new factor and a new rect, and the return from staging places it at both', async () => {
     const zoom = { factor: 1 };
     const h = harness({ zoom });
     const { w, sender } = h.win();
@@ -344,10 +344,15 @@ describe('the view manager: the app window’s zoom (U6b-5b, placement 1)', () =
     zoom.factor = 2;
     h.manager.placeAgain(w as unknown as BrowserWindow);
     expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height }); // still staged, at the stage's origin
+    // a device-sized pane redrawn at the new factor sends a new rect meanwhile: recorded and acknowledged, the stage left be
+    const moved = { x: 30, y: 40, width: 200, height: 100 };
+    h.place(sender, tabId, 'p1', moved);
+    expect(h.manager.placedOf(h.store.entry(tabId)!)).toMatchObject({ rect: moved });
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height });
     answer(fakeImage(10));
     await vi.waitFor(() => expect(h.covered()).toHaveLength(1));
     expect(w.children.has(view)).toBe(true);
-    expect(view.bounds).toEqual({ x: 20, y: 40, width: 600, height: 400 }); // the control: back in its window at 200 %
+    expect(view.bounds).toEqual({ x: 60, y: 80, width: 400, height: 200 }); // the control: back in its window, the latest rect at 200 %
   });
 
   it('places nothing again for a released tab', () => {
