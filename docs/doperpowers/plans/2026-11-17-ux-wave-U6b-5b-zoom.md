@@ -658,6 +658,14 @@ Found while this document was written and reviewed; each changed a decision abov
     - **A late startup read yields to a heard change.** Once `layout.zoomChanged` has arrived, `connectZoom` drops the answer to `current`.
     - **The matrix is completed.** The pin and the device box are pinned at 0.5, 0.8, 1.25 and 2. A new `src/main/window.test.ts` pins the `trafficLightPosition` `createWindow` gives a window at the four factors, and `zoom.test.ts` pins S3's live `setWindowButtonPosition`. It passed on arrival, because `createWindow` already read the stored factor: the lights' red stands on the pure `trafficLightsAt` cases and the Mac's `y = 15`. The preset steps are checked against a fixed table.
 
+20. **2026-11-20 (UTC) · M3's start: what becomes of M1's probes, and the tracker rows M2 left.**
+    - **M1's four probe scenes were spike instruments.** M3 removes the cross-build probe, as M3's section says. It also removes each of the other three (`e2e/browser.spec.ts`, `browser-chrome.spec.ts`, `browser-comment.spec.ts`) once the §I scene in the same file asserts that placement. `e2e/support/zoom-probe.ts` goes with them, except what a §I scene still uses. FINDINGS.md cites each probe at the commits that ran it, and the harness under `spikes/zoom-probe/` stays as the spike's record. A probe left in place records only today's readings, which M2 has made wrong.
+    - **The tracker rows M2 adds to M3's record:**
+      - an open or saved comment pin does not follow its element when the page reflows because the view's size in points changed;
+      - a report that moves a view to another window while it is staged for its still takes attach's window-change step, which is older than M2.
+      These come beside the rows "Left over" names and row j.
+    - **The chip against Chromium:** §I's `e2e:browser` scene asserts the chip's text against the page's own `innerWidth` and `innerHeight` at 1.25 and at 2 (Decision Log 19).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
