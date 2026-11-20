@@ -188,7 +188,7 @@ export interface EngineIpcDeps {
   diskEvents?: (appSessionId: AppSessionId, request: HistoryRequest, quiet: boolean) => Promise<HistoryPage>;
   // UX wave, ticket 777: the cursor before a launch's seam in the session's transcript (FsService.historySeam), given the
   // launch's message uuids in order; null when the transcript holds nothing before it. Absent, a live answer has none.
-  diskSeam?: (appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[]>) => Promise<EventId | null>;
+  diskSeam?: (appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[] | null>) => Promise<EventId | null>;
   // C4 end
   // W7: whether a foreign process holds the app session's engine session now, or held it at or after `since` (C4's
   // registry); absent, never
@@ -433,13 +433,21 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // those the stream took after it, read once the transcript has been. A page the journal could not give back in full
   // does not start there, nor can a page cut short that names no message of the launch place the seam; and a bounded
   // answer carries the cursor only within its bound. A failed read of the transcript costs only the cursor.
-  const uuidsOf = (events: readonly SessionEvent[]): MessageUuid[] => events.flatMap((event) => (event.agentId === null ? (messageOf(event) ?? []) : []));
+  // A scheduled turn's prompt is named by its started command before its message streams (the engine's
+  // `command_lifecycle`, which the transcript's prompt row carries the uuid of).
+  const uuidsOf = (events: readonly SessionEvent[]): MessageUuid[] =>
+    events.flatMap((event) => (event.agentId !== null ? [] : event.kind === 'command.lifecycle' ? [event.commandUuid] : (messageOf(event) ?? [])));
   const withEarlier = async (id: AppSessionId, page: EventsSnapshot, maxBytes: number | null): Promise<EventsSnapshot> => {
     if (!deps.diskSeam || page.historyUnavailable === true) return page;
     const held = uuidsOf(page.events);
-    if (held.length === 0 && !page.complete) return page;
     const stream = streamOf(id);
-    const journal = async (): Promise<readonly MessageUuid[]> => [...held, ...uuidsOf((await stream.snapshot(page.lastSeq, null).catch(() => null))?.events ?? [])];
+    // the page's messages and those the ring holds once the transcript is read, never the journal past the ring; a page
+    // cut short that names none places the seam only while the ring holds the launch whole
+    const journal = async (): Promise<readonly MessageUuid[] | null> => {
+      const now = stream.held;
+      if (held.length === 0 && !page.complete && !now.whole) return null;
+      return [...held, ...uuidsOf(now.events)];
+    };
     const earlier = await deps.diskSeam(id, journal).catch(() => null);
     if (earlier === null) return page;
     const answer = { ...page, earlier };

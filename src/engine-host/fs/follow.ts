@@ -247,7 +247,11 @@ export class Follow {
     const exit = seam ? this.seamExit(end) : null;
     if (maxBytes !== null) {
       const page = this.boundedPage(before, end, request.seek ?? null, complete, exit === null ? maxBytes : maxBytes - eventUtf8Bytes(exit));
-      return exit === null ? page : { ...page, events: [...page.events, exit] };
+      if (exit === null) return page;
+      // the seam's last row alone past the budget, left out: the page stays empty, so a reader reads on past it, and its
+      // cursor is the seam's again, now before that row, whose page then ends with the exit
+      if (page.events.length === 0 && page.earlier !== undefined) return { ...page, earlier: `${SEAM}${this.delivered[this.positions.get(page.earlier)! - 1]!.id}` as EventId };
+      return { ...page, events: [...page.events, exit] };
     }
     const start = this.windowStart(end);
     const sought = request.seek ? soughtIn(this.delivered, request.seek, start, end) : null;
