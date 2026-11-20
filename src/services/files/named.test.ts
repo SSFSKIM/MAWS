@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, openSync, readdirSync, readFileSync } from 'node:fs';
 import { cp, open as fsOpen, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile, mkdir, stat, type FileHandle } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { readArrivals } from '@shared/engine/arrival';
@@ -972,11 +972,15 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
   const AGENT = 'a1b2c3';
   const THEIRS = 'app-theirs' as AppSessionId;
   const folderOf = (transcript: string) => transcript.slice(0, -'.jsonl'.length);
+  // The conversation a transcript is of (its engine session, the file's name), and the subagent a follow names in it
+  const conversationOf = (transcript: string) => basename(transcript, '.jsonl');
+  const agent = (id = AGENT, transcript: string | null = file) => ({ id, engineSessionId: transcript === null ? 'engine-session-none' : conversationOf(transcript) });
   const agentFile = (agentId: string, dirs: string[] = [], transcript = file!) => join(folderOf(transcript), 'subagents', ...dirs, `agent-${agentId}.jsonl`);
+  // Every record as the engine writes a subagent's: its conversation's id and the agent's own (a record's own keys win)
   async function writeAgent(agentId: string, records: object[], dirs: string[] = [], transcript = file!): Promise<string> {
     const path = agentFile(agentId, dirs, transcript);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, records.map((record) => `${lineOf(record)}\n`).join(''));
+    await writeFile(path, records.map((record) => `${lineOf({ sessionId: conversationOf(transcript), agentId, ...record })}\n`).join(''));
     return path;
   }
   // A subagent's records as the engine writes them (test/fixtures/transcripts/…/subagents/): every one a sidechain and none
@@ -1001,16 +1005,16 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     await writeAgent(AGENT, [prompt('Look into the report.'), ...filler(2), sidechain(linkTo(P)), ...filler(2)]);
     const named = paths();
     expect(await named.names(S, P), 'the session’s own transcript').toBe(false);
-    expect(await named.namesInAgent(S, AGENT, P)).toBe('counted');
+    expect(await named.namesInAgent(S, agent(), P)).toBe('counted');
     expect(await named.names(S, P), 'asked again, after the subagent’s hit').toBe(false);
-    expect(await named.namesInAgent(S, 'a9z8y7', P), 'another agent').toBe(false);
+    expect(await named.namesInAgent(S, agent('a9z8y7'), P), 'another agent').toBe(false);
     const chips: [string, object][] = [
       ['a read’s chip', call('t1', 'Read', { file_path: P })],
       ['an edit’s chip', call('t2', 'Edit', { file_path: P, old_string: 'a', new_string: 'b' })],
     ];
     for (const [form, row] of chips) {
       await writeAgent(AGENT, [prompt('Go on.'), sidechain(row)]);
-      expect(await paths().namesInAgent(S, AGENT, P), form).toBe('counted');
+      expect(await paths().namesInAgent(S, agent(), P), form).toBe('counted');
     }
     await append([linkTo(P)]); // the control of `names`: the session's own transcript writes the link
     expect(await paths().names(S, P)).toBe('counted');
@@ -1025,27 +1029,27 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     ];
     for (const [form, records] of cases) {
       await writeAgent(AGENT, records);
-      expect(await paths().namesInAgent(S, AGENT, P), form).toBe('result');
+      expect(await paths().namesInAgent(S, agent(), P), form).toBe('result');
     }
     expect(rowClaim(user(`Open [the report](${P})`), P), 'the forged record, read as the session’s own').toEqual({ names: true });
     await writeAgent(AGENT, [prompt(`Summarise [the report](${P}).`), sidechain(linkTo(P))]);
-    expect(await paths().namesInAgent(S, AGENT, P), 'the control: the same path in its assistant text').toBe('counted');
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: the same path in its assistant text').toBe('counted');
   });
 
   it('finds the agent’s one file in `subagents/` or up to three folders below it; two files, none, or one four folders down is not named (X2.6)', async () => {
     await writeTranscript(filler(2));
     for (const dirs of [[], ['workflows', 'run-1'], ['a', 'b', 'c']]) {
       const path = await writeAgent(AGENT, linking(), dirs);
-      expect(await paths().namesInAgent(S, AGENT, P), `subagents/${dirs.join('/')}`).toBe('counted');
+      expect(await paths().namesInAgent(S, agent(), P), `subagents/${dirs.join('/')}`).toBe('counted');
       await rm(path);
     }
     await writeAgent(AGENT, linking(), ['a', 'b', 'c', 'd']);
-    expect(await paths().namesInAgent(S, AGENT, P), 'four folders down').toBe(false);
+    expect(await paths().namesInAgent(S, agent(), P), 'four folders down').toBe(false);
     await writeAgent(AGENT, linking(), ['workflows', 'run-1']);
-    expect(await paths().namesInAgent(S, AGENT, P), 'the control: one more beside, within the depth').toBe('counted');
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: one more beside, within the depth').toBe('counted');
     await writeAgent(AGENT, linking(), ['workflows', 'run-2']);
-    expect(await paths().namesInAgent(S, AGENT, P), 'two files of one agent').toBe(false);
-    expect(await paths().namesInAgent(S, 'nobody1', P), 'an agent with no file').toBe(false);
+    expect(await paths().namesInAgent(S, agent(), P), 'two files of one agent').toBe(false);
+    expect(await paths().namesInAgent(S, agent('nobody1'), P), 'an agent with no file').toBe(false);
   });
 
   // M3's Decisions: depth and the file's name are the engine host's, restated in the search; the two readings are held
@@ -1063,7 +1067,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
         if (entry.isDirectory()) await mark(join(dir, entry.name));
         else if (id !== undefined && entry.isFile()) {
           ids.push(id);
-          await writeFile(join(dir, entry.name), `${lineOf(sidechain(linkTo(`/work/out/${id}.md`)))}\n`, { flag: 'a' });
+          await writeFile(join(dir, entry.name), `${lineOf({ sessionId: conversationOf(file!), agentId: id, ...sidechain(linkTo(`/work/out/${id}.md`)) })}\n`, { flag: 'a' });
         }
       }
     };
@@ -1072,7 +1076,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     const listed = (await new SubagentReader().list(folderOf(file!))).map((agent) => agent.agentId as string);
     const named = paths();
     const found: string[] = [];
-    for (const id of ids) if ((await named.namesInAgent(S, id, `/work/out/${id}.md`)) === 'counted') found.push(id);
+    for (const id of ids) if ((await named.namesInAgent(S, agent(id), `/work/out/${id}.md`)) === 'counted') found.push(id);
     expect(found.sort()).toEqual(listed.sort());
     expect(listed.sort()).toEqual(['ad286defbc77bc090', 'ae75ba6ce5d866acc', 'd0', 'd1', 'd2', 'd3']);
   });
@@ -1080,31 +1084,62 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
   it('reads no subagent’s file reached through a link: the session’s folder, `subagents`, a folder under it, or the file itself; nor one whose folder became a link after the walk found it (X2.9)', async () => {
     const their = await theirs();
     await writeAgent(AGENT, linking(), ['workflows', 'run-1'], their);
-    expect(await both(their).namesInAgent(THEIRS, AGENT, P), 'the control: their file, under their session').toBe('counted');
+    expect(await both(their).namesInAgent(THEIRS, agent(AGENT, their), P), 'the control: their file, under their session').toBe('counted');
     const mine = await writeTranscript(filler(2));
     const subagents = join(folderOf(mine), 'subagents');
     await symlink(folderOf(their), folderOf(mine));
-    expect(await both(their).namesInAgent(S, AGENT, P), 'the session’s folder a link').toBe(false);
+    expect(await both(their).namesInAgent(S, agent(), P), 'the session’s folder a link').toBe(false);
     await unlink(folderOf(mine));
     await mkdir(folderOf(mine));
     await symlink(join(folderOf(their), 'subagents'), subagents);
-    expect(await both(their).namesInAgent(S, AGENT, P), '`subagents` a link').toBe(false);
+    expect(await both(their).namesInAgent(S, agent(), P), '`subagents` a link').toBe(false);
     await unlink(subagents);
     await mkdir(subagents);
     await symlink(join(folderOf(their), 'subagents', 'workflows'), join(subagents, 'workflows'));
-    expect(await both(their).namesInAgent(S, AGENT, P), 'a folder under `subagents` a link').toBe(false);
+    expect(await both(their).namesInAgent(S, agent(), P), 'a folder under `subagents` a link').toBe(false);
     await unlink(join(subagents, 'workflows'));
     await mkdir(join(subagents, 'workflows', 'run-1'), { recursive: true });
     await symlink(agentFile(AGENT, ['workflows', 'run-1'], their), agentFile(AGENT, ['workflows', 'run-1']));
-    expect(await both(their).namesInAgent(S, AGENT, P), 'the file a link').toBe(false);
+    expect(await both(their).namesInAgent(S, agent(), P), 'the file a link').toBe(false);
     await unlink(agentFile(AGENT, ['workflows', 'run-1']));
     await writeAgent(AGENT, linking(), ['workflows', 'run-1']);
-    expect(await both(their).namesInAgent(S, AGENT, P), 'the control: the same file, reached with no link').toBe('counted');
+    expect(await both(their).namesInAgent(S, agent(), P), 'the control: the same file, reached with no link').toBe('counted');
     // the session's file no longer links the path, theirs does: a way through a link would read theirs
     await writeAgent(AGENT, [prompt('Go.')], ['workflows', 'run-1']);
     holds.found = () => swapForLink(join(subagents, 'workflows'), join(folderOf(their), 'subagents', 'workflows'));
-    expect(await both(their).namesInAgent(S, AGENT, P), 'a folder on its way swapped for a link after the walk').toBe(false);
+    expect(await both(their).namesInAgent(S, agent(), P), 'a folder on its way swapped for a link after the walk').toBe(false);
     expect(holds.found, 'the walk found the file').toBeUndefined();
+  });
+
+  // The branch panel (scalpel-2, finding 1): the walk and the open hand on a path alone, so a regular file renamed into the
+  // found file's place between them is what is opened; only records that this agent of this conversation wrote count
+  it('counts only records that carry its conversation’s id and the agent’s: a file put in the found file’s place between the walk and the open names nothing (the branch panel)', async () => {
+    const their = await theirs();
+    await writeTranscript(filler(2));
+    const found = await writeAgent(AGENT, [prompt('Go.')]);
+    // an agent of the same id in another conversation, and another agent of this one, each linking the path
+    const elsewhere = await writeAgent(AGENT, linking(), [], their);
+    const sibling = await writeAgent('d9e8f7', linking());
+    for (const [what, replacement] of [['another conversation’s agent of the same id', elsewhere], ['another agent of this conversation', sibling]] as const) {
+      const copy = `${found}.next`;
+      await cp(replacement, copy);
+      holds.found = () => rename(copy, found);
+      expect(await both(their).namesInAgent(S, agent(), P), what).toBe(false);
+      expect(holds.found, `${what}: the walk found the file`).toBeUndefined();
+    }
+    await writeAgent(AGENT, [prompt('Go.'), { ...sidechain(linkTo(P)), agentId: undefined }]);
+    expect(await paths().namesInAgent(S, agent(), P), 'a record with no agent’s id').toBe(false);
+    await writeAgent(AGENT, linking());
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: its own records').toBe('counted');
+  });
+
+  // The branch panel (scalpel-2, finding 3): a follow from a drill-in still shown after `/clear` names the conversation it
+  // was drawn for, which the session's transcript no longer is (Q11)
+  it('names nothing for a conversation the session is no longer bound to, though the one it is bound to has the agent (Q11, the branch panel)', async () => {
+    await writeTranscript(filler(2));
+    await writeAgent(AGENT, linking());
+    expect(await paths().namesInAgent(S, { id: AGENT, engineSessionId: 'engine-session-0' }, P), 'a conversation left behind').toBe(false);
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: the conversation it is bound to').toBe('counted');
   });
 
   // Where the open helper walks the folders first (Linux), a folder swapped between its walk and its open is followed by
@@ -1115,9 +1150,9 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     await writeTranscript(filler(2));
     await writeAgent(AGENT, [prompt('Go.')], ['workflows', 'run-1']);
     holds.walked = () => swapForLink(join(folderOf(file!), 'subagents', 'workflows'), join(folderOf(their), 'subagents', 'workflows'));
-    expect(await both(their).namesInAgent(S, AGENT, P)).toBe(false);
+    expect(await both(their).namesInAgent(S, agent(), P)).toBe(false);
     expect(holds.walked, 'the open walked').toBeUndefined();
-    expect(await both(their).namesInAgent(THEIRS, AGENT, P), 'the control: the file the link leads to names the path').toBe('counted');
+    expect(await both(their).namesInAgent(THEIRS, agent(AGENT, their), P), 'the control: the file the link leads to names the path').toBe('counted');
   });
 
   it('finds an agent’s file only under its own session’s transcript folder, and reads nothing for a session with no transcript (X2.7, X2.8)', async () => {
@@ -1125,11 +1160,11 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     await writeAgent(AGENT, linking(), [], their);
     await writeTranscript(filler(2));
     await mkdir(join(folderOf(file!), 'subagents'), { recursive: true });
-    expect(await both(their).namesInAgent(S, AGENT, P), 'asked under this session').toBe(false);
-    expect(await both(their).namesInAgent(THEIRS, AGENT, P), 'the control: asked under its own').toBe('counted');
+    expect(await both(their).namesInAgent(S, agent(), P), 'asked under this session').toBe(false);
+    expect(await both(their).namesInAgent(THEIRS, agent(AGENT, their), P), 'the control: asked under its own').toBe('counted');
     reset();
-    expect(await paths({ transcript: async () => null }).namesInAgent(S, AGENT, P), 'no transcript').toBe(false);
-    expect(await paths({ transcript: async () => `${folderOf(their)}.json` }).namesInAgent(THEIRS, AGENT, P), 'a transcript not named `.jsonl`').toBe(false);
+    expect(await paths({ transcript: async () => null }).namesInAgent(S, agent(), P), 'no transcript').toBe(false);
+    expect(await paths({ transcript: async () => `${folderOf(their)}.json` }).namesInAgent(THEIRS, agent(AGENT, their), P), 'a transcript not named `.jsonl`').toBe(false);
     expect({ dirs: dirReads.count, opens: stats.opens }).toEqual({ dirs: 0, opens: 0 });
   });
 
@@ -1142,7 +1177,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
       const named = paths();
       const client = new AbortController();
       const held = holdAt(point, async () => client.abort());
-      const abandoned = named.namesInAgent(S, AGENT, P, client.signal);
+      const abandoned = named.namesInAgent(S, agent(), P, client.signal);
       await held.reached;
       const next = named.names(S, '/work/out/next.md'); // waits behind it, in the one slot
       reset();
@@ -1151,7 +1186,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
       expect(await next, `${point}: the next job runs`).toBe('counted');
       expect(stats.opens, `${point}: only the next job's transcript is opened`).toBe(1);
     }
-    expect(await paths().namesInAgent(S, AGENT, P), 'the control: the same search, not abandoned').toBe('counted');
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: the same search, not abandoned').toBe('counted');
   });
 
   // The branch's M3 re-review: the client ends while the agent file's open is under way, and the open then succeeds: the
@@ -1174,14 +1209,14 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     };
     const named = paths({ open });
     const held = holdAt('found');
-    const abandoned = named.namesInAgent(S, AGENT, P, client.signal);
+    const abandoned = named.namesInAgent(S, agent(), P, client.signal);
     await held.reached;
     const next = named.names(S, '/work/out/next.md'); // waits behind it, in the one slot
     held.release();
     expect(await abandoned).toBe(false);
     expect(await next, 'the next job runs').toBe('counted');
     expect(asked, 'closed, with no stat').toEqual(['close']);
-    expect(await paths({ open }).namesInAgent(S, AGENT, P), 'the control: the same open, its waiter still there').toBe('counted');
+    expect(await paths({ open }).namesInAgent(S, agent(), P), 'the control: the same open, its waiter still there').toBe('counted');
   });
 
   it('a request made after the session is bound to another transcript does not join the search of the old one’s subagent (X2.11, W3)', async () => {
@@ -1190,15 +1225,15 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     const rebound = await fixture.addTranscript('/work/repo', 'engine-session-2', filler(2).map(lineOf));
     const named = paths();
     const held = holdAt('opened');
-    const before = named.namesInAgent(S, AGENT, P);
+    const before = named.namesInAgent(S, agent(), P);
     await held.reached;
     file = rebound; // `/clear`: the session's transcript is now another, whose folder holds no such agent
-    const after = named.namesInAgent(S, AGENT, P);
+    const after = named.namesInAgent(S, agent(), P);
     held.release();
     expect(await before).toBe('counted');
     expect(await after).toBe(false);
     await writeAgent(AGENT, linking(), [], rebound);
-    expect(await named.namesInAgent(S, AGENT, P), 'the control: the new folder’s agent').toBe('counted');
+    expect(await named.namesInAgent(S, agent(), P), 'the control: the new folder’s agent').toBe('counted');
   });
 
   it('finds one agent’s file among 4,000 by reading folders alone: one file opened (K13)', async () => {
@@ -1210,7 +1245,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     for (let i = 0; i < 4000; i += 200) await Promise.all(Array.from({ length: 200 }, (_, n) => writeFile(join((i + n) % 4 === 0 ? run : subagents, `agent-x${i + n}.jsonl`), other)));
     await writeAgent(AGENT, linking(), ['workflows', 'run-1']);
     reset();
-    expect(await paths().namesInAgent(S, AGENT, P)).toBe('counted');
+    expect(await paths().namesInAgent(S, agent(), P)).toBe('counted');
     expect({ opens: stats.opens, dirs: dirReads.count }).toEqual({ opens: 1, dirs: 3 }); // subagents, workflows, run-1
   });
 
@@ -1218,8 +1253,8 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     await writeTranscript(filler(2));
     for (const dir of ['a', 'b']) await mkdir(join(folderOf(file!), 'subagents', dir), { recursive: true });
     await writeAgent(AGENT, linking(), ['c']);
-    expect(await paths({ bounds: { dirs: 4 } }).namesInAgent(S, AGENT, P), 'subagents and its three folders').toBe('counted');
-    expect(await paths({ bounds: { dirs: 3 } }).namesInAgent(S, AGENT, P)).toBe(false);
+    expect(await paths({ bounds: { dirs: 4 } }).namesInAgent(S, agent(), P), 'subagents and its three folders').toBe('counted');
+    expect(await paths({ bounds: { dirs: 3 } }).namesInAgent(S, agent(), P)).toBe(false);
   });
 
   it('gives the event loop back after every read of the subagent’s file, as the session’s search does (K13)', async () => {
@@ -1228,7 +1263,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     const loop = ticker();
     const at: number[] = [];
     try {
-      expect(await paths({ open: instant(() => at.push(loop.ticks())), bounds: { chunk: 2048 } }).namesInAgent(S, AGENT, P)).toBe('counted');
+      expect(await paths({ open: instant(() => at.push(loop.ticks())), bounds: { chunk: 2048 } }).namesInAgent(S, agent(), P)).toBe('counted');
     } finally {
       loop.stop();
     }
@@ -1248,13 +1283,13 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
     await turns(2); // their transcript found, they wait
     reset();
     const located = vi.fn();
-    const burst = await Promise.all(['/work/out/a.md', '/work/out/b.md', P].map((path) => named.namesInAgent(S, AGENT, path, undefined, located)));
+    const burst = await Promise.all(['/work/out/a.md', '/work/out/b.md', P].map((path) => named.namesInAgent(S, agent(), path, undefined, located)));
     expect(burst).toEqual([false, false, false]);
     expect({ dirs: dirReads.count, opens: stats.opens, located: located.mock.calls.length }).toEqual({ dirs: 0, opens: 0, located: 3 });
     held.release();
     expect(await running).toBe('counted');
     expect(await Promise.all(waiting)).toEqual(others.map(() => 'counted'));
-    expect(await named.namesInAgent(S, AGENT, P), 'the control, the queue free').toBe('counted');
+    expect(await named.namesInAgent(S, agent(), P), 'the control, the queue free').toBe('counted');
   });
 
   // Interfaces §D, Decision Log 10: a follow keeps its place until its search's call of the transcript locator has
@@ -1266,7 +1301,7 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
       await writeAgent(AGENT, linking());
       for (const [path, answer] of [[P, 'counted'], ['/work/out/other.md', false]] as const) {
         const located = vi.fn();
-        expect(await paths().namesInAgent(S, AGENT, path, undefined, located)).toBe(answer);
+        expect(await paths().namesInAgent(S, agent(), path, undefined, located)).toBe(answer);
         expect(located, String(answer)).toHaveBeenCalledTimes(1);
       }
     });
@@ -1278,9 +1313,9 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
       const named = paths({ transcript: () => locator.promise.then(() => file), bounds: { waitMs: 20 } });
       const timedOut = vi.fn();
       const ended = vi.fn();
-      expect(await named.namesInAgent(S, AGENT, P, undefined, timedOut)).toBe(false);
+      expect(await named.namesInAgent(S, agent(), P, undefined, timedOut)).toBe(false);
       const client = new AbortController();
-      const asked = named.namesInAgent(S, AGENT, P, client.signal, ended);
+      const asked = named.namesInAgent(S, agent(), P, client.signal, ended);
       client.abort();
       expect(await asked).toBe(false);
       expect({ timedOut: timedOut.mock.calls.length, ended: ended.mock.calls.length }, 'answered, the locator still held').toEqual({ timedOut: 0, ended: 0 });
@@ -1302,11 +1337,11 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
       ];
       for (const [how, transcript] of locators) {
         const located = vi.fn();
-        expect(await paths({ transcript }).namesInAgent(S, AGENT, P, undefined, located), how).toBe(false);
+        expect(await paths({ transcript }).namesInAgent(S, agent(), P, undefined, located), how).toBe(false);
         expect(located, how).toHaveBeenCalledTimes(1);
       }
       const located = vi.fn();
-      expect(await paths().namesInAgent(S, AGENT, P, undefined, located), 'the control').toBe('counted');
+      expect(await paths().namesInAgent(S, agent(), P, undefined, located), 'the control').toBe('counted');
       expect(located).toHaveBeenCalledTimes(1);
     });
 
@@ -1318,11 +1353,11 @@ describe('namesInAgent: what one subagent’s transcript names', () => {
       const named = paths({ transcript: locate });
       for (const [why, path, signal] of [['ended', P, AbortSignal.abort()], ['too long', long, undefined]] as const) {
         const located = vi.fn();
-        expect(await named.namesInAgent(S, AGENT, path, signal, located), why).toBe(false);
+        expect(await named.namesInAgent(S, agent(), path, signal, located), why).toBe(false);
         expect(located, why).toHaveBeenCalledTimes(1);
       }
       expect(locate).not.toHaveBeenCalled();
-      expect(await named.namesInAgent(S, AGENT, P), 'the control').toBe('counted');
+      expect(await named.namesInAgent(S, agent(), P), 'the control').toBe('counted');
     });
   });
 });

@@ -27,7 +27,7 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-const linkTo = (path: string) => JSON.stringify({ type: 'assistant', uuid: 'a-1', isSidechain: true, message: { role: 'assistant', content: [{ type: 'text', text: `Wrote [the notes](${path}).` }] } });
+const linkTo = (path: string) => JSON.stringify({ type: 'assistant', uuid: 'a-1', isSidechain: true, sessionId: 'engine-session-1', agentId: AGENT, message: { role: 'assistant', content: [{ type: 'text', text: `Wrote [the notes](${path}).` }] } });
 function write(path: string, content: string) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
@@ -49,7 +49,7 @@ describe('a subagent’s transcript where an open cannot be confirmed', () => {
     const locate = vi.fn(async () => transcript);
     const named = createNamedPaths({ transcript: locate, open });
     const located = vi.fn();
-    expect(await named.namesInAgent(S, AGENT, target, undefined, located)).toBe(false);
+    expect(await named.namesInAgent(S, { id: AGENT, engineSessionId: 'engine-session-1' }, target, undefined, located)).toBe(false);
     expect({ opened, dirs: dirReads.count, locator: locate.mock.calls.length, located: located.mock.calls.length }).toEqual({ opened: [], dirs: 0, locator: 0, located: 1 });
 
     const add = vi.fn();
@@ -58,7 +58,7 @@ describe('a subagent’s transcript where an open cannot be confirmed', () => {
       links: { add, get: () => null },
       agentNames: named.namesInAgent,
     });
-    expect(await files.follow({ appSessionId: S, path: target, from: { agent: AGENT } })).toEqual({ status: 'not-linked' });
+    expect(await files.follow({ appSessionId: S, path: target, from: { agent: AGENT, engineSessionId: 'engine-session-1' } })).toEqual({ status: 'not-linked' });
     expect({ add: add.mock.calls.length, opened, dirs: dirReads.count }).toEqual({ add: 0, opened: [], dirs: 0 });
 
     // the control: the same search opens and reads the session's own transcript, which links the same path
