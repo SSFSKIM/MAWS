@@ -95,6 +95,8 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
   const { tabId, appSessionId } = tab;
   const owner = tab.placedIn?.paneId ?? null;
   const [ownerAtMount] = useState(owner);
+  // UX wave U6b-5b (decision 35): the page's element's origin as last sent to main, which the chip's reading needs
+  const [placedAt, setPlacedAt] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const pane = element.current;
@@ -110,7 +112,9 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
         // A sheet occludes main, not its own Browser surface. Release only main's native view rather than
         // freezing every view in the window, which would also make the opened Browser sheet unusable.
         if (surface === 'main' && (geometry.sheet || geometry.mainHidden)) return null;
-        return paneRect(pane.getBoundingClientRect());
+        const rect = paneRect(pane.getBoundingClientRect());
+        if (rect) setPlacedAt((previous) => (previous?.x === rect.x && previous.y === rect.y ? previous : { x: rect.x, y: rect.y }));
+        return rect;
       },
       send: (report) => {
         place(report);
@@ -181,7 +185,7 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
   // resize of the element's own, which its observer would miss)
   const [sizedWidth, sizedHeight] = [sized?.width ?? null, sized?.height ?? null];
   useEffect(() => placement.current?.report(), [room, sizedWidth, sizedHeight]);
-  const heldRoom = mode === 'owner' ? room : null;
+  const heldRoom = useMemo(() => (mode !== 'owner' || room === null ? null : placedAt === null ? room : { ...room, at: placedAt }), [mode, room, placedAt]);
   useEffect(() => onRoom?.(heldRoom), [heldRoom, onRoom]);
   useEffect(() => () => onRoom?.(null), [onRoom]);
 

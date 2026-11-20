@@ -24,9 +24,11 @@ const ACTS: readonly { id: ActionId; to: ZoomTo; can(factor: number): boolean }[
   { id: 'zoom.reset', to: 'actual', can: (factor) => factor !== 1 },
 ];
 
-// Mounted once from App.tsx. Subscribed first, then the factor read, so a change made meanwhile is not missed.
+// Mounted once from App.tsx. Subscribed first, then the factor read, so a change made meanwhile is not missed; once a
+// change has been heard, the read's reply is older than it and is ignored.
 export function connectZoom(client: MawsBridge = ipc): () => void {
   let live = true;
+  let heard = false;
   let line: string | null = null;
   const handlers = new Map<ActionId, () => void>();
   const ask = (to: ZoomTo) => () =>
@@ -50,12 +52,13 @@ export function connectZoom(client: MawsBridge = ipc): () => void {
     line = toast({ level: 'info', text: zoomLine(factor), actions: [], dismissible: false, durationMs: ZOOM_LINE_MS });
   };
   const off = client.on('layout.zoomChanged', ({ factor }) => {
+    heard = true;
     apply(factor);
     say(factor);
   });
   apply(useZoom.getState().factor);
   void client.invoke('layout.zoom', { to: 'current' }).then((result) => {
-    if (!live) return;
+    if (!live || heard) return;
     if (result.ok) apply(result.value.factor);
     else console.warn(`[zoom] layout.zoom current failed: ${result.error.message}`);
   });

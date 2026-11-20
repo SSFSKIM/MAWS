@@ -209,9 +209,10 @@ export class ViewManager {
   // cua #90 end
 
   // UX wave U6b-5b (S3 step 4): the window's zoom changed, so each view placed in it takes its rect at the new factor; the
-  // window sends no report for a CSS rect that did not change. A placement is no report, so nothing is acknowledged.
+  // window sends no report for a CSS rect that did not change. A placement is no report, so nothing is acknowledged. A view
+  // staged for its still stays at the stage's origin: staging's return places it, at the factor of that moment.
   placeAgain(win: BrowserWindow): void {
-    for (const entry of this.placedIn(win)) if (entry.view && entry.host === win) entry.view.setBounds(this.pointsOf(entry.placement!));
+    for (const entry of this.placedIn(win)) if (entry.view && entry.host === win && !this.staged.has(entry)) entry.view.setBounds(this.pointsOf(entry.placement!));
   }
 
   // U6b-5b M1: the placement last acted on for the tab, for the e2e seam (inspect.ts); null before the first
