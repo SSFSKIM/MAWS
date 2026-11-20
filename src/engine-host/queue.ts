@@ -213,7 +213,10 @@ export class MessageQueue {
         if (!this.paused) this.pauseFor('state_corrupt');
         this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session went on without them.`);
       }
-      this.endEmptyInterruptPause(); // ticket 790: as at a recovery
+      // ticket 790: as at a recovery, except that the live process may still run the turn the old manager's Stop
+      // interrupted (the fold restored it open): the Stop's phase lasts until that turn ends, as it would have there
+      if (this.paused && this.pauseReason === 'interrupt' && (this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true;
+      this.endEmptyInterruptPause();
       await this.persist();
       this.deps.onPauseChange?.(this.releasePaused);
     });
