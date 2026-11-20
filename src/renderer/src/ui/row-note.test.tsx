@@ -47,22 +47,24 @@ describe('the row note', () => {
 
   it('shows on pointing after the short delay, and closes when the pointer leaves', async () => {
     render(<Row />);
-    await user().hover(row());
+    const pointer = user();
+    await pointer.hover(row());
     wait(POINTING_DELAY_MS - 1);
     expect(shown()).toBe(false);
     wait(1);
     expect(shown()).toBe(true);
     expect(screen.getByRole('group', { name: 'Archive', description: NOTE })).toBe(row());
-    await user().unhover(row());
+    await pointer.unhover(row());
     wait(CLOSE_MOTION.ms);
     expect(shown()).toBe(false);
   });
 
   it('shows nothing for a pointer that passes over the row within the delay', async () => {
     render(<Row />);
-    await user().hover(row());
+    const pointer = user();
+    await pointer.hover(row());
     wait(POINTING_DELAY_MS / 2);
-    await user().unhover(row());
+    await pointer.unhover(row());
     wait(POINTING_DELAY_MS);
     expect(shown()).toBe(false);
   });
@@ -135,8 +137,7 @@ describe('the row note', () => {
 describe('the pointed-row line', () => {
   it('keeps its line’s place at rest without drawing it, and is the row’s description', () => {
     render(<Row form="line" />);
-    const line = screen.getByText(NOTE).closest('[data-row-note]')!;
-    expect(line.hasAttribute('hidden')).toBe(false); // its height stays in the row
+    expect(screen.getByText(NOTE).hasAttribute('hidden')).toBe(false); // its height stays in the row
     expect(drawnText(row())).toBe('ArchiveOpen Archive');
     expect(screen.getByRole('group', { name: 'Archive', description: NOTE })).toBe(row());
   });

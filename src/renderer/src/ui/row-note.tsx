@@ -69,18 +69,19 @@ export function useRowNote(): RowNoteState {
   };
 }
 
-// The outer element is placed (and moved, for a note); the inner one is drawn. The outer carries no border, so the
-// height the motion opens to is the height it rests at.
+// A note's outer element is placed and moved, its inner one drawn: the outer carries no border, so the height the
+// motion opens to is the height it rests at. A line is one element, placed and drawn, whose words are text: it rests
+// `visibility: hidden`, which its descendants inherit, and a description is read through a hidden element's own text.
 const PLACE = 'flow-root note-overlay:absolute note-overlay:inset-x-0 note-overlay:top-full note-overlay:z-10';
 const NOTE = 'mt-1 mb-1 w-fit max-w-[30rem] rounded-md border border-border-strong bg-bg-overlay px-2.5 py-1.5 text-ui-sm leading-normal text-fg-muted [overflow-wrap:anywhere] note-overlay:mt-0.5 note-overlay:shadow-float';
 const LINE = 'text-ui-sm leading-normal text-fg-muted [overflow-wrap:anywhere] note-overlay:mt-0.5 note-overlay:w-fit note-overlay:max-w-[30rem] note-overlay:rounded-md note-overlay:border note-overlay:border-border-strong note-overlay:bg-bg-overlay note-overlay:px-2.5 note-overlay:py-1.5 note-overlay:shadow-float';
 
-// `className` places the note in its row (a grid column, an indent); the note draws itself.
+// `className` places the note in its row (a grid column, an indent); the note draws itself. A line's children are text.
 export function RowNote({ note, form = 'note', className = '', children }: { note: RowNoteState; form?: RowNoteForm; className?: string; children: ReactNode }) {
   if (form === 'line')
     return (
-      <div id={note.id} data-row-note="line" data-open={note.open || undefined} style={note.open ? undefined : RESERVED} className={`${PLACE} ${className}`}>
-        <div className={LINE}>{children}</div>
+      <div id={note.id} data-row-note="line" data-open={note.open || undefined} style={note.open ? undefined : RESERVED} className={`${PLACE} ${LINE} ${className}`}>
+        {children}
       </div>
     );
   return (

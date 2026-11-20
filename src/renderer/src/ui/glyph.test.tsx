@@ -57,10 +57,10 @@ describe('NamedGlyph', () => {
         <Plus />
       </NamedGlyph>,
     );
+    expect(screen.getByRole('button', { name: 'Export' }).hasAttribute('aria-describedby')).toBe(false); // nothing beyond its name to describe at rest
     const keys = user();
     await keys.tab();
     expect(tooltip()).toBe('Export');
-    expect(screen.getByRole('button', { name: 'Export' }).hasAttribute('aria-describedby')).toBe(false); // nothing beyond its name to describe
     await keys.keyboard('{Enter}');
     expect(add).toHaveBeenCalledOnce();
   });
