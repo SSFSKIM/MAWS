@@ -1,6 +1,6 @@
 # UX wave · U6b-4c: the execution report
 
-The landing: `docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md` (revision 4), branch `ux-wave/U6b-4c`, executed 2026-11-19 by subagent-driven execution: a fresh executor per milestone, a task review at each milestone's frontier, the fixes resumed on the executor that wrote the code. The document's Progress, Surprises & Discoveries, Decision Log (entries 8 to 18 are this execution's) and Outcomes & Retrospective are the living record; this report is the account for ux-wave.
+The landing: `docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md` (revision 4), branch `ux-wave/U6b-4c`, executed 2026-11-19 by subagent-driven execution: a fresh executor per milestone, a task review at each milestone's frontier, the fixes resumed on the executor that wrote the code. The document's Progress, Surprises & Discoveries, Decision Log (entries 8 to 19 are this execution's) and Outcomes & Retrospective are the living record; this report is the account for ux-wave.
 
 ## Status
 
@@ -154,6 +154,10 @@ By ux-wave's instruction, `origin/ux-wave/U6b-5` was merged at `17f422d11` (its 
 - `e2e:cross-build` with `--peer-exact f1852de3a` and `--peer-exact 2c7044231`: this build is now 3.60 against peers at 3.59 and older.
 - `unit:darwin`.
 - Added for the merge's guard list: "Open in, in the title bar and in a session row's menu, hands the working folder to the app chosen" (`e2e/panel.spec.ts`), and "skills: a skill's Open in hands its listed file to an editor or Finder; a plugin's line; refusals; New skill… fills a chat" (`e2e/discover.spec.ts`). The exact list is pinned in `daemon-root.test.ts`, so these two confirm what a unit case already holds; drop them if the Mac's time is short.
+
+## U2b's stale cross-build scene (added after the chain merge)
+
+On `cc9067571` the desk-web run 44670345243 failed one `e2e:cross-build` scene: "(to-human, to the peer) a session this build launched at 9…", at "the peer's launch advertises 8" (received `['9', 'off']`). The scene assumes a peer that predates U2b, and the default peer at 3.59 is master `5e8534042`, which carries U2b. By ux-wave's instruction it now skips, with its reason, for a peer that names `drawnBy` (`knowsDrawnBy`), so it still runs against `b89d6d1d7` (Decision Log 19; `068ba81a0`). The other four to-human scenes were already guarded, or hold with a later peer. On the VM: node and e2e typecheck, and eslint on the spec, clean. The gates on the new head are named in the hand-back.
 
 ## The scenes ux-wave runs on a Mac
 
