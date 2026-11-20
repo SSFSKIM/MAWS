@@ -127,6 +127,36 @@ test('publishes a mawsd directory’s log generations beside the host’s, redac
   assert.deepEqual(marked.map((name) => name.replace(/^engine-host-[0-9a-f-]{36}/, '<id>')), ['<id>.mawsd-excluded.log']);
 });
 
+// Ticket 784: the pty host's log, in the mawsd directory's `pty-host/`, published beside mawsd's under the same rules
+// (a launch passes its profile's mawsd directory, so a failed scene keeps what the daemon and the pty host logged)
+test('publishes the pty host’s log generations beside mawsd’s, redacted, and refuses only an inherited one', (t) => {
+  const dir = scratch(t);
+  const profile = join(dir, 'profile');
+  const daemon = join(profile, 'mawsd');
+  mkdirSync(join(profile, 'supervisor'), { recursive: true });
+  mkdirSync(join(daemon, 'pty-host'), { recursive: true });
+  const evidence = processEvidence(join(dir, 'output'), profile, () => true, { ...process.env, MAWS_TEST_SECRET_TOKEN: 'ptyhostlogsecret' }, { daemon });
+  writeFileSync(join(daemon, 'mawsd.log'), 'pty-host.sock: client connected\n');
+  writeFileSync(join(daemon, 'pty-host', 'host.log'), '[host] shell environment capture failed\n');
+  writeFileSync(join(daemon, 'pty-host', 'host.log.1'), 'pty host starting with ptyhostlogsecret\n');
+  writeFileSync(join(daemon, 'pty-host', 'host.token'), 'not evidence');
+  evidence.finish();
+  rmSync(profile, { recursive: true });
+  const files = readdirSync(join(dir, 'output')).sort();
+  assert.deepEqual(files.map((name) => name.replace(/^engine-host-[0-9a-f-]{36}/, '<id>')).sort(), ['<id>.mawsd.log', '<id>.pty-host.log', '<id>.pty-host.previous.log']);
+  const read = (suffix) => readFileSync(join(dir, 'output', files.find((name) => name.endsWith(suffix))), 'utf8');
+  assert.equal(read('.pty-host.log'), '[host] shell environment capture failed\n');
+  assert.equal(read('.pty-host.previous.log'), 'pty host starting with [REDACTED]\n', 'redacted');
+
+  const reused = join(dir, 'reused');
+  mkdirSync(join(reused, 'mawsd', 'pty-host'), { recursive: true });
+  writeFileSync(join(reused, 'mawsd', 'pty-host', 'host.log'), 'an earlier run\n');
+  const again = processEvidence(join(dir, 'again'), reused, () => true, process.env, { daemon: join(reused, 'mawsd'), host: false });
+  writeFileSync(join(reused, 'mawsd', 'mawsd.log'), 'this run\n');
+  again.finish();
+  assert.deepEqual(readdirSync(join(dir, 'again')).map((name) => name.replace(/^engine-host-[0-9a-f-]{36}/, '<id>')).sort(), ['<id>.mawsd.log', '<id>.pty-host-excluded.log']);
+});
+
 // P5 O3-D M6: beside a launch, which publishes the host's log itself, a scene's own evidence publishes mawsd's alone
 test('with host false, publishes the mawsd directory’s log and not the host’s', (t) => {
   const dir = scratch(t);
