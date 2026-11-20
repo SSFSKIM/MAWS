@@ -15,7 +15,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
-const user = () => userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+const user = () => userEvent.setup({ delay: null }); // no waits of its own: under fake timers they never end
 const wait = (ms: number) => act(() => vi.advanceTimersByTime(ms));
 const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
 
