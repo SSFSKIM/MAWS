@@ -35,7 +35,7 @@ How to see it working: in a session on this Mac, open a Markdown file of the ses
 - [x] (2026-11-19) M2 — The record, the command, and a Markdown file as the source. Reviewed clean after two fix rounds (`c5fc3ddb1`..`57c61adc1`).
 - [x] (2026-11-19) M3 — A subagent's transcript as the source. Reviewed clean after two fix rounds and one test-only path fix (`de3214dc2`..`92559e4a7`).
 - [x] (2026-11-19) M4 — The window follows. Reviewed clean after two fix rounds (`86b107c67`..`a9d06faec`).
-- [ ] M5 — The scenes, the older builds, the record, and the acceptance run.
+- [x] (2026-11-19) M5 — The scenes, the older builds, the record, and the acceptance run. Reviewed clean after one fix round (`c1a3c664e`..`adae9a4fb`). The scenes are written and typechecked, not run (a Mac's).
 
 ## Words used in this document
 
@@ -742,4 +742,13 @@ Its body names the class 1a run, the panel's verdict, the two cross-build runs a
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-19, at the hand-back to ux-wave (the branch's xhigh panel, class 1a's record, the Mac scenes and the cross-build runs are ux-wave's).**
+
+What exists. All five milestones are built and each was reviewed clean at its frontier: M1 after one fix round, M2 after two, M3 after two and a test-only path fix, M4 after two, M5 after one. The daemon answers `files.follow` for a Markdown source and for a subagent's transcript, proves the link itself through the read's own boundary (R2, R3), and keeps a link record in `sessions/file-links.json` that every later read, open outside MAWS, frame and save of that file asks where a grant is asked (R5), for this machine's own caller alone (X5.5 on U6f's caller). The window follows before the tab's first read, waits for it in `readChunk`, and reads once more when a read sent before the click landed refused after a follow found the link (W1). A file a read-only Markdown file links opens read-only with Q2's sentence. The wire is at minor 58 (`files.follow`; `outside.linked`). The charter's §19 entry, C8's line at K1 and the tracker's rows are written. The landing's own diff, against U6b-4b's final head, is 55 files and about 4,500 added lines beside this document.
+
+What the frontier reviews changed, which a later reader of the code should know. The follow's 8 s bounds its answer and not only its record, through one latch the reply and the synchronous record step share; a follow keeps its place in the count of nine until its own work settles, and a subagent follow's place goes back only on `located` (Decision Log 10). A subagent search whose last waiter left starts no further file-system stage and closes an agent file opened for nobody (Decision Log 12). W1 (g)'s read again is owed per tab and checked for session, path, generation and unsaved edits both before it takes its slot and before it is sent, taking turns with Retry under one guard (Decision Log 13). X5.14 is read at the daemon's admission, accepted by ux-wave with its condition, which a test holds (Decision Log 14).
+
+Verified on the build VM (Linux): every milestone's proof set; `pnpm typecheck` whole; eslint; the gate's script tests (588/588); the secret scan; desk-web's typecheck, build and tests (801/801); and the whole unit suite once at `1eb58113a`, whose 15 failing files are each either the VM's own failure shown failing the same way at the branch's base, or a load time-out shown passing alone. Not verified here: any scene of §H (a Mac's), the macOS-guarded cases of `src/services/files/` (the Mac lane), and the two cross-build runs.
+
+Retrospective. The document's two narrow points held up under review exactly where its revisions had concentrated (the follow count, `located`, the window's read again), and each review round there found a real ordering gap one stage further along; the rounds converged because each finding was a missing check at a named stage, not a design question. The refresh against U6b-4b as built paid for itself at once: four names had moved under U6f (Decision Log 8), and `files.follow` would otherwise have joined `OUTSIDE_ACTS`, which offers an act to another machine.
+
