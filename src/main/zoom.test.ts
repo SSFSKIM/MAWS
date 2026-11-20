@@ -9,7 +9,7 @@ import type { WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 import { LayoutFileStore } from './layout/store';
-import { nextFactor, openAt, readFactor, startZoom, toPoints, trafficLightsAt, ZOOM_MAX, ZOOM_MIN, zoomOf, type ZoomWindow } from './zoom';
+import { nextFactor, openAt, readFactor, startZoom, toPoints, trafficLightsAt, zoomOf, type ZoomWindow } from './zoom';
 
 vi.mock('./ipc/router', () => ({ registerMainHandler: () => {} })); // the store module's own handlers, unused here
 
@@ -22,13 +22,22 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('nextFactor', () => {
-  it('steps up and down the in-app browser’s presets between 50 % and 200 %', () => {
-    const up = [0.5];
-    while (up.at(-1)! < ZOOM_MAX) up.push(nextFactor(up.at(-1)!, 'in'));
-    expect(up).toEqual([0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]);
-    const down = [2];
-    while (down.at(-1)! > ZOOM_MIN) down.push(nextFactor(down.at(-1)!, 'out'));
-    expect(down).toEqual([...up].reverse());
+  // each step against the in-app browser's presets, a fixed table: from, in, out
+  it.each([
+    [0.5, 0.67, 0.5],
+    [0.67, 0.75, 0.5],
+    [0.75, 0.8, 0.67],
+    [0.8, 0.9, 0.75],
+    [0.9, 1, 0.8],
+    [1, 1.1, 0.9],
+    [1.1, 1.25, 1],
+    [1.25, 1.5, 1.1],
+    [1.5, 1.75, 1.25],
+    [1.75, 2, 1.5],
+    [2, 2, 1.75],
+  ])('from %s steps in to %s and out to %s, between 50 % and 200 %', (from, up, down) => {
+    expect(nextFactor(from, 'in')).toBe(up);
+    expect(nextFactor(from, 'out')).toBe(down);
   });
 
   it('holds at the ends; actual is 1; current changes nothing', () => {
@@ -161,6 +170,23 @@ describe('layout.zoom (S3)', () => {
     expect(h.zoom('actual')).toEqual({ factor: 1 });
     expect(h.zoom('actual')).toEqual({ factor: 1 });
     expect(h.calls.filter((call) => call.startsWith('emit'))).toEqual(['emit layout.zoomChanged 1']);
+  });
+
+  // placement 5 at the native call: every window's buttons centred in the toolbar at the factor reached
+  it('hands every window’s setWindowButtonPosition { x: 16, y: round(22 × factor − 7) } at 0.8, 0.5, 1.25 and 2', () => {
+    const h = harness();
+    const lights = () => h.windows.map((win) => win.lights);
+    const steps: [('in' | 'out' | 'actual')[], number, number][] = [
+      [['out', 'out'], 0.8, 11],
+      [['out', 'out', 'out'], 0.5, 4],
+      [['actual', 'in', 'in'], 1.25, 21],
+      [['in', 'in', 'in'], 2, 37],
+    ];
+    for (const [presses, factor, y] of steps) {
+      for (const to of presses) h.zoom(to);
+      expect(h.zoom('current')).toEqual({ factor });
+      expect(lights()).toEqual([{ x: 16, y }, { x: 16, y }]);
+    }
   });
 
   it('takes two presses in order, and holds the factor to its bounds', () => {

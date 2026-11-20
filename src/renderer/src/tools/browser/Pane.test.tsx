@@ -565,6 +565,26 @@ describe('a device size (U12a)', () => {
     }
   });
 
+  // UX wave U6b-5b (decision 35, decision 27): the room carries the element's origin as the placement sent it, so the chip
+  // reads the placed edges: at 125 % Mobile is 300 × 650 CSS pixels, centred at 350 from a top of 158
+  it('tells its surface where the page’s element sits, the origin its placement sent main', async () => {
+    room = { left: 0, top: 158, right: 1000, bottom: 1258 };
+    const onRoom = vi.fn();
+    try {
+      act(() => useZoom.setState({ factor: 1.25 }));
+      render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" onRoom={onRoom} />);
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 350, y: 158, width: 300, height: 650 } });
+      expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, at: { x: 350, y: 158 } });
+      act(() => useZoom.setState({ factor: 1 }));
+      await frames();
+      expect(places().at(-1)).toMatchObject({ rect: { x: 313, y: 158, width: 375, height: 812 } });
+      expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, at: { x: 313, y: 158 } }); // it follows the element
+    } finally {
+      useZoom.setState({ factor: 1 });
+    }
+  });
+
   it('a pane made narrower narrows the page, and widening it restores the size', async () => {
     const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
     await frames();
@@ -597,13 +617,13 @@ describe('a device size (U12a)', () => {
     const onRoom = vi.fn();
     const { rerender, unmount } = render(<BrowserPane tab={tab()} surface="panel" onRoom={onRoom} />);
     await frames();
-    expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100 });
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100, at: { x: 0, y: 40 } });
     await resizeRoom({ left: 0, top: 40, right: 700.6, bottom: 1140 });
-    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100 }); // whole points, never more than the box
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100, at: { x: 0, y: 40 } }); // whole points, never more than the box
     rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" onRoom={onRoom} />);
     expect(onRoom).toHaveBeenLastCalledWith(null);
     rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" onRoom={onRoom} />); // the other let go: this one claims
-    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100 });
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100, at: { x: 0, y: 40 } });
     unmount();
     expect(onRoom).toHaveBeenLastCalledWith(null);
   });

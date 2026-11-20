@@ -451,6 +451,16 @@ describe('the report gate (Design §8, §9)', () => {
     arm(A);
     await mode.receive(wc as never, report({ ...button, epoch: mode.state(A)!.epoch }));
     expect(picked(send).at(-1)).toMatchObject({ position: { x: 202, y: 681 } });
+    wc.zoom = 1; // the tab at its own 100 % again, at the two factors between
+    for (const [factor, position] of [
+      [0.8, { x: 101, y: 341 }],
+      [1.25, { x: 65, y: 218 }],
+    ] as const) {
+      factors.set(win, factor);
+      arm(A);
+      await mode.receive(wc as never, report({ ...button, epoch: mode.state(A)!.epoch }));
+      expect(picked(send).at(-1)).toMatchObject({ position });
+    }
   });
 
   it('drops, counts and disarms nothing for a report that is not the person\'s pick', async () => {

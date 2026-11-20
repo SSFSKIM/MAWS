@@ -52,6 +52,8 @@ describe('the app window’s zoom (U6b-5b, placement 6)', () => {
   it.each([
     [2, 1, { width: 188, height: 406, reads: { width: 376, height: 812 } }],
     [2, 1.25, { width: 234, height: 508, reads: { width: 374, height: 813 } }],
+    [1.25, 1, { width: 300, height: 650, reads: { width: 375, height: 813 } }],
+    [1.25, 1.25, { width: 375, height: 812, reads: { width: 375, height: 812 } }],
     [0.5, 1, { width: 750, height: 1624, reads: { width: 375, height: 812 } }],
     [0.5, 1.25, { width: 938, height: 2030, reads: { width: 375, height: 812 } }],
   ])('at an app factor of %s and a tab zoom of %s the element, the reading and the fit come from the one formula', (app, zoom, box) => {
@@ -59,6 +61,16 @@ describe('the app window’s zoom (U6b-5b, placement 6)', () => {
     expect(pageBox(MOBILE, zoom, room, app)).toEqual(box);
     expect(fits(MOBILE, zoom, { width: Math.ceil((375 * zoom) / app), height: 1 }, app)).toBe(true);
     expect(fits(MOBILE, zoom, { width: Math.ceil((375 * zoom) / app) - 1, height: 1 }, app)).toBe(false);
+  });
+
+  // main places the view edge by edge (decision 27: each edge times the factor, rounded), so what the page reads depends
+  // on where the element sits: at 125 % an element of 650 CSS pixels from a top of 158 is 198 to 1010 points, 812, where
+  // from a top of 0 it is 0 to 813
+  it('reads the element’s placed edges: at 125 % Mobile from a top of 158 reads 812, from a top of 0 reads 813', () => {
+    expect(pageBox(MOBILE, 1, { width: 1000, height: 1100, at: { x: 350, y: 158 } }, 1.25)).toEqual({ width: 300, height: 650, reads: { width: 375, height: 812 } });
+    expect(pageBox(MOBILE, 1, { width: 1000, height: 1100, at: { x: 0, y: 0 } }, 1.25)).toEqual({ width: 300, height: 650, reads: { width: 375, height: 813 } });
+    expect(pageBox(MOBILE, 1, { width: 1000, height: 1100, at: { x: 406, y: 40 } }, 2)).toEqual({ width: 188, height: 406, reads: { width: 376, height: 812 } }); // 375 → 376 at 200 %, wherever it sits
+    expect(pageBox(MOBILE, 1, { width: 1000, height: 1100, at: { x: 407, y: 41 } }, 2)!.reads).toEqual({ width: 376, height: 812 });
   });
 
   it('offers Mobile in a room of 300 CSS pixels at 200 % (it needs 188), and not in a room of 500 at 50 % (it needs 750)', () => {

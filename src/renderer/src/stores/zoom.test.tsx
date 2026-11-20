@@ -15,7 +15,7 @@ type Answer = { ok: true; value: { factor: number } } | { ok: false; error: { co
 function fakeBridge(current = 1) {
   const listeners = new Set<(payload: EventPayload<'layout.zoomChanged'>) => void>();
   const invoked: unknown[] = [];
-  let answer: (to: string) => Answer = (to) => ({ ok: true, value: { factor: to === 'current' ? current : 1 } });
+  let answer: (to: string) => Answer | Promise<Answer> = (to) => ({ ok: true, value: { factor: to === 'current' ? current : 1 } });
   const bridge = {
     invoke: async (name: string, input: { to: string }) => {
       invoked.push([name, input]);
@@ -70,6 +70,20 @@ describe('connectZoom: the factor', () => {
     expect(lines()).toEqual([]);
     f.changed(1.5); // the control: a change after it does show one
     expect(lines().map((line) => line.text)).toEqual(['Zoom 150 %']);
+    expect(rootZoom()).toBe('1.5');
+  });
+
+  // the reply to the startup read can arrive after a change was heard; the event is the newer word, so it stands (the
+  // case above is the control: with no event first, the reply is applied)
+  it('keeps a change heard before the startup read answers, the late reply ignored', async () => {
+    const f = fakeBridge();
+    let reply!: (answer: Answer) => void;
+    f.answer(() => new Promise<Answer>((resolve) => (reply = resolve)));
+    off = connectZoom(f.bridge);
+    f.changed(1.5);
+    reply({ ok: true, value: { factor: 1.25 } });
+    await settle();
+    expect(useZoom.getState().factor).toBe(1.5);
     expect(rootZoom()).toBe('1.5');
   });
 

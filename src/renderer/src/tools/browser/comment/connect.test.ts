@@ -17,6 +17,7 @@ import { COMMENT_COPY } from './copy';
 import { registerDock } from './dock';
 import { resetCommentMode, useCommentMode } from './store';
 import { openCard, passKey, registerCardHost, resetPlaceNotes, setCommentText, useCommentCard } from '../../../side/card/store'; // UX wave U5a
+import { useZoom } from '../../../stores/zoom'; // UX wave U6b-5b
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -160,6 +161,37 @@ describe('connectBrowserComment', () => {
       expect(opened.mock.lastCall![1].placement).not.toHaveProperty('rect');
     } finally {
       undock();
+    }
+  });
+
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 4): main divides the pin by the app
+  // window's factor once, at the pick; the element stays where it is in the window's points when the factor changes, so the
+  // open card's pin, in the window's CSS pixels, is scaled by the old factor over the new one
+  it('keeps the open card’s pin on the element across a change of the app window’s zoom', () => {
+    unregister();
+    unregister = registerCommentComposer(openCard);
+    const undock = registerDock(T1, 'pane-1');
+    const off = registerCardHost('pane-1', { kind: 'browser', subject: T1, holds: 'many' });
+    const pin = () => useCommentCard.getState().open?.rect ?? null;
+    try {
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: ANCHOR, crop: 'none', position: { x: 296, y: 342 } });
+      expect(pin()).toEqual({ x: 296, y: 342, width: 0, height: 0 }); // the control: the pick's own point at 100 %
+      useZoom.setState({ factor: 1.25 });
+      expect(pin()!.x).toBeCloseTo(236.8);
+      expect(pin()!.y).toBeCloseTo(273.6);
+      useZoom.setState({ factor: 2 });
+      expect(pin()!.x).toBeCloseTo(148);
+      expect(pin()!.y).toBeCloseTo(171);
+      // a card with no pin docks with none at any factor
+      fake.event('browser.comment.picked', { tabId: T1, appSessionId: A, anchor: { ...ANCHOR, locator: '#decrement', css: '#decrement' }, crop: 'none' });
+      useZoom.setState({ factor: 1 });
+      expect(useCommentCard.getState().open).not.toBeNull();
+      expect(pin()).toBeNull();
+    } finally {
+      useZoom.setState({ factor: 1 });
+      off();
+      undock();
+      useCommentCard.setState({ open: null, passes: new Map() });
     }
   });
 

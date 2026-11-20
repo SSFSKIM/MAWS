@@ -325,6 +325,31 @@ describe('the view manager: the app window’s zoom (U6b-5b, placement 1)', () =
     expect(a.view.bounds).toEqual(R);
   });
 
+  // a view in the staging window for its still is placed back by staging's own return, at the factor of that moment
+  it('leaves a view staged for its still where it is, and the return from staging places it at the new factor', async () => {
+    const zoom = { factor: 1 };
+    const h = harness({ zoom });
+    const { w, sender } = h.win();
+    const { tabId } = h.store.open({ appSessionId: A, url: 'https://late.test/', select: true }).tab;
+    const view = h.views.at(-1)!;
+    h.place(sender, tabId, 'p1', R, true);
+    await h.manager.cover(true, sender);
+    let captures = 0;
+    let answer!: (image: unknown) => void;
+    view.capture = () => (++captures === 1 ? Promise.resolve(fakeImage(10, true)) : new Promise((resolve) => (answer = resolve)));
+    h.store.navigationCommitted(tabId, { url: 'https://late.test/', canGoBack: false, canGoForward: false });
+    h.store.update(tabId, { loading: false });
+    await vi.waitFor(() => expect(captures).toBe(2)); // in the staging window
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height });
+    zoom.factor = 2;
+    h.manager.placeAgain(w as unknown as BrowserWindow);
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height }); // still staged, at the stage's origin
+    answer(fakeImage(10));
+    await vi.waitFor(() => expect(h.covered()).toHaveLength(1));
+    expect(w.children.has(view)).toBe(true);
+    expect(view.bounds).toEqual({ x: 20, y: 40, width: 600, height: 400 }); // the control: back in its window at 200 %
+  });
+
   it('places nothing again for a released tab', () => {
     const zoom = { factor: 1 };
     const h = harness({ zoom });
