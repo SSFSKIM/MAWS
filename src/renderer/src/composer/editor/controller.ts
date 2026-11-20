@@ -27,7 +27,7 @@ import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, rec
 import { classifyFile, classifyText, mentionPath, pathRefusal, type FileAction } from './paste';
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
-import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { draftState, modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -309,7 +309,7 @@ export class EditorController {
     const doc = editor.getJSON();
     const mode = modeOf(doc);
     this.view.setMode(mode);
-    this.view.setCommandEmpty(mode === 'send' || serializeDraft(doc, { sessionId: null, cwd: '' }).empty);
+    this.view.setCommandEmpty(mode === 'send' || draftState(doc).empty); // board ticket 741: no fold on an edit
     this.inputs.onDocChange?.(doc);
     if (!this.silent && transaction.docChanged) {
       if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
