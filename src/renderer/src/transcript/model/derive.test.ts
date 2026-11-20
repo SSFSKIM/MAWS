@@ -672,8 +672,12 @@ describe('the queue tail', () => {
     expect(held).toMatchObject({ id: 'held:q-1', kind: 'user', turnId: null, pending: 'held', editable: false, text: 'look at b too', messageUuid: null });
     const shown = withQueueTail(rows, new Set(['s1']), [held]);
     expect(shown.filter((row) => row.kind === 'user').map((row) => row.id)).toEqual(['user:u1', 'held:q-1']);
-    expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(rows); // a prompt that ran is never hidden
-    expect(withQueueTail(rows, new Set(), [])).toBe(rows);
+    // a prompt that ran is never hidden; the running turn's line goes below the dropped bubble (board ticket 789)
+    const lineLast = [...rows.filter((row) => row.kind !== 'divider'), ...rows.filter((row) => row.kind === 'divider')];
+    expect(kinds(lineLast).at(-1)).toBe('divider');
+    expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(lineLast);
+    expect(withQueueTail(rows, new Set(), [])).toEqual(lineLast);
+    expect(withQueueTail(lineLast, new Set(), [])).toBe(lineLast);
   });
 
   // UX wave U4a (decision 12): a mount with a stack (`'stacked'`) draws a message there while it is unread, so the

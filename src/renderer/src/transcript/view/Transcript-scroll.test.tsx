@@ -745,6 +745,7 @@ it('keeps an anchored row at its place on screen when rows inserted above push i
   const opened: Row[] = Array.from({ length: 40 }, (_, i) => ({ id: `opened-row-${i}` as RowId, turnId: null, at: '', kind: 'time', label: `Opened ${i}` }));
   s.redraw([...s.rows.slice(0, index), ...opened, ...s.rows.slice(index)]);
   expect(place()).toBeNull(); // out of the window: the opened work stands between the reader and it
-  for (let i = 0; i < 3 && frames.length > 0; i += 1) act(() => frames.shift()!());
+  // each frame as a browser runs it: the list's scroll, then the scroll event it raises
+  for (let i = 0; i < 3 && frames.length > 0; i += 1) act(() => { frames.shift()!(); fireEvent.scroll(s.scroller); });
   expect(place()).toBe(before);
 });
