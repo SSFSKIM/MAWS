@@ -26,7 +26,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
 // reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
 // `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
-async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */ } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number; unsettled?: () => Promise<MessageUuid[]> /* P2-C */; prepare?: (content: SendContent) => Promise<Prepared> /* P4-A3 */; holdsSequence?: () => boolean /* ticket 790 */ } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
@@ -72,6 +72,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     holdAllDeadlineMs: opts.holdAllDeadlineMs,
     unsettled: opts.unsettled, // P2-C
     prepare: opts.prepare, // P4-A3
+    holdsSequence: opts.holdsSequence, // ticket 790
   });
   if (opts.recovered !== false) await queue.recover(); // what the session does before `ready`
   return { ...h, h, queue };
@@ -1100,7 +1101,7 @@ describe('F2 paused queue admission', () => {
     const sent = await t.queue.send('after Stop');
     expect(sent.disposition).toBe('sent');
     expect(t.writes.map((w) => w.message.content)).toEqual(['after Stop']);
-    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'after Stop', state: 'submitting' }] });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, entries: [{ content: 'after Stop', state: 'submitting' }] }); // ticket 790: the empty pause ended with it
   });
 
   it('l2-transcript-15: new text bypasses the interrupted queue without resuming the pre-existing held items', async () => {
@@ -1128,6 +1129,146 @@ describe('F2 paused queue admission', () => {
     await t.queue.pause(reason);
     expect((await t.queue.send('held')).disposition).toBe('queued');
     expect(t.writes).toEqual([]);
+  });
+});
+
+// Ticket 790: an interrupt pause holds what waited at the Stop. Once the Stop is over and it holds nothing, it ends, so
+// a message queued later behind a turn goes at that turn's end rather than waiting for a Resume nobody needs.
+describe('an interrupt pause that holds nothing ends (ticket 790)', () => {
+  it('a Stop with nothing queued, then a message queued behind the next turn: the turn\'s end sends it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.pause('interrupt'); // the Stop's pause, as a state left latched by a build before this fix
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ terminalReason: 'aborted_streaming', isError: true }));
+    t.h.turn = true; // the person's next turn runs
+    expect((await t.queue.send('after the turn')).disposition).toBe('queued');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes.map((w) => w.message.content)).toEqual(['after the turn']);
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(queueRows(t.rows)).toEqual(['pause:interrupt', 'resume:empty', 'release:turn_ended']);
+  });
+
+  it('stop() with nothing waiting ends its pause at once, saved and announced; with a held steer it stays paused', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.stop({ hold: true });
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+    expect(t.changes.at(-1)).toMatchObject({ paused: false });
+    expect(queueRows(t.rows)).toEqual(['pause:interrupt', 'resume:empty']);
+
+    const held = await harness();
+    held.h.turn = true;
+    await held.queue.steer('steer a', { priority: 'next' });
+    await held.queue.stop({ hold: true });
+    expect(held.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'steer a', state: 'queued' }] });
+    held.h.turn = false;
+    await held.queue.onTurnEnded(turnEnded());
+    expect(held.writes.map((w) => w.message.content)).toEqual(['steer a']); // the steer's own write, nothing released
+  });
+
+  it('a message being prepared, or saved as submitting but not yet written, when a Stop arrives is still held', async () => {
+    let finish!: () => void;
+    const prepared = new Promise<void>((resolve) => (finish = resolve));
+    const t = await harness({ prepare: async (content) => { await prepared; return { content, settle: () => {} }; } });
+    const sending = t.queue.send('racing');
+    await flush();
+    await t.queue.stop({ hold: true });
+    finish();
+    expect((await sending).disposition).toBe('queued');
+    expect(t.writes).toEqual([]);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'racing', state: 'queued' }] });
+
+    const s = await harness();
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    const save = s.store.saveQueue.bind(s.store);
+    vi.spyOn(s.store, 'saveQueue').mockImplementationOnce(async (id, queue) => {
+      await landed;
+      await save(id, queue);
+    });
+    const submitting = s.queue.send('racing');
+    await flush();
+    const stopping = s.queue.stop({ hold: true });
+    land();
+    await stopping;
+    expect((await submitting).disposition).toBe('queued');
+    expect(s.writes).toEqual([]);
+    expect(s.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'racing', state: 'queued' }] });
+  });
+
+  it('a send while the Stop withdraws a steer does not end the pause under it; the steer stays held', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.steer('steer a', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const stopping = t.queue.stop({ hold: true });
+    await flush();
+    await t.queue.send('typed during the Stop');
+    answer();
+    await stopping;
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes.map((w) => w.message.content)).toEqual(['steer a']);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    expect(t.queue.state.entries.map((e) => e.content)).toEqual(['typed during the Stop', 'steer a']);
+  });
+
+  it('removing or sending now the last held row ends the pause; one row left keeps it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const a = (await t.queue.send('a')).entry;
+    const b = (await t.queue.send('b')).entry;
+    await t.queue.stop({ hold: true });
+    await t.queue.remove(a.queueId);
+    expect(t.queue.isPaused).toBe(true);
+    await t.queue.promote(b.queueId);
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+
+    const r = await harness();
+    r.h.turn = true;
+    const only = (await r.queue.send('only')).entry;
+    await r.queue.stop({ hold: false });
+    await r.queue.remove(only.queueId);
+    expect(r.queue.state).toMatchObject({ paused: false, pauseReason: null, entries: [] });
+    expect(await r.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+  });
+
+  it('a host sequence the pause holds keeps it; other pauses that hold nothing stay as they are', async () => {
+    let staged = true;
+    const t = await harness({ holdsSequence: () => staged });
+    await t.queue.stop({ hold: true });
+    expect(t.queue.isPaused).toBe(true);
+    staged = false;
+    await t.queue.send('after the sequence');
+    expect(t.queue.isPaused).toBe(false);
+
+    const user = await harness();
+    await user.queue.pause('user');
+    await user.queue.send('held');
+    expect(user.queue.state).toMatchObject({ paused: true, pauseReason: 'user' });
+  });
+
+  it('a state file another build left with an interrupt pause and no rows loads unpaused, by recovery and by adoption', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
+    const recovered = await harness({ store });
+    expect(recovered.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(await store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+
+    const adoptedStore = new MemorySessionStateStore();
+    await adoptedStore.saveQueue(ID, { entries: [], paused: true, pauseReason: 'interrupt' });
+    const adopted = await harness({ store: adoptedStore, recovered: false });
+    await adopted.queue.adopt({ written: new Set(), unended: [], ended: new Set() });
+    expect(adopted.queue.state).toMatchObject({ paused: false, pauseReason: null });
+
+    const kept = new MemorySessionStateStore();
+    await kept.saveQueue(ID, { entries: [{ queueId: 'q1', appSessionId: ID, content: 'held', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }], paused: true, pauseReason: 'interrupt' });
+    expect((await harness({ store: kept })).queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
   });
 });
 
