@@ -116,7 +116,7 @@ export function requestKeyboard(request: KeyboardRequest): number {
 
 /** UX wave U6b-5a: ends the request of this number while it still waits (the showing that made it has ended). */
 export function withdrawKeyboard(number: number): void {
-  if (pending?.made === number) end();
+  if (pending?.made === number) end('withdrawn: the showing that made it ended');
 }
 
 /**
