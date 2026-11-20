@@ -53,7 +53,7 @@ import { hardReasons } from './budget';
 import { ControlClient, ControlError, ControlTimeout } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
-import { isPermissionMode, SessionStatusTracker, type Catalog, type TrackedStatus } from './session-status';
+import { isPermissionMode, SessionStatusTracker, type Catalog, type McpAsk, type TrackedStatus } from './session-status';
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
@@ -814,8 +814,10 @@ export class EngineSession {
   stdioServers(): Promise<StdioServers | null> {
     const client = this.client;
     if (client === null || this.processState !== 'ready') return Promise.resolve(null);
+    const asked = this.mcpRead === null ? this.mcpAsked() : null; // ticket 619: its answer is the status's servers too
     this.mcpRead ??= mcpStatus(client, {}).then(
       (answer) => {
+        if (asked !== null) this.noteMcpStatus(answer, asked);
         const stdio = answer.mcpServers.filter((server) => (stdioConfigOf(server)?.type ?? (server as { transport?: unknown }).transport) === 'stdio');
         const commands = stdio.flatMap((server) => {
           const config = stdioConfigOf(server);
@@ -921,11 +923,11 @@ export class EngineSession {
 
   // Ticket 619: an mcp_status answer (this session's own read and a page's alike) is its servers now, published when they
   // changed, unless a newer report came since it was asked (`mcpAsked()` then).
-  mcpAsked(): number {
-    return this.tracker.mcpRevision;
+  mcpAsked(): McpAsk {
+    return this.tracker.askMcp();
   }
 
-  noteMcpStatus(answer: McpStatusResponse, asked: number): void {
+  noteMcpStatus(answer: McpStatusResponse, asked: McpAsk): void {
     if (this.tracker.applyMcpStatus(answer, asked)) this.touch();
   }
 

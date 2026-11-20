@@ -51,6 +51,9 @@ export function isPermissionMode(mode: string): mode is PermissionMode {
   return (PERMISSION_MODES as readonly string[]).includes(mode);
 }
 
+
+/** Ticket 619: an mcp_status ask, as `applyMcpStatus` weighs its answer. */
+export interface McpAsk { reports: number; seq: number }
 export class SessionStatusTracker {
   engineState: EngineSessionStatus['engineState'] = 'unknown';
   activity: EngineSessionStatus['activity'] = null;
@@ -69,7 +72,10 @@ export class SessionStatusTracker {
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
   pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet); U11h: and its MCP servers
   mcpServers: EngineSessionStatus['mcpServers'] = [];
-  mcpRevision = 0; // ticket 619: moved by each report of the servers, so an mcp_status answer asked before a newer one does not stand
+  // ticket 619: the init frames' and reloads' reports of the servers, the mcp_status asks, and the latest ask applied
+  private mcpReports = 0;
+  private mcpAsks = 0;
+  private mcpApplied = 0;
   backgroundTasks: EngineSessionStatus['backgroundTasks'] = [];
   heldPeerMessages: EngineSessionStatus['heldPeerMessages'] = [];
   published: EngineSessionStatus['published'] = undefined; // P5 E312: the last code_change_published
@@ -268,19 +274,25 @@ export class SessionStatusTracker {
   }
 
   // Ticket 619: an mcp_status answer is the session's servers now: the engine answers it once the session is ready, before
-  // the first turn's system/init (which the list was otherwise filled from). `asked`: `mcpRevision` when it was asked; an
-  // answer asked before a newer report (an init frame, a reload, another answer) does not stand. The plugins' observation
-  // stays the init's and the reload's: the answer says nothing of them. True when the list changed.
-  applyMcpStatus(answer: McpStatusResponse, asked: number): boolean {
-    if (asked !== this.mcpRevision) return false;
+  // the first turn's system/init (which the list was otherwise filled from). `asked`: the token `askMcp` gave when it was
+  // asked. Each answer is the servers as of its own ask, so it stands unless an init frame or a reload reported them since,
+  // or a later ask's answer was applied already (which an older one never rolls back). The plugins' observation stays the
+  // init's and the reload's: the answer says nothing of them. True when the list changed.
+  askMcp(): McpAsk {
+    return { reports: this.mcpReports, seq: ++this.mcpAsks };
+  }
+
+  applyMcpStatus(answer: McpStatusResponse, asked: McpAsk): boolean {
+    if (asked.reports !== this.mcpReports || asked.seq <= this.mcpApplied) return false;
+    this.mcpApplied = asked.seq;
     const before = JSON.stringify(this.mcpServers);
-    this.reportMcp(mcpServersOf(answer.mcpServers));
+    this.mcpServers = mcpServersOf(answer.mcpServers);
     return JSON.stringify(this.mcpServers) !== before;
   }
 
   private reportMcp(servers: EngineSessionStatus['mcpServers']): void {
     this.mcpServers = servers;
-    this.mcpRevision += 1;
+    this.mcpReports += 1;
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {
