@@ -180,7 +180,7 @@ describe('(g) a message with an attachment past the draft’s budget', () => {
     await waitFor(() => expect(stageKept()).toBe(false)); // settled
     const pane = screen.getByRole('region', { name: 'pane 0' });
     expect(within(pane).getByText('not kept in draft')).toBeTruthy();
-    expect(screen.queryByText(TAKE_BACK_WORDS.taking)).toBeNull();
+    expect(editorOf().editor.isEditable, 'the hold ended').toBe(true);
 
     // a word edited: the writer saves the text and leaves the attachment out
     act(() => editorOf().focus());
@@ -258,7 +258,7 @@ describe('(d) a second window settles and sends while this one’s settle is hel
     // this window's settle lands: stale; it reads what is kept, and its box takes it: empty
     await act(async () => heldSettle.resolve());
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
-    await waitFor(() => expect(screen.queryByText(TAKE_BACK_WORDS.taking)).toBeNull());
+    await waitFor(() => expect(editorOf().editor.isEditable, 'the hold ended').toBe(true));
     expect(fake.invoked('session.send')).toHaveLength(1);
     expect((fake.invoked('session.send')[0] as { content: unknown }).content).toBe(TEXT);
     holder.remove();
@@ -337,13 +337,15 @@ describe('a held settle that meets another window’s newer stage', () => {
     await waitFor(() => expect(stageKept()).toBe(true));
     await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(1));
     expect(editorOf().editor.getText()).toContain(TEXT); // still message 1, held
+    // the hold's reason (TAKE_BACK_WORDS.taking) is drawn as no text: the box is read-only while the take-back is in hand
+    expect(editorOf().editor.isEditable, 'held while the take-back is in hand').toBe(false);
     await act(async () => heldRead.resolve()); // A reads stage 2 and carries it forward
     await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(2));
     await act(() => fake.reply('session.queue.remove', undefined, 1)); // A's own withdrawal of message 2
     await waitFor(() => expect(editorOf().editor.getText()).toContain('the second message'));
     expect(editorOf().editor.getText()).not.toContain(TEXT);
     await waitFor(() => expect(stageKept()).toBe(false));
-    await waitFor(() => expect(screen.queryByText(TAKE_BACK_WORDS.taking)).toBeNull());
+    await waitFor(() => expect(editorOf().editor.isEditable, 'the hold ended').toBe(true));
     expect(fake.invoked('session.send')).toHaveLength(1);
     B.takeBackB.resetTakeBack();
     B.holder.remove();
@@ -360,7 +362,7 @@ describe('a held settle that meets another window’s newer stage', () => {
     await waitFor(() => expect(editorOf().editor.getText()).toContain('the second message'));
     expect(editorOf().editor.getText()).not.toContain(TEXT);
     await waitFor(() => expect(stageKept()).toBe(false));
-    await waitFor(() => expect(screen.queryByText(TAKE_BACK_WORDS.taking)).toBeNull());
+    await waitFor(() => expect(editorOf().editor.isEditable, 'the hold ended').toBe(true));
     expect(fake.invoked('session.send')).toHaveLength(1);
     B.takeBackB.resetTakeBack();
     B.holder.remove();

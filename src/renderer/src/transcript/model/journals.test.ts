@@ -306,6 +306,9 @@ describe('the one-writer rule: a `!` command holding the consent sentence', () =
     const frames = userFrames(rows);
     expect(frames.filter((frame) => frame.message.content.includes(command)), 'the command is in the replay and the echo').toHaveLength(2);
     const events = journalToEvents(rows);
+    // These two lines hold whatever rule R does: on the live route the engine host drops the `bash_command` write and
+    // returns on the echo's `shouldQuery: false` before it reads arrivals (engine-host/normalizer.ts). The last line,
+    // each frame's content read on every route, carries the claim.
     expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent'), 'the live route marks no consent').toEqual([]);
     expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn').toEqual([]);
     for (const frame of frames) expect(grantsReadFrom(frame.message.content), frame.message.content).toEqual({ gate: [], live: [], file: [] });
