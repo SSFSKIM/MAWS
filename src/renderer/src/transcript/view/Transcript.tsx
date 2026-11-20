@@ -9,7 +9,7 @@
 // only returning to the bottom or Jump to latest resumes it. While following, structural changes and measurements
 // keep the end pinned.
 import { elementScroll, measureElement, useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type Ref } from 'react';
+import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { flushSync } from 'react-dom';
 import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
@@ -350,15 +350,21 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   // As the content observer below: movement the reader made first (a witnessed key, a reversed scrollbar drag) is read
   // before the end is followed. Board ticket 789: the running turn's line is the last row, so the streamed answer grows
   // in the row above it, and its growth reaches the DOM's end only past the line, which stands where the last commit put
-  // it. Where neither the sizer nor the rendered content reaches the measured end, the measured sizes are committed here,
-  // before the frame paints: the line moves below the answer and the end followed is the measured one.
-  const [, commitMeasured] = useReducer((n: number) => n + 1, 0);
+  // it. Where neither the sizer nor the rendered content reaches the measured end, the rows' measured places are
+  // committed here, before the frame paints: the line moves below the answer and the end followed is the measured one.
+  // The sizer keeps its committed height in that commit (the moved rows overflow it to the measured end): it is an
+  // ancestor of the row whose observer delivery this runs in, and resizing it there leaves its own notification
+  // undelivered, which the browser reports as an error on the window. The virtualiser's own re-render grows it after.
+  const [heldSizer, holdSizer] = useState<{ height: number } | null>(null); // a new object each time, so each commits
   useLayoutEffect(() => {
     followGrowth.current = () => {
       readScroll(virtualizer.getTotalSize());
       if (!followingRef.current) return;
       const element = scrollRef.current;
-      if (element && extentPending(element, virtualizer.getTotalSize())) flushSync(commitMeasured);
+      if (element && extentPending(element, virtualizer.getTotalSize())) {
+        flushSync(() => holdSizer({ height: committedSize(element) }));
+        holdSizer(null); // released in a later render, outside this delivery
+      }
       pinEnd();
     };
   }, [pinEnd, readScroll, virtualizer]);
@@ -493,7 +499,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   return (
     <div className={`min-h-0 ${className ?? ''}`}>
       <div ref={scrollRef} id={id} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
-        <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        <div className="relative w-full" style={{ height: heldSizer?.height ?? virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (
