@@ -13,7 +13,7 @@ import { frameUrl } from '@shared/files/framed';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record as sessionRecord } from '../../../../../../test/support/builders';
-import { at } from '../../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../../test/support/machine';
 import { resetArtifactEditors, type ArtifactEditor } from '../../../artifacts/registry';
 import { resetExportFormats } from '../../../library/export';
 import { connectLibrary, resetLibrary } from '../../../library/store';
@@ -75,9 +75,9 @@ afterEach(() => {
 
 function mount(scope: EditorHostScope, visible: boolean) {
   const editor = byteViewer('file') as ArtifactEditor<ByteViewerState>;
-  const state = editor.createState!({ artifactId: ID, kind: 'file', surface: scope.surface === 'main' ? 'main' : 'panel' });
+  const state = editor.createState!({ artifactId: ID, machine: TEST_MACHINE, kind: 'file', surface: scope.surface === 'main' ? 'main' : 'panel' });
   const Body = editor.Panel;
-  const draw = (shown: boolean) => <Body artifactId={ID} state={state} scope={scope} visible={shown} onShown={() => {}} />;
+  const draw = (shown: boolean) => <Body artifactId={ID} machine={TEST_MACHINE} state={state} scope={scope} visible={shown} onShown={() => {}} />;
   const view = render(draw(visible));
   return (shown: boolean) => view.rerender(draw(shown));
 }

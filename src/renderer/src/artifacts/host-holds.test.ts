@@ -11,16 +11,16 @@ const ARTIFACT = '11111111-1111-4111-8111-111111111111';
 const HOLD = '22222222-2222-4222-8222-222222222222';
 
 describe('ArtifactHost.holdDatasets', () => {
-  it('asks main for one hold over the refs, and releases its handle once', async () => {
+  it('holds a remote artifact’s refs and releases the window’s local handle once', async () => {
     const invoke = vi.fn(async (name: string) => ({ ok: true as const, value: name === 'artifacts.holdDatasets' ? { holdId: HOLD } : { released: true } }));
-    const host = createArtifactHost({ ipc: { invoke, on: () => () => {} } as never, ports: { take: () => Promise.reject(new Error('no ports')) } });
+    const host = createArtifactHost({ ipc: { invoke, on: () => () => {}, localMachine: TEST_MACHINE } as never, machine: OTHER_MACHINE, ports: { take: () => Promise.reject(new Error('no ports')) } });
     const hold = await host.holdDatasets(ARTIFACT, ['assets/a.json', 'assets/b.csv']);
     hold.release();
     hold.release();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls).toEqual([
-      ['artifacts.holdDatasets', { artifactId: ARTIFACT, refs: ['assets/a.json', 'assets/b.csv'] }],
-      ['artifacts.releaseDatasets', { holdId: HOLD }],
+      ['artifacts.holdDatasets', { artifactId: ARTIFACT, refs: ['assets/a.json', 'assets/b.csv'] }, { machine: OTHER_MACHINE }],
+      ['artifacts.releaseDatasets', { holdId: HOLD }, { machine: TEST_MACHINE }],
     ]);
   });
 

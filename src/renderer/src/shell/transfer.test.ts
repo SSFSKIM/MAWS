@@ -36,9 +36,9 @@ const DOC_TAB = artifactTab(DOC);
 const mainScope = (artifactId = DOC): EditorHostScope => ({ surface: 'main', tabId: tabId({ kind: 'artifact', artifactId, machine: TEST_MACHINE }) });
 const panelScope = (panelTabId: string): EditorHostScope => ({ surface: 'panel', tabId: panelTabId });
 
-function metadata(artifactId: string, projectId?: ProjectId): void {
+function metadata(artifactId: string, projectId?: ProjectId, machine = TEST_MACHINE): void {
   const row: LibraryRow = { id: artifactId, kind: 'document', title: 'Launch notes', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [], ...(projectId ? { project: { id: projectId, name: projectId } } : {}) };
-  library.setState((state) => ({ reads: new Map(state.reads).set(rowKey(artifactId), { status: 'ready', value: row, error: null }) }));
+  library.setState((state) => ({ reads: new Map(state.reads).set(rowKey(artifactId, machine), { status: 'ready', value: row, error: null }) }));
 }
 
 // UX wave U13a: the sessions sit under these projects' rows (a project on this Mac each), as the current project reads
@@ -86,7 +86,7 @@ afterEach(() => {
 });
 
 // A body mounted in a scope made the editor's state there (as `MountedEditor` does).
-const mounted = (scope: EditorHostScope, artifactId = DOC): ArtifactEditorHold => holdArtifactEditorState(scope, artifactId, 'document', artifactEditorFor('document')!);
+const mounted = (scope: EditorHostScope, artifactId = DOC): ArtifactEditorHold => holdArtifactEditorState(scope, artifactId, TEST_MACHINE, 'document', artifactEditorFor('document')!);
 const handleOf = (panelTabId: string) => instanceOf(panelTabId)?.state as ArtifactsHandle | undefined;
 const recordOf = (panelTabId: string | undefined) => (panelTabId ? handleOf(panelTabId)?.snapshot().view : undefined);
 const artifactsTab = (appSessionId: AppSessionId) => panelOf(appSessionId)?.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)?.id;
@@ -144,7 +144,7 @@ describe('main → panel', () => {
 
   it.each(['unread', 'missing'] as const)('waits for %s metadata and updates the menu refusal when only the Library row arrives or changes project', async (status) => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
-    act(() => library.setState({ reads: status === 'unread' ? new Map() : new Map([[rowKey(DOC), { status: 'ready', value: null, error: null }]]) }));
+    act(() => library.setState({ reads: status === 'unread' ? new Map() : new Map([[rowKey(DOC, TEST_MACHINE), { status: 'ready', value: null, error: null }]]) }));
     const refusal = renderHook(() => useTransferRefusal({ to: 'panel', mainTabId: DOC_TAB.id }));
     expect(refusal.result.current).toBe('Loading…');
     const before = surfaces();
@@ -271,6 +271,7 @@ describe('main → panel', () => {
   // P5 O6 M4: an artifact id names no machine, so the panel shows the moved artifact only when the machines agree too.
   it('a panel showing another machine’s artifact of the same id is not T5: its record goes Back and the moved one shows', async () => {
     const onOther: TabRef = { id: tabId({ kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE }), kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE, pinned: false };
+    metadata(DOC, undefined, OTHER_MACHINE);
     useLayout.setState({ main: panes([sessionTab(A), onOther]) });
     const dest = addArtifacts(A, DOC);
     expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
@@ -454,8 +455,8 @@ describe('the version a moved viewer shows', () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     addArtifacts(A); // a list tab, which the move re-targets
     mounted(mainScope());
-    requestArtifactOpen(DOC, 'latest', 'panel'); // a stale ask for the panel's viewer of DOC
-    const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
+    requestArtifactOpen(DOC, TEST_MACHINE, 'latest', 'panel'); // a stale ask for the panel's viewer of DOC
+    const asked = renderHook(() => useOpenRequest(DOC, TEST_MACHINE, 'panel'));
     expect(asked.result.current).not.toBeNull();
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(asked.result.current).toBeNull();
@@ -464,7 +465,7 @@ describe('the version a moved viewer shows', () => {
   it('a new Artifacts tab made for the move asks for none either', async () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     mounted(mainScope());
-    const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
+    const asked = renderHook(() => useOpenRequest(DOC, TEST_MACHINE, 'panel'));
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(asked.result.current).toBeNull();
@@ -476,8 +477,8 @@ describe('the version a moved viewer shows', () => {
     useLayout.setState({ main: panes([sessionTab(A)]) });
     const src = addArtifacts(A, DOC);
     mounted(panelScope(src));
-    requestArtifactOpen(DOC, 'latest', 'main', { version: 2 }); // a link's ask whose main tab was closed first
-    const asked = renderHook(() => useOpenRequest(DOC, 'main'));
+    requestArtifactOpen(DOC, TEST_MACHINE, 'latest', 'main', { version: 2 }); // a link's ask whose main tab was closed first
+    const asked = renderHook(() => useOpenRequest(DOC, TEST_MACHINE, 'main'));
     expect(asked.result.current).not.toBeNull();
     expect(await move(() => moveArtifactToTab(src))).toBe(true);
     expect(asked.result.current, 'the carried state adopted by a new main tab').toBeNull();
@@ -489,8 +490,8 @@ describe('the version a moved viewer shows', () => {
     mounted(panelScope(again));
     mounted(mainScope());
     guard(panelScope(again), () => true);
-    requestArtifactOpen(DOC, 'latest', 'main', { block: 'b7' });
-    const left = renderHook(() => useOpenRequest(DOC, 'main'));
+    requestArtifactOpen(DOC, TEST_MACHINE, 'latest', 'main', { block: 'b7' });
+    const left = renderHook(() => useOpenRequest(DOC, TEST_MACHINE, 'main'));
     expect(left.result.current).not.toBeNull();
     expect(await move(() => moveArtifactToTab(again))).toBe(true);
     expect(left.result.current, 'an existing main tab activated').toBeNull();
@@ -498,7 +499,7 @@ describe('the version a moved viewer shows', () => {
 
   it('an ordinary open in the panel still asks for its version', () => {
     const id = addArtifacts(A);
-    const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
+    const asked = renderHook(() => useOpenRequest(DOC, TEST_MACHINE, 'panel'));
     act(() => void handleOf(id)!.open({ target: DOC, at: { version: 1 } }));
     expect(asked.result.current?.at).toEqual({ version: 1 });
   });

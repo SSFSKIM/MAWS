@@ -383,7 +383,7 @@ describe('the record view', () => {
     await openRow(1);
     expect(screen.getByText(`panel editor for ${NOTES.id} in panel:${TAB}`)).toBeTruthy();
     expect(editor.createState).toHaveBeenCalledTimes(1);
-    expect(editor.createState).toHaveBeenCalledWith({ artifactId: NOTES.id, kind: 'document', surface: 'panel' });
+    expect(editor.createState).toHaveBeenCalledWith({ artifactId: NOTES.id, machine: TEST_MACHINE, kind: 'document', surface: 'panel' });
     expect(editorHostOf(SCOPE)?.title).toBe('Editing 1');
     await waitFor(() => expect(main.callsOf('artifacts.markViewed')).toEqual([{ artifactId: NOTES.id }]));
     expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
@@ -427,7 +427,7 @@ describe('the record view', () => {
     act(() => artifactsTool.open!(handle, { target: SPEC.id }));
     await screen.findByText(`panel editor for ${SPEC.id} in panel:${TAB}`);
     expect(editor.dispose).toHaveBeenCalledTimes(1);
-    expect(editor.createState).toHaveBeenLastCalledWith({ artifactId: SPEC.id, kind: 'document', surface: 'panel' });
+    expect(editor.createState).toHaveBeenLastCalledWith({ artifactId: SPEC.id, machine: TEST_MACHINE, kind: 'document', surface: 'panel' });
     expect(editorHostOf(SCOPE)?.title).toBe('Editing 4');
 
     act(() => artifactsTool.open!(handle, {}));
@@ -481,7 +481,7 @@ describe('the record view', () => {
     const { handle } = await mount({ target: NOTES.id });
     await screen.findByText(`panel editor for ${NOTES.id} in panel:${TAB}`);
     function Asked() {
-      const request = useOpenRequest(OTHER.id, 'panel');
+      const request = useOpenRequest(OTHER.id, TEST_MACHINE, 'panel');
       return <p data-asked="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
     }
     render(<Asked />);
@@ -658,7 +658,7 @@ describe('openArtifactInPanel (M6b)', () => {
   beforeEach(() => resetOpenRequests()); // every open asks, the earlier cases' too
   afterEach(() => resetOpenRequests());
   function Request() {
-    const request = useOpenRequest(NOTES.id, 'panel');
+    const request = useOpenRequest(NOTES.id, TEST_MACHINE, 'panel');
     return <p data-request="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
   }
   const asked = () => document.querySelector('[data-request]')!.textContent;
@@ -682,7 +682,7 @@ describe('openArtifactInPanel (M6b)', () => {
   // on it or already shows it; a later plain open supersedes it
   it('asks for the place a link names, beside the version, also of a tab already showing the artifact', () => {
     function Place() {
-      const request = useOpenRequest(NOTES.id, 'panel');
+      const request = useOpenRequest(NOTES.id, TEST_MACHINE, 'panel');
       return <p data-place="">{request === null ? 'none' : JSON.stringify([request.at, request.location ?? null])}</p>;
     }
     const place = () => document.querySelector('[data-place]')!.textContent;
@@ -825,7 +825,7 @@ describe('in the panel', () => {
       const editor = guardedEditor();
       const third = row(7, { title: 'Third' });
       rows = [...rows, third];
-      const unwatch = watchLibraryRow(third.id);
+      const unwatch = watchLibraryRow(third.id, TEST_MACHINE);
       await settle();
       unwatch();
       const tabId = await opened(NOTES.id);

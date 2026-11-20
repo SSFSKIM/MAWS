@@ -47,7 +47,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
-import { useArtifactMachine } from '../../../artifacts/use-artifact-machine';
+import { artifactKey } from '../../../artifacts/machines';
+import type { MachineRef } from '@shared/machine/ref';
 import { LEASE_NEEDS, useRemoteGreyed } from '../../../artifacts/remote-surfaces'; // P5 O7 M5c
 import { connectorsOwner } from '../../../artifacts/connector-owner'; // P3-HD M3c2
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
@@ -147,18 +148,18 @@ function useReaderSession(home: AppSessionId | null): AppSessionId | null {
 
 // ---- the editor --------------------------------------------------------------------------------------------------------
 
-function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: ArtifactEditorProps<ByteViewerState> & { kind: ByteKind }) {
+function ByteViewer({ kind, artifactId, machine, state, scope, visible, onShown }: ArtifactEditorProps<ByteViewerState> & { kind: ByteKind }) {
   const { selected, reloads } = useStore(state.view);
-  const row = useLibraryRow(artifactId).value;
+  const row = useLibraryRow(artifactId, machine).value;
   const title = row?.title ?? VIEWERS_COPY.fallbackTitle;
   // read again as the row moves on (a publish), the versions read before standing meanwhile, so the version shown keeps
   // its frame and an Open asked meanwhile is placed; a Reload reads from nothing
-  const versionsRead = useRead(`${artifactId}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }), row?.revision);
+  const versionsRead = useRead(`${artifactId}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }, { machine }), row?.revision);
   const ordered = useMemo(() => (versionsRead.status === 'ready' ? versionsInOrder(versionsRead.value.versions) : null), [versionsRead]);
   const shown = ordered ? shownVersion(ordered, placeOfOpenAt(ordered, selected)) : null;
   const revision = shown?.version.seq;
   const contentRead = useRead<LibraryContent>(ordered === null ? null : `${artifactId}@${revision ?? 'latest'}#${reloads}`, () =>
-    ipc.invoke('library.content', { artifactId, ...(revision !== undefined && { revision }) }),
+    ipc.invoke('library.content', { artifactId, ...(revision !== undefined && { revision }) }, { machine }),
   );
   const content = contentRead.status === 'ready' ? contentRead.value : null;
   const body: BodyKind | null = content === null ? null : kind === 'html' ? 'html' : bodyOf(content.name);
@@ -191,7 +192,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // P4-B4: a place's version (a retained version's id, a link's `#v<id>`) names the version shown; a place without one, `at`
   const chooseAt = (at: ArtifactOpenAt, location?: ArtifactLocation) => ordered !== null && state.view.setState({ selected: selectionOfOpen(ordered, at, location) });
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
-  const request = useOpenRequest(artifactId, scope.surface);
+  const request = useOpenRequest(artifactId, machine, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
     noteArtifactVersions(artifactId, ordered);
@@ -256,7 +257,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // followed exports live only while it shows the row's revision, else the version shown, as the actions' revision is.
   const selection =
     ordered !== null && content !== null ? { revision: content.revision, versionId: shown && (selected !== 'latest' || row?.revision !== content.revision) ? shown.version.id : undefined } : null;
-  useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload, connectors });
+  useViewerHeader({ kind, artifactId, machine, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload, connectors });
   useRegionMarkupSurface(bodyBox, title, body !== null); // P3-G (§D4.1): Mark-up over the drawn body
 
   const failed = versionsRead.status === 'error' ? versionsRead.error : contentRead.status === 'error' ? contentRead.error : null;
@@ -272,6 +273,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
           <Body
             key={frameKey}
             artifactId={artifactId}
+            machine={machine}
             content={content}
             body={body}
             title={title}
@@ -346,6 +348,7 @@ function ReadError({ message, onRetry }: { message: string; onRetry(): void }) {
 
 interface BodyProps {
   artifactId: string;
+  machine: MachineRef;
   content: LibraryContent;
   body: BodyKind;
   title: string;
@@ -359,7 +362,7 @@ interface BodyProps {
   inView: boolean; // UX wave U6b-2: the file viewer's body is on screen (Decision Log 35)
 }
 
-function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onReady, connectors, inView }: BodyProps) {
+function Body({ artifactId, machine, content, body, title, session, reloads, picking, onPick, onFrame, onReady, connectors, inView }: BodyProps) {
   const url = artifactUrl(artifactId, content.revision, content.name);
   const frameTitle = VIEWERS_COPY.frameTitle(title);
   switch (body) {
@@ -382,13 +385,13 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
     case 'audio':
       return <Media kind={body} url={url} onLoad={onReady} />;
     case 'file':
-      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} artifact={{ artifactId, revision: content.revision }} path={content.path} onReady={onReady} inView={inView} />;
+      return <DrawnFile tabId={fileTabId(artifactId, machine, content.revision, reloads)} session={session} artifact={{ artifactId, machine, revision: content.revision }} path={content.path} onReady={onReady} inView={inView} />;
   }
 }
 
 // The file viewer's entry for a drawn revision: one per artifact revision and Reload (`reloads` is a serial shared by
 // every view, so a Reload reads afresh even while another view holds the revision's entry).
-const fileTabId = (artifactId: string, revision: number, reloads: number) => `artifact:${artifactId}:${revision}${reloads > 0 ? `:r${reloads}` : ''}`;
+const fileTabId = (artifactId: string, machine: MachineRef, revision: number, reloads: number) => `artifact:${artifactKey(artifactId, machine)}:${revision}${reloads > 0 ? `:r${reloads}` : ''}`;
 
 // Under its session while the window knows it (the file followed as it changes), else by its artifact alone (fix wave 2).
 function DrawnFile({ tabId, session, artifact, path, onReady, inView }: { tabId: string; session: AppSessionId | null; artifact: ArtifactRead; path: string; onReady(): void; inView: boolean }) {
@@ -405,6 +408,7 @@ function DrawnFile({ tabId, session, artifact, path, onReady, inView }: { tabId:
 interface HeaderInput {
   kind: ByteKind;
   artifactId: string;
+  machine: MachineRef;
   title: string;
   state: ByteViewerState;
   scope: ArtifactEditorProps['scope'];
@@ -429,14 +433,14 @@ const answered = async (pending: Promise<{ ok: true; value: { opened?: boolean; 
   else if (result.value.message !== null) toastFailure(result.value.message);
 };
 
-function useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload, connectors }: HeaderInput): void {
+function useViewerHeader({ kind, artifactId, machine, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload, connectors }: HeaderInput): void {
   const revision = selection?.revision;
   const formats = useExportFormats(kind);
   const sessionRecord = useSessions((s) => (session === null ? undefined : s.records.get(session)));
-  const drawnKind = useViewer((s) => (content && body === 'file' ? (s.entries.get(fileTabId(artifactId, content.revision, reloads))?.kind ?? null) : null));
+  const drawnKind = useViewer((s) => (content && body === 'file' ? (s.entries.get(fileTabId(artifactId, machine, content.revision, reloads))?.kind ?? null) : null));
   const at = revision === undefined ? {} : { revision };
-  const machine = useArtifactMachine(artifactId); // P5 O7 M5a: another machine's artifact, else null
-  const machineShown = useMachines((s) => (machine === null ? null : machineName(s.machines, machine, ipc.localMachine)));
+  const local = machine === ipc.localMachine;
+  const machineShown = useMachines((s) => (local ? null : machineName(s.machines, machine, ipc.localMachine)));
   const actions: EditorHostAction[] = [];
   if (commentable) {
     actions.push({ id: COMMENT_ACTION, label: VIEWERS_COPY.comment, icon: CommentIcon, pressed: picking, onSelect: () => state.view.setState({ pickingIn: picking ? null : frameKey }) });
@@ -445,18 +449,18 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   const connectorsAsked = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.declared.length > 0 || (s.grants?.length ?? 0) > 0);
   // P5 O7 M5c: a page of another machine that offers it no leases asked in vain; the sheet says why
   const leaseRefused = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.leaseRefused);
-  const leaseGreyed = useRemoteGreyed(connectors?.artifactId ?? null, LEASE_NEEDS);
+  const leaseGreyed = useRemoteGreyed(connectors?.artifactId ?? null, LEASE_NEEDS, connectors?.machine);
   const connectorsOpen = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.sheet);
   if (connectors && (connectorsAsked || (leaseRefused && leaseGreyed !== null))) {
     actions.push({ id: 'connectors', label: CONNECTORS_COPY.action, icon: ConnectorsIcon, pressed: connectorsOpen, onSelect: () => (connectors.view.getState().sheet ? connectors.closeSheet() : connectors.openSheet()) });
   }
   actions.push({ id: 'reload', label: VIEWERS_COPY.reload, icon: ReloadIcon, onSelect: onReload });
   if (content && opensExternally(content.name)) {
-    const open = () => (machine === null ? ipc.invoke('library.openExternally', { artifactId, ...at }) : openArtifactCopy(machine, artifactId, revision, ipc));
+    const open = () => (local ? ipc.invoke('library.openExternally', { artifactId, ...at }, { machine }) : openArtifactCopy(machine, artifactId, revision, ipc));
     actions.push({ id: 'external', label: VIEWERS_COPY.openExternally, icon: OpenExternallyIcon, onSelect: () => void answered(open()) });
   }
   if (content && machineShown !== null) actions.push({ id: 'reveal', label: VIEWERS_COPY.revealOn(machineShown), icon: RevealIcon, disabled: true, onSelect: () => {} });
-  else if (content) actions.push({ id: 'reveal', label: VIEWERS_COPY.reveal, icon: RevealIcon, onSelect: () => void answered(ipc.invoke('library.reveal', { artifactId, ...at })) });
+  else if (content) actions.push({ id: 'reveal', label: VIEWERS_COPY.reveal, icon: RevealIcon, onSelect: () => void answered(ipc.invoke('library.reveal', { artifactId, ...at }, { machine })) });
   if (content && session !== null && drawnKind !== null && OPENS_AS_FILE.has(drawnKind) && underSession(content.path, sessionRecord)) {
     actions.push({ id: 'file', label: VIEWERS_COPY.openAsFile, icon: OpenAsFileIcon, onSelect: () => openFile(session, content.path) });
   }
@@ -465,7 +469,7 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
     label: VIEWERS_COPY.exportFormats[format],
     disabled: selection === null,
     onSelect: () => {
-      if (selection) void exportArtifact(artifactId, format, selection.versionId);
+      if (selection) void exportArtifact(artifactId, machine, format, selection.versionId);
     },
   }));
   if (savesCopy(kind)) {
@@ -475,12 +479,12 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
       label: VIEWERS_COPY.saveCopy,
       disabled: selection === null,
       onSelect: () => {
-        if (selection) void saveArtifactCopy(artifactId, selection.revision);
+        if (selection) void saveArtifactCopy(artifactId, machine, selection.revision);
       },
     });
   }
   // P4-B5: Send to, the revision the viewer shows (a version's when it is not the latest followed)
-  const sendTo = useSendToAction(selection === null ? null : sendToSubject(artifactId, kind, title, selection.versionId === undefined ? null : { versionId: selection.versionId }));
+  const sendTo = useSendToAction(selection === null ? null : sendToSubject(artifactId, machine, kind, title, selection.versionId === undefined ? null : { versionId: selection.versionId }));
   if (sendTo && formats.length > 0) actions.push(sendTo);
   useEditorHost(scope, { title, saved: 'readonly', actions, exports });
 }
@@ -489,12 +493,12 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
 
 // P3-H H4: an HTML page's tab keeps its connectors, ended with the tab. P3-HD M3c2: with the owner's server rows (main's
 // trusted commands, apart from the page's ArtifactHost)
-const connectorsFor = (artifactId: string): ConnectorsTab =>
-  new ConnectorsTab(artifactId, { host: artifactHost(), startSession: (context, previous) => startArtifactSession(context, previous), log: (line) => console.warn(`[connectors] ${line}`), owner: connectorsOwner() });
+const connectorsFor = (artifactId: string, machine: MachineRef): ConnectorsTab =>
+  new ConnectorsTab(artifactId, { host: artifactHost(machine), startSession: (context, previous) => startArtifactSession(context, previous), log: (line) => console.warn(`[connectors] ${line}`), owner: connectorsOwner(machine), machine });
 
 const createState = (kind: ByteKind, target: ArtifactEditorTarget): ByteViewerState => ({
   view: createStore<ViewState>()(() => ({ selected: 'latest', reloads: 0, pickingIn: null })),
-  connectors: kind === 'html' ? connectorsFor(target.artifactId) : null,
+  connectors: kind === 'html' ? connectorsFor(target.artifactId, target.machine) : null,
 });
 const dispose = (state: ByteViewerState) => state.connectors?.dispose();
 

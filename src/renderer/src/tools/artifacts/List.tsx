@@ -39,7 +39,7 @@ interface Props {
   scrollTop: number;
   onScope(scope: ArtifactsScope): void;
   onScroll(scrollTop: number): void;
-  onOpen(artifactId: string): void;
+  onOpen(artifactId: string, machine: MachineRef): void;
 }
 
 export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScroll, onOpen }: Props) {
@@ -53,9 +53,9 @@ export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScrol
     if (scroller.current) scroller.current.scrollTop = restore.top;
   }, [restore]);
   const filter: LibraryFilter | null = scope === 'all' ? {} : appSessionId === null ? null : { appSessionId, lineage: true };
-  const machine = appSessionId !== null && isAddress(appSessionId) ? machineOf(appSessionId) : undefined;
+  const machine = appSessionId !== null && isAddress(appSessionId) ? machineOf(appSessionId) : ipc.localMachine;
   const openLibrary = () => {
-    setLibraryView({ machine: machine === undefined || machine === ipc.localMachine ? null : machine, spaceId: null });
+    setLibraryView({ machine: machine === ipc.localMachine ? null : machine, spaceId: null });
     openArtifacts();
   };
   return (
@@ -103,13 +103,13 @@ const sizeKey = (line: Line): SizeKey => (line.kind === 'row' ? (line.last ? 'la
 // the last one was, so the kept scroll offset lands on the same row. A hidden list measures 0, which is not kept.
 const measured: Partial<Record<SizeKey, number>> = {};
 
-function Groups({ filter, machine, scope, initialOffset, onOpen }: { filter: LibraryFilter; machine: MachineRef | undefined; scope: ArtifactsScope; initialOffset: number; onOpen(artifactId: string): void }) {
+function Groups({ filter, machine, scope, initialOffset, onOpen }: { filter: LibraryFilter; machine: MachineRef; scope: ArtifactsScope; initialOffset: number; onOpen(artifactId: string, machine: MachineRef): void }) {
   const read = useLibraryList(filter, machine);
   const error = read.status === 'error' ? (read.error ?? '') : null;
   if (read.value === undefined) {
     return error === null ? <Quiet>{ARTIFACTS_TOOL_COPY.reading}</Quiet> : <Failure message={ARTIFACTS_TOOL_COPY.couldNotList(error)} />;
   }
-  return <Lines rows={read.value.rows} error={error} scope={scope} appSessionId={filter.appSessionId} initialOffset={initialOffset} onOpen={onOpen} />;
+  return <Lines rows={read.value.rows} error={error} scope={scope} appSessionId={filter.appSessionId} initialOffset={initialOffset} onOpen={(id) => onOpen(id, machine)} />;
 }
 
 // A refused refresh above the last good rows, the empty note, then each kind's heading and its rows, newest first.

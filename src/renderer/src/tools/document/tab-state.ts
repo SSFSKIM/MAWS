@@ -43,6 +43,7 @@ import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import type { CloseAsk } from '../../panel/editor-host'; // P4-B3
+import { ipc } from '../../ipc/client';
 import { ownFileFor } from '../../library/export'; // P5 O7 M5a
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
@@ -111,6 +112,7 @@ let commentHosts = 0; // P4-B3 M6
 
 export class DocumentTabState {
   readonly artifactId: string;
+  readonly machine: ArtifactEditorTarget['machine'];
   readonly history: HistoryApi;
   readonly mentions: MentionSource;
   readonly host: ArtifactHost; // the editor's assets and the identity it writes as
@@ -139,6 +141,7 @@ export class DocumentTabState {
     private readonly deps: DocumentTabDeps,
   ) {
     this.artifactId = target.artifactId;
+    this.machine = target.machine;
     this.host = deps.host;
     this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, saving: false, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, shown: null, exporting: null };
     this.whenShown = new Promise((resolve) => (this.resolveShown = resolve));
@@ -320,7 +323,7 @@ export class DocumentTabState {
       // P4 (W1, L302): a file of its own, saved by its id, so Letter and A4 or the agent's export of the same revision and
       // format between the two never swaps the file saved. UX wave U10b: a size only where the row carries one (a
       // dashboard's), else the export prints on the document's own page
-      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), ...(pageSize && { pageSize }), ...ownFileFor(this.artifactId) }); // P5 O7 M5a: no own file on another machine
+      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), ...(pageSize && { pageSize }), ...ownFileFor(this.machine, ipc.localMachine) }); // P5 O7 M5a: no own file on another machine
       if (!exported.ok) throw new Error(exported.error.message);
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });

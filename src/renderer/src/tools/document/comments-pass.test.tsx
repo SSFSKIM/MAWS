@@ -20,7 +20,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { holdArtifactEditorState, releaseArtifactEditorState, type ArtifactEditor } from '../../artifacts/registry';
 import { cardHostEntry, resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
@@ -85,7 +85,7 @@ async function openTab(confirm: () => boolean = () => false) {
     sessions: () => [],
   } as DocumentTabDeps;
   const editor: ArtifactEditor<DocumentTabState> = { Panel: () => null, createState: (target) => new DocumentTabState(target, deps), dispose: (state) => state.dispose() };
-  const { state } = holdArtifactEditorState(SCOPE, A, 'document', editor);
+  const { state } = holdArtifactEditorState(SCOPE, A, TEST_MACHINE, 'document', editor);
   await until(() => state.snapshot().ready, 'the tab to open');
   // M3's review, finding 4: every hold of the replica is counted, and each release, so a second release shows
   const holds = { taken: 0, released: 0, twice: 0 };

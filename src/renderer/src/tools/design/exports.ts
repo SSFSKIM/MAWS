@@ -8,6 +8,7 @@
 //
 // A picture over the cap is never cropped: main refuses it `exportTooLarge {board, w, h, maxScale}`, and the sheet states
 // that scale and the size it gives; the owner agreeing, the export runs at it.
+import type { MachineRef } from '@shared/machine/ref';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
 import type { ShownVersion } from '@artifacts/design/editor/viewport';
@@ -69,13 +70,13 @@ export function designExports(context: Pick<DesignExportContext, 'board' | 'show
 }
 
 /** WR 66: the card's version, with the same board choice as its preview: selected if retained, otherwise first. */
-export function designVersionExports(artifactId: string, versionId: number, current: DesignExportContext, source: Pick<HistoryApi, 'versionState'>): EditorHostExport[] {
+export function designVersionExports(artifactId: string, machine: MachineRef, versionId: number, current: DesignExportContext, source: Pick<HistoryApi, 'versionState'>): EditorHostExport[] {
   return DESIGN_EXPORTS.map((entry) => ({
     id: entry.id,
     label: entry.label,
     onSelect: async () => {
       try {
-        if (entry.of === 'all') return await exportDesign(artifactId, { format: entry.format, versionId }, { boardName: (id) => id });
+        if (entry.of === 'all') return await exportDesign(artifactId, machine, { format: entry.format, versionId }, { boardName: (id) => id });
         const state = await source.versionState(versionId);
         const doc = newDoc();
         let context: DesignExportContext;
@@ -89,7 +90,7 @@ export function designVersionExports(artifactId: string, versionId: number, curr
         } finally {
           doc.destroy();
         }
-        await runDesignExport(artifactId, entry, context);
+        await runDesignExport(artifactId, machine, entry, context);
       } catch (error) {
         toastFailure(VIEWERS_COPY.exportFailed(error instanceof Error ? error.message : String(error)));
       }
@@ -114,23 +115,23 @@ function fittingSheet(name: string, format: 'png' | 'pdf', { w, h, maxScale }: {
 }
 
 /** The design exported as `request` asks (at the fitting scale when the owner agrees), then saved where they choose. */
-export async function exportDesign(artifactId: string, request: DesignExportRequest, { client = ipc, ask = confirm, boardName }: { client?: MawsBridge; ask?: DesignExportAsk; boardName(id: string): string }): Promise<void> {
-  let exported = await client.invoke('artifacts.export', { artifactId, ...request });
+export async function exportDesign(artifactId: string, machine: MachineRef, request: DesignExportRequest, { client = ipc, ask = confirm, boardName }: { client?: MawsBridge; ask?: DesignExportAsk; boardName(id: string): string }): Promise<void> {
+  let exported = await client.invoke('artifacts.export', { artifactId, ...request }, { machine });
   if (!exported.ok) {
     const refusal = artifactRefusalOf(exported.error);
     const data = refusal?.data as { board?: unknown; w?: unknown; h?: unknown; maxScale?: unknown } | undefined;
     if (refusal?.reason !== 'exportTooLarge' || request.scale !== undefined || typeof data?.board !== 'string' || typeof data.w !== 'number' || typeof data.h !== 'number' || typeof data.maxScale !== 'number') return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
     if (!(await ask(fittingSheet(boardName(data.board), request.format, { w: data.w, h: data.h, maxScale: data.maxScale })))) return;
-    exported = await client.invoke('artifacts.export', { artifactId, ...request, scale: data.maxScale });
+    exported = await client.invoke('artifacts.export', { artifactId, ...request, scale: data.maxScale }, { machine });
     if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   }
   const { revision, exportId } = exported.value; // the export's own file (Decision Log 33)
-  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: request.format, ...(exportId !== undefined && { exportId }) } } });
+  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: request.format, ...(exportId !== undefined && { exportId }) } } }, { machine });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
 }
 
 /** `entry` exported for what the tab shows (`context`, read as it is chosen): the sheet names the board as shown. */
-export function runDesignExport(artifactId: string, entry: DesignExportEntry, context: DesignExportContext, deps: { client?: MawsBridge; ask?: DesignExportAsk } = {}): Promise<void> {
-  return exportDesign(artifactId, designExportRequest(entry, context), { ...deps, boardName: (id) => (id === context.board && context.label ? context.label : id) });
+export function runDesignExport(artifactId: string, machine: MachineRef, entry: DesignExportEntry, context: DesignExportContext, deps: { client?: MawsBridge; ask?: DesignExportAsk } = {}): Promise<void> {
+  return exportDesign(artifactId, machine, designExportRequest(entry, context), { ...deps, boardName: (id) => (id === context.board && context.label ? context.label : id) });
 }

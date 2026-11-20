@@ -31,12 +31,12 @@ describe('the library’s writes', () => {
   it('each asks its command and answers its value', async () => {
     const main = installFakeMain((name) => (name.startsWith('spaces.') && name !== 'spaces.delete' ? ok({ space }) : name === 'artifacts.delete' || name === 'artifacts.markViewed' || name === 'spaces.delete' ? ok() : ok({ artifact })));
     expect(await createArtifact({ kind: 'document', title: 'Untitled document', spaceId: S })).toEqual({ ok: true, value: artifact });
-    await renameArtifact(A, 'Notes');
-    await setArtifactPinned(A, true);
-    await moveArtifactToSpace(A, null);
-    await duplicateArtifact(A);
-    await deleteArtifact(A);
-    await markArtifactViewed(A);
+    await renameArtifact(A, TEST_MACHINE, 'Notes');
+    await setArtifactPinned(A, TEST_MACHINE, true);
+    await moveArtifactToSpace(A, TEST_MACHINE, null);
+    await duplicateArtifact(A, TEST_MACHINE);
+    await deleteArtifact(A, TEST_MACHINE);
+    await markArtifactViewed(A, TEST_MACHINE);
     expect(await createSpace('Research', '/repo')).toEqual({ ok: true, value: space });
     await renameSpace(S, 'Reading');
     await linkSpaceDirectory(S, null);
@@ -62,9 +62,9 @@ describe('the library’s writes', () => {
         ? { ok: false, error: { code: 'invalid_input', message: 'in use', issues: { reason: 'designSystemInUse', data: { artifactIds: [A] } } } }
         : fail('host unavailable'),
     );
-    const refused = await deleteArtifact(A);
+    const refused = await deleteArtifact(A, TEST_MACHINE);
     expect(refused).toMatchObject({ ok: false, refusal: { reason: 'designSystemInUse', data: { artifactIds: [A] } }, error: { message: 'in use' } });
-    expect(await renameArtifact(A, 'x')).toMatchObject({ ok: false, refusal: null, error: { message: 'host unavailable' } });
+    expect(await renameArtifact(A, TEST_MACHINE, 'x')).toMatchObject({ ok: false, refusal: null, error: { message: 'host unavailable' } });
   });
 });
 
@@ -84,7 +84,7 @@ describe('opening an artifact', () => {
   // plain open asks nothing of it (the tab keeps the version it shows)
   it('asks the main tab’s editor for the place it names, at the latest; a plain open asks nothing', () => {
     resetOpenRequests();
-    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
     act(() => openArtifactTab(A));
     expect(asked.result.current).toBeNull();
     act(() => openArtifactTab(A, { block: 'b7' }));
@@ -173,11 +173,13 @@ describe('showing the main tab that already shows an artifact', () => {
   it('asks the tab’s editor for the place the link names; with none, asks nothing', () => {
     resetOpenRequests();
     openArtifactTab(A);
-    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
+    const other = renderHook(() => useOpenRequest(A, OTHER_MACHINE, 'main'));
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A));
     expect(asked.result.current).toBeNull();
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A, { block: 'b7' }));
     expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
+    expect(other.result.current, 'the other machine’s copy does not take the place').toBeNull();
   });
 
   it('for a session on another machine looks for that machine’s tab, and takes no tab of the same id on another machine', () => {
@@ -190,12 +192,12 @@ describe('showing the main tab that already shows an artifact', () => {
   });
 
   it('for this Mac’s session looks on the machine the page’s table gives the artifact, else on this Mac', () => {
-    openArtifactTab(A); // this Mac's tab
     recordArtifactMachine(A, OTHER_MACHINE, TEST_MACHINE);
-    expect(showOpenArtifactTab(LOCAL_SESSION, A), 'the table puts it on another machine').toBe(false);
     openArtifactTab(A, undefined, OTHER_MACHINE);
+    expect(showOpenArtifactTab(LOCAL_SESSION, A), 'only a remote copy is known').toBe(true);
+    openArtifactTab(A, undefined, TEST_MACHINE);
     useLayout.getState().openTab({ kind: 'diagnostics' });
     expect(showOpenArtifactTab('app-bare' as AppSessionId, A)).toBe(true);
-    expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(OTHER_MACHINE));
+    expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(TEST_MACHINE));
   });
 });

@@ -93,7 +93,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
     for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
   };
   const open = () => {
-    const state = new DocumentTabState({ artifactId: A, kind: 'document', surface: 'panel' }, deps);
+    const state = new DocumentTabState({ artifactId: A, machine: TEST_MACHINE, kind: 'document', surface: 'panel' }, deps);
     states.push(state);
     return state;
   };
@@ -515,8 +515,8 @@ describe('a document tab’s state', () => {
     const state = w.open();
     await ready(state);
     const views = { Panel: () => null, createState: () => null };
-    holdArtifactEditorState({ surface: 'panel', tabId: 'view-1' }, A, 'document', views);
-    holdArtifactEditorState({ surface: 'main', tabId: 'view-2' }, A, 'document', views);
+    holdArtifactEditorState({ surface: 'panel', tabId: 'view-1' }, A, TEST_MACHINE, 'document', views);
+    holdArtifactEditorState({ surface: 'main', tabId: 'view-2' }, A, TEST_MACHINE, 'document', views);
     try {
       unsent('Monthly?');
       expect(await state.closeGuard()).toBe(true);

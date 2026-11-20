@@ -15,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -110,11 +110,11 @@ describe('a deck’s compose card keeps its draft', () => {
     act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
     off = registerPresentationEditor(() => ({ host, log: () => {}, confirmDiscard }));
     const editor = artifactEditorFor('presentation')!;
-    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, 'presentation', editor as never);
+    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, TEST_MACHINE, 'presentation', editor as never);
     const Main = editor.Main;
     const view = render(
       <EditorHostScopeContext.Provider value={scope}>
-        <Main artifactId={DECK} state={hold.state} scope={scope} visible onShown={() => {}} />
+        <Main artifactId={DECK} machine={TEST_MACHINE} state={hold.state} scope={scope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(hold.state.snapshot().session).not.toBeNull());
@@ -161,11 +161,11 @@ describe('a deck’s compose card keeps its draft', () => {
     // the panel shows the deck too: the move's destination
     const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
     const editor = artifactEditorFor('presentation')!;
-    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, 'presentation', editor as never);
+    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, TEST_MACHINE, 'presentation', editor as never);
     const Panel = editor.Panel;
     const panel = render(
       <EditorHostScopeContext.Provider value={panelScope}>
-        <Panel artifactId={DECK} state={kept.state} scope={panelScope} visible onShown={() => {}} />
+        <Panel artifactId={DECK} machine={TEST_MACHINE} state={kept.state} scope={panelScope} visible onShown={() => {}} />
       </EditorHostScopeContext.Provider>,
     );
     await waitFor(() => expect(kept.state.snapshot().session).not.toBeNull());

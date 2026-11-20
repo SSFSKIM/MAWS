@@ -17,6 +17,8 @@
 // between the panel and a main tab hands the state over instead (stage, then adopt; below), so nothing is disposed.
 import { useLayoutEffect, useRef, useSyncExternalStore, type ComponentType } from 'react';
 import { create } from 'zustand';
+import { artifactKey } from './machines';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { EditorHostScope } from '../panel/editor-host';
 import { dropSubject } from '../side/card/store'; // UX wave U5a
@@ -25,6 +27,7 @@ import { allTabs } from '../stores/layout-model';
 
 export interface ArtifactEditorProps<S = unknown> {
   artifactId: string;
+  machine: MachineRef;
   state: S; // what the editor's createState made for this tab (undefined without one)
   scope: EditorHostScope; // the tab the editor registers its X32 header under
   // The body is on screen: the panel tab is selected with the panel open, or the main tab is active with the main region
@@ -38,6 +41,7 @@ export interface ArtifactEditorProps<S = unknown> {
 
 export interface ArtifactEditorTarget {
   artifactId: string;
+  machine: MachineRef;
   kind: ArtifactKind;
   surface: EditorHostScope['surface'];
 }
@@ -86,6 +90,7 @@ export const useArtifactEditor = (kind: ArtifactKind | null): RegisteredArtifact
 // stands for one showing of one artifact in one tab, so a surface can key per-showing work on it (markViewed once).
 export interface ArtifactEditorHold<S = unknown> {
   readonly artifactId: string;
+  readonly machine: MachineRef;
   readonly kind: ArtifactKind;
   readonly editor: ArtifactEditor<S>;
   readonly state: S;
@@ -150,17 +155,17 @@ function endCommentsOnceUnshown(artifactId: string): void {
 // move for the same artifact, kind and editor (the fallback of the hand-off below), else a new one made by the editor's
 // createState; the scope's previous one (another artifact, or a replaced editor) is disposed first. Safe to call while
 // rendering: asking again returns what is held.
-export function holdArtifactEditorState<S>(scope: EditorHostScope, artifactId: string, kind: ArtifactKind, editor: ArtifactEditor<S>): ArtifactEditorHold<S> {
+export function holdArtifactEditorState<S>(scope: EditorHostScope, artifactId: string, machine: MachineRef, kind: ArtifactKind, editor: ArtifactEditor<S>): ArtifactEditorHold<S> {
   const key = keyOf(scope);
   const held = holds.get(key);
-  if (held && held.artifactId === artifactId && held.kind === kind && held.editor === editor) return held as ArtifactEditorHold<S>;
-  const waiting = staged.get(artifactId);
+  if (held && held.artifactId === artifactId && held.machine === machine && held.kind === kind && held.editor === editor) return held as ArtifactEditorHold<S>;
+  const waiting = staged.get(artifactKey(artifactId, machine));
   if (waiting && waiting.kind === kind && waiting.editor === editor) {
-    adoptStagedArtifactEditorState(artifactId, scope);
+    adoptStagedArtifactEditorState(artifactId, machine, scope);
     return waiting as ArtifactEditorHold<S>;
   }
   end(key);
-  const hold: ArtifactEditorHold<S> = { artifactId, kind, editor, state: editor.createState?.({ artifactId, kind, surface: scope.surface }) as S };
+  const hold: ArtifactEditorHold<S> = { artifactId, machine, kind, editor, state: editor.createState?.({ artifactId, machine, kind, surface: scope.surface }) as S };
   holds.set(key, hold as ArtifactEditorHold);
   published();
   return hold;
@@ -196,30 +201,32 @@ export function stageArtifactEditorState(scope: EditorHostScope): boolean {
   holds.delete(key);
   carried.delete(key);
   published();
-  const before = staged.get(hold.artifactId);
+  const artifact = artifactKey(hold.artifactId, hold.machine);
+  const before = staged.get(artifact);
   if (before) disposeHold(before, `staged:${hold.artifactId}`);
-  staged.set(hold.artifactId, hold);
+  staged.set(artifact, hold);
   const view = captureView(key, hold);
-  if (view === undefined) stagedViews.delete(hold.artifactId);
-  else stagedViews.set(hold.artifactId, view);
+  if (view === undefined) stagedViews.delete(artifact);
+  else stagedViews.set(artifact, view);
   sweepStaged();
   return true;
 }
 
 // Binds the artifact's staged hold to `scope` (ending what the scope held before); false when none is staged.
-export function adoptStagedArtifactEditorState(artifactId: string, scope: EditorHostScope): boolean {
-  const hold = staged.get(artifactId);
+export function adoptStagedArtifactEditorState(artifactId: string, machine: MachineRef, scope: EditorHostScope): boolean {
+  const artifact = artifactKey(artifactId, machine);
+  const hold = staged.get(artifact);
   if (!hold) return false;
-  staged.delete(artifactId);
-  const view = stagedViews.get(artifactId);
-  stagedViews.delete(artifactId);
+  staged.delete(artifact);
+  const view = stagedViews.get(artifact);
+  stagedViews.delete(artifact);
   const key = keyOf(scope);
   end(key);
   holds.set(key, hold);
   if (view !== undefined) carried.set(key, view);
   published();
   try {
-    hold.editor.moved?.(hold.state, { artifactId, kind: hold.kind, surface: scope.surface });
+    hold.editor.moved?.(hold.state, { artifactId, machine, kind: hold.kind, surface: scope.surface });
   } catch (error) {
     console.error(`[artifacts] moving the ${hold.kind} editor's state to ${key} failed`, error);
   }
@@ -236,8 +243,8 @@ export function handArtifactViewOver(from: EditorHostScope, to: EditorHostScope)
   const source = holds.get(keyOf(from));
   if (!source?.editor.handOver) return false;
   const there = holds.get(keyOf(to));
-  if (there && (there.artifactId !== source.artifactId || there.kind !== source.kind || there.editor !== source.editor)) return false;
-  const target = holdArtifactEditorState(to, source.artifactId, source.kind, source.editor);
+  if (there && (there.artifactId !== source.artifactId || there.machine !== source.machine || there.kind !== source.kind || there.editor !== source.editor)) return false;
+  const target = holdArtifactEditorState(to, source.artifactId, source.machine, source.kind, source.editor);
   try {
     source.editor.handOver(source.state, target.state);
     return true;

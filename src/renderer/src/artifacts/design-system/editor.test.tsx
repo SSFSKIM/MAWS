@@ -2,6 +2,7 @@
 // owns the replica (createState opens it, dispose closes it), the body mounts once it has synced, `onShown` fires once
 // the content is on screen and the body visible, and the header's app actions: Set as my default (settings 14), Delete
 // with its in-use refusal and "Move them to…", and the adopt request for a system with no law.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -64,8 +65,8 @@ const listed = (input: Record<string, unknown>) => {
 function mount(editor: RegisteredArtifactEditor, state: OpenedSystem, props: { visible?: boolean; onShown?: () => void } = {}) {
   const Body = editor.Panel;
   const onShown = props.onShown ?? vi.fn();
-  const view = render(<Body artifactId={DS} state={state} scope={SCOPE} visible={props.visible ?? true} onShown={onShown} />);
-  return { view, onShown, rerender: (visible: boolean) => view.rerender(<Body artifactId={DS} state={state} scope={SCOPE} visible={visible} onShown={onShown} />) };
+  const view = render(<Body artifactId={DS} machine={TEST_MACHINE} state={state} scope={SCOPE} visible={props.visible ?? true} onShown={onShown} />);
+  return { view, onShown, rerender: (visible: boolean) => view.rerender(<Body artifactId={DS} machine={TEST_MACHINE} state={state} scope={SCOPE} visible={visible} onShown={onShown} />) };
 }
 const action = (label: string) => editorHostOf(SCOPE)!.actions!.find((a) => a.label === label)!;
 
@@ -99,7 +100,7 @@ describe('the design system’s editor in L’s registry', () => {
     let arrive!: (h: DocumentHandle) => void;
     const host = fakeHost(() => new Promise<DocumentHandle>((resolve) => (arrive = resolve)));
     const editor = { ...createDesignSystemEditor({ host: () => host }), Main: createDesignSystemEditor({ host: () => host }).Panel } as RegisteredArtifactEditor<OpenedSystem>;
-    const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
+    const state = editor.createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'main' });
     expect(host.open).toHaveBeenCalledWith(DS, { signal: expect.any(AbortSignal) }); // P5 O7 M5b review fix 2: the tab owns the open
     const { view } = mount(editor as RegisteredArtifactEditor, state);
     expect(view.container.textContent).toContain('Opening the design system…');
@@ -112,7 +113,7 @@ describe('the design system’s editor in L’s registry', () => {
     const late = handleOf(systemDoc());
     let arriveLate!: (h: DocumentHandle) => void;
     const slow = fakeHost(() => new Promise<DocumentHandle>((resolve) => (arriveLate = resolve)));
-    const gone = createDesignSystemEditor({ host: () => slow }).createState!({ artifactId: DS, kind: 'design_system', surface: 'panel' });
+    const gone = createDesignSystemEditor({ host: () => slow }).createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'panel' });
     gone.dispose();
     await act(async () => arriveLate(late));
     expect(late.close).toHaveBeenCalledTimes(1);
@@ -120,7 +121,7 @@ describe('the design system’s editor in L’s registry', () => {
 
   it('says so when the system cannot be opened', async () => {
     const editor = createDesignSystemEditor({ host: () => fakeHost(async () => Promise.reject(new Error('no artifact'))) });
-    const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
+    const state = editor.createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'main' });
     const { view } = mount(editor as RegisteredArtifactEditor, state);
     await act(async () => {});
     expect(view.container.textContent).toBe('Could not open this design system · no artifact');
@@ -133,7 +134,7 @@ describe('the design system’s editor in L’s registry', () => {
     const said = new Set<(state: DocumentState) => void>();
     handle.subscribe = (listener) => (said.add(listener), () => void said.delete(listener));
     const editor = createDesignSystemEditor({ host: () => fakeHost(async () => handle) });
-    const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
+    const state = editor.createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'main' });
     const { view } = mount(editor as RegisteredArtifactEditor, state);
     await act(async () => {});
     expect(view.container.querySelector('[data-ds-page]')).not.toBeNull();
@@ -148,7 +149,7 @@ describe('the design system’s editor in L’s registry', () => {
 
   it('calls onShown once the system is on screen and the body visible, not while hidden', async () => {
     const editor = createDesignSystemEditor({ host: () => fakeHost(async () => handleOf(systemDoc())) });
-    const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
+    const state = editor.createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'main' });
     const { onShown, rerender } = mount(editor as RegisteredArtifactEditor, state, { visible: false });
     await act(async () => {});
     expect(onShown).not.toHaveBeenCalled();
@@ -160,7 +161,7 @@ describe('the design system’s editor in L’s registry', () => {
 describe('the header’s app actions', () => {
   async function opened(doc = systemDoc()) {
     const editor = createDesignSystemEditor({ host: () => fakeHost(async () => handleOf(doc)) });
-    const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
+    const state = editor.createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'main' });
     const mounted = mount(editor as RegisteredArtifactEditor, state);
     await act(async () => {});
     return mounted;
@@ -253,16 +254,16 @@ describe('the delete request’s lifetime', () => {
     let next = 'first';
     const editor = { ...createDesignSystemEditor({ host: () => hosts[next]! }) };
     const Panel = editor.Panel;
-    const first = holdArtifactEditorState(PANEL, 'first', 'design_system', editor).state;
-    const view = render(<Panel artifactId="first" state={first} scope={PANEL} visible onShown={() => {}} />);
+    const first = holdArtifactEditorState(PANEL, 'first', TEST_MACHINE, 'design_system', editor).state;
+    const view = render(<Panel artifactId="first" machine={TEST_MACHINE} state={first} scope={PANEL} visible onShown={() => {}} />);
     await act(async () => {});
     act(() => editorHostOf(PANEL)!.actions!.find((a) => a.id === 'design-system.delete')!.onSelect());
     expect(screen.getByRole('dialog', { name: 'Delete “First”?' })).toBeTruthy();
     view.unmount();
     next = 'second';
-    const second = holdArtifactEditorState(PANEL, 'second', 'design_system', editor).state; // the registry disposes the first
+    const second = holdArtifactEditorState(PANEL, 'second', TEST_MACHINE, 'design_system', editor).state; // the registry disposes the first
     expect(second).not.toBe(first);
-    render(<Panel artifactId="second" state={second} scope={PANEL} visible onShown={() => {}} />);
+    render(<Panel artifactId="second" machine={TEST_MACHINE} state={second} scope={PANEL} visible onShown={() => {}} />);
     await act(async () => {});
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(editorHostOf(PANEL)!.title).toBe('Second');
@@ -271,13 +272,13 @@ describe('the delete request’s lifetime', () => {
   it('a disposed showing’s request is gone; a request made while hidden waits for the showing to be visible', async () => {
     installFakeMain((_, input) => listed(input));
     const editor = createDesignSystemEditor({ host: () => named('First') });
-    const state = holdArtifactEditorState(PANEL, 'first', 'design_system', editor).state;
+    const state = holdArtifactEditorState(PANEL, 'first', TEST_MACHINE, 'design_system', editor).state;
     const Panel = editor.Panel;
-    const view = render(<Panel artifactId="first" state={state} scope={PANEL} visible={false} onShown={() => {}} />);
+    const view = render(<Panel artifactId="first" machine={TEST_MACHINE} state={state} scope={PANEL} visible={false} onShown={() => {}} />);
     await act(async () => {});
     act(() => state.requestDelete());
     expect(screen.queryByRole('dialog')).toBeNull();
-    view.rerender(<Panel artifactId="first" state={state} scope={PANEL} visible onShown={() => {}} />);
+    view.rerender(<Panel artifactId="first" machine={TEST_MACHINE} state={state} scope={PANEL} visible onShown={() => {}} />);
     expect(screen.getByRole('dialog', { name: 'Delete “First”?' })).toBeTruthy();
     act(() => releaseArtifactEditorState(PANEL));
     expect(state.deleting()).toBe(false);

@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE, at } from '../../../../test/support/machine';
 import { actorSessionOnPage } from '../ipc/machine';
 import { useSessions } from '../stores/sessions';
 import { preloadOf } from '../test-support/preload-of';
@@ -39,7 +39,7 @@ describe('the withheld session', () => {
     // even a record the window held under that id (none can exist: the id is never minted) names nothing
     window.maws = preloadOf(fakeClient()); // the window's artifact host listens on it
     useSessions.setState({ records: new Map([[WITHHELD_HERE, record(WITHHELD_HERE)]]) });
-    expect(documentWindowDeps().sessionTitle(WITHHELD_SESSION)).toBeUndefined();
+    expect(documentWindowDeps(TEST_MACHINE).sessionTitle(WITHHELD_SESSION)).toBeUndefined();
   });
 
   it('is no session context for an artifact it created', () => {
@@ -49,7 +49,7 @@ describe('the withheld session', () => {
 
   it('reads as Claude in a library row, which names and links no session for it', () => {
     const row = libraryRow(1, { title: 'Shared deck', lastEditor: { kind: 'session', appSessionId: WITHHELD_THERE } });
-    render(<Row row={row} stop menuOpen={false} onMenuOpen={() => {}} onFocus={() => {}} onFocusWithin={() => {}} onKeyDown={() => {}} />);
+    render(<Row row={row} machine={OTHER_MACHINE} stop menuOpen={false} onMenuOpen={() => {}} onFocus={() => {}} onFocusWithin={() => {}} onKeyDown={() => {}} />);
     expect(screen.getByText(/by Claude/)).toBeTruthy();
     expect(document.body.textContent).not.toContain(WITHHELD_SESSION);
   });

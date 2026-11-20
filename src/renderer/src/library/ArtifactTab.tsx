@@ -41,7 +41,8 @@ import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
 import { useMachineUndoUnavailable, useUndoAct, useUnsentWhileDeleted } from './undo-delete'; // UX wave U10b
 import { unsentWhileDeleted } from '../artifacts/deleted-replicas'; // fix wave 4
-import { artifactMachineOf } from '../artifacts/machines'; // UX wave U10b
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactKey } from '../artifacts/machines';
 import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's Undo
 
 type ArtifactTabRef = Extract<TabRef, { kind: 'artifact' }>;
@@ -54,30 +55,30 @@ export function ArtifactTab({ tab }: { tab: ArtifactTabRef }) {
   // A main tab's body is mounted only while it is its pane's active tab; it is on screen unless the panel has taken the
   // main column's place (maximized or floating).
   const visible = useLayout((s) => !panelInMain(s.regions) && !pageOpen(s)); // UX wave U7b (§N): not behind a page
-  return <ArtifactView artifactId={tab.artifactId} scope={scope} visible={visible} />;
+  return <ArtifactView artifactId={tab.artifactId} machine={tab.machine} scope={scope} visible={visible} />;
 }
 
 // One artifact shown in a tab's scope, by whichever surface holds it: an `artifact` main tab mounts the kind's `Main`,
 // the panel's Artifacts tool (its record view, M5) the kind's `Panel`. The surface gives the editor's state back when it
 // stops showing the artifact (a main tab when it leaves the main area, the panel at Back, a re-target and disposal).
-export function ArtifactView({ artifactId, scope, visible }: { artifactId: string; scope: EditorHostScope; visible: boolean }) {
-  const read = useLibraryRow(artifactId);
-  const host = useHostAnswer(artifactId, read);
+export function ArtifactView({ artifactId, machine, scope, visible }: { artifactId: string; machine: MachineRef; scope: EditorHostScope; visible: boolean }) {
+  const read = useLibraryRow(artifactId, machine);
+  const host = useHostAnswer(artifactId, machine, read);
   const indexless = read.value === null;
   const artifact = read.value ?? (indexless && host.answer?.status === 'present' ? host.answer.row : undefined);
   // What the tab showed until now, kept while the artifact cannot be confirmed (the host unreachable, or still asked).
   const kept = useHeldArtifactEditorState(scope); // P3-H (Decision Log 93): selected, so a compiled render follows it
-  const held = kept?.artifactId === artifactId ? kept : null;
+  const held = kept?.artifactId === artifactId && kept.machine === machine ? kept : null;
   const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
-  if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
+  if (artifact && editor) return <MountedEditor machine={machine} artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
   if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} />;
   // UX wave U10b (§C.5): an agent's delete, which Undo can take back: the editor held stays, under the notice
   if (indexless && host.answer?.status === 'deleted') {
-    const deleted = <DeletedNotice artifactId={artifactId} />;
+    const deleted = <DeletedNotice artifactId={artifactId} machine={machine} />;
     if (held && editor && held.editor === editor) {
       return (
-        <MountedEditor artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope} visible={visible}>
+        <MountedEditor machine={machine} artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope} visible={visible}>
           {deleted}
         </MountedEditor>
       );
@@ -100,7 +101,7 @@ export function ArtifactView({ artifactId, scope, visible }: { artifactId: strin
   );
   if (held && editor && held.editor === editor) {
     return (
-      <MountedEditor artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope} visible={visible}>
+      <MountedEditor machine={machine} artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope} visible={visible}>
         {notice && <div role="status" className="flex shrink-0 items-center gap-3 border-b border-border bg-bg-raised px-3 py-1.5 text-ui-sm text-fg-muted">{notice}</div>}
       </MountedEditor>
     );
@@ -115,15 +116,16 @@ type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent' }
 // created, or the index unavailable), absent (confirmed gone), or refused (a timeout, a restarting host: no word at
 // all). Asked again at each settled read of the index that still has none, at Retry, and when the engine host is
 // ready again; the last answer stands meanwhile.
-function useHostAnswer(artifactId: string, read: LibraryRead<LibraryRow | null>): { answer: HostAnswer | undefined; retry(): void } {
-  const [answer, setAnswer] = useState<{ artifactId: string; answer: HostAnswer } | null>(null);
+function useHostAnswer(artifactId: string, machine: MachineRef, read: LibraryRead<LibraryRow | null>): { answer: HostAnswer | undefined; retry(): void } {
+  const key = artifactKey(artifactId, machine);
+  const [answer, setAnswer] = useState<{ key: string; answer: HostAnswer } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const hostReady = useHosts((s) => (s.hosts.engine?.state === 'ready' ? s.hosts.engine.revision : null));
   const settledAbsent = read.value === null && read.status === 'ready' ? read : null;
   useEffect(() => {
     if (settledAbsent === null) return;
     let live = true;
-    void ipc.invoke('artifacts.get', { artifactId }).then((result) => {
+    void ipc.invoke('artifacts.get', { artifactId }, { machine }).then((result) => {
       if (!live) return;
       const { deleted } = result.ok ? result.value : { deleted: undefined };
       const next: HostAnswer = !result.ok
@@ -133,22 +135,22 @@ function useHostAnswer(artifactId: string, read: LibraryRead<LibraryRow | null>)
           : deleted?.undoable === true
             ? { status: 'deleted', title: deleted.title }
             : { status: 'absent' };
-      setAnswer({ artifactId, answer: next });
+      setAnswer({ key, answer: next });
     });
     return () => {
       live = false;
     };
-  }, [artifactId, settledAbsent, attempt, hostReady]);
-  return { answer: answer?.artifactId === artifactId ? answer.answer : undefined, retry: () => setAttempt((n) => n + 1) };
+  }, [artifactId, machine, key, settledAbsent, attempt, hostReady]);
+  return { answer: answer?.key === key ? answer.answer : undefined, retry: () => setAttempt((n) => n + 1) };
 }
 
-function MountedEditor({ artifactId, kind, editor, scope, visible, children }: { artifactId: string; kind: ArtifactKind; editor: RegisteredArtifactEditor; scope: EditorHostScope; visible: boolean; children?: ReactNode }) {
-  const hold = holdArtifactEditorState(scope, artifactId, kind, editor);
+function MountedEditor({ artifactId, machine, kind, editor, scope, visible, children }: { artifactId: string; machine: MachineRef; kind: ArtifactKind; editor: RegisteredArtifactEditor; scope: EditorHostScope; visible: boolean; children?: ReactNode }) {
+  const hold = holdArtifactEditorState(scope, artifactId, machine, kind, editor);
   // Decision Log 15: the owner's view, recorded at the editor's first word that the content is on screen, once per showing.
   const onShown = useCallback(() => {
     if (viewed.has(hold)) return;
     viewed.add(hold);
-    void markArtifactViewed(hold.artifactId);
+    void markArtifactViewed(hold.artifactId, hold.machine);
   }, [hold]);
   const Body = scope.surface === 'panel' ? editor.Panel : editor.Main;
   return (
@@ -156,7 +158,7 @@ function MountedEditor({ artifactId, kind, editor, scope, visible, children }: {
       {children}
       <div className="relative min-h-0 flex-1">
         <DocumentSessionSpace surface={scope.surface} enabled={visible && kind === 'document'}>
-          <Body artifactId={artifactId} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
+          <Body artifactId={artifactId} machine={machine} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
         </DocumentSessionSpace>
       </div>
     </div>
@@ -197,10 +199,9 @@ function NoEditor({ artifact, scope }: { artifact: LibraryRow | ArtifactRow; sco
 // UX wave U10b (M5, §C.5): the notice over an editor open on an artifact an agent deleted, in the place a held editor's
 // notices stand, with the row's Undo on the artifact's machine. While the editor's replica holds an edit the host never
 // acknowledged, it says that restoring saves it.
-function DeletedNotice({ artifactId }: { artifactId: string }) {
-  const machine = artifactMachineOf(artifactId) ?? ipc.localMachine;
+function DeletedNotice({ artifactId, machine }: { artifactId: string; machine: MachineRef }) {
   const unavailable = useMachineUndoUnavailable(machine);
-  const unsent = useUnsentWhileDeleted(artifactId);
+  const unsent = useUnsentWhileDeleted(artifactId, machine);
   const act = useUndoAct(() => undeleteArtifact(artifactId, machine));
   const line = unavailable ?? act.failure;
   return (
@@ -245,9 +246,9 @@ function Gone({ scope }: { scope: EditorHostScope }) {
 export function artifactReplaceVerdict(ref: TabRef): ReplaceVerdict {
   if (ref.kind !== 'artifact') return null;
   const saved = editorHostOf({ surface: 'main', tabId: ref.id })?.saved;
-  const kept = unsentWhileDeleted(ref.artifactId);
+  const kept = unsentWhileDeleted(ref.artifactId, ref.machine);
   if (!kept && saved !== 'saving' && saved !== 'unsaved' && saved !== 'reconnecting') return null;
-  const title = libraryRow(library.getState(), ref.artifactId).value?.title ?? LIBRARY_COPY.fallbackTitle;
+  const title = libraryRow(library.getState(), ref.artifactId, ref.machine).value?.title ?? LIBRARY_COPY.fallbackTitle;
   return { keep: saved === 'saving' ? LIBRARY_COPY.beingSaved(title) : LIBRARY_COPY.unsaved(title) };
 }
 

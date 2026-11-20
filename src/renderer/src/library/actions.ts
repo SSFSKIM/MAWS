@@ -35,12 +35,12 @@ const local = (client: MawsBridge) => ({ machine: client.localMachine });
 // ---- artifacts ---------------------------------------------------------------------------------------------------------
 
 export const createArtifact = (input: CommandInput<'artifacts.create'> & { kind: ArtifactKind }, client: MawsBridge = ipc) => run(client, 'artifacts.create', input, artifactOf, local(client));
-export const renameArtifact = (artifactId: string, title: string, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, title }, artifactOf);
-export const setArtifactPinned = (artifactId: string, pinned: boolean, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, pinned }, artifactOf);
+export const renameArtifact = (artifactId: string, machine: MachineRef, title: string, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, title }, artifactOf, { machine });
+export const setArtifactPinned = (artifactId: string, machine: MachineRef, pinned: boolean, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, pinned }, artifactOf, { machine });
 // null: out of every Space
-export const moveArtifactToSpace = (artifactId: string, spaceId: string | null, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, spaceId }, artifactOf);
-export const duplicateArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.duplicate', { artifactId }, artifactOf);
-export const deleteArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.delete', { artifactId }, nothing);
+export const moveArtifactToSpace = (artifactId: string, machine: MachineRef, spaceId: string | null, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, spaceId }, artifactOf, { machine });
+export const duplicateArtifact = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc) => run(client, 'artifacts.duplicate', { artifactId }, artifactOf, { machine });
+export const deleteArtifact = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc) => run(client, 'artifacts.delete', { artifactId }, nothing, { machine });
 // UX wave U10b (M5, §C.4): undo an agent's delete on the artifact's machine. Resolves null once the artifact is live
 // again, else the sentence an act that ended without its effect leaves: this Mac's store's sentence after "Not restored:";
 // another machine's as main words it (`refusalWords`, `failureWords`: "Not restored: <machine> is offline", …).
@@ -56,7 +56,7 @@ export function undeleteSessionArtifact(appSessionId: AppSessionId, artifactId: 
   return undeleteArtifact(artifactId, machine, client);
 }
 // Decision Log 15: once per open, by the surface that showed the artifact's content to the owner, never by the list.
-export const markArtifactViewed = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.markViewed', { artifactId }, nothing);
+export const markArtifactViewed = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc) => run(client, 'artifacts.markViewed', { artifactId }, nothing, { machine });
 
 // ---- Spaces ------------------------------------------------------------------------------------------------------------
 
@@ -77,19 +77,18 @@ export async function setSpaceInstructions(spaceId: string, text: string, client
 
 // ---- opening -----------------------------------------------------------------------------------------------------------
 
-// An artifact in a main tab of its own (one per artifact: opened again, its tab is activated), in the current tab set.
+// An artifact in a main tab of its own (one per machine and artifact: opened again, its tab is activated), in the current tab set.
 // The tab lives in the main area, so a maximized or floating panel docks first, as `openArtifacts` does for the library.
 // P4-B4: at the place `location` names (an artifact link's fragment), asked of the tab's editor at the latest version
 // unless it names one; a plain open asks nothing of the editor, so a tab opened again keeps the version it shows.
-// P5 O7 M5a: on the artifact's machine (artifacts/machines.ts; the library lists one machine's at a time). `machine`: the
-// machine a link's source is on (its session's, the Markdown artifact it is written in), told to the table first, so an
-// artifact the page has not listed yet opens there.
+// Use the chosen row or the link source's machine, when known. Bare links use the window's route hints.
 export function openArtifactTab(artifactId: string, location?: ArtifactLocation, machine?: MachineRef): void {
-  if (machine !== undefined) recordArtifactMachine(artifactId, machine, ipc.localMachine);
-  if (location !== undefined) requestArtifactOpen(artifactId, 'latest', 'main', location);
+  const on = machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
+  recordArtifactMachine(artifactId, on, ipc.localMachine);
+  if (location !== undefined) requestArtifactOpen(artifactId, on, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
-  layout.openTab({ kind: 'artifact', artifactId, machine: artifactMachineOf(artifactId) ?? ipc.localMachine });
+  layout.openTab({ kind: 'artifact', artifactId, machine: on });
 }
 
 // UX wave U6d (card C5, "Show that tab"; the execution document's decisions 1 to 3): the main tab that already shows the
@@ -97,8 +96,8 @@ export function openArtifactTab(artifactId: string, location?: ArtifactLocation,
 // The tab is looked for in this window's one strip on the machine the side column would read the artifact on
 // (`sessionArtifactMachine`, `openArtifactInPanel`'s rule), so a tab of the same id on another machine is not taken.
 // False, and nothing done, when the strip holds none; it awaits nothing.
-export function showOpenArtifactTab(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean {
-  const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
+export function showOpenArtifactTab(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation, on?: MachineRef): boolean {
+  const machine = on ?? sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
   if (!isOpen(useLayout.getState().main, tabId({ kind: 'artifact', artifactId, machine }))) return false;
   openArtifactTab(artifactId, location, machine);
   return true;

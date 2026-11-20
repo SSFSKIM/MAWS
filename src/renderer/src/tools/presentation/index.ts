@@ -3,6 +3,8 @@
 // `artifact` main tab `DeckMain`, each with the state `createState` made for that tab (its replica and deck session,
 // kept until `dispose`), so the X32 header's close guard reads the tab's state while its body is unmounted.
 import { artifactHost } from '../../artifacts';
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactClient } from '../../artifacts/machine-client';
 import { ipc } from '../../ipc/client';
 import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
@@ -13,10 +15,10 @@ import { DeckMain, DeckPanel } from './DeckBody';
 import { DeckTabState, type DeckTabDeps } from './tab-state';
 import { actorSessionOnPage } from '../../ipc/machine';
 
-const windowDeps = (): DeckTabDeps => ({
-  host: artifactHost(),
+const windowDeps = (machine: MachineRef): DeckTabDeps => ({
+  host: artifactHost(machine),
   log: (line) => console.warn(`[presentation] ${line}`),
-  ipc, // M8: the deck's history
+  ipc: artifactClient(ipc, machine), // M8: the deck's history
   sessionTitle: (appSessionId) => {
     const session = actorSessionOnPage(appSessionId); // P5 O6 M2: the artifact holds main's bare id; P5 O7 M5a: none for the withheld one
     const record = session === null ? undefined : useSessions.getState().records.get(session);
@@ -33,11 +35,11 @@ const windowDeps = (): DeckTabDeps => ({
 });
 
 /** Registers the deck editor (App.tsx's P3-C block); returns the registration's removal. */
-export function registerPresentationEditor(deps: () => DeckTabDeps = windowDeps): () => void {
+export function registerPresentationEditor(deps: (machine: MachineRef) => DeckTabDeps = windowDeps): () => void {
   return registerArtifactEditor<DeckTabState>('presentation', {
     Panel: DeckPanel,
     Main: DeckMain,
-    createState: (target) => new DeckTabState(target, deps()),
+    createState: (target) => new DeckTabState(target, deps(target.machine)),
     dispose: (state) => state.dispose(),
     moved: (state, target) => state.moveTo(target.surface), // P4-B3: the e2e seam reports the surface it is on
     // P4-B2 (D16; the review's P1): a move onto a view already showing the deck hands that view the compose card and its

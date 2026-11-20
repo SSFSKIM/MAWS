@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { TrustDecision } from '@shared/sessions/intent'; // P3-F F4
 import type { SetupEvent, StartOutcome } from '@shared/sessions/setup';
@@ -176,8 +177,8 @@ export async function startArtifactSession(context: ArtifactSessionContext, prev
 }
 
 // The context of an artifact as the window knows it now (its index records, projects and the library's Spaces).
-export function useArtifactSessionContext(artifact: ArtifactContextOf | null): ArtifactSessionContext {
-  const spaces = useLibrarySpaces().value;
+export function useArtifactSessionContext(artifact: ArtifactContextOf | null, machine?: MachineRef): ArtifactSessionContext {
+  const spaces = useLibrarySpaces(machine).value;
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
   return useMemo(() => (artifact === null ? { kind: 'none' } : artifactSessionContext(artifact, { records, projects, spaces: spaces ?? [] })), [artifact, records, projects, spaces]);

@@ -3,6 +3,7 @@
 // when the owner presses Start (its library row, the window's sessions and projects, the library's Spaces), then
 // `startArtifactSession` with its empty-message guard, so no model turn runs. Nothing calls it but that gesture.
 import type { AppSessionId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { artifactSessionContext, startArtifactSession, type ArtifactSessionContext, type ArtifactSessionStart } from '../../artifacts/session-context';
 import { ipc } from '../../ipc/client';
@@ -10,19 +11,19 @@ import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 
 export interface DashboardLiveDeps {
-  startSession(artifactId: string, previous: AppSessionId | null): Promise<ArtifactSessionStart>;
+  startSession(artifactId: string, machine: MachineRef, previous: AppSessionId | null): Promise<ArtifactSessionStart>;
   openSession?(appSessionId: AppSessionId): void;
 }
 
 /** The artifact's session context as the window knows it now (`useArtifactSessionContext`'s facts, read once). */
-export async function dashboardSessionContext(artifactId: string, client: Pick<MawsBridge, 'invoke'> = ipc): Promise<ArtifactSessionContext> {
-  const [row, spaces] = await Promise.all([client.invoke('library.get', { artifactId }), client.invoke('library.spaces', undefined)]);
+export async function dashboardSessionContext(artifactId: string, machine: MachineRef, client: Pick<MawsBridge, 'invoke'> = ipc): Promise<ArtifactSessionContext> {
+  const [row, spaces] = await Promise.all([client.invoke('library.get', { artifactId }, { machine }), client.invoke('library.spaces', undefined, { machine })]);
   if (!row.ok || row.value.row === null) return { kind: 'none' };
   const { records, projects } = useSessions.getState();
   return artifactSessionContext(row.value.row, { records, projects, spaces: spaces.ok ? spaces.value.spaces : [] });
 }
 
 export const dashboardLiveDeps: DashboardLiveDeps = {
-  startSession: async (artifactId, previous) => startArtifactSession(await dashboardSessionContext(artifactId), previous),
+  startSession: async (artifactId, machine, previous) => startArtifactSession(await dashboardSessionContext(artifactId, machine), previous),
   openSession: (appSessionId) => useLayout.getState().openSession(appSessionId, { how: 'tab' }),
 };

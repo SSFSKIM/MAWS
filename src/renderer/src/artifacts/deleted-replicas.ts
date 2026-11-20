@@ -4,7 +4,9 @@
 // reads it: "Your last edit is not saved" while any replica of the artifact holds one (its hook is in
 // ../library/undo-delete.ts, so this module, which host.ts imports, stays free of React for the node project).
 
-const held = new Map<object, { artifactId: string; unsent: number }>();
+import type { MachineRef } from '@shared/machine/ref';
+
+const held = new Map<object, { artifactId: string; machine: MachineRef; unsent: number }>();
 const listeners = new Set<() => void>();
 
 const changed = () => {
@@ -12,19 +14,19 @@ const changed = () => {
 };
 
 /** A replica of `artifactId` waits for the artifact's restore holding `unsent` unacknowledged edits; null: it no longer waits. */
-export function noteDeletedReplica(replica: object, artifactId: string, unsent: number | null): void {
+export function noteDeletedReplica(replica: object, artifactId: string, machine: MachineRef, unsent: number | null): void {
   const was = held.get(replica);
   if (unsent === null) {
     if (held.delete(replica)) changed();
     return;
   }
-  if (was?.artifactId === artifactId && was.unsent === unsent) return;
-  held.set(replica, { artifactId, unsent });
+  if (was?.artifactId === artifactId && was.machine === machine && was.unsent === unsent) return;
+  held.set(replica, { artifactId, machine, unsent });
   changed();
 }
 
 /** Whether a waiting replica of the artifact holds an edit the host never acknowledged. */
-export const unsentWhileDeleted = (artifactId: string): boolean => [...held.values()].some((entry) => entry.artifactId === artifactId && entry.unsent > 0);
+export const unsentWhileDeleted = (artifactId: string, machine: MachineRef): boolean => [...held.values()].some((entry) => entry.artifactId === artifactId && entry.machine === machine && entry.unsent > 0);
 
 /** Called at every change of the waiting replicas; answers its unsubscribe. */
 export function subscribeDeletedReplicas(listener: () => void): () => void {

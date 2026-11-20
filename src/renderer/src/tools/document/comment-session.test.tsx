@@ -16,7 +16,7 @@ import type { LibraryRow } from '@shared/ipc/schema/library';
 import { bareOf } from '@shared/machine/address';
 import { project, record } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { NO_SESSION_CONTEXT, type ArtifactSessionContext } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
 import { useCommentCard } from '../../side/card/store';
@@ -92,7 +92,7 @@ const sessionCalls = () => fake.calls.filter((call) => /^invoke session\.(create
 // ---- the target ----------------------------------------------------------------------------------------------------
 
 function Target({ artifactId = ARTIFACT }: { artifactId?: string }) {
-  const target = useArtifactCommentTarget(artifactId);
+  const target = useArtifactCommentTarget(artifactId, TEST_MACHINE);
   return <output data-testid="target">{JSON.stringify(target)}</output>;
 }
 const target = () => JSON.parse(screen.getByTestId('target').textContent!) as unknown;

@@ -10,7 +10,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { Markdown } from '../../../transcript';
 import { isAddress, machineOf } from '@shared/machine/address';
-import { artifactMachineOf } from '../../../artifacts/machines';
 import { ipc } from '../../../ipc/client';
 import { TranscriptActionsProvider, useActions } from '../../../transcript/view/context';
 import { openFile } from '../open-file';
@@ -22,7 +21,7 @@ export function MarkdownView({ entry, artifactView = false }: { entry: ViewerEnt
   const { tabId } = entry;
   const openTab = useActions().openArtifactTab;
   const from = !artifactView && entry.appSessionId !== null ? { from: { file: entry.path } } : {}; // U6b-4c
-  const source = entry.artifact ? (artifactMachineOf(entry.artifact.artifactId) ?? ipc.localMachine) : entry.appSessionId !== null && isAddress(entry.appSessionId) ? machineOf(entry.appSessionId) : ipc.localMachine;
+  const source = entry.artifact ? entry.artifact.machine : entry.appSessionId !== null && isAddress(entry.appSessionId) ? machineOf(entry.appSessionId) : ipc.localMachine;
   useLayoutEffect(() => {
     const el = scroller.current!;
     const saved = viewState(tabId);

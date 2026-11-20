@@ -13,6 +13,7 @@ import { embedUrl } from '@artifacts/slides/render-rules';
 import { artifactHost } from '../../artifacts';
 import { DesignSystemHostProvider } from '../../artifacts/design-system/provider';
 import { useLibraryRow } from '../../library/store';
+import { ipc } from '../../ipc/client';
 import { useSettings } from '../../stores/settings';
 import { useDeckSystem } from './governing';
 
@@ -56,7 +57,7 @@ function Show({ params, close }: { params: PresentParams; close: () => void }) {
     let live = true;
     let held: DocumentHandle | null = null;
     const owner = new AbortController(); // P5 O7 M5b review fix 2: no retries once the route is gone
-    artifactHost()
+    artifactHost(ipc.localMachine)
       .open(artifactId, { signal: owner.signal })
       .then(
         (handle) => {
@@ -73,10 +74,10 @@ function Show({ params, close }: { params: PresentParams; close: () => void }) {
     };
   }, [artifactId]);
 
-  const row = useLibraryRow(artifactId).value;
+  const row = useLibraryRow(artifactId, ipc.localMachine).value;
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
-  const assetUrl = useMemo(() => (ref: string) => artifactHost().assetUrl(artifactId, ref), [artifactId]);
+  const assetUrl = useMemo(() => (ref: string) => artifactHost(ipc.localMachine).assetUrl(artifactId, ref), [artifactId]);
   const embeds = useMemo(() => (slideId: string, elementId: string, raw: string) => embedUrl(artifactId, slideId, elementId, raw), [artifactId]);
 
   if (opened === null) return <Note>{C.opening}</Note>;

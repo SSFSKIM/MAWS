@@ -50,7 +50,7 @@ const canSendFrom = (status: DeliveryStatus | null): boolean => status !== null 
 
 export function SendToHost() {
   const sheet = useDelivery((s) => s.sheet);
-  return sheet ? <SendToSheet key={sheet.subject.artifactId} subject={sheet.subject} run={sheet.run} /> : null;
+  return sheet ? <SendToSheet key={`${sheet.subject.machine ?? ''}:${sheet.subject.artifactId}`} subject={sheet.subject} run={sheet.run} /> : null;
 }
 
 function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun }) {
@@ -59,7 +59,8 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
   const [picked, setPicked] = useState<ArtifactExportFormat | null>(null);
   const [where, setWhere] = useState<'default' | 'inside'>('default');
   const [link, setLink] = useState('');
-  const machine = useArtifactMachine(subject.artifactId); // P5 O7 M5c: its machine's receipts
+  const hint = useArtifactMachine(subject.machine === undefined ? subject.artifactId : null);
+  const machine = subject.machine === undefined ? hint : subject.machine === ipc.localMachine ? null : subject.machine; // P5 O7 M5c: its machine's receipts
   const receipt = useDelivery((s) => s.receipts[receiptKey(subject.artifactId, target, machine)] ?? null);
   const now = useNow();
 
