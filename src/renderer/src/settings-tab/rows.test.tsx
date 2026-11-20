@@ -2,7 +2,9 @@
 // from one declaration in `SETTINGS_ROWS`, names the state it shows and tells the view both. With the page populated
 // (imported Chrome profiles with extensions, Spaces, a chosen binary, the memory budget on, the supervisor waiting on an
 // older version) and again empty, every drawn row is declared in the section it is drawn in, and every declared row is
-// drawn or revealed by a drawn one.
+// drawn or revealed by a drawn one. The word cut: the rows drawn only on trouble (the voice helper, recognition, the
+// machine daemon) or once a binding changed (Reset to defaults) are drawn when the populated page has it; the config
+// home is in the Binary row's note, and Update is drawn on the Binary row.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -37,7 +39,9 @@ async function renderPage(initial: Settings, populated: boolean) {
     b.answers['browser.import.list'] = () => ({ profiles: [RECORD], fileBroken: false, running: null });
     b.answers['library.list'] = () => ({ rows: [SYSTEM], counts });
     b.answers['library.spaces'] = () => ({ spaces: [{ id: 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e', name: 'Teaching', createdAt: 1, count: 0 }] });
-    b.answers['host.status'] = () => waitingStatus(2);
+    b.answers['host.status'] = () => ({ ...waitingStatus(2), daemon: null });
+    const probe = b.answers['voice.status']!;
+    b.answers['voice.status'] = (input) => ({ ...(probe(input) as object), helper: { state: 'missing', path: '/repo/build/voice-helper/maws-voice-helper' }, supportsOnDevice: false });
   }
   window.maws = b.bridge;
   const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -100,8 +104,14 @@ describe('the row table', () => {
     expect(SETTINGS_ROWS.some((row) => row.section === 'org')).toBe(false); // the Org page's rows are not the table's
   });
 
-  it('never puts a state line behind More', () => {
-    for (const row of SETTINGS_ROWS) for (const [name, state] of Object.entries(row.states)) if (state.state) expect(state.more, `${row.id} ${name}`).toBeUndefined();
+  // the word cut: a condition the person must act on stands at rest, whole, and is never a note
+  it('keeps a state line at rest: a state has its line and no note', () => {
+    for (const row of SETTINGS_ROWS)
+      for (const [name, state] of Object.entries(row.states))
+        if (state.state) {
+          expect(state.line, `${row.id} ${name}`).toBeDefined();
+          expect(state.note, `${row.id} ${name}`).toBeUndefined();
+        }
   });
 
   it('fills a marked place with its value, and keeps the words around it', () => {
@@ -112,16 +122,20 @@ describe('the row table', () => {
 
 describe('every row drawn from the table', () => {
   it('with the page populated, every declared row is drawn, repeating rows once per thing made at run time', async () => {
-    await renderPage({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude' } }, true);
+    await renderPage({ ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.dictate': 'Cmd+D' }, engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude' } }, true);
     const shows = (id: string, state: string) => document.querySelector(`[data-settings-row="${id}"][data-settings-state="${state}"]`);
     await vi.waitFor(() => {
       expect(document.querySelectorAll('[data-settings-row="browser.extension"]')).toHaveLength(RECORD.extensions.length);
       expect(shows('supervisor.status', 'waiting')).not.toBeNull();
       expect(shows('artifacts.bySpace', 'spaces')).not.toBeNull();
       expect(shows('gateway.defaultRoute', 'machine')).not.toBeNull();
+      expect(shows('voice.helper', 'build')).not.toBeNull();
+      expect(shows('voice.recognition', 'default')).not.toBeNull();
+      expect(shows('supervisor.daemon', 'default')).not.toBeNull();
     });
     const drawn = expectEveryRowDeclaredAndEveryDeclarationDrawn();
-    for (const declared of SETTINGS_ROWS) expect(drawn.map((row) => row.id), declared.id).toContain(declared.id);
+    for (const declared of SETTINGS_ROWS) if (declared.id !== 'engine.configHome') expect(drawn.map((row) => row.id), declared.id).toContain(declared.id);
+    expect(drawn.map((row) => row.id)).not.toContain('engine.configHome'); // in the Binary row's note
     expect(drawn.filter((row) => row.id === 'browser.importedProfile')).toHaveLength(1);
     expect(drawn.filter((row) => row.id === 'browser.extension')).toHaveLength(RECORD.extensions.length);
     expect(drawn.find((row) => row.id === 'engine.binary')?.state).toBe('chosen');
@@ -134,7 +148,7 @@ describe('every row drawn from the table', () => {
   it('with the page empty, every declared row not drawn is revealed by one that is', async () => {
     await renderPage({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudget: { enabled: false } } }, false);
     const ids = expectEveryRowDeclaredAndEveryDeclarationDrawn().map((row) => row.id);
-    for (const hidden of ['supervisor.limit', 'supervisor.stateful', 'browser.importedProfile', 'browser.extension']) expect(ids, hidden).not.toContain(hidden);
+    for (const hidden of ['supervisor.limit', 'supervisor.stateful', 'browser.importedProfile', 'browser.extension', 'keyboard.reset', 'voice.helper', 'voice.recognition', 'supervisor.daemon', 'engine.configHome']) expect(ids, hidden).not.toContain(hidden);
   });
 });
 

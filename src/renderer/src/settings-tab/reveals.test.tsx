@@ -15,27 +15,13 @@ import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { accessibleText } from '../test-support/accessible-text';
-import { daemonStatus, supervisorStatus } from '../test-support/host-status';
+import { hostStatus } from '../test-support/host-status';
 import { settingsBridge } from '../test-support/settings-bridge';
 import { importBridge, RECORD } from '../test-support/browser-import';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { SettingsView } from './SettingsView';
 
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
-const RUNNING = () => ({
-  transport: 'daemon',
-  state: 'ready',
-  supervisor: supervisorStatus(),
-  appBuildId: 'b',
-  appWire: 'w',
-  mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' },
-  matches: true,
-  reason: null,
-  waitingLiveSessions: null,
-  lastExit: null,
-  daemon: daemonStatus(),
-  daemonUnavailable: null,
-});
 
 let disconnect = () => {};
 function renderView(answers: Record<string, (input: unknown) => unknown> = {}, initial: Settings = SETTINGS_DEFAULTS_V21) {
@@ -111,7 +97,7 @@ describe('a fact sent to a tooltip has an owner the keyboard reaches', () => {
     renderView();
     act(() => useAttention.setState({ notificationDelivery: 'fallback' }));
     const notify = row('Notify me');
-    const chip = within(notify).getByText('Blocked in macOS');
+    const chip = within(notify).getByText('Blocked in macOS').closest<HTMLElement>('[tabindex="0"]')!;
     await tabTo(within(notify).getByRole('switch'), chip);
     expect(tooltip()).toBe('MAWS falls back to a dock bounce and a toast');
     expect(accessibleText(notify)).not.toContain('dock bounce');
@@ -149,13 +135,15 @@ describe('a fact sent to a tooltip has an owner the keyboard reaches', () => {
     const version = await within(binary).findByText('2.1.287');
     expect(accessibleText(binary)).not.toContain('~/.local/share/claude/versions/2.1.287');
     expect(screen.queryByRole('group', { name: 'Config home' })).toBeNull();
-    await vi.waitFor(() => expect(screen.getByRole('group', { name: 'Binary', description: /~\/\.local\/share\/claude\/versions\/2\.1\.287 Config home · ~\/\.claude · read-only to MAWS/ })).toBe(binary));
+    const described = (words: string) => (description: string) => description.includes(words);
+    await vi.waitFor(() => expect(screen.getByRole('group', { name: 'Binary', description: described('~/.local/share/claude/versions/2.1.287') })).toBe(binary));
+    expect(screen.getByRole('group', { name: 'Binary', description: described('Config home · ~/.claude · read-only to MAWS') })).toBe(binary);
     act(() => version.closest<HTMLElement>('[tabindex="0"]')!.focus());
     expect(tooltip()).toBe('~/.local/share/claude/versions/2.1.287');
   });
 
   it('Status reads its state and its sessions; when, which process and when it exits are its tooltip, with the daemon (G129, G133)', async () => {
-    renderView({ 'host.status': RUNNING });
+    renderView({ 'host.status': () => hostStatus() });
     const status = row('Status');
     const line = await within(status).findByText('Running · 3 sessions');
     expect(screen.queryByRole('group', { name: 'Machine daemon' })).toBeNull(); // connected: its line is in the tooltip
