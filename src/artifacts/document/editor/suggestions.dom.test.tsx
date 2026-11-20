@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, mergeUpdates, newDoc, newSuggestionDoc, onUpdate, planAccept, planReject, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
+import { clientIdChanges } from '../../yjs/client-id-log.fixture';
 import { applyEdit } from '../patch-writer';
 import { schemaFor } from '../schema';
 import { addTab } from '../tabs';
@@ -76,7 +77,9 @@ describe('document suggestion review', () => {
     expect(ranges?.length).toBeGreaterThan(0);
     const plan = planAccept(handle.doc, proposal!, attribution, ranges);
     expect(plan.edit).not.toBeNull();
-    transact(handle.doc, () => plan.edit!(handle.doc));
+    // the edit applies the deletions it carries and writes the copy in one transaction of this doc, so Yjs gives the
+    // doc a fresh clientID after it and says so once
+    expect(clientIdChanges(() => transact(handle.doc, () => plan.edit!(handle.doc)))).toBe(1);
     expect(pmOf(handle.doc, 'base').toJSON()).toEqual(expected);
   });
 
