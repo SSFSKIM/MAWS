@@ -104,6 +104,7 @@ export class MessageQueue {
   private preparing: QueueEntry | null = null; // P4-A3: the submission whose frame is being prepared (the queue is busy)
   private stopping = 0; // ticket 790: Stops whose pause, hold and interrupt (`stop`) are still running
   private stoppedTurn = false; // ticket 790: a Stop's interrupted turn had not ended when its interrupt was answered
+  private turnEnds = 0; // ticket 790: main-lane turn ends seen, so a Stop tells the turn it interrupted from a successor
   private removing = 0; // ticket 790: removals whose save has not committed (a failed one puts its row back)
   private readonly log: (message: string) => void;
 
@@ -320,8 +321,12 @@ export class MessageQueue {
   // Resume. The phase lasts until the interrupted turn has ended (the interrupt's answer can precede that turn's end), so
   // whatever reaches the queue meanwhile, a message being queued or submitted as the Stop arrives among it, stays held.
   // A pause that failed to save ends nothing.
+  // The interrupted turn is the one open when the interrupt is answered, unless a main-lane turn ended since the Stop
+  // began: then that end was the interrupted turn's, and a turn open now is a successor (a steer the hold's deadline left
+  // with the engine, started in the same inbound drain), which the phase does not wait for.
   async stop<T>(opts: { hold: boolean }, interrupt: () => Promise<T>): Promise<T> {
     this.stopping++;
+    const endsBefore = this.turnEnds;
     let paused = false;
     try {
       await this.pause('interrupt');
@@ -331,7 +336,7 @@ export class MessageQueue {
     } finally {
       this.stopping--;
       if (paused) {
-        if ((this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
+        if (this.turnEnds === endsBefore && (this.deps.mainTurnOpen ?? this.deps.turnOpen)()) this.stoppedTurn = true; // the interrupted turn's end (onTurnEnded) ends the phase
         else await this.settleEmptyPause();
       }
     }
@@ -641,6 +646,7 @@ export class MessageQueue {
   // delivery); then a human turn's end submits the head unless paused. Echo receipts and child lanes are not turns.
   async onTurnEnded(event: Extract<SessionEvent, { kind: 'turn.ended' }>): Promise<void> {
     if (event.isEchoReceipt || event.parentToolUseId !== null) return;
+    this.turnEnds++; // ticket 790
     const named = new Set<string>(event.userMessageUuids);
     const before = this.entries.length;
     this.entries = this.entries.filter((e) => {
