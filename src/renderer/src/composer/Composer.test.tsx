@@ -64,7 +64,7 @@ import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX w
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, hardBreak, mentionNode, paragraph, textNode } from './editor/doc';
+import { docOf, hardBreak, mentionNode, pastedNode, paragraph, textNode } from './editor/doc';
 import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
 import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
@@ -82,6 +82,14 @@ import { DictationKeys } from './dictation/DictationKeys'; // E9
 import { modelSelector } from '../widgets/ModelSelector'; // P2-F S chip (review)
 import { resetModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { resetDictationStore, useDictationStore } from './dictation/store'; // E9
+
+// Board ticket 741: the characters the one-writer rule's fold (shared/engine/grant.ts `neutraliseGrant`) goes over, the
+// function itself passed through unchanged
+const fold = vi.hoisted(() => ({ characters: 0 }));
+vi.mock('@shared/engine/grant', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@shared/engine/grant')>();
+  return { ...actual, neutraliseGrant: (text: string, work?: { steps: number }) => ((fold.characters += text.length), actual.neutraliseGrant(text, work)) };
+});
 
 // P5 O6 M2: `A` and `B` are the page's ids (addresses); `fake`, installed as `window.maws`, stands for main, so what it is
 // asked, answers and emits holds the bare `A_ID` and `B_ID`. The builders make main's values; the page's are lifted.
@@ -881,6 +889,25 @@ describe('the view’s switch above the composer', () => {
 });
 
 describe('sending from the box', () => {
+  // board ticket 741: the fold goes over the whole wire text, a pasted body included, so it runs once at the send and
+  // never on an edit; what the box reads on an edit (its mode, whether it holds anything) the fold cannot change
+  it('folds nothing while the person types beside a paste, and folds the wire text at the send', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const body = 'a pasted line\n'.repeat(200);
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('see'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text #1', lines: 200, text: body }))])));
+    act(() => editorOf().focus());
+    fold.characters = 0;
+    for (const letter of ' and fix it') await type(letter);
+    expect(primary().disabled).toBe(false);
+    expect(fold.characters).toBe(0);
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(1));
+    expect((invoked('session.send')[0] as { content: string }).content).toContain(body);
+    expect(fold.characters).toBeGreaterThan(body.length);
+  });
+
   const placeholder = () => editorOf().querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ?? null;
   const cmdEnter = () => key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });
 
