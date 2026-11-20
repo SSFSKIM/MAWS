@@ -6,6 +6,9 @@
 // the queued steer and the engine's JSONL, and nothing a human typed in that shape is taken for MAWS's framing.
 import { AnchorSchema, type Anchor, type AnchorBox /* E4d */ } from './anchor';
 import type { ArtifactKind } from '../artifacts/entity'; // P3-C
+import { wrapPasted } from '../composer/pasted-framing'; // ticket 733a
+import { leaveOutGrant, segmentsInPlace, takeSegment, type Range } from '../engine/composed-content'; // ticket 733a
+import { nameSlot, neutraliseGrant } from '../engine/grant'; // ticket 733a
 
 export type Destination = 'thread' | 'main';
 
@@ -20,7 +23,7 @@ const SCREENSHOT_SENTENCE = '. A screenshot of it is attached:';
 export const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
 export const ANCHOR_TAG_OPENING = '<maws_anchor';
 const PROMOTION_CONTINUE = 'Continue from here.';
-const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' };
+export const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' }; // ticket 733a: an edit asks it of a row
 
 // The parenthetical's parts per kind, each present only when its fields are (the schema leaves them optional; a
 // producer that gives them all gets exactly Interfaces' table).
@@ -102,17 +105,88 @@ export function anchorTag(anchor: Anchor): string {
   return `${ANCHOR_TAG_OPENING}${attributes.join('')}/>`;
 }
 
-export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }): string {
-  const { anchor, text, destination, screenshot } = input;
-  return `${anchorLead(anchor, screenshot)}\n${text.trim()}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
+/**
+ * Ticket 733a (its document, Design 3): an anchor's fields are a page's or a file's words, so each string field goes by
+ * the name's rule (`nameSlot`), once, here, and the lead and the tag are both written from what it gives: the readers
+ * regenerate the lead from the tag's anchor, so they strip it as before, and a field already slotted comes back as it
+ * is, so writing back what was read gives the same bytes. `work`, when given, is charged each field's test.
+ */
+export function slottedAnchor(anchor: Anchor, work?: { steps: number }): Anchor {
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(anchor)) out[field] = typeof value === 'string' ? nameSlot(value, work) : value;
+  return out as Anchor;
+}
+
+/**
+ * One comment's message: its lead, its words, the preamble for a thread, and its tag. Ticket 733a: the anchor by
+ * `slottedAnchor`, and the whole text through `neutraliseGrant`, as any text sent as the person's; `work`, when given,
+ * is charged what it does (the fields' tests, the text's assembly, the last pass), for the own-text rule's meter.
+ */
+export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }, work?: { steps: number }): string {
+  return neutraliseGrant(anchoredBeforeLastPass(input, work), work);
+}
+
+function anchoredBeforeLastPass(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }, work?: { steps: number }): string {
+  const { text, destination, screenshot } = input;
+  const anchor = slottedAnchor(input.anchor, work);
+  const message = `${anchorLead(anchor, screenshot)}\n${commentWords(text)}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
+  if (work) work.steps += 2 * message.length + 1; // its parts written, then joined
+  return message;
+}
+
+// Ticket 733a (its document, Designs 3 and 4): a comment's words as a message carries them, trimmed; words that begin
+// with a pasted segment (a quoted line, `quotedComment`, or words a resend framed whole) keep the segment's two line
+// breaks before it, which the trim would take and which the segment's own reader (`takeSegment`) reads. A segment that
+// ends the words loses the line break after its closing tag to the trim; the message's next line break stands for it.
+// The readers trim the words again (`readOneComment`, as build F reads), so writing back what was read gives the same
+// bytes.
+export function commentWords(text: string): string {
+  const words = text.trim();
+  return opensWithSegment(words) ? `\n\n${words}` : words;
+}
+
+// Whether trimmed words begin with a pasted segment, the frame's line breaks around it being the ones the trim took
+const opensWithSegment = (words: string) => takeSegment(`\n\n${words}\n`, 0) !== null;
+
+/**
+ * A comment's words read in place (Design 4): every pasted segment in them, the one at their start and the one at their
+ * end included (whose line breaks a reader's trim took off), drawn as its body where it stood, and each body's range in
+ * the text it gives. Called only on the words of a message `readAnchoredMessage` read.
+ */
+export function commentInPlace(words: string): { text: string; composed: Range[] } {
+  const read = segmentsInPlace(`${opensWithSegment(words) ? '\n\n' : ''}${words}\n`);
+  // the line break put after the words is the closing tag's own when a segment ends them (its reading took it), else no
+  // part of the words
+  return read.composed.at(-1)?.[1] === read.text.length ? read : { text: read.text.slice(0, -1), composed: read.composed };
 }
 
 // A `/btw` exchange promoted to a side thread: its first prompt lists the answered exchanges, then the text the human
 // typed (else a line asking to continue), then the anchorless tag, so the thread's first row reads as a side question.
-export function promotionMessage(exchanges: { question: string; response: string }[], text: string | null): string {
-  const pairs = exchanges.map(({ question, response }) => `Q: ${question}\nA: ${response}`);
+// Ticket 733a (Design 3; the architect's rulings of 2026-11-17): each answer is the model's, so its lines that quote the
+// grant's opening are left out, and the exchanges, `Q:` and `A:` pairs as before, stand inside one pasted segment after
+// the head (a question is the person's own and is not rewritten); the typed words after it. Read in place, it is the
+// text it was before.
+export function promotionMessage(exchanges: { question: string; response: string }[], text: string | null, tagId: string): string {
+  const pairs = exchanges.map(({ question, response }) => `Q: ${question}\nA: ${leaveOutGrant(response)}`);
+  const exchange = pairs.length === 0 ? [] : [wrapPasted(tagId, pairs.join('\n\n'))];
   const typed = text?.trim() || PROMOTION_CONTINUE;
-  return [PROMOTION_HEAD, ...pairs, typed, anchorTag(PROMOTION_ANCHOR)].join('\n\n');
+  return neutraliseGrant([PROMOTION_HEAD, ...exchange, typed, anchorTag(PROMOTION_ANCHOR)].join('\n\n'));
+}
+
+/**
+ * A promoted side question's text, read in place as the transcript's row holds it with its segments' ranges (§D, Design
+ * 5): null unless it begins with the head and a blank line; `body`, the range of the segment's body that stands directly
+ * after them with the typed words after it, a blank line between (this build's shape), else null (the earlier writer's,
+ * or the head's paragraph edited).
+ */
+export function readPromotion(text: string, composed: readonly Range[]): { body: Range | null } | null {
+  const head = `${PROMOTION_HEAD}\n\n`;
+  if (!text.startsWith(head)) return null;
+  const first = composed[0];
+  // the body is the text's one segment, whole: with another segment beside it, none (no reading picks a part of the
+  // segments or leaves one among the typed words)
+  const shaped = composed.length === 1 && first![0] === head.length && text.startsWith('\n\n', first![1]);
+  return { body: shaped ? first! : null };
 }
 
 // E4d (2026-10-06): attribute names widened from `[A-Za-z]+` to `[A-Za-z][A-Za-z0-9]*` so X10's `a11y` parses (E4d
@@ -182,15 +256,42 @@ const ESCAPED = /^\\+<maws_anchor/; // a line the reader takes one backslash off
 const escapeLine = (line: string) => (ESCAPED_OR_NOT.test(line) ? `\\${line}` : line);
 const unescapeLine = (line: string) => (ESCAPED.test(line) ? line.slice(1) : line);
 
-/** The text of one message carrying `comments` (1 to 20), oldest first. */
-export function commentsMessage(comments: readonly MessageComment[], destination: Destination): string {
+/**
+ * The text of one message carrying `comments` (1 to 20), oldest first. Ticket 733a: each anchor by `slottedAnchor`, the
+ * whole through `neutraliseGrant`; `work`, when given, is charged what it does (the fields' tests, the blocks' assembly
+ * and their join, the last pass), the count the own-text rule's meter takes for its reconstruction.
+ */
+export function commentsMessage(comments: readonly MessageComment[], destination: Destination, work?: { steps: number }): string {
+  return neutraliseGrant(commentsMessageBeforeLastPass(comments, destination, work), work);
+}
+
+/**
+ * Ticket 733a (the architect's ruling on M3's numbers): `commentsMessage` before its last pass, `neutraliseGrant`, so
+ * that the own-text rule's meter (src/shared/files/named.ts, its only importer) runs the two as two calls, each inside
+ * one stretch at the length bound. What it returns is no message: it has not had the pass every text sent as the
+ * person's has. No sender imports it (test/support/person-sends.test.ts holds the importers to that one file).
+ */
+export function commentsMessageBeforeLastPass(comments: readonly MessageComment[], destination: Destination, work?: { steps: number }): string {
   if (comments.length < 1 || comments.length > MESSAGE_COMMENTS_MAX) throw new RangeError(`a message carries 1 to ${MESSAGE_COMMENTS_MAX} comments, not ${comments.length}`);
-  if (comments.length === 1) return anchoredMessage({ ...comments[0]!, destination });
-  const blocks = comments.map(({ anchor, text, screenshot }, index) => {
+  if (comments.length === 1) return anchoredBeforeLastPass({ ...comments[0]!, destination }, work);
+  const blocks = comments.map(({ anchor: given, text, screenshot }, index) => {
+    const anchor = slottedAnchor(given, work);
     const preamble = destination === 'thread' && index === comments.length - 1 ? `\n\n${SIDE_THREAD_PREAMBLE_MANY}` : '';
-    return `${anchorLead(anchor, screenshot)}\n${text.trim().split('\n').map(escapeLine).join('\n')}${preamble}\n\n${anchorTag(anchor)}`;
+    return `${anchorLead(anchor, screenshot)}\n${commentWords(text).split('\n').map(escapeLine).join('\n')}${preamble}\n\n${anchorTag(anchor)}`;
   });
-  return [framingLine(comments.length), ...blocks].join('\n\n');
+  const message = [framingLine(comments.length), ...blocks].join('\n\n');
+  if (work) work.steps += 2 * message.length + 1; // the blocks written, then joined
+  return message;
+}
+
+/**
+ * Ticket 733a (Design 4, narrowed by the architect's ruling of 2026-11-17): whether a message `readAnchoredMessage` read
+ * is one of MAWS's own anchored forms, whose segments are drawn in place: a comment with a destination (its lead or its
+ * framing is MAWS's), or a text under the promotion's own anchor. A text under any other anchor with no destination is
+ * no writer's of MAWS, so it is drawn, given back at an edit and sent again as at the pin, its pasted blocks chips.
+ */
+export function isComposedAnchored(read: { comments: readonly MessageComment[]; destination: Destination | null }): boolean {
+  return read.destination !== null || (read.comments.length === 1 && anchorTag(read.comments[0]!.anchor) === anchorTag(PROMOTION_ANCHOR));
 }
 
 /** Every comment of a message MAWS wrote, else null. */
@@ -293,13 +394,44 @@ function codeSpan(line: string): string {
   return `${ticks}${pad}${line}${pad}${ticks}`;
 }
 
-/** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line outside a commit's diff); unchanged when `quote` is null and the line is not such a removed one. */
-export function quotedComment(anchor: Anchor, quote: string | null, text: string): string {
+/**
+ * A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line outside a
+ * commit's diff); unchanged when `quote` is null and the line is not such a removed one. Ticket 733a (Design 3): the
+ * line is a file's text, so it is left out when it quotes the grant's opening, and its code span stands inside a pasted
+ * segment on lines of its own, which MAWS's readers draw in place: read so, the words are what they were before.
+ */
+export function quotedComment(anchor: Anchor, quote: string | null, text: string, tagId: string): string {
   if (text.trim() === '') return text; // a comment with no words is not sent
   const line = quote === null ? null : quoteLine(quote);
   // UX wave U5b-2: a commit's old side says so in its lead ("the first parent of commit"), so its words take no caption
   const caption = anchor.kind === 'file-line' && anchor.side === 'old' && anchor.commit === undefined;
-  const parts = [...(caption ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
-  return parts.join('\n');
+  if (line === null) return [...(caption ? [BEFORE_THE_CHANGE] : []), text].join('\n');
+  return `${caption ? `${BEFORE_THE_CHANGE}\n` : ''}${wrapPasted(tagId, codeSpan(leaveOutGrant(line)))}\n${text}`;
+}
+
+/**
+ * The quoted line of an anchored comment's words, read by its own form at an edit (§D, Design 5): this build's segment
+ * of one line at the words' start, after the caption line when they have one (its range among the row's `composed`); or,
+ * from the earlier writer, a first line (after the caption) that is one whole code span, under an anchor on a file's
+ * line, in words that hold no segment. Null when the words hold none.
+ */
+export function readQuote(anchor: Anchor, words: string, composed: readonly Range[]): Range | null {
+  const at = words.startsWith(`${BEFORE_THE_CHANGE}\n`) ? BEFORE_THE_CHANGE.length + 1 : 0;
+  const first = composed[0];
+  if (first !== undefined && first[0] === at && !/[\n\r]/.test(words.slice(first[0], first[1]))) return first;
+  // the earlier writer's line only where no segment stands: a line inside one is a frame's, never a quote of its own
+  if (anchor.kind !== 'file-line' || composed.length > 0) return null;
+  const end = words.indexOf('\n', at);
+  const line = words.slice(at, end < 0 ? words.length : end);
+  return isCodeSpan(line) ? [at, at + line.length] : null;
+}
+
+// One whole inline code span, as `codeSpan` writes one: a run of backticks, the line, the same run, and no run of that
+// length inside
+function isCodeSpan(line: string): boolean {
+  const ticks = /^`+/.exec(line)?.[0];
+  if (ticks === undefined || line.length < 2 * ticks.length + 1 || !line.endsWith(ticks) || line.charAt(line.length - ticks.length - 1) === '`') return false;
+  const inner = line.slice(ticks.length, line.length - ticks.length);
+  return (inner.match(/`+/g) ?? []).every((run) => run.length !== ticks.length);
 }
 // UX wave U5b end

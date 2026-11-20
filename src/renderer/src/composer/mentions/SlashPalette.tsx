@@ -7,8 +7,8 @@
 import type { Editor, Range } from '@tiptap/core';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useForkUnavailable } from '../../lane-b/remote-unavailable';
-import { textNode } from '../editor/doc';
-import { oneLine } from '../editor/mention-text';
+import { textNode } from '../editor/doc'; // ticket 733a
+import { slashText } from '../editor/mention-text'; // ticket 733a
 import { slashItems, type SlashItem, type SlashOrigin } from './items';
 import { Listbox, useListKeys, type PopupItem, type PopupProps } from './popup';
 import { paletteRows, rememberChosen } from './rank';
@@ -23,7 +23,7 @@ function rowOf(item: SlashItem, openWidget: (name: string) => void): Row {
   };
   switch (item.action.kind) {
     case 'text':
-      return { key, item, disabled: false, apply: chosen((editor, range) => void editor.chain().focus().insertContentAt(range, textNode(`/${oneLine(item.name)} `)).run()) }; // board ticket 739: text, one line
+      return { key, item, disabled: false, apply: chosen((editor, range) => void editor.chain().focus().insertContentAt(range, textNode(slashText(item.name))).run()) }; // ticket 733a: the name's rule, as text (never parsed as HTML)
     case 'widget':
       return {
         key,

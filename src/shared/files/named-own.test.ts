@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage, commentsMessage, promotionMessage } from '@shared/anchor/message';
+import { anchoredMessage, commentsMessage, promotionMessage, quotedComment, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
 import { wrapPasted } from '@shared/composer/pasted-framing';
 import { consentMessage } from '@shared/engine/arrival';
 import { bashEcho, planPrompt } from '@shared/engine/host-prompts';
@@ -22,6 +22,8 @@ const P = '/work/out/notes.md';
 const LINK = `[the notes](${P})`;
 const NAMES = { names: true };
 const OTHER = { names: false, pending: [], other: true };
+// ticket 733a: the reconstruction's counted work for its pinned input (the meter's test below), printed by the test
+const PINNED = { length: 29_296, work: 1_486_245, pauses: 15 }; // 15 since the write-back's two calls: a pause falls between them
 const text = (value: string) => ({ type: 'text', text: value });
 // A `user` row and a queued prompt of the person's origin, as the engine writes them (test/fixtures/transcripts/)
 const user = (content: string | object[]) => ({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, message: { role: 'user', content } });
@@ -37,7 +39,7 @@ const readLinking = (() => {
   const read = JSON.parse(sent.read) as { markdown: string };
   return JSON.stringify({ ...read, markdown: `${read.markdown}\nSee ${LINK} for the schedule. ^n0tes001\n` }, null, 2);
 })();
-const attached = async (words: string) => (await withLinkedReads(words, async (_link, admit) => admit(readLinking))).content;
+const attached = async (words: string) => (await withLinkedReads(words, async (_link, admit) => admit(readLinking), 'ab12')).content;
 
 describe('the person’s own text: the linked read (the finding)', () => {
   it('the host attaches the read after the person’s words, as recorded', async () => {
@@ -58,12 +60,12 @@ describe('the person’s own text: the linked read (the finding)', () => {
 
 describe('the person’s own text: what the engine host composes as the person’s', () => {
   it('the plan handed back after a clear names it for a read only', () => {
-    expect(both(planPrompt(`1. Update the schedule in ${LINK}`))).toEqual([OTHER, OTHER]);
+    expect(both(planPrompt(`1. Update the schedule in ${LINK}`, 'ab12'))).toEqual([OTHER, OTHER]);
   });
 
   it('the bash echo fails whole: a link in the output, and one in the typed command', () => {
-    expect(both(bashEcho('cat notes.md', `<bash-stdout>See ${LINK}</bash-stdout><bash-stderr></bash-stderr>`))).toEqual([OTHER, OTHER]);
-    expect(both(bashEcho(`echo ${LINK}`, '<bash-stdout></bash-stdout><bash-stderr></bash-stderr>'))).toEqual([OTHER, OTHER]);
+    expect(both(bashEcho('cat notes.md', `<bash-stdout>See ${LINK}</bash-stdout><bash-stderr></bash-stderr>`, 'ab12'))).toEqual([OTHER, OTHER]);
+    expect(both(bashEcho(`echo ${LINK}`, '<bash-stdout></bash-stdout><bash-stderr></bash-stderr>', 'ab12'))).toEqual([OTHER, OTHER]);
   });
 });
 
@@ -74,12 +76,12 @@ describe('the person’s own text: what the window composes around a model’s w
   });
 
   it('a side question promoted to a thread: the model’s answer in it', () => {
-    expect(both(promotionMessage([{ question: 'Where is the schedule?', response: `In ${LINK}.` }], 'Go on.'))).toEqual([OTHER, OTHER]);
+    expect(both(promotionMessage([{ question: 'Where is the schedule?', response: `In ${LINK}.` }], 'Go on.', 'ab12'))).toEqual([OTHER, OTHER]);
   });
 
   it('a relay to an agent or a peer: the whole instruction, the person’s words in it included', () => {
     const agent = relayText({ agentId: 'a1b2c3' as AgentId, name: null }, `Read ${LINK}`);
-    const peer = relayText({ kind: 'peer', address: 'session:7ef6ac00', name: null, mode: 'message' }, `Read ${LINK}`);
+    const peer = relayText({ kind: 'peer', address: 'session:7ef6ac00', name: null, mode: 'message' }, `Read ${LINK}`)!;
     expect([...both(agent), ...both(peer)]).toEqual([OTHER, OTHER, OTHER, OTHER]);
   });
 });
@@ -142,6 +144,20 @@ describe('the person’s own text: pastes, comments, commands (the architect’s
     expect(both(anchoredMessage({ anchor: fileAnchor('notes.md'), text: `Compare with ${LINK}`, destination: 'thread', screenshot: false }))).toEqual([NAMES, NAMES]);
     const two = commentsMessage([{ anchor: fileAnchor('notes.md'), text: 'This one', screenshot: false }, { anchor: fileAnchor('notes.md'), text: `And ${LINK}`, screenshot: false }], 'main');
     expect(both(two)).toEqual([NAMES, NAMES]);
+  });
+
+  // Ticket 733a (its document, Design 6): the own-text rule's two directions for a comment, unchanged by the quoted line's
+  // segment, in one test: the comment's typed words name a link for a save; the same link in its quoted line (now inside
+  // a segment) or in its anchor's label names it for a read only, and so does a promotion holding it in an answer
+  it('B (ticket 733a): a comment’s typed words name a save; its quoted line, its label and a promotion’s answer a read only', () => {
+    const anchor = fileAnchor('notes.md');
+    const words = (quote: string | null, text: string) => quotedComment(anchor, quote, text, 'ab12');
+    for (const destination of ['main', 'thread'] as const) {
+      expect(both(commentsMessage([{ anchor, text: words('const total = rows.length;', `Compare with ${LINK}`), screenshot: false }], destination)), destination).toEqual([NAMES, NAMES]);
+      expect(both(commentsMessage([{ anchor, text: words(`See ${LINK}`, 'Wrong date here'), screenshot: false }], destination)), destination).toEqual([OTHER, OTHER]);
+      expect(both(commentsMessage([{ anchor: { ...anchor, label: LINK }, text: words('const total = rows.length;', 'Wrong date here'), screenshot: false }], destination)), destination).toEqual([OTHER, OTHER]);
+    }
+    expect(both(promotionMessage([{ question: 'Where is the schedule?', response: `In ${LINK}.` }], 'Go on.', 'ab12'))).toEqual([OTHER, OTHER]);
   });
 
   it('C: a typed slash command’s arguments, typed or as the engine records them, name it for a read only', () => {
@@ -230,6 +246,10 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     ['plain words', () => near('word ')],
     ['many answer-shaped lines', () => near('Answering "x\n')],
     ['many anchor-tag openings', () => near('\n<maws_anchor kind="x"')],
+    // ticket 733a: the characters the grant's test costs most on, which case mapping lengthens
+    ['a capital I with a dot above', () => near('\u0130')],
+    ['a sharp s', () => near('\u00df')],
+    ['an iota with dialytika and tonos', () => near('\u0390')],
   ])('linear work, bounded between pauses, with a pause inside the text: %s', (_, shape) => {
     const textOf = shape();
     expect(textOf.length).toBeLessThanOrEqual(OWN_TEXT_MAX_CHARS);
@@ -238,6 +258,73 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
     expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
     expect(read.pauses).toBeGreaterThanOrEqual(2);
+  });
+
+  // ticket 733a: the costliest text counted, an anchored comment at the length bound in the character the grant's test
+  // costs most on; it counts, within the budget and one stretch between pauses
+  it('an anchored comment at the length bound, in a capital I with a dot above, counts within the budget', () => {
+    const anchor = { kind: 'file-line' as const, label: 'notes.md', locator: `${P}:3`, path: P, line: 3 };
+    const words = near('\u0130', `Compare ${LINK} `).slice(0, OWN_TEXT_MAX_CHARS - 200);
+    const textOf = anchoredMessage({ anchor, text: words, destination: 'main', screenshot: false });
+    expect(textOf.length).toBeLessThanOrEqual(OWN_TEXT_MAX_CHARS);
+    const read = ownTextWork(textOf);
+    expect(read.refused).toBeNull();
+    expect(read.texts).toHaveLength(1);
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
+  });
+
+  // Ticket 733a (its document, Design 1, "The own-text rule's meter"; acceptance 11): the reconstruction writes the read
+  // comments back with their writer, which slots each anchor's fields and passes the whole through the writer's last
+  // step; the meter charges it what the writer counts, beside the read's fixed 16 a character. Long comments on a page
+  // whose selector and accessible path fill the text: the counted work and the pauses pinned, within one stretch.
+  const page = (field: string): MessageComment => ({ anchor: { kind: 'browser-element', label: 'Save', locator: 'b', pageUrl: 'https://example.test/', css: field, role: 'button', name: 'Save', a11y: field }, text: 'x', screenshot: false });
+  const fieldsAt = (ch: string, length: number) => {
+    const comments: MessageComment[] = [{ ...page(ch.repeat(1990)), text: `Fix ${LINK}` }];
+    while (comments.length < 20 && commentsMessage([...comments, page(ch.repeat(1990))], 'main').length <= length) comments.push(page(ch.repeat(1990)));
+    return commentsMessage(comments, 'main');
+  };
+  it('the reconstruction is charged what the writer counts: long comments on a page’s fields, their work and pauses pinned', () => {
+    const textOf = fieldsAt('a', 30_000);
+    expect(textOf.length).toBe(PINNED.length);
+    const written = { steps: 0 };
+    const read = readAnchoredMessage(textOf)!;
+    expect(commentsMessage(read.comments, read.destination!, written)).toBe(textOf);
+    const meter = ownTextWork(textOf);
+    expect(meter).toMatchObject({ refused: null, work: PINNED.work, pauses: PINNED.pauses });
+    expect(meter.texts).toHaveLength(read.comments.length);
+    expect(meter.longest).toBeLessThanOrEqual(STRETCH_MAX);
+    // the read's 16 a character and the writer's own count are both in the meter's
+    expect(meter.work).toBeGreaterThan(16 * textOf.length + written.steps);
+    expect(written.steps).toBeGreaterThan(8 * textOf.length); // the fixed charge it replaces fell short
+  });
+
+  it('the costliest text counted, comments on a page’s fields in a capital I with a dot above at the length bound, counts within the budget and one stretch', () => {
+    const textOf = fieldsAt('\u0130', OWN_TEXT_MAX_CHARS);
+    expect(textOf.length).toBeGreaterThan(OWN_TEXT_MAX_CHARS - 4000);
+    const read = ownTextWork(textOf);
+    expect(read.refused).toBeNull();
+    expect(read.texts.length).toBeGreaterThan(1);
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
+    expect(both(textOf)).toEqual([NAMES, NAMES]);
+  });
+
+  // Ticket 733a (the architect's ruling on M3's numbers): the write-back runs as two calls, its assembly and its last
+  // pass, so the length a text counts up to stays 65,536 characters and no call of the reading, the write-back's two
+  // among them, passes one stretch at that length, on the characters that cost each part most and on ASCII
+  it.each([
+    ['U+1FB7 (the last pass’s costliest)', '\u1FB7'],
+    ['U+0130 (the fields’ test’s costliest)', '\u0130'],
+    ['ASCII', 'a'],
+  ])('no single call of the reading passes STRETCH_MAX at the length bound: comments on a page’s fields in %s', (_, ch) => {
+    expect(OWN_TEXT_MAX_CHARS).toBe(65_536);
+    const textOf = fieldsAt(ch, OWN_TEXT_MAX_CHARS);
+    expect(textOf.length).toBeGreaterThan(OWN_TEXT_MAX_CHARS - 4000);
+    const read = ownTextWork(textOf);
+    expect(read.refused).toBeNull();
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX); // the most work between two pauses bounds every call
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
   });
 
   it('a paste opener with no closer makes the text not count', () => {

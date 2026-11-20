@@ -7,6 +7,7 @@ import { asTyped } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
 import { pastedPlaceholder, replacePasted } from '@shared/composer/pasted-content';
 import { countLines } from '@shared/composer/pasted-framing';
+import { formTextInPlace } from '@shared/engine/form-in-place'; // ticket 733a
 import type { Prefill } from '../../stores/composer';
 import { atomId, attachmentsOf, type Attachment, type ComposerDoc } from '../editor/doc';
 import { base64Bytes } from '../editor/attachments';
@@ -42,11 +43,13 @@ function partsOf(content: string | readonly ContentBlock[]) {
 }
 
 // The row's text (UX wave U4a: two lines in the stack, opened in place to the whole): attachments named, pasted blocks as
-// placeholders, line breaks kept, a run of blank lines as one.
+// placeholders, line breaks kept, a run of blank lines as one. Ticket 733a (Design 4): one of MAWS's forms has its
+// segments in place, as the transcript draws it.
 export function entryDisplay(content: string | readonly ContentBlock[]): string {
   const { text, images, documents } = partsOf(content);
   const named = [...images.map((_, i) => `[Image #${i + 1}]`), ...documents.map((_, i) => `[PDF #${i + 1}]`)];
-  return [...named, extractPasted(text).text]
+  const form = formTextInPlace(text);
+  return [...named, form === null ? extractPasted(text).text : typedFromRowText(form)]
     .join(' ')
     .replace(/[ \t]*\n\s*/g, '\n')
     .trim();

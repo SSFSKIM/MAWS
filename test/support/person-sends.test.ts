@@ -15,21 +15,24 @@
 // sends no person-origin engine message (its composer, apps/desk-web/src/views/composer/Composer.tsx:67-74, says to the
 // project's channel through `connection.say`), and the terminal lane's port types through the sminos bridge, whose rows
 // carry the plugin's origin (session/controls/lane-a.ts, the carrier below); neither is a site of the rule.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { commentsMessage, promotionMessage } from '@shared/anchor/message';
-import { consentMessage, personsGrants } from '@shared/engine/arrival';
+import { commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
+import { consentMessage, pastedBodies, personsGrants } from '@shared/engine/arrival';
 import { holdsGrantForm } from '@shared/engine/composed-forms';
+import { LINE_LEFT_OUT } from '@shared/engine/composed-content'; // ticket 733a
+import { asTyped, NAME_LEFT_OUT, quotesGrant } from '@shared/engine/grant'; // ticket 733a
 import { bashEcho, planPrompt } from '@shared/engine/host-prompts';
 import type { AgentId } from '@shared/graph/ids';
 import { rowClaim } from '@shared/files/named';
 import { askSteerText } from '@shared/maws/ask';
 import { linkedReadBlock } from '@shared/maws/linked-read';
 import { answerText } from '@shared/owner/answer';
-import { mentionText } from '../../src/renderer/src/composer/editor/mention-text';
+import { mentionText, slashText } from '../../src/renderer/src/composer/editor/mention-text';
 import { relayText } from '../../src/renderer/src/tools/agents/model/relay';
 import { anchoredTextOf } from '../../src/renderer/src/transcript/model/user-text';
+import { expectNoGrantSent } from './grant-readers'; // ticket 733a
 import { REPOSITORY, scanSends, sitesIn, type Site, type Verb } from './person-sends';
 
 const P = '/work/out/notes.md';
@@ -41,7 +44,12 @@ const LINK = `[the notes](${P})`;
 // the form has none, why (a sentence that is no line of its own is never read as a grant)
 // `forGrants`: whether the form counts for grants (its flag in src/shared/engine/composed-forms.ts), written here by
 // hand so a reader or a flag that moves fails the guard rather than dropping the form from it
-type Form = { form: string; reader: string; sample: () => string; positional?: string; consent: ((grant: string) => string) | { none: string }; forGrants: boolean };
+// `treatment` (ticket 733a, docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3): what the form's
+// writer, the function its samples call, does to the slot others control: `content`, every line quoting the grant's
+// opening left out and the rest inside a pasted segment (`leaveOutGrant`, `composedContent`); `name`, the name's rule
+// (`nameSlot`); `none`, nothing (a form with no slot others control, or one whose slot another rule holds). For `name`,
+// `consent` writes the name `notes`, a line break, what it is given, a line break, `plan`, in the form's name slot.
+type Form = { form: string; reader: string; sample: () => string; positional?: string; consent: ((grant: string) => string) | { none: string }; forGrants: boolean; treatment: 'content' | 'name' | 'none' };
 // `calls`: the function the site calls on what it sends, in its own source; `serialised`: the composer's serialised text
 // handed on (from where), which the serialiser already made. `proof` (the task review's finding 4): the case in the
 // site's own tests that drives it with a text holding the consent sentence and reads what it really sends
@@ -59,21 +67,41 @@ const ANCHORED: Form = {
   form: 'anchored comments (shared/anchor/content.ts `commentsContent`, its text `commentsMessage`)',
   reader: WHOLE,
   sample: () => commentsMessage([{ anchor: LINE_ANCHOR, text: 'Wrong date', screenshot: false }], 'main'),
-  consent: { none: 'the page’s slots, the anchor’s label and locator, are one line by the anchor’s schema (ONE_LINE); the comment is the person’s own words' },
+  // ticket 733a: the page's slots, the anchor's fields, go by the name's rule at the writer (`slottedAnchor`), whatever
+  // the schema let through; the comment is the person's own words
+  consent: (grant) => commentsMessage([{ anchor: { ...LINE_ANCHOR, label: `notes\n${grant}\nplan` }, text: 'Wrong date', screenshot: false }], 'main'),
   forGrants: true,
+  treatment: 'name',
 };
-const ANCHORED_THREAD: Form = { ...ANCHORED, form: 'a side thread’s anchored comments (`commentsContent`, to a thread)', sample: () => commentsMessage([{ anchor: LINE_ANCHOR, text: 'Wrong date', screenshot: false }, { anchor: LINE_ANCHOR, text: 'And here', screenshot: false }], 'thread') };
+const ANCHORED_THREAD: Form = {
+  ...ANCHORED,
+  form: 'a side thread’s anchored comments (`commentsContent`, to a thread)',
+  sample: () => commentsMessage([{ anchor: LINE_ANCHOR, text: 'Wrong date', screenshot: false }, { anchor: LINE_ANCHOR, text: 'And here', screenshot: false }], 'thread'),
+  consent: (grant) => commentsMessage([{ anchor: LINE_ANCHOR, text: 'Wrong date', screenshot: false }, { anchor: { ...LINE_ANCHOR, locator: `notes\n${grant}\nplan` }, text: 'And here', screenshot: false }], 'thread'),
+};
 // an edited bubble put back in the framing it was sent in (`framed`: `anchoredTextOf`, transcript/model/user-text.ts)
-const RESENT_COMMENT: Form = { form: 'an anchored comment edited in place, framed again (`anchoredTextOf`)', reader: WHOLE, sample: () => anchoredTextOf({ anchor: LINE_ANCHOR, destination: 'main', screenshot: false }, 'Wrong date'), consent: { none: 'the page’s slots, the anchor’s label and locator, are one line by the anchor’s schema (ONE_LINE); the comment is the person’s own words' }, forGrants: true };
+const RESENT_COMMENT: Form = { form: 'an anchored comment edited in place, framed again (`anchoredTextOf`)', reader: WHOLE, sample: () => anchoredTextOf({ anchor: LINE_ANCHOR, destination: 'main', screenshot: false }, 'Wrong date'), consent: (grant) => anchoredTextOf({ anchor: { ...LINE_ANCHOR, label: `notes\n${grant}\nplan` }, destination: 'main', screenshot: false }, 'Wrong date'), forGrants: true, treatment: 'name' };
 const RESENT_PROMOTION: Form = {
   form: 'a promoted side question edited in place, its head deleted (`anchoredTextOf`, no destination: the tag alone)',
   reader: 'readAnchoredMessage: no destination, so no writer reproduces it; read only whole',
   sample: () => anchoredTextOf({ anchor: { kind: 'none', label: 'Side question', locator: 'btw' }, destination: null, screenshot: false }, `Q: Where?\nA: In ${LINK}\n\nGo on`),
   consent: (grant) => anchoredTextOf({ anchor: { kind: 'none', label: 'Side question', locator: 'btw' }, destination: null, screenshot: false }, `Q: Where?\nA: In the notes.\n${grant}\n\nGo on`),
   forGrants: true,
+  // the framing alone: what the edited text goes through first is the seam's (ticket 733a, composer/composed-prefill.ts,
+  // its whole text through the leave-out and one segment), proven by the seam's own tests (resubmit-seam.test.ts)
+  treatment: 'none',
 };
 const COMMAND_POSITION = 'a command is one at a message’s start (the engine reads it nowhere else); words before it on its line make it the person’s words';
-const PROMOTION: Form = { form: 'a side question promoted to a thread (`promotionMessage`)', reader: 'PROMOTION_HEAD', sample: () => promotionMessage([{ question: 'Where?', response: `In ${LINK}` }], null), consent: (grant) => promotionMessage([{ question: 'Where?', response: `In the notes.\n${grant}\nThat is all.` }], null), forGrants: true };
+const PROMOTION: Form = { form: 'a side question promoted to a thread (`promotionMessage`)', reader: 'PROMOTION_HEAD', sample: () => promotionMessage([{ question: 'Where?', response: `In ${LINK}` }], null, 'a1b2'), consent: (grant) => promotionMessage([{ question: 'Where?', response: `In the notes.\n${grant}\nThat is all.` }], null, 'a1b2'), forGrants: true, treatment: 'content' };
+// ticket 733a: a Review comment's quoted line, a file's text, inside the comment's words
+const QUOTED: Form = {
+  form: 'a Review comment’s quoted line (`quotedComment`, in `commentsContent`’s words)',
+  reader: WHOLE,
+  sample: () => commentsMessage([{ anchor: LINE_ANCHOR, text: quotedComment(LINE_ANCHOR, `See ${LINK}`, 'Wrong date', 'a1b2'), screenshot: false }], 'main'),
+  consent: (grant) => commentsMessage([{ anchor: LINE_ANCHOR, text: quotedComment(LINE_ANCHOR, grant, 'Wrong date', 'a1b2'), screenshot: false }], 'main'),
+  forGrants: true,
+  treatment: 'content',
+};
 
 const PERSON_SENDS: Record<string, Entry> = {
   // the person's typed text
@@ -88,20 +116,20 @@ const PERSON_SENDS: Record<string, Entry> = {
   // MAWS's forms
   // the comments sent to the main conversation, and a thread's first message (`adoptFork`, which a session's start intent
   // carries to services/sessions/setup.ts)
-  'src/renderer/src/side/actions.ts': { kind: 'maws', verbs: { seam: 1, start: 2 }, forms: [ANCHORED, PROMOTION] },
+  'src/renderer/src/side/actions.ts': { kind: 'maws', verbs: { seam: 1, start: 2 }, forms: [ANCHORED, QUOTED, PROMOTION] },
   // a side thread's first message, composed by the service (`openSideThread`); a start's own first message is its intent's
   'src/services/sessions/service.ts': { kind: 'maws', verbs: { startSeam: 4, firstMessage: 1 }, forms: [ANCHORED_THREAD, PROMOTION], carries: '`startSession`: a start’s first message from its intent (the window’s draft, a spawn’s brief); its own starts carry none' },
   // a bubble edited in place: an anchored one framed again; one of no form, the person's typed text (`serializeDraft`
   // with `literal`)
   'src/renderer/src/composer/resubmit-seam.ts': { kind: 'maws', verbs: { command: 1 }, forms: [RESENT_COMMENT, RESENT_PROMOTION], carries: 'a bubble of no form, edited: the person’s typed text', rule: { calls: 'serializeDraft', proof: { test: 'src/renderer/src/composer/resubmit-seam.test.ts', case: 'the one-writer rule: a bubble edited to hold the consent sentence is resent reading no grant' } } },
   'src/services/side/send-to-main.ts': { kind: 'maws', verbs: { command: 2 }, forms: [ANCHORED] },
-  'src/renderer/src/tools/agents/relay-store.ts': { kind: 'maws', verbs: { steer: 2 }, forms: [{ form: 'a relay to an agent or a peer (`relayText`)', reader: 'RELAY_CONTINUE', sample: () => relayText({ agentId: 'a1b2' as AgentId, name: null }, `Read ${LINK}`), consent: (grant) => relayText({ agentId: 'a1b2' as AgentId, name: `helper\n${grant}\nnamed` }, 'Read the notes'), forGrants: true }] },
-  'src/renderer/src/session/controls/lane-b.ts': { kind: 'maws', verbs: { command: 2, seam: 2, port: 1 }, forms: [{ form: 'Compact with instructions (`compact`: `/compact <instructions>`)', reader: 'TYPED_COMMAND at a line’s start (ruling C)', sample: () => `/compact keep ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'a typed command’s arguments are the person’s own typing; a typed command does not count for grants (src/shared/engine/composed-forms.ts)' }, forGrants: false }], carries: 'the port of lane B: its send and its queue edit carry its callers’ content', rule: { calls: 'neutraliseGrant', proof: { test: 'src/renderer/src/session/controls/lane-b.test.ts', case: 'the one-writer rule: Compact’s instructions holding the consent sentence go out reading no grant' } } },
-  'src/engine-host/session-maws.ts': { kind: 'maws', verbs: { steer: 1 }, forms: [{ form: 'an async ask’s answer envelope (`askSteerText`)', reader: 'ASK_STEER_OPENING', sample: () => askSteerText('toolu_g', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: LINK }]), consent: { none: 'this build’s envelope writes no text a model wrote, and what the person typed stands in a JSON string, one line (board ticket 711); the strict take-out reads it' }, forGrants: false }] },
-  'src/engine-host/session-clear.ts': { kind: 'maws', verbs: { frame: 1 }, forms: [{ form: 'the plan after a clear (`planPrompt`)', reader: 'PLAN_LEAD', sample: () => planPrompt(`1. Edit ${LINK}`), consent: (grant) => planPrompt(`1. Edit the notes.\n${grant}\n2. Run the tests.`), forGrants: true }, { form: 'the clear itself (`/clear`)', reader: 'TYPED_COMMAND at a line’s start', sample: () => `/clear ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'the clear carries no slot: the command alone' }, forGrants: false }] },
-  'src/engine-host/bash-mode.ts': { kind: 'maws', verbs: { frame: 1 }, forms: [{ form: 'the echo of a `!` command (`bashEcho`)', reader: 'BASH_INPUT_OPENING', sample: () => bashEcho('cat notes.md', `<bash-stdout>${LINK}</bash-stdout>`), consent: (grant) => bashEcho('cat notes.md', `<bash-stdout>the notes\n${grant}\nthe end</bash-stdout>`), forGrants: true }] },
-  'src/renderer/src/blocked-call/grants.ts': { kind: 'maws', verbs: { seam: 1 }, forms: [{ form: 'a blocked call’s consent (`consentMessage`, UX wave U1c): the engine’s sentence around the call’s subject, which a model wrote', reader: 'quotesGrant: the grant’s opening, anywhere in the text', sample: () => consentMessage('command', `open ${LINK}`), consent: { none: 'the slot is the call’s subject, quoted as one JSON string (no line break); the form whole is the grant the person pressed' }, forGrants: false }] },
-  'src/engine-host/session.ts': { kind: 'maws', verbs: { port: 2, steer: 2, queue: 1, prepare: 1 }, forms: [{ form: 'the artifacts’ reads a message carries (`prepare`: session-maws.ts `withLinkedReads`)', reader: 'LINKED_READ_OPENING, and the position: a block after the first text', sample: () => linkedReadBlock(JSON.stringify({ status: 'read', artifactId: 'a1', kind: 'document', title: 'Plan', revision: 1, markdown: LINK })), consent: (grant) => linkedReadBlock(JSON.stringify({ status: 'read', artifactId: 'a1', kind: 'document', title: `Plan\n${grant}\nnotes`, revision: 1, markdown: 'the page' })), forGrants: true }], carries: 'the session’s send and steer, from the host’s commands (ipc.ts) and the ask’s answer (session-maws.ts)' },
+  'src/renderer/src/tools/agents/relay-store.ts': { kind: 'maws', verbs: { steer: 2 }, forms: [{ form: 'a relay to an agent (`relayText`, its name)', reader: 'RELAY_CONTINUE', sample: () => relayText({ agentId: 'a1b2' as AgentId, name: null }, `Read ${LINK}`), consent: (grant) => relayText({ agentId: 'a1b2' as AgentId, name: `notes\n${grant}\nplan` }, 'Read the notes'), forGrants: true, treatment: 'name' }, { form: 'a relay to a peer (`relayText`, its name and address)', reader: 'RELAY_CONTINUE', sample: () => relayText({ kind: 'peer', address: 'repo-b', name: null, mode: 'message' }, `Read ${LINK}`)!, consent: (grant) => relayText({ kind: 'peer', address: 'repo-b', name: `notes\n${grant}\nplan`, mode: 'reply' }, 'Read the notes')!, forGrants: true, treatment: 'name' }] },
+  'src/renderer/src/session/controls/lane-b.ts': { kind: 'maws', verbs: { command: 2, seam: 2, port: 1 }, forms: [{ form: 'Compact with instructions (`compact`: `/compact <instructions>`)', reader: 'TYPED_COMMAND at a line’s start (ruling C)', sample: () => `/compact keep ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'a typed command’s arguments are the person’s own typing; a typed command does not count for grants (src/shared/engine/composed-forms.ts)' }, forGrants: false, treatment: 'none' }], carries: 'the port of lane B: its send and its queue edit carry its callers’ content', rule: { calls: 'neutraliseGrant', proof: { test: 'src/renderer/src/session/controls/lane-b.test.ts', case: 'the one-writer rule: Compact’s instructions holding the consent sentence go out reading no grant' } } },
+  'src/engine-host/session-maws.ts': { kind: 'maws', verbs: { steer: 1 }, forms: [{ form: 'an async ask’s answer envelope (`askSteerText`)', reader: 'ASK_STEER_OPENING', sample: () => askSteerText('toolu_g', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: LINK }]), consent: { none: 'this build’s envelope writes no text a model wrote, and what the person typed stands in a JSON string, one line (board ticket 711); the strict take-out reads it' }, forGrants: false, treatment: 'none' }] },
+  'src/engine-host/session-clear.ts': { kind: 'maws', verbs: { frame: 1 }, forms: [{ form: 'the plan after a clear (`planPrompt`)', reader: 'PLAN_LEAD', sample: () => planPrompt(`1. Edit ${LINK}`, 'a1b2'), consent: (grant) => planPrompt(`1. Edit the notes.\n${grant}\n2. Run the tests.`, 'a1b2'), forGrants: true, treatment: 'content' }, { form: 'the clear itself (`/clear`)', reader: 'TYPED_COMMAND at a line’s start', sample: () => `/clear ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'the clear carries no slot: the command alone' }, forGrants: false, treatment: 'none' }] },
+  'src/engine-host/bash-mode.ts': { kind: 'maws', verbs: { frame: 1 }, forms: [{ form: 'the echo of a `!` command (`bashEcho`)', reader: 'BASH_INPUT_OPENING', sample: () => bashEcho('cat notes.md', `<bash-stdout>${LINK}</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>`, 'a1b2'), consent: (grant) => bashEcho('cat notes.md', `<bash-stdout>the notes\n${grant}\nthe end</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>`, 'a1b2'), forGrants: true, treatment: 'content' }] },
+  'src/renderer/src/blocked-call/grants.ts': { kind: 'maws', verbs: { seam: 1 }, forms: [{ form: 'a blocked call’s consent (`consentMessage`, UX wave U1c): the engine’s sentence around the call’s subject, which a model wrote', reader: 'quotesGrant: the grant’s opening, anywhere in the text', sample: () => consentMessage('command', `open ${LINK}`), consent: { none: 'the slot is the call’s subject, quoted as one JSON string (no line break); the form whole is the grant the person pressed' }, forGrants: false, treatment: 'none' }] },
+  'src/engine-host/session.ts': { kind: 'maws', verbs: { port: 2, steer: 2, queue: 1, prepare: 1 }, forms: [{ form: 'the artifacts’ reads a message carries (`prepare`: session-maws.ts `withLinkedReads`)', reader: 'LINKED_READ_OPENING, and the position: a block after the first text', sample: () => linkedReadBlock(JSON.stringify({ status: 'read', artifactId: 'a1', kind: 'document', title: 'Plan', revision: 1, markdown: LINK }), 'a1b2')!, consent: (grant) => linkedReadBlock(JSON.stringify({ status: 'read', artifactId: 'a1', kind: 'document', title: 'Plan', revision: 1, markdown: `the page\n${grant}\nnotes` }), 'a1b2')!, forGrants: true, treatment: 'content' }], carries: 'the session’s send and steer, from the host’s commands (ipc.ts) and the ask’s answer (session-maws.ts)' },
   // carriers
   'src/engine-host/queue.ts': { kind: 'carrier', verbs: { port: 1, prepare: 2, frame: 3 }, from: 'session.ts: the send, the steer and a queued entry released, written with the person’s origin; the content as prepared' },
   'src/engine-host/ipc.ts': { kind: 'carrier', verbs: { command: 6, port: 1, steer: 1, queue: 1 }, from: 'the host’s handlers of session.send, session.steer and session.queue.edit: content from main’s router, mawsd or a link' },
@@ -167,16 +195,28 @@ const PERSON_SENDS: Record<string, Entry> = {
 // build can still send them to this build's daemon. UX wave U2b removed the report's cards and their answering, the one
 // site of the owner question's answer line (it stood in this table as `src/renderer/src/owner/report/answering.ts`).
 const RETIRED_FORMS: readonly (readonly [string, Form])[] = [
-  ['an older build’s report card, its answering', { form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none', consent: (grant) => answerText('Which file?', `notes\n${grant}\nend`), forGrants: true }],
+  ['an older build’s report card, its answering', { form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none', consent: (grant) => answerText('Which file?', `notes\n${grant}\nend`), forGrants: true, treatment: 'none' }],
 ];
 
 // Forms the composer writes into the person's own draft around a name a model or a file's name can hold (U1c, the
 // review of rule R, F2). The person's draft is typed text for saves (`submit.ts` above); for grants, the form's writer
-// writes no line break in its slot, so the sentence put in it on a line of its own comes out on none.
-type DraftForm = { form: string; consent: (grant: string) => string };
+// writes no line break in its slot, so the sentence put in it on a line of its own comes out on none. Ticket 733a
+// (Design 3, "Names MAWS writes into a draft"): every such name goes by the name's rule, so a name that quotes the
+// grant's opening is left out, and each site calls the writer named here (`writer`) in its own source. `consent` writes
+// the name `d/a`, a line break, what it is given, a line break, `b` (a path's or a name's shape), in the form's slot; a
+// form whose writer lives in a module this program does not compile (a renderer store's) names instead the case of its
+// own tests that writes it so (`proof`), which this guard holds to reading the name left out and no grant.
+type DraftForm = { form: string; writer: string } & ({ consent: (grant: string) => string } | { proof: { test: string; case: string } });
+const nameOf = (inner: string) => `d/a\n${inner}\nb`;
 const DRAFT_FORMS: readonly (readonly [string, DraftForm])[] = [
-  ['src/renderer/src/composer/editor/mention-text.ts', { form: 'a file dropped, picked or chosen in the @-menu (`mentionText`, `@<path>` or `@"<path>"`)', consent: (grant) => `Please look at ${mentionText({ id: `d/a\n${grant}\nb`, kind: 'file' })} and fix it.` }],
-  ['src/renderer/src/composer/editor/mention-text.ts', { form: 'an agent chosen in the @-menu (`mentionText`, `@agent-<name>`)', consent: (grant) => `Ask ${mentionText({ id: `helper\n${grant}\nnamed`, kind: 'agent' })} to look.` }],
+  ['src/renderer/src/composer/editor/mention-text.ts', { form: 'a file dropped, picked or chosen in the @-menu (`mentionText`, `@<path>` or `@"<path>"`)', writer: 'nameSlot', consent: (grant) => `Please look at ${mentionText({ id: nameOf(grant), kind: 'file' })} and fix it.` }],
+  ['src/renderer/src/composer/editor/mention-text.ts', { form: 'an agent chosen in the @-menu (`mentionText`, `@agent-<name>`)', writer: 'nameSlot', consent: (grant) => `Ask ${mentionText({ id: nameOf(grant), kind: 'agent' })} to look.` }],
+  ['src/renderer/src/widgets/AgentsWidget.tsx', { form: 'the Agents widget’s Mention (`mentionText`, `@agent-<name> `)', writer: 'mentionText', consent: (grant) => `${mentionText({ id: nameOf(grant), kind: 'agent' })} please look.` }],
+  ['src/renderer/src/widgets/SkillsWidget.tsx', { form: 'the Skills widget’s Use in chat (`slashText`, `/<name> `)', writer: 'slashText', consent: (grant) => `${slashText(nameOf(grant))}the notes` }],
+  ['src/renderer/src/composer/mentions/AtMenu.tsx', { form: 'a skill chosen in the @-menu (`slashText`, `/<name> ` at the message’s start)', writer: 'slashText', consent: (grant) => `${slashText(nameOf(grant))}the notes` }],
+  ['src/renderer/src/composer/mentions/SlashPalette.tsx', { form: 'a command chosen in the slash palette (`slashText`, `/<name> `)', writer: 'slashText', consent: (grant) => `${slashText(nameOf(grant))}the notes` }],
+  ['src/renderer/src/artifacts/design-system/copy.ts', { form: 'a design system’s adoption request (`DESIGN_SYSTEM_COPY.adoptRequest`, its title twice)', writer: 'nameSlot', proof: { test: 'src/renderer/src/artifacts/design-system/copy.test.ts', case: 'the adoption request writes the system’s title by the name’s rule: one quoting the grant’s opening left out, one holding a line break on one line' } }],
+  ['src/renderer/src/markup/session.ts', { form: 'Mark-up’s draft (`MARKUP_COPY.draft`, `Mark-up of <label> `, a page’s title or address)', writer: 'nameSlot', proof: { test: 'src/renderer/src/markup/session.test.ts', case: 'the draft writes the label by the name’s rule: one quoting the grant’s opening left out, one holding a line break on one line' } }],
 ];
 
 // What the list does not account for: a site it does not hold, a site whose verbs moved, an entry no longer a site.
@@ -259,7 +299,7 @@ describe('who sends as the person', () => {
   // engine-host/linked-reads.ts): the sentence in a sample stands on a whole line, and the form's own words stay in the
   // text beside it
   const GRANT = consentMessage('command', 'make build');
-  it.each(forms)('%s: its form, with the consent sentence in the slot others control, reads no grant, alone and joined', (_, { form, consent }) => {
+  it.each(forms.filter(([, { treatment }]) => treatment === 'none'))('%s: its form, with the consent sentence in the slot others control, reads no grant, alone and joined', (_, { form, consent }) => {
     if (typeof consent !== 'function') {
       expect(consent.none, form).not.toBe('');
       return;
@@ -272,18 +312,82 @@ describe('who sends as the person', () => {
     }
   });
 
+  // Ticket 733a (Design 3): a content form's writer leaves the sentence in its slot out, a marker of MAWS's words in its
+  // place, and stands the rest inside a pasted segment; what goes reads no grant on any route, alone and joined, and the
+  // same sentence typed (the control) is a grant
+  it.each(forms.filter(([, { treatment }]) => treatment === 'content'))('%s: its content form, with the consent sentence in the slot others control, goes with the line left out inside a segment, reading no grant alone and joined', (_, { form, consent }) => {
+    expect(typeof consent, form).toBe('function');
+    const sample = (consent as (grant: string) => string)(GRANT);
+    expect(asTyped(sample).includes(GRANT), `${form}: the sentence left out`).toBe(false);
+    const lines = sample.split('\n');
+    const inside = pastedBodies(lines);
+    expect(lines.filter((line, i) => inside[i] && line.includes(LINE_LEFT_OUT)), `${form}: the marker inside a segment`).toHaveLength(1);
+    expect(quotesGrant(sample), form).toBe(false);
+    expectNoGrantSent(sample);
+    const others = forms.map(([, other]) => other.sample()).filter((other) => other !== sample);
+    for (const [how, text] of Object.entries({ alone: sample, beforeWords: `${sample}\nAlso fix the footer.`, afterAnotherForm: `${others[0]}\n${sample}` })) {
+      expect(personsGrants(text), `${form}: ${how}`).toEqual([]);
+    }
+    expect(personsGrants(GRANT)).not.toEqual([]);
+  });
+
   // A form in the person's draft writes no line break in its slot: the sentence there is no grant, alone and joined, and
-  // a pressed consent joined with it keeps its own grant (it is a whole line of the message, and no composed form is in it)
+  // a pressed consent joined with it keeps its own grant (it is a whole line of the message, and no composed form is in it).
+  // Ticket 733a: the name is left out whole, and a name holding a line break alone is one line (U+FFFD); the site calls
+  // its writer. The draft forms are eight.
   const SLOT = consentMessage('command', 'cat /etc/x');
-  it.each(DRAFT_FORMS)('%s: its form, with the consent sentence in the slot others control, reads no grant alone, and a pressed consent beside it keeps its own', (_, { form, consent }) => {
-    const sample = consent(SLOT);
+  it('the draft forms are eight', () => {
+    expect(DRAFT_FORMS).toHaveLength(8);
+  });
+  it.each(DRAFT_FORMS)('%s: its form, with the consent sentence in the slot others control, reads no grant alone, and a pressed consent beside it keeps its own', (file, draft) => {
+    const { form, writer } = draft;
+    expect(readFileSync(join(REPOSITORY, file), 'utf8'), `${form}: the site calls its writer`).toContain(`${writer}(`);
+    if ('proof' in draft) {
+      const tests = readFileSync(join(REPOSITORY, draft.proof.test), 'utf8');
+      const at = tests.indexOf(`it('${draft.proof.case}',`);
+      expect(at, `${form}: its proof, ${draft.proof.test} › ${draft.proof.case}`).toBeGreaterThan(-1);
+      const body = tests.slice(at, tests.indexOf('\n  });', at));
+      for (const call of ['NAME_LEFT_OUT', 'personsGrants(', '\\ufffd']) expect(body, `${form}: its proof reads ${call}`).toContain(call);
+      return;
+    }
+    const sample = draft.consent(SLOT);
     expect(sample, `${form}: no line break`).not.toMatch(/[\n\r\u0085\u2028\u2029]/u);
+    expect(sample, `${form}: the name left out`).toContain(NAME_LEFT_OUT);
+    expect(quotesGrant(sample), form).toBe(false);
     for (const [how, text] of Object.entries({ alone: sample, beforeWords: `${sample}\nAlso fix the footer.`, afterAnotherForm: `${forms[0]![1].sample()}\n${sample}` })) {
       expect(personsGrants(text), `${form}: ${how}`).toEqual([]);
     }
     for (const [how, text] of Object.entries({ beforeAPressedConsent: `${sample}\n${GRANT}`, afterAPressedConsent: `${GRANT}\n${sample}` })) {
       expect(personsGrants(text), `${form}: ${how}`).toEqual(personsGrants(GRANT));
     }
+    // a name holding a line break and no opening is kept, on one line
+    const broken = draft.consent('middle');
+    expect(broken, form).toContain('d/a\ufffdmiddle\ufffdb');
+    expect(broken, form).not.toMatch(/[\n\r]/u);
+    // the control: the name as given holds the sentence on a line of its own, a grant
+    expect(personsGrants(nameOf(SLOT))).not.toEqual([]);
+  });
+
+  // Ticket 733a (Design 3): a name form's writer holds every name to one line and leaves out a name that quotes the
+  // grant's opening; what goes reads no grant on any route, alone and joined, and the name as given (the control) is one
+  it.each(forms.filter(([, { treatment }]) => treatment === 'name'))('%s: its name form, with the consent sentence in a name, goes with the name left out, reading no grant alone and joined', (_, { form, consent }) => {
+    expect(typeof consent, form).toBe('function');
+    const write = consent as (grant: string) => string;
+    const sample = write(GRANT);
+    expect(asTyped(sample).includes(GRANT), `${form}: the sentence left out`).toBe(false);
+    expect(asTyped(sample).includes('notes\n'), `${form}: no line of the name`).toBe(false);
+    expect(quotesGrant(sample), form).toBe(false);
+    expectNoGrantSent(sample);
+    const others = forms.map(([, other]) => other.sample()).filter((other) => other !== sample);
+    for (const [how, text] of Object.entries({ alone: sample, beforeWords: `${sample}\nAlso fix the footer.`, afterAnotherForm: `${others[0]}\n${sample}` })) {
+      expect(personsGrants(text), `${form}: ${how}`).toEqual([]);
+    }
+    // a name holding a line break and no opening is kept, on one line
+    const broken = write('middle');
+    expect(broken, form).toContain('notes\ufffdmiddle\ufffdplan');
+    expect(broken, form).not.toContain('notes\nmiddle');
+    // the control: the name as given holds the sentence on a line of its own, a grant
+    expect(personsGrants(`notes\n${GRANT}\nplan`)).not.toEqual([]);
   });
 
   // Step 1b reads the forms on the whole joined text, nothing set aside (the exemption withdrawn, 2026-11-16). Each form is
@@ -302,5 +406,63 @@ describe('who sends as the person', () => {
     if (!forGrants) return;
     const sentence = consentMessage('command', `echo ${JSON.stringify(text)}`);
     for (const [how, joined] of Object.entries({ after: `${text}\n${sentence}`, before: `${sentence}\n${text}` })) expect(personsGrants(joined), `${form}: ${how}`).toEqual([]);
+  });
+});
+
+// Ticket 733a (the architect's ruling on M3's numbers, guard (a)): the anchored writer's assembly before its last pass
+// (`commentsMessageBeforeLastPass`) is no message, so no sender may hold it: the own-text rule's meter is its one
+// importer in the product, and two tests hold it to its pass. Every file of the repository is read, tests included.
+// New with the split; no red first. Widened at M4 to every way a file can take it, red first (the second case).
+describe('the write-back’s assembly', () => {
+  const IMPORTERS = ['src/shared/files/named.ts', 'src/shared/anchor/message.test.ts', 'src/services/files/named-split.test.ts'];
+  const SKIPPED = new Set(['node_modules', 'dist', 'out']);
+  const files = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return SKIPPED.has(entry.name) || entry.name.startsWith('.') ? [] : files(path);
+      return /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
+    });
+  // Whether a file's text, at `path`, takes the assembly (ticket 733a, M4: a named import alone was read before): it
+  // names it, in any place, or it takes the anchored writer's module whole, which hands it every export, this one
+  // included (a namespace import or re-export, a wildcard re-export, a dynamic import, a require, a mock's factory). A
+  // module is named by a relative path or the `@shared/` alias, with or without its extension. What a file reaches by a
+  // computed name, from a module object another file handed it, is outside what a reading of the text can see.
+  const MESSAGE_MODULE = join(REPOSITORY, 'src/shared/anchor/message');
+  const WHOLE = /(?:\bimport\s*\*\s*as\s+[\w$]+\s+from|\bexport\s*\*\s*(?:as\s+[\w$]+\s+)?from|\bimport\s*\(|\brequire\s*\(|\bvi\.(?:mock|doMock|importActual)\s*(?:<[^>]*>)?\s*\()\s*(['"`])([^'"`]+)\1/g;
+  const moduleOf = (path: string, specifier: string) =>
+    (specifier.startsWith('@shared/') ? join(REPOSITORY, 'src/shared', specifier.slice('@shared/'.length)) : specifier.startsWith('.') ? resolve(dirname(path), specifier) : specifier).replace(/\.[cm]?[jt]sx?$/, '');
+  const holdsAssembly = (path: string, text: string) =>
+    /\bcommentsMessageBeforeLastPass\b/.test(text) || [...text.matchAll(WHOLE)].some((match) => moduleOf(path, match[2]!) === MESSAGE_MODULE);
+  it('is named by the own-text rule alone, by the tests that hold it to its pass, its writer and this guard, and no other file takes its module whole', () => {
+    const importers = ['src', 'apps', 'test', 'e2e', 'scripts', 'plugins']
+      .flatMap((top) => files(join(REPOSITORY, top)))
+      .filter((path) => holdsAssembly(path, readFileSync(path, 'utf8')))
+      .map((path) => relative(REPOSITORY, path).split(sep).join('/'))
+      .sort();
+    expect(importers).toEqual([...IMPORTERS, 'src/shared/anchor/message.ts', 'test/support/person-sends.test.ts'].sort());
+  });
+  // Ticket 733a, M4: every way a file can reach the assembly, each read as holding it, beside the ways that do not
+  it('reads a file as holding the assembly however it takes it: by name, or the module whole', () => {
+    const at = join(REPOSITORY, 'src/shared/files/a.ts'); // a file beside the own-text rule, which names the module `../anchor/message`
+    const holds = {
+      'a named import': "import { commentsMessageBeforeLastPass } from '../anchor/message';",
+      'a named import, renamed': "import { commentsMessageBeforeLastPass as assemble } from '@shared/anchor/message';",
+      'a named re-export': "export { commentsMessageBeforeLastPass } from '../anchor/message';",
+      'a namespace import': "import * as message from '../anchor/message';\nexport const assemble = message.writer;",
+      'a namespace re-export': "export * as message from '@shared/anchor/message';",
+      'a wildcard re-export': "export * from '../anchor/message';",
+      'a dynamic import': "export const load = () => import('../anchor/message');",
+      'a require': "const message = require('../../shared/anchor/message.ts');",
+      'a mock of the module': "vi.mock('@shared/anchor/message', async (original) => original());",
+      'the name in any other place': 'const assemble = (m: Record<string, unknown>) => m.commentsMessageBeforeLastPass;',
+    };
+    const holdsNot = {
+      'a named import of the writer': "import { commentsMessage } from '../anchor/message';",
+      'a namespace import of another module': "import * as content from '../anchor/content';",
+      'a wildcard re-export of another module': "export * from './named-rows';",
+      'a dynamic import of a module of the same name elsewhere': "export const load = () => import('../composer/message');",
+    };
+    expect(Object.entries(holds).filter(([, text]) => !holdsAssembly(at, text)).map(([how]) => how), 'each way read as holding it').toEqual([]);
+    expect(Object.entries(holdsNot).filter(([, text]) => holdsAssembly(at, text)).map(([how]) => how), 'the controls, read as not').toEqual([]);
   });
 });

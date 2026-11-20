@@ -23,12 +23,18 @@ import { JOURNAL_MAX_BYTES, JournalWriter } from './journal'; // P5 O16 M2
 import { mapFileOf } from './holder/checkpoint'; // P5 O16 M2
 import { LATE_TABLE_MS } from './rpc'; // P5 O16 M2 fix wave 2
 import type { SessionJournal } from './session'; // P5 O16 M2
+import { planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
 // C7 start
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadJournal, TEST_FIXTURE_DIR } from '../../test/support/fixtures';
 import type { Catalog } from './session';
 // C7 end
+
+// Ticket 733a: the plan after a clear goes as its writer writes it, in one segment under a random id (the clear's
+// sequence holds no session id); these cases read every segment's id as one fixed id
+const oneId = (content: unknown) => (typeof content === 'string' ? content.replace(/(<\/?pasted_content id=")[0-9a-f]{4}"/g, '$1a1b2"') : content);
+const implementing = (plan: string) => planPrompt(plan, 'a1b2');
 
 const prelude = loadEngineJournal('replay-handshake');
 const responseOf = (seq: number) => (prelude.find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
@@ -1006,10 +1012,10 @@ describe('plan outcomes map to the wire', () => {
     transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 0, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', user_message_uuids: [clearUuid] });
     await flush();
     const implement = transport.writes.filter((w) => w.type === 'user').at(-1) as { message: { content: string }; origin: unknown };
-    expect(implement.message.content).toBe('Implement this plan:\n\n# Plan\n1. do it');
+    expect(oneId(implement.message.content)).toBe(implementing('# Plan\n1. do it'));
     expect(implement.origin).toEqual({ kind: 'human' });
     const userRows = journal.rows.filter((r) => r.direction === 'out' && (r.frame as { type: string }).type === 'user').map((r) => (r.frame as { message: { content: string } }).message.content);
-    expect(userRows).toEqual(['plan it', '/clear', 'Implement this plan:\n\n# Plan\n1. do it']);
+    expect(userRows.map(oneId)).toEqual(['plan it', '/clear', implementing('# Plan\n1. do it')]);
   });
 
   it('clear_and_implement is staged before the deny is written: a result that arrives while the write is in flight still runs the sequence', async () => {
@@ -1846,7 +1852,7 @@ describe('F2 session lifecycle regressions', () => {
     await t.session.answer('p-f2' as RequestId, { kind: 'plan', outcome: 'clear_and_implement', feedback: null });
     return t;
   }
-  const prompts = (t: ScriptedTransport) => t.writes.filter((w) => w.type === 'user').map((w) => w.message.content);
+  const prompts = (t: ScriptedTransport) => t.writes.filter((w) => w.type === 'user').map((w) => oneId(w.message.content));
 
   it('ticket 790: a Stop with nothing waiting leaves the queue unpaused, with the hold and without it', async () => {
     const t = setup({ responder: defaultResponder({ interrupt: () => ({ response: { still_queued: [], cancelled: [] } }) }) });
@@ -1872,7 +1878,7 @@ describe('F2 session lifecycle regressions', () => {
     const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
     transport.push({ ...result, user_message_uuids: ['uuid' in clear ? clear.uuid : ''] });
     await flush();
-    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    expect(prompts(transport)).toEqual(['plan it', '/clear', implementing('Build it')]);
     transport.exit(0);
     await session.exited;
   });
@@ -1929,7 +1935,7 @@ describe('F2 session lifecycle regressions', () => {
     let finishWrite!: () => void;
     const held = new Promise<void>((resolve) => { finishWrite = resolve; });
     const { session, transport, journal } = await staged({}, { transport: {
-      holdWrite: (frame) => frame.type === 'user' && frame.message.content === 'Implement this plan:\n\nBuild it' ? held : null,
+      holdWrite: (frame) => frame.type === 'user' && oneId(frame.message.content) === implementing('Build it') ? held : null,
     } });
     await session.send('ordinary prompt');
     const planPrompt = transport.writes.find((w) => w.type === 'user')!;
@@ -1945,11 +1951,11 @@ describe('F2 session lifecycle regressions', () => {
     expect(session.queue.state.entries).toMatchObject([{ content: 'ordinary prompt', state: 'queued' }]);
     finishWrite();
     await flush();
-    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
-    const implementation = journal.rows.find((r) => r.direction === 'out' && (r.frame as { message?: { content?: string } }).message?.content === 'Implement this plan:\n\nBuild it')!;
+    expect(prompts(transport)).toEqual(['plan it', '/clear', implementing('Build it')]);
+    const implementation = journal.rows.find((r) => r.direction === 'out' && oneId((r.frame as { message?: { content?: string } }).message?.content) === implementing('Build it'))!;
     transport.push({ ...result, user_message_uuids: [(implementation.frame as { uuid: string }).uuid] });
     await flush();
-    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it', 'ordinary prompt']);
+    expect(prompts(transport)).toEqual(['plan it', '/clear', implementing('Build it'), 'ordinary prompt']);
     transport.exit(0);
     await session.exited;
   });
@@ -1958,7 +1964,7 @@ describe('F2 session lifecycle regressions', () => {
     let failWrite!: (error: Error) => void;
     const held = new Promise<void>((_resolve, reject) => { failWrite = reject; });
     const { session, transport } = await staged({}, { transport: {
-      holdWrite: (frame) => frame.type === 'user' && frame.message.content === 'Implement this plan:\n\nBuild it' ? held : null,
+      holdWrite: (frame) => frame.type === 'user' && oneId(frame.message.content) === implementing('Build it') ? held : null,
     } });
     await session.send('ordinary prompt');
     const planPrompt = transport.writes.find((w) => w.type === 'user')!;
@@ -1986,7 +1992,7 @@ describe('F2 session lifecycle regressions', () => {
     const write = transport.write.bind(transport);
     transport.write = async (frame) => {
       await write(frame); // the engine received the prompt before the pipe's completion callback
-      if (frame.type === 'user' && frame.message.content === 'Implement this plan:\n\nBuild it') await held;
+      if (frame.type === 'user' && oneId(frame.message.content) === implementing('Build it')) await held;
     };
     const planPrompt = transport.writes.find((w) => w.type === 'user')!;
     transport.push({ ...result, user_message_uuids: ['uuid' in planPrompt ? planPrompt.uuid : ''] });
@@ -1997,7 +2003,7 @@ describe('F2 session lifecycle regressions', () => {
     transport.push({ type: 'command_lifecycle', command_uuid: 'uuid' in clear ? clear.uuid : '', state: 'completed', uuid: 'clear-done', session_id: 's' });
     await flush();
     await session.queue.setPaused(false);
-    const implementation = transport.writes.find((w) => w.type === 'user' && w.message.content === 'Implement this plan:\n\nBuild it')!;
+    const implementation = transport.writes.find((w) => w.type === 'user' && oneId(w.message.content) === implementing('Build it'))!;
     const uuid = 'uuid' in implementation ? implementation.uuid : '';
     transport.push({ type: 'command_lifecycle', command_uuid: uuid, state: 'started', uuid: 'impl-started', session_id: 's' });
     transport.push({ ...result, user_message_uuids: [uuid] });
@@ -2007,7 +2013,7 @@ describe('F2 session lifecycle regressions', () => {
     await flush();
     finishWrite();
     await flush();
-    const throughImplementation = ['plan it', '/clear', 'Implement this plan:\n\nBuild it'];
+    const throughImplementation = ['plan it', '/clear', implementing('Build it')];
     if (gate !== 'idle') {
       expect(prompts(transport)).toEqual(throughImplementation);
       if (gate === 'paused') await session.queue.setPaused(false);
@@ -2053,7 +2059,7 @@ describe('F2 session lifecycle regressions', () => {
     expect(prompts(transport)).toEqual(['plan it', '/clear']);
     await session.queue.setPaused(false);
     await flush();
-    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    expect(prompts(transport)).toEqual(['plan it', '/clear', implementing('Build it')]);
     transport.exit(0);
     await session.exited;
   });
@@ -2102,7 +2108,7 @@ describe('F2 session lifecycle regressions', () => {
     await flush();
     expect(prompts(transport)).toEqual(['plan it', '/clear']);
     await session.queue.setPaused(false);
-    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    expect(prompts(transport)).toEqual(['plan it', '/clear', implementing('Build it')]);
     transport.exit(0);
     await session.exited;
   });

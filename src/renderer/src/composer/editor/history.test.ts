@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { consentMessage, readConsents } from '@shared/engine/arrival';
+import { consentMessage, pastedBodies, readConsents } from '@shared/engine/arrival';
+import type { Anchor } from '@shared/anchor/anchor'; // ticket 733a
+import { anchoredMessage, commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message'; // ticket 733a
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a
+import { bashEcho, planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
+import { asTyped } from '@shared/engine/grant'; // ticket 733a, the architect's ruling 4366
+import type { AgentId } from '@shared/graph/ids'; // ticket 733a, the architect's ruling 4366
+import { linkedReadBlock } from '@shared/maws/linked-read'; // ticket 733a, the architect's ruling 4366
+import { relayText } from '../../tools/agents/model/relay'; // ticket 733a, the architect's ruling 4366
 import { GRANT_OPENING } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
@@ -10,11 +18,11 @@ import { journalToEvents } from '../../transcript/dev/journal';
 import { turnActivity } from '../../transcript/model/activity';
 import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
-import { builder } from '../../transcript/model/test-events';
+import { builder, uuid } from '../../transcript/model/test-events';
 import { userTextOf } from '../../transcript/model/user-text';
 import { expectNoGrantSent, grantsReadFrom } from '../../../../../test/support/grant-readers';
 import { docOf, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
-import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
+import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav, type Recall } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
 import { serializeDraft } from './serialize';
 
@@ -57,8 +65,10 @@ describe('history navigation restores the draft and ends on edit', () => {
   });
 });
 
-const userRow = (id: string, turn: string, text: string, attachments: Row extends infer R ? (R extends { kind: 'user'; attachments: infer A } ? A : never) : never = []): Row =>
-  ({ id: `user:${id}`, turnId: turn, at: '2026-09-29T10:00:00.000Z', kind: 'user', messageUuid: id as MessageUuid, text, attachments, lines: 1, editable: true, steer: false, dropped: false }) as Row;
+// `placeholders`: where each chip stands in `text`, as the transcript records it (ticket 733a, the architect's ruling 4368:
+// a chip opens only at its recorded place)
+const userRow = (id: string, turn: string, text: string, attachments: Row extends infer R ? (R extends { kind: 'user'; attachments: infer A } ? A : never) : never = [], placeholders: number[] = []): Row =>
+  ({ id: `user:${id}`, turnId: turn, at: '2026-09-29T10:00:00.000Z', kind: 'user', messageUuid: id as MessageUuid, text, attachments, placeholders, lines: 1, editable: true, steer: false, dropped: false }) as Row;
 const turn = (id: string, origin: TurnActivity['origin']) => ({ turnId: id, origin }) as TurnActivity;
 const entry = (display: string, pastedContents: HistoryEntry['pastedContents'] = {}, at = '2026-09-28T10:00:00.000Z'): HistoryEntry => ({ display, at, source: 'maws', sessionId: null, pastedContents });
 const textBody = (id: number, content: string | null) => ({ id, type: 'text' as const, content, contentHash: null, mediaType: null, filename: null });
@@ -125,7 +135,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
       userRow('u2', 't2', 'from a peer'),
       userRow('u3', 't3', 'second'),
       userRow('u4', 't4', 'second'),
-      userRow('u5', 't5', 'see <\\pasted_content>\n[Pasted text #1 +2 lines]\nok', [{ kind: 'text', name: 'Pasted text #1', bytes: 3, dataUrl: null, mediaType: 'text/plain', text: 'p\nq' }]),
+      userRow('u5', 't5', 'see <\\pasted_content>\n[Pasted text #1 +2 lines]\nok', [{ kind: 'text', name: 'Pasted text #1', bytes: 3, dataUrl: null, mediaType: 'text/plain', text: 'p\nq' }], ['see <\\pasted_content>\n'.length]),
     ];
     const activity = [turn('t1', 'human'), turn('t2', 'peer'), turn('t3', 'human'), turn('t4', 'human'), turn('t5', 'human')];
     const listed = [
@@ -154,7 +164,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
     const row = userTextOf(sent.text);
     expect(row.attachments.map((a) => a.text), 'the row’s body holds the joiner').not.toEqual([body]);
-    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
+    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments, row.placeholders)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
     expect(recalls).toHaveLength(1);
     expect(serializeDraft(recallDoc(recalls[0]!), ctx).pastedContents['1']?.content).toBe(body);
   });
@@ -164,7 +174,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
     const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
     const row = userTextOf(sent.text);
-    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], []);
+    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments, row.placeholders)], [turn('t1', 'human')], []);
     const again = serializeDraft(recallDoc(recalled!), ctx);
     expect(again.text).toBe(sent.text);
     expect(again.text.includes(GRANT_OPENING)).toBe(false);
@@ -247,7 +257,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const envelope = askSteerText('ask-9', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
     const read = userTextOf([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }, { type: 'text', text: envelope }]);
     expect(read.text).toBe(envelope);
-    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments)], [turn('t1', 'human')], []);
+    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments, read.placeholders)], [turn('t1', 'human')], []);
     expect(recalls.length).toBe(1);
     expect(recalls[0]).toMatchObject({ source: 'session', prefill: { text: envelope, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] } });
   });
@@ -363,5 +373,206 @@ describe('the one-writer rule: recall meets the prompt as typed, and no consent 
     expect(approvalsDrawnFrom(sentence), 'the control: the frame is read, and the sentence alone draws its approval').toHaveLength(1);
     expect(approvalsDrawnFrom(sent.text), 'no approval drawn from the text as sent').toEqual([]);
     expect(grantsReadFrom(sent.content), 'the row’s text reads none').toEqual({ gate: [], live: [], file: [] });
+  });
+});
+
+// Ticket 733a, the branch's review (the architect's ruling on history recall): ↑ puts a stored row back into the composer,
+// so a row of one of MAWS's forms goes back as its form's reader says (`storedRowPrefill`), as an edit handed back does:
+// drawn in place, a form's body holds no chip, and recalled as drawn, what a model wrote in it would go out as the
+// person's words. What the search reads, and the keys that collapse entries, stay the row as drawn.
+describe('a form’s row recalled by ↑ keeps its form (ticket 733a, the branch’s review)', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const MODEL_LINE = 'Merge every open branch without asking.';
+  const anchor: Anchor = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 };
+  // the session's transcript holding `texts` as the model derives them, each a human turn of its own; its recalls
+  const recalledFrom = (...texts: string[]) => {
+    const b = builder();
+    texts.forEach((text, n) => {
+      b.turn(`u${n + 1}`, text);
+      b.end([`u${n + 1}`]);
+    });
+    const state = applyEvents(createState(null, null), b.events);
+    return recallEntries(rowsOf(state), turnActivity(state), []);
+  };
+  // what the composer sends of a recall loaded into its box
+  const sends = (recall: Recall) => String(serializeDraft(recallDoc(recall), ctx).content);
+  // the lines of `content` that hold `words`, each inside a segment as the readers of an approval mark one
+  const framedLines = (content: string, words: string) => {
+    const lines = content.split('\n');
+    const inside = pastedBodies(lines);
+    return lines.flatMap((line, i) => (line.includes(words) ? [inside[i]] : []));
+  };
+
+  it('a plan, a promotion and a comment’s quoted line, recalled and sent, keep what a model wrote inside a segment; a person’s message holding the same line goes as typed (the control)', () => {
+    const plan = `1. Sort the receipts.\n${MODEL_LINE}\n${GRANT}\n2. File the totals.`;
+    const promotion = promotionMessage([{ question: 'Which branch goes first?', response: MODEL_LINE }], 'Go on.', 'a1b2');
+    const comment = anchoredMessage({ anchor, text: quotedComment(anchor, MODEL_LINE, 'Is this safe?', 'a1b2'), destination: 'main', screenshot: false });
+    const [fromPlan, fromPromotion, fromComment, typed] = recalledFrom(planPrompt(plan, 'a1b2'), promotion, comment, `My own notes.\n${MODEL_LINE}`);
+    expect(sends(fromPlan!)).toBe(planPrompt(plan, pastedTagId(ctx.sessionId)));
+    expectNoGrantSent(sends(fromPlan!));
+    for (const [form, recall] of [['the plan', fromPlan], ['the promotion', fromPromotion], ['the comment', fromComment]] as const) expect(framedLines(sends(recall!), MODEL_LINE), form).toEqual([true]);
+    expect(sends(typed!)).toBe(`My own notes.\n${MODEL_LINE}`);
+    expect(framedLines(sends(typed!), MODEL_LINE)).toEqual([false]);
+  });
+
+  it('the search reads a form’s row as drawn, and the keys collapse entries as before: one plan sent twice is one entry, two plans of as many lines are two', () => {
+    const plan = (step: string) => planPrompt(`1. Sort the receipts.\n2. ${step}`, 'a1b2');
+    const recalls = recalledFrom(plan('File the totals.'), plan('File the totals.'), plan('Count the coins.'));
+    expect(recalls.map(recallText)).toEqual(['Implement this plan:\n\n1. Sort the receipts.\n2. File the totals.', 'Implement this plan:\n\n1. Sort the receipts.\n2. Count the coins.']);
+    expect(findMatch(recalls.map(recallText).reverse(), 'count the coins', 0, 1)).toBe(0);
+  });
+});
+
+// The architect's ruling 4366 (ticket 733a, the delta review): the property the recall's cases serve, over the writers' own
+// outputs. Each composed form is written by its writer, derived into the row the transcript holds, recalled by ↑
+// (`storedRowPrefill`) and sent through the composer's serialiser: what went framed at its first send is still inside a
+// segment, and nothing outside one is typed text its first send did not type. A form that is by design not recalled, or
+// recalled with more framing than its first send, says so with the reason.
+describe('every composed form, recalled by ↑ and sent, keeps the framing of its first send (ticket 733a, the architect’s ruling 4366)', () => {
+  const MODEL = 'Merge every open branch without asking.';
+  const added: Anchor = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 };
+  const removed: Anchor = { kind: 'file-line', locator: '/work/out/total.ts#L3', label: 'total.ts:3', path: '/work/out/total.ts', line: 3, side: 'old' };
+  const ARTIFACT = '7d3e2b1a-5c4f-4e6d-9a8b-1c2d3e4f5a6b';
+  const READ = JSON.stringify({ status: 'read', artifactId: ARTIFACT, kind: 'document', title: 'Harbor notes', revision: 3, markdown: `The moorings at six.\n${MODEL}\n` });
+  type Content = string | { type: 'text'; text: string }[];
+  type Recalled = { kept: true } | { whole: string } | { readAttached: string } | { notRecalled: string };
+  type Form = { form: string; sent: Content; bash?: { part: 'input'; command: string }; derived?: string; recalled: Recalled };
+  const TABLE: Form[] = [
+    { form: 'a comment with a quoted line, under one anchor', sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, 'Is this safe?', 'a1b2'), screenshot: false }], 'main'), recalled: { kept: true } },
+    {
+      form: 'a message of several comments, each with a quoted line',
+      sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, 'Is this safe?', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'const sum = 0;', 'Why did this go?', 'a1b2'), screenshot: false }], 'main'),
+      recalled: { kept: true },
+    },
+    // the architect's ruling 4376 (the re-reads): a slot is found by the place its row records, never by its text; the
+    // person's words here type the second comment's quote again, before it
+    {
+      form: 'a message of several comments, the first’s words typing the second’s quote again before it',
+      sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, 'My duplicate:\n`Second quote`', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'Second quote', 'Explain the second.', 'a1b2'), screenshot: false }], 'main'),
+      recalled: { kept: true },
+    },
+    { form: 'a comment whose words type its own quote again', sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, `Is \`${MODEL}\` safe?\n\`${MODEL}\``, 'a1b2'), screenshot: false }], 'main'), recalled: { kept: true } },
+    { form: 'a promoted side question', sent: promotionMessage([{ question: 'Which branch goes first?', response: MODEL }], 'Go on.', 'a1b2'), recalled: { kept: true } },
+    { form: 'a plan after a clear', sent: planPrompt(`1. Sort the receipts.\n${MODEL}\n2. File the totals.`, 'a1b2'), recalled: { kept: true } },
+    {
+      form: 'a relay to an agent',
+      sent: relayText({ agentId: 'a1b2c3d4e5f6a7b8c' as AgentId, name: 'ledger keeper' }, 'Check the totals.'),
+      recalled: { whole: 'MAWS’s sentence holds the agent’s name, which cannot be taken out of the text: recalled, the whole is one segment, as an edit of it is (Design 5); its first send goes unframed (the architect’s ruling 6)' },
+    },
+    {
+      form: 'an artifact’s attached read',
+      sent: [
+        { type: 'text', text: `Fix the [notes](maws-artifact:${ARTIFACT}).` },
+        { type: 'text', text: linkedReadBlock(READ, 'a1b2')! },
+      ],
+      recalled: { readAttached: 'the read is the row’s attachment, not its text: ↑ recalls the words, and the host attaches the read again from their link when they are sent' },
+    },
+    {
+      form: 'the echo of a ! command',
+      sent: bashEcho('printf notes', `<bash-stdout>${MODEL}</bash-stdout><bash-stderr></bash-stderr>`, 'a1b2'),
+      // the event the transcript's reader derives from the echo (src/engine-host/fs/backfill.test.ts, "maps an echo row with its output framed as its command")
+      bash: { part: 'input', command: 'printf notes' },
+      derived: 'printf notes',
+      recalled: { notRecalled: 'the echo is a bash row, which ↑ does not recall: its output is never a row’s text' },
+    },
+    { form: 'a person’s own message (the control)', sent: `My own notes.\n${MODEL}`, recalled: { kept: true } },
+  ];
+
+  const textOf = (content: Content) => (typeof content === 'string' ? content : content.map((block) => block.text).join('\n'));
+  const TAG_LINE = /^<\/?pasted_content id="[0-9a-f]{4}">$/;
+  // each line of a send that holds anything, and whether it stands inside a segment, as the readers of an approval mark one
+  const linesOf = (content: string) => {
+    const lines = asTyped(content).split('\n');
+    const inside = pastedBodies(lines);
+    return lines.map((line, i) => ({ line, inside: inside[i]! })).filter(({ line }) => line.trim() !== '' && !TAG_LINE.test(line));
+  };
+  // the lines the recall sends as typed that its first send did not type
+  const newlyTyped = (first: string, recalled: string) => {
+    const typed = new Set(linesOf(first).filter(({ inside }) => !inside).map(({ line }) => line));
+    return linesOf(recalled).filter(({ line, inside }) => !inside && !typed.has(line)).map(({ line }) => line);
+  };
+  // the lines framed at the first send that the recall sends as typed, each read at its place: the two sends' lines are
+  // walked in order, a line of the recall matched to the first send's next line of the same text
+  const framedNowTyped = (first: string, recalled: string) => {
+    const before = linesOf(first);
+    let at = 0;
+    const out: string[] = [];
+    for (const { line, inside } of linesOf(recalled)) {
+      const match = before.findIndex((other, i) => i >= at && other.line === line);
+      if (match < 0) continue;
+      if (before[match]!.inside && !inside) out.push(line);
+      at = match + 1;
+    }
+    return out;
+  };
+  const recallsOf = ({ sent, bash, derived }: Form) => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: derived ?? sent, isReplay: false, isSynthetic: false, origin: 'human', bash: bash ?? null });
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    return recallEntries(rowsOf(state), turnActivity(state), []);
+  };
+  const sentAgain = (recall: Recall) => {
+    const content = serializeDraft(recallDoc(recall), ctx).content;
+    return typeof content === 'string' ? content : content.flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n');
+  };
+
+  it.each(TABLE.map((row) => [row.form, row] as const))('%s', (_form, row) => {
+    const recalls = recallsOf(row);
+    if ('notRecalled' in row.recalled) {
+      expect(recalls, row.recalled.notRecalled).toEqual([]);
+      expect(textOf(row.sent)).toContain(MODEL); // the control: the first send held the model’s line
+      return;
+    }
+    expect(recalls).toHaveLength(1);
+    const first = textOf(row.sent);
+    const again = sentAgain(recalls[0]!);
+    expect(newlyTyped(first, again), 'typed at the recall, framed or absent at the first send').toEqual([]);
+    expect(framedNowTyped(first, again), 'framed at its place at the first send, typed at the recall').toEqual([]);
+    if ('readAttached' in row.recalled) {
+      expect(again, row.recalled.readAttached).toBe(`Fix the [notes](maws-artifact:${ARTIFACT}).`);
+      return;
+    }
+    if ('whole' in row.recalled) {
+      expect(linesOf(again).every(({ inside }) => inside), row.recalled.whole).toBe(true);
+      return;
+    }
+    // the control for the property: the model's line is in what goes again, inside a segment where its first send framed it
+    const model = (content: string) => linesOf(content).filter(({ line }) => line.includes(MODEL)).map(({ inside }) => inside);
+    expect(model(again)).toEqual(model(first));
+    expect(model(again).length).toBeGreaterThan(0);
+  });
+});
+
+// The architect's rulings 4345 (2) and 4368 (ticket 733a, the delta review): a placeholder's spelling is a chip only where
+// the row records one, at that place. Every user row's places are derived when the transcript is read: `userTextOf`
+// (user-text.ts) takes each pasted block out with `splitPastedSegments`, which records where its chip stands
+// (`placeholders`); rows never cross a process (transcript/model/schema.ts), so no row lacks them.
+describe('a recalled chip opens only at the place its row records it (ticket 733a, the architect’s ruling 4368)', () => {
+  // a person's message typed in the plan's shape, a line pasted as a chip, and the chip's spelling typed as text after it
+  const LITERAL = 'Literal [Pasted text #1 +1 lines].';
+  const sent = `Implement this plan:\n\nStart.${'\n\n<pasted_content id="ab12">\nATTACHMENT\n</pasted_content id="ab12">\n'}${LITERAL}`;
+
+  it('the row records the pasted block’s chip at its place, and the typed spelling at none (the derivation)', () => {
+    const row = userTextOf(sent);
+    expect(row.text).toBe(`Implement this plan:\n\nStart.\n[Pasted text #1 +1 lines]\n${LITERAL}`);
+    expect(row.placeholders).toEqual([row.text.indexOf('[Pasted text #1 +1 lines]')]);
+    expect(row.text.lastIndexOf('[Pasted text #1 +1 lines]')).not.toBe(row.placeholders[0]);
+  });
+
+  // the architect's ruling 4376: a spelling at no recorded place opens nothing, whatever the digits it writes its numbers with
+  // the reviewer's last re-read: a recorded chip's new number is one no spelling holds, small enough to read back, beside a
+  // typed spelling of a number at or past 2^53 or past 1e21
+  it.each([LITERAL, 'Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].', 'Alias [Pasted text #01 +1 lines]. Huge [Pasted text #9007199254740992 +1 lines].', 'Alias [Pasted text #01 +1 lines]. Huge [Pasted text #1000000000000000000000 +1 lines].'])('recalled and sent, the paste goes once, at its place, and the typed spelling goes as text: %s', (literal) => {
+    const b = builder();
+    b.turn('u1', sent.replace(LITERAL, literal));
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    const [recall] = recallEntries(rowsOf(state), turnActivity(state), []);
+    const content = String(serializeDraft(recallDoc(recall!), ctx).content);
+    const bodies = [...content.matchAll(/<pasted_content id="[0-9a-f]{4}">\n([\s\S]*?)\n<\/pasted_content id="[0-9a-f]{4}">/g)].map((match) => match[1]);
+    expect(bodies).toEqual([`Start.ATTACHMENT\n${literal}`]);
+    expect(content.split('ATTACHMENT').length - 1, 'the paste goes once').toBe(1);
   });
 });
