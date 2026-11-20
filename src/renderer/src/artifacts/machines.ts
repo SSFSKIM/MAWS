@@ -19,6 +19,9 @@ export function artifactMachineOf(artifactId: string): MachineRef | null {
   return machines?.size === 1 ? (machines.values().next().value ?? null) : null;
 }
 
+/** Whether any copy of the artifact is on record, this Mac's included. */
+export const artifactCopiesKnown = (artifactId: string): boolean => table.has(artifactId);
+
 // Machine refs cannot contain a colon; keep the artifact id intact.
 export const artifactKey = (artifactId: string, machine: MachineRef): string => `${machine}:${artifactId}`;
 

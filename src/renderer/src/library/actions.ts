@@ -11,10 +11,10 @@ import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shar
 import { tabId } from '@shared/ipc/schema/layout';
 import type { Space } from '@shared/artifacts/entity';
 import type { MachineRef } from '@shared/machine/ref';
-import { artifactMachineOf, sessionArtifactMachine } from '../artifacts/machines';
+import { artifactCopiesKnown, artifactMachineOf, sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
-import { isOpen } from '../stores/layout-model';
+import { allTabs, isOpen } from '../stores/layout-model';
 import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
 import { refreshSpaceInstructions } from './store'; // UX wave U10b (M9)
 import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's words, shared with the editor's notice
@@ -80,13 +80,21 @@ export async function setSpaceInstructions(spaceId: string, text: string, client
 // The tab lives in the main area, so a maximized or floating panel docks first, as `openArtifacts` does for the library.
 // P4-B4: at the place `location` names (an artifact link's fragment), asked of the tab's editor at the latest version
 // unless it names one; a plain open asks nothing of the editor, so a tab opened again keeps the version it shows.
-// Use the chosen row or the link source's machine, when known. Bare links use the window's route hints.
+// Use the chosen row or the link source's machine, when known. Bare links use the window's route hints; with no copy on
+// record, the one machine the strip already holds a tab of it on (a tab restored at launch), which is reused and is not
+// taken as a confirmed copy.
 export function openArtifactTab(artifactId: string, location?: ArtifactLocation, machine?: MachineRef): void {
-  const on = machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
+  const on = machine ?? artifactMachineOf(artifactId) ?? (artifactCopiesKnown(artifactId) ? null : stripMachineOf(artifactId)) ?? ipc.localMachine;
   if (location !== undefined) requestArtifactOpen(artifactId, on, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
   layout.openTab({ kind: 'artifact', artifactId, machine: on });
+}
+
+// The one machine the strip holds tabs of the artifact on; null for none or several.
+function stripMachineOf(artifactId: string): MachineRef | null {
+  const machines = new Set(allTabs(useLayout.getState().main).flatMap((tab) => (tab.kind === 'artifact' && tab.artifactId === artifactId ? [tab.machine] : [])));
+  return machines.size === 1 ? [...machines][0]! : null;
 }
 
 // UX wave U6d (card C5, "Show that tab"; the execution document's decisions 1 to 3): the main tab that already shows the
