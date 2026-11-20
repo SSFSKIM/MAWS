@@ -34,6 +34,7 @@ import { activeMainTab, hideSurfaces, mainTabById, mainTabs, mountedTabs, moveSi
 import { sidebarRow } from './support/sidebar';
 
 const REFUSAL = "path outside the session's directories";
+const FOLDER_OUTSIDE = 'This folder is outside the folders this session works in.'; // UX wave U6b-4b: the Files list's notice of REFUSAL
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const HARNESS_ENV = { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' };
 
@@ -1346,10 +1347,15 @@ test.describe('the product in stub mode over a scratch repository', () => {
   test('the Files tree and the viewer use tokens only in both themes', async () => {
     await withProduct(
       async (p) => {
-        // A refused row: an in-root directory the service cannot open is answered with the refusal.
+        // A refused row: an in-root directory the service cannot open is answered with the refusal. UX wave U6b-4b (§G;
+        // L11): the row reads the folder's first sentence in place of the command's words, which its title keeps.
         const locked = await reveal(p, 'locked');
         await locked.click();
-        await expect(p.panel.locator('[data-tool="files"] [data-notice="refused"]')).toContainText(`Refused: ${REFUSAL}`);
+        const refusedRow = p.panel.locator('[data-tool="files"] [data-notice="refused"]');
+        await expect(refusedRow).toContainText(FOLDER_OUTSIDE);
+        await expect(refusedRow).toHaveAttribute('data-notice-cause', 'outside');
+        await expect(refusedRow, 'the sentence whole and the service’s words, in the row’s title').toHaveAttribute('title', `${FOLDER_OUTSIDE}\n${REFUSAL}`);
+        await expect(refusedRow, 'no “Refused: …”').not.toContainText('Refused');
         // UX wave U6b-2 (M6; Interfaces §H): a framed file whose load failed, its body the sentence and Open again. A PDF
         // kept in its tab is removed (its folder's watch says so, and its frame, already drawn, stays); shown again after
         // another tab, its frame asks its URL once more and the read for it fails.
@@ -1794,6 +1800,51 @@ test.describe('UX wave U6b-1: a file opens beside the chat', () => {
       await expect(sideFileTab(page, 'gamma.txt'), 'no side tab of it is left').toHaveCount(0);
       await expect(sideFileTab(page, 'beta.txt')).toHaveCount(1);
       expect((await stripIds(page)).sort(), 'the main strip gained the two files, and only them').toEqual([...strip, `file:${machine}:${repo.path('delta.txt')}`, `file:${machine}:${repo.path('gamma.txt')}`].sort());
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    } finally {
+      await maws?.cleanup();
+      repo.dispose();
+      await store.dispose();
+    }
+  });
+});
+
+// ---- UX wave U6b-4b: the notice of a file that cannot be read --------------------------------------------------------
+
+test.describe('UX wave U6b-4b: the notice of a file that cannot be read', () => {
+  // L8 (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G): a path link to a file that is not there opens its
+  // tab beside the chat, which reads the notice of its cause in place of the command's words: "No file at this path.", the
+  // path under it and the service's words small, with neither Copy path nor Retry. Waits on the notice's cause.
+  test('a path with no file reads “No file at this path.”', async () => {
+    const repo = await ScratchRepo.create({ sentinels: false });
+    const store = await StoreFixture.create();
+    let maws: MawsLaunch | null = null;
+    try {
+      const sid = '5e551011-0000-4000-8000-0000000000b7';
+      const missing = repo.path('never-written.txt');
+      const at = '2026-11-18T10:00:00.000Z';
+      const row = { cwd: repo.root, sessionId: sid, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300' };
+      await store.addTranscript(repo.root, sid, [
+        { ...row, type: 'user', uuid: 'u-u6b4b-code-1', parentUuid: null, message: { role: 'user', content: 'Where are the notes?' } },
+        {
+          ...row, type: 'assistant', uuid: 'a-u6b4b-code-1', parentUuid: 'u-u6b4b-code-1',
+          message: { id: 'msg_u6b4bc01', type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: `They would be in [the notes](${missing}).` }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+        },
+      ]);
+      writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: { [repo.root]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+      maws = await launchMaws({ env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: '', CLAUDE_CONFIG_DIR: store.configHome, MAWS_HARNESS: '0' } });
+      const { page } = maws;
+      const appId = await indexedSession(page, sid);
+      await (await sidebarRow(page, { appSessionId: appId })).click();
+      const link = page.locator(`[data-region="main"] [data-chip="path"][title="${missing}"]`);
+      await expect(link).toBeVisible({ timeout: 20_000 });
+      await link.click();
+      const notice = sideColumn(page).locator(`[data-file-viewer][data-path="${missing}"] [data-refusal]`);
+      await expect(notice, 'the notice of a missing file').toHaveAttribute('data-notice-cause', 'not-found', { timeout: 20_000 });
+      await expect(notice).toHaveAttribute('role', 'alert');
+      expect(await notice.locator('p').allTextContents(), 'the sentence, the path, the service’s words').toEqual(['No file at this path.', missing, `not found: ${missing}`]);
+      await expect(notice.locator('[data-notice-copy], [data-notice-retry]'), 'neither Copy path nor Retry').toHaveCount(0);
+      expect(existsSync(missing), 'nothing created').toBe(false);
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     } finally {
       await maws?.cleanup();

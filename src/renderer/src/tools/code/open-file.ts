@@ -14,8 +14,15 @@
 // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 19): an agent's open of a
 // file the session already has a tab of (beside the chat or in the main area) selects it and reads nothing new; a tab it
 // adds or reuses holds the mark `agent`, so its reads skip the person's grants. A person's open, and `keep`, remove it.
+//
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2, Interfaces §B, S2): a relative path is
+// resolved here, before anything reads it, against the opener's `base` (a shown Markdown file's own folder), else the
+// working folder of the session the read is made for (UC-4), lexically; with neither it stays relative and the read's
+// refusal says so. No other session's folder is consulted. An open kept for the layout with its path still relative is
+// resolved again when it is made, with the record known then.
 import type { AppSessionId } from '@shared/graph/ids';
 import { normalizeLexically } from '@shared/files/named';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { machineFor } from '../../ipc/machine';
 import { panelHost, shownSession } from '../../panel/host';
 import { surfaceSession } from '../../panel/surface-model';
@@ -34,6 +41,12 @@ export interface OpenFileOptions {
   main?: boolean; // ⌘-click: a main tab, every side tab of the file dropped (rule 3)
   keep?: boolean; // the tab is kept, not the preview
   asked?: 'agent'; // not the person's act (UX wave U7b): no page closes, and what comes to the front comes behind it
+  base?: string | null; // an absolute folder a relative path is resolved against; absent, the session's working folder; null, no resolution
+}
+
+/** `path` when it begins with `/`, or when `base` is not an absolute path; else `base`, `/` and `path`, lexically normal. Reads no disk. */
+export function resolveRelative(base: string | null, path: string): string {
+  return path.startsWith('/') || base === null || !base.startsWith('/') ? path : normalizeLexically(`${base}/${path}`);
 }
 export type Opened = { surface: 'main' | 'side'; tabId: string };
 // The two ends of an open kept for the layout that open no tab: its session is not one the read keeps, or the layout was
@@ -61,7 +74,7 @@ let watching = false;
 
 // null: the layout is not read yet; the open is kept and made when it is.
 export function openFile(appSessionId: AppSessionId | null, path: string, line?: number | null, options: OpenFileOptions = {}): Opened | null {
-  const request: Request = { appSessionId, path: normalizeLexically(path), line: line ?? null, options };
+  const request: Request = { appSessionId, path: resolvedPath(appSessionId, path, options), line: line ?? null, options };
   if (waiting()) {
     keepForLayout(request);
     return null;
@@ -73,7 +86,7 @@ export function openFile(appSessionId: AppSessionId | null, path: string, line?:
 // `not-ready` when it is not within PANE_LAYOUT_WAIT_MS (the open withdrawn, so it never opens later unannounced), or
 // with `unknown-session` when the read keeps no list for the session.
 export function openFileWhenRead(appSessionId: AppSessionId, path: string, line: number | null, options: OpenFileOptions = {}): Promise<Opened | NotOpened> {
-  const request: Request = { appSessionId, path: normalizeLexically(path), line, options };
+  const request: Request = { appSessionId, path: resolvedPath(appSessionId, path, options), line, options };
   if (!waiting()) return Promise.resolve(decide(request));
   return new Promise((resolve) => {
     const open: KeptOpen = { ...request, settle: resolve };
@@ -83,6 +96,14 @@ export function openFileWhenRead(appSessionId: AppSessionId, path: string, line:
     }, PANE_LAYOUT_WAIT_MS);
     keepForLayout(open);
   });
+}
+
+// The path an open asks for: resolved against the opener's base, else the working folder the session's record says now
+// (none: no session, no record yet, a folder the index does not know), then lexically normal.
+function resolvedPath(appSessionId: AppSessionId | null, path: string, options: OpenFileOptions): string {
+  const record = options.base !== undefined || appSessionId === null ? undefined : useSessions.getState().records.get(appSessionId);
+  const base = options.base !== undefined ? options.base : record === undefined ? null : workingFolder(record).path;
+  return normalizeLexically(resolveRelative(base, path));
 }
 
 // An open waits while the layout is unread, and while opens kept before it are not yet made (call order).
@@ -109,6 +130,8 @@ function makeKept(): void {
       open.settle?.('unknown-session');
       continue;
     }
+    // S2: a path still relative is resolved with the record known now (it may have arrived since the open was asked)
+    if (!open.path.startsWith('/')) open.path = resolvedPath(open.appSessionId, open.path, open.options);
     const made = decide(open); // made before the answer: an optional call evaluates no argument when there is no `settle`
     open.settle?.(made);
   }

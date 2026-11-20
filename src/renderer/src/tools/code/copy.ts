@@ -25,8 +25,7 @@ export const FILES_COPY = {
   symlink: (target: string | null) => `Symbolic link → ${target ?? 'unknown target'}`,
   empty: 'Empty directory',
   truncated: `Showing ${FILES_LIST_MAX_ENTRIES.toLocaleString('en-US')} of many entries`,
-  couldNotList: (message: string) => `Could not list: ${message}`,
-  refused: (message: string) => `Refused: ${message}`,
+  // UX wave U6b-4b: a listing that failed reads the notice's sentences for a folder (NOTICE_COPY below)
   // UX wave U6b-1 (M3): the tree at the file's left, its button in the file's bar and its divider
   hideTree: 'Hide files',
   showTree: 'Show files',
@@ -89,6 +88,27 @@ export const VIEWER_COPY = {
   videoUnplayable: 'This video can’t be played here.',
   soundUnplayable: 'This sound can’t be played here.',
   olderService: 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.',
+} as const;
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, "The sentences a person reads"; decisions 9
+// and 19): the notice of a file that cannot be read and of a folder that cannot be listed, by cause (`viewer/notice.ts`).
+// A folder's forms are the Files list's. No sentence says who may open a file on a machine.
+type Subject = 'file' | 'folder';
+export const NOTICE_COPY = {
+  outside: { file: 'This file is outside the folders this session works in.', folder: 'This folder is outside the folders this session works in.' },
+  outsideOn: (subject: Subject, machine: string) => `This ${subject} is outside the folders this session works in on ${machine}.`,
+  threeWays: "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+  askAgent: 'Ask the agent to send the file to see it here.',
+  notFound: (subject: Subject, machine: string | null) => `No ${subject} at this path${machine === null ? '' : ` on ${machine}`}.`,
+  unreachableHere: "MAWS's service on this Mac is not answering.",
+  unreachable: (machine: string) => `${machine} is not reachable.`,
+  notOnRecord: (machine: string) => `${machine} does not have this session on record right now.`,
+  noAccess: (machine: string) => `Your access to this session on ${machine} does not include its files.`,
+  other: { file: 'This file could not be opened.', folder: 'This folder could not be listed.' },
+  retry: 'Retry',
+  copyPath: 'Copy path',
+  copied: 'Copied', // the Copy path button's words for a moment after it copied (fix wave 1)
+  copyFailed: "Couldn't copy the path", // … after the clipboard refused, or with none (as the agents' log says it)
 } as const;
 
 // A count as Review prints it, with the thousands separator (UX wave U5b, §I); English throughout, as the app's other counts.

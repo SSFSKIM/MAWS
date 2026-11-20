@@ -2,7 +2,7 @@
 // the panel rule (a thread opened while its parent is not shown is added without activation and a toast says where);
 // the chip strip of the session's threads, newest first; the thread view yielding to a main tab of the same thread
 // and publishing the child it draws for the unread rule.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
@@ -22,7 +22,7 @@ import { useTranscriptStore } from '../transcript';
 import { instanceOf, panelHost } from '../panel/host';
 import type { PanelToolContext } from '../panel/tool';
 import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
+import { activeTab, allTabs, sessionOfTab } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
@@ -48,6 +48,16 @@ import { ARTIFACTS_TOOL_ID, type ArtifactsParams } from '../tools/artifacts/Arti
 // P2-E1 end
 import { browser, resetBrowser } from '../tools/browser/store'; // P2-F L146
 import { registerDock } from '../tools/browser/comment/dock'; // P2-F L146
+import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files'; // UX wave U6b-4b
+import { FileViewer } from '../tools/code/viewer/FileViewer';
+import { useViewer } from '../tools/code/viewer/viewer-store';
+import { openFile } from '../tools/code/open-file';
+// UX wave U6b-4b (R4): the opener the answers' chips call, spied through to the real one, so a case counts its calls
+vi.mock('../tools/code/open-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../tools/code/open-file')>();
+  return { ...actual, openFile: vi.fn(actual.openFile) };
+});
+
 
 const ONE = at('side-one' as AppSessionId);
 const TWO = at('side-two' as AppSessionId);
@@ -492,5 +502,63 @@ describe('the Side pane and side questions', () => {
     b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
     b.emit('user.message', { messageUuid: uuid('u2'), content: promotionMessage([{ question: 'The inner question?', response: 'Inner.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events)))).toBe('The inner question?');
+  });
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4, L6): a path in a side thread's question
+// answers opens the file for the thread's own session, as a chip of its transcript does, with its parent in front; the
+// answers add no evidence, so a file outside the folders is read by name for that session alone.
+describe('a path in a side thread’s question answers (U6b-4b)', () => {
+  const answer = (response: string): SideExchange => ({ id: 'op-1', question: 'Where?', state: 'answered', response, synthetic: false, error: null, askedAt: '2026-10-06T10:00:00.000Z', answeredAt: '2026-10-06T10:00:02.000Z' });
+  const filesBeside = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+  let fake: FakeClient;
+  let unregister: () => void;
+  beforeEach(() => {
+    resetSideQuestions();
+    useViewer.getState().reset();
+    vi.mocked(openFile).mockClear();
+    unregister = registerPanelTool(filesTool);
+  });
+  afterEach(() => unregister());
+  async function chipOf(response: string, path: string): Promise<HTMLElement> {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    fake = fakeClient({ 'side.question.list': { exchanges: [answer(response)] }, 'files.watch': undefined, 'files.unwatch': undefined });
+    window.maws = fake.client as unknown as PreloadBridge;
+    act(() => openSideThread(A, ONE));
+    mount();
+    act(() => setInlineQuestions(ONE, true));
+    const chip = await screen.findByTitle(path);
+    expect(chip.closest(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
+    expect(shown()).toBe(A); // the parent in front
+    return chip;
+  }
+
+  it('a click opens the file beside the thread’s own chat at its line', async () => {
+    const chip = await chipOf('See [a](/work/a.ts#L12).', '/work/a.ts');
+    act(() => void fireEvent.click(chip));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[ONE, '/work/a.ts', 12, { main: false }]]); // one open per click, the tabs' reuse aside
+    expect(filesBeside(ONE)).toEqual([{ file: '/work/a.ts', line: 12, preview: true }]);
+    expect(filesBeside(A)).toEqual([]);
+  });
+
+  it('⌘ opens a main tab for the thread at the line; a path outside the folders makes one read by name for the thread, refused as today', async () => {
+    const chip = await chipOf('See [o](/elsewhere/o.md#L12).', '/elsewhere/o.md');
+    act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(vi.mocked(openFile).mock.calls).toEqual([[ONE, '/elsewhere/o.md', 12, { main: true }]]);
+    const tab = allTabs(useLayout.getState().main).find((t): t is Extract<typeof t, { kind: 'file' }> => t.kind === 'file');
+    expect(tab).toMatchObject({ path: '/elsewhere/o.md', line: 12, appSessionId: ONE });
+    cleanup();
+    render(<FileViewer tab={tab!} />);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fake.invoked('files.read')).toEqual([{ appSessionId: ONE_ID, path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
+    await act(() => fake.fail('files.read', "path outside the session's directories"));
+    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences, the path, the command's words
+    expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual([
+      'This file is outside the folders this session works in.',
+      "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+      'Ask the agent to send the file to see it here.',
+      '/elsewhere/o.md',
+      "path outside the session's directories",
+    ]);
   });
 });
