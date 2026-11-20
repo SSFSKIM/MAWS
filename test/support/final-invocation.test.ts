@@ -16,6 +16,8 @@ const RUNNER = ['/usr/local/bin/node', '/repo/node_modules/@playwright/test/cli.
 const DESIGN_SPECS = ['design.spec.ts', 'design-comments.spec.ts', 'design-history.spec.ts', 'design-export.spec.ts', 'design-provisional.spec.ts' /* P4-A2 G2.6 */];
 
 const argvOf = (script: string) => [...RUNNER, ...playwrightArgs(script)!];
+// A file's declared count, read from the declaration so that a landing adding a case edits the declaration alone.
+const declared = (file: string) => DASHBOARD_ACCEPTANCE.find((d) => d.file === file)!.tests;
 const casesOf = (files: readonly { file: string; tests: number }[]) => files.flatMap(({ file, tests }) => Array.from({ length: tests }, (_, k) => ({ file, title: `case ${k}`, outcome: 'expected' })));
 const run = (script: string, over: Partial<InvocationSummary> = {}, files: readonly { file: string; tests: number }[] = DESIGN_SPECS.map((file) => ({ file, tests: 2 }))): InvocationSummary => ({
   status: 'passed',
@@ -115,8 +117,8 @@ describe('the whole declared invocation', () => {
   it('holds a group that declares its case counts to exactly those, in place of forbidding test.only', () => {
     const problems = (over: Partial<InvocationSummary>) => invocationProblems(dashboardRun(over), { script: dashboard, files: DASHBOARD_ACCEPTANCE }, ROOT);
     const [, ...rest] = dashboardRun().tests;
-    expect(problems({ tests: rest })).toEqual(['dashboard.spec.ts: 6 cases of the declared 7']);
-    expect(problems({ tests: dashboardRun().tests.filter((t) => t.file !== 'dashboard-history.spec.ts') })).toEqual(['dashboard-history.spec.ts: 0 cases of the declared 2']);
+    expect(problems({ tests: rest })).toEqual([`dashboard.spec.ts: ${declared('dashboard.spec.ts') - 1} cases of the declared ${declared('dashboard.spec.ts')}`]);
+    expect(problems({ tests: dashboardRun().tests.filter((t) => t.file !== 'dashboard-history.spec.ts') })).toEqual([`dashboard-history.spec.ts: 0 cases of the declared ${declared('dashboard-history.spec.ts')}`]);
     expect(problems({ tests: [...dashboardRun().tests, { file: 'dashboard-scale.spec.ts', title: 'scale', outcome: 'expected' }] })).toEqual(['a file outside the declared list ran: dashboard-scale.spec.ts']);
     expect(problems({ argv: [...argvOf(dashboard), 'e2e/dashboard.spec.ts'] })).toEqual(['the invocation was narrowed: the command line adds e2e/dashboard.spec.ts']);
   });

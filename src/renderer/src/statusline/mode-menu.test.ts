@@ -77,7 +77,7 @@ describe('mode menu', () => {
 
   it('a choice on a session with no ready process acquires it (chip), then sets the mode; a refused start sets nothing', async () => {
     const ok = fakeClient({ 'session.acquire': { status: 'ready', appSessionId: 'a', launched: true, joined: false }, 'session.setPermissionMode': { effective: 'plan', refusal: null, error: null } });
-    expect(await liveModeBinding(record('a'), null, models, ok.client).set('plan')).toEqual({ ok: true });
+    expect(await liveModeBinding(record('a'), null, models, ok.client).set('plan')).toEqual({ ok: true, effective: 'plan' }); // UX wave U6b-5a: the engine's answer kept
     expect(ok.invoked('session.acquire')).toEqual([{ appSessionId: 'a', reason: 'chip' }]);
     expect(ok.invoked('session.setPermissionMode')).toEqual([{ appSessionId: 'a', mode: 'plan' }]);
     const held = fakeClient({ 'session.acquire': { status: 'held', appSessionId: 'a', holder: { kind: 'terminal', pid: 9 }, attach: null } });

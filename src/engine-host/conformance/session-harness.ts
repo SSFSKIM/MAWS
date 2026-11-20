@@ -36,6 +36,7 @@ export const handshakeResponder = (overrides: Responder = {}): Responder => ({
   get_status: () => ({ response: ROUTED_STATUS }),
   set_max_thinking_tokens: () => ({ response: {} }),
   get_context_usage: () => ({ error: 'Context sampling is not available in this scripted scenario' }),
+  mcp_status: () => ({ response: { mcpServers: [] } }), // ticket 619: asked once the session is ready
   apply_flag_settings: () => ({}),
   set_permission_mode: (r) => ({ response: { mode: r.mode } }),
   ...overrides,

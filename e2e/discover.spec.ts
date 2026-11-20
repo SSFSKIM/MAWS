@@ -32,13 +32,19 @@
 //              word in one column; a plugin's menu and a connector's Remove work from it; Discover, All is Featured and a
 //              shelf per kind, a shelf's See all chooses its kind, and a search is one grid of plugins and connectors
 //              whose + opens each kind's sheet; the head at 1512, 900, 620 and 400 px, its four Show choices on one line.
+//   skills:    the UX wave's U11 skill actions (docs/doperpowers/ledgers/2026-11-18-ux-wave-U11-skill-actions.md): a skill's
+//              detail offers "Open in" with the editors this Mac has and Finder, no terminal; a row hands main the skill's
+//              real file, which main's own inventory read admits (the open log's `open-in` line), a plugin's skill says
+//              its updates replace the file, a path no inventory lists opens nothing, a removed file reads its refusal
+//              under the head; "New skill…" opens a chat whose composer holds the first message, sent by nobody.
 // UX wave U11c: Customize's head chooses the view (My items | Discover) and the kind (Show); a scene reaches Discover's
 // Plugins, Skills or Connectors by the two (support/customize.ts), and the page opened by the sidebar lands on My items, All.
 // The detail, the install sheet and the add-then-install sheet are attached as screenshots beside the home's (M5, for
 // the owner's references), each sheet as it opens: its commands and files behind a closed Details (the owner's ruling,
 // 2026-10-25).
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
@@ -892,4 +898,90 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
     await info.attach('customize-head-mine-all-700x820-sidebar-480.png', { body: await head.screenshot(), contentType: 'image/png' });
     await info.attach('customize-page-mine-all-700x820-sidebar-480.png', { body: await page.screenshot(), contentType: 'image/png' });
   });
+});
+
+test('skills: a skill’s Open in hands its listed file to an editor or Finder; a plugin’s line; refusals; New skill… fills a chat', async () => {
+  const logs = mkdtempSync(join(tmpdir(), 'maws-skill-open-'));
+  const log = join(logs, 'open.log');
+  const logged = () => (existsSync(log) ? readFileSync(log, 'utf8') : '');
+  try {
+    maws = await launchMaws({ realEngine: { projects: 1 }, env: { MAWS_E2E_OPEN_LOG: log, MAWS_E2E_OPEN_IN_APPS: 'zed' } });
+    const { page } = maws;
+    const { configDir, marketplace, projects } = maws.realEngine!.scratch;
+    const mine = join(configDir, 'skills', 'outline-notes', 'SKILL.md');
+    const projectSkill = join(projects[0]!, '.claude', 'skills', 'release-steps', 'SKILL.md');
+    const detail = (name: string) => customizePage(page).locator(`[data-skill-detail="${name}"]`);
+    // a person clicks the row's name: the row's content stands above its full-row open button (its tooltips), and the
+    // row's own click opens the detail (SkillItem in src/renderer/src/widgets/skills/SkillsLibrary.tsx)
+    const openDetail = async (name: string) => {
+      await customizePage(page).locator(`[data-skill-row="${name}"] [data-skill-name]`).click();
+      await expect(detail(name)).toBeVisible();
+    };
+    const choose = async (name: string, row: string) => {
+      await detail(name).getByRole('button', { name: 'Open in', exact: true }).click();
+      await page.getByRole('menuitem', { name: row, exact: true }).click();
+    };
+
+    await test.step('the scratch: the skills-only plugin installed by the engine’s own CLI, a person’s skill and a project’s on disk', async () => {
+      engineCli(maws!, ['plugin', 'marketplace', 'add', marketplace]);
+      engineCli(maws!, ['plugin', 'install', `skills-only@${TEST_MARKETPLACE}`, '--scope', 'user']);
+      for (const [file, name] of [[mine, 'outline-notes'], [projectSkill, 'release-steps']] as const) {
+        mkdirSync(join(file, '..'), { recursive: true });
+        writeFileSync(file, `---\nname: ${name}\ndescription: A fixture skill of the Discover e2e group.\n---\nReply in one line.\n`);
+      }
+    });
+
+    await test.step('a person’s skill: Open in lists Zed and Finder, no terminal; Zed is handed the real file', async () => {
+      await openAppDestination(page, 'Customize');
+      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'User configuration' });
+      await chooseCustomize(page, { show: 'Skills' });
+      await openDetail('outline-notes');
+      await detail('outline-notes').getByRole('button', { name: 'Open in', exact: true }).click();
+      await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['Zed', 'Finder']);
+      await page.getByRole('menuitem', { name: 'Zed', exact: true }).click();
+      await expect.poll(logged).toBe(`open-in zed ${realpathSync(mine)}\n`);
+      await expect(detail('outline-notes').locator('[data-skill-refusal]')).toHaveCount(0);
+      await expect(detail('outline-notes').locator('[data-skill-note]')).toHaveCount(0);
+    });
+
+    await test.step('a plugin’s skill from All: its line, and Finder shows the plugin’s copy', async () => {
+      const greet = value(await invoke(page, 'customization.inventory', { cwd: null })).skills.find((skill) => skill.name === 'greet')!;
+      await chooseCustomize(page, { show: 'All' });
+      await openDetail('greet');
+      await expect(detail('greet').locator('[data-skill-note]')).toHaveText(/^Comes with the plugin .+\. An update of the plugin replaces this file, and any edit in it\.$/);
+      await choose('greet', 'Finder');
+      await expect.poll(logged).toBe(`open-in zed ${realpathSync(mine)}\nopen-in finder ${realpathSync(greet.path)}\n`);
+    });
+
+    await test.step('main opens only what its own inventory read lists for the place, and never for a terminal', async () => {
+      const before = logged();
+      expect(value(await invoke(page, 'customization.skillFile', { cwd: null, path: projectSkill, app: 'finder' }))).toEqual({ status: 'refused', reason: 'missing', message: null }); // listed on the project's page only
+      expect(value(await invoke(page, 'customization.skillFile', { cwd: null, path: join(configDir, 'settings.json'), app: 'zed' }))).toEqual({ status: 'refused', reason: 'missing', message: null });
+      expect((await invoke(page, 'customization.skillFile', { cwd: null, path: mine, app: 'terminal' } as never)).ok).toBe(false);
+      expect(logged()).toBe(before);
+      expect(value(await invoke(page, 'customization.skillFile', { cwd: projects[0]!, path: projectSkill, app: 'finder' }))).toEqual({ status: 'opened' });
+      await expect.poll(logged).toBe(`${before}open-in finder ${realpathSync(projectSkill)}\n`);
+    });
+
+    await test.step('a file removed after the list was read: the refusal under the head, nothing opened', async () => {
+      await chooseCustomize(page, { show: 'Skills' });
+      await openDetail('outline-notes');
+      const before = logged();
+      rmSync(join(mine, '..'), { recursive: true, force: true });
+      await choose('outline-notes', 'Zed');
+      await expect(detail('outline-notes').getByRole('alert')).toHaveText("This skill's file is no longer here. Refresh, then try again.");
+      expect(logged()).toBe(before);
+    });
+
+    await test.step('New skill… on the user configuration’s page: a new chat, its composer filled, nothing sent', async () => {
+      await chooseCustomize(page, { show: 'Skills' });
+      await customizeHead(page).getByRole('button', { name: 'New skill…', exact: true }).click();
+      const composer = page.locator('[data-composer] [contenteditable="true"]').filter({ hasText: "Let's create a new skill in " });
+      await expect(composer).toBeVisible({ timeout: 30_000 });
+      await expect(composer).toContainText('/skills/, for all my projects. First ask me what it should do.');
+      expect(maws!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  } finally {
+    rmSync(logs, { recursive: true, force: true });
+  }
 });

@@ -12,6 +12,11 @@
 // `blocked-navigation <url>` or `blocked-download <url>` to the seam log, so the e2e sees the policies run on the real
 // session and webContents.
 //
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md): a file frame's URL,
+// `maws-artifact://<token>/<the file's name>`, is a store frame to every decision here as it stands; the one question
+// added is which web contents asks for a token (`shouldCancelForOwner`), asked first by the request filter of main's two
+// partitions, with its `frame-decision` line under the e2e.
+//
 // Console attribution (Design §8, Decision Log 9) lives here too: a message an app window's artifact frame logged, read
 // by the frame's URL, becomes the main-owned event `artifacts.console`, cut and rate-bounded.
 //
@@ -76,6 +81,20 @@ const artifactIdOf = (url: string): string => url.slice(ARTIFACT_PREFIX.length).
 function crossesArtifacts(url: string, shown: string | null | undefined): boolean {
   if (!url.startsWith(ARTIFACT_PREFIX) || shown === undefined) return false;
   return shown !== artifactIdOf(url);
+}
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, R1; decision 11): a file frame's host is a
+// token main issued to one app window's web contents, and a scheme handler is told nothing of who asks, so the request
+// filter is where the asker is judged. `ownerOf` answers for a host: undefined when it has no token's shape (an artifact's
+// id, which this question leaves alone), null for a token nobody holds, else the owning web contents' id.
+export type StoreHostOwner = (host: string) => number | null | undefined;
+
+// A request for a token host, unless it comes from the web contents the token was issued to: from another one, from
+// none (a request the browser itself started), and for a token nobody holds, it is cancelled.
+export function shouldCancelForOwner(details: { url: string; webContentsId: number | undefined; ownerOf: StoreHostOwner }): boolean {
+  if (!isStoreUrl(details.url)) return false;
+  const owner = details.ownerOf(artifactIdOf(details.url));
+  return owner !== undefined && owner !== details.webContentsId;
 }
 
 // A request whose frame is (or lies beneath) a store frame, or whose initiator is the scheme (an unsandboxed frame
@@ -205,9 +224,11 @@ function beneathRead(read: () => FrameLike | null | undefined): boolean | null {
 
 export type SeamEnv = NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's seam log (as the files service reads them)
 
-// One write at a time, so the log keeps the order the policies ran in (two concurrent appends may land either way).
+// One write at a time, so the log keeps the order the policies ran in (two concurrent appends may land either way). UX wave
+// U6b-2: exported, so the file frames' responder writes its `frame-entry` line through the same ordered writer as the
+// request filter's `frame-decision` line.
 let seamWrites: Promise<void> = Promise.resolve();
-function seam(env: SeamEnv, line: string): void {
+export function writeSeam(env: SeamEnv, line: string): void {
   const path = env.MAWS_E2E_OPEN_LOG;
   if (env.MAWS_E2E !== '1' || !path) return;
   seamWrites = seamWrites.then(() => appendFile(path, `${line}\n`)).catch((error: unknown) => console.warn('[artifacts] could not write the e2e seam log', error));
@@ -233,17 +254,24 @@ export function appOriginOf(appUrl: string): string {
 
 // The session's request filter (its only `onBeforeRequest` listener: nothing else in main installs one) and download
 // filter. `appOrigin`: the app's renderer origin (`appOriginOf`), the one initiator trusted to reach every artifact.
-export function installFramePolicies(session: Session, env: SeamEnv, appOrigin: string | null = null): void {
+// UX wave U6b-2: `ownerOf`, the file frames' tokens (main's two partitions; the render host passes none): the owner's check
+// is the listener's first question, before a webContents' own filter, so the export's printer window is judged too. Under
+// MAWS_E2E=1 every request for a host `ownerOf` answers for writes `frame-decision <pass|cancel> <id|none> <method> <url>`,
+// the listener's whole answer, so the e2e can walk each one against the responder's entries.
+export function installFramePolicies(session: Session, env: SeamEnv, appOrigin: string | null = null, ownerOf?: StoreHostOwner): void {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     const own = details.webContentsId === undefined ? undefined : ownFilters.get(details.webContentsId);
-    if (own) return callback({ cancel: own(details.url) });
-    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin, shown: shownRead(() => details.frame), appOrigin }) });
+    const cancel =
+      (ownerOf !== undefined && shouldCancelForOwner({ url: details.url, webContentsId: details.webContentsId, ownerOf })) ||
+      (own ? own(details.url) : shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin, shown: shownRead(() => details.frame), appOrigin }));
+    if (ownerOf && isStoreUrl(details.url) && ownerOf(artifactIdOf(details.url)) !== undefined) writeSeam(env, `frame-decision ${cancel ? 'cancel' : 'pass'} ${details.webContentsId ?? 'none'} ${details.method} ${details.url}`);
+    callback({ cancel });
   });
   session.on('will-download', (event, item) => {
     if (!shouldCancelDownload({ url: item.getURL(), urlChain: item.getURLChain() })) return;
     event.preventDefault();
     item.cancel();
-    seam(env, `blocked-download ${item.getURL()}`);
+    writeSeam(env, `blocked-download ${item.getURL()}`);
   });
 }
 
@@ -279,7 +307,7 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
     const initiatorShows = shownRead(() => event.initiator, () => shownRead(() => event.frame));
     if (!shouldBlockFrameNavigation({ url: event.url, frameBeneath, initiatorBeneath, initiatorShows })) return;
     event.preventDefault();
-    seam(env, `blocked-navigation ${event.url}`);
+    writeSeam(env, `blocked-navigation ${event.url}`);
   });
 }
 
@@ -292,7 +320,7 @@ export function guardWindowNavigation(contents: WebContents, env: SeamEnv, { rel
   contents.on('will-navigate', (event) => {
     if (reloads && event.url === contents.getURL()) return;
     event.preventDefault();
-    seam(env, `blocked-navigation ${event.url}`);
+    writeSeam(env, `blocked-navigation ${event.url}`);
   });
 }
 

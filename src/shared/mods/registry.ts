@@ -14,7 +14,7 @@ export const BUILT_IN_MODS: readonly BuiltInMod[] = [
   {
     id: 'maws.to-human',
     name: 'To-human',
-    description: 'Agents send you messages and ask questions you answer in place.', // P2-C2: contract 5 (the owner's parity answer); P4-R7: 7, messages mid-turn through a tool; P4-R7z: 8, through the to-human plugin's tool
+    description: 'Agents send you messages and ask questions you answer in place.', // P2-C2: contract 5 (the owner's parity answer); P4-R7: 7, messages mid-turn through a tool; P4-R7z: 8, through the to-human plugin's tool; U2b: 9, the mod draws MAWS's view
     version: TO_HUMAN_CONTRACT_VERSION,
   },
 ];
@@ -29,5 +29,9 @@ export const ModRowSchema = z.strictObject({
   perSession: LaneOverrideSchema.optional(),
   pending: LanePendingSchema.optional(),
   mismatch: StyleMismatchSchema.optional(),
+  // the UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M, "The switch"): on the to-human
+  // row, whether launches MAWS decides make new fold summaries (`mods.setFoldSummaries`); this build always sends it, and
+  // a row without it (an earlier daemon's) draws no switch
+  summaries: z.boolean().optional(),
 });
 export type ModRow = z.infer<typeof ModRowSchema>;

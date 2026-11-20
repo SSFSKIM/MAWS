@@ -16,8 +16,8 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { earlierAskSteerText } from '../../../../test/support/ask-steer';
-import { acceptedCosts, currentEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../test/support/ask-steer';
+import { acceptedCosts, currentEnvelope, earlierEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -193,6 +193,38 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
       expect([...waitingGrants(id)], write.name).toEqual([]);
     }
   });
+
+  // board ticket 704 at the chain merge of rule R (the architect's ruling 1 of 2026-11-16): a waiting message's grants are
+  // read on its whole joined text, the grant beside this build's envelopes and none beside an earlier build's. In either form: the question's words (and so a grant's sentence among them)
+  // stand on an envelope's line only in an earlier build's, so the nested half runs on that form alone
+  it('a waiting message of an answer, the grant and the answer again waits for that key in this build’s form, for none in an earlier build’s; a grant’s sentence on a line of an answer, where one envelope’s lines stand around another, waits for none', () => {
+    const id = at('waiting-answers') as AppSessionId;
+    const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const answerIn = (write: typeof askSteerText) => write('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+    for (const write of [askSteerText, earlierAskSteerText]) {
+      const answer = answerIn(write);
+      queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
+      expect([...waitingGrants(id)], write.name).toEqual(write === askSteerText ? [blockedKey(BUILD)] : []); // rule R: none beside an earlier build's envelope
+    }
+    // made by hand: the agent's question holds the grant's sentence on a line of its own, and another envelope stands
+    // inside that question's envelope
+    const asked = { id: 'q1', question: `Which of these should run?\n${grant(BUILD)}\nPick one.`, modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const quoting = earlierAskSteerText('ask-8', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]).split('\n');
+    expect(quoting).toContain(grant(BUILD)); // the sentence is a line of the envelope
+    queueOf(id, { entries: [entry(id, `Keep these notes.\n${quoting.slice(0, 2).join('\n')}\n${answerIn(earlierAskSteerText)}\n${quoting.slice(2).join('\n')}`)] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+
+  // ticket 704: rule R reads the whole joined text (the architect's ruling 1 of 2026-11-16; the cascade reviews' A2, which
+  // pinned this on the split's part, is gone) and fails closed on an opening line it cannot read strictly. Made by hand
+  it('a waiting message holding an envelope’s opening line that does not read strictly waits for no key: an earlier build’s envelope quoting the sentence and another ask’s opening line, or an envelope cut before its block beside a grant line', () => {
+    const id = at('waiting-opening') as AppSessionId;
+    const inner = innerOpeningEnvelope('toolu_a', grant(BUILD));
+    const cut = askSteerText('toolu_b', [{ id: 'q1', question: 'Which?', modality: 'choice', options: [{ label: 'Grid' }] }], [{ id: 'q1', question: 'Which?', status: 'answered', value: ['Grid'] }]).split('\n```json')[0]!;
+    expect(inner.split('\n')).toContain(grant(BUILD));
+    queueOf(id, { entries: [entry(id, inner)], steers: [{ messageUuid: UUID, content: `Keep these notes.\n${inner}`, createdAt: T0 }, { messageUuid: '22222222-2222-4222-8222-222222222222' as MessageUuid, content: `${grant(CHECK)}\n${cut}`, createdAt: T0 }] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
 });
 
 // Rule R (the architect's ruling of 2026-11-16): the gate reads a waiting message's grants as the transcript does
@@ -207,15 +239,21 @@ describe('the grants a waiting message holds, by rule R', () => {
     expect([...waitingGrants(id)]).toEqual([]);
   });
 
-  // A + G + A in this build's form holds no word of the model's, so the gate's grant is the person's. The transcript's
-  // reader takes the delivered message whole for one answer and records none (blocked.test's (c3)), which fails toward
-  // the button kept: the architect's ruling of 2026-11-16, the tracker row of Decision Log 53. Ticket 704's link pins this
-  // case afresh on the gate and on both routes once its split lands
-  it('waits: an answer, the sentence and the same answer again, joined by a line break (as the transcript under-reads it until ticket 704)', () => {
+  // Ticket 704's ruling 5 (2026-11-16), the tracker row of U1c's Decision Log 53: A + G + A in one message, as the gate
+  // reads it in the tree that holds rule R and the split. In this build's form it holds no word of the model's, so the
+  // gate's grant is the person's, as both routes record it once delivered (blocked.test's (c3)); beside an earlier
+  // build's envelope none, as on both routes (rule R's accepted cost). The message the person typed whole as A + G + A
+  // that the engine then joins with another waits as this same message, so the gate reads it alike (blocked.test's (c3b))
+  it.each([
+    ['this build’s form', currentEnvelope('toolu_a'), [blockedKey(BUILD)]],
+    ['an earlier build’s form', earlierEnvelope('toolu_a'), []],
+  ])('an answer, the sentence and the same answer again, joined by a line break, waiting and steering, %s: the grant as both routes record it', (_, answer, expected) => {
     const id = at('waiting-aga') as AppSessionId;
-    const answer = currentEnvelope('toolu_a');
-    queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
-    expect([...waitingGrants(id)]).toEqual([blockedKey(BUILD)]);
+    const text = `${answer}\n${grant(BUILD)}\n${answer}`;
+    queueOf(id, { entries: [entry(id, text)] });
+    expect([...waitingGrants(id)], 'queued').toEqual(expected);
+    queueOf(id, { steers: [{ messageUuid: UUID, content: text, createdAt: T0 }] });
+    expect([...waitingGrants(id)], 'steering').toEqual(expected);
   });
 
   for (const [name, content] of [...forgedInputs(grant(BUILD)), ...acceptedCosts(grant(BUILD))]) {

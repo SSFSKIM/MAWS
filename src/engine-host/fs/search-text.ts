@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { open, type FileHandle } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
+import { envelopeSlices, MAX_ENVELOPE_CHECKS, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival'; // ticket 704: the envelope's reader, run from its source
+import { answerOutsideTranscript } from '@shared/engine/persons-message';
+import { answeredBlock, ASK_STEER_OPENING, askSteerOpening } from '@shared/maws/ask';
+import { parseBash } from './backfill';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 
 // At worst JSON escaping costs six bytes per UTF-16 code unit: a page is < 1 MiB,
@@ -37,21 +41,52 @@ async function fingerprint(createHash: (algorithm: string) => { update(data: Uin
 // A pass reads lines from byte `from` to the size it was started with and ends at the byte after the last line it
 // consumed: a complete line, or a last line that has no newline yet but already parses (a torn one is left for the next
 // pass, which starts at it). Lines are split on \n alone; a transcript's JSON never holds a raw line break.
-const WORKER = String.raw`
+// Exported for the guard that holds the worker's copy of the envelope's reader to the reader's own source (ticket 704,
+// the architect's ruling 6 of 2026-11-16: search-text.test.ts)
+export const WORKER = String.raw`
 const { parentPort } = require('node:worker_threads');
 const { createHash } = require('node:crypto');
 const PAGE_CHARS = ${PAGE_CHARS};
 const FINGERPRINT_BYTES = ${FINGERPRINT_BYTES};
 const isMadeUpFinalAnswer = ${isMadeUpFinalAnswer}; // the to-human plugin's answer after a final message, which said nothing
 const fingerprint = ${fingerprint};
-// The text blocks a line holds, or null when it is not JSON.
+// Ticket 704 (ruling A): MAWS's answer envelopes inside a person's text, read as the window reads them, each function
+// from its own source (each uses its arguments alone), the block checked by the envelope's own checks.
+const ASK_STEER_OPENING = ${JSON.stringify(ASK_STEER_OPENING)}; // the opening's one constant (UX wave U6e), which askSteerOpening's source names
+const askSteerOpening = ${askSteerOpening};
+const pastedBodies = ${pastedBodies}; // the one definition of a pasted segment's lines, rule R's
+const MAX_ENVELOPE_CHECKS = ${MAX_ENVELOPE_CHECKS};
+const answeredBlock = ${answeredBlock};
+const envelopeSlices = ${envelopeSlices};
+const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out (16 at most)
+const answerOutsideTranscript = ${answerOutsideTranscript};
+const parseBash = ${parseBash}; // the backfill's own test of a shell row, which the split never reads
+// A person's text with each answer envelope read as an answer reads outside the transcript, on a line of its own after
+// the person's words; read again until a reading takes nothing out, by the reader's own loop, as the split does (an
+// envelope's lines can stand around another's). White space left beside an envelope is no words of the person's. Null
+// when nothing is left.
+function searchableText(text) {
+  const { own, envelopes } = takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS));
+  const answers = envelopes.map((envelope) => answerOutsideTranscript(envelope.text));
+  if (answers.length === 0) return text;
+  const parts = [own.trim() === '' ? '' : own, ...answers].filter((part) => part !== '');
+  return parts.length === 0 ? null : parts.join('\n');
+}
+// The text blocks a line holds, or null when it is not JSON. A person's row (a user row with no origin, or the person's,
+// that is no shell row: the row's form of the split's gate, the shell test the backfill's own) has its envelopes read
+// out; a text left empty yields nothing. Board ticket 715: an origin of a kind no reader names is none, as the backfill
+// lowers it (its message's origin is the person's or none), so the split reads that row as a person's.
+const KNOWN_ORIGINS = ['human', 'peer', 'plugin', 'task-notification', 'coordinator'];
 function blocksOf(line) {
   let row;
   try { row = JSON.parse(line.toString('utf8')); } catch { return null; }
   if (row && ['user', 'assistant'].includes(row.type) && row.isMeta !== true && !isMadeUpFinalAnswer(row)) {
     const content = row.message?.content;
-    return typeof content === 'string' ? [content] : Array.isArray(content)
+    const texts = typeof content === 'string' ? [content] : Array.isArray(content)
       ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];
+    const kind = row.origin != null && typeof row.origin === 'object' ? row.origin.kind : undefined;
+    const persons = row.type === 'user' && (kind === 'human' || !KNOWN_ORIGINS.includes(kind)) && !(typeof content === 'string' && parseBash(content) !== null);
+    return persons ? texts.map(searchableText).filter((text) => text !== null) : texts;
   }
   return [];
 }

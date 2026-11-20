@@ -19,12 +19,15 @@ import { invoke, value } from './support/c7-replay';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
 import { menu } from './support/menu';
+import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
+import { displayScale, zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
+import { CROP_MAX_EDGE } from '@shared/browser/comment'; // UX wave U6b-5b: Mark up's still's cap
 import {
   address, attachShot, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
-  preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
+  preloadRunsAt, readsAsBlink, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
 test.describe.configure({ timeout: 180_000 });
@@ -1193,18 +1196,20 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     expect(room.width, 'the room is narrower than Tablet').toBeLessThan(768);
     await expectOnPane(s, t, pane, 'panel');
 
-    // Mobile: the page element 375 × 812, centred and top-aligned in its room; the page reads 375; the chip
+    // Mobile: the page element 375 × 812, centred and top-aligned in its room; the page and the chip read the view
     await (await viewportItem(s, panel, 'mobile')).click();
     await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
     const chip = panel.locator('[data-browser-viewport-chip]');
-    await expect(chip).toHaveText('375 × 812');
-    await expect(chip).toHaveAccessibleName('Viewport: 375 × 812');
+    await expect(chip).toBeVisible();
     await expectOnPane(s, t, pane, 'panel');
     const sized = await rectOf(pane);
     expect({ width: Math.round(sized.width), height: Math.round(sized.height) }).toEqual({ width: 375, height: 812 });
     expect(near(sized.x + sized.width / 2, room.x + room.width / 2), JSON.stringify({ sized, room })).toBe(true);
     expect(near(sized.y, room.y), 'top-aligned').toBe(true);
-    await expect.poll(innerWidth).toBe(375);
+    // what the page reads, and the chip's text and name, by Blink's rule over the view's native bounds at the display's
+    // scale (support/browser-scene.ts `readsAsBlink`), never a constant
+    const asBlink = (message: string) => expect.poll(() => readsAsBlink(s, t, pageA, chip), { message }).toBe('as Blink');
+    await asBlink('Mobile: the page and the chip read the view as Blink does');
     await attachShot(s, 'u12a-device-size-mobile', pane, pageA);
 
     // the options menu over the page: the view yields to its frozen picture, which lies on the page element's box
@@ -1225,20 +1230,14 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1.25);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(469);
     await expectOnPane(s, t, pane, 'panel');
-    await expect.poll(innerWidth).toBe(375);
     // the chip reads what the page reads (the view's real size, Interfaces §D): at 125% Mobile's 1,015 points of height
-    // fit this room only on a tall enough window, so its height is the page's own, read from the page, not a constant
-    const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
-    const chipAgainstPage = async () => {
-      const [text, page] = [(await chip.textContent())?.trim(), await reads()];
-      return text === page ? 'the same' : `chip ${text}, page ${page}`;
-    };
-    await expect.poll(chipAgainstPage, { message: 'the chip reads the page’s innerWidth × innerHeight' }).toBe('the same');
-    expect(await chip.textContent()).toMatch(/^375 × \d+$/);
+    // fit this room only on a tall enough window, so both sides come from the view's bounds, the tab's zoom and the scale
+    await asBlink('at a tab zoom of 125%: the page and the chip read the view as Blink does');
     await overflow(s, panel, 'Reset zoom');
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(375);
-    await expect(chip).toHaveText('375 × 812'); // at 100% the room made above holds the whole size again
+    await expectOnPane(s, t, pane, 'panel');
+    await asBlink('back at 100%: the page and the chip read the view as Blink does');
 
     // Tablet does not fit this pane: disabled, its hint in place of its numbers
     const tablet = await viewportItem(s, panel, 'tablet');
@@ -1300,15 +1299,16 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
       await send('Emulation.setDeviceMetricsOverride', override);
       await expect.poll(innerWidth).toBe(640);
       await send('Emulation.clearDeviceMetricsOverride');
-      await expect.poll(innerWidth).toBe(375);
+      await expect.poll(() => readsAsBlink(s, t, pageA), { message: 'the override cleared: the page reads its view again' }).toBe('as Blink');
       await send('Emulation.setDeviceMetricsOverride', override);
       await expect.poll(innerWidth).toBe(640);
       await host.request('debugger.detach', { tabId: native.id });
-      await expect.poll(innerWidth).toBe(375);
+      await expect.poll(() => readsAsBlink(s, t, pageA), { message: 'the lease let go: MAWS’s undo leaves the page reading its view' }).toBe('as Blink');
     } finally {
       await host.close();
     }
     await expectOnPane(s, t, pane, 'panel');
+    await asBlink('after the agent’s override: the page and the chip read the view as Blink does');
 
     // the chip opens the same three choices; Responsive takes the size away and the page fills its room again
     await chip.click();
@@ -1412,5 +1412,228 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
           .catch((error: unknown) => console.warn(`[e2e] could not tell whether the pasteboard still holds the copied screenshot; left as it is: ${String(error)}`));
       }
     });
+  });
+});
+
+// ---- UX wave U6b-5b: zoom (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B11, B12) ---------------------
+// The window zoomed by View's items (support/zoom.ts) to 50 %, 80 %, 125 % and 200 %, on a window as large as its
+// display's work area (so the panel keeps its separator at 200 %). At each factor, once the zoom's line is gone (a toast
+// over the pane puts the page's still in the view's place) and main has acknowledged the rect the pane now measures
+// (`expectOnPane` calls `placedOn` first, decision 36): the view covers the pane's rect times the factor, each edge
+// within a point, so a press lands on the page wherever the frame draws it and on the app everywhere else; with the
+// Browser options menu open over it the page yields to its still, which lies on the pane, and the view comes back on
+// its frame after; the traffic lights stand centred in the toolbar's height and clear of its first control. Mark up's
+// still at 100 % and at 150 % is taken by the same rule, laid on the pane: the whole view at its device pixels, the
+// longer edge brought down to the cap (`stillOfView`), so that at either factor it holds what the view shows. At the
+// Mobile size, in a room the panel's Expand surface makes ample: the page reads its view as Blink does over the view's
+// native bounds at the display's scale (`readsAsBlink`: 375 or 376 wide, as the element's edges round), the chip says
+// exactly that, and the chip's menu offers exactly the sizes whose
+// width over the factor fits the room (decision 35). Before that, in a room the panel's separator sets to 390 to 450
+// CSS pixels, the chip's menu offers Mobile at 100 % and not at 80 %. Every read is polled; no time is asserted.
+
+// macOS's standard window buttons, in points (three 14-point circles, 54 points from the first's left to the last's
+// right): Electron reports only the group's position; M1's look confirmed where they stand
+const LIGHTS = { diameter: 14, span: 54 };
+const ZOOM_FACTORS = [0.5, 0.8, 1.25, 2] as const;
+// Mark up's still of a view as main takes it (src/main/browser/capture.ts, `encodeCrop`): the view's whole capture at
+// the display's device pixels, its longer edge brought down to CROP_MAX_EDGE when it is longer, the other side in
+// proportion. It is computed from the view's native bounds and the display's scale, never a constant: whether the cap
+// applies depends on the display and on how many points the view has at the factor.
+const stillOfView = (bounds: { width: number; height: number }, scale: number) => {
+  const device = { width: Math.round(bounds.width * scale), height: Math.round(bounds.height * scale) };
+  const longest = Math.max(device.width, device.height);
+  if (longest <= CROP_MAX_EDGE) return { ...device, capped: false };
+  const k = CROP_MAX_EDGE / longest;
+  return { width: Math.max(1, Math.round(device.width * k)), height: Math.max(1, Math.round(device.height * k)), capped: true };
+};
+const lightsOf = (s: Scene) =>
+  s.maws.app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+    return typeof win.getWindowButtonPosition === 'function' ? win.getWindowButtonPosition() : null;
+  });
+
+test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with a menu over it; the lights in the title bar; Mark up’s still at 150 %; the Mobile size, its chip and its menu at each', async () => {
+  test.setTimeout(360_000);
+  await browserScene(['U6b-5b: zoom'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    const { app } = s.maws;
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pageA = await pageAt(s, A);
+    const pane = paneIn(panel); // the page element: what the placement measures
+    await expectOnPane(s, t, pane, 'panel');
+    await app.evaluate(({ BrowserWindow, screen }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+      win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+    });
+    await expectOnPane(s, t, pane, 'panel');
+
+    // the view, the cover's still under a menu, and the lights, at each factor
+    for (const f of ZOOM_FACTORS) {
+      await zoomTo(app, s.page, f);
+      await zoomLineGone(s.page, f);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+
+      await panel.getByRole('button', { name: 'Browser options', exact: true }).click();
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered, { message: `covered under the Browser options menu at ${f}` }).toBe(true);
+      const still = pane.locator('img');
+      await expect(still).toBeVisible();
+      const [picture, frame] = [await rectOf(still), await rectOf(pane)];
+      for (const key of ['x', 'y', 'width', 'height'] as const) expect(near(picture[key], frame[key]), `at ${f} the still's ${key} on the pane's: ${JSON.stringify({ picture, frame })}`).toBe(true);
+      await closeMenus(s);
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+
+      const lights = await lightsOf(s);
+      expect(lights, 'the window reports its buttons’ position').not.toBeNull();
+      const toolbar = await rectOf(s.page.locator('[data-toolbar]'));
+      const first = await rectOf(s.page.locator('[data-toolbar]').getByRole('button', { name: 'Toggle sidebar', exact: true }));
+      const centre = (toolbar.y + toolbar.height / 2) * f;
+      expect(Math.abs(lights!.y + LIGHTS.diameter / 2 - centre), `at ${f} the lights' centre on the title bar's: ${JSON.stringify({ lights, toolbar })}`).toBeLessThanOrEqual(1);
+      expect(lights!.x + LIGHTS.span, `at ${f} the lights clear of the first control: ${JSON.stringify({ lights, first })}`).toBeLessThanOrEqual(first.x * f);
+    }
+
+    // Mark up's still at 100 % and at 150 %: the layer on the pane, its picture the whole view at its device pixels or the
+    // cap, whichever is smaller (B12: the still is the same at 150 % as at 100 %). Pixels per view point are no measure of
+    // that: under the cap they fall as the view grows in points, and the view is a different size at each factor.
+    const scale = await displayScale(app);
+    const markUp = sideGroup(s.page, 'upper').locator('[data-side-strip]').getByRole('button', { name: 'Mark up', exact: true });
+    const layer = s.page.getByRole('region', { name: 'Mark-up' });
+    const stillOf = async (f: number) => {
+      await zoomTo(app, s.page, f);
+      await zoomLineGone(s.page, f);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+      const bounds = (await viewOf(s, t))!.bounds!;
+      await markUp.click();
+      await expect(layer).toBeVisible();
+      const image = layer.locator('img');
+      await expect(image).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+      await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { message: 'the still decoded' }).toBe(true);
+      const natural = await image.evaluate((el: HTMLImageElement) => ({ width: el.naturalWidth, height: el.naturalHeight }));
+      const [l, i, p] = [await rectOf(layer), await rectOf(image), await rectOf(pane)];
+      for (const key of ['x', 'y', 'width', 'height'] as const) {
+        expect(near(l[key], p[key]), `at ${f} the layer's ${key} on the pane's`).toBe(true);
+        expect(near(i[key], p[key]), `at ${f} the still's own ${key} on the pane's: ${JSON.stringify({ still: i, pane: p })}`).toBe(true);
+      }
+      await s.page.keyboard.press('Escape');
+      await expect(layer).toHaveCount(0);
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+      const expected = stillOfView(bounds, scale);
+      test.info().annotations.push({ type: `zoom: Mark up's still at ${f}`, description: JSON.stringify({ natural, bounds, scale, expected }) });
+      for (const side of ['width', 'height'] as const) {
+        expect(near(natural[side], expected[side]), `at ${f} the still's ${side} is the whole view's at device pixels or the cap of ${CROP_MAX_EDGE}: ${JSON.stringify({ natural, bounds, scale, expected })}`).toBe(true);
+      }
+    };
+    await stillOf(1);
+    await stillOf(1.5);
+
+    // the Mobile size: the chip's own menu in a room the panel's separator sets, then the chip in an ample room
+    await zoomTo(app, s.page, 1);
+    await zoomLineGone(s.page, 1);
+    await (await viewportItem(s, panel, 'mobile')).click();
+    await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
+    const chip = panel.locator('[data-browser-viewport-chip]');
+    const box = panel.locator('[data-browser-page-box]'); // the room
+    // the chip's menu, opened by the chip: whether it offers `size`
+    const chipOffers = async (size: 'mobile' | 'tablet'): Promise<boolean> => {
+      await chip.click();
+      const item = s.page.locator(`[data-viewport="${size}"]`);
+      await expect(item).toBeVisible();
+      const offered = (await item.getAttribute('aria-disabled')) !== 'true';
+      await closeMenus(s);
+      return offered;
+    };
+    // the room's width once two reads in a row agree (a drag's layout lands after the pointer's last event)
+    const settledRoom = async (): Promise<number> => {
+      let last = Number.NaN;
+      await expect
+        .poll(
+          async () => {
+            const previous = last;
+            last = (await rectOf(box)).width;
+            return last === previous;
+          },
+          { message: 'the room settled' },
+        )
+        .toBe(true);
+      return last;
+    };
+    // the room dragged by the panel's separator into [lo, hi] CSS pixels (a few drags, since the panel's own bounds and
+    // the pointer's rounding can leave one short), and the width it settled at
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    const roomIn = async (lo: number, hi: number, at: string): Promise<number> => {
+      let room = await settledRoom();
+      for (let k = 0; k < 3 && (room < lo || room > hi); k++) {
+        const handle = await rectOf(resizer);
+        const [hx, hy] = [handle.x + handle.width / 2, handle.y + handle.height / 2];
+        await s.page.mouse.move(hx, hy);
+        await s.page.mouse.down();
+        await s.page.mouse.move(hx + room - (lo + hi) / 2, hy, { steps: 4 });
+        await s.page.mouse.up();
+        room = await settledRoom();
+      }
+      expect(room >= lo && room <= hi, `${at}, the separator set the room within ${lo} to ${hi} CSS pixels: ${room}`).toBe(true);
+      return room;
+    };
+    // a room of 390 to 450 CSS pixels holds Mobile's 375 at 100 % and not its 468.75 at 80 % (decision 35's `fits`), so the
+    // chip's menu offers Mobile at one factor and not at the other; at 80 % the room is set again if the zoom moved it
+    const atActualRoom = await roomIn(390, 450, 'at 1');
+    expect(await chipOffers('mobile'), `at 1 Mobile (375 CSS pixels) in a room of ${atActualRoom}, by the chip's menu`).toBe(true);
+    await zoomTo(app, s.page, 0.8);
+    await zoomLineGone(s.page, 0.8);
+    const atSmallerRoom = await roomIn(390, 450, 'at 0.8');
+    expect(await chipOffers('mobile'), `at 0.8 Mobile (468.75 CSS pixels) in a room of ${atSmallerRoom}, by the chip's menu`).toBe(false);
+
+    await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
+    for (const f of ZOOM_FACTORS) {
+      await zoomTo(app, s.page, f);
+      await zoomLineGone(s.page, f);
+      await expectOnPane(s, t, pane, 'panel', 5_000, f);
+      const room = (await rectOf(box)).width;
+      expect(room, `at ${f} the room holds Mobile's ${375 / f} CSS pixels`).toBeGreaterThanOrEqual(375 / f);
+      // the page's both sides and the chip's text and name, against Blink's rule over the view's native bounds at the
+      // display's actual scale, never a constant (the architect's rule of the branch review's fix wave)
+      await expect.poll(() => readsAsBlink(s, t, pageA, chip), { message: `at ${f} the page and the chip read the view as Blink does` }).toBe('as Blink');
+      // the menu offers a size exactly when its width over the factor fits the room; a room within a pixel of a
+      // threshold is said, not judged
+      for (const [size, wide] of [['mobile', 375], ['tablet', 768]] as const) {
+        const needs = wide / f;
+        const offered = await chipOffers(size);
+        if (Math.abs(needs - room) <= 1) test.info().annotations.push({ type: 'zoom: an offer at its threshold', description: JSON.stringify({ f, size, needs, room, offered }) });
+        else expect(offered, `at ${f} ${size} (${needs} CSS pixels) against a room of ${room}`).toBe(needs <= room);
+      }
+    }
+    await zoomTo(app, s.page, 1);
+  });
+});
+
+// ---- UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G6; acceptance B4) --------
+// Go ▸ Go to file is one of the menu's actions that take the keyboard from a page of the in-app browser (main's
+// SHELL_FOCUS_ACTIONS): with the keyboard in Page A, the row's own click (which is what ⌘P does; the row is read first,
+// enabled and carrying ⌘P) puts it in Files' field in the app's page. The keyboard is put in the page as a click on its
+// view leaves it, by main focusing the view's contents. This group runs quiet (no MAWS_E2E_FOREGROUND; gate-offload
+// Decision Log 76), so the scene reads what the pages say and never activates the app: waits on the page's own witness
+// (its document has the focus), then on the field being the active element of the app's page and the app's page having
+// the focus. Main's focused contents, which exist only while the app's window is key, are read by the same scene in
+// the foreground in e2e/browser-focus.spec.ts (Decision Log 18).
+test('G6: with the keyboard in a page of the in-app browser, Go to file puts it in Files’ field', async () => {
+  await browserScene(['U6b-3b: Go to file from a page'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pageA = await pageAt(s, A);
+    await expectOnPane(s, t, paneIn(panel), 'panel');
+
+    await s.maws.app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find((contents) => contents.getURL() === url)!.focus(), A);
+    await expect.poll(() => pageA.evaluate(() => document.hasFocus()), { message: 'the page’s own witness: its document has the keyboard' }).toBe(true);
+
+    await goToFile(s.maws.app);
+    await expect.poll(() => s.page.evaluate(() => document.hasFocus() && (document.activeElement?.matches('[data-files-filter]') ?? false)), { message: 'the field is the active element of the app’s page, which has the keyboard' }).toBe(true);
   });
 });

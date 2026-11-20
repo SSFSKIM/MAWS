@@ -19,11 +19,14 @@ import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
 import type { CellId, Row, RowId, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron, LineCounts } from './parts';
+import { CLOSE_MOTION, OPEN_MOTION } from '../../../ui/disclosure';
 import { Backdrop } from '../../../sessions/scrim'; // board 523 (U11a): the one scrim
+import { turnDurationMs } from '../../surface/adapters'; // UX wave U2b
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
 
-const completedMs = (row: DividerRowData) => row.summary.durationMs ?? (row.endedAt === null ? 0 : Date.parse(row.endedAt) - Date.parse(row.startedAt));
+// UX wave U2b: the one reading of a finished turn's duration, which its `TurnDuration` ask carries too (§E)
+const completedMs = turnDurationMs;
 
 // A working turn's duration, re-read from the store once a second while its process is live; without one (C5's
 // liveness rule) it is the latest event's time, following the events as they arrive and never the wall clock.
@@ -43,16 +46,16 @@ function useDuration(row: DividerRowData | undefined, storeKey: string): number 
   return row === undefined ? 0 : working ? (frozen ?? workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, now)) : completedMs(row);
 }
 
-// The rows of an open work area: the turn's rows after its divider up to its receipt, without those that stay in view
-// when it folds (W1: a steer at its delivery position splits the work around it; derive.ts, isPersistentRow), time
-// separators skipped.
+// The rows of an open work area: the turn's rows before its divider, which ends the turn (board ticket 789), without
+// its receipt and those that stay in view when it folds (W1: a steer at its delivery position splits the work around
+// it; derive.ts, isPersistentRow), time separators skipped.
 function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[] {
   const ids: string[] = [];
-  for (let i = rows.findIndex((candidate) => candidate.id === divider.id) + 1; i > 0 && i < rows.length; i += 1) {
+  for (let i = rows.findIndex((candidate) => candidate.id === divider.id) - 1; i >= 0; i -= 1) {
     const row = rows[i];
-    if (row.kind === 'time') continue;
-    if (row.turnId !== divider.turnId || row.kind === 'receipt') break;
-    if (!isPersistentRow(row)) ids.push(row.id);
+    if (row.kind === 'time' || row.kind === 'receipt') continue;
+    if (row.turnId !== divider.turnId) break;
+    if (!isPersistentRow(row)) ids.unshift(row.id);
   }
   return ids;
 }
@@ -102,7 +105,7 @@ function TurnLine({ row }: { row: DividerRowData }) {
 }
 
 function FoldingDividerRow({ row }: { row: DividerRowData }) {
-  const { storeKey } = useTranscriptContext();
+  const { storeKey, keepInPlace: keepRow } = useTranscriptContext();
   const motion = useWorkMotion();
   const turn = row.turnId!;
   const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;
@@ -118,6 +121,9 @@ function FoldingDividerRow({ row }: { row: DividerRowData }) {
           aria-controls={controls || undefined}
           onClick={() => {
             const target = !row.expanded;
+            // board ticket 789: the line ends its turn, so the work opens and folds above it; the line stays under the pointer
+            // (the list's anchor, which also places the line while the work that opened pushes it out of its window)
+            keepRow?.(row.id, (row.expanded ? CLOSE_MOTION.ms : OPEN_MOTION.ms) + 200);
             motion.toggle(turn, row.expanded, () => {
               const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
               if (current?.kind === 'divider' && current.expanded !== target) store.toggleTurn(storeKey, turn);

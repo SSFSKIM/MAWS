@@ -82,7 +82,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'catalog.pluginIcons':
       return { icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: null })) };
     case 'catalog.postures':
-      return { servers: servers.map((s) => ({ name: s.name, scope: s.scope, path: s.path, authPosture: 'auth_required', fingerprint: 'print-1', revision: null, iconUrl: null })) };
+      return { servers: servers.map((s) => ({ name: s.name, scope: s.scope, path: s.path, authPosture: 'auth_required', fingerprint: 'print-1', revision: null, iconUrl: null })), plugins: [] };
     case 'session.mcpStatus':
       return { mcpServers: [] };
     case 'connectors.signInCancel':
@@ -445,6 +445,18 @@ describe('My items, All', () => {
     fireEvent.click(within(detail).getByRole('button', { name: /^Back to / }));
     await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
     expect(document.activeElement?.closest('li')).toBe(secondRow);
+  });
+
+  // UX wave U2b, M7 (the execution document, §M, "The switch"; reported point 26 as ruled): the summaries' switch is the
+  // mods list's alone; the same row here is as it was, whatever the row carries.
+  it('the to-human row draws no summaries’ switch here, and is as it was', async () => {
+    mods = [{ ...MOD, summaries: true }];
+    mountCustomize({ view: 'mine', show: 'all' });
+    await drawn();
+    const row = list().querySelector<HTMLElement>('[data-mod-row="maws.to-human"]')!;
+    expect(within(row).getAllByRole('switch').map((control) => control.getAttribute('aria-label'))).toEqual(['To-human in every session']);
+    expect(row.textContent).not.toContain('Summaries on fold lines');
+    expect(row.querySelector('[data-mod-summaries]')).toBeNull();
   });
 
   it('beside one skill alone the mods are drawn', async () => {

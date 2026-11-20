@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { RECENT_TURN_ANSWER_MAX, RECENT_TURN_PROMPT_MAX, RecentTurnsSchema } from '@shared/ipc/schema/session';
 import { NO_TURNS, readRecentTurns, recentTurnsOf } from './recent-turns';
 import { linkedReadBlock } from '@shared/maws/linked-read'; // P4-A3
+import type { ContentBlock } from '@shared/graph/events';
+import { PROBE_JOINS, recordedJoin } from '../../../test/support/recorded-joins'; // ticket 704
 
 const ROOT = join(__dirname, '../../..');
 const fixture = (name: string) => join(ROOT, 'test/fixtures/transcripts', `${name}.jsonl`);
@@ -287,6 +289,42 @@ describe('recentTurnsOf', () => {
   it('an empty or unparsable text has no turns', () => {
     expect(recentTurnsOf('', 5, false)).toEqual({ turns: [], earlier: false, source: 'transcript' });
     expect(recentTurnsOf('{"type":"user", torn', 5, true).turns).toEqual([]);
+  });
+});
+
+// Ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, M3; ruling A; Acceptance 9): an answer reads as
+// nothing outside the transcript. The engine's file holds one line for a joined message; the backfill tells it as the
+// person's message, then the envelope's, so the turn's prompt is the person's. A turn an answer opened with nothing of
+// the person's (an envelope sent alone; two envelopes joined) has no prompt and shows the agent's reply and its tool
+// calls. Over the probes' recorded files and E1's recorded async ask.
+describe('an answer envelope in the preview (ticket 704)', () => {
+  const recorded = (name: string) => readFileSync(join(ROOT, 'spikes/protocol-probe/fixtures/uxwave', `${name}.transcript.jsonl`), 'utf8');
+  const holdsEnvelope = (text: string | null) => text !== null && (text.includes('[MAWS ask') || text.includes('```json'));
+  // the prompt member as the preview reads a prompt: its text, an image as [Image]
+  const asPreview = (prompt: string | ContentBlock[]) =>
+    (typeof prompt === 'string' ? prompt : prompt.map((block) => (block.type === 'text' ? String(block.text) : block.type === 'image' ? '[Image]' : '')).filter(Boolean).join('\n')).trim().slice(0, RECENT_TURN_PROMPT_MAX);
+  // u704-rewind-1's joined message was rewound (probe 2): its turn is off the current chain
+  const withPrompt = PROBE_JOINS.filter((name) => recordedJoin(name).prompt !== null && name !== 'u704-rewind-1');
+
+  it.each(withPrompt)('%s: the joined turn’s prompt is the person’s prompt, and no turn’s prompt holds an envelope', (name) => {
+    const shown = prompts(recentTurnsOf(recorded(name), 20, false));
+    expect(shown).toContain(asPreview(recordedJoin(name).prompt!));
+    expect(shown.filter(holdsEnvelope)).toEqual([]);
+  });
+
+  it.each(['u704-end-two-envelopes-1', 'u704-end-two-envelopes-2'])('%s: two answers joined open a turn with no prompt that keeps its answer', (name) => {
+    const { turns } = recentTurnsOf(recorded(name), 20, false);
+    expect(turns.map((turn) => turn.prompt?.text ?? null).filter(holdsEnvelope)).toEqual([]);
+    expect(turns.at(-1)!.prompt).toBeNull();
+    expect(turns.at(-1)!.answer).not.toBeNull();
+  });
+
+  it('p1-maws-ask-async: the turn an answer sent alone opened has no prompt and keeps its answer', () => {
+    const turns = brief('p1-maws-ask-async');
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.prompt).toMatch(/^Use the maws ask tool with blocking false/);
+    expect(turns[1]!.prompt).toBeNull();
+    expect(turns[1]!.answer).toMatch(/^ANSWER: Yes/);
   });
 });
 

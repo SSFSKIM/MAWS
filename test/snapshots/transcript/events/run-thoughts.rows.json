@@ -21,71 +21,6 @@
     "turnId": "turn:u-rt-1"
   },
   {
-    "at": "2026-10-02T09:00:00.010Z",
-    "autoDenied": 0,
-    "caption": "Read and edited parser.ts, ran a command, searched code",
-    "counts": {
-      "added": 2,
-      "removed": 1
-    },
-    "denied": 0,
-    "endedAt": "2026-10-02T09:00:45.500Z",
-    "expanded": true,
-    "files": [
-      {
-        "added": 2,
-        "cellId": "cell:toolu_rt_edit",
-        "change": "update",
-        "path": "/tmp/maws-synth-run-thoughts/src/parser.ts",
-        "removed": 1
-      }
-    ],
-    "firstDeniedCell": null,
-    "id": "divider:turn:u-rt-1",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "read and edited parser.ts",
-      "ran a command",
-      "searched code"
-    ],
-    "startedAt": "2026-10-02T09:00:00.000Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 1,
-        "exploration": 2,
-        "files": 1,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.02,
-      "denials": [],
-      "durationMs": 45500,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 4,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 4,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 0,
-        "inputTokens": 40,
-        "outputTokens": 300,
-        "thinkingTokens": null
-      }
-    },
-    "toolCalls": 4,
-    "turnId": "turn:u-rt-1"
-  },
-  {
     "at": "2026-10-02T09:00:01.010Z",
     "cells": [
       {
@@ -377,6 +312,71 @@
     "messageUuid": "a-msg_rt_5-1",
     "model": "claude-opus-5-5",
     "phase": "answer",
+    "turnId": "turn:u-rt-1"
+  },
+  {
+    "at": "2026-10-02T09:00:00.010Z",
+    "autoDenied": 0,
+    "caption": "Read and edited parser.ts, ran a command, searched code",
+    "counts": {
+      "added": 2,
+      "removed": 1
+    },
+    "denied": 0,
+    "endedAt": "2026-10-02T09:00:45.500Z",
+    "expanded": true,
+    "files": [
+      {
+        "added": 2,
+        "cellId": "cell:toolu_rt_edit",
+        "change": "update",
+        "path": "/tmp/maws-synth-run-thoughts/src/parser.ts",
+        "removed": 1
+      }
+    ],
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-rt-1",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "read and edited parser.ts",
+      "ran a command",
+      "searched code"
+    ],
+    "startedAt": "2026-10-02T09:00:00.000Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 2,
+        "files": 1,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.02,
+      "denials": [],
+      "durationMs": 45500,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 4,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 4,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 40,
+        "outputTokens": 300,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 4,
     "turnId": "turn:u-rt-1"
   },
   {

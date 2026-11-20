@@ -20,7 +20,9 @@ import { allTabs, paramsHoldFile, repairFileTabs } from '../../../stores/layout-
 export const FILES_TOOL_ID = 'files';
 
 export interface FilesTabParams {
-  file: string; // as the opener gave it, lexically normal: absolute, or a relative path chip's, which the viewer's read refuses as a main tab's does
+  // lexically normal and absolute, `openFile` resolving a relative path chip's (UX wave U6b-4b, R2); relative only where no
+  // folder was known or an earlier build stored it, which the viewer's read refuses as a main tab's does
+  file: string;
   line: number | null;
   preview?: true;
   agent?: true; // UX wave U6e (decision 19): an open the agent asked for made the tab; its reads say so until the person opens it

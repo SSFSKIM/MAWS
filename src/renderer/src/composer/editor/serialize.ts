@@ -99,7 +99,19 @@ export function modeOf(doc: JSONContent): Serialized['mode'] {
   return modeOfPieces(trimTrailing(pieces), paragraphs, attachmentsOf(doc).length);
 }
 
+// Board ticket 741: what the box reads on every edit, its mode and whether it holds anything to send, from the draft as
+// assembled before the one-writer rule's fold. The fold only puts U+2060 after a letter, so it changes neither, and its
+// work grows with the whole wire text, pasted bodies included. It holds no text: whatever goes out is `serializeDraft`'s.
+export function draftState(doc: JSONContent): Pick<Serialized, 'mode' | 'empty'> {
+  const { mode, empty } = assemble(doc, { sessionId: null, cwd: '' }, (wire) => wire);
+  return { mode, empty };
+}
+
 export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Serialized {
+  return assemble(doc, ctx, neutraliseGrant);
+}
+
+function assemble(doc: JSONContent, ctx: SerializeContext, fold: (wire: string) => string): Serialized {
   const { pieces: raw, paragraphs } = piecesOf(doc);
   const pieces = trimTrailing(raw);
   const attachments = attachmentsOf(doc);
@@ -156,7 +168,7 @@ export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Seriali
   // UX wave U1c, the one-writer rule (the architect's ruling of 2026-11-16, UTC): the last step on the wire text, once
   // every piece is joined, pasted, written and placed, so no join can make a fresh opening after it; what the person
   // sees (`display`, `pastedContents`) is as typed
-  wire = neutraliseGrant(wire);
+  wire = fold(wire);
   const content: string | ContentBlock[] = blocks.length === 0 ? wire : wire.trim() === '' ? blocks : [...blocks, { type: 'text', text: wire }];
   // P5 O7 M4: a file to upload is no block (it goes up at the send), but a draft holding one is something to send
   const uploads = attachments.some((a) => a.kind === 'file');

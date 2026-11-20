@@ -12,7 +12,7 @@ const rows = (events: SessionEvent[]) => rowsOf(withAllExpanded(applyEvents(crea
 afterEach(() => configureTime(null));
 
 describe('serializeRows', () => {
-  it('renders a turn as markdown: the prompt, the divider line, the work as a list and the answer verbatim, without a receipt', () => {
+  it('renders a turn as markdown: the prompt, the work as a list, the answer verbatim and the turn’s line, without a receipt', () => {
     configureTime({ now: '2026-09-28T15:00:00.000Z', timeZone: 'UTC' });
     const b = builder();
     b.turn('u1', 'Fix the tests');
@@ -32,10 +32,10 @@ describe('serializeRows', () => {
       '### Today 10:00 AM',
       '**You**',
       'Fix the tests',
-      '*Worked for 2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15)
       ['- Read and edited a.ts, ran a command', '  - Thought', '    > Look first.', '  - Read a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
       '- Denied: `rm -rf x` · Denied by rule',
       'Done: **one** edit.\n\n```ts\nconst y = 1;\n```',
+      '*Worked for 2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15), last since board ticket 789
     ].join('\n\n'));
   });
 

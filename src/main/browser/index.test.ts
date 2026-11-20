@@ -278,7 +278,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     plain.stop();
     const e2e = start(fakeIndex([A]).index, { env: { MAWS_E2E: '1' } });
     const { tab } = e2e.store.open({ appSessionId: A, url: null, select: true });
-    expect(globalThis.__maws_browser!.tab(tab.tabId)).toEqual({ visible: false, bounds: null, attached: false, windowId: null, owner: null });
+    expect(globalThis.__maws_browser!.tab(tab.tabId)).toEqual({ visible: false, bounds: null, attached: false, windowId: null, owner: null, placed: null }); // U6b-5b M1: no placement acknowledged yet
     expect(globalThis.__maws_browser!.metrics()).toEqual({ loaded: 0, sampled: 0 });
     e2e.stop();
     expect(globalThis.__maws_browser).toBeUndefined();

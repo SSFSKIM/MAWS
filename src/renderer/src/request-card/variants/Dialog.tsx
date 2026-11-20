@@ -19,15 +19,20 @@ import { toast } from '../../stores/notices';
 import { ipcSource, useTranscriptStore } from '../../transcript';
 import { toAnswer } from '../answers';
 import { CardButton, Controls, Muted, pretty } from '../controls';
-import { initiatingPrompt } from '../initiating-prompt';
+import { initiatingPrompt, opensWithoutPrompt } from '../initiating-prompt';
 import { declaredDialog, type AutoModeServerFallbackPayload, type RefusalFallbackPayload } from './dialog-kinds';
 import type { VariantProps } from './types';
 
 // The session's transcript as the store holds it, attached for the read: `ipcSource` is memoised per key, so a mounted
 // view's attachment is shared (counted, already hydrated), and with no holder the key hydrates again from the source.
 // A kept `live` entry alone is not current: the store keeps it after its last holder detaches, and stops following.
-async function captureInitiatingPrompt(appSessionId: AppSessionId): Promise<(UserRow & { messageUuid: MessageUuid }) | null> {
-  const read = () => initiatingPrompt(useTranscriptStore.getState().rows(appSessionId), useTranscriptStore.getState().activity(appSessionId));
+// Board ticket 714: `'none'` where the newest human turn holds no prompt of the person's own (an answer opened it alone).
+async function captureInitiatingPrompt(appSessionId: AppSessionId): Promise<(UserRow & { messageUuid: MessageUuid }) | 'none' | null> {
+  const read = () => {
+    const rows = useTranscriptStore.getState().rows(appSessionId);
+    const activity = useTranscriptStore.getState().activity(appSessionId);
+    return opensWithoutPrompt(rows, activity) ? 'none' : initiatingPrompt(rows, activity);
+  };
   await useTranscriptStore.getState().attach(appSessionId, ipcSource(appSessionId));
   try {
     return read();
@@ -44,7 +49,8 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
   // UX wave U5a: as far as the store holds the session's transcript now; with no prompt read, Edit prompt says so itself.
   // Decision Log 52 (3): only rows a holder follows now hide it; a kept entry nobody follows (the overview's and the hover
   // card's hosts attach none) may be older than the session, so the button is offered and the click decides
-  const editableShown = useTranscriptStore((s) => !s.attached(item.appSessionId) || (initiatingPrompt(s.rows(item.appSessionId), s.activity(item.appSessionId))?.editable ?? true));
+  // board ticket 714: nor for a turn an answer opened alone, which holds no prompt of the person's to edit
+  const editableShown = useTranscriptStore((s) => !s.attached(item.appSessionId) || (!opensWithoutPrompt(s.rows(item.appSessionId), s.activity(item.appSessionId)) && (initiatingPrompt(s.rows(item.appSessionId), s.activity(item.appSessionId))?.editable ?? true)));
   const [notEditable, setNotEditable] = useState(false); // the click found a prompt that cannot be edited in place
   // the click's own read attaches the key, its rows the kept ones until the fresh history is in: the button stands meanwhile
   const offersEdit = (editableShown || capturing) && !notEditable;
@@ -56,7 +62,7 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
     setCapturing(true);
     const prompt = await captureInitiatingPrompt(item.appSessionId);
     setCapturing(false);
-    if (prompt !== null && !prompt.editable) return setNotEditable(true); // UX wave U5a: rows can change between the render and the click
+    if (prompt === 'none' || (prompt !== null && !prompt.editable)) return setNotEditable(true); // UX wave U5a, board ticket 714: rows can change between the render and the click
     answer('edit_prompt', 'Edit prompt', () => {
       if (prompt) startInlineEdit(item.appSessionId, prompt, 'edit');
       else toast({ level: 'info', text: 'No prompt to edit', actions: [], dismissible: true });

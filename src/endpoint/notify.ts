@@ -26,10 +26,11 @@
 //
 // `wrote` is a to-human message: a session-lane `host` message sent outside any subscription whose event is a
 // `message`, which O12's phase 2 sends as each is written, whether or not a device is subscribed. It is told once per
-// event, by the event's `(writer, seq)` in the host store, however often sminos sends it again. One that can't go yet is
-// held (a few, the newest), since an owner with every app closed is whom it is for: while no connection is up, until
-// the next welcome; and for a session whose listing is still being signed (a session's `member` and its first messages
-// come together), until the listing is sent. A welcome drops what it still can't send for want of a listing.
+// event, by the event's `(project, writer, seq)` in the host store, however often sminos sends it again: sminos numbers
+// a writer's events per project, so a session that changes project starts its writer at seq 1 again there. One that
+// can't go yet is held (a few, the newest), since an owner with every app closed is whom it is for: while no
+// connection is up, until the next welcome; and for a session whose listing is still being signed (a session's `member`
+// and its first messages come together), until the listing is sent. A welcome drops what it still can't send for want of a listing.
 //
 // A count, likewise, is told once the session is listed: a listing just made tells what was held back for it.
 import type { NotifyFrame } from 'org-protocol';
@@ -182,7 +183,7 @@ export class Notifier {
     if (typeof event.writer !== 'string' || !Number.isSafeInteger(event.seq)) {
       return this.#ctx.log('endpoint: a to-human message with no (writer, seq) was not notified');
     }
-    const id = `${event.writer}\n${event.seq as number}`;
+    const id = `${message.project}\n${event.writer}\n${event.seq as number}`;
     if (this.#seen.has(id)) return;
     this.#seen.add(id);
     if (this.#seen.size > SEEN_LIMIT) this.#seen.delete(this.#seen.values().next().value as string);

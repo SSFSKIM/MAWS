@@ -5,7 +5,11 @@
    hover. Under an opened stretch it is indented two columns, as the mod indents its `‹ fold to report`. */
 .owner-record-fold { padding: 2px 0 8px; }
 .owner-record-fold[data-open] { padding-inline-start: 2ch; }
-.owner-record-fold > button { padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; }
+/* M7 (§M): one line, a label longer than the column cut with an ellipsis. */
+/* The owner's request of 2026-11-20: the line at Claude Desktop's size for a folded run's line, its body text (13 px), in
+   the muted colour Desktop folds it in, and as the full transcript's run line draws it (transcript.css,
+   `.transcript-run-line`: the same size and line height), so a folded line reads alike in both views. */
+.owner-record-fold > button { max-width: 100%; overflow: hidden; padding: 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; text-align: left; white-space: nowrap; text-overflow: ellipsis; }
 .owner-record-fold > button:hover { color: var(--fg); }
 
 /* A message (`Message.tsx`; the mod's `spanRows`): its wrapper indents the body two columns in the text colour, and its
@@ -29,7 +33,9 @@
 /* The caption ends in a space ("to-human view · "). A flex item's trailing space is dropped at its line's end, which
    drew "·full transcript"; `pre` keeps it. */
 .owner-view-switch > span { white-space: pre; }
-.owner-view-switch > button { color: var(--fg-muted); font-size: inherit; text-align: left; }
+/* M7 (the rulings on the drawing): a hit area at least 24 px tall, by padding, with an equal negative margin so the
+   line's height and the text's place are as they were. */
+.owner-view-switch > button { margin-block: -3px; padding-block: 3px; color: var(--fg-muted); font-size: inherit; text-align: left; }
 .owner-view-switch > button:hover { color: var(--fg); }
 .owner-view-switch > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 

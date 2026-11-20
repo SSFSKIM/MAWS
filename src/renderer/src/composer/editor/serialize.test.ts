@@ -10,7 +10,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { applyEvents, createState, rowsOf, type Row } from '../../transcript';
 import { docOf, hardBreak, mentionNode, paragraph, pastedNode, textNode, type Attachment } from './doc';
 import { schemaExtensions } from './schema';
-import { PIECE_KINDS, serializeDraft, type PieceKind } from './serialize';
+import { draftState, PIECE_KINDS, serializeDraft, type PieceKind } from './serialize';
 
 const FIXTURES = join(__dirname, '../../../../../test/fixtures/composer');
 const golden = JSON.parse(readFileSync(join(FIXTURES, 'pasted-terminal-framing.json'), 'utf8')) as { sessionId: string; id: string; body: string; typed: string; content: string; display: string };
@@ -170,6 +170,28 @@ describe('serializeDraft maps docs to user content', () => {
 
   it('is empty with no text and no attachments', () => {
     expect(serializeDraft(real(docOf([paragraph(textNode('  ')), paragraph()])), ctx)).toMatchObject({ empty: true, content: '', display: '' });
+  });
+
+  // board ticket 741: the box's reading on an edit skips the fold, which changes neither the mode nor the emptiness
+  it('reads on an edit the mode and emptiness the send reads', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const notes: Attachment = { id: 'a3', kind: 'file', name: 'notes.txt', mediaType: 'text/plain', bytes: 4, data: 'aGkK', persisted: true };
+    const docs = [
+      docOf([paragraph(textNode('  ')), paragraph()]),
+      docOf([paragraph(textNode(sentence))]),
+      docOf([paragraph(textNode('\u2060'))]),
+      docOf([paragraph(textNode(' '), pastedNode({ id: 'p', kind: 'text', name: 'Pasted text #1', lines: 1, text: sentence }))]),
+      docOf([paragraph(pastedNode({ id: 'p', kind: 'image', name: 'Image #1', lines: 0, text: null }))]),
+      docOf([paragraph(mentionNode({ id: 'src/a.ts', label: 'a.ts', kind: 'file' }))]),
+      docOf([paragraph(textNode('!ls'))]),
+      docOf([paragraph(textNode('!'))]),
+      docOf([paragraph(textNode('# a note'))]),
+      docOf([paragraph()], [notes]),
+    ];
+    for (const doc of docs.map(real)) {
+      const { mode, empty } = serializeDraft(doc, { sessionId: null, cwd: '' });
+      expect(draftState(doc), JSON.stringify(doc)).toEqual({ mode, empty });
+    }
   });
 });
 

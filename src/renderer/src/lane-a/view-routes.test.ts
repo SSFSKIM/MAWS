@@ -17,6 +17,8 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { storedRunsOf, type StoredRun } from '@shared/owner/folds';
+import { labelsOf } from '../owner/view/label'; // UX wave U2b, M7
 import { liveMarkedRowIds, mirrorRows, stretchesOf } from '../owner/view/mirror';
 import { createTranscriptStore } from '../stores/transcript';
 import { journalToEvents } from '../transcript/dev/journal';
@@ -59,7 +61,7 @@ const fromRows = (text: string): Promise<SessionEvent[]> =>
   freshSource(text.split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as JsonObject), SESSION, subagentLookupOf([])).snapshot();
 
 /** A route's events in a store whose lane is on, as the session view holds them: the flag set by the store's own rule. */
-async function viewOf(events: SessionEvent[]) {
+async function viewOf(events: SessionEvent[], stored?: readonly StoredRun[]) {
   const store = createTranscriptStore();
   await store.getState().attach('k', { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) });
   store.getState().setToHumanView('k', { lane: true, tailMessage: false });
@@ -68,9 +70,12 @@ async function viewOf(events: SessionEvent[]) {
     const { state, rows: held } = entry();
     const resting = restingRows(state, held);
     const openStretches = open === 'all' ? new Set(stretchesOf(resting).map((stretch) => stretch.key)) : new Set<string>();
-    return mirrorRows(resting, { openStretches }, liveMarkedRowIds(state));
+    // UX wave U2b, M7: the record lines' labels, where the mount hands the stored runs in (§M)
+    const labels = stored === undefined ? undefined : labelsOf(resting, { stored, running: false, turns: state.turns });
+    return mirrorRows(resting, { openStretches }, liveMarkedRowIds(state), labels);
   };
-  return { inForce: entry().state.ui.noTurnFold === true, closed: at('none'), opened: at('all'), keys: stretchesOf(restingRows(entry().state, entry().rows)).map((stretch) => stretch.key) };
+  const resting = restingRows(entry().state, entry().rows);
+  return { inForce: entry().state.ui.noTurnFold === true, closed: at('none'), opened: at('all'), keys: stretchesOf(resting).map((stretch) => stretch.key), stretches: stretchesOf(resting) };
 }
 
 /**
@@ -81,7 +86,7 @@ async function viewOf(events: SessionEvent[]) {
 const reading = (drawn: Row[]) =>
   drawn.flatMap((row): string[] => {
     switch (row.kind) {
-      case 'record_fold': return [row.open ? '‹ fold to report' : '› working record'];
+      case 'record_fold': return [row.open ? '‹ fold to report' : `› ${row.label ?? 'working record'}`];
       case 'to_human': return [`message: ${row.text}`];
       case 'assistant_text': return [`text: ${row.markdown}`];
       case 'user': return [`prompt: ${row.text}`];
@@ -111,5 +116,25 @@ describe('the to-human view is the same by every route', () => {
       expect(reading(view.opened), route).toEqual(reading(live.opened));
       expect(view.keys, route).toEqual(live.keys); // keyed by the calls' own ids, which every route carries
     }
+  });
+
+  // UX wave U2b, M7 (the execution document, §M; decisions 27 and 28): the same session with an invented folds file of
+  // the contract's shape for it, in the mod's own form, its bounds the calls' own ids as the mod's tracker names them.
+  // Every route that reads this machine's file draws the same record lines; another machine's rows, whose file this
+  // landing does not read, are handed no stored run and read the live line alone, which at rest is none.
+  it('p4-r7-tool-stages with a folds file of shape 2: the same record lines from the wire and the file; from another machine’s rows, working record', async () => {
+    const text = transcriptOf(rows);
+    const plain = await viewOf(journalToEvents(rows));
+    const calls = plain.stretches.map((stretch) => stretch.rows.flatMap((row) => (row.kind === 'cell' ? [row.toolUseId!] : row.kind === 'group' ? row.cells.flatMap((cell) => (cell.toolUseId === null ? [] : [cell.toolUseId])) : [])));
+    expect(calls.every((ids) => ids.length > 0)).toBe(true);
+    const file = `${JSON.stringify({ shape: 2, runs: calls.map((ids, i) => [ids[0], ids.at(-1), `Ran stage ${i + 1} and checked its output`]) })}\n`;
+    const stored = storedRunsOf(file)!;
+    const live = reading((await viewOf(journalToEvents(rows), stored)).closed);
+    const onFile = reading((await viewOf(await fromFile(text), stored)).closed);
+    const fromLink = reading((await viewOf(await fromRows(text), [])).closed);
+    expect(live.filter((line) => line.startsWith('› '))).toEqual(calls.map((_, i) => `› Ran stage ${i + 1} and checked its output`));
+    expect(onFile).toEqual(live);
+    expect(fromLink.filter((line) => line.startsWith('› '))).toEqual(calls.map(() => '› working record'));
+    expect(fromLink.filter((line) => !line.startsWith('› '))).toEqual(live.filter((line) => !line.startsWith('› ')));
   });
 });

@@ -13,7 +13,7 @@
 // it) and every other request at the transcript's end; an asynchronous question's answer and dismissal stand on its row,
 // before and after a reload; a prompt its terminal settles leaves its receipt at the end for SETTLED_MS.
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -25,9 +25,11 @@ import { consentMessage } from '../src/shared/engine/arrival';
 import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, nestedAgentRecords, pluginStopNoteRecord, probeTerminalRecords, queuedNotificationRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
 import { menu } from './support/menu';
-import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
+import { openSurface, sessionCard, showSessionCards, sideColumn, surface } from './support/shell';
 import { END_ROW, rowOf } from './support/request-keys';
 import { stopRecord } from './support/stop-record';
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2
+import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -302,6 +304,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.heartbeat();
     await reported('Manual')();
     await expect(info).toContainText(/Manual · Reported (now|1 minute ago)/);
+    // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B9 and Decision Log 10 (ix)):
+    // ⇧Tab in this composer asks nothing, since the chip takes no change here, so its live region says nothing; the
+    // region is mounted as on the composer's route, whose scene in e2e/composer.spec.ts ("⇧Tab says the mode") is this
+    // one's control: there the same region reads the sentence after the same press.
+    const said = main(page).locator('[data-mode-announcement]');
+    await expect(said, 'the composer’s live region, mounted').toHaveCount(1);
+    await editor(page).click();
+    await page.keyboard.press('Shift+Tab');
+    await reported('Manual')();
+    await expect(said, 'nothing said on a terminal session').toHaveText('');
     // the menu still sets nothing: the reported mode checked, each choice closed with why
     await chip.click();
     await expect(page.getByRole('menuitemradio', { name: /^Manual/ })).toHaveAttribute('aria-checked', 'true');
@@ -467,6 +479,39 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await uploads.getByRole('button', { name: 'Dismiss' }).click();
     await expect(uploads).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B5): a terminal session on this Mac
+  // is read by the same files service as a session MAWS runs, so a PDF of its folder, opened from Files' tree, is drawn
+  // beside the chat by Chromium's viewer from a token, the toolbar hidden there, Open externally in the bar.
+  test('a PDF of the terminal session’s folder is drawn beside the chat, as for a session MAWS runs', async () => {
+    const c = await begin();
+    const { page, maws } = c;
+    const path = c.repo.path('notes.pdf');
+    writeFileSync(path, minimalPdf());
+    await drive(c);
+    const before = await created(page, maws.userData, c.appId);
+    await openSurface(page, 'Files');
+    // UX wave U6b-3a (Decision Log 14, ruling 1): the tree's row by its `data-kind`; the new PDF's row in the Changed group
+    // above the tree has the same `data-path`, and `.first()` would take it
+    const row = surface(page, 'files').locator(`[role="treeitem"][data-kind][data-path="${path}"]`).first();
+    await expect(row, 'the PDF in Files’ tree of the terminal session’s folder').toBeVisible({ timeout: 20_000 });
+    await row.click();
+    const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);
+    await expect(viewer, 'drawn in its frame').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
+    const frame = viewer.locator('[data-artifact-frame="pdf"]');
+    await expect(frame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/notes\.pdf#toolbar=0&navpanes=0$/);
+    const src = (await frame.getAttribute('src'))!;
+    const url = src.slice(0, src.indexOf('#'));
+    // Chromium's viewer beneath the frame (its extension's frame, whose parent is the token's)
+    await expect
+      .poll(() => maws.app.evaluate(({ BrowserWindow }, root) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/') && (f.parent?.url ?? '').startsWith(root)).length, url), { timeout: 20_000, message: 'Chromium’s viewer in the frame' })
+      .toBe(1);
+    await expect.poll(() => markPixels(maws.app, page, frame), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+    await expect(viewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
+    await expect(viewer.getByRole('button', { name: 'Open externally', exact: true }), 'Open externally in the bar').toBeVisible();
+    expect(await created(page, maws.userData, c.appId), 'nothing created').toEqual(before);
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   test('each control reaches the bridge with its body: the model chip, a slash command, interrupt, compact with instructions, MCP reconnect and enable, a side question answered from its op’s end, and the agent and shell stops', async () => {
@@ -817,6 +862,69 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const done = await doneReads('Done 2 · 1 stopped');
     await expect(done.locator(`[data-agent-row="${second.agentId}"]`)).toContainText('ended with the session');
     await expect(done.locator(`[data-agent-row="${first.agentId}"]`), 'the orphan keeps the word its resume gave it').toContainText('stopped');
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // Ticket 701: the terminal's bridge goes (its socket gone, its child restarting) while the terminal's process runs.
+  // Main reads that as the bridge alone going: the agent and the shell it drove are no longer known to run, so neither
+  // card holds them and nothing reads "ended with the session" (the panel lists the agent on disk, its status
+  // unavailable) until the bridge answers again and its watch says they run. The process then ending ends them.
+  test('a bridge that goes while its terminal runs: the cards leave and nothing reads ended with the session, the agent on disk with its status unavailable; the bridge back, both run again; the terminal going then ends them with the session', async () => {
+    test.setTimeout(120_000);
+    const agent: BackgroundAgent = { agentId: 'a1e2e000000000007', description: 'Count the notes', prompt: 'Count notes.md.', at: '2026-10-28T10:00:04.000Z' };
+    const job = { taskId: 'bwatch07', command: 'sleep 600', description: 'Watch the tests', at: '2026-10-28T10:00:03.000Z' };
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const shell = backgroundBashRecords(sid, cwd, ask, job);
+      const turn = backgroundAgentRecords(sid, cwd, shell.at(-1)!.uuid as string, agent);
+      return [userRecord(sid, cwd, ask, after, 'Watch the tests and count the notes.', '2026-10-28T10:00:03.000Z'), ...shell, ...turn, ...turnEndRecords(sid, cwd, turn.at(-1)!.uuid as string, '2026-10-28T10:00:05.000Z')];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
+    const { page } = c;
+    const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
+    const states = async () => value(await invoke(page, 'laneA.list', undefined)).states.length;
+    const subagents = sessionCard(page, 'Subagents');
+    const background = sessionCard(page, 'Background tasks');
+    const running = async () => {
+      await showSessionCards(page);
+      await expect(subagents.locator(`[data-agent-row="${agent.agentId}"]`), 'the agent on the Subagents card').toContainText(agent.description, { timeout: 15_000 });
+      await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell on the Background tasks card').toContainText(job.description, { timeout: 15_000 });
+    };
+    // the panel's section `name`, unfolded, once its heading reads `heading`
+    const section = async (name: string, heading: string): Promise<Locator> => {
+      await openSurface(page, 'Subagents');
+      const found = surface(page, 'subagents').locator(`section[data-section="${name}"]`);
+      await expect(found).toHaveAttribute('aria-label', heading, { timeout: 15_000 });
+      const unfold = found.getByRole('heading').getByRole('button');
+      if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+      return found;
+    };
+    const terminal = await drive(c);
+    await running();
+
+    await terminal.bridge.close();
+    await expect.poll(states, { timeout: 10_000, message: 'its bridge gone: no lane A state' }).toBe(0);
+    expect(await holder(), 'the terminal still holds the session').toBe('terminal');
+    await expect(subagents, 'the agent is no longer known to run: the Subagents card leaves').toHaveCount(0, { timeout: 15_000 });
+    await expect(background, 'nor the shell: the Background tasks card leaves').toHaveCount(0, { timeout: 15_000 });
+    const disk = await section('disk', 'On disk 1');
+    await expect(disk.locator(`[data-agent-row="${agent.agentId}"]`), 'its status unknown, not ended').toContainText('status unavailable');
+    await expect(surface(page, 'subagents').locator('section[data-section="done"]'), 'nothing reads ended').toHaveCount(0);
+    await expect(surface(page, 'subagents')).not.toContainText('ended with the session');
+
+    // the bridge answers again under the same terminal: its watch says both run
+    const back = await startFakeBridge({ home: c.maws.sminosHome, session: c.sid, pid: terminal.pid, sessionInfo: { session: c.sid, cwd: c.repo.root, model: 'claude-opus-4-5', version: '2.1.300' } });
+    back.emit({ type: 'catalog', ...CATALOG });
+    c.terminal = { bridge: back, pid: terminal.pid, close: async () => (await terminal.close(), await back.close()) };
+    await expect.poll(states, { timeout: 15_000, message: 'its bridge back' }).toBe(1);
+    await running();
+
+    // the terminal's process ends: what ran ended with the session
+    await c.terminal.close();
+    c.terminal = null;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(subagents, 'nothing of the session runs').toHaveCount(0, { timeout: 15_000 });
+    await expect((await section('done', 'Done 1')).locator(`[data-agent-row="${agent.agentId}"]`)).toContainText('ended with the session');
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 

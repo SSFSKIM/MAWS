@@ -1,11 +1,17 @@
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACTION_IDS, ACTIONS, type ActionTable } from '@shared/keymap/actions';
+import { ACTION_IDS, ACTIONS, type ActionId, type ActionTable } from '@shared/keymap/actions';
 import { EXTENDED_TABLE, sample } from '@shared/keymap/sample-rows'; // U6a
 import { formatChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
-import { registerAction, runAction } from '../keymap/actions-runtime';
+import { isActionEnabled, registerAction, runAction } from '../keymap/actions-runtime';
+import { connectKeys } from '../keymap/dispatcher'; // M4's second re-review
+import { bindChord } from '../keymap/useKeyChord';
+import { connectVisits, useVisits } from '../keymap/visits'; // UX wave U6b-5a M4: Recent
+import { EMPTY_RECORD } from '../keymap/places';
+import { useLibraryView, resetLibraryView } from '../library/view';
+import { artifactId, countsOf, libraryRow } from '../test-support/remote-artifacts';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
@@ -23,7 +29,8 @@ import { registerRemoteOpener } from '../sessions/remote-openers';
 import { Sidebar } from '../sidebar/Sidebar';
 import { projectNodeId } from '../sidebar/tree';
 import { ipc } from '../ipc/client';
-import { openConversationSearch, CommandPalette, paletteEntries, usePalette } from './CommandPalette';
+import { openConversationSearch, CommandPalette, listable, paletteEntries, usePalette } from './CommandPalette';
+import { RECENT_MAX } from './recent';
 
 const file = scenarioFile('nine-sessions');
 const nine = pageScenario(file); // P5 O6 M2: the scenario as the page holds it
@@ -34,6 +41,8 @@ beforeEach(() => {
   resetShellStores();
   fillStores(file);
   usePalette.setState({ open: false });
+  useVisits.setState({ record: EMPTY_RECORD, opened: [] }); // UX wave U6b-5a M4: nothing opened in this run
+  resetLibraryView();
   offs.push(registerShellActions({ invoke: vi.fn(async () => ({ ok: true, value: undefined })), on: vi.fn(() => () => {}) } as never));
 });
 afterEach(() => {
@@ -64,26 +73,38 @@ describe('command palette', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('lists every action of the table with its chord, disabled ones greyed with what they wait for', async () => {
+  // UX wave U6b-5a (M4; P9; Interfaces §E): a row is listed when it is listable (not fixed, not a renderer row of a pane or
+  // the composer, which only a key in a focused element can run) and has a handler; nothing is drawn disabled
+  it('lists the rows it can run, each with its chord; a row with no handler, and a pane or composer key, are absent', async () => {
     await openAndType('');
-    const actions = within(group('Actions')!).getAllByRole('option');
-    const listed = ACTION_IDS.filter((id) => !(ACTIONS as ActionTable)[id].fixed); // U6a: an editor's own key is not an act to run
-    expect(actions).toHaveLength(listed.length);
-    for (const id of listed) {
-      const option = actions.find((o) => o.dataset.value === `action:${id}`)!;
-      expect(option, id).toBeTruthy();
-      expect(option.textContent).toContain(ACTIONS[id].title);
+    const values = () => within(group('Actions')!).getAllByRole('option').map((o) => o.dataset.value);
+    const runnable = ACTION_IDS.filter((id) => listable(id, ACTIONS) && isActionEnabled(id));
+    expect(runnable.length).toBeGreaterThan(0);
+    expect(values()).toEqual(runnable.map((id) => `action:${id}`));
+    for (const option of within(group('Actions')!).getAllByRole('option')) {
+      const id = option.dataset.value!.slice('action:'.length) as ActionId;
+      expect(option.textContent, id).toContain(ACTIONS[id].title);
       if (ACTIONS[id].chord) expect(option.textContent, id).toContain(formatChord(ACTIONS[id].chord!));
+      expect(option.getAttribute('aria-disabled'), id).toBe('false');
     }
-    const newSession = actions.find((o) => o.dataset.value === 'action:session.new')!;
-    expect(newSession.getAttribute('aria-disabled')).toBe('true');
-    expect(newSession.textContent).toContain('Not available here');
-    // UX wave U4a: ⌘Enter's two composer rows and Ctrl+R's search wait for the composer's focus; its fixed keys are not listed
-    for (const id of ['composer.queue', 'composer.send', 'composer.historySearch']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in the composer');
-    for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption']) expect(actions.find((o) => o.dataset.value === `action:${id}`), id).toBeUndefined();
-    // UX wave U1a (§D): a permission prompt's two allow keys wait for a focused request, as Enter and Esc do
-    for (const id of ['request.allowOnce', 'request.allowLasting']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in a focused request');
-    expect(actions.find((o) => o.dataset.value === 'action:tab.close')!.getAttribute('aria-disabled')).toBe('false');
+    expect(isActionEnabled('session.new')).toBe(false);
+    expect(values()).not.toContain('action:session.new'); // no handler
+    expect(isActionEnabled('tab.next')).toBe(true);
+    expect(values()).not.toContain('action:tab.next'); // a pane's key, with a handler
+    for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption']) expect(values(), id).not.toContain(`action:${id}`); // U6a: fixed
+    act(() => void offs.push(registerAction('composer.queue', () => {}), registerAction('request.allowOnce', () => {})));
+    expect(values()).not.toContain('action:composer.queue'); // a composer's key, even with a handler
+    expect(values()).not.toContain('action:request.allowOnce'); // a focused request's
+    act(() => void offs.push(registerAction('session.new', () => {}))); // the control: a listable row's handler makes it appear
+    expect(values()).toContain('action:session.new');
+  });
+
+  it('decides what is listable from the row alone: not fixed, not a renderer row of a pane or the composer', () => {
+    expect(listable('session.new', ACTIONS)).toBe(true);
+    expect(listable('composer.focus', ACTIONS)).toBe(true); // a renderer row of the app
+    expect(listable('tab.next', ACTIONS)).toBe(false);
+    expect(listable('composer.cycleMode', ACTIONS)).toBe(false);
+    expect(listable('composer.submit', ACTIONS)).toBe(false);
   });
 
   it('“quota” lists exactly one session, Quota reset recovery, with its glyph and project', async () => {
@@ -114,6 +135,61 @@ describe('command palette', () => {
     const actions = within(group('Actions')!).getAllByRole('option');
     expect(actions.map((o) => o.dataset.value)).toEqual(['action:theme.dark']);
     expect(group('Sessions')).toBeNull();
+  });
+
+  // UX wave U6b-5a (M4; decision 19): the sidebar's rule admits, the scorer orders by title; a session found by its folder
+  // alone has no score and follows those found by title
+  it('orders the sessions the sidebar’s rule finds by the scorer, one found by its folder alone after those found by title', async () => {
+    const extra = [
+      record(at('r1'), { title: { text: 'Ship it', source: 'user' }, directory: '/work/deploy-tools' }),
+      record(at('r2'), { title: { text: 'Undeployable plan', source: 'user' }, directory: '/work/r2' }),
+      record(at('r3'), { title: { text: 'Deploy checklist', source: 'user' }, directory: '/work/r3' }),
+    ];
+    useSessions.setState({ records: new Map([...useSessions.getState().records, ...extra.map((r) => [r.appId, r] as const)]) });
+    await openAndType('deploy');
+    expect(options('Sessions')).toEqual([expect.stringContaining('Deploy checklist'), expect.stringContaining('Undeployable plan'), expect.stringContaining('Ship it')]);
+  });
+
+  // The branch panel's scalpel-4#2: the row the palette selects by itself is scrolled into view, as cmdk scrolls its own
+  it('scrolls the first row into view when new text gives the selection back to it', async () => {
+    const owner = (() => {
+      let proto: object | null = Object.getPrototypeOf(document.createElement('div'));
+      while (proto && !Object.prototype.hasOwnProperty.call(proto, 'scrollIntoView')) proto = Object.getPrototypeOf(proto);
+      return proto as { scrollIntoView(): void };
+    })();
+    const scrolled: Element[] = [];
+    const spy = vi.spyOn(owner, 'scrollIntoView').mockImplementation(function (this: Element) { scrolled.push(this); });
+    try {
+      await openAndType('e');
+      const combobox = within(dialog()).getByRole('combobox');
+      fireEvent.keyDown(combobox, { key: 'End' });
+      const options = () => within(dialog()).getAllByRole('option');
+      expect(options().at(-1)!.getAttribute('aria-selected')).toBe('true');
+      scrolled.length = 0;
+      act(() => usePalette.setState({ query: 'e ' })); // the same rows: the selection goes back to the first
+      const first = options()[0]!;
+      expect(first.getAttribute('aria-selected')).toBe('true');
+      expect(scrolled).toContain(first);
+    } finally { spy.mockRestore(); }
+  });
+
+  // Decision Log 11 (vii): Back and Forward are listable rows with handlers, listed while they can run
+  it('lists Back while there is a place before, and Forward only once there is one after', async () => {
+    offs.push(connectVisits());
+    const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    for (const title of ['Quota reset recovery', 'Fix sidebar drag']) {
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: idOf(title) }));
+      await act(turn);
+    }
+    const user = await openAndType('back');
+    const values = () => (group('Actions') ? within(group('Actions')!).getAllByRole('option').map((o) => o.dataset.value) : []);
+    expect(values()).toContain('action:go.back');
+    await user.clear(within(dialog()).getByRole('combobox'));
+    await user.keyboard('forward');
+    expect(values()).not.toContain('action:go.forward');
+    act(() => runAction('go.back')); // the control: with a place after, Forward can run and is listed
+    await act(turn);
+    expect(values()).toContain('action:go.forward');
   });
 
   it('⏎ on a session opens its tab in the focused pane and closes the palette', async () => {
@@ -161,6 +237,45 @@ describe('command palette', () => {
     await user.keyboard('{Enter}');
     expect(screen.queryByRole('dialog')).toBeNull();
     await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: destination })));
+  });
+
+  // UX wave U6b-3b (M1, fix 1): Go to file records where the keyboard is for Esc's second step, so it runs once the
+  // palette has given the keyboard back to its opener, as the region steps do; an action that moves no keyboard runs at once
+  it('runs Go to file after the palette gives the keyboard back to its opener; another action runs while the palette holds it', async () => {
+    const user = userEvent.setup();
+    const seen: Record<string, Element | null> = {};
+    offs.push(registerAction('files.goToFile', () => void (seen.goToFile = document.activeElement)));
+    offs.push(registerAction('diagnostics.open', () => void (seen.diagnostics = document.activeElement)));
+    render(<><textarea aria-label="Composer" /><CommandPalette /></>);
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+    act(() => runAction('palette.open'));
+    await user.keyboard('Go to file');
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await vi.waitFor(() => expect(seen.goToFile).toBe(composer));
+    act(() => composer.focus()); // the control: an action outside the set runs while the palette's field holds the keyboard
+    act(() => runAction('palette.open'));
+    const field = within(dialog()).getByRole('combobox');
+    await user.keyboard('Diagnostics');
+    await user.keyboard('{Enter}');
+    expect(seen.diagnostics).toBe(field);
+  });
+
+  // The branch panel's sweep#4: a surface's toggle moves the keyboard (it shows a tool and gives it the keyboard, or hides
+  // the column and gives it back), so from the palette it runs once the dialog has given the keyboard back to its opener
+  it.each(['surface.terminal', 'surface.files', 'surface.source-control'] as const)('runs %s after the palette gives the keyboard back to its opener', async (id) => {
+    const user = userEvent.setup();
+    const seen: (Element | null)[] = [];
+    offs.push(registerAction(id, () => void seen.push(document.activeElement)));
+    render(<><textarea aria-label="Composer" /><CommandPalette /></>);
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+    act(() => runAction('palette.open'));
+    await user.keyboard(ACTIONS[id].title);
+    await user.click(within(group('Actions')!).getAllByRole('option').find((o) => o.dataset.value === `action:${id}`)!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await vi.waitFor(() => expect(seen).toEqual([composer]));
   });
 
   it('a project reveals it in the sidebar: shown, its row expanded', async () => {
@@ -264,16 +379,18 @@ describe('palette entries', () => {
     const found = paletteEntries('quota', { records, projects });
     expect(found.sessions).toEqual([]);
     expect(paletteEntries('MAWS', { records, projects }).projects.map((p) => p.name)).toEqual(['MAWS']);
-    expect(paletteEntries('', { records, projects }).actions).toEqual(ACTION_IDS.filter((id) => !(ACTIONS as ActionTable)[id].fixed));
+    expect(paletteEntries('', { records, projects }).actions).toEqual(ACTION_IDS.filter((id) => listable(id, ACTIONS as ActionTable))); // UX wave U6b-5a M4
   });
 
-  // U6a (decision 7): a fixed row (a key its editor handles) is not an act the palette can run, so it is not listed
-  it('lists no fixed row, and every other row of a table extended with a sibling’s rows', () => {
+  // U6a (decision 7): a fixed row (a key its editor handles) is not an act the palette can run, so it is not listed.
+  // UX wave U6b-5a M4 (P9): nor is a composer's own key, which only the focused composer runs
+  it('lists no fixed row and no composer key, and every other row of a table extended with a sibling’s rows', () => {
     const empty = { records: new Map(), projects: new Map() };
     const actions = paletteEntries('', empty, EXTENDED_TABLE).actions;
     expect(actions).not.toContain(sample('sample.fixed'));
-    expect(actions).toEqual(expect.arrayContaining([sample('sample.menu'), sample('sample.shared')]));
-    expect(paletteEntries('sample', empty, EXTENDED_TABLE).actions).toEqual([sample('sample.menu'), sample('sample.shared')]);
+    expect(actions).not.toContain(sample('sample.shared'));
+    expect(actions).toContain(sample('sample.menu')); // the control: a sibling's menu row is listed
+    expect(paletteEntries('sample', empty, EXTENDED_TABLE).actions).toEqual([sample('sample.menu')]);
   });
 });
 
@@ -337,11 +454,13 @@ describe('the Channel entries', () => {
     expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'channel')).toHaveLength(1);
   });
 
-  it('greys Project channel with its sentence while the tab in front has no project with a channel', async () => {
+  // UX wave U6b-5a (M4; P9): no row is greyed; the row comes while the tab in front has a project with a channel
+  it('lists no Project channel row while the tab in front has no project with a channel', async () => {
     await openAndType('project channel');
-    const option = within(group('Actions')!).getAllByRole('option').find((o) => o.dataset.value === 'action:channel.open')!;
-    expect(option.getAttribute('aria-disabled')).toBe('true');
-    expect(option.textContent).toContain('This project has no channel');
+    const values = () => (group('Actions') ? within(group('Actions')!).getAllByRole('option').map((o) => o.dataset.value) : []);
+    expect(values()).not.toContain('action:channel.open');
+    act(() => void offs.push(registerAction('channel.open', () => {}))); // the control: registered, it is listed
+    expect(values()).toContain('action:channel.open');
   });
 });
 
@@ -349,8 +468,10 @@ it('bounds mounted results for 3,279 sessions while searching the entire index',
   const template = nine.sessions[0];
   const records = Array.from({ length: 3279 }, (_, n) => ({ ...template, appId: at(`large-${n}` as AppSessionId), title: { ...template.title, text: `Indexed session ${n}` } }));
   useSessions.setState({ records: new Map(records.map((r) => [r.appId, r])) });
-  const user = await openAndType('');
+  const user = await openAndType('Indexed'); // UX wave U6b-5a M4: with nothing typed there is no Sessions group, only Recent
   expect(within(group('Sessions')!).getAllByRole('option').length).toBeLessThanOrEqual(50);
+  expect(within(dialog()).getByText(/Showing the first 50 matches per group/)).toBeTruthy();
+  await user.clear(within(dialog()).getByRole('combobox'));
   await user.keyboard('Indexed session 3278');
   expect(options('Sessions')).toEqual([expect.stringContaining('Indexed session 3278')]);
 });
@@ -365,6 +486,76 @@ it('Escape returns focus to the element focused before each palette opening', as
     await user.keyboard('{Escape}');
     await vi.waitFor(() => expect(document.activeElement).toBe(opener));
   }
+});
+
+// UX wave U6b-5a M4 (Decision Log 16 (ii)): S5's following of the first row is the All scope's; in Conversations a retry
+// while indexing that adds an earlier hit leaves the selection where it was, and Enter runs it
+it('keeps the Conversations selection by value when an indexing retry adds an earlier hit', async () => {
+  vi.useFakeTimers();
+  const quota = idOf('Quota reset recovery');
+  const charter = idOf('Charter + research');
+  const invoke = vi.spyOn(ipc, 'invoke')
+    .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }], indexing: true, incomplete: false } } as never)
+    .mockResolvedValue({ ok: true, value: { hits: [{ appSessionId: charter, snippet: 'an earlier needle' }, { appSessionId: quota, snippet: 'a needle' }], indexing: false, incomplete: false } } as never);
+  try {
+    render(<CommandPalette />);
+    act(() => openConversationSearch('needle'));
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    const selectedValue = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+    expect(selectedValue()).toBe(`session:${quota}`);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(within(dialog()).getAllByRole('option').map((o) => o.dataset.value)).toEqual([`session:${charter}`, `session:${quota}`]); // the control: the earlier hit is drawn first
+    expect(selectedValue()).toBe(`session:${quota}`);
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Enter' });
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${quota}`);
+  } finally { invoke.mockRestore(); vi.useRealTimers(); }
+});
+
+// UX wave U6b-5a, the delta review's H6: with no row drawn there is no selection, so ⌘⏎ splits nothing. The rows here go
+// without a change of the text: cmdk 1.1.1 clears its value on a new search, and when its selected row unmounts alone,
+// but of several rows unmounting together it looks only at the last one's removal, so the selected value is left behind
+describe('with no row drawn', () => {
+  const selectedValue = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+  const expectNothingSelectedAndNoSplit = (quota: AppSessionId) => {
+    const input = within(dialog()).getByRole('combobox');
+    expect(within(dialog()).queryAllByRole('option')).toEqual([]);
+    expect(input.getAttribute('aria-activedescendant')).toBeNull();
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(currentSet(useLayout.getState().main).panes).toHaveLength(1);
+    expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).not.toContain(`session:${quota}`);
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+  };
+
+  it('selects nothing and splits nothing on ⌘⏎ after a switch to Conversations, while its search is pending', async () => {
+    useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which a split would open
+    const quota = idOf('Quota reset recovery');
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(() => new Promise<never>(() => {}));
+    try {
+      await openAndType('quota');
+      expect(selectedValue()).toBe(`session:${quota}`); // the control
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Conversations' }));
+      expectNothingSelectedAndNoSplit(quota);
+    } finally { invoke.mockRestore(); }
+  });
+
+  it('selects nothing and splits nothing on ⌘⏎ when an indexing retry finds no hits', async () => {
+    vi.useFakeTimers();
+    useLayout.getState().openSession(idOf('Charter + research'));
+    const quota = idOf('Quota reset recovery');
+    const invoke = vi.spyOn(ipc, 'invoke')
+      .mockResolvedValueOnce({ ok: true, value: { hits: [{ appSessionId: quota, snippet: 'a needle' }, { appSessionId: idOf('Charter + research'), snippet: 'another needle' }], indexing: true, incomplete: false } } as never)
+      .mockResolvedValue({ ok: true, value: { hits: [], indexing: false, incomplete: false } } as never);
+    try {
+      render(<CommandPalette />);
+      act(() => openConversationSearch('needle'));
+      await act(() => vi.advanceTimersByTimeAsync(150));
+      expect(selectedValue()).toBe(`session:${quota}`); // the control
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expectNothingSelectedAndNoSplit(quota);
+    } finally { invoke.mockRestore(); vi.useRealTimers(); }
+  });
 });
 
 it('shows terminal incomplete indexing without polling forever or hiding available results', async () => {
@@ -409,4 +600,333 @@ it.each([
     act(() => openConversationSearch('green pear'));
     expect(await screen.findByText(shown)).toBeTruthy();
   } finally { invoke.mockRestore(); }
+});
+
+// UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M4; decisions 18 and 20; B6): with
+// nothing typed the palette opens on Recent, the sessions and artifacts opened in this run (`keymap/visits.ts`), filled
+// with the sessions most recently active; an artifact's row is drawn with the title its machine answers.
+describe('Recent', () => {
+  let bridge: unknown;
+  beforeEach(() => void (bridge = window.maws));
+  afterEach(() => void (window.maws = bridge as PreloadBridge));
+
+  it('lists Recent first with nothing typed: newest first, mixed, filled by activity, eight at most; no Sessions group, no notice, no Library row', async () => {
+    const notes = libraryRow(1, { title: 'Launch notes' });
+    const fake = fakeClient({ 'library.get': (input: { artifactId: string }) => ({ row: input.artifactId === notes.id ? notes : null }) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    const archived = idOf('Somersault terminal run'); // the second most recently active
+    const records = new Map(useSessions.getState().records);
+    records.set(archived, { ...records.get(archived)!, archived: true });
+    useSessions.setState({ records });
+    useVisits.setState({
+      opened: [
+        { kind: 'artifact', artifactId: notes.id, machine: TEST_MACHINE },
+        { kind: 'session', appSessionId: idOf('Quota reset recovery') },
+        { kind: 'artifact', artifactId: artifactId(2), machine: TEST_MACHINE }, // no longer exists: answered null
+        { kind: 'session', appSessionId: archived },
+      ],
+    });
+    await openAndType('');
+    await vi.waitFor(() => expect(options('Recent')[0]).toContain('Launch notes')); // the control: the one that exists, by the same read
+    expect(options('Recent')).toEqual([
+      expect.stringContaining('Launch notes'),
+      expect.stringContaining('Quota reset recovery'),
+      expect.stringContaining('Usage reset countdown'), // then by last activity: the archived one and Quota left out
+      expect.stringContaining('Terminal workflow notes'),
+      expect.stringContaining('Trace stream reconnects'),
+      expect.stringContaining('Settings idle probe'),
+      expect.stringContaining('SDK wire inventory'),
+      expect.stringContaining('Charter + research'),
+    ]);
+    expect(options('Recent')).toHaveLength(RECENT_MAX);
+    expect(fake.invoked('library.get')).toEqual([{ artifactId: notes.id }, { artifactId: artifactId(2) }]);
+    expect(fake.machines('library.get')).toEqual([TEST_MACHINE, TEST_MACHINE]);
+    expect(group('Sessions')).toBeNull();
+    expect(within(dialog()).queryByText(/Showing the first/)).toBeNull();
+    expect(within(dialog()).queryByText(/Search the Library/)).toBeNull();
+    const before = (a: string, b: string) => Boolean(group(a)!.compareDocumentPosition(group(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before('Recent', 'Projects')).toBe(true);
+    expect(before('Projects', 'Actions')).toBe(true);
+    // S5 (Decision Log 15 (viii)): until the person moves it, the selection follows the first row, so once the artifact's
+    // answer is drawn above the session that was first, the artifact is selected and no session stays selected above it
+    const selected = within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+    expect(selected.dataset.value).toBe(`artifact:${TEST_MACHINE}/${notes.id}`);
+    // the widget's own selection follows too: the combobox names the artifact's option as its active descendant
+    await vi.waitFor(() => expect(within(dialog()).getByRole('combobox').getAttribute('aria-activedescendant')).toBe(selected.id));
+  });
+
+  // M4's second re-review: a late answer that changes the first row sends nothing the rest of the app reads as a key
+  it('follows a late first row without a key event: a profile’s action rebound to Home is not run; the person’s Home is', async () => {
+    const notes = libraryRow(1, { title: 'Launch notes' });
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    const stop = vi.fn();
+    offs.push(connectKeys(window, () => ({ 'composer.stop': 'Home' })), bindChord({ id: 'composer.stop', within: null, run: stop }));
+    useVisits.setState({ opened: [{ kind: 'artifact', artifactId: notes.id, machine: TEST_MACHINE }, { kind: 'session', appSessionId: idOf('Quota reset recovery') }] });
+    await openAndType('');
+    await vi.waitFor(() => expect(fake.pending('library.get')).toBe(1));
+    const value = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+    expect(value()).toBe(`session:${idOf('Quota reset recovery')}`);
+    await act(() => fake.reply('library.get', { row: notes }));
+    await vi.waitFor(() => expect(value()).toBe(`artifact:${TEST_MACHINE}/${notes.id}`));
+    const selected = within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+    expect(within(dialog()).getByRole('combobox').getAttribute('aria-activedescendant')).toBe(selected.id);
+    expect(stop).not.toHaveBeenCalled();
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Home' }); // the control: the person's Home reaches the dispatcher
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  // M4's re-review: a press or a hover that does not change the row is no move, and Enter still runs the row selected
+  // The branch panel's scalpel-4#1: a moved selection whose row goes falls back to a live row, the first, in one render
+  it('falls back to the first row when two artifacts arriving together take the moved selection’s row out', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    useVisits.setState({ opened: [1, 2].map((n) => ({ kind: 'artifact' as const, artifactId: artifactId(n), machine: TEST_MACHINE })) });
+    await openAndType('');
+    await vi.waitFor(() => expect(fake.pending('library.get')).toBe(2));
+    const combobox = within(dialog()).getByRole('combobox');
+    const rows = () => within(group('Recent')!).getAllByRole('option');
+    expect(rows()).toHaveLength(RECENT_MAX); // eight sessions of the fill
+    for (let n = 0; n < RECENT_MAX - 2; n++) fireEvent.keyDown(combobox, { key: 'ArrowDown' }); // to Recent's penultimate row
+    const penultimate = rows()[RECENT_MAX - 2]!.dataset.value;
+    expect(rows()[RECENT_MAX - 2]!.getAttribute('aria-selected')).toBe('true');
+    await act(async () => {
+      await Promise.all([fake.reply('library.get', { row: libraryRow(1, { title: 'Field notes' }) }), fake.reply('library.get', { row: libraryRow(2, { title: 'Field report' }) })]);
+    });
+    await vi.waitFor(() => expect(rows()[0]!.textContent).toContain('Field notes'));
+    expect(rows().map((o) => o.dataset.value)).not.toContain(penultimate); // the moved row went with the fill's last two
+    const selected = within(dialog()).getAllByRole('option').filter((o) => o.getAttribute('aria-selected') === 'true');
+    expect(selected).toEqual([rows()[0]]);
+    expect(combobox.getAttribute('aria-activedescendant')).toBe(rows()[0]!.id);
+    fireEvent.keyDown(combobox, { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${artifactId(1)}`);
+  });
+
+  it.each([
+    ['Home', (row: HTMLElement) => fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Home' }) && row],
+    ['the pointer over the selected row', (row: HTMLElement) => fireEvent.pointerMove(row)],
+  ])('keeps Enter on the first row after %s, which changes no row', async (_, act_) => {
+    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }] });
+    await openAndType('');
+    const first = () => within(group('Recent')!).getAllByRole('option')[0]!;
+    await vi.waitFor(() => expect(first().getAttribute('aria-selected')).toBe('true'));
+    act(() => void act_(first()));
+    expect(first().getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${idOf('Quota reset recovery')}`);
+  });
+
+  // Decision Log 16 (v): Recent's reads are staged, no more out at once than the slots left in the first eight
+  it('has no more library.get reads out than slots are left, and a null answer frees its slot for the next read', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }, ...Array.from({ length: 9 }, (_, n) => ({ kind: 'artifact' as const, artifactId: artifactId(n + 1), machine: TEST_MACHINE }))] });
+    await openAndType('');
+    await vi.waitFor(() => expect(fake.pending('library.get')).toBe(7));
+    expect(options('Recent')[0]).toContain('Quota reset recovery'); // a session's row is drawn at once
+    expect(fake.invoked('library.get')).toEqual(Array.from({ length: 7 }, (_, n) => ({ artifactId: artifactId(n + 1) })));
+    await act(() => fake.reply('library.get', { row: null })); // the first no longer exists
+    await vi.waitFor(() => expect(fake.invoked('library.get')).toHaveLength(8));
+    expect(fake.invoked('library.get')[7]).toEqual({ artifactId: artifactId(8) });
+    expect(fake.pending('library.get')).toBe(7);
+  });
+
+  it('opens a recent session’s tab on ⏎, and a recent artifact by the artifact link’s rule', async () => {
+    const notes = libraryRow(1, { title: 'Launch notes' });
+    window.maws = fakeClient({ 'library.get': { row: notes } }).client as unknown as PreloadBridge;
+    useVisits.setState({ opened: [{ kind: 'session', appSessionId: idOf('Quota reset recovery') }, { kind: 'artifact', artifactId: notes.id, machine: TEST_MACHINE }] });
+    const user = await openAndType('');
+    await vi.waitFor(() => expect(options('Recent')[1]).toContain('Launch notes'));
+    await user.keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${idOf('Quota reset recovery')}`);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    act(() => runAction('palette.open'));
+    await vi.waitFor(() => expect(options('Recent')[1]).toContain('Launch notes'));
+    await user.click(within(group('Recent')!).getAllByRole('option')[1]!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const shown = `artifact:${TEST_MACHINE}:${notes.id}`;
+    // a session on screen and no main tab of the artifact: beside the chat while a build registers the Artifacts tool,
+    // else (as here) a main tab
+    expect(activeTab(useLayout.getState().main)?.id).toBe(shown);
+  });
+});
+
+// UX wave U6b-5a (M4; S5; decisions 19 to 22; Interfaces §E): with text typed, "Artifacts" lists the Library's matches of
+// this Mac and of each machine the conversation search asks, 150 ms after the last keystroke, one group per machine by
+// name when more than one has matches; an answer for an older query is dropped, a later one adds rows and moves no
+// selection; the last row opens the Library on the text.
+describe('Artifacts in the palette', () => {
+  const THIRD = 'ThirdMachineRef0000000' as MachineRef;
+  type Held = { input: unknown; machine: MachineRef | undefined; resolve(value: unknown): void };
+  let held: Held[];
+  let restore: () => void;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    held = [];
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(((name: string, input: unknown, opts?: { machine?: MachineRef }) =>
+      name === 'library.list'
+        ? new Promise((resolve) => held.push({ input, machine: opts?.machine, resolve }))
+        : Promise.resolve({ ok: false, error: { code: 'internal', message: 'not staged' } })) as never);
+    restore = () => invoke.mockRestore();
+    render(<CommandPalette />);
+  });
+  afterEach(() => {
+    restore();
+    vi.useRealTimers();
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  });
+  const typed = async (query: string) => {
+    act(() => usePalette.setState({ open: true, scope: 'all', query }));
+    await act(() => vi.advanceTimersByTimeAsync(150));
+  };
+  const answer = async (n: number, rows: ReturnType<typeof libraryRow>[]) => {
+    held[n]!.resolve({ ok: true, value: { rows, counts: countsOf(rows) } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+  };
+  const refuse = async (n: number, code: string) => {
+    held[n]!.resolve({ ok: false, error: { code, message: 'no answer' } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+  };
+  const selected = () => within(dialog()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.dataset.value;
+  const enter = () => fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'Enter' });
+  const twoMachines = () => {
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-01T00:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-01T00:00:00Z', generation: 1 },
+      { ref: THIRD, name: 'Lab', local: false, state: 'up', since: '2026-11-01T00:00:00Z', generation: 1 },
+    ]);
+    useSessions.setState({ listedMachines: new Set([OTHER_MACHINE, THIRD]) });
+  };
+
+  it('asks 150 ms after the last keystroke; an answer that comes later adds its rows and does not move the selection', async () => {
+    act(() => usePalette.setState({ open: true, scope: 'all', query: 'quo' }));
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    act(() => usePalette.setState({ query: 'quota' }));
+    await act(() => vi.advanceTimersByTimeAsync(149));
+    expect(held).toHaveLength(0);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(held.map((h) => [h.input, h.machine])).toEqual([[{ filter: { query: 'quota' } }, undefined]]);
+    const quota = `session:${idOf('Quota reset recovery')}`;
+    expect(selected()).toBe(quota);
+    await answer(0, [libraryRow(1, { title: 'Quota notes' })]);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Quota notes')]);
+    expect(selected()).toBe(quota);
+    enter();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(quota);
+  });
+
+  // S5 (Decision Log 15 (viii)): the selection follows the first row until the person moves it
+  it('selects the first row as answers arrive: a title typed with nothing else matching selects the artifact once it is drawn, and Enter opens it', async () => {
+    await typed('launch');
+    expect(selected()).toBe('library:search'); // the only row before the answer
+    await answer(0, [libraryRow(1, { title: 'Launch notes' })]);
+    expect(selected()).toBe(`artifact:${TEST_MACHINE}/${artifactId(1)}`);
+    enter();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${artifactId(1)}`);
+    expect(useLayout.getState().destination).toBeNull(); // not the Library
+  });
+
+  it('keeps a selection the person moved by value when a later answer comes above it', async () => {
+    await typed('quota');
+    const quota = `session:${idOf('Quota reset recovery')}`;
+    expect(selected()).toBe(quota);
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'ArrowDown' });
+    const moved = selected();
+    expect(moved).not.toBe(quota);
+    await answer(0, [libraryRow(1, { title: 'Quota notes' })]);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Quota notes')]);
+    expect(selected()).toBe(moved);
+    act(() => usePalette.setState({ query: 'quota ' })); // the control: new text gives the selection back to the first row
+    expect(selected()).toBe(quota);
+  });
+
+  // Decision Log 16 (i): a moved selection is forgotten at every change of the text, so it does not come back with it
+  it('forgets a moved selection when the text changes and comes back: a space typed and erased selects the first row', async () => {
+    await typed('quota');
+    const quota = `session:${idOf('Quota reset recovery')}`;
+    fireEvent.keyDown(within(dialog()).getByRole('combobox'), { key: 'ArrowDown' });
+    expect(selected()).toBe('library:search');
+    act(() => usePalette.setState({ query: 'quota ' }));
+    act(() => usePalette.setState({ query: 'quota' }));
+    expect(selected()).toBe(quota);
+    enter();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(quota);
+    expect(useLayout.getState().destination).toBeNull();
+  });
+
+  it('runs on Enter the row selected when it is pressed; an answer released afterwards changes nothing', async () => {
+    await typed('quota');
+    enter();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const quota = `session:${idOf('Quota reset recovery')}`;
+    expect(activeTab(useLayout.getState().main)?.id).toBe(quota);
+    await answer(0, [libraryRow(1, { title: 'Quota notes' })]);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(quota);
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toEqual([]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('drops an answer for the older of two queries released last', async () => {
+    await typed('artifact');
+    await typed('artifact 2');
+    expect(held).toHaveLength(2);
+    await answer(1, [libraryRow(2)]);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Artifact 2')]); // the control: the newer answer is drawn
+    await answer(0, [libraryRow(1), libraryRow(2)]);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Artifact 2')]);
+  });
+
+  it('leaves out a machine that does not answer and draws no line for it; one machine with matches is one group “Artifacts”', async () => {
+    twoMachines();
+    await typed('plan');
+    expect(held.map((h) => h.machine)).toEqual([undefined, OTHER_MACHINE, THIRD]);
+    await answer(0, [libraryRow(1, { title: 'Plan A' })]);
+    await refuse(1, 'host_unavailable');
+    await answer(2, []);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Plan A')]);
+    expect(group('Artifacts · Studio')).toBeNull();
+    expect(within(dialog()).queryByRole('alert')).toBeNull();
+    expect(within(dialog()).queryByRole('status')).toBeNull();
+  });
+
+  it('draws one group per machine by name when two have matches', async () => {
+    twoMachines();
+    await typed('plan');
+    await answer(0, [libraryRow(1, { title: 'Plan A' })]);
+    await answer(1, [libraryRow(2, { title: 'Plan B' })]);
+    await refuse(2, 'timeout');
+    expect(group('Artifacts')).toBeNull();
+    expect(options('Artifacts · This Mac')).toEqual([expect.stringContaining('Plan A')]);
+    expect(options('Artifacts · Studio')).toEqual([expect.stringContaining('Plan B')]);
+    expect(group('Artifacts · Lab')).toBeNull();
+    expect(within(dialog()).queryByRole('alert')).toBeNull();
+  });
+
+  it('orders a machine’s matches by the scorer over their titles, one found by its text alone after those', async () => {
+    await typed('quarter');
+    await answer(0, [libraryRow(1, { title: 'Headquarters move' }), libraryRow(2, { title: 'Text only', snippet: 'the quarter ahead' }), libraryRow(3, { title: 'Quarter in review' })]);
+    expect(options('Artifacts')).toEqual([expect.stringContaining('Quarter in review'), expect.stringContaining('Headquarters move'), expect.stringContaining('Text only')]);
+  });
+
+  it('opens an artifact found by its title on ⏎, by the artifact link’s rule', async () => {
+    await typed('launch');
+    await answer(0, [libraryRow(1, { title: 'Launch notes' })]);
+    fireEvent.click(within(group('Artifacts')!).getByRole('option'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${artifactId(1)}`); // no session on screen: a main tab
+  });
+
+  it('ends on the row “Search the Library for …”, which sets the Library’s query and opens its page', async () => {
+    useLibraryView.setState({ view: 'pinned', query: 'old', kind: 'document', spaceId: null, machine: OTHER_MACHINE });
+    await typed('  quarter ');
+    const last = within(dialog()).getAllByRole('option').at(-1)!;
+    expect(last.textContent).toBe('Search the Library for “quarter”');
+    fireEvent.click(last);
+    expect(useLibraryView.getState()).toEqual({ view: 'all', query: 'quarter', kind: null, spaceId: null, machine: null });
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
 });

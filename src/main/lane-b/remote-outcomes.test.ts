@@ -41,6 +41,17 @@ describe('outcomeAsResult', () => {
     expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'step-up-cancelled' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'step-up-cancelled' } } });
   });
 
+  // UX wave U6f (decision 4, §D): the ledger's marker of an answer it did not keep, which the adapter asks again for, keeps
+  // its word through the projection, whatever words the act has
+  it('keeps the not-kept marker of a failed act, under internal with the machine’s sentence, before the act’s words are made', () => {
+    const marker = { code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: 'not-kept' } };
+    for (const name of ['files.readOutside', 'files.listOutside'] as const) {
+      expect([name, outcomeAsResult(name, 'mini', { state: 'failed', error: marker })]).toEqual([name, { ok: false, error: marker }]);
+    }
+    // the control: another failure of the same act loses its issues and takes the act's words
+    expect(outcomeAsResult('files.readOutside', 'mini', { state: 'failed', error: { code: 'internal', message: 'not found: /srv/x', issues: { refusal: 'other' } } })).toEqual({ ok: false, error: { code: 'internal', message: 'Not opened: not found: /srv/x' } });
+  });
+
   it('words the pending bound', () => {
     expect(pendingResult('session.send', 'mini')).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the message but hasn’t confirmed it; check the transcript' } });
     expect(pendingResult('session.interrupt', 'mini')).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });

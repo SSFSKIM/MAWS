@@ -75,7 +75,7 @@ import * as browserEngine from './schema/browser-engine'; // P5 O17
 import * as channel from './schema/channel'; // P5 O8 M7b
 import * as endpoint from './schema/endpoint'; // P5 O8 M6b
 import * as projects from './schema/projects'; // the project registry's M12
-export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
+export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint, type CustomizationPluginServer, type CustomizationPluginEndpoint } from './schema/customization';
 
 export {
   HostPingSchema,
@@ -304,6 +304,7 @@ export const MACHINE_EVENTS = [
   'session.changed', 'session.removed', 'session.projects.changed', 'session.digest', 'session.setup', 'session.intent.changed',
   'session.eventBatch', 'session.status', 'engine.budget', // the side threads', setups' and yield's rows; the scenario stub's statuses and budget
   'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
+  'mods.foldSummariesChanged', // UX wave U2b (panel finding 3): the owner channel's, after the summaries switch's write
   'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
   'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
   'render.request', 'render.exit', // P5 O5 M3: the render host's work, posted to it alone

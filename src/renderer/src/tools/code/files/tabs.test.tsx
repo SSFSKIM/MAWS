@@ -4,23 +4,26 @@
 // viewer's prune. Invented paths under `/r` and invented text throughout.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { storedMain, type PanelTabRef, type Strip } from '@shared/ipc/schema/layout';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
-import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectPanelHost, panelHost, registerPanelTool, togglePinned } from '../../../panel/host';
 import { SurfaceRow } from '../../../panel/SurfaceRow';
 import { surfaceTabs } from '../../../panel/surface-model';
-import { useLayout } from '../../../stores/layout';
+import { persistLayout, useLayout } from '../../../stores/layout';
 import { activeTab, allTabs, openTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
+import { frameToken } from '../../../test-support/code-disk';
+import { frameUrl } from '@shared/files/framed';
+import { moveFileToMain } from '../../../shell/transfer';
 import { A, B, heldBridge, hydrateHeld, mainShowing, panelOf, persisted, pinIds, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { sideFilesViewer } from '../editor/register';
-import { codeTranscriptActions, openFile, resetKeptOpens } from '../open-file';
+import { codeTranscriptActions, openFile, resetKeptOpens, resolveRelative } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { Tab as MainTab } from '../../../main/Tab';
 import { useViewer } from '../viewer/viewer-store';
@@ -43,6 +46,7 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)))
 // it (`granted`, which a read with `agent` skips) or its transcript names it (`named`), and answered with `outside`.
 const REFUSAL = "path outside the session's directories";
 function mainFor(files: Record<string, string>, opts: { refused?: string[]; held?: Map<string, Promise<void>>; outside?: { granted: Set<string>; named: Set<string> } } = {}) {
+  let frames = 0;
   return installFakeMain(async (name, input) => {
     if (name === 'files.watch' || name === 'files.unwatch' || name === 'layout.set' || name === 'git.unwatch') return ok();
     if (name === 'git.watch') return fail('not a git repository'); // the summary's reads, as the panel suites answer them
@@ -61,12 +65,22 @@ function mainFor(files: Record<string, string>, opts: { refused?: string[]; held
       if (outside && !(input.named === true && ((opts.outside!.granted.has(path) && input.agent !== true) || opts.outside!.named.has(path)))) return fail(REFUSAL);
       const text = files[path];
       if (text === undefined) return fail(`not found: ${path}`);
-      return ok({ encoding: 'utf8', content: text, bytes: text.length, offset: 0, length: text.length, truncated: false, mime: 'text/plain', hash: null, utf8: null, ...(outside ? { named: true, outside: { real: path, writable: true } } : {}) });
+      const mime = path.endsWith('.pdf') ? 'application/pdf' : 'text/plain'; // UX wave U6b-2: a PDF is a framed kind
+      return ok({ encoding: 'utf8', content: text, bytes: text.length, offset: 0, length: text.length, truncated: false, mime, hash: null, utf8: null, ...(outside ? { named: true, outside: { real: path, writable: true } } : {}) });
     }
+    // UX wave U6b-2: main's file frames, one token per ask
+    if (name === 'layout.frameFile') {
+      const token = frameToken(++frames);
+      return ok({ status: 'ready', token, url: frameUrl(token, (input.path as string).slice((input.path as string).lastIndexOf('/') + 1)), framed: 'pdf' });
+    }
+    if (name === 'layout.releaseFrame') return ok();
+    if (name === 'files.follow') return ok({ status: 'inside' }); // UX wave U6b-4c: every path here is inside the folders
     return fail(`unexpected ${name}`);
   });
 }
 
+// UX wave U6b-2: happy-dom knows no `maws-artifact:` scheme, so a file's frame only takes its URL (child-frame navigation off)
+beforeAll(() => void ((window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true));
 const offs: (() => void)[] = [];
 let unregisterFiles: () => void;
 beforeEach(() => {
@@ -276,28 +290,95 @@ describe('opening a file beside the chat (openFile)', () => {
   });
 });
 
-// ---- a path the opener gives as it is ------------------------------------------------------------------------------------
+// ---- a relative path (UX wave U6b-4b, R2) ----------------------------------------------------------------------------------
 
-describe('a relative path chip opens beside the chat as it opens in a main tab', () => {
-  // The transcript leaves a relative path relative (`src/shared/files/named.ts`); a main tab of it shows the viewer's
-  // refusal of it, and so does its side tab, in the preview's place, never the tree.
-  it('the preview tab draws the viewer with the service’s refusal, keyed as the main tab would be; ⌘ opens that main tab', async () => {
+describe('a relative path opens against the session’s working folder (U6b-4b, R2)', () => {
+  // docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R2 and S2: `openFile` resolves a path that does not begin
+  // with `/` against the opener's base, else the working folder of the session the read is made for, lexically; with
+  // neither the path stays relative and the read's refusal is drawn in the preview's place, never the tree.
+  const withRecord = (id: AppSessionId, over: Parameters<typeof record>[1]) => useSessions.setState((s) => ({ records: new Map(s.records).set(id, record(id, over)) }));
+  const withoutRecord = (id: AppSessionId) =>
+    useSessions.setState((s) => {
+      const records = new Map(s.records);
+      records.delete(id);
+      return { records };
+    });
+
+  it('resolveRelative joins a relative path to an absolute base, lexically, and leaves every other path as it is', () => {
+    expect(resolveRelative('/r', 'docs/./notes.md')).toBe('/r/docs/notes.md');
+    expect(resolveRelative('/r/sub', '../../elsewhere/x.md')).toBe('/elsewhere/x.md');
+    expect(resolveRelative('/r', '~/x.md')).toBe('/r/~/x.md'); // decision 3: `~` is a folder's name
+    expect(resolveRelative('/', 'x.md')).toBe('/x.md');
+    expect(resolveRelative('/r', '/abs/./x.md')).toBe('/abs/./x.md'); // absolute: the opener's own normalisation follows
+    expect(resolveRelative(null, 'docs/x.md')).toBe('docs/x.md');
+    expect(resolveRelative('', 'docs/x.md')).toBe('docs/x.md');
+    expect(resolveRelative('work/r', 'docs/x.md')).toBe('docs/x.md');
+  });
+
+  it('a relative chip opens the file in the working folder, the same tab an absolute open made; ⌘ opens that main tab (L4)', async () => {
+    withRecord(A, { directory: '/r' });
+    const main = mainFor({ '/r/a.ts': 'a\n' });
     render(<TestHost />);
     act(() => void openFile(A, '/r/a.ts'));
     const [preview] = filesOf(A);
     await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe('/r/a.ts'));
-    act(() => codeTranscriptActions.openFile('src/./a.ts', 4, A));
-    expect(filesOf(A).map((tab) => tab.id)).toEqual([preview.id]);
-    expect(paramsOf(preview.id)).toEqual({ file: 'src/a.ts', line: 4, preview: true });
-    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe('Refused: path must be absolutesrc/a.ts'));
-    expect(document.querySelector('[data-files-tab]')!.getAttribute('data-file')).toBe('src/a.ts');
-    expect(screen.queryByRole('tree')).toBeNull();
-    expect(sideFileKeys(useLayout.getState())).toEqual(new Set([KEY('src/a.ts')]));
-    act(() => codeTranscriptActions.openFile('src/a.ts', 9, A)); // rule 3: the tab of the file, selected at the line
-    expect(filesOf(A).map((tab) => [tab.id, paramsOf(tab.id)])).toEqual([[preview.id, { file: 'src/a.ts', line: 9, preview: true }]]);
-    act(() => codeTranscriptActions.openFile('src/a.ts', 9, A, { main: true }));
-    expect(mainFiles()).toEqual([KEY('src/a.ts')]);
+    act(() => codeTranscriptActions.openFile('src/../a.ts', 4, A));
+    expect(filesOf(A).map((tab) => [tab.id, paramsOf(tab.id)])).toEqual([[preview.id, { file: '/r/a.ts', line: 4, preview: true }]]);
+    expect(sideFileKeys(useLayout.getState())).toEqual(new Set([KEY('/r/a.ts')]));
+    expect(main.callsOf('files.read').map((input) => input.path)).toEqual(['/r/a.ts']);
+    expect(document.querySelector('[data-refusal]')).toBeNull();
+    act(() => codeTranscriptActions.openFile('./a.ts', 9, A, { main: true }));
+    expect(mainFiles()).toEqual([KEY('/r/a.ts')]);
+    expect(allTabs(useLayout.getState().main).find((tab) => tab.id === KEY('/r/a.ts'))).toMatchObject({ path: '/r/a.ts', line: 9, appSessionId: A });
     expect(filesOf(A)).toEqual([]);
+  });
+
+  it('the folder is the working folder the record says now (its worktree), and a session on another machine’s own', () => {
+    withRecord(A, { directory: '/r/sub', worktree: { path: '/r/wt', branch: 'feature' } });
+    act(() => void openFile(A, 'a.ts'));
+    expect(paramsOf(filesOf(A)[0].id)).toEqual({ file: '/r/wt/a.ts', line: null, preview: true });
+    withRecord(R, { directory: '/there' });
+    act(() => void openFile(R, 'docs/b.ts', 2));
+    expect(paramsOf(filesOf(R)[0].id)).toEqual({ file: '/there/docs/b.ts', line: 2, preview: true });
+    expect(sideFileKeys(useLayout.getState())).toContain(KEY('/there/docs/b.ts', OTHER_MACHINE));
+  });
+
+  it('an absolute path given a base is never re-based; a relative one given `base: null` is left relative (N2.4)', () => {
+    withRecord(A, { directory: '/r' });
+    act(() => void openFile(A, '/r/./a.ts', null, { base: '/elsewhere' }));
+    expect(paramsOf(filesOf(A)[0].id)).toEqual({ file: '/r/a.ts', line: null, preview: true });
+    act(() => void openFile(A, 'b.ts', null, { base: '/elsewhere/docs' }));
+    expect(paramsOf(filesOf(A)[0].id)).toEqual({ file: '/elsewhere/docs/b.ts', line: null, preview: true });
+    act(() => void openFile(A, 'src/./c.ts', null, { base: null }));
+    expect(paramsOf(filesOf(A)[0].id)).toEqual({ file: 'src/c.ts', line: null, preview: true }); // the control above: the same session, resolved
+  });
+
+  it('with no session the path is left relative and the main tab says no session grants it, reading nothing (N2.5)', () => {
+    const main = mainFor({ '/r/a.ts': 'a\n' });
+    act(() => void openFile(null, 'src/./a.ts', 3));
+    const [tab] = allTabs(useLayout.getState().main).filter((t): t is Extract<typeof t, { kind: 'file' }> => t.kind === 'file');
+    expect(tab).toMatchObject({ path: 'src/a.ts', line: 3, appSessionId: null });
+    render(<FileViewer tab={tab} />);
+    expect(screen.getByText('No session grants access to this file')).toBeTruthy();
+    expect(main.callsOf('files.read')).toEqual([]);
+  });
+
+  it('a session whose record is not loaded leaves the path relative: one read for that session, refused; the session in front lends no folder (N2.6)', async () => {
+    const X = at('app-unlisted' as AppSessionId);
+    withoutRecord(X);
+    withRecord(B, { directory: '/r' });
+    useLayout.setState({ main: mainShowing(B) });
+    const main = mainFor({ '/r/a.ts': 'a\n' });
+    render(<TestHost />);
+    act(() => codeTranscriptActions.openFile('src/./a.ts', 4, X));
+    expect(filesOf(X).map((tab) => paramsOf(tab.id))).toEqual([{ file: 'src/a.ts', line: 4, preview: true }]);
+    // UX wave U6b-4b (M3): the notice's last row, the command's words under it
+    await waitFor(() => expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual(['This file could not be opened.', 'src/a.ts', 'path must be absolute']));
+    expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ appSessionId: bareOf(X), path: 'src/a.ts' })]);
+    expect(screen.queryByRole('tree')).toBeNull(); // the preview's place, never the tree
+    // the control: the same chip for the session in front is resolved against its folder
+    act(() => codeTranscriptActions.openFile('src/./a.ts', 4, B));
+    expect(filesOf(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: '/r/src/a.ts', line: 4, preview: true }]);
   });
 });
 
@@ -424,15 +505,15 @@ describe('no way of pinning pins a file’s tab', () => {
 
 describe('before the layout is read', () => {
   const FILES_T = { id: 'files:tree', toolId: 'files', pinned: true };
-  async function launch(values: Record<string, unknown>, before: () => void) {
+  async function launch(values: Record<string, unknown>, before: (main: ReturnType<typeof mainFor>) => void) {
     resetPanelStores({ hydrated: false });
     unregisterFiles = registerPanelTool(filesTool); // the reset forgot every registration
-    mainFor({ '/r/a.ts': 'a\n' });
+    const main = mainFor({ '/r/a.ts': 'a\n' });
     const bridge = heldBridge(persisted(values));
     offs.push(connectPanelHost());
-    await hydrateHeld(bridge, before);
+    await hydrateHeld(bridge, () => before(main));
     await settle();
-    return bridge;
+    return { ...bridge, main };
   }
 
   it('the barrier: a file’s add reserved beside a restored pinned tree-only tab gets its own unpinned tab; the pin stays the tree', async () => {
@@ -468,6 +549,37 @@ describe('before the layout is read', () => {
     expect(paramsOf(preview.id)).toEqual({ file: '/r/d.ts', line: null, preview: true }); // c, then d, in the preview tab
     expect(paramsOf(kept.id)).toEqual({ file: '/r/a.ts', line: 7 });
     expect(inView(A)).toEqual([kept.id]);
+  });
+
+  // UX wave U6b-4c (W1 e): the follow of a link's open is sent when the open is made, so the read the made tab starts waits
+  // for it, and never for an open withdrawn before then
+  it('an open through a link made before the read sends its follow when it is made, not when it is kept (W1 e)', async () => {
+    let answer: ReturnType<typeof openFile> | undefined;
+    let whenKept: unknown[] = [];
+    const { main } = await launch({}, (served) => {
+      answer = openFile(A, '/r/a.ts', null, { from: { file: '/r/doc.md' } });
+      whenKept = served.callsOf('files.follow');
+    });
+    expect(answer).toBeNull();
+    expect(whenKept).toEqual([]);
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: bareOf(A), path: '/r/a.ts', from: { file: '/r/doc.md' } }]);
+    expect(paramsOf(filesOf(A)[0].id)).toEqual({ file: '/r/a.ts', line: null, preview: true }); // nothing of the source on the tab
+  });
+
+  // UX wave U6b-4b (S2): a relative path is resolved when the open is asked, with the record known then; an open kept with
+  // its path still relative is resolved again when it is made, with the record that arrived in between
+  it('a relative open made before the read resolves with the record it finds: then, or when it is made (S2)', async () => {
+    await launch({}, () => {
+      const records = new Map(useSessions.getState().records);
+      records.delete(A);
+      records.set(B, record(B, { directory: '/b' }));
+      useSessions.setState({ records });
+      expect(openFile(A, 'docs/./a.ts', 2)).toBeNull();
+      expect(openFile(B, 'x.ts')).toBeNull();
+      useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r' })).set(B, record(B, { directory: '/moved' })) }));
+    });
+    expect(filesOf(A).map((tab) => paramsOf(tab.id))).toEqual([{ file: '/r/docs/a.ts', line: 2, preview: true }]);
+    expect(filesOf(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: '/b/x.ts', line: null, preview: true }]);
   });
 });
 
@@ -517,6 +629,39 @@ describe('the read of a stored layout', () => {
 });
 
 // ---- an open the agent asked for (UX wave U6e, decision 19; sequence W9) --------------------------------------------------
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, K2; UC-14): the source of a link is
+// held in memory alone, so what layout.json holds after an open through a link is what a plain open of the path leaves.
+describe('an open through a link stores what a plain open stores (U6b-4c, K2)', () => {
+  // A launch over an empty layout, one open, and the quit: every key as layout.json then holds it, the file's tab id named
+  async function stored(open: () => void) {
+    resetPanelStores({ hydrated: false });
+    unregisterFiles = registerPanelTool(filesTool); // the reset forgot every registration
+    const main = mainFor({ '/r/a.ts': 'a\n' });
+    const bridge = heldBridge(persisted({}));
+    const stop = persistLayout(bridge.client);
+    const off = connectPanelHost();
+    await hydrateHeld(bridge);
+    await settle();
+    act(open);
+    await settle();
+    const [tab] = filesOf(A);
+    stop(); // the quit: what is pending is written
+    off();
+    const written = Object.fromEntries(bridge.sets.map((set) => [set.key, set.value]));
+    return { main, tab, layout: JSON.stringify(written).split(tab.id).join('files:the-tab') };
+  }
+
+  it('main.tabs, the session’s side list and panelTools.params hold after a followed open what they hold after a plain one', async () => {
+    const followed = await stored(() => void openFile(A, '/r/a.ts', 3, { from: { file: '/r/docs/guide.md' } }));
+    expect(followed.main.callsOf('files.follow')).toEqual([{ appSessionId: bareOf(A), path: '/r/a.ts', from: { file: '/r/docs/guide.md' } }]);
+    const plain = await stored(() => void openFile(A, '/r/a.ts', 3));
+    expect(plain.main.callsOf('files.follow')).toEqual([]);
+    expect(followed.layout).toContain('files:the-tab'); // the file's tab was written
+    expect(followed.layout).toBe(plain.layout);
+    expect(followed.layout).not.toContain('guide.md');
+  });
+});
 
 describe('an open the agent asked for (U6e)', () => {
   const OUT = '/elsewhere/chosen.txt';
@@ -881,5 +1026,29 @@ describe('the viewer’s prune counts the files beside the chat', () => {
     await settle();
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-path')).toBe('/r/b.ts');
     expect(useViewer.getState().entries.has(KEY('/r/a.ts'))).toBe(false);
+  });
+});
+
+// ---- a framed file's move (UX wave U6b-2, docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, sequence 8) ---
+
+describe('a framed file moved to the main area', () => {
+  it('a move keeps the token', async () => {
+    const main = mainFor({ '/r/ledger.pdf': '%PDF-1.4 invented\n' });
+    render(<TestHost />);
+    act(() => void openFile(A, '/r/ledger.pdf'));
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY('/r/ledger.pdf'))?.frame?.status).toBe('ready'));
+    const url = frameUrl(frameToken(1), 'ledger.pdf');
+    const beside = document.querySelector('[data-artifact-frame="pdf"]')!;
+    expect(beside.getAttribute('src')).toBe(`${url}#toolbar=0&navpanes=0`); // beside the chat: the side tab's fragment
+    const [side] = filesOf(A);
+    act(() => void moveFileToMain(side!.id));
+    const moved = allTabs(useLayout.getState().main).find((tab) => tab.id === KEY('/r/ledger.pdf')) as Extract<ReturnType<typeof allTabs>[number], { kind: 'file' }>;
+    expect(moved).toBeDefined();
+    render(<FileViewer tab={moved} />); // the main area draws the moved tab
+    await waitFor(() => expect(document.querySelector('[data-artifact-frame="pdf"]')?.getAttribute('src')).toBe(`${url}#navpanes=0`));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+    expect(main.callsOf('layout.releaseFrame')).toEqual([]);
+    expect(main.callsOf('files.read')).toHaveLength(1);
   });
 });

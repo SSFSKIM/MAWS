@@ -3,13 +3,14 @@
 // `params { scope?, path?, turnId? }`, `open` re-targeting, and a `summary` for Environment's diff stats. Its state is a
 // store handle (C8a's React Compiler rule): the scope, the turn, the hunk, the mode, the viewed marks and (UX wave U5b)
 // the stack's folds and places. The git watch and the scope's diff are the mounted body's (the host unmounts an
-// unselected tool), so `dispose` has nothing left to release.
+// unselected tool); a listed commit's read is the tab's (Decision Log 49), released by `dispose`.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { REVIEW_COPY } from '../copy';
 import type { ReviewParams } from './review-model';
+import { useReview } from './review-store';
 import { ReviewShell } from './ReviewShell';
 import { ReviewSummary } from './ReviewSummary';
 import { applyRequest, createReviewUi, forSession, type ReviewUi } from './view-state';
@@ -74,7 +75,7 @@ export const reviewTool: PanelTool<ReviewState, ReviewParams> = {
   createState,
   open,
   beforeClose: async () => true, // read-only: nothing to lose
-  dispose: () => {}, // the watch and the diff are the mounted body's, released when it unmounts
+  dispose: (state) => useReview.getState().releaseTab(state.ui), // the listed commit's read; the watch and the scopes' diffs go with the mounted body
   render: ReviewBody,
   summary: ReviewSummary,
 };

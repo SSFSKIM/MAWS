@@ -1,0 +1,375 @@
+/* Choices: the board. Its root carries Layers' class as well, so every token, block, row and platter here is drawn
+   by layers.css; this sheet adds the board's own furniture (.xc-head, .xc-variant, .xc-tag) and the variants that
+   Layers does not have. Every rule is under .x-choices and every class of its own starts xc-. */
+
+.x-layers.x-choices {
+  /* The reading column stands exactly where it stands in a session with the side column open, so a block is over
+     the same part of the field as in the app; the tags stand to its right, where the modules would be. */
+  --xc-gutter: 250px;
+  --xc-side: calc(var(--xl-gap) + var(--xl-side-w));
+  --xl-col: min(680px, calc(100vw - var(--xl-main-l) - var(--xc-side) - 64px));
+  --xc-left: 44px;
+  --xc-thumb: #ffffff;
+  --xc-n: 3;
+  /* A count that stands on the field, not on glass, takes a deeper step of its hue in light: the field is a shade
+     darker than a glass body, and darker again where the picture's paper is in shadow. */
+  --xc-add-field: #135a36; --xc-del-field: #92281a;
+}
+.x-layers.x-choices[data-scheme='dark'] { --xc-thumb: rgb(255 255 255 / 0.18); --xc-n: 5; --xc-add-field: var(--xl-add); --xc-del-field: var(--xl-del); }
+.x-layers.x-choices:is([data-layout='stack'], [data-layout='column']) { --xc-left: calc((100vw - var(--xl-main-l) - var(--xc-side) - var(--xl-col)) / 2); }
+.x-layers.x-choices[data-layout='bands'] { --xc-left: 40px; }
+
+/* ---- the frame: a head, and one page under it --------------------------------------------------------------------- */
+
+.x-choices .xc-head {
+  position: absolute; z-index: 1003; top: var(--xl-bar-top); left: var(--xc-left); right: 20px; height: var(--xl-bar-h);
+  display: flex; align-items: center; gap: 10px; pointer-events: none; transition: left var(--xl-t-shell) var(--xl-ease);
+}
+.x-choices:is([data-pane='closed'], [data-pane='rail']) .xc-head { left: max(var(--xc-left), calc(140px - var(--xl-main-l))); }
+.x-choices .xc-head > * { pointer-events: auto; }
+.x-choices .xc-title { margin: 0; font: 600 20px/28px var(--xl-font); letter-spacing: -0.012em; }
+.x-choices .xc-seg { display: inline-flex; padding: 3px; border-radius: 17px; background: var(--xl-well); }
+.x-choices .xc-seg button { height: 28px; padding: 0 13px; border-radius: 14px; font-size: 13px; color: var(--xl-ink-2); white-space: nowrap; transition: color var(--xl-t-hover), background-color var(--xl-t-hover); }
+.x-choices .xc-seg button[aria-checked='true'] { background: var(--xc-thumb); color: var(--xl-ink); font-weight: 540; box-shadow: 0 1px 2.5px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.05); }
+.x-choices .xc-replay { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 12px; border-radius: 17px; background: var(--xl-well); font-size: 13px; font-weight: 520; transition: background-color var(--xl-t-hover), transform var(--xl-t-press); }
+.x-choices .xc-replay:hover { background: var(--xl-selected); }
+.x-choices .xc-replay:active { transform: scale(0.97); }
+
+/* Above the glass planes, so words are drawn over the glass they stand on. */
+.x-choices .xc-scroll { position: absolute; z-index: 1002; inset: 56px 0 0 0; overflow-y: auto; scrollbar-width: none; outline: none; }
+.x-choices .xc-page { margin: 0 40px 0 var(--xc-left); padding: 22px 0 36px; user-select: text; animation: xc-page-in 300ms var(--xl-ease-open); }
+@keyframes xc-page-in { from { opacity: 0; } }
+
+/* A variant: its tag stands outside the thing it names. */
+/* A tag is a small plate of the ground's own colour: over plain ground it is not seen, and where the field's picture
+   passes behind it (the leaf's rim, at the right) the words stay clear of the line. */
+.x-choices .xc-tag {
+  display: flex; align-items: flex-start; gap: 10px; width: fit-content; padding: 4px 12px 4px 4px; border-radius: 15px; user-select: none;
+  background: color-mix(in srgb, var(--xl-ground) 62%, transparent); backdrop-filter: blur(10px);
+}
+.x-choices[data-scheme='dark'] .xc-tag { background: color-mix(in srgb, var(--xl-ground) 44%, transparent); }
+.x-choices .xc-band .xc-tag { background: none; backdrop-filter: none; }
+.x-choices .xc-tag b {
+  flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font: 600 12px/1 var(--xl-font); color: var(--xl-ink-2);
+  box-shadow: inset 0 0 0 1.25px rgb(var(--xl-ink-rgb) / 0.3); transition: background-color var(--xl-t-hover), color var(--xl-t-hover), box-shadow var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-spring);
+}
+.x-choices .xc-tag:hover b { box-shadow: inset 0 0 0 1.25px rgb(var(--xl-ink-rgb) / 0.7); color: var(--xl-ink); }
+.x-choices .xc-tag:active b { transform: scale(0.9); }
+.x-choices .xc-tag[aria-pressed='true'] b { background: var(--xl-solid); color: var(--xl-on-solid); box-shadow: none; }
+.x-choices .xc-tag-name { padding-top: 2px; font: 550 13px/18px var(--xl-font); color: var(--xl-ink-2); white-space: nowrap; }
+.x-choices .xc-tag[aria-pressed='true'] .xc-tag-name { color: var(--xl-ink); }
+.x-choices .xc-tag-name small { display: block; font: var(--xl-w) 12px/16px var(--xl-font); color: var(--xl-ink-3); }
+.x-choices .xc-tag-name code { font: 500 12px/18px var(--xl-mono); }
+.x-choices .xc-variant { min-width: 0; }
+.x-choices .xc-thing { position: relative; min-width: 0; }
+.x-choices .xc-thing > :first-child { margin-top: 0; }
+
+/* stack: full-width things in the reading column, tags in the margin to its left */
+.x-choices[data-layout='stack'] .xc-variant { display: grid; grid-template-columns: var(--xl-col) var(--xc-gutter); align-items: start; }
+.x-choices[data-layout='stack'] .xc-thing { grid-column: 1; grid-row: 1; }
+.x-choices[data-layout='stack'] .xc-tag { grid-column: 2; grid-row: 1; margin-left: 30px; }
+.x-choices[data-layout='stack'] .xc-variant + .xc-variant { margin-top: 40px; }
+/* grid: composers, two abreast; tags above */
+.x-choices[data-layout='grid'] .xc-page { display: grid; grid-template-columns: repeat(2, minmax(0, 520px)); gap: 30px 56px; align-items: end; align-content: center; min-height: 100%; padding-bottom: 96px; }
+.x-choices[data-layout='grid'] .xc-tag, .x-choices[data-layout='row'] .xc-tag { margin-bottom: 12px; }
+/* Where a thing opens upward, its tag stands under it, as a caption does, and the room above is the menu's. */
+.x-choices:is([data-layout='grid'], [data-layout='ask'], [data-part='usage'], [data-part='menu']) .xc-variant { display: flex; flex-direction: column; }
+.x-choices:is([data-layout='grid'], [data-layout='ask'], [data-part='usage'], [data-part='menu']) .xc-tag { order: 2; margin: 12px 0 0; }
+.x-choices[data-layout='ask'] .xc-tag { margin-top: 10px; }
+.x-layers.x-choices:is([data-part='model'], [data-part='context']) .xc-page { row-gap: 214px; align-content: start; padding-top: 204px; padding-bottom: 24px; }
+.x-layers.x-choices[data-part='menu'] .xc-page { column-gap: 28px; }
+.x-choices[data-part='menu'] .xc-variant { width: 244px; }
+.x-choices:is([data-layout='grid'], [data-layout='row'], [data-layout='ask']) .xc-tag-name small { display: inline; margin-left: 8px; }
+/* ask: the two "needs you" parts. Above, what the waiting capsule's list would hold; below, what the session holds. */
+.x-layers.x-choices[data-layout='ask'] .xc-page { display: grid; grid-template-columns: repeat(2, minmax(0, 520px)); gap: 22px 56px; align-items: end; padding: 6px 0 10px; }
+/* row: small things side by side */
+.x-choices[data-layout='row'] .xc-page { display: flex; flex-wrap: wrap; gap: 36px 40px; align-items: flex-end; align-content: center; min-height: 100%; padding-bottom: 96px; }
+
+/* column: the Together page. Layers' own scroller, column and scroll rule; only where they stand is the board's. */
+.x-choices .xc-app-scroll { z-index: 1002; }
+.x-choices .xc-app-scroll .xl-column { margin: 0 0 0 var(--xc-left); }
+.x-choices .xc-app-band { position: absolute; left: 0; right: 0; top: 66px; pointer-events: none; }
+.x-choices .xc-app-foot { position: absolute; z-index: 1002; left: var(--xc-left); width: var(--xl-col); bottom: 16px; transition: left var(--xl-t-shell) var(--xl-ease); }
+
+/* ---- the index in the pane ------------------------------------------------------------------------------------------ */
+
+.x-choices .xc-pane-clip { position: absolute; inset: 0; overflow: hidden; border-radius: 20px; transition: opacity 260ms ease 60ms, transform 380ms var(--xl-ease-open); }
+.x-choices .xc-pane-clip > .xl-pane-in { width: var(--xl-pane-w); transition: opacity 200ms ease; }
+.x-choices .xc-picked { flex: none; width: 28px; margin-right: 3px; text-align: center; font: 600 12px/1 var(--xl-font); color: var(--xl-fg2); }
+.x-choices .xc-count { padding-right: 8px; color: var(--xl-fg3); font-size: 12px; }
+
+/* Sixteen rows in six groups: the groups stand a little closer than in a session's pane, so the index needs no scroll. */
+.x-choices .xl-pane .xl-group { margin-top: 8px; }
+.x-choices .xl-pane .xl-group-head { height: 26px; }
+
+/* ---- the person's own message ------------------------------------------------------------------------------------------ */
+
+/* B: a wash of the ink on the field, as wide as its words. No material, no shadow. */
+.x-choices .xc-tint { background: var(--xl-well); border-radius: 20px; }
+/* C: no object at all. The message is the heading of the turn it starts. */
+.x-choices .xc-ask { margin: 30px 0 0; font: 620 15px/22px var(--xl-font); letter-spacing: -0.003em; text-wrap: pretty; }
+.x-choices .xc-ask + .xl-prose { margin-top: 8px; }
+
+/* ---- thinking ---------------------------------------------------------------------------------------------------------- */
+
+.x-choices .xc-cap-said { cursor: default; }
+.x-choices .xc-cap-said:is(:hover, :focus-visible) { background: var(--xl-hover); color: var(--xl-ink); }
+.x-choices .xc-cap-said[data-open='true'] .xl-cap-time { opacity: 1; }
+.x-choices .xc-call-thought .xl-call-verb { align-self: center; }
+.x-choices .xc-call-said { flex: 1; min-width: 0; color: var(--xl-fg); }
+
+/* ---- the diff -------------------------------------------------------------------------------------------------------------- */
+
+.x-choices .xl-cap .xc-cap-name { color: var(--xl-ink); }
+.x-choices .xl-cap .xl-stat { margin-left: 2px; }
+.x-choices .xl-cap .xl-add { color: var(--xc-add-field); }
+.x-choices .xl-cap .xl-del { color: var(--xc-del-field); }
+.x-choices .xl-calls-wrap :is(.xl-edit, .xl-live) { margin-top: 0; }
+.x-choices .xc-edit-bare .xl-diff { border-top: 0; padding: 10px 0; }
+.x-choices .xc-edit-code { margin-top: 4px; }
+/* C: the sign is a bar of the colour, one piece for a run of lines, where A prints a character per line. */
+.x-choices .xc-diff-bars .xl-diff-line i { position: relative; width: 28px; }
+.x-choices .xc-diff-bars .xl-diff-line:is([data-sign='+'], [data-sign='-']) i::before { content: ''; position: absolute; left: 13px; top: 0; bottom: 0; width: 3px; background: var(--xl-add); }
+.x-choices .xc-diff-bars .xl-diff-line[data-sign='-'] i::before { background: var(--xl-del); }
+.x-choices .xc-diff-bars .xl-diff-line:first-child i::before { border-radius: 2px 2px 0 0; top: 2px; }
+.x-choices .xc-diff-bars .xl-diff-line:last-child i::before { border-radius: 0 0 2px 2px; bottom: 2px; }
+
+/* ---- the running command ------------------------------------------------------------------------------------------------- */
+
+.x-choices .xc-cap-mono { font: 450 12px/18px var(--xl-mono); gap: 9px; }
+.x-choices .xc-cap-mono .xl-cap-time { font: var(--xl-w) 12px/18px var(--xl-font); }
+.x-choices .xl-cap .xl-dot { flex: none; }
+.x-choices .xc-live-bare .xl-tail { padding: 11px 16px 12px; }
+/* C: a capsule while it is one row; it opens into the card. */
+.x-choices .xc-run { width: fit-content; max-width: 100%; overflow: hidden; transition: width var(--xl-t-fold) var(--xl-ease-open); }
+.x-choices .xc-run .xl-live-head, .x-choices .xc-run .xl-tail { white-space: nowrap; }
+.x-choices .xc-run .xl-live-cmd { overflow: visible; mask-image: none; }
+.x-choices .xc-run .xl-live-head { width: 100%; height: 36px; padding: 0 15px 0 14px; gap: 9px; transition: background-color var(--xl-t-hover); }
+.x-choices .xc-run .xl-live-head:hover { background: var(--xl-hover); }
+.x-choices .xc-run .xl-live-time { margin-left: 18px; }
+.x-choices .xc-run .xl-tail { padding: 4px 18px 12px 30px; }
+
+/* ---- agents started ------------------------------------------------------------------------------------------------------- */
+
+.x-choices .xc-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-choices .xc-agent { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px 0 10px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; user-select: none; transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-choices .xc-agent:is(:hover, :focus-visible) { background: var(--xl-selected); color: var(--xl-ink); }
+.x-choices .xc-agent-line { max-width: 0; overflow: hidden; white-space: nowrap; color: var(--xl-ink-3); opacity: 0; transition: max-width 320ms var(--xl-ease-open), opacity 200ms ease; }
+.x-choices .xc-agent:is(:hover, :focus-visible, [data-open='true']) .xc-agent-line { max-width: 220px; opacity: 1; }
+.x-choices .xc-agent-list { min-width: 236px; }
+.x-choices .xc-agent-row { align-items: flex-start; gap: 10px; padding: 7px 12px 7px 10px; }
+.x-choices .xc-agent-row .xl-dot { margin-top: 6px; color: var(--xl-fg2); }
+.x-choices .xc-agent-row small { display: block; color: var(--xl-fg3); font-size: 12px; line-height: 16px; }
+
+/* ---- a menu that stands in the page ---------------------------------------------------------------------------------------- */
+
+.x-choices .xc-anchor { position: relative; display: inline-flex; }
+.x-choices .xc-menu.xl-pop { position: absolute; z-index: 40; width: max-content; transition: none; user-select: none; }
+.x-choices .xc-menu[data-place='above-end'] { right: 0; bottom: calc(100% + 8px); transform-origin: 100% 100%; --xl-pop-from: translateY(5px); }
+.x-choices .xc-menu[data-place='above-start'] { left: 0; bottom: calc(100% + 8px); transform-origin: 0 100%; --xl-pop-from: translateY(5px); }
+.x-choices .xc-menu[data-place='below-end'] { right: 0; top: calc(100% + 8px); transform-origin: 100% 0; --xl-pop-from: translateY(-5px); }
+.x-choices .xc-menu[data-place='below-start'] { left: 0; top: calc(100% + 8px); transform-origin: 0 0; --xl-pop-from: translateY(-5px); }
+.x-choices .xc-menu .xl-item { min-width: 190px; }
+
+/* B of the menu's motion: let down from the control's edge by its height; its rows follow one after another. */
+.x-choices .xc-menu[data-motion='unroll'] { display: grid; grid-template-rows: 1fr; padding-block: 0; animation: xc-unroll 320ms var(--xl-ease-open); }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in { min-height: 0; overflow: hidden; padding-block: 5px; }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in > * { animation: xc-row-in 300ms var(--xl-ease-open) backwards; }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in > :nth-last-child(2) { animation-delay: 30ms; }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in > :nth-last-child(3) { animation-delay: 55ms; }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in > :nth-last-child(4) { animation-delay: 80ms; }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in > :nth-last-child(5) { animation-delay: 105ms; }
+.x-choices .xc-menu[data-motion='unroll'] .xc-menu-in > :nth-last-child(n + 6) { animation-delay: 130ms; }
+.x-choices .xc-menu[data-motion='unroll'][data-state='closing'] { animation: xc-unroll-out 190ms cubic-bezier(0.4, 0, 0.8, 0.4) forwards; }
+@keyframes xc-unroll { from { grid-template-rows: 0fr; opacity: 0.5; } }
+@keyframes xc-unroll-out { to { grid-template-rows: 0fr; opacity: 0; } }
+@keyframes xc-row-in { from { opacity: 0; transform: translateY(7px); } }
+
+/* C: the control's own box grows into the menu, which then covers it; closing, it shrinks back into the control. */
+.x-choices .xc-menu[data-motion='become'] { right: 0; bottom: 0; min-width: 0; padding: 0; overflow: hidden; visibility: hidden; animation: none; width: var(--xc-w); height: var(--xc-h); }
+.x-choices .xc-menu[data-motion='become'] .xc-menu-in { position: absolute; right: 0; bottom: 0; width: max-content; padding: 5px; }
+.x-choices .xc-menu[data-motion='become'][data-sized] { visibility: visible; animation: xc-become 420ms var(--xl-spring); }
+.x-choices .xc-menu[data-motion='become'][data-sized] .xc-menu-in { animation: xc-fade-in 200ms ease 90ms backwards; }
+.x-choices .xc-menu[data-motion='become'][data-sized][data-state='closing'] { animation: xc-become-out 240ms var(--xl-ease) forwards; }
+.x-choices .xc-menu[data-motion='become'][data-sized][data-state='closing'] .xc-menu-in { animation: xc-fade-out 110ms ease forwards; }
+@keyframes xc-become { from { width: var(--xc-aw); height: var(--xc-ah); border-radius: 15px; box-shadow: 0 0 0 0 transparent; } }
+@keyframes xc-become-out { 70% { opacity: 1; } to { width: var(--xc-aw); height: var(--xc-ah); border-radius: 15px; opacity: 0; box-shadow: 0 0 0 0 transparent; } }
+@keyframes xc-fade-in { from { opacity: 0; } }
+@keyframes xc-fade-out { to { opacity: 0; } }
+
+/* D: the library's platter. Its rows take the page's row shape. */
+.x-choices .xc-glass-item { min-width: 196px; min-height: 32px; outline: none; transition: background-color var(--xl-t-press); }
+.x-choices .xc-glass-item[data-highlighted] { background: color-mix(in srgb, var(--xl-fg) 8%, transparent); }
+.x-choices .xc-glass-item [data-vitrea-part='menu-item-label'] { flex: 1; display: flex; align-items: center; gap: 9px; }
+.x-choices .xc-glass-item [data-vitrea-part='menu-item-label'] > span:first-of-type { flex: 1; }
+.x-choices .xc-glass-menu .xl-sep { flex: none; }
+.x-choices .xc-glass-value { color: color-mix(in srgb, var(--xl-fg) 76%, transparent); }
+.x-choices .xc-glass-item svg { opacity: 0.76; }
+
+/* ---- the composer and what it holds ----------------------------------------------------------------------------------------- */
+
+.x-choices .xc-composer-wrap { position: relative; }
+.x-choices .xc-composer { border-radius: 26px; user-select: none; }
+.x-choices .xc-field-wrap { position: relative; }
+/* queued, B: the message where it will be sent from, drawn as not yet real */
+.x-choices .xc-wait { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 84%; margin: 0 0 12px auto; padding: 8px 9px 8px 16px; border-radius: 20px; border: 1px dashed rgb(var(--xl-ink-rgb) / 0.3); color: var(--xl-ink-2); font-size: 15px; line-height: 22px; }
+.x-choices .xc-wait .xl-queued-x { flex: none; }
+.x-choices :is(.xc-wait, .xc-composer):hover .xl-queued-x { opacity: 1; }
+/* queued, C: it rests in the field, where a placeholder would be */
+.x-choices .xc-in-field { position: absolute; left: 20px; right: 12px; top: 15px; height: 22px; display: flex; align-items: center; gap: 8px; color: var(--xl-fg2); font: var(--xl-w) 15px/22px var(--xl-font); pointer-events: none; }
+.x-choices .xc-in-field svg { color: var(--xl-fg3); }
+.x-choices .xc-in-field .xl-fade { flex: 0 1 auto; }
+.x-choices .xc-in-field .xl-queued-x { pointer-events: auto; }
+/* queued, D: one mark; the words are a hover away */
+.x-choices .xc-queue-mark i { position: absolute; right: 4px; top: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--xl-fg); }
+/* the model, B: the chip is there when the pointer or the caret is */
+.x-choices .xc-approach { opacity: 0; transition: opacity 200ms ease, background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-choices .xc-composer:is(:hover, :focus-within, [data-open='true']) .xc-approach { opacity: 1; }
+.x-choices .xc-mid { flex: none; width: 3px; height: 3px; margin: 0 3px; border-radius: 50%; background: currentColor; opacity: 0.45; }
+.x-choices .xl-chip:has(> .xl-ring:first-child) { gap: 7px; padding: 0 12px 0 8px; }
+.x-choices .xl-item .xl-ring { color: var(--xl-fg2); }
+.x-choices .xc-pct { position: relative; padding: 0 9px; font-size: 12px; color: var(--xl-fg3); }
+/* send and stop, B: stop is hollow, because it is not what the composer is for */
+.x-choices .xc-send-hollow:is([data-kind='stop'], [data-kind='idle']) { background: none; color: var(--xl-fg); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xl-fg) 46%, transparent); }
+.x-choices .xc-send-hollow[data-kind='idle'] { color: var(--xl-fg3); box-shadow: inset 0 0 0 1.5px var(--xl-line-2); }
+.x-choices .xc-stop-ghost { color: var(--xl-fg2); }
+/* a tooltip held open while the page shows everything opened */
+.x-choices [data-tip][data-shown]::after { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.x-choices [data-tip][data-shown]:is([data-tip-at='above-start'], [data-tip-at='above-end'], [data-tip-at='end'])::after { transform: translate(0, 0) scale(1); }
+
+
+/* ---- the usage mark ---------------------------------------------------------------------------------------------------------- */
+
+.x-choices .xc-foot { display: flex; flex-direction: column; width: var(--xl-pane-w); height: 132px; padding: 10px 0 0; border-radius: 20px; user-select: none; }
+.x-choices .xc-foot .xl-group-head { width: auto; margin: 0 8px; }
+.x-choices .xc-foot .xl-caret { opacity: 0.7; }
+/* C: one fact in words, the one a person acts on. No level is drawn at rest. */
+.x-choices .xc-time { height: 26px; margin-right: 2px; padding: 0 11px; border-radius: 13px; background: var(--xl-well); color: var(--xl-fg2); font: var(--xl-w) 12px/26px var(--xl-font); transition: color var(--xl-t-hover), background-color var(--xl-t-hover); }
+.x-choices .xc-time:is(:hover, [aria-expanded='true']) { color: var(--xl-fg); background: var(--xl-selected); box-shadow: var(--xl-current-shadow); }
+
+/* ---- the pane's collapse: three small drawings of the window, and the real pane ---------------------------------------------- */
+
+.x-choices .xc-stage { position: relative; width: 336px; height: 210px; border-radius: 16px; overflow: hidden; background: rgb(var(--xl-ink-rgb) / 0.045); box-shadow: inset 0 0 0 1px var(--xl-line); --xc-glass: rgb(255 255 255 / 0.86); --xc-mark: rgb(var(--xl-ink-rgb) / 0.2); }
+.x-choices[data-scheme='dark'] .xc-stage { --xc-glass: rgb(255 255 255 / 0.13); }
+.x-choices .xc-stage-pane {
+  position: absolute; left: 4px; top: 4px; bottom: 4px; width: 64px; padding: 26px 7px 7px; border-radius: 9px; background: var(--xc-glass); box-shadow: 0 3px 10px -3px rgb(var(--xl-shade-rgb) / 0.3);
+  display: flex; flex-direction: column; gap: 6px; transition: transform var(--xl-t-shell) var(--xl-ease), width var(--xl-t-shell) var(--xl-ease), top var(--xl-t-shell) var(--xl-ease), padding var(--xl-t-shell) var(--xl-ease), opacity 220ms ease;
+}
+.x-choices .xc-stage-pane i { flex: none; height: 5px; border-radius: 3px; background: var(--xc-mark); transition: width var(--xl-t-shell) var(--xl-ease), height var(--xl-t-shell) var(--xl-ease); }
+.x-choices .xc-stage-pane i:nth-child(2) { background: rgb(var(--xl-ink-rgb) / 0.62); }
+.x-choices .xc-stage-toggle { position: absolute; left: 24px; top: 10px; width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--xl-ink-rgb) / 0.4); }
+.x-choices .xc-stage-main { position: absolute; left: 72px; right: 0; top: 0; bottom: 0; padding-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: left var(--xl-t-shell) var(--xl-ease); }
+.x-choices .xc-stage-main > * { flex: none; width: 152px; }
+.x-choices .xc-stage-main i { height: 5px; border-radius: 3px; background: var(--xc-mark); }
+.x-choices .xc-stage-main b { height: 26px; margin-bottom: 4px; border-radius: 8px; background: var(--xc-glass); box-shadow: 0 3px 10px -4px rgb(var(--xl-shade-rgb) / 0.3); }
+.x-choices .xc-stage-main .xc-stage-composer { position: absolute; bottom: 8px; margin: 0; height: 30px; border-radius: 11px; }
+/* A: it slides out of the window and the main space follows it */
+.x-choices .xc-stage[data-how='slide'][data-away='true'] .xc-stage-pane { transform: translateX(-76px); }
+.x-choices .xc-stage[data-how='slide'][data-away='true'] .xc-stage-main { left: 0; }
+/* B: it folds to a rail that keeps one mark per session that is not idle */
+.x-choices .xc-stage[data-how='rail'][data-away='true'] .xc-stage-pane { width: 16px; top: 17px; padding: 7px 5px; }
+.x-choices .xc-stage[data-how='rail'][data-away='true'] .xc-stage-pane i { width: 6px; height: 6px; }
+.x-choices .xc-stage[data-how='rail'][data-away='true'] .xc-stage-main { left: 24px; }
+/* C: it melts into its button where it stands; then the main space takes the room */
+.x-choices .xc-stage[data-how='melt'] .xc-stage-pane { transform-origin: 24px 10px; transition: opacity 260ms ease 240ms, transform 380ms var(--xl-ease-open) 240ms; }
+.x-choices .xc-stage[data-how='melt'][data-away='true'] .xc-stage-pane { opacity: 0; transform: scale(0.9); transition: opacity 200ms ease, transform 260ms var(--xl-ease); }
+.x-choices .xc-stage[data-how='melt'][data-away='true'] .xc-stage-main { left: 0; transition-delay: 200ms; }
+.x-choices .xc-full { display: inline-flex; align-items: center; gap: 7px; height: 30px; margin-top: 12px; padding: 0 13px 0 11px; border-radius: 15px; color: var(--xl-ink-2); font-size: 13px; box-shadow: inset 0 0 0 0.5px var(--xl-line-2); user-select: none; transition: background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press); }
+.x-choices .xc-full:hover { background: var(--xl-hover); color: var(--xl-ink); }
+.x-choices .xc-full:active { transform: scale(0.97); }
+
+/* The real pane, in each of the three ways. A is Layers' own rule (it slides). */
+.x-choices .xl-pane { transition: left var(--xl-t-shell) var(--xl-ease), width var(--xl-t-shell) var(--xl-ease), top var(--xl-t-shell) var(--xl-ease); }
+.x-layers.x-choices[data-pane='rail'] { --xl-main-l: calc(var(--xl-gap) + 52px); }
+.x-layers.x-choices[data-pane='rail'] .xl-pane { width: 52px; top: 56px; }
+.x-choices[data-pane='rail'] .xc-pane-clip > .xl-pane-in { opacity: 0; }
+.x-choices .xc-rail { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0 12px; opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
+.x-choices[data-pane='rail'] .xc-rail { opacity: 1; pointer-events: auto; transition: opacity 240ms ease 200ms; }
+.x-choices .xc-rail-mark { display: grid; place-items: center; width: 34px; height: 34px; color: var(--xl-fg2); }
+/* Melted, the pane does not travel: it is gone where it stood, and steps out of the way without a slide. */
+.x-layers.x-choices[data-melted='true'] .xl-pane { transition: none; }
+.x-layers.x-choices[data-melted='true'] .xl-pane::before { opacity: 0; }
+.x-choices[data-melted='true'] .xc-pane-clip { opacity: 0; transform: scale(0.965); transform-origin: 94px 20px; transition: opacity 180ms ease, transform 260ms var(--xl-ease); }
+
+/* ---- how a menu opens: a composer's lower edge, four times ---------------------------------------------------------------------- */
+
+.x-choices .xc-strip { display: flex; align-items: center; gap: 4px; width: 244px; height: 52px; padding: 0 9px 0 10px; border-radius: 26px; user-select: none; }
+
+/* ---- the ground: bands of one picture ----------------------------------------------------------------------------------------- */
+
+.x-choices[data-layout='bands'] .xc-scroll { inset: 0; overflow: hidden; }
+.x-choices[data-layout='bands'] .xc-page { margin: 0; padding: 0; height: 100%; }
+.x-choices .xc-band { display: grid; grid-template-columns: 148px minmax(0, 430px) minmax(0, 1fr); align-items: center; gap: 0 40px; height: calc(100% / var(--xc-n)); padding: 0 44px 0 var(--xc-left); }
+.x-choices .xc-band .xc-tag { margin: 0; }
+.x-choices .xc-band .xl-prose { margin-top: 0; }
+.x-choices .xc-band .xl-user { margin-top: 0; justify-content: flex-start; }
+.x-choices .xc-band .xl-bubble { max-width: 100%; }
+.x-choices .xc-band:first-child { padding-top: 34px; }
+
+@media (width < 1180px) {
+  .x-choices[data-layout='grid'] .xc-page { grid-template-columns: minmax(0, 520px); }
+}
+
+/* ---- a question, a plan: what waits for you ------------------------------------------------------------------------ */
+
+/* The capsule's list, standing in the page: Layers' platter and item, held still. */
+.x-choices .xc-platter.xl-pop { position: relative; z-index: auto; animation: none; transition: none; user-select: none; }
+.x-choices .xc-platter .xl-wait-item:hover { background: none; }
+.x-choices .xc-done { display: inline-flex; align-items: center; gap: 6px; height: 30px; color: var(--xl-fg2); font-size: 13px; font-weight: 520; animation: xc-fade-in 240ms ease; }
+.x-choices .xl-btn:disabled { color: var(--xl-fg3); background: var(--xl-well); box-shadow: none; }
+
+/* the question's parts, shared by the card, the form and the composer */
+.x-choices .xc-q-form { margin-top: 12px; }
+.x-choices .xc-q + .xc-q { margin-top: 12px; }
+.x-choices .xc-q-ask { margin: 0 2px 7px; color: var(--xl-fg); font-size: 13px; line-height: 18px; font-weight: 540; }
+/* A chip keeps its width when chosen, so a row of them never re-wraps under the pointer: the choice is a ring of the
+   ink and a wash, not a tick. The corner says the kind, as the marks of D do: squarer for "any of these". */
+.x-choices .xc-chip { position: relative; color: var(--xl-fg2); }
+.x-choices .xc-chip[data-multi] { border-radius: 10px; }
+.x-choices .xc-chip:hover { color: var(--xl-fg); background: var(--xl-hover); }
+.x-choices .xc-chip[aria-pressed='true'] { color: var(--xl-fg); background: color-mix(in srgb, var(--xl-fg) 8%, transparent); box-shadow: inset 0 0 0 1.5px var(--xl-fg); }
+.x-choices .xc-q-other { display: block; flex: none; width: 100%; margin-top: 12px; }
+/* D: a row per option, its sentence under its label; a square for "any of these", a circle for "one of these" */
+.x-choices .xc-q-sheet { padding: 14px 12px 12px; user-select: none; }
+.x-choices .xc-q-sheet .xc-q-form { margin-top: 0; }
+.x-choices .xc-q-sheet .xc-q-ask { margin: 0 8px 4px; font-size: 14px; line-height: 20px; font-weight: 560; }
+.x-choices .xc-q-sheet .xc-q + .xc-q { margin-top: 10px; }
+.x-choices .xc-opt { display: flex; align-items: flex-start; gap: 11px; width: 100%; padding: 5px 8px; border-radius: 13px; text-align: left; transition: background-color var(--xl-t-hover); }
+.x-choices .xc-opt:hover { background: var(--xl-hover); }
+.x-choices .xc-opt-mark { flex: none; display: grid; place-items: center; width: 17px; height: 17px; margin-top: 2px; border-radius: 50%; color: var(--xl-on-solid); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xl-fg) 34%, transparent); transition: background-color var(--xl-t-hover), box-shadow var(--xl-t-hover); }
+.x-choices .xc-opt-mark svg { opacity: 0; transform: scale(0.6); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-spring); }
+.x-choices .xc-opt[aria-checked='true'] .xc-opt-mark svg { opacity: 1; transform: none; }
+.x-choices .xc-opt-mark[data-multi] { border-radius: 6px; }
+.x-choices .xc-opt[aria-checked='true'] .xc-opt-mark { background: var(--xl-solid); box-shadow: none; }
+.x-choices .xc-opt-text { flex: 1; min-width: 0; color: var(--xl-fg); font-size: 14px; line-height: 20px; }
+.x-choices .xc-opt-text small { display: block; color: var(--xl-fg3); font-size: 13px; line-height: 18px; }
+.x-choices .xc-q-sheet .xc-q-other { width: calc(100% - 16px); margin: 10px 8px 0; }
+.x-choices .xc-q-sheet .xl-ask-acts { margin: 10px 2px 0; }
+/* C: the question rides in the composer, over the field it is answered in */
+.x-choices .xc-q-bar { display: flex; align-items: center; gap: 10px; padding: 13px 16px 0 20px; }
+.x-choices .xc-q-bar .xc-q-ask { flex: 1; margin: 0; font-size: 14px; line-height: 20px; }
+.x-choices .xc-q-dots { display: inline-flex; gap: 2px; }
+.x-choices .xc-q-dots button { position: relative; width: 14px; height: 20px; }
+.x-choices .xc-q-dots button::after { content: ''; position: absolute; left: 4px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--xl-fg) 26%, transparent); transition: background-color var(--xl-t-pop), transform var(--xl-t-pop) var(--xl-spring); }
+.x-choices .xc-q-dots button[aria-current]::after { background: var(--xl-fg); transform: scale(1.15); }
+.x-choices .xc-q-chips { padding: 9px 14px 0 17px; animation: xc-row-in 280ms var(--xl-ease-open); }
+
+/* the plan's parts */
+.x-choices .xc-steps { margin: 0; padding: 0; list-style: none; counter-reset: xc-step; }
+.x-choices .xc-steps li { position: relative; padding: 3px 0 3px 26px; counter-increment: xc-step; }
+.x-choices .xc-steps li::before { content: counter(xc-step); position: absolute; left: 0; width: 16px; text-align: right; color: var(--xl-fg3); font-variant-numeric: tabular-nums; }
+.x-choices .xc-steps-card { margin: 10px 2px 0; color: var(--xl-fg); font-size: 13px; line-height: 18px; }
+.x-choices .xc-steps-card li { padding: 2px 0 2px 24px; }
+.x-choices .xc-plan-why { margin: 12px 0 0; }
+.x-choices .xc-plan-title { font: 620 15px/22px var(--xl-font); letter-spacing: -0.003em; color: var(--xl-fg); }
+/* D: a document on glass, which is prose on glass: Layers keeps prose off it everywhere else */
+.x-choices .xc-plan-sheet { padding: 16px 20px 14px; color: var(--xl-fg); font-size: 14px; line-height: 21px; }
+.x-choices .xc-plan-sheet .xc-plan-p { margin-top: 8px; text-wrap: pretty; }
+.x-choices .xc-plan-sheet .xc-steps { margin-top: 10px; }
+.x-choices .xc-plan-sheet .xl-ask-acts { margin-top: 12px; }
+/* C: the agent's own prose, on the field, and a composer whose one action is the decision */
+.x-choices .xc-plan-prose { margin-top: 0; }
+.x-choices .xc-plan-prose p + p { margin-top: 8px; }
+.x-choices .xc-plan-prose .xc-steps { margin-top: 10px; }
+.x-choices .xc-plan-composer { margin-top: 18px; }
+.x-choices .xc-plan-go { height: 32px; margin-left: 4px; padding: 0 15px; border-radius: 16px; }

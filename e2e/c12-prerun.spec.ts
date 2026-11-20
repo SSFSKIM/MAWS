@@ -16,6 +16,8 @@
 // mutates no session, commits only counts and timing, and keeps its screenshot under the scratch root.
 import { addressed } from './support/address';
 import { bareOf } from '../src/shared/machine/address';
+import { defaultBase } from '../src/services/git/default-base';
+import { createGitRunner } from '../src/services/git/runner';
 import { mainTabById, openSurface, surface, surfaceRow, unfoldSessionCard } from './support/shell';
 import { hookStartedCommand, terminalPwdCommand } from '../test/support/prerun-commands';
 import { execFileSync } from 'node:child_process';
@@ -806,8 +808,12 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const shotsUncommitted = await shoot(page, '10.4-review');
       git(worktree!, 'add', 'c12-deep.txt');
       git(worktree!, 'commit', '-qm', 'C12 pre-run deep file');
+      // UX wave U5b-2 (§C, decision 13): the base is the default-branch rule's, read as the service reads it (the scratch
+      // has no remote, so its local main or master), and This branch includes the working tree, clean after the commit
+      const base = await defaultBase(createGitRunner({ env: process.env }), worktree!);
+      expect(base, 'the default-branch rule finds a base for the worktree').not.toBeNull();
       await panel(page).locator('[data-chip="branch"]').click();
-      await expect(panel(page).locator('[data-review-footer]')).toHaveText(`${branch} · Since main`, { timeout: 30_000 });
+      await expect(panel(page).locator('[data-review-footer]')).toHaveText(`${branch} · Since ${base!.ref}`, { timeout: 30_000 });
       await expect(panel(page).locator('[data-review-header]')).toContainText('1 file changed', { timeout: 30_000 });
       out.review = { uncommitted, thisBranch: { header: await panel(page).locator('[data-review-header]').innerText(), footer: await panel(page).locator('[data-review-footer]').innerText() }, screenshots: [...shotsUncommitted, ...(await shoot(page, '10.4-review-this-branch'))] };
     });
@@ -831,7 +837,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const root = files.locator(`[role="treeitem"][data-kind="root"][data-path="${worktree}"]`);
       await expect(root).toBeVisible({ timeout: 15_000 });
       if ((await root.getAttribute('aria-expanded')) !== 'true') await root.click();
-      await files.locator(`[role="treeitem"][data-path="${worktree}/one.txt"]`).click();
+      await files.locator(`[role="treeitem"][data-kind][data-path="${worktree}/one.txt"]`).click(); // UX wave U6b-3a: the tree's row, not a Changed row of the path
       // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): the file opens
       // beside the chat, as a tab of the side column; the session's tab and its composer stay in front in the main area
       await expect(panel(page).locator(`[data-file-viewer][data-path="${worktree}/one.txt"]`)).toBeVisible({ timeout: 15_000 });
@@ -1193,8 +1199,9 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
         await pick.evaluate((b) => b.scrollIntoView({ block: 'center' }));
         await settle(page);
         // What the reader sees: the collapsed turn's divider they click (C6's own anchoring criterion: it stays put) and a
-        // row 120 px above it (old work above the expansion must not move); measured once with no click first (the
-        // baseline: the virtual list's own settling), then across the click.
+        // row 120 px above it, measured once with no click first (the baseline: the virtual list's own settling), then
+        // across the click. Board ticket 789: the turn's line ends its turn, so the work opens above it and the list keeps
+        // the line put; the row above moves by the work's height, recorded and not bounded.
         const measure = (rowId: string | null) =>
           scroller(page).evaluate((s, id) => {
             const b = s.querySelector('[data-c12-pick="1"]')!.getBoundingClientRect();
@@ -1217,7 +1224,7 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
         trials.push({
           at: where === 'above' ? '50%' : '40%', expanded: button, rowAbove: first.aboveId, before: baseline, after,
           baselineDriftPx: { divider: d(first.divider, baseline.divider), rowAbove: d(first.above, baseline.above) },
-          driftPx: Math.max(d(baseline.divider, after.divider) ?? 0, d(baseline.above, after.above) ?? 0),
+          driftPx: d(baseline.divider, after.divider) ?? 0,
           dividerDriftPx: d(baseline.divider, after.divider), rowAboveDriftPx: d(baseline.above, after.above),
         });
       }

@@ -102,7 +102,10 @@ export type RemoteCopySource = z.infer<typeof RemoteCopySourceSchema>;
 export const commands = {
   'remote.forward.open': { input: ForwardTargetSchema, output: z.strictObject({ localPort: z.number().int().min(1).max(65535) }), owner: 'main' },
   'remote.forward.close': { input: ForwardTargetSchema, output: z.void(), owner: 'main' },
-  'remote.openCopy': { input: z.strictObject({ machine: MachineRefSchema, source: RemoteCopySourceSchema }), output: z.strictObject({ opened: z.boolean(), message: z.string().nullable() }), owner: 'main' },
+  // open (UX wave U6f, the branch review, Decision Log 33 (3)): as `layout.frameFile`'s, the person opened the protected
+  // folder a session's file lies in on that machine, sent under the same test as the tab's reads, from an app page alone
+  // (main's guard); main passes it into the copy's act there and nowhere else
+  'remote.openCopy': { input: z.strictObject({ machine: MachineRefSchema, source: RemoteCopySourceSchema, open: z.literal(true).optional() }), output: z.strictObject({ opened: z.boolean(), message: z.string().nullable() }), owner: 'main' },
 } as const satisfies Record<`remote.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

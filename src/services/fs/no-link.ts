@@ -47,12 +47,16 @@ function check(stat: Stats | undefined, at: string, part: string): void {
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new LinkOnTheWay(part);
 }
 
-// Every directory from `/` to `dir` (absolute, normal) a directory and none a link, as it stands now.
+// Every directory from `/` to `dir` (absolute, normal) a directory and none a link, as it stands now. `halt`, called
+// before each `lstat`, may end the walk by throwing (UX wave U6b-4c: an ended follow starts no further call).
 export function walkSync(dir: string): void {
   for (const [at, part] of steps(dir)) check(lstatSync(at, { throwIfNoEntry: false }), at, part);
 }
-export async function walk(dir: string): Promise<void> {
-  for (const [at, part] of steps(dir)) check(await lstat(at).catch((error: unknown) => ((error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : Promise.reject(error))), at, part);
+export async function walk(dir: string, halt?: () => void): Promise<void> {
+  for (const [at, part] of steps(dir)) {
+    halt?.();
+    check(await lstat(at).catch((error: unknown) => ((error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : Promise.reject(error))), at, part);
+  }
 }
 
 // After a walked open: the descriptor names `path` itself (the caller closes it on a throw).

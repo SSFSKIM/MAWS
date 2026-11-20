@@ -1,0 +1,104 @@
+Ticket 704, probes 1 to 3: an async ask's answer envelope waiting at the engine's next step beside a prompt, with a
+real ask and the engine's file kept whole, on engine 2.1.322 (docs/doperpowers/plans/2026-11-15-envelope-split.md on
+ux-wave/704-envelope-split, "Probes" and "Engine facts"; recorded 2026-11-15 on VM dc-uxwave5-26dc, branch
+ux-wave/704-probes)
+
+Verdict (each statement the document asks for; run counts in brackets).
+  Probe 1.
+  - The joined `user` line [7 of 7 joined runs]: ONE line, under the last-written member's uuid. Its keys:
+      cwd, entrypoint, gitBranch, isSidechain, mergedSendUuids, message, origin, parentUuid, permissionMode, promptId,
+      promptSource, sessionId, timestamp, turnAttributionKey, turnOrigin, turnPosition, type, userType, uuid, version
+    That is a lone prompt's keys (the session's first prompt, and the pasted case below) plus ONE new key,
+    `mergedSendUuids`: the uuids of the earlier members, in order (one entry here). Values: origin {kind: "human"},
+    entrypoint "sdk-ts", promptSource "sdk", turnOrigin "human", userType "external", turnAttributionKey = the line's
+    own uuid. message.content is the joined string. The earlier member has its own replay on the wire and no line in
+    the file.
+  - A not-joined control line [the tool-boundary control, 2 of 2]: no `user` line for either member. Each is an
+    `attachment` row of type `queued_command`. The row has entrypoint "sdk-ts" and no `origin`. The attachment
+    carries origin {kind: "human"} and the keys commandMode, delivery_id, humanTurn, origin, prompt, source_uuid,
+    timestamp, type. `prompt` is the member's whole text, and `source_uuid` is its uuid. The other non-joined `user`
+    lines (every run's first prompt, the pasted envelope, the rewind's anchor prompt) have entrypoint "sdk-ts" and
+    origin {kind: "human"}, with no `mergedSendUuids`.
+  - The joined text [7 of 7]: the members in writing order, exactly one "\n" between, each member's bytes intact (an
+    exact comparison against the frames written). Envelope first: its closing fence is followed by one "\n". As
+    U4b's probes recorded, now with a real ask.
+  - The `last-prompt` row after a joined message: written in 3 of 7 joined runs (end-image 2/2, end-two-envelopes
+    1/2; end-env-first 0/2 and end-prompt-first 0/2 wrote none after the join), and in the rewind run as the
+    rewind's own row. Whole, when written:
+      {"type": "last-prompt", "lastPrompt": <the joined text with each newline a space, cut, closed with "…">,
+       "leafUuid": <a row uuid>, "sessionId": …}
+    lastPrompt is 196 characters for the envelope-first joins, cut inside the result block ("…\"answers\": […").
+    After the rewind it is 201 characters, prompt first, and the row also carries "explicit": true, "rewound": true,
+    "cutUuid": <the joined uuid>. No newline remains in any lastPrompt. When the engine writes this row is not
+    settled by these runs. It came at the end of a turn in the runs that had one, and never between the joined line
+    and its first response.
+  - Two envelopes, no prompt [2 of 2]: JOINED. The text is envelope 1, "\n", envelope 2, each intact. It sits under
+    the SECOND envelope's uuid, with mergedSendUuids [the first's], origin {kind: "human"}. The first envelope is
+    replayed alone under its own uuid with no line.
+  - The tool-boundary control [2 of 2]: not joined. Each member has its own replay and its own queued_command
+    attachment, read inside the running turn, as U4b's two-late runs recorded.
+  - The pasted envelope (the review's case) [2 of 2]: a prompt whose whole text is askSteerText's envelope for an id
+    no ask of the session has, sent with no ask pending. On the file it is an ordinary first-prompt line: the keys
+    above without mergedSendUuids, origin {kind: "human"}, entrypoint "sdk-ts", promptSource "sdk", content the
+    envelope's bytes exactly. Nothing marks it apart from a real answer's line. A real answer's envelope, written
+    alone, would have the same keys.
+  Probe 2 [1 run]: rewind_conversation to the joined uuid, written as src/engine-host/rewind.ts writes it, answered
+    {rewound: true, targetMessageUuid: <the joined uuid>, prefillText: <the joined line's whole text, prompt then
+    envelope, byte for byte>, precedingAssistantUuid: <the joined line's parentUuid, an assistant row>}. The file
+    after it: the rewind's last-prompt row (above), then the anchor prompt's line, whose parentUuid is the joined
+    line's parentUuid. The joined message is cut whole, both members together.
+  Probe 3 [2 of 2]: an envelope (first) and a prompt with an image block JOIN. The joined content is blocks:
+    [{type: "text", text: <the envelope> + "\n"}, <the prompt's own blocks unchanged: its text block, its image
+    block>], on the wire replay and in the file line. The separator is appended to the envelope's text block; there
+    is no separate block for it. The line has mergedSendUuids and origin {kind: "human"}. After it the engine writes
+    an isMeta `user` row (keys include `turnCompanion`) holding "[Image: source: <a scratch path>]".
+  Nothing contradicts the document's decision 5: every joined line's origin is {kind: "human"}. Additions the
+  document does not have: the `mergedSendUuids` key; the image join's form; the last-prompt row not being written
+  after every join.
+
+Method. Engine 2.1.322 (/opt/maws-probe/engines/2.1.322 through vm-run.sh), model haiku (claude-haiku-5-5), the gateway
+route (spikes/protocol-probe/VM.md); MAWS's launch flags, environment and permission mode (auto) as U4b's second
+probes took them (uxwave-common-send-permission.mjs, uxwave-u4b-envelope-end.mjs). Scenario
+scenarios/pass3/uxwave-u704-envelope.mjs:
+  - The `maws` SDK server is declared (appInitialize's sdkMcpServers) and served by the harness with MAWS's tools
+    (p4-maws-tools.json). Its `ask` answers one text block {"status": "asked", "askId": <the request's
+    _meta["claudecode/toolUseId"]>}, as p1-maws-ask-async.jsonl seq 105 records.
+  - The first prompt has the model call mcp__maws__ask with blocking false (two calls in the two-envelope case),
+    then write a story (or run a 30 s foreground shell call for the control).
+  - Each answer is the envelope built at run time by askSteerText from src/shared/maws/ask.ts at this branch's head
+    (bundled with esbuild at the start of each run; the head is in each journal's uxw_case row), for the call's id.
+    It is written as answerAsk writes it (user frame, origin human, priority next) and followed by a meta row
+    maws_ask_answered {askId, toolUseId, answers}.
+  - The prompt member is "Run the shell command `echo KIWI` with the Bash tool, then reply with its output and carry
+    on with what you were doing." It asks for a tool so that the joined turn makes a request after a tool use; the
+    first take, with a text-only member, wrote no last-prompt after the join. In end-image the prompt's content is
+    that text plus an invented 1x1 PNG.
+  - Timings are U4b's: members written 0.8 s into the story's text, each `queued` awaited (end-*). In the control,
+    9.5 s into the shell call the envelope at next, and at 10 s the prompt at next named by interrupt {send_now}.
+  Kept per recording: the journal (every replay whole) and <name>.transcript.jsonl, the engine's file copied whole
+  through the harness's redaction. That redaction rewrites one thing: the engine's own attribution e-mail inside the
+  remote_session_change attachment and the attribution reminder, which read owner@redacted.invalid. Every other
+  byte is the engine's.
+  Fixtures (fixtures/uxwave/), each .jsonl and .transcript.jsonl:
+    u704-end-env-first-{1,2}, u704-end-prompt-first-{1,2}, u704-two-late-env-first-{1,2},
+    u704-end-two-envelopes-{1,2}, u704-rewind-1, u704-end-image-{1,2}, u704-pasted-{1,2}.
+  The names match the document's, with a run suffix.
+  Spend: US$0.043 in all.
+
+Observed (journal seq; file line L).
+  u704-end-env-first-1: ask toolu_…; maws_ask_answered 188; envelope queued 189, prompt queued 191; story result 665;
+    replays 667 (envelope alone) and 672 (joined, under the prompt's uuid, origin human); requesting 671 names both;
+    file L46 the joined line (mergedSendUuids [the envelope's uuid]). -2: 734, 739; L46.
+  u704-end-prompt-first-1: replays 675 (prompt alone) and 680 (joined under the envelope's uuid); L46. -2: 638, 643;
+    L46.
+  u704-end-two-envelopes-1: replays 756 (envelope 1 alone), 761 (joined under envelope 2's uuid); L50, merged
+    [envelope 1]; L55 last-prompt. -2: 818, 823; L48.
+  u704-two-late-env-first-1: the Send now answer {still_queued: [both], send_now: "delivering"}; replays 156 and
+    157, each alone; one turn, result 326 completed; L45 and L48 queued_command (source_uuid each member). -2: 132,
+    133; L43, L46.
+  u704-rewind-1: replays 725 and 730 (joined under the envelope's uuid); joined turn result 766; rewind_conversation
+    answered at 772; L46 the joined line; L54 the rewind's last-prompt (explicit, rewound, cutUuid); L57 the anchor
+    prompt under L46's parent.
+  u704-end-image-1: replays 665 (envelope alone) and 670 (blocks: text envelope+"\n", text, image); L46 the joined
+    line; L47 the isMeta image note; L59 last-prompt. -2: 715, 720; L44, L45, L57.
+  u704-pasted-1 and -2: replay 29 (the envelope text, origin human); L3 its line.

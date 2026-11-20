@@ -21,6 +21,29 @@
     "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
   },
   {
+    "at": "2026-09-29T08:19:53.252Z",
+    "durationMs": 481,
+    "id": "think:msg_011CfXQPCZ4R8kebC3rYuAbF:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "e042328c-efc9-4ae3-bfc3-72a5df984982",
+    "recordedMs": null,
+    "text": "The user is asking me to remember the word \"MANGO\" and reply \"OK\". This seems like a simple request to demonstrate that I can acknowledge something. Let me respond with \"OK\" as requested.",
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
+    "at": "2026-09-29T08:19:53.735Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfXQPCZ4R8kebC3rYuAbF:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "5680ed64-3347-4314-8c00-3bacfeed0f6e",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
     "at": "2026-09-29T08:19:52.577Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
-  },
-  {
-    "at": "2026-09-29T08:19:53.252Z",
-    "durationMs": 481,
-    "id": "think:msg_011CfXQPCZ4R8kebC3rYuAbF:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "e042328c-efc9-4ae3-bfc3-72a5df984982",
-    "recordedMs": null,
-    "text": "The user is asking me to remember the word \"MANGO\" and reply \"OK\". This seems like a simple request to demonstrate that I can acknowledge something. Let me respond with \"OK\" as requested.",
-    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
-  },
-  {
-    "at": "2026-09-29T08:19:53.735Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfXQPCZ4R8kebC3rYuAbF:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "OK",
-    "messageUuid": "5680ed64-3347-4314-8c00-3bacfeed0f6e",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
   },
   {

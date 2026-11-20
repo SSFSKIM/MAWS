@@ -37,6 +37,11 @@ export const ACTIONS = {
   'session.new':          { title: 'New chat',                    chord: 'Cmd+N',        sink: 'menu', menu: 'file', scope: 'app' },   // New chat (2026-10-01): registered with the session creator; disabled until one exists
   'tab.close':            { title: 'Close tab',                   chord: 'Cmd+W',        sink: 'menu', menu: 'file', scope: 'app' },
   'tab.reopen':           { title: 'Reopen closed tab',           chord: 'Cmd+Shift+T',  sink: 'menu', menu: 'file', scope: 'app' },
+  // Edit, after the menu's own items (U6a). UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-
+  // keyboard.md, M2; Interfaces §A; l5-code-08): the terminal holding the keyboard's selection, or with none what its
+  // screen shows, into its session's chat as one pasted block (`tools/terminal/attach.ts`); registered while a terminal
+  // holds the keyboard. No rebinding while build F may run (`isRebindable`)
+  'terminal.attachSelection': { title: 'Attach selection to chat', chord: 'Cmd+Shift+L', sink: 'menu', menu: 'edit', scope: 'app' },
   // View, in its order (U6a; l7-shell-07): Overview, Artifacts, Tabs ▸, Project channel (U11a), the panes, the regions,
   // the side surfaces and More surfaces ▸, the moves between them, then Comments ▸, Appearance ▸ and Usage (accounts.open,
   // in C11's block below)
@@ -75,6 +80,13 @@ export const ACTIONS = {
   // panel's Artifacts record into a main tab ("Move to tab"), as a drag does; refused with the drag's reason. No chords
   'artifact.moveToPanel':    { title: 'Move to side surface',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'artifact.moveToTab':      { title: 'Move to tab',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, Interfaces §A; l7-shell-08): the whole
+  // window larger and smaller in the in-app browser's steps, and back to 100 % (`stores/zoom.ts`); each registered while it
+  // can change the factor. Rows, not menu roles: ⌘0 is the Overview. A group of their own; no rebinding while build F may
+  // run (`isRebindable`)
+  'zoom.in':    { title: 'Zoom In',     chord: 'Cmd+=', sink: 'menu', menu: 'view', scope: 'app' },
+  'zoom.out':   { title: 'Zoom Out',    chord: 'Cmd+-', sink: 'menu', menu: 'view', scope: 'app' },
+  'zoom.reset': { title: 'Actual Size', chord: null,    sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B1 start (2026-10-20; the P4 spec §4.3, Docs' View › Comments): every document's comment view, per user
   // (settings.artifacts.commentsView): Expand draws the cards in the margin, Minimize the icons at the anchors, Hide an
   // empty margin. Unbound by default; U6a: in View › Comments
@@ -85,8 +97,18 @@ export const ACTIONS = {
   'theme.light':          { title: 'Appearance: Light',           chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
   'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
   'theme.system':         { title: 'Appearance: System',          chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
-  // Go, in its order (U6a; l7-shell-07): the palette, the session steps, the tab steps, the region steps
+  // Go, in its order (U6a; l7-shell-07): Back and Forward, the palette and Go to file, the session steps, the tab steps,
+  // the region steps
+  // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, M3; Interfaces §A; l7-shell-09):
+  // the places the window has shown in this run (`keymap/visits.ts`); each registered while there is an entry on its
+  // side. A group of their own at the head of Go; no rebinding while build F may run (`isRebindable`)
+  'go.back':              { title: 'Back',                        chord: 'Cmd+[',        sink: 'menu', menu: 'go',   scope: 'app' },
+  'go.forward':           { title: 'Forward',                     chord: 'Cmd+]',        sink: 'menu', menu: 'go',   scope: 'app' },
   'palette.open':         { title: 'Command palette',             chord: 'Cmd+K',        sink: 'menu', menu: 'go',   scope: 'app' },
+  // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 11): Go to file, the keyboard
+  // in Files' field above the tree; registered while it can end there (`files/finder.ts`). Directly under the palette with
+  // no separator (`GROUP_OF_PREFIX`); no rebinding while build F may run (`isRebindable`)
+  'files.goToFile':       { title: 'Go to file',                  chord: 'Cmd+P',        sink: 'menu', menu: 'go',   scope: 'app' },
   'session.previous':    { title: 'Previous session', chord: 'Cmd+Shift+[', sink: 'menu', menu: 'go', scope: 'app' },
   'session.next':        { title: 'Next session', chord: 'Cmd+Shift+]', sink: 'menu', menu: 'go', scope: 'app' },
   'session.markUnread':  { title: 'Mark session unread', chord: 'Cmd+Alt+U', sink: 'menu', menu: 'go', scope: 'app' },

@@ -21,61 +21,6 @@
     "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
   },
   {
-    "at": "2026-09-29T02:24:23.644Z",
-    "autoDenied": 0,
-    "caption": "Ran 8 commands",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-29T02:24:50.919Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:fe091b0d-b28b-41a8-aed3-39585769623d",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran 8 commands"
-    ],
-    "startedAt": "2026-09-29T02:24:23.750Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 8,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.205216,
-      "denials": [],
-      "durationMs": 27175,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 8
-      },
-      "terminalReason": "completed",
-      "toolCalls": 8,
-      "usage": {
-        "cacheCreationInputTokens": 15650,
-        "cacheReadInputTokens": 293200,
-        "inputTokens": 18,
-        "outputTokens": 796,
-        "thinkingTokens": 85
-      }
-    },
-    "toolCalls": 8,
-    "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
-  },
-  {
     "at": "2026-09-29T02:24:25.592Z",
     "cells": [
       {
@@ -431,6 +376,61 @@
     "messageUuid": "a4e75adf-28c3-4fb1-b0b4-f28564ae5d3e",
     "model": "claude-sonnet-5-5",
     "phase": "answer",
+    "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
+  },
+  {
+    "at": "2026-09-29T02:24:23.644Z",
+    "autoDenied": 0,
+    "caption": "Ran 8 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-29T02:24:50.919Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:fe091b0d-b28b-41a8-aed3-39585769623d",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran 8 commands"
+    ],
+    "startedAt": "2026-09-29T02:24:23.750Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 8,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.205216,
+      "denials": [],
+      "durationMs": 27175,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 8
+      },
+      "terminalReason": "completed",
+      "toolCalls": 8,
+      "usage": {
+        "cacheCreationInputTokens": 15650,
+        "cacheReadInputTokens": 293200,
+        "inputTokens": 18,
+        "outputTokens": 796,
+        "thinkingTokens": 85
+      }
+    },
+    "toolCalls": 8,
     "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
   },
   {

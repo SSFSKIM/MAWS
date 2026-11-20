@@ -4,10 +4,16 @@
 // press (a click, Enter or Space) opens that comment's card in the row's place, one at a time; read, edit, send, remove,
 // a refusal and its retry are the card's own. Past `UNPLACED_ROWS_SHOWN` rows the list scrolls inside the row, so the
 // diff stays in sight; an open card is never cut by that bound.
+//
+// UX wave U5b-2 (§G, Decision Log 37): a comment made on another commit than the scope's stands last, under "This comment
+// is on commit <sha7>." (`REVIEW_COPY.onCommit`), one sentence per commit and file; its short hash is a button that opens
+// Review on that commit at that file by `openCommit`, the act the transcript's chip of such a comment calls.
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { CARD_WIDTH } from '../../../side/card/placement';
 import { editComment } from '../../../side/card/store';
-import { UNPLACED_ORDER } from './comment-place';
+import type { AppSessionId } from '@shared/graph/ids';
+import { UNPLACED_ORDER, UNPLACED_WORDS } from './comment-place';
+import { COMMIT_HASH_BUTTON, openCommit } from './open-commit';
 import { RemoveComment, type UnplacedComment } from './LineComments';
 import { reviewLayout } from './measure';
 
@@ -15,6 +21,7 @@ import { reviewLayout } from './measure';
 export const UNPLACED_ROWS_SHOWN = 3;
 
 export interface UnplacedCommentsProps {
+  appSessionId: AppSessionId; // UX wave U5b-2: the session a commit's hash opens Review for
   passKey: string;
   hostId: string;
   unplaced: readonly UnplacedComment[];
@@ -23,7 +30,7 @@ export interface UnplacedCommentsProps {
   claimFocus(commentId: string): boolean; // a row drawn again after its card went on Escape takes the keyboard (once)
 }
 
-export function UnplacedComments({ passKey, hostId, unplaced, opened, onRow, claimFocus }: UnplacedCommentsProps) {
+export function UnplacedComments({ appSessionId, passKey, hostId, unplaced, opened, onRow, claimFocus }: UnplacedCommentsProps) {
   const list = useRef<HTMLDivElement>(null);
   const [maxHeight, setMaxHeight] = useState<number | null>(null);
 
@@ -52,15 +59,14 @@ export function UnplacedComments({ passKey, hostId, unplaced, opened, onRow, cla
   return (
     <div data-review-unplaced="" className="shrink-0 border-b border-border px-3 py-2">
       <div ref={list} data-review-unplaced-list="" style={maxHeight === null ? undefined : { maxHeight }} className="flex flex-col gap-0.5 overflow-y-auto">
-        {UNPLACED_ORDER.map((sentence) => {
+        {UNPLACED_ORDER.flatMap((sentence) => {
           const own = unplaced.filter((each) => sentence.kinds.includes(each.kind));
-          if (own.length === 0) return null;
-          return (
-            <Fragment key={sentence.name}>
+          return groupsOf(sentence.name, own).map(({ key, commit, path, comments }) => (
+            <Fragment key={key}>
               <p data-review-unplaced-words={sentence.name} className="m-0 py-0.5 text-ui-sm text-fg-muted">
-                {sentence.words}
+                {commit === null ? sentence.words : <OnCommit appSessionId={appSessionId} commit={commit} path={path} />}
               </p>
-              {own.map(({ comment }) =>
+              {comments.map((comment) =>
                 comment.id === opened ? (
                   <div key={comment.id} ref={onRow} data-review-unplaced-item="" data-review-card-row="away" className="whitespace-normal" />
                 ) : (
@@ -68,10 +74,48 @@ export function UnplacedComments({ passKey, hostId, unplaced, opened, onRow, cla
                 ),
               )}
             </Fragment>
-          );
+          ));
         })}
       </div>
     </div>
+  );
+}
+
+interface SentenceGroup {
+  key: string;
+  commit: string | null; // a commit's comments' group: their commit
+  path: string | undefined; // and their file, as that commit's diff names it
+  comments: UnplacedComment['comment'][];
+}
+
+// The comments under one sentence: all of a kind under its sentence; a commit's, one group per commit and file, in the order
+// of each group's oldest comment.
+function groupsOf(name: string, own: readonly UnplacedComment[]): SentenceGroup[] {
+  if (own.length === 0) return [];
+  if (name !== 'on-commit') return [{ key: name, commit: null, path: undefined, comments: own.map((each) => each.comment) }];
+  const groups = new Map<string, SentenceGroup>();
+  for (const { comment, commit } of own) {
+    const key = `${name}\0${commit}\0${comment.anchor.path}`;
+    const group = groups.get(key) ?? { key, commit: commit!, path: comment.anchor.path, comments: [] };
+    group.comments.push(comment);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+// "This comment is on commit <sha7>.", the short hash a button that opens the commit at the comment's file.
+function OnCommit({ appSessionId, commit, path }: { appSessionId: AppSessionId; commit: string; path: string | undefined }) {
+  const words = UNPLACED_WORDS['on-commit'](commit);
+  const short = commit.slice(0, 7);
+  const at = words.indexOf(short);
+  return (
+    <>
+      {words.slice(0, at)}
+      <button type="button" data-review-unplaced-commit="" title={commit} className={COMMIT_HASH_BUTTON} onClick={() => openCommit(appSessionId, commit, path)}>
+        {short}
+      </button>
+      {words.slice(at + short.length)}
+    </>
   );
 }
 

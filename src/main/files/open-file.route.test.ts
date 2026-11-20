@@ -1,7 +1,8 @@
 // The sender's guard and Open File… through main's real router (UX wave U6e,
 // docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, write rule line 2, decision 9, §C; A6; R2, R4),
-// registered as the app registers them (src/main/app.ts): `guardCommand(['files.writeOutside', 'layout.openFile'],
-// appPageOnly)` and the handler of `layout.openFile`, whose grant is main's own call (`invokeOwn`). Electron is faked as
+// registered as the app registers them (src/main/app.ts): `guardCommand(APP_PAGE_ONLY, appPageOnly)` (U6e's two names
+// and, since U6f, the three acts of another machine on a file outside a session's folders) and the handler of
+// `layout.openFile`, whose grant is main's own call (`invokeOwn`). Electron is faked as
 // in the router's suite; the app-window registry and main's page instances are the real modules. The host dispatcher
 // and the connection manager are spied, and a second profile's daemon stands behind the manager as a writer of whatever
 // reaches it, over a scratch file. The page's side is the renderer's own client (src/renderer/src/ipc/client.ts) over a
@@ -100,7 +101,7 @@ beforeEach(async () => {
   const { router, openFile, clients } = m;
   router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, remote, machine: { kind: 'host' } });
   // as src/main/app.ts registers them
-  router.guardCommand(['files.writeOutside', 'layout.openFile'], openFile.appPageOnly(DEV_URL));
+  router.guardCommand(openFile.APP_PAGE_ONLY, openFile.appPageOnly(DEV_URL));
   router.registerMainHandler('layout.openFile', (input, ctx) => {
     opened.push({ input, target: ctx.target });
     return openFile.openChosenFile(input, ctx, {
@@ -215,6 +216,78 @@ describe('the sender’s guard: files.writeOutside and layout.openFile only for 
     expect(opened).toEqual([]);
     expect(pick).not.toHaveBeenCalled();
     expect(dispatchToHost).not.toHaveBeenCalled();
+  });
+});
+
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, the write rule's line 2,
+// decision 7; M2's "The guard"): the open, the chooser's listing and the pick of a file outside a session's folders on
+// another machine are the app window's alone, as its save is, before anything is forwarded
+describe('the sender’s guard: files.readOutside, files.listOutside and files.chooseOutside', () => {
+  const NEW: Array<[string, Record<string, unknown>]> = [
+    ['files.readOutside', { appSessionId: 'app-1', path: '/srv/elsewhere/notes.txt' }],
+    ['files.listOutside', { appSessionId: 'app-1', path: '/srv/elsewhere' }],
+    ['files.chooseOutside', { appSessionId: 'app-1', path: '/srv/elsewhere/notes.txt' }],
+  ];
+
+  it('are the guard’s, with U6e’s two, U6b-4a’s Open in, U11’s skill file and U6b-4c’s follow, as the app registers it', () => {
+    expect([...m.openFile.APP_PAGE_ONLY].sort()).toEqual(['customization.skillFile' /* UX wave U11 */, 'files.chooseOutside', 'files.follow' /* UX wave U6b-4c */, 'files.listOutside', 'files.readOutside', 'files.writeOutside', 'layout.openFile', 'layout.openIn' /* UX wave U6b-4a */]);
+    expect(readFileSync(join(import.meta.dirname, '../app.ts'), 'utf8')).toContain('guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl))');
+  });
+
+  it('are refused forbidden_sender, calling neither dispatcher, from a subframe, a window that is no app window and through dispatchLocal', async () => {
+    const top = appWindow();
+    const subframe = { sender: top.event.sender, senderFrame: { url: DEV_URL, parent: top.event.senderFrame } };
+    const presentation = windowAt().event;
+    const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
+    for (const [name, input] of NEW) {
+      const refused = { ok: false, error: { code: 'forbidden_sender', message: `${name} may only be invoked by the app window` } };
+      await expect(invoke(subframe, name, input), `${name} from a subframe`).resolves.toEqual(refused);
+      await expect(invoke(presentation, name, input), `${name} from a window that is no app window`).resolves.toEqual(refused);
+      await expect(invoke(presentation, name, input, SECOND_PROFILE), `${name} aimed at another machine`).resolves.toEqual(refused);
+      await expect(m.router.dispatchLocal(name as CommandName, input as never, { client: remoteClient, target: LOCAL }), `${name} through dispatchLocal`).resolves.toEqual(refused);
+    }
+    expect(dispatchToHost).not.toHaveBeenCalled();
+    expect(remote).not.toHaveBeenCalled();
+  });
+
+  it('are forwarded once, their input unchanged, from the app window’s top frame (the control)', async () => {
+    remote.mockImplementation(async () => ({ ok: true, value: { status: 'granted', path: '/srv/elsewhere/notes.txt' } }) as CommandResult<CommandName>);
+    for (const [name, input] of NEW) {
+      const { event } = appWindow();
+      await expect(invoke(event, name, input), name).resolves.toMatchObject({ ok: true });
+      expect(dispatchToHost).toHaveBeenLastCalledWith('machine', name, input, expect.objectContaining({ id: `page:${event.sender.id}.1` }));
+      await expect(invoke(event, name, input, SECOND_PROFILE), `${name} to another machine`).resolves.toMatchObject({ ok: true });
+      expect(remote).toHaveBeenLastCalledWith(SECOND_PROFILE, name, input, expect.anything());
+    }
+    expect(dispatchToHost).toHaveBeenCalledTimes(NEW.length);
+  });
+});
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, R1, X1.1): the follow of a link
+// writes an admission a save may use, so it is the app window's alone, as the outside save is, before anything is
+// forwarded; it is offered to no other machine, and the daemon refuses any that reaches it
+describe('the sender’s guard: files.follow', () => {
+  const follow = { appSessionId: 'app-1', path: '/srv/elsewhere/notes.txt', from: { file: '/work/notes/guide.md' } };
+  const refused = { ok: false, error: { code: 'forbidden_sender', message: 'files.follow may only be invoked by the app window' } };
+
+  it('is refused forbidden_sender, calling neither dispatcher, from main itself, a window that is no app window, a subframe and through dispatchLocal', async () => {
+    const top = appWindow();
+    const subframe = { sender: top.event.sender, senderFrame: { url: DEV_URL, parent: top.event.senderFrame } };
+    const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
+    await expect(m.router.invokeOwn('files.follow', follow as never, { client: m.clients.mainClient, target: LOCAL }), 'main itself').resolves.toEqual(refused);
+    await expect(invoke(windowAt().event, 'files.follow', follow), 'a presentation window’s page').resolves.toEqual(refused);
+    await expect(invoke(subframe, 'files.follow', follow), 'a subframe').resolves.toEqual(refused);
+    await expect(m.router.dispatchLocal('files.follow', follow as never, { client: remoteClient, target: LOCAL }), 'through dispatchLocal').resolves.toEqual(refused);
+    expect(dispatchToHost).not.toHaveBeenCalled();
+    expect(remote).not.toHaveBeenCalled();
+  });
+
+  it('is forwarded once, its input unchanged, from the app window’s top frame (the control)', async () => {
+    dispatchToHost.mockImplementation(async () => ({ ok: true, value: { status: 'linked' } }) as CommandResult<CommandName>);
+    const { event } = appWindow();
+    await expect(invoke(event, 'files.follow', follow)).resolves.toEqual({ ok: true, value: { status: 'linked' } });
+    expect(dispatchToHost).toHaveBeenCalledExactlyOnceWith('machine', 'files.follow', follow, expect.objectContaining({ id: `page:${event.sender.id}.1` }));
+    expect(remote).not.toHaveBeenCalled();
   });
 });
 

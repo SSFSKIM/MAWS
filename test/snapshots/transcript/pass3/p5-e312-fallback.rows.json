@@ -21,6 +21,29 @@
     "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
   },
   {
+    "at": "2026-10-29T06:55:23.475Z",
+    "attempt": null,
+    "id": "error:replay:journal:13:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "notice",
+    "severity": "notice",
+    "text": "Switched to Haiku 5.5 because claude-e312-no-such-model is not available",
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
+    "at": "2026-10-29T06:55:25.243Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CgW6D2SwbCpYkDg7o6oQK:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "5dedaad1-c77d-4cc5-9c85-034d132c4afb",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
     "at": "2026-10-29T06:55:22.413Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
-  },
-  {
-    "at": "2026-10-29T06:55:23.475Z",
-    "attempt": null,
-    "id": "error:replay:journal:13:0",
-    "kind": "error",
-    "lostAttentionCount": null,
-    "scope": "notice",
-    "severity": "notice",
-    "text": "Switched to Haiku 5.5 because claude-e312-no-such-model is not available",
-    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
-  },
-  {
-    "at": "2026-10-29T06:55:25.243Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CgW6D2SwbCpYkDg7o6oQK:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "OK",
-    "messageUuid": "5dedaad1-c77d-4cc5-9c85-034d132c4afb",
-    "model": "claude-haiku-5-5",
-    "phase": "answer",
     "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
   },
   {

@@ -12,6 +12,7 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { pathTarget } from '../../ipc/machine';
 import { mentionNode, textNode } from '../editor/doc';
+import { MENTION_BREAKS, oneLine } from '../editor/mention-text';
 import { mentionLabel } from '../editor/recall';
 import { atItems, type AtItem } from './items';
 import { GroupLabel, Listbox, useDebounced, useListKeys, type PopupItem, type PopupProps } from './popup';
@@ -38,7 +39,7 @@ function rowOf(item: AtItem): Row {
     disabled: false,
     item,
     apply: (editor, range) => {
-      editor.chain().focus().deleteRange(range).insertContentAt(1, `/${item.name} `).run();
+      editor.chain().focus().deleteRange(range).insertContentAt(1, textNode(`/${oneLine(item.name)} `)).run(); // board ticket 739: text, one line
     },
   };
 }
@@ -65,10 +66,13 @@ function useFiles(appSessionId: AppSessionId, cwd: string, additional: readonly 
       roots.map(async (root) => {
         const result = await ipc.invoke('git.lsFiles', { directory: root, query: q, limit: FILE_LIMIT }, pathTarget(machine, appSessionId));
         if (!result.ok) return [];
-        return result.value.paths.map((path): AtItem => {
+        // board ticket 739: a path that holds a control character, the root's included, is offered by no row: its mention
+        // would name no file
+        return result.value.paths.flatMap((path): AtItem[] => {
           const directory = path.endsWith('/');
           const bare = directory ? path.slice(0, -1) : path;
-          return { group: 'files', name: bare, path: pathMode ? `${root.replace(/\/$/, '')}/${bare}` : bare, directory };
+          const mentioned = pathMode ? `${root.replace(/\/$/, '')}/${bare}` : bare;
+          return MENTION_BREAKS.test(mentioned) ? [] : [{ group: 'files', name: bare, path: mentioned, directory }];
         });
       }),
     ).then((lists) => {

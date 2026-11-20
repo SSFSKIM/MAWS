@@ -129,6 +129,21 @@
 // U13a's UC-14 coverage table.
 // UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
 // other build's window as the row the build that reads the frames makes; its block is at the end of this file.
+// UX wave U6b-2: (file frame, both ways), `files.read`'s `raw` and its answer's `identity` across a daemon of each build;
+// its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
+// UX wave U6f: (another machine's outside file, the peer as that machine), this build's app reaching a `mawsd` of the
+// peer's build as the other machine over RL2; its block is after U6e's, and its row is in U13a's UC-14 coverage table.
+// UX wave U5b: (reads, on the peer's daemon), (source control, from the peer), (a commit's comment, to the peer) and (a
+// commit's side thread, to the peer), no new stored form: the git reads an older daemon lacks, its acting pane over this
+// build's daemon, and a commit's comment in a message's words and a side thread's lineage; their block is at the end of
+// this file, and their row is in U13a's UC-14 coverage table.
+// UX wave U2b: (to-human, from the peer) and (to-human, to the peer), the to-human view across the cutover (who draws, the
+// launch's reservation, the summaries' switch); their block is at the end of this file, and their rows are in U13a's
+// UC-14 coverage table.
+// UX wave U6b-4c: (a followed link, both ways), the daemon's records of followed links, a profile file neither older
+// build names, across build F and build M; its block is after U6e's, and its row is in U13a's UC-14 coverage table.
+// (outside file, on the peer's daemon) gains its step: a link in a Markdown file is followed to the peer's
+// `unknown_command`, and the tab shows the first notice.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -138,7 +153,8 @@
 // report as a skipped check naming the wire (skipWireSkew), and everything else runs, the stored forms read both ways first.
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
 import { createHash, randomUUID } from 'node:crypto'; // UX wave U6e: createHash, the files service's content hash
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'; // UX wave U6f: mkdtempSync, realpathSync
+import { tmpdir } from 'node:os'; // UX wave U6f: the two-machine scene's scratch
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -166,17 +182,33 @@ import { expectMockCustody } from './support/connector-direct-oauth';
 import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from './support/connector-oauth';
 import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
 import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
-import { REPO_ROOT } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch'; // UX wave U6f: launchMaws, A of the two-machine scene
 import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
-import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surface /* UX wave U6b-3a */, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
+import { newChatIn, openProject, showProjectList, sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf; UX wave U5b: a new chat, the parent of a side thread
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { adoptedOf, attentionOf, eventsOf, firstPrompt /* board ticket 711 */, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
-import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
+import { stubSpec, type StubEngine } from './support/stub-engine'; // P5 O16 M3c
 import { askFixture } from './support/maws-tools'; // board ticket 711: the recorded ask with ids the model chose
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
+import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's anchor on a commit's line
+import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
+import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
+import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
+import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // UX wave U2b: the advertisement's variable
+import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '../src/shared/owner/folds'; // UX wave U2b: the summaries' value
+import { installToHumanPlugin } from '../test/support/to-human-plugin'; // UX wave U2b: the plugin's style, its installation and its declaration
+import { transcriptSeed } from '../test/support/r3-surface'; // UX wave U2b: a transcript of invented rows
+import { B_NAME, startRemoteScene, type RemoteScene } from './support/remote-scene'; // UX wave U6f: the peer as the other machine
+import { addressOf } from '../src/shared/machine/address'; // UX wave U6f
+import { machineProjectId } from '../src/shared/machine/project-ids'; // UX wave U6f: a plain folder's project on B
+import type { MachineRef } from '../src/shared/machine/ref'; // UX wave U6f
+import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
+import { exchangeJournal } from './support/to-human-replay'; // UX wave U2b: the live launch's turn (the cross-build scenes' fix)
+import { zoomOfPage, zoomTo } from './support/zoom'; // UX wave U6b-5b: the window's zoom
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1314,6 +1346,58 @@ test('(export folder) the last export’s folder, kept as main’s layout key, s
   }
 });
 
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M3 "(zoom, both ways)"; B10's relaunch and
+// B12; UC-14): the window's zoom, main's own layout key `window.zoom` (`{ version: 1, factor }`, absent at 100 %), which a
+// build that does not name the key loads with the file and writes back whole with its own keys. This build zooms to
+// 125 % through View's items, and layout.json holds the key (polled from the file); the peer launches on the profile,
+// folds its sidebar from View's item so that it writes its layout whole (`regions`; every build has the fold, where U7b
+// retired the library's tab), and quits: the file still holds the key as written, and
+// the peer's page read 1 (its `getZoomFactor()` in main; this build's zoom is isolated, so Chromium kept none of it);
+// this build launches again at 125 % (main's factor and the window's zoom store). Skipped only for a peer whose
+// LayoutKeySchema names the key (`layoutSchemaNames`, U7a's form of `namesExportFolder`): a skipped scene is not
+// evidence. The runs of record are against build F and build M (`--peer-exact f1852de3a`, `--peer-exact 2c7044231`),
+// the master this landing merges into, and master at `b89d6d1d7`; none of the four names the key. It replaces M1's
+// "(zoom probe)", whose lines FINDINGS.md keeps.
+const WINDOW_ZOOM_KEY = 'window.zoom';
+// The factor main holds for the app's own window (the visible one, as the scenes' other helpers find it).
+const mainFactorOf = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents.getZoomFactor());
+
+test('(zoom, both ways) the window’s zoom, kept as main’s layout key, survives the peer’s launch on the profile, which does not name the key and opens at 100 %, and this build opens at it again', async () => {
+  const { here, peer } = builds();
+  test.skip(layoutSchemaNames(peer, WINDOW_ZOOM_KEY), `the peer (wire ${wireOf(peer)}) names ${WINDOW_ZOOM_KEY} in its LayoutKeySchema: there is no build that lacks the key to cross`);
+  await withScratch('xb-window-zoom', async (s) => {
+    // this build: 125 % through View's items, and the key in layout.json
+    const first = await s.launch();
+    await s.ready(first.page);
+    await zoomTo(first.maws.app, first.page, 1.25);
+    await expect.poll(() => storedLayout(s.userData)[WINDOW_ZOOM_KEY], { message: `${here.label} stored the zoom` }).toEqual({ version: 1, factor: 1.25 });
+    expect(await mainFactorOf(first), `${here.label}'s page at 125 %`).toBe(1.25);
+    await s.quit(first);
+
+    // the peer on the same profile: its page at 100 %; its sidebar folded, so its layout store writes the file whole; a quit
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    const theirs = await mainFactorOf(old);
+    expect(theirs, `${peer.label} opens at 100 %`).toBe(1);
+    await old.maws.app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.setBounds(bounds), WIDE);
+    expect(sidebarFolded(s.userData), 'the sidebar not folded before the peer folds it').not.toBe(true);
+    await menu(old.maws.app, 'sidebar.toggle');
+    await expect.poll(() => sidebarFolded(s.userData), { timeout: 20_000, message: `${peer.label} wrote its fold to layout.json` }).toBe(true);
+    await s.quit(old);
+    const written = storedLayout(s.userData);
+    expect(sidebarFolded(s.userData), `${peer.label} wrote layout.json`).toBe(true);
+    expect(written[WINDOW_ZOOM_KEY], `${peer.label} wrote the file back with the key it does not name`).toEqual({ version: 1, factor: 1.25 });
+
+    // this build again: the window at 125 % as it opens
+    const again = await s.launch();
+    await s.ready(again.page);
+    expect(await mainFactorOf(again), `${here.label} opens at the stored factor`).toBe(1.25);
+    await expect.poll(() => zoomOfPage(again.page), { message: `${here.label}'s zoom store reads the stored factor` }).toBe(1.25);
+    await s.quit(again);
+    record([`${WINDOW_ZOOM_KEY}: ${here.label} (wire ${wireOf(here)}) stored 1.25; ${peer.label} (wire ${wireOf(peer)}) opened at ${theirs} and wrote layout.json with the key kept; ${here.label} opened again at 1.25`]);
+  });
+});
+
 // P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
 // architect's rulings D29 and D32). This build's app on the daemon shape leaves its private `mawsd` running the spine
 // over a post-D profile (the index at 14, the settings split); an O2-era app (the peer, before O3-A: it takes no
@@ -1826,6 +1910,58 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | file (a Files tab, a main `file` tab)         | pin, and leaves the grants file's bytes as they were  | only by an agent's open, which no scene here       |
 //   |                                               |                                                       | replays; both peers keep a tab's params whole      |
 //   |                                               |                                                       | (U6b-1's row)                                      |
+//   | U6b-2: nothing stored. On the wire,           | (file frame, both ways): on the peer's mawsd this     | the second half: the peer's app on this build's    |
+//   | `files.read`'s `raw` and its answer's         | build's window draws the PDF's row, with the          | unit mawsd draws its row as it always did, Open    |
+//   | `identity` (`src/shared/ipc/schema/files.ts`) | sentence for a service that cannot serve it, and      | externally reaching the seam, nothing refused. A   |
+//   |                                               | no frame; the peer's daemon drops `raw`, refuses      | peer from before O4 is refused by this build's     |
+//   |                                               | nothing, and its Open externally reaches the seam;    | mawsd: "not run: <reason>", held by                |
+//   |                                               | on this build's own mawsd the tab draws the PDF       | service.test.ts "a plain read's answer is what it  |
+//   |                                               |                                                       | was" and files.test.ts "an answer with identity is |
+//   |                                               |                                                       | read by a reader that does not know it as the      |
+//   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
+//   | UX wave U5b-2: Review's and Source control's  | no new stored form; the reads, lineage and the        | no new stored form; the same block, below          |
+//   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
+//   | `owner_channel_sessions.advertised` (UX wave  | (to-human, to the peer): the peer opens the index,    | (to-human, from the peer): a launch the peer       |
+//   | U2b): the launch's reservation, an added      | lists the session, draws its own bar and record row,  | decided at 8 reads as MAWS's to draw (`drawnBy`    |
+//   | nullable column                               | launches the session again (8, no summaries value),   | `maws`, the mirror); the return of (to-human, to   |
+//   |                                               | records its launch and keeps it running; the column   | the peer), read while the peer's launch still      |
+//   |                                               | is left as this build wrote it                        | runs: the reservation, bound to this build's       |
+//   |                                               |                                                       | earlier launch, counts for nothing (`maws`); after |
+//   |                                               |                                                       | this build's last resume it is bound to the new    |
+//   |                                               |                                                       | launch                                             |
+//   | `index_meta`, `toHuman.foldSummaries` (UX     | (to-human, to the peer): this build turns the switch  | the return of (to-human, to the peer): the mods    |
+//   | wave U2b): the summaries' switch, a key of    | off before it quits; F opens the index, lists the     | list's row still reads `summaries: false`, and     |
+//   | the index's own facts                         | session and launches it, and the key is left as it    | this build's next launch carries                   |
+//   |                                               | was                                                   | TO_HUMAN_FOLD_SUMMARIES=off                        |
+//   | U6b-3a: nothing stored. On the wire (its      | (what changed, both ways), after its same-build       | the second half: the peer's app on this build's    |
+//   | minor 56, over U2b's 55 at the chain's        | control: on the peer's mawsd this build's window      | mawsd lists the folder, shows the dirty submodule  |
+//   | merge, Decision Log 13):                      | lists the folder with nothing dimmed, draws the       | and then a second change in its own Review,        |
+//   | `files.list`'s entries' `ignored`, and a      | dirty submodule as a file's row, and a second         | refuses no answer and no event, and its log names  |
+//   | status entry's `submodule` and                | change reaches the Changed group by the peer's        | `ignored` and `submodule` as dropped (its          |
+//   | `worktreeKind`, in answers and in             | `git.changed`                                         | repository sends no `worktreeKind`). Every peer    |
+//   | `git.changed`                                 |                                                       | the gate crosses runs both halves: none is skipped |
+//   | U6f: nothing stored on this Mac; on the other | (another machine's outside file, the peer as that     | not staged: an older app sends none of the four    |
+//   | machine U6e's grants file, ledger records of  | machine): the peer's `mawsd` as B lists no            | acts, whose names its registry does not hold;      |
+//   | four names, log lines; sent: four acts behind | `rl2.outside-files`, so this build's app sends it     | the endpoint's half is test/endpoint/outside-      |
+//   | `rl2.outside-files`                           | none: Open File… and a link say to update B, B's      | offers.test.ts over both builds' committed tables  |
+//   |                                               | ledger and log hold nothing of them, a save inside    |                                                    |
+//   |                                               | B's checkout lands. Both peers (F, M) run it          |                                                    |
+//   | U6b-4c: `sessions/file-links.json`, a profile | (a followed link, both ways), for F and for M: the    | the return: both files read and savable again, the |
+//   | file the peer does not know; the tab of a     | peer draws its Files tree beside the chat and no      | one beside the chat saving once more; the links    |
+//   | followed file (a Files tab, a main `file`     | viewer, the main tab's refusal, refuses no value,     | file as this build left it. An older window on     |
+//   | tab)                                          | writes its pin, and leaves the links file's bytes as  | this build's daemon is not staged; at the schema   |
+//   |                                               | they were. On the wire, `files.follow`: (outside      | (test/cross-build/files-schema.test.ts,            |
+//   |                                               | file, on the peer's daemon), for F and for M: the     | src/shared/ipc/schema.test.ts): F's and M's        |
+//   |                                               | click shows the first notice and a direct             | readers drop the whole `outside` object (F also    |
+//   |                                               | `files.follow` through the page's bridge answers      | `named`), while a wave reader from before U6b-4c   |
+//   |                                               | unknown_command; that the click sends the follow      | that knows `outside` drops only `outside.linked`   |
+//   |                                               | before its read is held by the unit (viewer.test.tsx, | and keeps `why: 'result'`, the file read-only      |
+//   |                                               | W1 (b) and K11), since the page cannot observe its    |                                                    |
+//   |                                               | own click's call                                      |                                                    |
+//   | U6b-5b: the window's zoom, `window.zoom`      | (zoom, both ways): F opens at 100 % (its page's       | the return: this build opens at 125 %, in main's   |
+//   | in `layout.json` (`{ version: 1, factor }`,   | factor in main), and after it opens a tab the file    | factor and in the window's zoom store, the key as  |
+//   | main's own key, absent at 100 %)              | it writes keeps the key as this build wrote it        | this build wrote it. Run against F, M, the master  |
+//   |                                               |                                                       | this landing merges into and master at b89d6d1d7   |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3620,7 +3756,14 @@ function filesBeside(s: Scratch, address: string): { id: string; file: string | 
   });
 }
 // Files' tree in this build's side column, a row of it clicked as a person clicks it
-const treeRow = (page: Page, name: string) => sideColumn(page).getByRole('treeitem', { name, exact: true });
+// UX wave U6b-3a (Decision Log 14, ruling 1): a Files tree row by its name, which ends with the row's state in this build
+// when the row carries a mark (a letter's word, "Contains changes", "Ignored by git"), and by its `data-kind`, which the
+// tree rows of every build carry and a row of this build's Changed group (a `treeitem` whose name also begins with the
+// file's) does not
+const ROW_STATES = ['Modified', 'Added', 'Untracked', 'Deleted', 'Renamed', 'Conflict', 'Contains changes', 'Ignored by git'];
+const namedRow = (scope: Locator, name: string) =>
+  scope.getByRole('treeitem', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: (?:${ROW_STATES.join('|')}))*$`) }).and(scope.locator('[data-kind]'));
+const treeRow = (page: Page, name: string) => namedRow(sideColumn(page), name);
 async function addFilesTab(page: Page): Promise<void> {
   await sideGroup(page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Files', exact: true }).click();
@@ -3704,7 +3847,7 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     const pinned = sideOf(s, address2).pinnedIds[0];
     await showSession(old.page, id, `session:${address}`);
     await showTool(old.page, 'Files');
-    await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'first.txt', exact: true }).click({ timeout: 20_000 });
+    await namedRow(toolBody(old.page, 'Files'), 'first.txt').click({ timeout: 20_000 }); // UX wave U6b-3a: a name with its state allowed
     await expect.poll(async () => mainFileIds(await stripIds(old.page)).some((tabId) => tabId.endsWith(`/${first}`)), { timeout: 20_000, message: `${peer.label} opens the first file as a main tab` }).toBe(true);
     await expect.poll(() => JSON.stringify(layoutJson(s)['main.tabs'] ?? null).includes(`/${first}`), { timeout: 20_000, message: `${peer.label} writes its main tab` }).toBe(true);
     expect(filesBeside(s, address).map((tab) => tab.file), `${peer.label} kept the first session's three tabs`).toEqual([third, other, first]);
@@ -3941,7 +4084,10 @@ function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
   return { which, why: '' };
 }
 const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
-const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
+const FILES_REFUSED = "Refused: path outside the session's directories"; // each older build's files service and viewer copy
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; acceptance L7): this build's viewer reads
+// the same refusal as the first notice, its headline first; the service's words stay in its small line
+const NOTICE_OUTSIDE = 'This file is outside the folders this session works in.';
 // An agent's row that links `text`'s paths, appended to the session's transcript (U6c's form: the agent's own text)
 function appendReply(path: string, sid: string, cwd: string, text: string): void {
   const rows = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown });
@@ -3970,6 +4116,10 @@ async function typeAndSave(run: Run, viewer: Locator, path: string, text: string
   await expect(viewer).toHaveAttribute('data-dirty', 'false');
 }
 const grantsOf = (s: Scratch) => join(s.userData, 'sessions', 'file-grants.json');
+// UX wave U6b-4c: the daemon's records of followed links, a profile file neither older build names; a Markdown file's
+// text whose inline links name each of `paths`, as written
+const linksOf = (s: Scratch) => join(s.userData, 'sessions', 'file-links.json');
+const followedGuide = (...paths: string[]) => `# An invented guide\n\n${paths.map((path, n) => `- [link ${n + 1}](${path})`).join('\n')}\n`;
 
 test('(an outside file, both ways) two files this build chose with Open File…, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the grants file as it was; this build reads both again and saves', async () => {
   const { here, peer } = builds();
@@ -4054,7 +4204,13 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
     mkdirSync(outside);
     const [linked, chosen] = [join(outside, 'linked.txt'), join(outside, 'chosen.txt')];
     for (const path of [linked, chosen]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
-    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}).`);
+    // UX wave U6b-4c: a Markdown file of the session's folder linking a file outside it and one beside it
+    const followed = join(outside, 'followed.txt');
+    writeFileSync(followed, OUTSIDE_TEXT('followed.txt'));
+    const [guide, inside] = [join(s.repo, 'guide.md'), join(s.repo, 'inside.txt')];
+    writeFileSync(guide, followedGuide(followed, 'inside.txt'));
+    writeFileSync(inside, 'An invented file inside the session’s folder.\n');
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}) and [the guide](${guide}).`);
     await withUnit(s, peer, 'xb-u6e-unit', async (unit) => {
       const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}), pid ${unit.pid}`];
       const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
@@ -4069,7 +4225,10 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       await chip.click();
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
       if (known.which === 'dropsNamed') {
-        await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
+        const refusal = viewer.locator('[data-refusal]');
+        await expect(refusal.locator('p').first(), 'F’s daemon drops `named`: the file is refused, as F refuses it, and this build’s notice says why').toHaveText(NOTICE_OUTSIDE, { timeout: 20_000 });
+        await expect(refusal).toHaveAttribute('data-notice-cause', 'outside');
+        await expect(refusal.locator('[data-notice-detail]'), 'the service’s own words, small').toHaveText("path outside the session's directories");
       } else {
         await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
         await expect(viewer.locator('[data-read-only="outside"]'), 'with no `outside`, held read-only (W6)').toBeVisible();
@@ -4088,12 +4247,295 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       const answer = await invoke(run.page, 'files.writeOutside', { appSessionId: id, path: linked, real: linked, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(linked)).digest('hex') });
       expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
+
+      // UX wave U6b-4c (§H): a link in a shown Markdown file is followed first (`files.follow`), which the peer's daemon
+      // does not know: the follow settles as one that found nothing, the read is sent, and the peer's refusal shows
+      // U6b-4b's first notice (master's daemon too: its transcript links the guide, not the file the guide links). The proof
+      // is split: the page cannot observe what its own click sends (its bridge is contextBridge's and cannot be wrapped,
+      // and neither main nor either peer's mawsd logs an unknown command), so that the click sends the follow before its
+      // read is held by the unit (viewer.test.tsx, W1 (b) and K11, over the fake disk's older daemon), and the peer's
+      // answer to the follow by the direct call through the page's bridge below. A link to a file inside the folders opens.
+      const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
+      const openGuide = async () => {
+        await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();
+        await expect(guideViewer.locator('[data-markdown-view]'), 'the guide drawn as Markdown beside the chat').toBeVisible({ timeout: 20_000 });
+      };
+      await openGuide();
+      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][title="${followed}"]`).click();
+      const followedNotice = sideColumn(run.page).locator(`[data-file-viewer][data-path="${followed}"] [data-refusal]`);
+      await expect(followedNotice.locator('p').first(), 'the peer refuses the file the guide links: the first notice').toHaveText(NOTICE_OUTSIDE, { timeout: 20_000 });
+      await expect(followedNotice).toHaveAttribute('data-notice-cause', 'outside');
+      expect(await invoke(run.page, 'files.follow', { appSessionId: id, path: followed, from: { file: guide } }), 'the peer’s daemon answers the follow unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
+      await openGuide();
+      await guideViewer.locator('[data-markdown-view] [data-chip="path"][title="inside.txt"]').click();
+      await expect(sideColumn(run.page).locator(`[data-file-viewer][data-path="${inside}"] .cm-content`), 'a link to a file inside the folders opens').toContainText('inside the session’s folder', { timeout: 20_000 });
+      expect(existsSync(linksOf(s)), 'nothing recorded').toBe(false);
       expect(run.maws.consoleErrors()).toEqual([]);
-      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written; a Markdown file's link: files.follow unknown_command, the first notice; its link inside the folders opens`);
       await s.quit(run);
       record(said);
     });
   });
+});
+
+// ---- UX wave U6b-4c: a followed link, the two older builds (UC-14) ----------------------------------------------------
+// U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, "What is stored and sent"; §H) stores one
+// profile file neither older build names, `sessions/file-links.json` (the links the daemon found by `files.follow`, per
+// session), and nothing new in a tab: the tab of a followed file is a Files tab or a main `file` tab of U6b-1's shape.
+// Its peers are U6e's, told by the same marks (`u6ePeer`): build F and a master from before U6e, neither of which knows a
+// grant or a link record.
+//   (a followed link, both ways)  this build follows a link in a Markdown file of the session's folder to two text files
+//                                 outside it, saves the first beside the chat and moves the second to the main area, and
+//                                 quits; the peer, on its own daemon, draws its Files tree beside the chat and no viewer,
+//                                 in the main tab the refusal it could always give (its transcript links the guide, not
+//                                 the files the guide links), refuses no layout value, pins that tab so that it writes,
+//                                 and quits; the links file's bytes are what they were; this build reads both files
+//                                 again, savable, and the one beside the chat saves once more.
+test('(a followed link, both ways) two files a Markdown file links, followed by this build, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the links file as it was; this build reads both again and saves', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.setTimeout(300_000);
+  await withScratch('xb-u6b4c-both', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) follows two links of a Markdown file to files outside the session's folders; ${peer.label} (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}) reads the profile`];
+    const outside = join(s.root, 'outside'); // beside the repository and the profile, under neither
+    mkdirSync(outside);
+    const [beside, inMain] = [join(outside, 'beside.txt'), join(outside, 'in-main.txt')];
+    for (const path of [beside, inMain]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+    const guide = join(s.repo, 'guide.md');
+    writeFileSync(guide, followedGuide(beside, inMain));
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Start with [the guide](${guide}).`);
+
+    // this build: the guide opened from the transcript's link; each of its links followed, the first edited and saved
+    // beside the chat, the second moved to the main area
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const machine = await localRef(run.page);
+    const mainTabId = `file:${machine}:${inMain}`;
+    await showSession(run.page, id, `session:${address}`);
+    const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
+    const follow = async (path: string): Promise<Locator> => {
+      await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();
+      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][title="${path}"]`).click({ timeout: 20_000 });
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${path}"]`);
+      await expect(viewer, `${basename(path)} followed and beside the chat, savable`).toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+      return viewer;
+    };
+    await typeAndSave(run, await follow(beside), beside, 'Saved by this build.');
+    await (await follow(inMain)).locator('[data-move-to-main]').click();
+    await expect(mainTabById(run.page, mainTabId), 'the second followed file a main tab, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect.poll(() => (existsSync(linksOf(s)) ? Object.values((JSON.parse(readFileSync(linksOf(s), 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions).flat().map((entry) => entry.real).sort() : []), { timeout: 20_000, message: 'the two links recorded in the profile' }).toEqual([beside, inMain].sort());
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const links = readFileSync(linksOf(s));
+    const saved = readFileSync(beside, 'utf8');
+    said.push(`  ${here.label}: ${basename(beside)} followed and saved beside the chat, ${basename(inMain)} followed and a main tab; ${links.length} bytes of link records`);
+
+    // the peer: the main tab its refusal (no older daemon knows a link record), pinned so that it writes; under the
+    // session, its Files surface with its tree and no viewer of the file beside the chat
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await mainTabById(old.page, mainTabId).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"] [data-refusal]`), `${peer.label} refuses the followed file it cannot know`).toContainText(FILES_REFUSED, { timeout: 20_000 });
+    await pinTab(old.page, mainTabId);
+    await expect.poll(() => pinnedIn((layoutJson(s)['main.tabs'] ?? null) as StoredSets | null), { timeout: 20_000, message: `${peer.label} writes main.tabs with its pin` }).toContain(mainTabId);
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await expect(toolBody(old.page, 'Files').getByRole('treeitem').first(), `${peer.label}'s Files surface draws its tree`).toBeVisible({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-file-viewer][data-path="${beside}"]`), `${peer.label} draws no file beside the chat`).toHaveCount(0);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(readFileSync(linksOf(s)), `${peer.label} left the links file as it was`).toEqual(links);
+    expect([readFileSync(beside, 'utf8'), readFileSync(inMain, 'utf8')], `${peer.label} wrote neither file`).toEqual([saved, OUTSIDE_TEXT(basename(inMain))]);
+    said.push(`  ${peer.label}: ${basename(inMain)} refused in its main tab and pinned, its Files tree under the session, nothing refused; the links file untouched`);
+
+    // this build again: the main tab reads the file, savable; the one beside the chat shows the saved text and saves again
+    const back = await s.launch();
+    await s.ready(back.page);
+    await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
+    const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
+    await expect(backMain, 'the main tab of the followed file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await showSession(back.page, id, `session:${address}`);
+    await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
+    const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);
+    await expect(backBeside.locator('.cm-content'), 'the saved text, beside the chat').toContainText('Saved by this build.', { timeout: 20_000 });
+    await typeAndSave(back, backBeside, beside, ' And once more after the peer.');
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${basename(inMain)} savable in its main tab; ${basename(beside)} saved once more`);
+    record(said);
+  });
+});
+
+// ---- UX wave U6f: another machine's outside file, the peer as that machine (UC-14; condition (g)) ----------------------
+// U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §A, §G) stores nothing on this Mac;
+// on the other machine its daemon keeps U6e's grants file, ledger records of the four acts and its log lines, and this
+// build's device sends the four acts only to an endpoint that lists `rl2.outside-files`. Its peers are the builds from
+// before it, told by a mark in the peer's source (`u6fPeer`: a peer whose src/endpoint/capabilities.ts names
+// `rl2.outside-files` has this landing, and the scene skips, saying so): build F (`f1852de3a`), the master every machine
+// runs (`2c7044231`), and the gate's ordinary peer.
+//   (another machine's outside file, the peer as that machine)  machine B is a private `mawsd` of the peer's build,
+//        enrolled in a local org (e2e/support/remote-scene.ts with `b.buildRoot`: the peer's out/ under its own
+//        Electron), its session on a replay journal whose reply links a file outside the session's folders; this
+//        build's app as A reaches it over RL2. A's entry for B lists no `rl2.outside-files`; File ▸ Open File… is
+//        disabled and the Files list's row says to update B; the link opens a tab that says so; B's ledger and log hold
+//        no record of any of the four acts; the editor's save of a file inside B's checkout still lands. Nothing in it
+//        depends on the two wires differing, so it runs for an equal wire too (`--peer-exact 2c7044231`). It skips,
+//        saying so, only for a peer with this landing, or where the rig cannot start the peer's daemon as B.
+function u6fPeer(peer: Build): string | null {
+  return peerSource(peer, 'src/endpoint/capabilities.ts').includes(`'${OUTSIDE_FILES_CAPABILITY}'`) ? `the peer (wire ${wireOf(peer)}) lists ${OUTSIDE_FILES_CAPABILITY} (its src/endpoint/capabilities.ts): a build from U6f on, which offers the four acts` : null;
+}
+// A command of B's session through this build's page, addressed to B, whatever it answers
+const onMachine = (page: Page, name: string, input: unknown, machine: MachineRef) =>
+  page.evaluate(([n, i, m]) => window.maws.invoke(n as never, i as never, m as never), [name, input, machine] as const) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
+// The names of every act B's services claimed, from B's ledger (`<profile>/spine-ops.jsonl`), and B's log's lines that
+// name one of the four acts or record one (decision 10's `[files] outside write:` and `outside choice:`)
+function outsideOnPeer(b: { userData: string; log(): string }): { claimed: string[]; lines: string[] } {
+  const ledger = join(b.userData, 'spine-ops.jsonl');
+  const names = existsSync(ledger)
+    ? readFileSync(ledger, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+        try {
+          const name = (JSON.parse(line) as { claim?: { name?: unknown } }).claim?.name;
+          return typeof name === 'string' ? [name] : [];
+        } catch {
+          return []; // a torn last line
+        }
+      })
+    : [];
+  const four = OUTSIDE_ACTS as readonly string[];
+  return { claimed: names, lines: b.log().split('\n').filter((line) => four.some((name) => line.includes(name)) || /\[files\] outside (?:write|choice): /.test(line)) };
+}
+
+test('(another machine’s outside file, the peer as that machine) this build’s app reaches a mawsd of the peer’s build as B: Open File… is disabled and says to update B, so does a link outside the folders, nothing of the four acts reaches B, and a save inside B’s checkout lands', async () => {
+  const { here, peer } = builds();
+  const landed = u6fPeer(peer);
+  test.skip(landed !== null, landed ?? '');
+  test.setTimeout(480_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-xb-u6f-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-xb-u6f-a-'));
+  const [checkout, outside, journals, bHome] = ['b-checkout', 'outside', 'journals', 'b-home'].map((name) => join(root, name)) as [string, string, string, string];
+  for (const dir of [checkout, outside, journals, bHome]) mkdirSync(dir);
+  const notes = join(outside, 'notes.txt');
+  const inside = join(checkout, 'inside.txt');
+  const NOTES_TEXT = 'An invented note outside the session’s folders.\n';
+  const INSIDE_TEXT = 'An invented file inside B’s checkout.\n';
+  writeFileSync(notes, NOTES_TEXT);
+  writeFileSync(inside, INSIDE_TEXT);
+  const journal = new SideJournal('b0c0d0e0-0000-4000-8000-0000000000f8', checkout);
+  journal.turn(`They are [the notes outside](${notes}).`);
+  const fixture = journal.write(journals, 'b-session');
+  const said = [`${here.label} (wire ${wireOf(here)}) as A; ${peer.label} (wire ${wireOf(peer)}) as machine B`];
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  try {
+    try {
+      scene = await startRemoteScene({
+        scratch: join(root, 'scene'),
+        aUserData,
+        b: {
+          root: '/tmp', // the replay writes the session's transcript only into a config home that is its own real path
+          buildRoot: peer.root!,
+          env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1', HOME: bHome },
+          prepare: ({ claudeConfigDir }) => {
+            writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+            writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+          },
+        },
+      });
+    } catch (error) {
+      test.skip(true, `the rig cannot start ${peer.label}'s mawsd as machine B: ${(error as Error).message.split('\n')[0]}`);
+    }
+    const { b } = scene!;
+    // B's session, started over its machine.sock as its own app's composer starts one (e2e:remote's laneBOpened)
+    await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+    const app = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+    await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+    const started = await b.request<{ status: string }>('session.start', { appSessionId: app, message: { content: 'Where are the notes?', display: 'Where are the notes?' }, options: {} });
+    expect(started.status, `B's session starts: ${JSON.stringify(started)}`).not.toBe('needs_trust');
+    type Status = { process: string; turn: unknown; engineSessionId: string | null };
+    await expect
+      .poll(async () => { const st = await b.request<Status>('session.status', { appSessionId: app }).catch(() => null); return st !== null && st.process === 'ready' && st.turn === null; }, { timeout: 60_000, message: `B's session ends its first turn\n${b.log().slice(-4000)}` }) // prettier-ignore
+      .toBe(true);
+    const engine = (await b.request<Status>('session.status', { appSessionId: app })).engineSessionId ?? journal.sessionId;
+
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene!.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } });
+    const { page } = a;
+    type Machine = { ref: string; state: string; capabilities?: string[] };
+    const machineB = async () => (value(await invoke(page, 'machines.list', undefined)).machines as Machine[]).find((m) => m.ref === b.ref);
+    await expect.poll(async () => (await machineB())?.state ?? null, { timeout: 60_000, message: 'A’s link to B comes up over the relay' }).toBe('up');
+    await scene!.sminos.list({ engine, app, owners: [scene!.member], project: machineProjectId((await scene!.org.chain()).org, B_NAME), title: 'B’s session of the peer’s build', cwd: checkout });
+    type Row = { machine: string; session: string };
+    await expect.poll(async () => (value(await invoke(page, 'org.rows', undefined)).rows as Row[]).some((row) => row.machine === b.ref && row.session === app), { timeout: 60_000, message: 'B’s session is a row of A’s' }).toBe(true);
+    // its row under B's machine row, opened as a person opens it
+    await showProjectList(page);
+    const machineRow = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:machine:${b.ref}"]`);
+    await expect(async () => {
+      if ((await machineRow.getAttribute('aria-expanded')) !== 'true') await machineRow.locator('[data-project-line]').click();
+      await expect(machineRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
+    await sidebarOf(page).locator(`[role="treeitem"][data-tree-id="s:${addressOf(b.ref, app)}"]`).click({ timeout: 30_000 });
+    const chip = page.locator(`[data-region="main"] [data-chip="path"][title="${notes}"]`).first();
+    await expect(chip, 'the reply’s link to the file outside, in A’s pane').toBeVisible({ timeout: 60_000 });
+
+    // what A knows of B, and what it offers: nothing of this landing
+    const capabilities = (await machineB())?.capabilities ?? null;
+    expect(capabilities, 'A knows what B’s endpoint lists').not.toBeNull();
+    expect(capabilities, `A’s entry for B lists no ${OUTSIDE_FILES_CAPABILITY}`).not.toContain(OUTSIDE_FILES_CAPABILITY);
+    await expect.poll(() => a!.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('file.open')?.enabled ?? null), { message: 'File ▸ Open File… disabled with B’s chat in front' }).toBe(false);
+    await openSurface(page, 'Files');
+    const files = surface(page, 'files');
+    const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
+    await expect(checkoutRow, 'B’s checkout in A’s Files tool').toBeVisible({ timeout: 60_000 });
+    await checkoutRow.click({ button: 'right' });
+    const openRow = page.locator('[data-files-menu] [data-open-file]');
+    await expect(openRow).toHaveAttribute('data-disabled', /.*/);
+    await expect(openRow, 'the Files list’s row says to update B').toHaveAttribute('title', `Can’t open a file on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+    await page.keyboard.press('Escape');
+    await chip.click();
+    const refusal = sideColumn(page).locator(`[data-file-viewer][data-path="${notes}"] [data-refusal]`);
+    await expect(refusal.locator('p').first(), 'the link’s tab says to update B, as it is').toHaveText(`Not opened: update MAWS on ${B_NAME} and try again`, { timeout: 60_000 });
+    said.push(`  A: no ${OUTSIDE_FILES_CAPABILITY} for B; Open File… disabled, its row and the link's tab say to update B`);
+
+    // a file inside B's checkout: read and saved as before, the save landing on B's disk
+    await expect(async () => {
+      if ((await checkoutRow.getAttribute('aria-expanded')) !== 'true') await checkoutRow.click();
+      await expect(checkoutRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
+    await files.locator(`[role="treeitem"][data-path="${inside}"]`).click({ timeout: 60_000 });
+    const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${inside}"]`);
+    await expect(viewer, 'the file inside B’s checkout, editable').toHaveAttribute('data-editable', 'true', { timeout: 60_000 });
+    await viewer.locator('.cm-content').click();
+    await page.keyboard.press('Meta+End');
+    await page.keyboard.type('Saved from A.');
+    await expect(viewer).toHaveAttribute('data-dirty', 'true');
+    await viewer.locator('[data-editor-controls]').getByRole('button', { name: 'Save', exact: true }).click();
+    await expect.poll(() => readFileSync(inside, 'utf8'), { timeout: 60_000, message: 'the save landed on B' }).toBe(`${INSIDE_TEXT}Saved from A.`);
+    await expect(viewer).toHaveAttribute('data-dirty', 'false');
+    // and the page's own outside save of the linked file, asked by hand: refused on this Mac, nothing sent
+    const asked = await onMachine(page, 'files.writeOutside', { appSessionId: app, path: notes, real: notes, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(notes)).digest('hex') }, b.ref);
+    expect(asked.ok, `files.writeOutside to B is refused: ${JSON.stringify(asked)}`).toBe(false);
+    expect(readFileSync(notes, 'utf8'), 'the file outside is unchanged').toBe(NOTES_TEXT);
+    // the ledger read is B's: it holds the save's claim (so a missing or unread file fails here), and none of the four acts
+    const there = outsideOnPeer(b);
+    expect(there.claimed, 'the save is files.write, claimed by B’s services').toContain('files.write');
+    expect(there.claimed.filter((name) => (OUTSIDE_ACTS as readonly string[]).includes(name)), 'B’s ledger holds no claim of the four acts').toEqual([]);
+    expect(there.lines, 'and B’s log no line of them').toEqual([]);
+    expect(a.consoleErrors()).toEqual([]);
+    said.push('  a save inside B’s checkout landed; B’s ledger and log hold nothing of the four acts');
+    record(said);
+  } finally {
+    await a?.cleanup();
+    await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ---- UX wave U3b (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, M6): a command's output -----
@@ -4191,4 +4633,975 @@ test('(a command’s output, both ways) a session kept with a slash command’s 
       record(said);
     });
   }
+});
+
+// ---- UX wave U6b-2: a file frame across builds (UC-14; B13) -----------------------------------------------------------
+// U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B, M6 decision 3) stores nothing and
+// adds `raw` to `files.read`'s input and `identity` to its answer. This build's main draws a PDF, an HTML page, a video or
+// a sound in its frame from raw reads of this Mac's daemon; a daemon of an older build drops the key it does not know and
+// answers the plain read, with no identity, so main serves nothing and the tab shows the row with the sentence for a
+// service that cannot serve it. Each build's mawsd runs as the profile's unit (a LaunchAgent, which the other build's app
+// leaves as it is), as in (update, render). One scene, both ways, with a peer from before this landing (its `files.read`
+// knows no `raw`); a direction that cannot run against a peer is not counted (C2), and a run in which the first half was
+// skipped is not a run of record:
+//   (file frame, both ways)  this build's app on the peer's unit mawsd opens a PDF of the session's folder from Files'
+//                            tree: its row, the sentence for a service that cannot serve it and Open externally, no
+//                            frame; Open externally reaches the open seam through the peer's mawsd; neither main's log nor
+//                            the peer's mawsd's holds a refusal of the read. This build again, on its own mawsd: the tab
+//                            shown again draws the PDF. Then the peer's app on this build's unit mawsd opens the same PDF:
+//                            its row, as it always drew it, Open externally reaching the seam, and no refusal. Where this
+//                            build's mawsd refuses the peer's app (one from before O4), that half says it is not run.
+const knowsRaw = (build: Build) => (commandOf(build, 'files.read')?.input as { properties?: Record<string, unknown> } | undefined)?.properties?.raw !== undefined;
+const knowsRawWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.read's raw: a daemon of this landing or later serves a frame; the runs of record have build F and build M as the peer, --peer-exact f1852de3a and 2c7044231`;
+const OLDER_SERVICE = 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.'; // this build's row (tools/code/copy.ts)
+const PEER_ROW = 'PDF files open outside MAWS'; // the row of both peers (tools/code/copy.ts at f1852de3a and at 2c7044231)
+// What either end would log had it refused the other's read: the validation's own words (src/shared/ipc/validate.ts)
+const READ_REFUSED = /invalid (?:input for|output of) files\.read/;
+
+test('(file frame, both ways) this build’s window on the peer’s unit mawsd draws a PDF’s row with the sentence for a service that cannot serve it, no frame, and nothing refused; on its own mawsd the PDF is drawn; the peer’s app on this build’s unit mawsd draws its row as it always did', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsRaw(peer), knowsRawWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-file-frame', async (s) => {
+    const said = [`${here.label} (wire ${wireOf(here)}) asks files.read with raw to draw a framed file; ${peer.label} (wire ${wireOf(peer)}) knows no raw`];
+    const pdf = join(s.repo, 'report.pdf');
+    writeFileSync(pdf, minimalPdf());
+    const openLog = join(s.root, 'open.log');
+    // the open seam's lines, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+    const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line !== '' && !line.startsWith('frame-'));
+    const refusals = (text: string) => text.split('\n').filter((line) => READ_REFUSED.test(line) || MAIN_REFUSES.test(line));
+    let id = '' as AppSessionId;
+    let address = '';
+
+    // the first half: this build's app on the peer's unit mawsd
+    await withUnit(s, peer, 'xb-file-frame-peer', async (unit) => {
+      said.push(`  ${here.label}'s app on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      id = await s.record(run.page);
+      address = await addressed(run.page, id);
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      await treeRow(run.page, 'report.pdf').click({ timeout: 20_000 });
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+      await expect(viewer, 'a framed file, beside the chat').toHaveAttribute('data-kind', 'frame', { timeout: 20_000 });
+      await expect(viewer, 'its row, no frame').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
+      const row = viewer.locator('[data-external-row]');
+      await expect(row.getByText(OLDER_SERVICE, { exact: true })).toBeVisible();
+      await expect(viewer.locator('iframe, video, audio'), 'nothing drawn in a frame').toHaveCount(0);
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(opened, { timeout: 20_000, message: `${peer.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing ${peer.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${peer.label}'s mawsd refuses no read ${here.label} sent`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the row: "${OLDER_SERVICE}" with Open externally, which reached the seam; no refusal in either log; ${s.daemonLog().split('\n').filter((line) => DROPPED.test(line)).length} dropped-field lines in the mawsd log`);
+      await s.quit(run);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    await endProfileProcesses(s.userData);
+
+    // this build again, on its own mawsd: the tab, shown again, draws the PDF
+    const back = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    await showSession(back.page, id, `session:${address}`);
+    await openSurface(back.page, 'Files');
+    await sideTab(sideColumn(back.page), 'report.pdf').click({ timeout: 20_000 });
+    const drawn = sideColumn(back.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+    await expect(drawn, 'drawn once a daemon of this build serves').toHaveAttribute('data-frame', 'pdf', { timeout: 30_000 });
+    await expect(drawn.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+    await expect.poll(() => markPixels(back.maws.app, back.page, drawn.locator('[data-artifact-frame="pdf"]')), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${here.label} again, on its own mawsd: the tab shown again draws the PDF`);
+
+    // the second half: the peer's app on this build's unit mawsd
+    if (!appObeysConnectors(peer)) {
+      const why = `not run: ${here.label}'s mawsd refuses an app from before O4 (${peer.label}, wire ${wireOf(peer)}); held by service.test.ts "a plain read's answer is what it was" and files.test.ts "an answer with identity is read by a reader that does not know it as the answer without it"`;
+      test.info().annotations.push({ type: 'skipped check', description: `the second half, ${why}` });
+      said.push(`  the second half ${why}`);
+      record(said);
+      return;
+    }
+    await withUnit(s, here, 'xb-file-frame-here', async (unit) => {
+      said.push(`  ${peer.label}'s app on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`);
+      const old = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog }, peer.root);
+      await s.ready(old.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(old.page, id, `session:${address}`);
+      await showTool(old.page, 'Files');
+      await namedRow(toolBody(old.page, 'Files'), 'report.pdf').click({ timeout: 20_000 }); // UX wave U6b-3a: a name with its state allowed
+      const row = old.page.locator(`[data-file-viewer][data-path="${pdf}"] [data-external-row]`);
+      await expect(row, `${peer.label}'s row, as it always drew it`).toContainText(PEER_ROW, { timeout: 20_000 });
+      await expect(old.page.locator('iframe[src^="maws-artifact:"]'), `${peer.label} frames no file`).toHaveCount(0);
+      const before = opened().length;
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(() => opened().slice(before), { timeout: 20_000, message: `${here.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(old.output()), `${peer.label}'s main refuses nothing ${here.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${here.label}'s mawsd refuses no read ${peer.label} sent`).toEqual([]);
+      expect(old.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s row: "${PEER_ROW}" with Open externally, which reached the seam; no refusal in either log`);
+      await s.quit(old);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    record(said);
+  });
+});
+
+// ---- UX wave U5b: the git reads, the acting pane and a commit's comment, the two older builds (UC-14) -----------------
+// U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §K and M11) stores no new form: Review's
+// and Source control's view state stays in the window's memory. What crosses is what it sends: the three git reads
+// (`git.branchCommits`, `git.commitDiff`, `git.changesSince`), which a daemon before them does not serve; the ten
+// `scm.*` commands, which this build's window no longer sends and its daemon still serves; and a comment on a commit's
+// line, whose anchor carries `commit`, a key the older builds' strict anchor schema refuses: whole in a message's words
+// and tag, which every build reads as text, and without `commit` and `path` in a side thread's lineage (`lineageAnchor`),
+// which their daemons hold to that schema. Its peers are build F (`f1852de3a`) and master at its parent pin
+// (`2c7044231`), the runs of record `--peer-exact f1852de3a` and `--peer-exact 2c7044231`; every scene holds against
+// both. Each is guarded by a probe of the peer's source alone, never by its wire, so it runs in the equal-wire mode as
+// well. A scene that puts one build's app on the other's daemon runs that daemon as the profile's unit (`withUnit`: a
+// private daemon of another build is restarted at the app's first status read) and asserts which build serves, by
+// `daemon.status`'s `build.buildId` against that build's out/main/mawsd.js, before anything else.
+//   (reads, on the peer's daemon)          run while the peer's src/shared/ipc/names/git.ts names no
+//                                          `git.branchCommits`. This build's app on the peer's unit: Source control draws
+//                                          Where, Uncommitted and the Pull request part (the folder is not trusted, so the
+//                                          part's sentence stands whatever GitHub CLI the Mac has), and Commits reads
+//                                          "Commits unavailable: this Mac’s MAWS service is older than this window" with
+//                                          no refresh control and no row; Review's Uncommitted lists the repository's two
+//                                          files, the new one "Untracked" with no count, and "This branch" is disabled
+//                                          with its title.
+//   (source control, from the peer)        run while the peer has src/renderer/src/tools/scm/CommitForm.tsx. The peer's
+//                                          app on this build's unit: its acting pane, by its own locators (a group's
+//                                          `data-scm-row`, the row's Stage, the commit form), stages one file and commits
+//                                          it, and the repository's HEAD moved: the commands stay served. The scene that
+//                                          drives build F's pane against this build's daemon, (build F's app, unit
+//                                          mawsd), stays as it is.
+//   (a commit's comment, to the peer)      run while the peer's src/shared/anchor/anchor.ts names no `commit` in its
+//                                          anchor schema: the key its tag reader and its lineage refuse. A session's
+//                                          transcript holds a comment on a commit's line, its text written by this build's
+//                                          `commentsMessage`; the peer, on its own daemon, draws the message's words with
+//                                          the full hash and the quoted line as code, and no chip.
+//   (a commit's side thread, to the peer)  the same probe. This build, on its own daemon, opens a commit from Source
+//                                          control in Review, comments on a line with "Send to main" unticked, and the
+//                                          side thread starts on the replay, its first message the tag with the hash.
+//                                          Then the peer's daemon, the profile's unit, answers `session.list` (the list
+//                                          loads and holds the child) and `session.get` for the child (its lineage as this
+//                                          build stored it, with no `commit` and no `path`), and the peer's app over it
+//                                          opens the parent and draws its side-thread row: the case a transcript alone
+//                                          does not prove.
+const sourceOf = (build: Build, path: string) => {
+  const file = join(build.root ?? REPO_ROOT, path);
+  return existsSync(file) ? readFileSync(file, 'utf8') : null;
+};
+const servesGitReads = (build: Build) => sourceOf(build, 'src/shared/ipc/names/git.ts')?.includes("'git.branchCommits'") ?? false;
+const servesGitReadsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names git.branchCommits in its src/shared/ipc/names/git.ts: its daemon serves the reads; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const hasActingPane = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/scm/CommitForm.tsx'));
+const hasActingPaneWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has no src/renderer/src/tools/scm/CommitForm.tsx: its window sends no scm.* command; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const knowsCommitAnchor = (build: Build) => /^\s*commit:/m.test(sourceOf(build, 'src/shared/anchor/anchor.ts') ?? '');
+const knowsCommitAnchorWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names commit in its src/shared/anchor/anchor.ts: it reads a commit's anchor as this build does; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+// A build's `mawsd` as `daemon.status` names it: 16 hex of the SHA-1 of its out/main/mawsd.js (src/shared/ipc/schema/daemon.ts)
+const mawsdBuildOf = (build: Build) => createHash('sha1').update(readFileSync(join(build.root ?? REPO_ROOT, 'out', 'main', 'mawsd.js'))).digest('hex').slice(0, 16);
+const U5B_APP = 'src/app.ts';
+const U5B_LINES = Array.from({ length: 8 }, (_, i) => `export const v${i + 1} = ${i + 1};`);
+const U5B_CHANGED = 'export const v3 = sumOf([1, 2]);'; // line 3 as the second commit has it
+const U5B_SUBJECT = 'An invented change to v3';
+const U5B_COMMENT = 'Why does v3 call sumOf here?';
+const U5B_PEER_COMMIT = 'An invented commit made by the peer’s pane';
+const U5B_PARENT = 'e5b20000-0000-4000-8000-000000000001'; // the engine ids the replay pins: the parent, its side thread
+const U5B_CHILD = 'e5b20000-0000-4000-8000-000000000002';
+const U5B_FIRST_PROMPT = 'Read src/app.ts and say what v3 holds.';
+const U5B_FIRST_REPLY = 'v3 holds the sum of a short list.';
+const U5B_THREAD_REPLY = 'sumOf keeps v3 in step with the list it names.';
+const COMMITS_OLDER = 'Commits unavailable: this Mac’s MAWS service is older than this window'; // tools/scm/copy.ts, commitsOlder(null)
+const BRANCH_NEEDS_READS = 'This branch needs this Mac’s MAWS service to be updated'; // tools/code/copy.ts, branchNeedsReads(null)
+const PR_UNTRUSTED = 'Trust this folder to see PR state'; // panel/copy.ts, SUMMARY_COPY.prUntrusted
+
+// The scratch's repository made a git repository on `main` with its own identity, no signing and no hooks: src/app.ts
+// and notes.txt in a first commit, line 3 of src/app.ts changed in a second; answers the second's full hash
+function u5bRepo(s: Scratch): string {
+  mkdirSync(join(s.repo, 'src'), { recursive: true });
+  mkdirSync(join(s.root, 'no-hooks'));
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.join('\n')}\n`);
+  writeFileSync(join(s.repo, 'notes.txt'), 'notes\n');
+  gitAt(s.repo, 'init', '-q');
+  const config: [string, string][] = [['user.name', 'MAWS Fixture'], ['user.email', 'fixture@maws.invalid'], ['commit.gpgsign', 'false'], ['core.hooksPath', join(s.root, 'no-hooks')]];
+  for (const [key, value] of config) gitAt(s.repo, 'config', key, value);
+  gitAt(s.repo, 'add', '-A');
+  gitAt(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.map((line, i) => (i === 2 ? U5B_CHANGED : line)).join('\n')}\n`);
+  gitAt(s.repo, 'commit', '-q', '-am', U5B_SUBJECT);
+  return gitAt(s.repo, 'rev-parse', 'HEAD').trim();
+}
+// The anchor Review makes for a new line of a commit's diff (`commitLineAnchor`, src/renderer/src/tools/code/anchor/anchor.ts)
+const commitAnchor = (path: string, line: number, commit: string): Anchor => ({ kind: 'file-line', locator: `${path}#L${line}@${commit}`, label: `${basename(path)}:${line} · ${commit.slice(0, 7)}`, path, line, side: 'new', commit });
+// The add control the diff library draws on a new line of Review while the line is hovered, pressed; answers the card
+async function commentOnCommitLine(review: Locator, path: string, line: number, label: string): Promise<Locator> {
+  const body = review.locator(`[data-review-file="${path}"] [data-review-body]`);
+  const numbered = `[data-line-new-num="${line}"]`;
+  const row = body.locator('tr').filter({ has: review.page().locator(numbered) }).first();
+  await clickRevealed(body.locator(numbered).first(), row.locator('[data-add-widget="new"] button'));
+  const card = review.getByRole('dialog', { name: `Comment on ${label}` });
+  await expect(card).toBeVisible();
+  return card;
+}
+// A new chat in the repository's project, its route direct (the replay's `get_status` answers a direct session, so its
+// side thread is direct too), started with its first prompt; answers once its first turn has ended (e2e/side.spec.ts)
+async function startCommentParent(page: Page, repo: string): Promise<AppSessionId> {
+  const project = value(await invoke(page, 'session.projects.add', { directory: repo }));
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible({ timeout: 20_000 });
+  const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+  value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
+  value(await invoke(page, 'session.start', { appSessionId: id, message: { content: U5B_FIRST_PROMPT, display: U5B_FIRST_PROMPT }, options: {} }));
+  await expect(page.locator('[data-region="main"]').getByText(U5B_FIRST_REPLY)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await statusOf(page, id)).turn, { timeout: 20_000 }).toBeNull();
+  return id;
+}
+// The side thread of `parent`, once its record exists (its setup creates it before the engine runs)
+async function sideThreadOf(page: Page, parent: AppSessionId): Promise<AppSessionId> {
+  let child = '';
+  await expect
+    .poll(async () => (child = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? ''), { timeout: 20_000, message: 'the side thread has a record' })
+    .not.toBe('');
+  return child as AppSessionId;
+}
+
+test('(reads, on the peer’s daemon) this build’s app on the peer’s unit mawsd: Source control draws Where, Uncommitted and the Pull request part, and Commits says this Mac’s service is older; Review lists Uncommitted with the new file uncounted, and This branch is disabled with its title', async () => {
+  const { here, peer } = builds();
+  test.skip(servesGitReads(peer), servesGitReadsWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-reads', async (s) => {
+    u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    writeFileSync(join(s.repo, 'added.txt'), 'a new file\nof two lines\n');
+    await withUnit(s, peer, 'xb-u5b-reads', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${peer.label}'s mawsd`).toBe(mawsdBuildOf(peer));
+      const page = run.page;
+      const id = await s.record(page);
+      await showSession(page, id, `session:${await addressed(page, id)}`);
+
+      // Source control: three parts drawn; Commits the older service's sentence, with nothing asked and nothing to ask again
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-where]'), 'Where').toContainText('⎇ main', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="uncommitted"] [data-scm-count]'), 'Uncommitted, its two files').toHaveText('2', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="pr"]'), 'the Pull request part, its sentence for a folder not trusted').toContainText(PR_UNTRUSTED, { timeout: 20_000 });
+      const commits = scm.locator('[data-scm-part="commits"]');
+      await expect(commits.locator('[data-scm-failure]'), 'Commits: the older service').toHaveText(COMMITS_OLDER, { timeout: 20_000 });
+      await expect(commits.locator('[data-scm-refresh]'), 'no refresh control').toHaveCount(0);
+      await expect(commits.locator('[data-scm-commit]'), 'no row').toHaveCount(0);
+      said.push(`  Source control: Where, Uncommitted 2 and the Pull request part drawn; Commits "${COMMITS_OLDER}"`);
+
+      // Review: Uncommitted read as before the reads, the new file uncounted; This branch disabled with its reason
+      await showTool(page, 'Review');
+      const review = toolBody(page, 'Review');
+      await expect(review.locator('[data-chip="uncommitted"]'), 'Review on Uncommitted').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+      const listed = () => review.locator('[data-review-file]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-review-file') ?? '').sort());
+      await expect.poll(listed, { timeout: 20_000, message: 'the repository’s two changed files' }).toEqual(['added.txt', 'notes.txt']);
+      const added = review.locator('[data-review-file="added.txt"]');
+      await expect(added.locator('[data-review-badge]'), 'the new file’s badge').toHaveText('Untracked');
+      await expect(added.locator('[data-review-counts]'), 'and no count').toHaveCount(0);
+      const branch = review.locator('[data-chip="branch"]');
+      await expect(branch, 'This branch disabled').toBeDisabled();
+      await expect(branch, 'with its title').toHaveAttribute('title', BRANCH_NEEDS_READS);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  Review: added.txt Untracked with no count beside notes.txt; This branch disabled, "${BRANCH_NEEDS_READS}"`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(source control, from the peer) the peer’s app on this build’s unit mawsd: its acting pane stages one file and commits it by its own locators, and the repository’s HEAD moved', async () => {
+  const { here, peer } = builds();
+  test.skip(!hasActingPane(peer), hasActingPaneWhy(peer));
+  test.skip(!appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is an app from before O4, which this build's mawsd refuses`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-acts', async (s) => {
+    const before = u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    trustIn(s, [s.repo]); // the pane commits only in a trusted folder
+    await withUnit(s, here, 'xb-u5b-acts', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      const page = run.page;
+      const id = await s.record(page);
+      await (await sidebarRow(page, { appSessionId: id })).click();
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-header]'), 'the peer’s pane on main').toContainText('⎇ main', { timeout: 20_000 });
+      const row = (group: string) => scm.locator(`section[data-scm-group="${group}"] li[data-scm-row][data-path="notes.txt"]`);
+      await expect(row('unstaged'), 'notes.txt unstaged').toBeVisible({ timeout: 20_000 });
+      await row('unstaged').hover();
+      await row('unstaged').getByRole('button', { name: 'Stage notes.txt', exact: true }).click();
+      await expect(row('staged'), 'notes.txt staged').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => gitAt(s.repo, 'diff', '--cached', '--name-only').trim(), { timeout: 20_000, message: 'the index holds notes.txt' }).toBe('notes.txt');
+      const form = scm.locator('[data-scm-commit]');
+      await form.getByRole('textbox', { name: 'Commit message', exact: true }).fill(U5B_PEER_COMMIT);
+      await form.getByRole('button', { name: 'Commit', exact: true }).click();
+      await expect.poll(() => gitAt(s.repo, 'rev-parse', 'HEAD').trim(), { timeout: 20_000, message: 'HEAD moved' }).not.toBe(before);
+      expect(gitAt(s.repo, 'log', '-1', '--format=%s%n%P').trim().split('\n'), 'the peer’s commit, on the last').toEqual([U5B_PEER_COMMIT, before]);
+      expect(gitAt(s.repo, 'show', '--name-only', '--format=', 'HEAD').trim(), 'holding the staged file').toBe('notes.txt');
+      expect(gitAt(s.repo, 'status', '--porcelain'), 'nothing left uncommitted').toBe('');
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the peer's pane staged notes.txt and committed it: HEAD ${before.slice(0, 7)} → ${gitAt(s.repo, 'rev-parse', '--short', 'HEAD').trim()}`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(a commit’s comment, to the peer) a comment this build wrote on a commit’s line, in a session’s transcript, is drawn by the peer as the message’s words and the quoted line, with no chip', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.setTimeout(180_000);
+  await withScratch('xb-u5b-comment', async (s) => {
+    const sha = u5bRepo(s);
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'main');
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', text);
+    const said = [`${here.label} (wire ${wireOf(here)}) wrote a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) draws the session`];
+
+    const run = await s.launch({}, peer.root);
+    await s.ready(run.page, () => true, 60_000);
+    const id = await s.record(run.page);
+    await (await sidebarRow(run.page, { appSessionId: id })).click();
+    const bubble = run.page.locator('[data-region="main"] [data-bubble]').filter({ hasText: U5B_COMMENT });
+    await expect(bubble, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(bubble, 'its words name the commit by its full hash').toContainText(`commit ${sha}`);
+    await expect(bubble.locator('code'), 'the quoted line, as code').toHaveText([U5B_CHANGED]);
+    await expect(bubble.locator('[data-chip="anchor"]'), 'no chip').toHaveCount(0);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${peer.label}: the words with commit ${sha.slice(0, 7)}…, the quoted line as code, no chip`);
+    await s.quit(run);
+    record(said);
+  });
+});
+
+test('(a commit’s side thread, to the peer) a side thread this build opened from a comment on a commit’s line is listed and read by the peer’s unit mawsd, its lineage with no commit, and the peer draws the parent’s side-thread row', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-u5b-thread', async (s) => {
+    const sha = u5bRepo(s);
+    trustIn(s, [s.repo]);
+    writeFileSync(join(s.userData, 'claude-config', 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the journals' mode, so the host corrects none
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const journals = join(s.root, 'journals');
+    mkdirSync(journals);
+    const parentJournal = new SideJournal(U5B_PARENT, s.repo);
+    parentJournal.turn(U5B_FIRST_REPLY);
+    const threadJournal = new SideJournal(U5B_CHILD, s.repo);
+    const first = threadJournal.prompt();
+    threadJournal.rename(anchor.label); // `finishBinding`'s title: the lineage's label, which keeps the short hash
+    threadJournal.reply(first, U5B_THREAD_REPLY);
+    threadJournal.completed(first);
+    const fixtures = [parentJournal.write(journals, 'parent'), threadJournal.write(journals, 'thread')].join(',');
+    const said = [`${here.label} (wire ${wireOf(here)}) opens a side thread from a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) reads the profile`];
+
+    // this build, on its own daemon: the commit opened from Source control, a comment on its line 3 sent to a side thread
+    const ours = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: fixtures });
+    const own = await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    expect(own.daemon!.build.buildId, `${here.label} on its own mawsd`).toBe(mawsdBuildOf(here));
+    const page = ours.page;
+    const parent = await startCommentParent(page, s.repo);
+    await showTool(page, 'Source control');
+    await toolBody(page, 'Source control').getByRole('button', { name: `Open commit ${sha.slice(0, 7)} in Review`, exact: true }).click({ timeout: 20_000 });
+    const review = toolBody(page, 'Review');
+    await expect(review.locator('[data-chip="commit"]'), 'Review on the commit').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+    await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`);
+    await expect(review.locator(`[data-review-file="${U5B_APP}"] [data-review-body] table`).first(), 'the commit’s diff').toBeVisible({ timeout: 20_000 });
+    const card = await commentOnCommitLine(review, U5B_APP, 3, anchor.label);
+    const toMain = card.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain, 'Review asks for main').toBeChecked();
+    await toMain.uncheck();
+    await card.getByRole('textbox', { name: 'Comment' }).fill(U5B_COMMENT);
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    const child = await sideThreadOf(page, parent);
+    const pane = page.locator('[data-region="panel"]').locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
+    await expect(pane.getByText(U5B_THREAD_REPLY), 'the side thread answered on the replay').toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => (await statusOf(page, child)).turn, { timeout: 20_000, message: 'its turn ended' }).toBeNull();
+    const written = s.journal(child).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => (r.frame.message as { content: unknown }).content);
+    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'thread') }]]);
+    const lineage = value(await invoke(page, 'session.get', { appSessionId: child }))?.lineage;
+    expect(lineage, 'stored without commit and path').toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: U5B_PARENT, anchor: { kind: 'file-line', locator: anchor.locator, label: anchor.label, line: 3, side: 'new' }, openedBy: 'comment' });
+    // what the engine left in its store for the parent's first turn (the replay writes none), for the peer to open
+    const parentTranscript = transcriptRecords({ sessionId: U5B_PARENT, cwd: s.repo, start: Date.UTC(2026, 10, 15, 12, 0, 0) });
+    parentTranscript.user('e5b2e000-0000-4000-8000-000000000001', U5B_FIRST_PROMPT);
+    parentTranscript.text('e5b2e000-0000-4000-8000-000000000002', U5B_FIRST_REPLY);
+    parentTranscript.turnEnd('e5b2e000-0000-4000-8000-000000000003');
+    seedTranscript(join(s.userData, 'claude-config'), s.repo, U5B_PARENT, parentTranscript.records);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's daemon runs next, as the profile's unit
+    said.push(`  ${here.label}: thread ${child} from ${anchor.label}, its first message's tag with the full hash, its lineage with no commit and no path`);
+
+    // the peer's daemon as the profile's unit: the list and the record load; the peer's app draws the parent's row
+    await withUnit(s, peer, 'xb-u5b-thread', async (unit) => {
+      expect((await unit.status()).build.buildId, `${peer.label}'s mawsd serves`).toBe(mawsdBuildOf(peer));
+      type Listed = { sessions: { appId: string; lineage: unknown }[] };
+      const listed = await unit.request<Listed>('session.list', {});
+      expect(listed.sessions.map((r) => r.appId), 'session.list loads and holds the parent and the child').toEqual(expect.arrayContaining([parent, child]));
+      expect(listed.sessions.find((r) => r.appId === child)?.lineage, 'the child listed with its lineage').toEqual(lineage);
+      const got = await unit.request<{ lineage: unknown } | null>('session.get', { appSessionId: child });
+      expect(got?.lineage, 'session.get: the lineage parses, with no commit').toEqual(lineage);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `${peer.label}'s app on its unit`).toBe(mawsdBuildOf(peer));
+      await (await sidebarRow(run.page, { appSessionId: parent })).click();
+      const row = run.page.locator(`[data-region="main"] [data-side-thread$=${JSON.stringify(child)}]`);
+      await expect(row, 'the parent’s side-thread row').toBeVisible({ timeout: 20_000 });
+      await expect(row.locator('.transcript-side-thread-label'), 'named by the lineage’s label').toHaveText(anchor.label);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s unit mawsd (pid ${unit.pid}): session.list holds ${listed.sessions.length} records with the child, session.get its lineage; its app draws the parent's row`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+// ---- UX wave U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §F and §H): the to-human view -------
+// From this build MAWS advertises 9 at a launch whose view the to-human mod draws (every applicable installation of the
+// mod declares it, `maws-surface.json`) and 8 where MAWS draws it, the mirror; the lane's published state says who
+// draws (`drawnBy`, an optional key an earlier build's tolerant reader drops); the launch's reservation is a column the
+// earlier builds read past (`owner_channel_sessions.advertised`), and the summaries' switch a key of the index's own
+// facts they never read (`index_meta`, `toHuman.foldSummaries`). Four scenes, each over a session whose transcript holds
+// a message and work, its lane on under the to-human plugin's style (test/support/to-human-plugin.ts), and a fifth with
+// no session, (to-human, the switch said to the peer), below them. A window reads a running session's history from its
+// stream alone (session.events answers it from the launch's journal, with no `earlier` cursor into the transcript), so
+// where a scene draws the session while a launch of it runs, that launch plays the turn (`exchangeJournal`): the prompt
+// the scene sends, the work and the message. What the peer draws follows its source (`drawsOwnReport`): a build of
+// before U2b's first landing (f1852de3a, 2c7044231) draws its own report, its bar and record row; a later one (master
+// since that landing) draws MAWS's mirror, the record line, and no bar:
+//   (to-human, from the peer) the peer starts the session (its launch decided at 8) and quits with keep; this build's
+//                             window attaches and draws the mirror: the record line and the switch, no bar, and no
+//                             refusal in either log (§H, row 1);
+//   (to-human, to the peer)   this build starts it with a declaring installation (the spawn carries 9, the index holds
+//                             the bound reservation), turns new summaries off, and quits; the peer opens the profile,
+//                             draws its view of it, starts the session again (8, no summaries value) and
+//                             quits keeping it; this build attaches while the peer's launch runs and reads it as MAWS's
+//                             to draw (the reservation bound to the earlier launch counts for nothing under a live
+//                             one), the switch still off; it resumes the session, whose launch carries the value and
+//                             binds the reservation anew (§F's two rows in U13a's coverage table above).
+//   (to-human, on the peer's daemon) this build's window on the peer's unit mawsd: the owner channel is that daemon's,
+//                             so the lane's state has no `drawnBy`, its lane-on launch advertises 8, and the window draws
+//                             the mirror (§H, row 3).
+//   (to-human, the peer on this daemon) the peer's window on this build's unit mawsd, a session launched at 8: the
+//                             peer's reader drops `drawnBy` and the peer draws its view, once (§H, row 4).
+// Every session runs on the stub engine (test/support/stub-engine-bin.ts), as both peers take MAWS_E2E_ENGINE_BIN.
+// §H's row 5 (an earlier window on a session this build launched at 9) cannot be staged with a replayed engine: one look
+// on the trial's Mac.
+const TO_HUMAN_ROWS = { prompt: 'Check the tree and tell me what you found.', call: 'toolu_01U2bXbTree', said: 'The tree is clean; nothing to commit.' };
+// The session's transcript as the engine left it: a prompt, a Bash call and its result, then a message to the person
+function seedToHumanSession(s: Scratch): void {
+  const t = transcriptSeed({ repo: s.repo, engineId: s.engineId });
+  t.user(randomUUID(), TO_HUMAN_ROWS.prompt);
+  t.tool(TO_HUMAN_ROWS.call, 'Bash', { command: 'git status --short', description: 'Check the tree' }, { stdout: '', stderr: '', interrupted: false });
+  t.text(randomUUID(), `<message>\n${TO_HUMAN_ROWS.said}\n</message>`);
+  writeFileSync(transcriptIn(s, s.repo, s.engineId), t.finish(true).map((record) => JSON.stringify(record)).join('\n') + '\n');
+}
+// A session's spawn rows in the order they were written, with the settings env each launch carried
+const spawnEnvs = (s: Scratch, id: AppSessionId) =>
+  s.journal(id).filter((r) => r.direction === 'meta' && r.frame.event === 'spawn').sort((a, b) => a.at.localeCompare(b.at)).map((r) => {
+    const args = r.frame.args as string[];
+    const settings = JSON.parse(args.includes('--settings') ? args[args.indexOf('--settings') + 1]! : '{}') as { env?: Record<string, string> };
+    return { launchId: r.frame.launchId as string, env: settings.env ?? {} };
+  });
+// A decided resume, through main's own launch path (where the to-human decision lives), in the build's own input shape
+async function startResume(run: Run, build: Build, id: AppSessionId): Promise<void> {
+  const input = fitTo(commandOf(build, 'session.start')!.input, { appSessionId: id, message: null, options: { gateway: 'direct', trust: 'accepted' } });
+  expect(value(await invoke(run.page, 'session.start', input as CommandInput<'session.start'>))).toMatchObject({ status: 'starting' });
+  const processOf = async () => { const st = await invoke(run.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }; // prettier-ignore
+  await expect.poll(processOf, { timeout: 60_000, message: `${build.label} resumes the session` }).toBe('ready');
+}
+const peerBar = (page: Page) => page.locator('[data-region="main"]').getByRole('group', { name: 'Session view', exact: true }); // the peer build's report bar, its toggle group (f1852de3a, the owner report's bar)
+const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-record > button.transcript-disclosure'); // the peer build's record row (f1852de3a)
+// A peer of before U2b's first landing draws its own report (the bar's component is in its source); a later peer draws
+// MAWS's mirror, whose record line is the stretch's fold row, closed
+const drawsOwnReport = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/owner/report/ReportBar.tsx'));
+// A peer that knows `drawnBy` (its src/shared/owner/state.ts names it) is of U2b: it decides a launch at 9 and carries
+// the summaries' value itself, so a scene about a peer that launches at 8 is not about it
+const knowsDrawnBy = (build: Build) => sourceHas(build, 'src/shared/owner/state.ts', 'drawnBy');
+const recordLine = (page: Page) => page.locator(`[data-region="main"] [data-row-id="record-fold:closed:${TO_HUMAN_ROWS.call}"]`).getByRole('button');
+// The resume journal of the scene's stub: the handshake, the scene's turn once its prompt is sent, then held at a prompt
+// no one sends (e2e/support/to-human-replay.ts)
+const exchangeOf = (s: Scratch) => readFileSync(ownJournal(s, exchangeJournal(s.root, Date.now(), { cwd: s.repo, prompt: TO_HUMAN_ROWS.prompt, call: TO_HUMAN_ROWS.call, line: 'Check the tree', said: TO_HUMAN_ROWS.said })), 'utf8');
+// The scene's turn on the running launch: its prompt sent from `run`'s window, until its message has streamed and the
+// turn has ended
+async function playExchange(run: Run, id: AppSessionId): Promise<void> {
+  value(await invoke(run.page, 'session.send', { appSessionId: id, content: TO_HUMAN_ROWS.prompt }));
+  await expect.poll(async () => JSON.stringify(await eventsOf(run.page, id)).includes(TO_HUMAN_ROWS.said), { timeout: 60_000, message: 'the running launch played the turn: its message streamed' }).toBe(true);
+  await expect.poll(async () => (await statusOf(run.page, id)).turn, { timeout: 60_000, message: 'the turn has ended' }).toBeNull();
+}
+
+test('(to-human, from the peer) a lane-on session the peer started and kept is drawn by this build’s window as the mirror: its record line and the switch, no bar, nothing refused', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  await withScratch('xb-to-human-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) starts and keeps a lane-on session with a message and work; ${here.label} (wire ${wireOf(here)}) attaches`];
+    trustIn(s, [s.repo]);
+    installToHumanPlugin(join(s.userData, 'claude-config')); // the plugin's style (6) and the plugin, as both builds read them
+    seedToHumanSession(s);
+    const stub = s.useStub({ rowMs: Number(ROW_MS) });
+    writeFileSync(join(stub.fixtures, `${s.engineId}.jsonl`), exchangeOf(s)); // its resume: the handshake, the turn the peer sends, then held
+
+    // the peer: the session resumed by its own decided launch, then kept
+    const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, peer.root);
+    await s.ready(first.page, () => true, 60_000);
+    const id = await s.record(first.page);
+    await startResume(first, peer, id);
+    const peerLaunch = spawnEnvs(s, id).at(-1)!;
+    expect(peerLaunch.env[NATIVE_TO_HUMAN_ENV], `${peer.label}'s launch advertises 8, the lane on`).toBe('8');
+    await playExchange(first, id); // the peer's launch carries the turn this build's window draws
+    expect(first.maws.consoleErrors()).toEqual([]);
+    await s.quit(first);
+
+    // this build: served the kept session; MAWS draws its view, by the mirror
+    const second = await launchServed(s, id);
+    const state = value(await invoke(second.page, 'ownerChannel.state', { appSessionId: id }));
+    expect([state.lane.on, state.lane.drawnBy], 'the lane on, MAWS to draw: the row holds no reservation, its launch decided at 8').toEqual([true, 'maws']);
+    await showSession(second.page, id, `session:${await addressed(second.page, id)}`);
+    const main = second.page.locator('[data-region="main"]');
+    await expect(main.getByText(TO_HUMAN_ROWS.said, { exact: true }), 'the message').toBeVisible({ timeout: 20_000 });
+    await expect(main.locator(`[data-row-id="record-fold:closed:${TO_HUMAN_ROWS.call}"]`).getByRole('button'), 'the work’s record line').toHaveText('› working record');
+    await expect(main.locator('[data-view-switch]'), 'the switch above the composer').toHaveText('to-human view · full transcript ›');
+    await expect(main.getByRole('group', { name: 'Session view', exact: true }), 'no bar').toHaveCount(0);
+    await expect(main.locator('[data-owner-bar]')).toHaveCount(0);
+    expect(first.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+    expect(second.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${here.label}'s main refuses nothing`).toEqual([]);
+    expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'no engine host refuses what the other build sent').toEqual([]);
+    const dropped = [...first.output().split('\n'), ...second.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
+    said.push(`  ${peer.label}'s launch: ${NATIVE_TO_HUMAN_ENV}=${peerLaunch.env[NATIVE_TO_HUMAN_ENV]}`, `  ${here.label}'s window: drawnBy ${state.lane.drawnBy}, the record line and the switch, no bar`, dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+    expect(second.maws.consoleErrors()).toEqual([]);
+    await s.quit(second);
+    record(said);
+  });
+});
+
+test('(to-human, to the peer) a session this build launched at 9, with new summaries off, is drawn by the peer as its own report and launched again at 8, kept running; here, while that launch runs, it is MAWS’s to draw, the switch still off, and the next launch carries it and binds the reservation anew', async () => {
+  test.setTimeout(420_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  test.skip(knowsDrawnBy(peer), `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of U2b, so its own launch advertises 9 and carries the summaries' value, and the scene is about a peer that launches at 8`);
+  await withScratch('xb-to-human-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) launches a session at 9 and turns new summaries off; ${peer.label} (wire ${wireOf(peer)}) opens the profile, draws its report and launches it again; ${here.label} reads it back`];
+    trustIn(s, [s.repo]);
+    installToHumanPlugin(join(s.userData, 'claude-config'), { declares: true, version: '0.9.0' }); // an installation that declares it draws from 9
+    seedToHumanSession(s);
+    const stub = s.useStub({ rowMs: Number(ROW_MS) });
+    // every resume: the handshake, then held at a prompt no one sends (so no init is played: the launch's plugins are not
+    // yet reported)
+    writeFileSync(join(stub.fixtures, `${s.engineId}.jsonl`), readFileSync(ownJournal(s, turnsJournal(s.root, 'xb-to-human-to', 1)), 'utf8'));
+    let id = '' as AppSessionId;
+    const reservation = () => indexed(s, `select advertised from owner_channel_sessions where app_session_id = '${id}'`);
+    const launchOf = () => indexed(s, `select launch_id from owner_channel_sessions where app_session_id = '${id}'`);
+    const foldSummariesFact = () => indexed(s, "select value from index_meta where key = 'toHuman.foldSummaries'");
+
+    // this build: a decided resume at 9, its reservation bound to the launch; then the switch off, and a quit
+    const ours = await s.launch({});
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    id = await s.record(ours.page);
+    await startResume(ours, here, id);
+    const nine = spawnEnvs(s, id).at(-1)!;
+    expect(nine.env[NATIVE_TO_HUMAN_ENV], 'the launch advertises 9: the mod draws').toBe('9');
+    expect(nine.env[FOLD_SUMMARIES_ENV], 'summaries on: no value').toBeUndefined();
+    await expect.poll(() => JSON.parse(String(reservation() ?? 'null')) as { launchId?: string; number?: number } | null, { timeout: 30_000, message: 'the reservation bound to the launch' }).toMatchObject({ launchId: nine.launchId, number: 9 });
+    // the contrast for the return's read below, on the same stub: under its own bound launch at 9, its plugins not yet
+    // reported, the mod draws (table B's arm for plugins not yet reported, @shared/owner/draws)
+    await expect.poll(async () => value(await invoke(ours.page, 'ownerChannel.state', { appSessionId: id })).lane.drawnBy, { timeout: 30_000, message: 'under this build’s own bound launch at 9, its plugins not yet reported, the mod draws' }).toBe('mod');
+    value(await invoke(ours.page, 'mods.setFoldSummaries', { on: false }));
+    expect(value(await invoke(ours.page, 'mods.list', { appSessionId: id }))[0]!.summaries).toBe(false);
+    expect(foldSummariesFact()).toBe('off');
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  ${here.label}: ${NATIVE_TO_HUMAN_ENV}=9 at launch ${nine.launchId}, the reservation bound to it; ${FOLD_SUMMARIES_ENV} unset; then the switch off (index_meta toHuman.foldSummaries = off)`);
+
+    // the peer: opens the index, lists the session and draws its own report; launches it again, records that launch,
+    // and quits keeping it running
+    const theirs = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await showSession(theirs.page, id, `session:${await addressed(theirs.page, id)}`);
+    await expect(theirs.page.locator('[data-region="main"]').getByText(TO_HUMAN_ROWS.said, { exact: false }).first(), `${peer.label} draws the message`).toBeVisible({ timeout: 20_000 });
+    if (drawsOwnReport(peer)) {
+      await expect(peerBar(theirs.page), `${peer.label} draws its bar`).toBeVisible({ timeout: 20_000 });
+      await expect(peerRecordRow(theirs.page).first(), `${peer.label} draws its record row`).toContainText('Working record');
+    } else {
+      await expect(recordLine(theirs.page), `${peer.label} draws MAWS's mirror: the record line`).toHaveText('› working record', { timeout: 20_000 });
+      await expect(peerBar(theirs.page), `${peer.label} draws no bar`).toHaveCount(0);
+    }
+    await startResume(theirs, peer, id);
+    const eight = spawnEnvs(s, id).at(-1)!;
+    expect(eight.launchId, `${peer.label}'s own launch`).not.toBe(nine.launchId);
+    expect([eight.env[NATIVE_TO_HUMAN_ENV], eight.env[FOLD_SUMMARIES_ENV] ?? null], `${peer.label}'s launch advertises 8 and carries no summaries value`).toEqual(['8', null]);
+    await expect.poll(launchOf, { timeout: 30_000, message: `${peer.label} records its launch` }).toBe(eight.launchId);
+    expect(JSON.parse(String(reservation() ?? 'null')), `${peer.label} leaves the column as it was`).toMatchObject({ launchId: nine.launchId, number: 9 });
+    expect(foldSummariesFact(), `${peer.label} leaves the index's own fact`).toBe('off');
+    expect(theirs.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    said.push(`  ${peer.label}: ${drawsOwnReport(peer) ? 'its bar and record row' : "MAWS's mirror, its record line"} drawn; ${NATIVE_TO_HUMAN_ENV}=8 at launch ${eight.launchId}, no summaries value, kept running; the reservation column and the fact left as they were`);
+
+    // this build again, served the peer's launch while it runs: the row's reservation is bound to this build's earlier
+    // launch, not to the live one, so the advertisement is read from the row's desired state, 8, and MAWS draws
+    const again = await launchServed(s, id);
+    expect(spawnEnvs(s, id).at(-1)!.launchId, 'no launch since the peer’s: the peer’s launch at 8 is the one that runs').toBe(eight.launchId);
+    expect(launchOf(), 'the row names the peer’s running launch').toBe(eight.launchId);
+    expect(JSON.parse(String(reservation() ?? 'null')), 'the reservation still bound to this build’s earlier launch').toMatchObject({ launchId: nine.launchId, number: 9 });
+    const back = value(await invoke(again.page, 'ownerChannel.state', { appSessionId: id }));
+    expect(back.lane.drawnBy, 'read under the peer’s live launch at 8: the reservation, bound to an earlier launch, counts for nothing, so MAWS draws').toBe('maws');
+    expect(value(await invoke(again.page, 'mods.list', { appSessionId: id }))[0]!.summaries, 'the switch as this build left it').toBe(false);
+    // the last resume: this build stops the peer's launch and decides again
+    value(await invoke(again.page, 'session.stop', { appSessionId: id, reason: 'stop' }));
+    await expect.poll(async () => { const st = await invoke(again.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }, { timeout: 60_000, message: 'the peer’s launch stopped' }).not.toBe('ready'); // prettier-ignore
+    await startResume(again, here, id);
+    const next = spawnEnvs(s, id).at(-1)!;
+    expect(next.launchId).not.toBe(eight.launchId);
+    expect([next.env[NATIVE_TO_HUMAN_ENV], next.env[FOLD_SUMMARIES_ENV]], 'this build decides again: 9, and the summaries value').toEqual(['9', FOLD_SUMMARIES_OFF]);
+    await expect.poll(() => JSON.parse(String(reservation() ?? 'null')) as { launchId?: string; number?: number } | null, { timeout: 30_000, message: 'after the last resume the reservation is bound to the new launch' }).toMatchObject({ launchId: next.launchId, number: 9 });
+    expect(again.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${here.label}'s main refuses nothing`).toEqual([]);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again, the peer's launch running: drawnBy ${back.lane.drawnBy}, summaries false; its resume ${NATIVE_TO_HUMAN_ENV}=${next.env[NATIVE_TO_HUMAN_ENV]}, ${FOLD_SUMMARIES_ENV}=${next.env[FOLD_SUMMARIES_ENV]}, the reservation bound to ${next.launchId}`);
+    record(said);
+  });
+});
+
+// §H, rows 3 and 4, on a unit mawsd of the other build (as (update, render) and (pre-O17 app, unit mawsd) do: a private
+// mawsd of another build would be restarted by the app's build check). The owner channel's commands are the machine's
+// (`owner: 'machine'`), so the daemon answers them and its own build decides the lane. A peer that knows `drawnBy`
+// (its src/shared/owner/state.ts names it, knowsDrawnBy above) is of this landing, and neither row is about it.
+const unitPeer = (peer: Build): string | null =>
+  !takesStubEngine(peer) ? `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: its engine host cannot run the stub`
+  : knowsDrawnBy(peer) ? `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of this landing, so §H's rows 3 and 4 are not about it`
+  : !peer.manifest.capabilities.includes('machine.spine') ? `the peer (wire ${wireOf(peer)}) lists no machine.spine: it runs no owner channel on a daemon`
+  : null;
+// The scene's session on the stub: a decided resume of the seeded session, which plays the turn the scene sends, then holds
+function stubbedSession(s: Scratch): StubEngine {
+  trustIn(s, [s.repo]);
+  installToHumanPlugin(join(s.userData, 'claude-config')); // the style and an installation that declares nothing: a lane-on launch at 8
+  seedToHumanSession(s);
+  const stub = s.useStub({ rowMs: Number(ROW_MS) });
+  writeFileSync(join(stub.fixtures, `${s.engineId}.jsonl`), exchangeOf(s)); // the handshake, the turn the scene sends, then held
+  return stub;
+}
+
+test('(to-human, on the peer’s daemon) this build’s window on the peer’s unit mawsd: the lane’s state has no drawnBy, its launch advertises 8, and the window draws the mirror, the record line and the switch, nothing refused', async () => {
+  const { here, peer } = builds();
+  const why = unitPeer(peer);
+  test.skip(why !== null, why ?? '');
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(300_000);
+  await withScratch('xb-to-human-unit-peer', async (s) => {
+    const stub = stubbedSession(s);
+    await withUnit(s, peer, 'xb-to-human-unit-peer', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const id = await s.record(run.page);
+      await startResume(run, peer, id);
+      const launched = spawnEnvs(s, id).at(-1)!;
+      expect(launched.env[NATIVE_TO_HUMAN_ENV], `${peer.label}'s daemon decides the lane-on launch at 8`).toBe('8');
+      const state = value(await invoke(run.page, 'ownerChannel.state', { appSessionId: id }));
+      expect([state.lane.on, 'drawnBy' in state.lane], `${peer.label}'s daemon publishes the lane with no drawnBy`).toEqual([true, false]);
+      await playExchange(run, id); // the running launch carries what the window draws
+      await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+      const main = run.page.locator('[data-region="main"]');
+      await expect(main.getByText(TO_HUMAN_ROWS.said, { exact: true }), 'the message').toBeVisible({ timeout: 20_000 });
+      await expect(main.locator(`[data-row-id="record-fold:closed:${TO_HUMAN_ROWS.call}"]`).getByRole('button'), 'the mirror’s record line').toHaveText('› working record');
+      await expect(main.locator('[data-view-switch]'), 'the mirror’s switch').toHaveText('to-human view · full transcript ›');
+      await expect(main.getByRole('group', { name: 'Session view', exact: true }), 'no bar').toHaveCount(0);
+      expect(run.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${here.label}'s main refuses nothing`).toEqual([]);
+      expect([...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => HOST_REFUSES.test(l)), `${peer.label}'s daemon and engine host refuse nothing`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the launch ${NATIVE_TO_HUMAN_ENV}=${launched.env[NATIVE_TO_HUMAN_ENV]} (stub ${stub.bin}); the lane on, no drawnBy; the mirror's record line and switch, no bar; nothing refused`);
+      value(await invoke(run.page, 'session.stop', { appSessionId: id, reason: 'stop' }));
+      await s.quit(run);
+      record(said);
+    }, { MAWS_E2E_ENGINE_BIN: stub.bin }); // the unit's engine hosts run the scene's stub
+  });
+});
+
+test('(to-human, the peer on this daemon) the peer’s window on this build’s unit mawsd, a session launched at 8: the peer drops drawnBy and draws its own report once, its bar and record row, nothing refused', async () => {
+  const { here, peer } = builds();
+  const why = unitPeer(peer) ?? (crossesOnMawsd(peer)[0] ? null : crossesOnMawsd(peer)[1]);
+  test.skip(why !== null, why ?? '');
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(300_000);
+  await withScratch('xb-to-human-unit-here', async (s) => {
+    const stub = stubbedSession(s);
+    await withUnit(s, here, 'xb-to-human-unit-here', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const id = await s.record(run.page);
+      await startResume(run, peer, id);
+      const launched = spawnEnvs(s, id).at(-1)!;
+      expect(launched.env[NATIVE_TO_HUMAN_ENV], `${here.label}'s daemon decides the launch at 8: the installation declares nothing`).toBe('8');
+      await playExchange(run, id); // the running launch carries what the window draws
+      await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+      const main = run.page.locator('[data-region="main"]');
+      await expect(main.getByText(TO_HUMAN_ROWS.said, { exact: false }).first(), `${peer.label} draws the message`).toBeVisible({ timeout: 20_000 });
+      if (drawsOwnReport(peer)) {
+        await expect(peerBar(run.page), `${peer.label} draws its bar, once`).toHaveCount(1, { timeout: 20_000 });
+        await expect(peerRecordRow(run.page), `${peer.label} draws its record row, once`).toHaveCount(1);
+        await expect(main.locator('[data-view-switch]'), 'no switch of this build’s').toHaveCount(0);
+      } else {
+        await expect(recordLine(run.page), `${peer.label} draws MAWS's mirror: its record line, once`).toHaveCount(1, { timeout: 20_000 });
+        await expect(peerBar(run.page), `${peer.label} draws no bar`).toHaveCount(0);
+      }
+      // the key among the dropped: the peer's reader logs each field it does not know, once per message and path
+      await expect.poll(() => [...run.output().split('\n')].filter((l) => DROPPED.test(l) && l.includes('drawnBy')).length, { timeout: 20_000, message: `${peer.label}'s reader drops drawnBy` }).toBeGreaterThan(0);
+      const lines = [...run.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')]; // read after the poll, so they cover its wait
+      expect(run.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+      expect(lines.filter((l) => HOST_REFUSES.test(l)), `${here.label}'s daemon and engine host refuse nothing`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      const dropped = run.output().split('\n').filter((l) => DROPPED.test(l) && l.includes('drawnBy')).map((l) => l.trim());
+      said.push(`  the launch ${NATIVE_TO_HUMAN_ENV}=${launched.env[NATIVE_TO_HUMAN_ENV]}; ${peer.label}'s ${drawsOwnReport(peer) ? 'bar and record row' : 'mirror record line'}, once each; dropped: ${dropped.join(' | ')}`);
+      value(await invoke(run.page, 'session.stop', { appSessionId: id, reason: 'stop' }));
+      await s.quit(run);
+      record(said);
+    }, { MAWS_E2E_ENGINE_BIN: stub.bin }); // the unit's engine hosts run the scene's stub
+  });
+});
+
+// UX wave U2b (panel finding 3, the coordinator's ruling): this build's owner channel says each write of the summaries'
+// switch to every client of its daemon (`mods.foldSummariesChanged`, a machine event, empty). A peer whose wire has no
+// such event is told it too: its main drops an event it does not know, says so once per name, and goes on
+// (src/shared/host/host-supervisor.ts, `isEventName`, in both peers). The peer's window on this build's unit mawsd while
+// the switch is written twice by a bare client of that daemon (the CLI's way in): the peer keeps working (its own
+// `mods.list` answers after each write) and neither end logs a refusal.
+const knowsSummariesSaid = (build: Build) => 'events.mods.foldSummariesChanged' in build.manifest.entries;
+test('(to-human, the switch said to the peer) the peer’s window on this build’s unit mawsd while the summaries’ switch is written twice: the peer drops the event it does not know, once, keeps answering, and nothing is refused', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsSummariesSaid(peer), `the peer (wire ${wireOf(peer)}) knows mods.foldSummariesChanged: it is of this landing, and the scene is about a peer that does not`);
+  test.skip(!peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) lists no machine.spine: it runs no owner channel on a daemon`);
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-to-human-said', async (s) => {
+    await withUnit(s, here, 'xb-to-human-said', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}; the switch written twice by a bare client of the daemon`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(value(await invoke(run.page, 'mods.list', {})).length, `${peer.label} reads the mods before`).toBeGreaterThan(0);
+      const drops = () => run.output().split('\n').filter((l) => /dropped \S+'s event mods\.foldSummariesChanged: not in this build's event registry/.test(l));
+      for (const on of [false, true]) {
+        await unit.request('mods.setFoldSummaries', { on });
+        // the peer's own read after the write, over the connection the event came down first: it still answers
+        expect(value(await invoke(run.page, 'mods.list', {})).length, `${peer.label} reads the mods after the write (on: ${on})`).toBeGreaterThan(0);
+        // the first event's drop reached the output (a later one would only add a line, so its count waits for the drain)
+        if (!on) await expect.poll(() => drops().length, { timeout: 20_000, message: `${peer.label}'s main drops the event it does not know` }).toBeGreaterThan(0);
+      }
+      expect((await unit.status()).pid, 'the same daemon still serves').toBe(unit.pid);
+      await s.quit(run);
+      // The barrier: the quit waits for the process's `exit`, which can come before its pipes have handed over their last
+      // bytes; `close` comes once both have ended, so every line the peer's main wrote is in its output from here on
+      await new Promise<void>((resolve) => {
+        if ([run.child.stdout, run.child.stderr].every((pipe) => pipe === null || pipe.readableEnded || pipe.destroyed)) resolve();
+        else run.child.once('close', () => resolve());
+      });
+      expect(drops(), `${peer.label}'s main drops the event it does not know once, for both writes (logged once per name)`).toHaveLength(1);
+      expect(run.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+      expect([...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => HOST_REFUSES.test(l)), `${here.label}'s daemon refuses nothing`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  dropped by ${peer.label}: ${drops().map((l) => l.trim()).join(' | ')}; its mods.list answered after each write; nothing refused`);
+      record(said);
+    });
+  });
+});
+
+// ---- UX wave U6b-3a: what changed, both ways (UC-14; B6) ---------------------------------------------------------------
+// U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §B and §F, scene G4; M3 decision 4)
+// stores nothing and adds three optional keys to what a daemon sends: `ignored: true` on an entry of `files.list`'s
+// answer that git ignores; `submodule: true` on a status entry that is a submodule; and `worktreeKind` on a status
+// entry whose path the work tree holds a link or nothing at (the ruling on the branch panel's findings); the last two in
+// `git.watch`'s and `git.status`'s answers and in the event `git.changed`. A daemon of an older build sends none, so
+// this build's window dims nothing and draws a dirty submodule as a file's row; an older app's main drops each key with
+// its tolerant reader and logs it once. This scene's repository holds no link and no path its work tree lost, so it
+// sends no `worktreeKind`: test/cross-build/git-status-schema.test.ts holds that key's drop against both peers'
+// schemas. The scene's repository holds an ignored folder with a file in it and a submodule (a second scratch repository
+// added from its path) whose working tree has a tracked file modified, dirty through all three steps; and three tracked
+// files committed clean, one per step, each the witness of that step's `git.changed`: its row is read as absent in the
+// surface already open, the file is written, and its row is waited on, with nothing shown, reopened or reloaded between,
+// so the row can only come by an event on the watch already held. Each daemon runs as the profile's unit (`withUnit`),
+// pinned by its pid and by `daemon.status`'s build against that build's out/main/mawsd.js before anything is read.
+//   (what changed, both ways)  the control: this build's app on this build's unit mawsd draws the submodule's Changed row
+//                              as a folder's and the ignored folder muted, and witness-control.txt's row comes. The first
+//                              half: on the peer's unit mawsd the same window draws the submodule's row as a file's and the
+//                              ignored folder plain, and witness-first.txt's row comes by the peer's `git.changed`; neither
+//                              main's log nor the peer's mawsd's refuses an answer or an event. The second half: the peer's
+//                              app on this build's unit mawsd lists the ignored folder in its tree, and its Review on
+//                              Uncommitted lists the submodule and then witness-second.txt with Review left as it was; its
+//                              logs refuse nothing, and its main names `ignored` dropped from files.list's output and
+//                              `submodule` dropped from the status, in an answer and in the event. Every peer the gate
+//                              crosses (build F, build M, master at b89d6d1d7 and the master this landing merges into)
+//                              lacks both keys and is an app this build's mawsd admits: no half has a reason not to run,
+//                              and the scene asserts that rather than annotating a half as not run.
+const knowsWhatChanged = (build: Build) => /\bignored: z\.literal\(true\)/.test(sourceOf(build, 'src/shared/ipc/schema/files.ts') ?? '') || /\bsubmodule: z\.literal\(true\)/.test(sourceOf(build, 'src/shared/ipc/schema/git.ts') ?? '');
+const knowsWhatChangedWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.list's ignored or a status entry's submodule: a build of U6b-3a or later; the runs of record cross build F, build M and the two masters the gate crosses, none of which knows them`;
+const XB_WITNESS = { control: 'witness-control.txt', first: 'witness-first.txt', second: 'witness-second.txt' } as const;
+// A refusal of what these commands and this event carry: the validation's words for an input or an answer
+// (src/shared/ipc/validate.ts) and a daemon's refusal to emit the event; main's own refusals are MAIN_REFUSES
+const CHANGED_REFUSED = /invalid (?:input for|output of) (?:files\.list|git\.(?:status|watch|unwatch))\b|refused to emit git\.changed/;
+// An older app's main's own lines for the two keys (`tolerantLog` in src/shared/ipc/tolerant.ts, written by
+// src/shared/host/host-supervisor.ts as `[hosts] dropped <path> from <what was read>, …`, the same in every peer)
+const DROPPED_IGNORED = /dropped \S*\bignored from the output of files\.list, a field this build does not know/;
+const DROPPED_SUBMODULE_ANSWER = /dropped \S*\bsubmodule from the output of git\.(?:watch|status), a field this build does not know/;
+const DROPPED_SUBMODULE_EVENT = /dropped \S*\bsubmodule from event git\.changed, a field this build does not know/;
+
+// The scene's repository, in the scratch's session folder: README.md, a .gitignore naming build/, the three witnesses and
+// the submodule `lib`, added from a second scratch repository's path (the file protocol allowed for that one command), all
+// committed; then build/out.txt written under the ignored folder and lib's tracked file modified, so that the outer status
+// lists `lib` alone, as a submodule whose working tree changed (porcelain v2's `sub` S.M.)
+function whatChangedRepo(s: Scratch): void {
+  // every git command of the fixture under a home of its own, empty, so no ignore file or configuration of the runner's
+  // home decides what it tracks or ignores (gitAt's flags, this environment); and the outer repository's and the
+  // submodule's core.excludesFile an empty file of the scene's, so each build's mawsd, which keeps the runner's HOME,
+  // reads what git ignores from the scene's .gitignore alone
+  const home = join(s.root, 'git-home');
+  mkdirSync(home);
+  const noGlobalIgnores = join(home, 'excludes');
+  writeFileSync(noGlobalIgnores, '');
+  const env = { ...isolatedGitEnv(), HOME: home, XDG_CONFIG_HOME: join(home, '.config') };
+  const git = (cwd: string, ...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], { cwd, env, encoding: 'utf8' });
+  const origin = join(s.root, 'lib-origin');
+  mkdirSync(origin);
+  writeFileSync(join(origin, 'lib.txt'), 'An invented library line.\n');
+  git(origin, 'init', '-q');
+  git(origin, 'add', '-A');
+  git(origin, 'commit', '-q', '-m', 'An invented library');
+  writeFileSync(join(s.repo, 'README.md'), '# An invented project\n');
+  writeFileSync(join(s.repo, '.gitignore'), 'build/\n');
+  for (const name of Object.values(XB_WITNESS)) writeFileSync(join(s.repo, name), 'An invented witness, as committed.\n');
+  git(s.repo, 'init', '-q');
+  git(s.repo, 'config', 'core.excludesFile', noGlobalIgnores);
+  git(s.repo, '-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', origin, 'lib');
+  git(join(s.repo, 'lib'), 'config', 'core.excludesFile', noGlobalIgnores);
+  git(s.repo, 'add', '-A');
+  git(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  mkdirSync(join(s.repo, 'build'));
+  writeFileSync(join(s.repo, 'build', 'out.txt'), 'An invented build output.\n');
+  writeFileSync(join(s.repo, 'lib', 'lib.txt'), 'An invented library line, changed in the working tree.\n');
+  expect(git(s.repo, 'status', '--porcelain=v2').trim(), 'the outer status lists the dirty submodule alone').toMatch(/^1 \.M S\.M\. 160000 160000 160000 [0-9a-f]+ [0-9a-f]+ lib$/);
+}
+
+test('(what changed, both ways) after a same-build control, this build’s window on the peer’s unit mawsd lists the folder with nothing dimmed, draws the dirty submodule as a file’s row, and a second change reaches the Changed group; the peer’s app on this build’s unit mawsd lists the folder, shows the submodule and then a second change in its Review, refuses nothing, and its log names both keys dropped', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsWhatChanged(peer), knowsWhatChangedWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(420_000);
+  await withScratch('xb-what-changed', async (s) => {
+    whatChangedRepo(s);
+    const said = [`${here.label} (wire ${wireOf(here)}) sends files.list's ignored and a status entry's submodule; ${peer.label} (wire ${wireOf(peer)}) knows neither`];
+    const lib = join(s.repo, 'lib');
+    const ignoredDir = join(s.repo, 'build');
+    const changedRowOf = (page: Page, path: string) => surface(page, 'files').locator(`[data-changed-row][data-path="${path}"]`);
+    const treeDirOf = (page: Page, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-kind="dir"][data-path="${path}"]`);
+    const refusals = (text: string) => text.split('\n').filter((line) => CHANGED_REFUSED.test(line) || MAIN_REFUSES.test(line));
+    // A step's witness in this build's Files, open since the submodule's row was read: its Changed row absent, the file
+    // written, then its row
+    const witnessed = async (page: Page, name: string, step: string) => {
+      const row = changedRowOf(page, join(s.repo, name));
+      await expect(row, `${step}: ${name} clean, no row`).toHaveCount(0);
+      writeFileSync(join(s.repo, name), `An invented witness, changed in ${step}.\n`);
+      await expect(row, `${step}: ${name}'s row, by a git.changed on the watch already held`).toHaveAttribute('data-letter', 'M', { timeout: 30_000 });
+    };
+    let id = '' as AppSessionId;
+    let address = '';
+
+    // the control: this build's app on this build's unit mawsd
+    await withUnit(s, here, 'xb-what-changed-control', async (unit) => {
+      said.push(`  the control: ${here.label}'s app on its own unit mawsd, pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      id = await s.record(run.page);
+      address = await addressed(run.page, id);
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      const sub = changedRowOf(run.page, lib);
+      await expect(sub, 'the dirty submodule, a folder’s row: the status carries submodule and the window reads it').toHaveAttribute('data-folder', '', { timeout: 20_000 });
+      await expect(sub).toHaveAttribute('data-letter', 'M');
+      await expect(treeDirOf(run.page, ignoredDir), 'the ignored folder muted: the listing carries ignored').toHaveAttribute('data-ignored', '', { timeout: 20_000 });
+      await witnessed(run.page, XB_WITNESS.control, 'the control');
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing its mawsd sent`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the control: lib a folder's row, build/ muted, ${XB_WITNESS.control}'s row by git.changed`);
+      await s.quit(run);
+    });
+    await endProfileProcesses(s.userData);
+
+    // the first half: this build's app on the peer's unit mawsd
+    await withUnit(s, peer, 'xb-what-changed-peer', async (unit) => {
+      said.push(`  the first half: ${here.label}'s app on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${peer.label}'s mawsd`).toBe(mawsdBuildOf(peer));
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      const sub = changedRowOf(run.page, lib);
+      await expect(sub, 'the dirty submodule listed').toHaveAttribute('data-letter', 'M', { timeout: 20_000 });
+      await expect(sub, 'as a file’s row: the peer’s status carries no submodule').not.toHaveAttribute('data-folder');
+      const ignored = treeDirOf(run.page, ignoredDir);
+      await expect(ignored, 'the ignored folder listed').toBeVisible({ timeout: 20_000 });
+      await expect(ignored, 'and plain: the peer’s listing carries no ignored').not.toHaveAttribute('data-ignored');
+      await witnessed(run.page, XB_WITNESS.first, 'the first half');
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing ${peer.label}'s mawsd sent`).toEqual([]);
+      expect(refusals(s.daemonLog()), `${peer.label}'s mawsd refuses nothing ${here.label} asked`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the first half: lib a file's row, build/ plain, ${XB_WITNESS.first}'s row by the peer's git.changed; no refusal in either log`);
+      await s.quit(run);
+    });
+    await endProfileProcesses(s.userData);
+
+    // the second half: the peer's app on this build's unit mawsd, which admits it (M3 decision 4)
+    expect(appObeysConnectors(peer), `${peer.label} (wire ${wireOf(peer)}) is an app ${here.label}'s mawsd admits: it lists ${CONNECTORS_CLIENT_CAPABILITY}`).toBe(true);
+    await withUnit(s, here, 'xb-what-changed-here', async (unit) => {
+      said.push(`  the second half: ${peer.label}'s app on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`);
+      const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(old.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(old.page, id, `session:${address}`);
+      await showTool(old.page, 'Files');
+      await expect(namedRow(toolBody(old.page, 'Files'), 'build'), `${peer.label}'s tree lists the ignored folder: the listing passed its reader`).toBeVisible({ timeout: 20_000 });
+      await showTool(old.page, 'Review');
+      const review = toolBody(old.page, 'Review');
+      const uncommitted = review.locator('[data-chip="uncommitted"]');
+      await expect(uncommitted).toBeVisible({ timeout: 20_000 });
+      if ((await uncommitted.getAttribute('aria-pressed')) !== 'true') await uncommitted.click();
+      await expect(uncommitted, `${peer.label}'s Review on Uncommitted`).toHaveAttribute('aria-pressed', 'true');
+      // the paths Review lists: the peer's list of files (an option's `data-path`), or a stack's sections in a later build
+      const listed = () => review.evaluate((root) => Array.from(root.querySelectorAll('[role="option"] [data-path], [data-review-stack] > [data-review-file]')).map((el) => el.getAttribute('data-path') ?? el.getAttribute('data-review-file') ?? ''));
+      await expect.poll(listed, { timeout: 20_000, message: `${peer.label}'s Review lists the submodule: the watch's answer passed its reader` }).toContain('lib');
+      expect(await listed(), `${XB_WITNESS.second} clean: not listed`).not.toContain(XB_WITNESS.second);
+      writeFileSync(join(s.repo, XB_WITNESS.second), 'An invented witness, changed in the second half.\n');
+      await expect.poll(listed, { timeout: 30_000, message: `${XB_WITNESS.second} listed with Review left as it was: a git.changed carrying submodule passed ${peer.label}'s event reader` }).toContain(XB_WITNESS.second);
+      // the logs: no refusal; the peer's main names both keys dropped, on both paths
+      const dropped = (line: RegExp) => old.output().split('\n').some((each) => line.test(each));
+      for (const [line, what] of [[DROPPED_IGNORED, 'ignored dropped from files.list’s output'], [DROPPED_SUBMODULE_ANSWER, 'submodule dropped from the status in an answer'], [DROPPED_SUBMODULE_EVENT, 'submodule dropped from the status in the event git.changed']] as const) {
+        await expect.poll(() => dropped(line), { timeout: 20_000, message: `${peer.label}'s main names ${what}` }).toBe(true);
+      }
+      expect(refusals(old.output()), `${peer.label}'s main refuses nothing ${here.label}'s mawsd sent`).toEqual([]);
+      expect(refusals(s.daemonLog()), `${here.label}'s mawsd refuses nothing ${peer.label} asked`).toEqual([]);
+      expect(old.maws.consoleErrors()).toEqual([]);
+      said.push(`  the second half: build/ in ${peer.label}'s tree; lib, then ${XB_WITNESS.second}, in its Review; its main dropped ignored and submodule (answer and event), refused nothing`);
+      await s.quit(old);
+    });
+    record(said);
+  });
 });

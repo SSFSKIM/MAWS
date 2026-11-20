@@ -89,6 +89,7 @@ describe('the routing classes', () => {
       'engine.hostState',
       'machines.list', // P5 O6 M3: the app's own connection manager
       'side.comment.content', // UX wave U5a: a comment's content built from this Mac's screenshot, never on a link
+      'customization.skillFile', // UX wave U11: this app's Finder on a skill this Mac's inventory lists
       ...NAMES.org.commands, // P5 O8 M1: this app's own sign-in to the org
     ].sort());
   });

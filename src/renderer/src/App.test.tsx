@@ -156,6 +156,9 @@ function fakeMain(initial: SettingsState['settings']['theme'], { onAnnounce }: {
       // P5 O9 M5: the lane A store's first list at connect (no terminal session driven through its bridge)
       case 'laneA.list':
         return { states: [] };
+      // UX wave U6b-5b: the window's zoom read at connect (100 %)
+      case 'layout.zoom':
+        return { factor: 1 };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':

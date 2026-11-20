@@ -98,7 +98,10 @@ export function heard(event: ConnectorSignInChanged, at = Date.now(), machine: M
     if (own.size > UNBOUND_KEPT) own.delete(own.keys().next().value!);
     return;
   }
-  if (TERMINAL.has(event.state)) bound.delete(op);
+  if (TERMINAL.has(event.state)) {
+    bound.delete(op);
+    endRowBindings((started) => started.op === op); // U11h: a row's operation ended, drawn or not
+  }
   if (newest.get(owner.key) !== op) return; // an older operation's
   record(owner.key, owner, event, at);
 }
@@ -139,9 +142,12 @@ export async function startSignInDynamic(server: { name: string; revision?: stri
 }
 
 // A sign-in's receipt bound to its server, the events heard before it applied; a refused invoke is a failed sign-in.
-function bindReceipt(target: Omit<SignInServer, 'machine'>, fingerprint: string | null, appSessionId: string, answer: CommandResult<'connectors.signIn' | 'connectors.signInServer' | 'connectors.signInDynamicServer'>): void {
+// U11h: `rowKey`, a plugin's row whose press it answers, which the operation is bound to; any other row's operation of
+// the server is replaced by it.
+function bindReceipt(target: Omit<SignInServer, 'machine'>, fingerprint: string | null, appSessionId: string, answer: CommandResult<'connectors.signIn' | 'connectors.signInServer' | 'connectors.signInDynamicServer'>, rowKey?: string): void {
   const machine = machineOfSession(appSessionId); // the session's address names where it went
   const key = signInKeyOf({ ...target, machine });
+  endRowBindings((started, row) => started.key === key || row === rowKey);
   if (!answer.ok) {
     newest.set(key, `refused:${key}`);
     record(key, { appSessionId, fingerprint }, { opId: `refused:${key}`, name: target.name, state: 'failed', reason: 'engine', message: transportWords(answer.error), where: null }, Date.now());
@@ -150,6 +156,7 @@ function bindReceipt(target: Omit<SignInServer, 'machine'>, fingerprint: string 
   const op = opKeyOf(machine, answer.value.opId);
   bound.set(op, { key, appSessionId, fingerprint });
   newest.set(key, op);
+  if (rowKey !== undefined) useStartedOn.setState(({ rows }) => ({ rows: new Map(rows).set(rowKey, { key, op, opId: answer.value.opId }) }));
   const own = unboundOf(machine);
   const waiting = own.get(op) ?? [];
   own.delete(op);
@@ -167,6 +174,7 @@ export function cancelSignIn(opId: string, appSessionId: string, bridge: MawsBri
 export function forgetSignIn(target: SignInServer): void {
   const key = signInKeyOf(target);
   newest.delete(key);
+  endRowBindings((started) => started.key === key);
   useSignIns.setState(({ byServer }) => {
     if (!byServer.has(key)) return { byServer };
     const next = new Map(byServer);
@@ -175,12 +183,39 @@ export function forgetSignIn(target: SignInServer): void {
   });
 }
 
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §E: "An operation under way shows its
+// step and Cancel, whatever the table says now"; the architect's rulings of 2026-11-16): the operation a plugin's row's
+// own press started, by the row's key, so it stays on that row while it runs whatever the row's engine name reads now
+// (its manifest unreadable, or renamed). A binding ends here, where the events are heard, whether or not the row is
+// drawn: when its operation ends, when another operation of its server replaces it, when the server's result is
+// forgotten, and at the row's next press.
+export interface StartedOn {
+  key: string; // the server's sign-in key
+  op: string; // the operation, by its machine and id
+  opId: string;
+}
+export const useStartedOn = create<{ rows: ReadonlyMap<string, StartedOn> }>()(() => ({ rows: new Map() }));
+
+function endRowBindings(ends: (started: StartedOn, rowKey: string) => boolean): void {
+  const { rows } = useStartedOn.getState();
+  const kept = [...rows].filter(([rowKey, started]) => !ends(started, rowKey));
+  if (kept.length !== rows.size) useStartedOn.setState({ rows: new Map(kept) });
+}
+
+/** A plugin's row's press: a dynamic sign-in, as `startSignInDynamic` sends it with the row's revision, its operation
+ * bound to the row it was pressed on. */
+export async function startSignInFromRow(rowKey: string, server: { name: string; revision: string }, fingerprint: string | null, appSessionId: AppSessionId, bridge: MawsBridge = ipc): Promise<void> {
+  const answer = await bridge.invoke('connectors.signInDynamicServer', { name: server.name, appSessionId, entry: { revision: server.revision } });
+  bindReceipt({ name: server.name, scope: 'dynamic', cwd: null }, fingerprint, appSessionId, answer, rowKey);
+}
+
 /** Every record and binding dropped (tests). */
 export function resetSignIns(): void {
   bound.clear();
   newest.clear();
   unbound.clear();
   useSignIns.setState({ byServer: new Map() });
+  useStartedOn.setState({ rows: new Map() });
 }
 
 /** The latest sign-in of a server that is still under way, for Cancel. */

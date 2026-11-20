@@ -168,7 +168,7 @@ export const MCP = {
 // UX wave U11a (§D, l8-settings-03): an unstarted tab's Connectors and Skills dialogs, what the three dialogs and the
 // "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
 export const BEFORE_START = {
-  connectors: (place: string) => `Configured for ${place}. Connection state, and connectors from plugins, show once the chat starts.`,
+  connectors: (place: string) => `Configured for ${place}. Connection state shows once the chat starts.`, // UX wave U11h: a plugin's connectors are listed now
   skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
   remote: (machine: string) => `Shown once the chat starts on ${machine}`,
   userConfiguration: 'your user configuration',
@@ -560,6 +560,11 @@ export const LIBRARY = {
       'next-launch': 'Applies the next time this session starts',
       'next-compaction': 'Applies after this session’s next compaction',
     } satisfies Record<NonNullable<ModRow['pending']>, string>,
+    // UX wave U2b (M7; the execution document, §M, "The switch"): the to-human row's second line, in the mods list alone
+    summaries: {
+      label: 'Summaries on fold lines',
+      sentence: 'Each summary is one small model call by the to-human mod, on the session’s own account. Off: sessions MAWS starts make no new summaries from their next start, and summaries already made stay. A session started in a terminal follows the mod’s own setting.',
+    },
   },
   // P2-C end
   // the detail (§5.7; Desktop's words where it has them, c24c8737b-BY-86Rbf.js)

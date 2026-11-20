@@ -15,11 +15,17 @@
 //   times, then answers `internal`. The whole file is hashed on every page (up to 8 MiB each), the price of that check.
 // - P5 O7 M5a: `library.read` (a library item's stored file, or with `export` an export's) answers as `files.read` does,
 //   and is read the same way (`readInPages`): the viewer's read of a File artifact, an open copy's and a Save As's.
+// - UX wave U6f: the paging itself (`readPages`) takes the function that reads one page, so a file outside a session's
+//   folders, read by one act per page, is assembled and checked as these are. And a read may be bound, whole, to the
+//   channel it began on (`boundTo`): every request goes on the channel current when it is made (`oneChannel`), and none
+//   after the first is asked once that channel is no longer the current one, so the page's keyed read, whose keys only a
+//   peer that lists the capability reads, never reaches another channel's peer, carried or asked anew (M3's fix waves 1
+//   and 3; Decision Log 27). Every other read is held across a channel's end and sent again on the next, as it always was.
 import { MESSAGE_MAX_BYTES } from '../../../apps/org-protocol/src/index.ts';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { FILES_READ_DEFAULT_LENGTH, type FilesReadOutput } from '@shared/ipc/schema/files';
-import { dispatchOverLink } from '../machines/remote/dispatch';
+import { callOverLink, dispatchOverLink } from '../machines/remote/dispatch';
 import type { RemoteLink } from '../machines/remote/link';
 
 /** Bytes per ranged read: base64 of it, with the answer's envelope, stays under the channel's result bound. */
@@ -39,29 +45,56 @@ export function readFileInPages(link: RemoteLink, input: Record<string, unknown>
   return readInPages(link, 'files.read', input, log);
 }
 
-export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void): Promise<Result> {
-  const whole = await dispatchOverLink(link, name, input);
+// UX wave U6b-2 (M3, decision 9; A7): `label`, when given, names the read in the two log lines in place of the path or the
+// artifact's id, so a file frame's copy logs no path. The sentence a file that kept changing answers is unchanged: it goes
+// to the window that asked, which named the path.
+export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void, label?: string, { boundTo }: { boundTo?: () => boolean } = {}): Promise<Result> {
+  // both reads are graded `view`, so the call `callOverLink` makes is the one `dispatchOverLink` would, bound to its channel;
+  // a request of a bound read whose channel is no longer current is answered as the link answers one it could not send
+  const ask = (fields: Record<string, unknown>): Promise<Result> => {
+    if (boundTo === undefined) return dispatchOverLink(link, name, fields);
+    if (!boundTo()) return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `${name}: machine ${link.name} is not reachable`) });
+    return callOverLink(link, name, fields, { oneChannel: true });
+  };
+  const whole = await ask(input);
   if (!tooLarge(whole)) return whole;
-  const said = `lane B: ${name} of ${link.name} ${String(input.path ?? input.artifactId)}`;
-  log(`${said}: too large for the channel in one answer; read in pages`);
+  log(`${saidOf(link, name, input, label)}: too large for the channel in one answer; read in pages`);
+  return readPages(link, name, input, log, { page: ask, pageBytes: REMOTE_READ_PAGE_BYTES, ...(label !== undefined && { label }) });
+}
+
+const saidOf = (link: RemoteLink, name: string, input: Record<string, unknown>, label?: string) => `lane B: ${name} of ${link.name} ${label ?? String(input.path ?? input.artifactId)}`;
+
+/**
+ * UX wave U6f (decision 4): the paged read, given the function that reads one page and the size of a page: a call over
+ * the link for the reads above (today's), or one act for a file outside a session's folders, which crosses in small
+ * pages from its first (./remote-outside-files.ts). The range asked is read in pages from its offset, assembled
+ * into one answer, and read again, up to REMOTE_READ_TRIES times, while its pages answer different hashes.
+ */
+export async function readPages(
+  link: RemoteLink,
+  name: string,
+  input: Record<string, unknown>,
+  log: (line: string) => void,
+  { page, pageBytes, label }: { page: (fields: Record<string, unknown>) => Promise<Result>; pageBytes: number; label?: string },
+): Promise<Result> {
   for (let tries = 1; ; tries++) {
-    const read = await readOnce(link, name, input);
+    const read = await readOnce(page, pageBytes, input);
     if (read !== 'changed') return read;
     if (tries >= REMOTE_READ_TRIES) return { ok: false, error: ipcError('internal', `${name}: ${String(input.path ?? input.artifactId)} kept changing on machine ${link.name} while it was read`) };
-    log(`${said}: the file changed between its pages; read again`);
+    log(`${saidOf(link, name, input, label)}: the file changed between its pages; read again`);
   }
 }
 
 /** The range asked, in pages; `changed` when the pages answered different hashes. */
-async function readOnce(link: RemoteLink, name: PagedRead, input: Record<string, unknown>): Promise<Result | 'changed'> {
+async function readOnce(readPage: (fields: Record<string, unknown>) => Promise<Result>, pageBytes: number, input: Record<string, unknown>): Promise<Result | 'changed'> {
   const start = typeof input.offset === 'number' ? input.offset : 0;
   const asked = typeof input.length === 'number' ? input.length : FILES_READ_DEFAULT_LENGTH;
   const pages: FilesReadOutput[] = [];
   let at = start;
-  let size = REMOTE_READ_PAGE_BYTES;
+  let size = pageBytes;
   for (;;) {
     const left = start + asked - at;
-    const read = await dispatchOverLink(link, name, { ...input, offset: at, length: Math.min(size, left) });
+    const read = await readPage({ ...input, offset: at, length: Math.min(size, left) });
     if (tooLarge(read) && size > REMOTE_READ_PAGE_MIN) {
       size = Math.max(REMOTE_READ_PAGE_MIN, Math.floor(size / 2));
       continue;

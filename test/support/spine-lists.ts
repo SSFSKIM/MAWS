@@ -14,8 +14,8 @@ export const SPINE_COMMANDS = [
   'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.send' /* P5 O7 M5c: on the machine */, 'delivery.status',
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C, D4): the checkouts, the root's last
   // parts (CHECKOUTS_COMMANDS below), interleaved here in sorted order
-  'files.grant', 'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.readUploads', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write', 'files.writeOutside', // UX wave U6e: files.grant, files.writeOutside
-  'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
+  'files.admit', 'files.chooseOutside', 'files.follow' /* UX wave U6b-4c */, 'files.grant', 'files.list', 'files.listOutside', 'files.openExternal', 'files.read', 'files.readOutside', 'files.readResolved', 'files.readUploads', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write', 'files.writeOutside', // UX wave U6e: files.grant, files.writeOutside; U6f: files.readOutside, files.listOutside, files.chooseOutside
+  'git.branchCommits', 'git.branches', 'git.changesSince', 'git.commitDiff', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch', // UX wave U5b-2: the three reads
   'git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status',
   // P5 O9's lane A driver (O3 Decision Log 13): composed only while the run holds spine.lock, with no intercept or tap
   'laneA.accepted', 'laneA.answer', 'laneA.btw', 'laneA.catalog', 'laneA.command', 'laneA.compact', 'laneA.interrupt', 'laneA.list', 'laneA.media', 'laneA.model',
@@ -28,8 +28,8 @@ export const SPINE_COMMANDS = [
   'machine.op', 'machine.opQuery', // P5 O3-D M4: the services' operation ledger, opened only while the run holds spine.lock
   'machine.setupTrust', // P5 O7 M9: its guarded trust read (src/services/machine/setup.ts), with the session service
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b (Interfaces §G): the machine half, for main's settings mirror
-  'mods.list', 'mods.setSessionOverride',
-  'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
+  'mods.list', 'mods.setFoldSummaries' /* UX wave U2b M4 */, 'mods.setSessionOverride',
+  'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.folds' /* UX wave U2b M4 */, 'ownerChannel.markRead', 'ownerChannel.state',
   'scm.commit', 'scm.discard', 'scm.pr.create', 'scm.pr.plan', 'scm.pr.state', 'scm.push', 'scm.push.plan', 'scm.remote.cancel', 'scm.remote.last',
   'scm.stage', 'scm.status', 'scm.unstage',
   'session.acquire', 'session.appEvents', 'session.archive', 'session.archiveOlder', 'session.create', 'session.delete',
@@ -49,8 +49,8 @@ export const SPINE_COMMANDS = [
 // P5 O3-E M2: what the checkouts register through the spine's bus, in every run (a refused one too): the 26 retagged
 // commands, files.readResolved (library.read's reach) and files.upload (M3's write; refused until then), sorted
 export const CHECKOUTS_COMMANDS = [
-  'files.grant', 'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.readUploads', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write', 'files.writeOutside', // UX wave U6e: files.grant, files.writeOutside
-  'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
+  'files.admit', 'files.chooseOutside', 'files.follow' /* UX wave U6b-4c */, 'files.grant', 'files.list', 'files.listOutside', 'files.openExternal', 'files.read', 'files.readOutside', 'files.readResolved', 'files.readUploads', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write', 'files.writeOutside', // UX wave U6e: files.grant, files.writeOutside; U6f: files.readOutside, files.listOutside, files.chooseOutside
+  'git.branchCommits', 'git.branches', 'git.changesSince', 'git.commitDiff', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch', // UX wave U5b-2: the three reads
   'scm.commit', 'scm.discard', 'scm.pr.create', 'scm.pr.plan', 'scm.pr.state', 'scm.push', 'scm.push.plan', 'scm.remote.cancel', 'scm.remote.last',
   'scm.stage', 'scm.status', 'scm.unstage',
 ];

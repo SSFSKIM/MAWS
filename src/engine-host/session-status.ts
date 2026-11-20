@@ -10,7 +10,7 @@ import { PERMISSION_MODES, type AutoModeRefusalCode, type PermissionMode } from 
 import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
+import type { InitializeResponse, McpStatusResponse, ReloadPluginsResponse } from '@shared/wire/control';
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { browserHoldOf, CRON_TOOLS, sessionCronsOf, WorkState, type BrowserEntry, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2; P5 O17 M7: the browser entry
 
@@ -31,6 +31,9 @@ const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]) : []);
 // system/init's and reload_plugins' plugin items alike: `name`, `path`, `source`, `version` (E8: pass3/e8-plugins-reload seq 26, 31)
 export const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
+// system/init's `mcp_servers` and reload_plugins' `mcpServers` alike (mcp_status's projection: pass3/p2-no-prompt-resume-1
+// seq 30): each server's name, status and source
+const mcpServersOf = (v: unknown): EngineSessionStatus['mcpServers'] => list(v).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
 // P2-A start (2026-10-09): a main-lane system/init's plugins with their load errors and warnings (omitted by the engine
 // when empty, SPEC 45 §45.10.2), read the same way by the tracker and by X17's observed facts (observed-facts.ts)
 export function initPluginsOf(frame: Record<string, unknown>): Pick<EngineSessionStatus, 'plugins' | 'pluginErrors' | 'pluginWarnings'> {
@@ -48,6 +51,9 @@ export function isPermissionMode(mode: string): mode is PermissionMode {
   return (PERMISSION_MODES as readonly string[]).includes(mode);
 }
 
+
+/** Ticket 619: an mcp_status ask, as `applyMcpStatus` weighs its answer. */
+export interface McpAsk { reports: number; seq: number }
 export class SessionStatusTracker {
   engineState: EngineSessionStatus['engineState'] = 'unknown';
   activity: EngineSessionStatus['activity'] = null;
@@ -64,8 +70,12 @@ export class SessionStatusTracker {
   firstTurnAt: string | null = null; // O16 D69: the launch's first main-lane turn.started (the fold restores it)
   pluginErrors: EngineSessionStatus['pluginErrors'] = [];
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
-  pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet)
+  pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet); U11h: and its MCP servers
   mcpServers: EngineSessionStatus['mcpServers'] = [];
+  // ticket 619: the init frames' and reloads' reports of the servers, the mcp_status asks, and the latest ask applied
+  private mcpReports = 0;
+  private mcpAsks = 0;
+  private mcpApplied = 0;
   backgroundTasks: EngineSessionStatus['backgroundTasks'] = [];
   heldPeerMessages: EngineSessionStatus['heldPeerMessages'] = [];
   published: EngineSessionStatus['published'] = undefined; // P5 E312: the last code_change_published
@@ -252,12 +262,37 @@ export class SessionStatusTracker {
   // answer carries only a count of errors, so the last init's errors and warnings stay. Its commands and agents, in the
   // initialize response's shape, are the catalogue's (a plugin's skills are among the commands); the skills and terminal
   // commands lists come only from system/init, so the skills keep only names still among the answer's commands (W-D
-  // review m1: pass3/e8-plugins-reload seq 54 drops e8-probe:e8-hello, an init skill at seq 9).
+  // review m1: pass3/e8-plugins-reload seq 54 drops e8-probe:e8-hello, an init skill at seq 9). UX wave U11h: the answer
+  // also lists the MCP servers once the engine applied the plugins' changes, so they are the status's servers, observed
+  // with the plugins (`pluginsObservedAt` is when both were); an answer without the list leaves the last one.
   applyReload(answer: ReloadPluginsResponse): void {
     this.plugins = pluginsOf(answer.plugins);
+    if (Array.isArray(answer.mcpServers)) this.reportMcp(mcpServersOf(answer.mcpServers));
     this.pluginsObservedAt = new Date().toISOString(); // P2-A
     const names = new Set(list(answer.commands).map((command) => command.name));
     this.setCatalog({ commands: answer.commands, agents: answer.agents, skills: this.catalogState.skills.filter((skill) => names.has(skill)) });
+  }
+
+  // Ticket 619: an mcp_status answer is the session's servers now: the engine answers it once the session is ready, before
+  // the first turn's system/init (which the list was otherwise filled from). `asked`: the token `askMcp` gave when it was
+  // asked. Each answer is the servers as of its own ask, so it stands unless an init frame or a reload reported them since,
+  // or a later ask's answer was applied already (which an older one never rolls back). The plugins' observation stays the
+  // init's and the reload's: the answer says nothing of them. True when the list changed.
+  askMcp(): McpAsk {
+    return { reports: this.mcpReports, seq: ++this.mcpAsks };
+  }
+
+  applyMcpStatus(answer: McpStatusResponse, asked: McpAsk): boolean {
+    if (asked.reports !== this.mcpReports || asked.seq <= this.mcpApplied) return false;
+    this.mcpApplied = asked.seq;
+    const before = JSON.stringify(this.mcpServers);
+    this.mcpServers = mcpServersOf(answer.mcpServers);
+    return JSON.stringify(this.mcpServers) !== before;
+  }
+
+  private reportMcp(servers: EngineSessionStatus['mcpServers']): void {
+    this.mcpServers = servers;
+    this.mcpReports += 1;
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {
@@ -330,7 +365,7 @@ export class SessionStatusTracker {
     if (typeof frame.claude_code_version === 'string') this.engineVersion = frame.claude_code_version;
     if (typeof frame.cwd === 'string') this.engineCwd = frame.cwd;
     if (typeof frame.permissionMode === 'string') this.setMode(frame.permissionMode);
-    if (Array.isArray(frame.mcp_servers)) this.mcpServers = list(frame.mcp_servers).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
+    if (Array.isArray(frame.mcp_servers)) this.reportMcp(mcpServersOf(frame.mcp_servers));
     this.setFastMode(frame);
     ({ plugins: this.plugins, pluginErrors: this.pluginErrors, pluginWarnings: this.pluginWarnings } = initPluginsOf(frame));
     this.pluginsObservedAt = at; // P2-A

@@ -117,7 +117,8 @@ class FakeWindow extends EventEmitter {
   isVisible = () => this.shownOnScreen;
 }
 
-function harness(options: { focus?: 'on' | 'off' } = {}) {
+// U6b-5b (placement 1): `zoom` is the app windows' factor, read by the manager at each placement (main's `zoomOf`)
+function harness(options: { focus?: 'on' | 'off'; zoom?: { factor: number } } = {}) {
   const emitted: { name: EventName; payload: unknown }[] = [];
   const views: FakeView[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
@@ -148,6 +149,7 @@ function harness(options: { focus?: 'on' | 'off' } = {}) {
     focusEmulation: options.focus ?? 'off',
     setFocusEmulation: (entry, enabled) => void focusCalls.push([entry.tab.tabId, enabled]),
     now: () => clock,
+    ...(options.zoom && { zoomOf: () => options.zoom!.factor }),
   });
   // a loaded tab whose page has committed (shown unless something hides it)
   const loaded = (url = 'https://a.test/') => {
@@ -249,6 +251,121 @@ describe('the view manager: placement (E4a Design §3, Decision Log 22)', () => 
     expect(view.visible).toBe(false); // nothing committed yet
     h.store.navigationCommitted(tabId, { url: 'https://a.test/', canGoBack: false, canGoForward: false });
     expect(view.visible).toBe(true);
+  });
+});
+
+// UX wave U6b-5b M1 (Interfaces §G, the e2e seam; decision 36): what main last took from `browser.view.place` for a tab,
+// as received, and how many such reports it has acted on: the acknowledgment a scene waits on before it reads bounds.
+describe('the view manager: the placement main acknowledged (U6b-5b M1)', () => {
+  it('is null before any report, then the last rect acted on as received and how many were', () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId } = h.loaded();
+    const entry = () => h.store.entry(tabId)!;
+    expect(h.manager.placedOf(entry())).toBeNull();
+    h.place(sender, tabId, 'p1', R, true);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: R, count: 1 });
+    const unrounded = { x: 10.4, y: 20.6, width: 300.5, height: 199.49 };
+    h.place(sender, tabId, 'p1', unrounded);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: unrounded, count: 2 }); // as received; the view takes it rounded
+    h.place(sender, tabId, 'p1', null);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: null, count: 3 }); // the owner's release is acted on too
+  });
+
+  it('a report the manager ignores (another pane, no claim; an unknown window) is not acknowledged', () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId } = h.loaded();
+    const entry = () => h.store.entry(tabId)!;
+    h.place(sender, tabId, 'p1', R, true);
+    h.place(sender, tabId, 'p2', { ...R, x: 99 });
+    h.place(sender, tabId, 'p2', null);
+    h.place({} as WebContents, tabId, 'p1', { ...R, x: 7 }, true);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: R, count: 1 });
+    h.place(sender, tabId, 'p2', { ...R, x: 99 }, true); // the control: the same pane's claim is acted on
+    expect(h.manager.placedOf(entry())).toEqual({ rect: { ...R, x: 99 }, count: 2 });
+  });
+});
+
+// UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, placement 1; decision 27): the pane reports
+// its rect in the window's CSS pixels, and `setBounds` takes window points. The pairs are the Mac's: the pane main received
+// at each factor, and the view's bounds that should have followed it, where today's bounds were the pane's rect itself.
+describe('the view manager: the app window’s zoom (U6b-5b, placement 1)', () => {
+  it.each([
+    [0.5, { x: 1173, y: 141, width: 1380, height: 1492 }, { x: 587, y: 71, width: 690, height: 746 }],
+    [0.8, { x: 789, y: 140, width: 804, height: 878 }, { x: 631, y: 112, width: 643, height: 702 }],
+    [1.25, { x: 415, y: 158, width: 602, height: 491 }, { x: 519, y: 198, width: 752, height: 613 }],
+    [2, { x: 29, y: 203, width: 604, height: 200 }, { x: 58, y: 406, width: 1208, height: 400 }],
+  ])('at %s places the view on the pane’s rect times the factor, edge by edge', (factor, pane, points) => {
+    const h = harness({ zoom: { factor } });
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', pane, true);
+    expect(view.bounds).toEqual(points);
+    expect(h.manager.placedOf(h.store.entry(tabId)!)).toEqual({ rect: pane, count: 1 }); // the acknowledgment is the rect as received
+  });
+
+  it('places every view of a window again when the factor changes, where the window sent no new rect, and no other window’s', () => {
+    const zoom = { factor: 1 };
+    const h = harness({ zoom });
+    const one = h.win();
+    const two = h.win();
+    const a = h.loaded();
+    const b = h.loaded('https://b.test/');
+    h.place(one.sender, a.tabId, 'p1', R, true);
+    h.place(two.sender, b.tabId, 'p2', R, true);
+    expect([a.view.bounds, b.view.bounds]).toEqual([R, R]);
+    zoom.factor = 2;
+    h.manager.placeAgain(one.w as unknown as BrowserWindow);
+    expect(a.view.bounds).toEqual({ x: 20, y: 40, width: 600, height: 400 });
+    expect(b.view.bounds).toEqual(R); // the control: the other window's view, placed alike, stays until its window is placed again
+    expect(h.manager.placedOf(h.store.entry(a.tabId)!)).toEqual({ rect: R, count: 1 }); // no report was acted on
+    zoom.factor = 1;
+    h.manager.placeAgain(one.w as unknown as BrowserWindow);
+    expect(a.view.bounds).toEqual(R);
+  });
+
+  // a view in the staging window for its still is placed back by staging's own return, at the factor of that moment
+  it('leaves a view staged for its still where it is, across a new factor and a new rect, and the return from staging places it at both', async () => {
+    const zoom = { factor: 1 };
+    const h = harness({ zoom });
+    const { w, sender } = h.win();
+    const { tabId } = h.store.open({ appSessionId: A, url: 'https://late.test/', select: true }).tab;
+    const view = h.views.at(-1)!;
+    h.place(sender, tabId, 'p1', R, true);
+    await h.manager.cover(true, sender);
+    let captures = 0;
+    let answer!: (image: unknown) => void;
+    view.capture = () => (++captures === 1 ? Promise.resolve(fakeImage(10, true)) : new Promise((resolve) => (answer = resolve)));
+    h.store.navigationCommitted(tabId, { url: 'https://late.test/', canGoBack: false, canGoForward: false });
+    h.store.update(tabId, { loading: false });
+    await vi.waitFor(() => expect(captures).toBe(2)); // in the staging window
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height });
+    zoom.factor = 2;
+    h.manager.placeAgain(w as unknown as BrowserWindow);
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height }); // still staged, at the stage's origin
+    // a device-sized pane redrawn at the new factor sends a new rect meanwhile: recorded and acknowledged, the stage left be
+    const moved = { x: 30, y: 40, width: 200, height: 100 };
+    h.place(sender, tabId, 'p1', moved);
+    expect(h.manager.placedOf(h.store.entry(tabId)!)).toMatchObject({ rect: moved });
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: R.width, height: R.height });
+    answer(fakeImage(10));
+    await vi.waitFor(() => expect(h.covered()).toHaveLength(1));
+    expect(w.children.has(view)).toBe(true);
+    expect(view.bounds).toEqual({ x: 60, y: 80, width: 400, height: 200 }); // the control: back in its window, the latest rect at 200 %
+  });
+
+  it('places nothing again for a released tab', () => {
+    const zoom = { factor: 1 };
+    const h = harness({ zoom });
+    const { w, sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    h.place(sender, tabId, 'p1', null);
+    const calls = view.calls.length;
+    zoom.factor = 2;
+    h.manager.placeAgain(w as unknown as BrowserWindow);
+    expect(view.calls.length).toBe(calls);
   });
 });
 

@@ -460,7 +460,11 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
     const adapter = adapterOf();
     const host = new Host(seedDoc(), adapter);
     const peer = host.peer();
-    transact(peer, () => nodeOf(peer, 'p4').format(0, 7, { 'comment--stray': { threadId: 'ghost' } }));
+    // a comment mark the schema knows (its key the binding's `comment--<hash>`), on a thread no row holds
+    const ghost = pmnodeToDelta(schemaFor().nodeFromJSON({ type: 'paragraph', attrs: { id: null }, content: [{ type: 'text', text: 'x', marks: [{ type: 'comment', attrs: { threadId: 'ghost' } }] }] }));
+    const ghostKey = Object.keys([...(ghost as unknown as { children: Iterable<{ format?: Record<string, unknown> }> }).children][0]!.format ?? {})[0]!;
+    expect(ghostKey).toMatch(/^comment--/);
+    transact(peer, () => nodeOf(peer, 'p4').format(0, 7, { [ghostKey]: { threadId: 'ghost' } }));
     const key = Object.keys([...(nodeOf(host.live, 'p1').toDelta() as unknown as { children: Iterable<{ format?: Record<string, unknown> }> }).children][1].format ?? {})[0];
     transact(peer, () => nodeOf(peer, 'p4').format(8, 9, { [key]: { threadId: 't1' } }));
     host.send(peer, human);

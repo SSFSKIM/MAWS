@@ -24,6 +24,8 @@ import type { TerminalInfo } from '../terminal/registry';
 import { resetPanelStores } from '../test-support/panel';
 import { resetSetupStore } from '../test-support/setup-intents';
 import { preloadOf } from '../test-support/preload-of';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { leaveRl2, overRl2 } from '../test-support/code-disk'; // ticket 627
 
 // The tab of A's side column in view (UX wave U8b: hiding the column keeps its selection to show again).
 const inViewOfA = () => surfaceTabs(useLayout.getState(), A)[0]?.id ?? null;
@@ -463,6 +465,25 @@ describe('take over a session another process holds', () => {
     });
     return open;
   };
+
+  // Ticket 627: a session on another machine over RL2 takes no `session.takeOver`: Take over is drawn disabled with the
+  // declared sentence, before any confirmation, in either lane
+  it('is drawn disabled with its sentence for a session on another machine, and asks nothing', async () => {
+    for (const lane of ['B', 'A'] as const) {
+      const onB = addressOf(OTHER_MACHINE, BARE_A);
+      overRl2(onB, {}, lane);
+      useSessions.setState({ records: new Map([[onB, record(onB, { engineSessionId: ENGINE, directory: '/work/repo', holder: JOB })]]) });
+      const { unmount } = render(<HolderNotice appSessionId={onB} holder={JOB} />);
+      const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Take over here' });
+      expect([button.disabled, button.title]).toEqual([true, REMOTE_UNAVAILABLE['session.takeOver']]);
+      await userEvent.click(button);
+      expect(useDialogs.getState().open).toBeNull();
+      unmount();
+    }
+    expect(fake.invoked('session.takeOverPane')).toEqual([]);
+    expect(fake.invoked('session.takeOver')).toEqual([]);
+    leaveRl2();
+  });
 
   it('is offered for a terminal and a job with an id, not for a job MAWS cannot name', () => {
     const { unmount } = renderNotice(held({ kind: 'terminal', pid: 7 }));

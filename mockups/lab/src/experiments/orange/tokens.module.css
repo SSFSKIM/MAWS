@@ -1,0 +1,150 @@
+/* Orange: every value the synthesis uses is named here or set inline by world.ts (the values that depend on how
+   much orange the ground keeps). Components read the roles, never a literal. */
+
+@font-face {
+  font-family: 'XO Figtree';
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'XO Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'XO Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+.root {
+  /* Ink on glass. One ink per scheme, used at alpha steps so it follows whatever body is behind it. */
+  --o-ink: 29 21 13;
+  --o-fg: rgb(var(--o-ink));
+  --o-fg2: rgb(var(--o-ink) / 82%);
+  --o-muted: rgb(var(--o-ink) / 70%);
+  --o-faint: rgb(var(--o-ink) / 58%);
+
+  --o-line: rgb(var(--o-ink) / 10%);
+  --o-line-strong: rgb(var(--o-ink) / 18%);
+  /* Fills inside a pane (a pane never holds a second pane): lighter lifts what can be pressed or is current,
+     darker wells hold what was typed or is set apart. */
+  --o-hover: rgb(255 255 255 / 30%);
+  --o-selected: rgb(255 255 255 / 52%);
+  --o-lift: rgb(255 255 255 / 34%);
+  --o-well: rgb(var(--o-ink) / 6.5%);
+  --o-raised: #ffffff;
+
+  /* "It is your move" cannot be orange in an orange world. It is the one opaque thing among glass. */
+  --o-solid: #1d150d;
+  --o-on-solid: #fff4e8;
+  --o-track-on: rgb(var(--o-ink) / 84%);
+  --o-on-track: #ffffff;
+
+  --o-add: #0f5530;
+  --o-del: #96180f;
+  --o-add-wash: rgb(15 85 48 / 9%);
+  --o-del-wash: rgb(150 24 15 / 8%);
+
+  --o-tip-bg: #1d150d;
+  --o-tip-fg: #fff4e8;
+
+  --o-rim: linear-gradient(140deg, rgb(255 255 255 / 92%), rgb(255 255 255 / 30%) 26%, rgb(255 255 255 / 12%) 64%, rgb(255 255 255 / 58%));
+  --o-glow: inset 0 1px 14px -5px rgb(255 255 255 / 55%);
+  --o-shadow-glass: 0 0 0 0.5px rgb(var(--o-cast) / 14%), 0 1px 2px rgb(var(--o-cast) / 12%),
+    0 12px 30px -8px rgb(var(--o-cast) / 34%);
+  --o-shadow-pop: 0 0 0 0.5px rgb(var(--o-cast) / 20%), 0 2px 6px rgb(var(--o-cast) / 14%),
+    0 18px 44px -10px rgb(var(--o-cast) / 44%);
+  --o-shadow-solid: 0 1px 2px rgb(var(--o-cast) / 30%), 0 8px 20px -6px rgb(var(--o-cast) / 50%);
+  --o-blur: 30px;
+  --o-blur-ctl: 14px;
+  --o-bevel: 12px;
+
+  --o-ui: 'XO Figtree', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  --o-mono: 'XO Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --o-w: 460;
+  --o-w-strong: 600;
+
+  /* Motion: Quiet's durations and curve for everything that folds, slides or pops; Instrument's spring for the
+     small round things that travel (a switch knob, a segmented thumb, a pill). */
+  --o-t-press: 90ms;
+  --o-t-hover: 130ms;
+  --o-t-pop: 210ms;
+  --o-t-pop-out: 130ms;
+  --o-t-fold: 300ms;
+  --o-t-shell: 380ms;
+  --o-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --o-ease-shell: cubic-bezier(0.32, 0.72, 0, 1);
+  --o-spring: linear(0, 0.19 5%, 0.56 12%, 0.87 20%, 1.02 28%, 1.06 35%, 1.045 44%, 1.01 58%, 0.997 74%, 1);
+
+  /* Geometry. The window is a margin of ground around floating components; components are parted by one gap. */
+  --o-m: 12px;
+  --o-g: 12px;
+  --o-side-w: 272px;
+  --o-aside-w: 288px;
+  --o-bar-h: 36px;
+  --o-row-h: 34px;
+  --o-measure: 680px;
+
+  --o-r-pane: 26px; /* squircle: draws as a 20 px continuous corner, Field's pane */
+  --o-r-ctl: 11px;
+  --o-r-item: 9px;
+  --o-r-pop: 16px;
+  --o-r-card: 16px;
+  --o-r-bubble: 20px;
+  --o-r-composer: 26px;
+  --o-corner-ctl: squircle;
+}
+
+.root[data-o-scheme='dark'] {
+  --o-ink: 255 242 228;
+  --o-fg: rgb(var(--o-ink) / 96%);
+  --o-fg2: rgb(var(--o-ink) / 80%);
+  --o-muted: rgb(var(--o-ink) / 66%);
+  --o-faint: rgb(var(--o-ink) / 54%);
+
+  --o-line: rgb(var(--o-ink) / 11%);
+  --o-line-strong: rgb(var(--o-ink) / 19%);
+  --o-hover: rgb(var(--o-ink) / 7%);
+  --o-selected: rgb(var(--o-ink) / 14%);
+  --o-lift: rgb(var(--o-ink) / 6%);
+  --o-well: rgb(0 0 0 / 24%);
+  --o-raised: rgb(var(--o-ink) / 24%);
+
+  --o-solid: #fff4e8;
+  --o-on-solid: #1d150d;
+  --o-track-on: rgb(var(--o-ink) / 88%);
+  --o-on-track: #1d150d;
+
+  --o-add: #7fdca8;
+  --o-del: #ffa193;
+  --o-add-wash: rgb(127 220 168 / 9%);
+  --o-del-wash: rgb(255 161 147 / 9%);
+
+  --o-tip-bg: #fff4e8;
+  --o-tip-fg: #1d150d;
+
+  --o-rim: linear-gradient(140deg, rgb(255 232 208 / 46%), rgb(255 226 200 / 12%) 26%, rgb(255 226 200 / 5%) 64%, rgb(255 226 200 / 24%));
+  --o-glow: inset 0 1px 12px -6px rgb(255 214 176 / 22%);
+  --o-shadow-glass: 0 0 0 0.5px rgb(var(--o-cast) / 30%), 0 1px 2px rgb(var(--o-cast) / 24%),
+    0 12px 30px -8px rgb(var(--o-cast) / 50%);
+  --o-shadow-pop: 0 0 0 0.5px rgb(0 0 0 / 40%), 0 2px 6px rgb(0 0 0 / 24%), 0 18px 44px -10px rgb(0 0 0 / 60%);
+}
+
+.root[data-o-type='geist'] {
+  --o-ui: 'XO Geist', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  --o-w: 440;
+  --o-w-strong: 580;
+}
+.root[data-o-type='system'] {
+  --o-ui: system-ui, -apple-system, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif;
+  --o-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --o-w: 430;
+  --o-w-strong: 600;
+}

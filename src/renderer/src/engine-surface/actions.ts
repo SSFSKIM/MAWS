@@ -2,17 +2,21 @@
 // and `handle` its latest drawing carried, with its `key`, site and instance so a field redrawn while typed in is
 // re-resolved; the engine runs the plugin's own handler and answers whether one ran. A failure is logged, never thrown
 // at the person: the drawing simply stays as it was until the plugin redraws it.
-import type { ScrollSite, SurfaceElement, SurfaceGeometry, SurfaceSite } from '@shared/engine/surface';
+import { isRenderSiteOnly, type AskedSite, type ScrollSite, type SurfaceElement, type SurfaceGeometry } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Press } from './tree';
 
 export interface Site {
   appSessionId: AppSessionId;
-  component: SurfaceSite;
+  component: AskedSite; // UX wave U2b: a site asked through `session.ui.renderSite` too (the turn's line), which no field's re-resolution names
   instanceId: string;
   client: MawsBridge;
 }
+
+// The site a field's re-resolution names: one of the wire's closed set, else none (the element's plugin and handle still
+// address it).
+const resolvedBy = (site: Site) => (isRenderSiteOnly(site.component) ? {} : { component: site.component, instanceId: site.instanceId });
 
 const warn = (what: string) => (result: { ok: boolean; error?: { message: string } }) => {
   if (!result.ok) console.warn(`[engine-surface] ${what} not sent: ${result.error?.message ?? 'unknown error'}`);
@@ -24,13 +28,13 @@ export function press(site: Site, element: Press, key: string, href?: string): v
 
 export function input(site: Site, element: Press, key: string, kind: 'change' | 'submit', value: string): void {
   void site.client
-    .invoke('session.ui.input', { appSessionId: site.appSessionId, plugin: element.plugin, handle: element.handle, kind, value, key, component: site.component, instanceId: site.instanceId })
+    .invoke('session.ui.input', { appSessionId: site.appSessionId, plugin: element.plugin, handle: element.handle, kind, value, key, ...resolvedBy(site) })
     .then(warn(`${kind} of ${key}`));
 }
 
 export function select(site: Site, element: Press, key: string, value: string): void {
   void site.client
-    .invoke('session.ui.select', { appSessionId: site.appSessionId, plugin: element.plugin, handle: element.handle, value, key, component: site.component, instanceId: site.instanceId })
+    .invoke('session.ui.select', { appSessionId: site.appSessionId, plugin: element.plugin, handle: element.handle, value, key, ...resolvedBy(site) })
     .then(warn(`pick in ${key}`));
 }
 

@@ -9,12 +9,11 @@
 import { slashCommandLine } from '@shared/wire/local-command';
 import { LOCAL_COMMAND_TAG } from '@shared/engine/engine-markers';
 export { slashCommandLine } from '@shared/wire/local-command';
-import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
+import { PASTED_PLACEHOLDER, pastedPlaceholder, pastedSegments } from '@shared/composer/pasted-content';
 import type { Anchor } from '@shared/anchor/anchor';
 import { anchoredMessage, anchorLead, anchorTag, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
 import type { ContentBlock } from '@shared/graph/events';
 import { linkedReadOf } from '@shared/maws/linked-read'; // P4-A3
-import { readAnswerEnvelopes } from '@shared/engine/arrival'; // UX wave U4b
 import type { AnchorFrame, Attachment, UserComment } from './rows';
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
@@ -38,15 +37,14 @@ export function splitPastedSegments(text: string): { text: string; attachments: 
   const placeholders: number[] = [];
   let out = '';
   let from = 0;
-  for (const match of text.matchAll(PASTED_BLOCK)) {
-    const [whole, , body] = match;
-    out += text.slice(from, match.index);
+  for (const { index, match: whole, body } of pastedSegments(text)) {
+    out += text.slice(from, index);
     if (whole.startsWith('\n')) out += '\n';
     attachments.push({ kind: 'text', name: `Pasted text #${attachments.length + 1}`, bytes: utf8Length(body), dataUrl: null, mediaType: 'text/plain', text: body });
     placeholders.push(out.length);
     out += pastedPlaceholder(attachments.length, body.split('\n').length);
     if (whole.endsWith('\n')) out += '\n';
-    from = match.index + whole.length;
+    from = index + whole.length;
   }
   return { text: out + text.slice(from), attachments, placeholders };
 }
@@ -106,14 +104,6 @@ function attachmentOf(block: ContentBlock, index: number): Attachment | null {
   return null;
 }
 
-// UX wave U4b (the joined answer, step 2; the engine joins an answer envelope with the prompts waiting beside it, one
-// newline between): a text that holds the person's words beside envelopes is those words; one that is all envelope stays
-// whole, as before (derive draws no bubble for it where its capsule took the answers, and its raw text where none did).
-function ownWords(text: string): string {
-  const { envelopes, rest } = readAnswerEnvelopes(text);
-  return envelopes.length > 0 && rest !== '' ? rest : text;
-}
-
 export function userTextOf(content: string | ContentBlock[]): UserText {
   const texts: string[] = [];
   const attachments: Attachment[] = [];
@@ -130,7 +120,7 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
       }
     });
   }
-  const joined = ownWords(texts.join('\n\n'));
+  const joined = texts.join('\n\n');
   const read = joined.includes('<maws_anchor') ? readAnchoredMessage(joined) : null; // E3: the framing is MAWS's, not the human's words
   // UX wave U5a: several comments are their texts, a blank line between (what find and the fold measure), as typed in the card
   const several = read !== null && read.comments.length > 1 ? read.comments : null;

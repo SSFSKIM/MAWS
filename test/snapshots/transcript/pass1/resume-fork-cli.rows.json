@@ -21,6 +21,29 @@
     "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
   },
   {
+    "at": "2026-09-28T09:24:33.185Z",
+    "durationMs": 187,
+    "id": "think:msg_011CfVbWEPujAG1ZSSaiAeLT:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "18ee3ddb-b36b-4f96-91bf-61015720f2a7",
+    "recordedMs": null,
+    "text": "The user is asking the same question again. From my memory file that I saved, the word is ZEBRA. I should reply with just that word.",
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
+    "at": "2026-09-28T09:24:33.373Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbWEPujAG1ZSSaiAeLT:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ZEBRA",
+    "messageUuid": "5f10505b-611f-4e30-876b-ebc66b328f09",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
     "at": "2026-09-28T09:24:31.589Z",
     "autoDenied": 0,
     "caption": "",
@@ -71,29 +94,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
-  },
-  {
-    "at": "2026-09-28T09:24:33.185Z",
-    "durationMs": 187,
-    "id": "think:msg_011CfVbWEPujAG1ZSSaiAeLT:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "18ee3ddb-b36b-4f96-91bf-61015720f2a7",
-    "recordedMs": null,
-    "text": "The user is asking the same question again. From my memory file that I saved, the word is ZEBRA. I should reply with just that word.",
-    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
-  },
-  {
-    "at": "2026-09-28T09:24:33.373Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfVbWEPujAG1ZSSaiAeLT:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "ZEBRA",
-    "messageUuid": "5f10505b-611f-4e30-876b-ebc66b328f09",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
   },
   {

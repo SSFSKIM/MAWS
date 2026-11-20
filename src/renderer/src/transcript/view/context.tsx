@@ -3,7 +3,7 @@
 // request-card renderer, and view-only disclosure state (bubbles, pasted blocks, thinking) that must survive a row
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
@@ -17,13 +17,22 @@ export interface TranscriptActions {
   openSubagent(ref: SubagentRef): void; // C8: Subagents tool with that agent selected
   openFullLog(cell: Cell): void; // C8: destination of "Open full log"
   reviewChanges(turnId: TurnId, path?: string): void; // C8: Review tool
+  // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, R8, decision 28): the chip of a
+  // comment that names a commit opens Review on that commit at that file (Review's folder implements it, App.tsx registers
+  // it). Optional, with no default: a mount that omits it (the desk) draws such a chip as a label.
+  openCommit?(appSessionId: AppSessionId, commit: string, path?: string): void;
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
   // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine. UX wave U6b-1: the
-  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
-  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
+  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area. UX wave U6b-4c (decision 9):
+  // `agent`, the subagent whose transcript the click is in, which a child's mount adds to every open (Transcript.tsx), with
+  // `conversation`, the engine session the session was in when that mount drew the child's rows (the branch panel); a
+  // mount may ignore both.
+  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean; agent?: string; conversation?: SessionId }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
-  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
-  openExternal(url: string, appSessionId?: AppSessionId | null): void;
+  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block).
+  // UX wave U6b-4b (R3, decision 13): `external`, a ⌘-click, asks for the system browser where the mount would open the
+  // link in the app (a loopback link of a session on this Mac: tools/browser/local-link.ts); a mount may ignore it.
+  openExternal(url: string, appSessionId?: AppSessionId | null, options?: { external?: boolean }): void;
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
   // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts). P5 O6 M4: `appSessionId` is the session
@@ -151,6 +160,20 @@ export function setHostActions(actions: TranscriptActions): void {
   hostActions = actions;
 }
 
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, decision 17): whether the Markdown pipeline
+// turns a `file:` link with an empty host into a path link (sanitize.ts, `remarkTranscriptSources`). Off until one of the
+// window's two entries (App.tsx, harness/main.tsx) turns it on as it loads; the desk's web app, which mounts this
+// Markdown with no file action, never does, so a `file:` link there stays its text. Here and not in default-actions.ts,
+// which the desk loads too; a light module, so the Markdown chunk is not imported to set a flag.
+let fileLinks = false;
+/** Whether a `file:` link is turned into a path link. Off until one of the window's entries turns it on; the desk's web app never does. */
+export function turnFileLinks(on: boolean): void {
+  fileLinks = on;
+}
+export function fileLinksTurned(): boolean {
+  return fileLinks;
+}
+
 // Open/closed flags by id, kept per mounted transcript rather than in a row's own state.
 export class Disclosures {
   private open = new Set<string>();
@@ -214,6 +237,9 @@ export interface TranscriptContextValue {
   // ("Your message"): a session another member owns names its owners
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
   answerActions?: AnswerActionsSource; // additive (UX wave U3b): absent outside a mounted transcript, which places none
+  // additive (board ticket 789): keep a row where it is on screen for the given time while rows above it open or close;
+  // the mounted list's, absent outside one
+  keepInPlace?: (rowId: RowId, ms: number) => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
@@ -226,10 +252,10 @@ export const useActions = () => useContext(TranscriptContext).actions;
 export const rowElementId = (idPrefix: string, rowId: string) => `${idPrefix}-${rowId}`;
 // E1: the app session a row belongs to: the store key is the session's id, or `<appSessionId>:<agentId>` for a child's
 // transcript (ipcSource), whose rows act on the parent session; null outside a mounted transcript.
-export const useRowSession = (): AppSessionId | null => {
-  const { storeKey } = useContext(TranscriptContext);
-  return storeKey === '' ? null : ((storeKey.includes(':') ? storeKey.slice(0, storeKey.indexOf(':')) : storeKey) as AppSessionId);
-};
+export const useRowSession = (): AppSessionId | null => sessionOfStoreKey(useContext(TranscriptContext).storeKey);
+/** The session of a transcript's store key (`<appSessionId>` or `<appSessionId>:<agentId>`); null for none. */
+export const sessionOfStoreKey = (storeKey: string): AppSessionId | null =>
+  storeKey === '' ? null : ((storeKey.includes(':') ? storeKey.slice(0, storeKey.indexOf(':')) : storeKey) as AppSessionId);
 // The list's scroll container: the one mounted element a divider's aria-controls can name (its rows are virtual).
 export const listElementId = (idPrefix: string) => `${idPrefix}-list`;
 

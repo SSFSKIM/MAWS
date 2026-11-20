@@ -64,12 +64,15 @@ interface Context {
   spawns: ReadonlySet<string>;
 }
 
+/** Whether a question's or an ask's row carries its answer's receipt (R13): a question with answers, an ask answered or cancelled. */
+export const carriesReceipt = (row: Extract<Row, { kind: 'question' | 'ask' }>): boolean =>
+  row.kind === 'question' ? row.answers !== null : row.state === 'answered' || row.state === 'cancelled';
+
 function contextOf(rows: readonly Row[], liveMarked: string | undefined): Context {
   const receipted = new Set<string>();
   const spawns = new Set<string>();
   for (const row of rows) {
-    if (row.kind === 'question' && row.answers !== null) receipted.add(row.toolUseId);
-    else if (row.kind === 'ask' && (row.state === 'answered' || row.state === 'cancelled')) receipted.add(row.toolUseId);
+    if ((row.kind === 'question' || row.kind === 'ask') && carriesReceipt(row)) receipted.add(row.toolUseId);
     else if (row.kind === 'subagent') for (const agent of row.agents) if (agent.toolUseId !== null) spawns.add(agent.toolUseId);
   }
   return { live: liveSet(liveMarked), receipted, spawns };
@@ -340,7 +343,9 @@ export function stretchHolding(rows: readonly Row[], id: RowId | CellId, liveMar
   return span === undefined || span.head === at ? null : span.stretch.key;
 }
 
-const recordFold = (stretch: string, open: boolean, at: Row): Row => ({ id: rowId.recordFold(stretch, open), turnId: at.turnId, at: at.at, kind: 'record_fold', stretch, open });
+// UX wave U2b (M7; §M): a closed line's `label`, which its id never takes, so a line whose words change is the same row.
+const recordFold = (stretch: string, open: boolean, at: Row, label?: string): Row =>
+  ({ id: rowId.recordFold(stretch, open), turnId: at.turnId, at: at.at, kind: 'record_fold', stretch, open, ...(label !== undefined && { label }) });
 
 /**
  * The rows of the to-human view: each stretch closed (its head with only its messages, then `› working record` in the
@@ -348,26 +353,24 @@ const recordFold = (stretch: string, open: boolean, at: Row): Row => ({ id: rowI
  * the last), all closed until the reader opens them (`openStretches`).
  *
  * Decision 11 for the rows of no stretch: a closed turn's line is drawn in its place while a stretch that holds a row
- * of that turn is open; the running turn's line is always drawn, in its place when that is in sight, else (its place
- * inside a closed stretch, or directly before one) directly after that stretch's record line (ruling 5); a separator is
- * drawn when the row after it is drawn, a record line counting for its stretch's first row. A line whose place is
- * inside a closed stretch is drawn after its record line.
+ * of that turn is open; the running turn's line is always drawn, in its place, which is the turn's end (board ticket
+ * 789, the owner's reversal of ruling 5 on 2026-11-20: the line is the transcript's last row while the turn runs, as
+ * the engine's terminal draws its spinner); a separator is drawn when the row after it is drawn, a record line counting
+ * for its stretch's first row. A closed turn's line whose place is inside a closed stretch is drawn after its record line.
+ *
+ * UX wave U2b (M7; §M; decision 28): `label`, where the mount hands one in, gives each closed stretch's line its words
+ * (`last`: the stretch is the rows' last), written on the line as `label`; with none, or where it answers nothing, the
+ * line reads `› working record`.
  */
-export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStretches'>, liveMarked?: string): Row[] {
+export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStretches'>, liveMarked?: string, label?: (stretch: Stretch, last: boolean) => string | undefined): Row[] {
   const { classes, spans, spanAt } = layoutOf(rows, liveMarked, ui.openStretches);
   const opened = (span: Span) => ui.openStretches?.has(span.stretch.key) ?? false;
   const openTurns = new Set<TurnId>();
   for (const span of spans) if (opened(span)) for (const turn of span.stretch.turns) openTurns.add(turn);
-  // The closed stretch whose record line covers row i's place: one it is a member of, or (for the running turn's line)
-  // the one its next row of a class opens.
-  const coveredBy = (i: number, before: boolean): Span | null => {
+  // The closed stretch whose record line covers row i's place: one it is a member of.
+  const coveredBy = (i: number): Span | null => {
     const own = spans[spanAt[i]];
-    if (own !== undefined) return opened(own) ? null : own;
-    if (!before) return null;
-    let next = i + 1;
-    while (next < rows.length && classes[next] === 'none') next += 1;
-    const ahead = spans[spanAt[next] ?? -1];
-    return ahead !== undefined && (ahead.head === next || ahead.first === next) && !opened(ahead) ? ahead : null;
+    return own !== undefined && !opened(own) ? own : null;
   };
   // Whether row i is drawn where it stands (a closed stretch's first folding row counts: its record line stands there).
   const shown = new Uint8Array(rows.length);
@@ -377,12 +380,15 @@ export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStr
     const span = spans[spanAt[i]];
     if (row.kind === 'time') shown[i] = i + 1 < rows.length && shown[i + 1] === 1 ? 1 : 0;
     else if (row.kind === 'divider') {
-      const working = row.state === 'working';
-      if (!working && (row.turnId === null || !openTurns.has(row.turnId))) continue;
-      const cover = coveredBy(i, working);
+      if (row.state === 'working') {
+        shown[i] = 1;
+        continue;
+      }
+      if (row.turnId === null || !openTurns.has(row.turnId)) continue;
+      const cover = coveredBy(i);
       if (cover === null) shown[i] = 1;
       else after.set(cover.first, [row, ...(after.get(cover.first) ?? [])]);
-    } else if (classes[i] === 'none') shown[i] = coveredBy(i, false) === null ? 1 : 0;
+    } else if (classes[i] === 'none') shown[i] = coveredBy(i) === null ? 1 : 0;
     else if (span === undefined || opened(span) || span.head === i || span.first === i) shown[i] = 1;
   }
   const out: Row[] = [];
@@ -394,7 +400,7 @@ export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStr
     }
     const open = opened(span);
     if (span.head === i) out.push(open || row.kind !== 'assistant_text' ? row : { ...row, reportOnly: true });
-    if (!open && span.first === i) out.push(recordFold(span.stretch.key, false, row), ...(after.get(i) ?? []));
+    if (!open && span.first === i) out.push(recordFold(span.stretch.key, false, row, label?.(span.stretch, spanAt[i] === spans.length - 1)), ...(after.get(i) ?? []));
     else if (open && span.head !== i) out.push(row);
     if (open && span.last === i) out.push(recordFold(span.stretch.key, true, row));
   });

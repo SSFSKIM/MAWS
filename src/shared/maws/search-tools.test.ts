@@ -73,14 +73,16 @@ describe('artifact_search (X33, P4-B4)', () => {
 describe('the maws server’s instructions (X33, route (b))', () => {
   it('is the one paragraph, word for word', () => {
     expect(MAWS_SERVER_INSTRUCTIONS).toBe(
-      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search.",
+      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search. A Markdown link to a file's absolute path, [its name](/absolute/path), opens the file in MAWS when it is inside this session's folders; deliver a file from anywhere else with mcp__maws__send_file.",
     );
-    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(635); // UX wave U6d: 699 before O-44 took out the sentence that invited show_pane
+    // UX wave U6d: 699 before O-44 took out the sentence that invited show_pane; U6b-4b: 635 before the sentence on file
+    // links (197 characters with its space)
+    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(832);
   });
 
   it('names only tools the server lists', () => {
     const named = [...MAWS_SERVER_INSTRUCTIONS.matchAll(/mcp__maws__(\w+)/g)].map((m) => m[1]);
-    expect(new Set(named)).toEqual(new Set(['artifact_read', 'artifact_search'])); // U6d: show_pane no longer
+    expect(new Set(named)).toEqual(new Set(['artifact_read', 'artifact_search', 'send_file'])); // U6d: show_pane no longer; U6b-4b: send_file
     for (const name of named) expect(MAWS_TOOL_NAMES as readonly string[], name).toContain(name);
   });
 });
@@ -109,7 +111,7 @@ const OLDER_IN_SNAPSHOT = [
   {
     place: 'instructions',
     since: '2026-11-14',
-    reason: 'UX wave U6d (O-44) took the sentence that invited show_pane out of the source; the fixtures were served it',
+    reason: 'UX wave U6d (O-44) took the sentence that invited show_pane out of the source; the fixtures were served it; UX wave U6b-4b (2026-11-18) appended the sentence on file links, which the fixtures were not served',
     held: () => "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. Call mcp__maws__show_pane only when the user should see it now. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search.",
   },
   {

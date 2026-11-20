@@ -85,9 +85,20 @@
 //   back and a pane's answer act on a live launch alone and never resume a session (`LIVE_ONLY`); and a Send now the
 //   endpoint accepted and an earlier engine host refused `unavailable` says so (`host-older`), apart from the endpoint's
 //   own `unavailable`.
+// - The UX wave (U5b-2, M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, decision 14): the
+//   branch read, the commit read and the working-tree read (`GIT_READ_CALLS`) are the adapter's, not the manager's path,
+//   where nothing reads REMOTE_NEEDS and the link holds a call made with no channel for the next one and resends one
+//   whose channel ended. Each goes only on the channel whose capabilities were just read and list `rl2.git-reads`
+//   (`oneChannel`), naming the session it is made for as the checkout's other reads do; while none are known it is
+//   refused `host_unavailable`, and a channel that ends under it fails it, never carried to the next channel's peer.
+// - The UX wave (U6f; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §D): a file outside a
+//   session's folders. A keyed read (`files.read` with `named`) and the four outside acts are handed, with their caller,
+//   to ./remote-outside-files.ts, which alone decides when a request becomes an outside act; the copy route reads a
+//   session's file through the same read.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
+import { OUTSIDE_ACTS } from '@shared/files/outside';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -106,6 +117,7 @@ import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import type { LinkState } from '../machines/manager';
 import { budgetedMs } from '../machines/budgets'; // U9 (M2): a fork's answer within its command's budget
+import { REMOTE_TIMING } from '../machines/remote/timing'; // the UX wave (U6f): the link's hold of a carried call
 import { peerLists } from '../machines/remote/capabilities';
 import { needsProjectActs } from '../machines/project-acts-peer';
 import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
@@ -126,7 +138,8 @@ import { outcomeAsResult, pendingResult, refusalResult } from './remote-outcomes
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { chooserTimings, openTiming, type ChooserRead, type OpenTiming } from './remote-timing';
 import { createSpawnAttempts } from './remote-spawn';
-import { readFileInPages } from './remote-files-read';
+import { readFileInPages, readInPages } from './remote-files-read';
+import { createRemoteOutsideFiles } from './remote-outside-files';
 import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type RemoteForwardsTiming } from './remote-forward';
 import { createRemotePty, PTY_NAMES, REMOTE_PTY_TIMING, type RemotePtyTiming } from './remote-pty';
 import { uploadInParts } from './remote-upload';
@@ -144,6 +157,11 @@ export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTi
   spawnKeptMs: number;
   /** P5 O7 M5b: a document's open answers `timeout` when no stream opened by then (../artifacts/remote-open.ts). */
   documentOpenMs: number;
+  /**
+   * The UX wave (U6f, M3's fix wave 2): how long the link holds a carried call with no budget of its own for its next
+   * channel (the link's CALL_TIMEOUT_MS, which no build overrides): a keyed read whose channel ended under it waits that long.
+   */
+  carriedCallMs: number;
 }
 
 export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
@@ -162,6 +180,7 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
   documentOpenMs: DOCUMENT_OPEN_MS, // P5 O7 M5b: a page's bound
+  carriedCallMs: REMOTE_TIMING.CALL_TIMEOUT_MS, // the UX wave (U6f)
   // P5 O7 M5c: a consent's listener from its act's acceptance, the machine's own bound on the flow and a round trip: a
   // Connect's owner action (OWNER_ACTION_DEADLINE_MS, 330 s, src/services/connectors/owner.ts: discovery, then the 120 s
   // callback wait from the flow's bind, which this side can't see), a sign-in's config and callback waits (CONFIG_MS and
@@ -210,6 +229,10 @@ export interface RemoteLaneBDeps {
   openUrl?(url: string, machine: MachineRef): OpenAnswer;
   /** P5 O7 M5c: a consent's callback listener (./remote-port.ts's `listenCallback` by default). */
   listenCallback?(handle: CallbackHandler): Promise<CallbackServer>;
+  /** The UX wave (U6f): whether a caller is a live page of an app window (U6e's `isAppPage` bound to the app's URL); none is without it. */
+  isAppPage?(client: ClientRef): boolean;
+  /** The UX wave (U6f): whether the person owns the machine, as the roster says (`MachineState.owner`); null, the default: not known. */
+  owns?(machine: MachineRef): boolean | null;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -237,7 +260,7 @@ export interface RemoteLaneB {
   /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
   attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
   /** P5 O7 M5a: `remote.openCopy` (main's handler's) and a remote artifact's files for Save As (src/main/library/files.ts). */
-  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files' | 'scheme' | 'assets'>; // P5 O7 M5b: scheme, assets
+  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files' | 'scheme' | 'assets' | 'copyInto'>; // P5 O7 M5b: scheme, assets; UX wave U6b-2: copyInto
   /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
@@ -276,6 +299,8 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   // the UX wave (U9): behind `rl2.session-acts`; archive, unarchive and rename `manage`, a dismissal `converse`; M2: a fork
   // in place, the machine's owners', stepped up and answered within its command's budget, never through the spawn table
   'session.archive', 'session.update', 'session.rename', 'attention.acknowledge', 'session.fork',
+  // the UX wave (U6f): behind `rl2.outside-files`; a file outside a session's folders opened, listed, chosen and saved
+  ...OUTSIDE_ACTS,
 ]);
 /**
  * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
@@ -294,6 +319,11 @@ const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.p
  * adapter's to send for that reason, a call by name on the channel it was checked on.
  */
 const SESSION_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.list']);
+/**
+ * The UX wave (U5b-2, M8): git's reads behind `rl2.git-reads` (REMOTE_NEEDS), the adapter's to send for the same reason as
+ * the archived read, each on the channel it was checked on and naming its session for the endpoint's checkout rule.
+ */
+const GIT_READ_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['git.branchCommits', 'git.commitDiff', 'git.changesSince']);
 /** The capability an act carries as `requires`: the project registry's, else the one REMOTE_NEEDS names. */
 const requiredBy = (name: CommandName, fields: Fields): string | undefined => (needsProjectActs(name, fields) ? PROJECT_ACTS_CAPABILITY : REMOTE_NEEDS[name]);
 // `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
@@ -451,6 +481,17 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     act: (link, name, fields, options) => machineAct(link, name, fields, now() + timing.sendPendingMs, options),
     log: deps.log,
   });
+  // the UX wave (U6f): a file outside a session's folders, read, listed, chosen and saved there
+  const outside = createRemoteOutsideFiles({
+    call: (link, name, fields, { label, boundTo }) => readInPages(link, name, fields, deps.log, label, boundTo !== undefined ? { boundTo } : {}),
+    act: (link, name, fields, { oneChannel, deadline }) => machineAct(link, name, fields, deadline, oneChannel ? { oneChannel: true } : {}),
+    isAppPage: deps.isAppPage ?? (() => false),
+    owns: deps.owns ?? (() => null),
+    now,
+    pendingMs: timing.sendPendingMs,
+    holdMs: (link) => budgetedMs(link.budgets, 'files.read') ?? timing.carriedCallMs,
+    log: deps.log,
+  });
   // P5 O7 M5a: artifacts
   const artifacts = createRemoteArtifacts({
     remote: deps.remote,
@@ -466,6 +507,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     openPath: deps.openPath ?? (async () => 'opening a copy is not wired in this process'),
     ...(deps.tempDir !== undefined && { tempDir: deps.tempDir }),
     env: deps.env ?? {},
+    readSessionFile: (link, fields, client, options) => outside.read(link, fields, client, { ...options, copy: true }), // the UX wave (U6f): a copy's read
     now,
     log: deps.log,
   });
@@ -910,11 +952,16 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       // only on the channel checked: one that ends fails it `offline`, never carried to the next channel's peer unchecked
       if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields, { oneChannel: true });
     }
+    if (outside.handles(name)) return outside.dispatch(link, name, fields, ctx.client); // the UX wave (U6f): its own module's
     const needs = REMOTE_NEEDS[name];
     if (needs !== undefined) {
       const peers = link.peerCapabilities();
       if (peers !== null && !peers.includes(needs)) return refusalResult(name, link.name, 'not-offered');
       if (SESSION_CALLS.has(name)) return peers === null ? failure('host_unavailable', `${name}: machine ${link.name} is not reachable`) : callOverLink(link, name, fields, { oneChannel: true });
+      if (GIT_READ_CALLS.has(name)) {
+        if (peers === null) return failure('host_unavailable', `${name}: machine ${link.name} is not reachable`);
+        return callOverLink(link, name, fields, { oneChannel: true, ...(ctx.session !== undefined && { session: { lane: 'B' as const, id: ctx.session } }) });
+      }
     }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
@@ -924,6 +971,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (name === 'session.spawn') return spawns.spawn(link, fields, ctx.session, ctx.client);
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
+    if (name === 'files.read' && fields.named === true) return outside.read(link, fields, ctx.client); // the UX wave (U6f): a keyed read
     if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
     if (name === 'session.events') {
       const app = String(fields.appSessionId);
@@ -951,7 +999,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || GIT_READ_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -978,7 +1026,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     chooserRead(machine, read, startedAt, answeredAt) {
       chooser(deps.remote(machine)?.name ?? machine, read, startedAt, answeredAt);
     },
-    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine) },
+    artifacts: { openCopy: (input, client) => artifacts.openCopy(input, client), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine), copyInto: (...args) => artifacts.copyInto(...args) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);

@@ -21,6 +21,27 @@
     "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
   },
   {
+    "agents": [
+      {
+        "agentId": null,
+        "glyph": 3,
+        "kind": "workflow",
+        "name": "Two echo agents in one phase",
+        "runId": "wf_7cacbb2d-902",
+        "subagentType": null,
+        "taskId": "wayue3on6",
+        "toolUseId": "toolu_01SawqFE14rcE7JMMJt8jBAg"
+      }
+    ],
+    "at": "2026-09-28T09:59:26.376Z",
+    "id": "subagent:wayue3on6",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Two echo agents in one phase started working · Echo",
+    "status": "working",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
     "at": "2026-09-28T09:59:23.181Z",
     "autoDenied": 0,
     "caption": "",
@@ -65,27 +86,6 @@
       "usage": null
     },
     "toolCalls": 0,
-    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
-  },
-  {
-    "agents": [
-      {
-        "agentId": null,
-        "glyph": 3,
-        "kind": "workflow",
-        "name": "Two echo agents in one phase",
-        "runId": "wf_7cacbb2d-902",
-        "subagentType": null,
-        "taskId": "wayue3on6",
-        "toolUseId": "toolu_01SawqFE14rcE7JMMJt8jBAg"
-      }
-    ],
-    "at": "2026-09-28T09:59:26.376Z",
-    "id": "subagent:wayue3on6",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "Two echo agents in one phase started working · Echo",
-    "status": "working",
     "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
   }
 ]

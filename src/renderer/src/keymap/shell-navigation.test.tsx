@@ -13,6 +13,8 @@ import { TabStrip } from '../main/TabStrip';
 import { connectKeys } from './dispatcher';
 import { A, probeTool, resetPanelStores, TestHost } from '../test-support/panel';
 import { panelHost, registerPanelTool } from '../panel/host';
+import { focusSurfaceStop } from './shell-navigation'; // UX wave U6b-5a (M1)
+import type { ProbeState } from '../test-support/panel';
 
 let off: () => void;
 beforeEach(() => {
@@ -400,5 +402,54 @@ describe('F6 onto a side strip that scrolls', () => {
     expect(document.activeElement).toBe(selected);
     expect(scroll).toBe(450);
     vi.restoreAllMocks();
+  });
+});
+
+// UX wave U6b-5a (M1, Interfaces §B): F6's stop of the side group that shows a tab, where a surface's key puts the keyboard
+// when the tool takes none itself: the first control of the group's content, else the content.
+describe('focusSurfaceStop', () => {
+  let offTools: (() => void)[] = [];
+  beforeEach(() => {
+    resetPanelStores();
+    const withField = probeTool('terminal', { title: 'Terminal', render: function Field({ state }: { state: ProbeState }) { return <input aria-label={`Field of ${state.id}`} />; } }).tool;
+    offTools = [registerPanelTool(withField), registerPanelTool(probeTool('review', { title: 'Review' }).tool)];
+  });
+  afterEach(() => offTools.splice(0).forEach((off) => off()));
+
+  it('lands on the first control of the group showing the tab, else on its content; a tab no group shows and an open dialog move nothing', () => {
+    render(<>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-panel"><TestHost /></section>
+    </>);
+    let terminal = '';
+    let review = '';
+    act(() => void (terminal = panelHost.addTool('terminal', { appSessionId: A })));
+    act(() => void (review = panelHost.addTool('review', { appSessionId: A })));
+    act(() => useLayout.getState().moveSurfaceTab(A, review, 'lower'));
+    const sidebar = screen.getByRole('button', { name: 'Sidebar destination' });
+    sidebar.focus();
+    expect(focusSurfaceStop(review)).toBe(true);
+    expect(document.activeElement?.id).toBe('panel-host-body-lower'); // no control in it: the content itself
+    expect(focusSurfaceStop(terminal)).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText(`Field of ${terminal}`));
+
+    let other = '';
+    act(() => void (other = panelHost.addTool('terminal', { appSessionId: A }))); // the upper group now shows another tab
+    sidebar.focus();
+    expect(focusSurfaceStop(terminal)).toBe(false);
+    expect(document.activeElement).toBe(sidebar);
+    expect(focusSurfaceStop(other)).toBe(true); // the control: the tab the group shows
+    expect(document.activeElement).toBe(screen.getByLabelText(`Field of ${other}`));
+
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.dataset.state = 'open';
+    dialog.innerHTML = '<input aria-label="Modal input" />';
+    document.body.append(dialog);
+    const input = dialog.querySelector('input')!;
+    input.focus();
+    expect(focusSurfaceStop(other)).toBe(false);
+    expect(document.activeElement).toBe(input);
+    dialog.remove();
   });
 });

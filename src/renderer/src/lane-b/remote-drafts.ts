@@ -36,6 +36,7 @@ import { fitDraft, nameWithheld, takeWithheld, type Withheld } from '@shared/ses
 import { useMachines } from '../stores/machines';
 import { toast } from '../stores/notices';
 import { machineName } from '../stores/org-projects';
+import { UNREAD, type Unread } from '../composer/editor/unread';
 import { heardReaderRows, isNotOffered } from './reader-rows';
 
 export const REMOTE_DRAFT_WORDS = {
@@ -108,7 +109,7 @@ async function readKept(client: MawsBridge, appSessionId: AppSessionId): Promise
 }
 
 /** The member's draft there, or the one still being saved; `refused`, the fallback's, if the machine offers none. */
-export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, refused: () => Draft | null): Promise<Draft | null> {
+export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, refused: () => Draft | null): Promise<Draft | null | Unread> {
   const unsaved = unsavedRemoteDraft(appSessionId);
   if (unsaved !== undefined) return unsaved;
   const result = await readKept(client, appSessionId);
@@ -120,7 +121,7 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
   }
   if (isNotOffered(result)) return refused();
   console.warn('[composer] the draft could not be read from its machine', result.error.message);
-  return null;
+  return UNREAD; // UX wave U6b-5a: not read, which is not none
 }
 
 /** The draft saved there after the session's saves before it; `refused` takes the newest if the machine offers none. */
@@ -134,6 +135,21 @@ export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, 
   queue.resent = 0;
   queue.handed = ++tickets; // in the session's order: a take-back's save taken after it supersedes it
   if (!queue.out) startPump(client, appSessionId, queue);
+}
+
+// UX wave U6b-5a (the delta review's fix wave, H2): a write whose route threw instead of answering is a failure, which
+// leaves what is kept there to be read again; the queue goes on.
+const threw = (appSessionId: AppSessionId): CommandResult<CommandName> => {
+  bases.delete(appSessionId);
+  return { ok: false, error: { code: 'internal', message: 'the route to the machine failed' } };
+};
+
+/**
+ * UX wave U6b-5a (fix wave 3): settles once the session's saves handed so far have been sent and answered (a `timeout`'s
+ * sending again later included only if it is already under way): what an attach waits for before it reads back.
+ */
+export async function remoteDraftsSent(appSessionId: AppSessionId): Promise<void> {
+  for (let turns = 0; turns < 8 && (saves.get(appSessionId)?.out ?? false); turns++) await (order.get(appSessionId)?.tail ?? Promise.resolve());
 }
 
 /** One draft saved on top of what is kept there: read first when that isn't known, and again after a stale refusal. */
@@ -187,7 +203,7 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
     if (sentOne && handedAfter(appSessionId, ticket)) return void inOrder(appSessionId, (next) => pump(client, appSessionId, queue, next));
     queue.waiting = false;
     sentOne = true;
-    const result = await saveOnce(client, appSessionId, queue.latest, current);
+    const result = await saveOnce(client, appSessionId, queue.latest, current).catch(() => threw(appSessionId));
     if (result === null) return void (queue.out = false);
     if (isNotOffered(result)) {
       queue.out = false;
@@ -244,8 +260,9 @@ const handedAfter = (appSessionId: AppSessionId, ticket: number): boolean => (or
  * One save of a take-back (the claim, or the settling save), with the `replaces` given, after the session's saves handed
  * before it and before those handed after it; sent once, its answer the caller's. A stage this machine's link would cut
  * is not sent (`withheld`): a stage must hold every byte. A settling save is an ordinary draft, fitted as any save is.
+ * UX wave U6b-5a (finding 4): an attach's save names what the machine answered in its round, which may be none (`null`).
  */
-export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
+export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string | null): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
   if (draft !== null && isStage(draft) && fitDraft(draft).withheld.length > 0) return { withheld: true };
   return inOrder(appSessionId, async (ticket) => {
     const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(nameWithheld(draft, leftThere.get(appSessionId) ?? []));

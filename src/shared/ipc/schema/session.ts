@@ -252,9 +252,10 @@ export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 export const PROJECT_DECIDED_BY = ['link', 'minted', 'smns', 'remote', 'machine'] as const;
 export type ProjectDecidedBy = (typeof PROJECT_DECIDED_BY)[number];
 // A project act's refusals (Interfaces §G): `invalid_input`, its message starting `<code>: ` (`statements-unavailable: <reason>: `).
+// `channel-id`: a link to a sminos declared channel's id (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, §D).
 export const PROJECT_REFUSALS = [
   'not-a-directory', 'not-declared', 'statements-unavailable', 'unknown-project', 'not-a-hub-project', 'too-many-locations',
-  'has-statement', 'into-and-own', 'changed', 'unresolved',
+  'has-statement', 'into-and-own', 'changed', 'unresolved', 'channel-id',
 ] as const;
 export type ProjectRefusal = (typeof PROJECT_REFUSALS)[number];
 /** The RL2 capability an endpoint lists when it serves the project acts of Interfaces §G (src/endpoint/capabilities.ts, from M9). */
@@ -703,6 +704,14 @@ const r2Commands = {
     z.void(),
   ),
   'session.ui.answer': host(input({ requestId: RequestIdSchema, answer: SurfaceAnswerSchema }), z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) })),
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §E, "The command"):
+  // `session.ui.render` for a site the closed set above does not name (an added member there is a wire major). Its
+  // `component` is open on the wire and checked by the engine host against its own list where the ask runs
+  // (`TurnDuration` at this landing); an engine host of an earlier build answers `unknown_command`.
+  'session.ui.renderSite': host(
+    input({ component: z.string().min(1).max(64), instanceId: z.string().min(1).max(256), props: z.record(z.string(), z.unknown()), viewport: SurfaceViewportSchema.optional(), contentRows: z.number().int().nonnegative().optional(), keyed: KeyedSchema.optional() }),
+    RenderAnswerSchema,
+  ),
 } as const;
 export const R2_SESSION_COMMANDS = Object.keys(r2Commands) as (keyof typeof r2Commands)[];
 // R2 end ----------------------------------------------------------------------------------------------------------------

@@ -10,7 +10,8 @@
 // extensions/menu.ts and popped by the same presenter, add theirs) so the e2e can choose by id path, since names repeat
 // across folders.
 //
-// The presenter pops a built menu on a window at the anchor; under MAWS_E2E it records the menu instead (a native menu
+// The presenter pops a built menu on a window at the anchor, which arrives in the window's CSS px and is popped in window
+// points, times the window's zoom (UX wave U6b-5b, placement 3); under MAWS_E2E it records the menu instead (a native menu
 // cannot be driven through CDP, and a real one on screen would take the e2e's mouse), and `pick(path)` runs the item
 // the path names, as a click would. Bookmark names and URLs are page strings: they reach the menu as labels only, and
 // nothing here logs them.
@@ -93,7 +94,7 @@ export function toNodes(items: readonly MenuSpec[]): MenuNode[] {
 
 export interface MenuAnchor {
   window: BrowserWindow;
-  x: number; // CSS px of the window's content area
+  x: number; // CSS px of the window's content area (window points once the presenter has it at the window's zoom)
   y: number;
 }
 
@@ -104,6 +105,9 @@ const nativePopup: PopupMenu = (template, { window, x, y }) => Menu.buildFromTem
 export interface NativeMenuSeam {
   last(): MenuNode[] | null; // null once chosen from, or before any
   pick(path: string[]): boolean; // false when the path names no enabled item with an action
+  // UX wave U6b-5b M1 (Interfaces §G): the point the last menu was handed to the presenter with, as handed (kept through
+  // a pick), in window points since placement 3; null before any
+  at(): { x: number; y: number } | null;
 }
 
 export interface MenuPresenter {
@@ -112,15 +116,20 @@ export interface MenuPresenter {
 
 export class NativeMenus implements MenuPresenter {
   private recorded: MenuSpec[] | null = null;
+  private recordedAt: { x: number; y: number } | null = null; // U6b-5b M1
   private readonly e2e: boolean;
   private readonly popup: PopupMenu;
+  private readonly zoomOf: (window: BrowserWindow) => number;
   readonly seam: NativeMenuSeam;
 
-  constructor({ e2e, popup = nativePopup }: { e2e: boolean; popup?: PopupMenu }) {
+  // zoomOf: UX wave U6b-5b, the app window's zoom (main's `zoomOf`); 1 without it
+  constructor({ e2e, popup = nativePopup, zoomOf = () => 1 }: { e2e: boolean; popup?: PopupMenu; zoomOf?(window: BrowserWindow): number }) {
     this.e2e = e2e;
     this.popup = popup;
+    this.zoomOf = zoomOf;
     this.seam = {
       last: () => (this.recorded === null ? null : toNodes(this.recorded)),
+      at: () => this.recordedAt && { ...this.recordedAt },
       pick: (path) => {
         let items = this.recorded;
         let item: MenuSpec | undefined;
@@ -136,8 +145,13 @@ export class NativeMenus implements MenuPresenter {
     };
   }
 
-  present(items: MenuSpec[], at: MenuAnchor): void {
-    if (this.e2e) this.recorded = items;
-    else this.popup(toTemplate(items), at);
+  present(items: MenuSpec[], css: MenuAnchor): void {
+    // UX wave U6b-5b: the point in window points, each coordinate times the zoom rounded to a point; at 100 % as it came
+    const factor = this.zoomOf(css.window);
+    const at = factor === 1 ? css : { window: css.window, x: Math.round(css.x * factor), y: Math.round(css.y * factor) };
+    if (this.e2e) {
+      this.recorded = items;
+      this.recordedAt = { x: at.x, y: at.y };
+    } else this.popup(toTemplate(items), at);
   }
 }

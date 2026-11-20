@@ -1,0 +1,1213 @@
+/* Layers. Every rule is scoped under .x-layers; both glass roots mount their planes inside that element, so hosts
+   and popovers inherit these tokens. Values and their reasons: DESIGN.md. */
+
+@font-face { font-family: 'XL Figtree'; font-style: normal; font-weight: 300 900; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2-variations'); }
+@font-face { font-family: 'XL Geist'; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2') format('woff2-variations'); }
+@font-face { font-family: 'XL Geist Mono'; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2') format('woff2-variations'); }
+/* A display serif, for one line of one colouring: the new-chat line under Paper. Nothing else is set in it. */
+@font-face { font-family: 'XL Newsreader'; font-style: normal; font-weight: 200 800; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-opsz-normal.woff2') format('woff2-variations'); }
+
+.x-layers {
+  position: absolute; inset: 0; overflow: hidden;
+  background: var(--xl-ground);
+
+  /* type: one family and its mono; the Typeface knob swaps the family and nothing else */
+  --xl-font: 'XL Figtree', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  --xl-mono: 'XL Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --xl-w: 450; --xl-w-strong: 560; --xl-w-label: 550;
+
+  /* colour: one warm ink (Field's) at four strengths; every fill and line is that ink or white at an alpha */
+  --xl-ink-rgb: 31 27 22;
+  --xl-ink: rgb(var(--xl-ink-rgb));
+  --xl-ink-2: rgb(var(--xl-ink-rgb) / 0.8);    /* secondary text */
+  --xl-ink-3: rgb(var(--xl-ink-rgb) / 0.7);    /* quiet text: the smallest strength that carries words */
+  --xl-ink-4: rgb(var(--xl-ink-rgb) / 0.42);   /* marks and decoration, never words */
+  --xl-line: rgb(var(--xl-ink-rgb) / 0.1);
+  --xl-line-2: rgb(var(--xl-ink-rgb) / 0.17);
+  /* fills on the field: the ink, thin */
+  --xl-hover: rgb(var(--xl-ink-rgb) / 0.055);
+  --xl-selected: rgb(var(--xl-ink-rgb) / 0.09);
+  --xl-well: rgb(var(--xl-ink-rgb) / 0.06);
+  /* fills on glass. Light glass at this size is already near white, so a lighter fill would be light on light:
+     hover is the ink, thin; what is current is a white chip with a contact shadow (Field's); a darker fill holds an
+     input or a command. Dark glass takes the lighter pair for both. */
+  --xl-lift: rgb(var(--xl-ink-rgb) / 0.05);
+  --xl-lift-2: rgb(255 255 255 / 0.8);
+  --xl-sink: rgb(var(--xl-ink-rgb) / 0.055);
+  --xl-current-shadow: 0 1px 2px rgb(var(--xl-shade-rgb) / 0.09);
+  --xl-raised: #ffffff;
+  --xl-veil: color-mix(in srgb, #ffffff 50%, transparent);
+  --xl-platter: color-mix(in srgb, #ffffff 74%, transparent);
+  /* The accent has one meaning: it is your move. These four, the ink and the shadows' tint are written on the root
+     by the Colour knob (colour.ts); the values here are the Orange colouring's, so the sheet stands without it. */
+  --xl-accent: #fd780f;
+  --xl-accent-mark: #c84c00; /* the same hue deepened until a 15 px glyph holds 3:1 on the light pane */
+  --xl-on-accent: #2a1300;
+  --xl-focus: var(--xl-accent);
+  --xl-shade-rgb: 90 45 0;   /* a shadow takes the colour of the room it falls in */
+  --xl-solid: var(--xl-ink); --xl-on-solid: #ffffff;
+  --xl-host-2: 86%; --xl-host-3: 76%; /* the second and third ink levels on a host, as shares of the runtime's primary */
+  --xl-add: #1a6b40; --xl-del: #b03424;
+  --xl-del-wash: rgb(176 52 36 / 0.08);
+  /* exterior shadows, drawn in CSS (the reason is in Layers.tsx): one recipe per span, as the material grades its own */
+  --xl-shadow-block: 0 10px 30px -12px rgb(var(--xl-shade-rgb) / 0.26), 0 2px 8px -2px rgb(var(--xl-shade-rgb) / 0.07);
+  --xl-shadow-pane: 0 14px 44px -14px rgb(var(--xl-shade-rgb) / 0.26), 0 3px 10px -3px rgb(var(--xl-shade-rgb) / 0.07);
+  --xl-shadow-bar: 0 6px 16px -6px rgb(var(--xl-shade-rgb) / 0.22), 0 1px 4px -1px rgb(var(--xl-shade-rgb) / 0.08);
+  --xl-shadow-pop: 0 0 0 0.5px rgb(var(--xl-ink-rgb) / 0.13), 0 2px 6px rgb(var(--xl-shade-rgb) / 0.06), 0 18px 44px -10px rgb(var(--xl-shade-rgb) / 0.26);
+  --xl-tip: rgb(var(--xl-ink-rgb)); --xl-on-tip: #faf9f5;
+
+  /* geometry: the window corner is the anchor; the pane and the modules stand 8 px inside it */
+  --xl-gap: 8px; --xl-pane-w: 272px; --xl-side-w: 296px;
+  --xl-room: 24px;            /* the room two glass groups owe each other; written from the runtime's own answer */
+  --xl-seam: 24px;            /* the same between two small controls (the tab capsule and the waiting capsule) */
+  --xl-bar-top: 10px; --xl-bar-h: 36px;
+  --xl-r-row: 12px;           /* 20 − 8: rows on the pane and in a module */
+  --xl-main-l: calc(var(--xl-gap) + var(--xl-pane-w));
+  --xl-main-r: calc(var(--xl-gap) + var(--xl-side-w));
+  /* the tab capsule ends a room short of the side column, or of the waiting capsule when the column is away */
+  --xl-tabs-r: max(calc(var(--xl-main-r) + var(--xl-room)), calc(var(--xl-gap) + 128px + var(--xl-room)));
+  --xl-col: min(680px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 64px));
+  --xl-col-l: calc(var(--xl-main-l) + (100vw - var(--xl-main-l) - var(--xl-main-r) - var(--xl-col)) / 2);
+  /* the tab capsule stands over the reading column's left edge, and never nearer the pane than the room allows */
+  --xl-tabs-min: calc(var(--xl-main-l) + var(--xl-room));
+  --xl-tabs-l: max(var(--xl-tabs-min), var(--xl-col-l));
+
+  /* motion: Field's curve for layout, Quiet's for things that open, Instrument's spring for small round things */
+  --xl-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --xl-ease-open: cubic-bezier(0.22, 1, 0.36, 1);
+  --xl-spring: linear(0, 0.19 5%, 0.56 12%, 0.87 20%, 1.02 28%, 1.06 35%, 1.045 44%, 1.01 58%, 0.997 74%, 1);
+  --xl-t-press: 90ms; --xl-t-hover: 130ms; --xl-t-pop: 210ms; --xl-t-pop-out: 130ms; --xl-t-fold: 300ms; --xl-t-shell: 460ms;
+
+  --xl-fg: var(--xl-ink); --xl-fg2: var(--xl-ink-2); --xl-fg3: var(--xl-ink-3);
+
+  font: var(--xl-w) 14px/20px var(--xl-font); color: var(--xl-ink); -webkit-font-smoothing: antialiased; font-optical-sizing: auto;
+  font-variant-numeric: tabular-nums; text-rendering: optimizeLegibility; cursor: default; user-select: none;
+}
+.x-layers[data-face='geist'] { --xl-font: 'XL Geist', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif; letter-spacing: -0.003em; }
+.x-layers[data-face='system'] { --xl-font: system-ui, -apple-system, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif; --xl-mono: ui-monospace, 'SF Mono', Menlo, monospace; --xl-w: 400; --xl-w-strong: 600; --xl-w-label: 500; }
+
+.x-layers[data-scheme='dark'] {
+  --xl-ink-rgb: 241 237 232;
+  --xl-ink-2: rgb(var(--xl-ink-rgb) / 0.8);
+  --xl-ink-3: rgb(var(--xl-ink-rgb) / 0.68);
+  --xl-ink-4: rgb(var(--xl-ink-rgb) / 0.42);
+  --xl-line: rgb(var(--xl-ink-rgb) / 0.11);
+  --xl-line-2: rgb(var(--xl-ink-rgb) / 0.18);
+  --xl-hover: rgb(255 255 255 / 0.07);
+  --xl-selected: rgb(255 255 255 / 0.115);
+  --xl-well: rgb(255 255 255 / 0.08);
+  --xl-lift: rgb(255 255 255 / 0.075);
+  --xl-lift-2: rgb(255 255 255 / 0.15);
+  --xl-sink: rgb(0 0 0 / 0.2);
+  --xl-current-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  --xl-raised: color-mix(in srgb, white 8%, var(--xl-ground));
+  --xl-veil: color-mix(in srgb, color-mix(in srgb, white 9%, var(--xl-ground)) 66%, transparent);
+  --xl-platter: color-mix(in srgb, color-mix(in srgb, white 11%, var(--xl-ground)) 78%, transparent);
+  --xl-accent-mark: #fd780f;
+  --xl-solid: rgb(var(--xl-ink-rgb)); --xl-on-solid: #191715;
+  --xl-host-2: 92%; --xl-host-3: 86%;
+  --xl-add: #74d3a3; --xl-del: #f6a092;
+  --xl-del-wash: rgb(246 160 146 / 0.1);
+  --xl-shadow-block: 0 12px 30px -12px rgb(0 0 0 / 0.6);
+  --xl-shadow-pane: 0 16px 44px -14px rgb(0 0 0 / 0.6);
+  --xl-shadow-bar: 0 6px 16px -6px rgb(0 0 0 / 0.55);
+  --xl-shadow-pop: 0 0 0 0.5px rgb(255 255 255 / 0.15), 0 2px 6px rgb(0 0 0 / 0.24), 0 18px 44px -10px rgb(0 0 0 / 0.62);
+  --xl-tip: rgb(var(--xl-ink-rgb)); --xl-on-tip: #191715;
+}
+
+.x-layers[data-pane='closed'] { --xl-main-l: 0px; --xl-tabs-min: calc(84px + 36px + var(--xl-room)); }
+.x-layers[data-side='closed'] { --xl-main-r: 0px; }
+
+.x-layers *, .x-layers *::before, .x-layers *::after { box-sizing: border-box; }
+.x-layers button, .x-layers input, .x-layers textarea { font: inherit; letter-spacing: inherit; color: inherit; margin: 0; }
+.x-layers button { background: none; border: 0; padding: 0; cursor: default; text-align: left; -webkit-tap-highlight-color: transparent; }
+.x-layers p, .x-layers h2, .x-layers h3, .x-layers pre { margin: 0; }
+.x-layers code, .x-layers pre { font-family: var(--xl-mono); font-variant-ligatures: none; }
+.x-layers :focus { outline: none; }
+.x-layers :focus-visible { outline: 2px solid var(--xl-focus); outline-offset: 2px; }
+.x-layers ::selection { background: color-mix(in srgb, var(--xl-focus) 28%, transparent); }
+.x-layers svg { display: block; flex: none; }
+
+/* ---- the field, the lights ------------------------------------------------------------------------------------- */
+
+.x-layers .xl-plane { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.x-layers .xl-lights { position: absolute; z-index: 1004; left: 24px; top: 22px; display: flex; gap: 8px; pointer-events: none; }
+.x-layers .xl-lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.14); }
+.x-layers .xl-lights i:nth-child(1) { background: #ff5f57; }
+.x-layers .xl-lights i:nth-child(2) { background: #febc2e; }
+.x-layers .xl-lights i:nth-child(3) { background: #28c840; }
+
+/* A capture aid (`x=field`): the field alone. */
+.x-layers[data-aid='field'] > :not(.xl-plane), .x-layers[data-aid='field'] [data-vitrea-plane] { visibility: hidden; }
+
+/* ---- glass hosts. No background, border, shadow or blur is authored on any of these: the runtime owns them ------ */
+
+.x-layers .xl-host {
+  position: fixed; box-sizing: border-box;
+  /* The runtime publishes its ink on each host; the levels below it are authored from that primary, because the
+     runtime's own second level measured under the floor on light panes in round 1. */
+  --xl-fg: var(--vitrea-foreground, var(--xl-ink));
+  --xl-fg2: color-mix(in srgb, var(--vitrea-foreground, var(--xl-ink)) var(--xl-host-2), transparent);
+  --xl-fg3: color-mix(in srgb, var(--vitrea-foreground, var(--xl-ink)) var(--xl-host-3), transparent);
+  color: var(--xl-fg); font: var(--xl-w) 14px/20px var(--xl-font);
+}
+/* A host's shadow is cast by a pseudo-element behind its content, never by the host itself. */
+.x-layers .xl-host::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: var(--xl-host-r, 999px); box-shadow: var(--xl-host-shadow, var(--xl-shadow-bar)); pointer-events: none; transition: opacity 220ms ease; }
+.x-layers[data-pose='inactive'] .xl-host::before { opacity: 0; }
+.x-layers[data-pose='inactive'] .xl-module { box-shadow: none; }
+/* Under Paper in light, receded glass falls to the ivory's own level (0.89 to 0.92 on 0.89) and has no hue to differ
+   by, so a shadow stays at about half strength: without it a block has nothing left but its rim. */
+.x-layers:is([data-colour='paper'], [data-paper])[data-scheme='light'][data-pose='inactive'] .xl-host::before { opacity: 0.55; }
+.x-layers:is([data-colour='paper'], [data-paper])[data-scheme='light'][data-pose='inactive'][data-material='glass'] .xl-block,
+.x-layers:is([data-colour='paper'], [data-paper])[data-scheme='light'][data-pose='inactive'] .xl-module:not([data-shown='false']) { box-shadow: 0 9px 26px -12px rgb(var(--xl-shade-rgb) / 0.2), 0 1px 5px -2px rgb(var(--xl-shade-rgb) / 0.08); }
+.x-layers .xl-under { pointer-events: none; }
+.x-layers .xl-under[data-space='viewport'] { position: fixed; }
+.x-layers .xl-under[data-space='container'] { position: absolute; }
+/* on glass, and on a block that stands on it, fills are the glass pair */
+.x-layers :is(.xl-host, .xl-block, .xl-module, .xl-pop) { --xl-hover: var(--xl-lift); --xl-selected: var(--xl-lift-2); --xl-well: var(--xl-sink); }
+
+/* A plain control on glass: a fill on hover, never glass of its own (Instrument). */
+.x-layers .xl-gbtn {
+  position: relative; display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 15px; color: var(--xl-fg2);
+  transition: background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press);
+}
+.x-layers .xl-gbtn:hover { background: var(--xl-hover); color: var(--xl-fg); }
+.x-layers .xl-gbtn:active { transform: scale(0.94); }
+
+/* An icon-only control off the bars (Quiet). The label lives in the tooltip. */
+.x-layers .xl-icon {
+  position: relative; display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 15px; color: var(--xl-fg2);
+  transition: background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press);
+}
+.x-layers .xl-icon:hover { background: var(--xl-hover); color: var(--xl-fg); }
+.x-layers .xl-icon:active { transform: scale(0.94); }
+.x-layers .xl-icon:is([aria-pressed='true'], [aria-expanded='true']) { background: var(--xl-selected); color: var(--xl-fg); box-shadow: var(--xl-current-shadow); }
+
+/* Tooltips: the words that are not on screen. They wait, then arrive small (Quiet). */
+.x-layers [data-tip]::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 8px); left: 50%; z-index: 80; padding: 4px 8px; border-radius: 8px;
+  background: var(--xl-tip); color: var(--xl-on-tip); font: 500 12px/16px var(--xl-font); white-space: nowrap; pointer-events: none;
+  opacity: 0; transform: translate(-50%, -3px) scale(0.96); transform-origin: 50% 0; transition: opacity var(--xl-t-pop-out), transform var(--xl-t-pop-out);
+}
+.x-layers [data-tip]:is(:hover, :focus-visible)::after { opacity: 1; transform: translate(-50%, 0) scale(1); transition: opacity var(--xl-t-hover) 480ms, transform var(--xl-t-pop) var(--xl-ease-open) 480ms; }
+.x-layers [data-tip][aria-expanded='true']::after { opacity: 0; }
+.x-layers [data-tip-at='above']::after { top: auto; bottom: calc(100% + 8px); transform-origin: 50% 100%; transform: translate(-50%, 3px) scale(0.96); }
+.x-layers [data-tip-at='end']::after { left: auto; right: 0; transform-origin: 100% 0; transform: translate(0, -3px) scale(0.96); }
+.x-layers [data-tip-at='above-start']::after { top: auto; bottom: calc(100% + 8px); left: 0; transform-origin: 0 100%; transform: translate(0, 3px) scale(0.96); }
+.x-layers [data-tip-at='above-end']::after { top: auto; bottom: calc(100% + 8px); left: auto; right: 0; transform-origin: 100% 100%; transform: translate(0, 3px) scale(0.96); }
+.x-layers :is([data-tip-at='end'], [data-tip-at='above-start'], [data-tip-at='above-end']):is(:hover, :focus-visible)::after { transform: translate(0, 0) scale(1); }
+
+/* ---- the pane: Field's (272 wide, radius 20, 8 px from the window, the lights on it) ---------------------------- */
+
+.x-layers .xl-pane { --xl-host-r: 20px; --xl-host-shadow: var(--xl-shadow-pane); top: var(--xl-gap); bottom: var(--xl-gap); left: var(--xl-gap); width: var(--xl-pane-w); transition: left var(--xl-t-shell) var(--xl-ease); }
+.x-layers[data-pane='closed'] .xl-pane { left: calc(-1 * var(--xl-pane-w) - 32px); }
+.x-layers[data-pane='open'] .xl-lead::before { opacity: 0; }
+.x-layers .xl-lead { left: 84px; top: var(--xl-bar-top); width: var(--xl-bar-h); height: var(--xl-bar-h); display: grid; place-items: center; }
+
+/* its content: Quiet's (a row is a title and one slot) */
+.x-layers .xl-pane-in { height: 100%; display: flex; flex-direction: column; }
+.x-layers .xl-pane-top { flex: none; height: 44px; }
+.x-layers .xl-pane-body {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 12px; scrollbar-width: none; animation: xl-side-in 340ms var(--xl-ease-open);
+  mask-image: linear-gradient(transparent, #000 10px, #000 calc(100% - 14px), transparent);
+}
+@keyframes xl-side-in { from { opacity: 0; transform: translateX(-10px); } }
+.x-layers .xl-pane-body[data-from='right'] { animation-name: xl-side-in-right; }
+@keyframes xl-side-in-right { from { opacity: 0; transform: translateX(10px); } }
+.x-layers .xl-group { margin-top: 18px; }
+.x-layers .xl-group-head {
+  display: flex; align-items: center; gap: 4px; width: 100%; height: 28px; padding: 0 6px 0 10px; border-radius: var(--xl-r-row);
+  color: var(--xl-fg3); font: var(--xl-w-label) 12px/16px var(--xl-font); transition: color var(--xl-t-hover);
+}
+.x-layers button.xl-group-head:hover { color: var(--xl-fg); }
+.x-layers .xl-group-head span { flex: 1; }
+.x-layers .xl-caret { opacity: 0; transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-group-head:is(:hover, :focus-visible, [aria-expanded='false']) .xl-caret { opacity: 0.7; }
+.x-layers .xl-group-head[aria-expanded='true'] .xl-caret { transform: rotate(90deg); }
+
+.x-layers .xl-row {
+  position: relative; display: flex; align-items: center; height: 34px; margin-top: 1px; border-radius: var(--xl-r-row); corner-shape: squircle;
+  color: var(--xl-fg2); transition: background-color var(--xl-t-hover), color var(--xl-t-hover), box-shadow var(--xl-t-hover);
+}
+.x-layers .xl-row:is(:hover, :focus-within, [data-held='true']) { background: var(--xl-hover); color: var(--xl-fg); }
+.x-layers .xl-row[data-selected='true'] { background: var(--xl-selected); color: var(--xl-fg); box-shadow: var(--xl-current-shadow); }
+.x-layers .xl-row[data-weight='unread'] { color: var(--xl-fg); font-weight: var(--xl-w-strong); }
+.x-layers .xl-row[data-weight='rest'] { color: var(--xl-fg3); }
+.x-layers .xl-row[data-weight='rest']:is(:hover, :focus-within) { color: var(--xl-fg); }
+.x-layers .xl-row-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 4px 0 10px; border-radius: inherit; font-weight: inherit; transition: transform var(--xl-t-press); }
+.x-layers .xl-row-main:active { transform: scale(0.99); }
+.x-layers .xl-row-main svg { opacity: 0.82; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-row:is(:hover, [data-selected='true']) .xl-row-main svg { opacity: 1; }
+/* A long title fades out; no ellipsis. The fade lives in padding the text only reaches when it is too long. */
+.x-layers .xl-fade { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; padding-right: 16px; margin-right: -10px; mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); }
+.x-layers .xl-keys { flex: none; padding-right: 10px; color: var(--xl-fg3); font: var(--xl-w) 12px/16px var(--xl-font); opacity: 0; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-row:is(:hover, :focus-within) .xl-keys { opacity: 1; }
+/* One slot at the end of a row. At rest it holds the state; under the pointer the state steps aside for actions. */
+.x-layers .xl-slot { position: relative; flex: none; width: 28px; height: 28px; margin-right: 3px; }
+.x-layers .xl-slot > * { position: absolute; inset: 0; display: grid; place-items: center; }
+.x-layers .xl-slot-state { transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-slot-act { border-radius: 9px; color: var(--xl-fg2); opacity: 0; transform: scale(0.8); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open), background-color var(--xl-t-hover); }
+.x-layers .xl-slot-act:is(:hover, [aria-expanded='true']) { background: var(--xl-selected); color: var(--xl-fg); }
+.x-layers .xl-row:is(:hover, :focus-within, [data-held='true']) .xl-slot-state { opacity: 0; transform: scale(0.8); }
+.x-layers .xl-row:is(:hover, :focus-within, [data-held='true']) .xl-slot-act { opacity: 1; transform: scale(1); }
+
+/* State glyphs. Grey is the agent's business; the accent is yours. */
+.x-layers .xl-glyph { display: grid; place-items: center; width: 16px; height: 16px; animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+@keyframes xl-glyph-in { from { opacity: 0; transform: scale(0.5); } }
+.x-layers .xl-glyph[data-kind='yours'] { color: var(--xl-accent-mark); }
+/* Where the accent cannot be a 15 px stroke (the ink itself), the glyph is reversed out of a disc of it. */
+.x-layers[data-mark='badge'] .xl-glyph[data-kind='yours'] { width: 20px; height: 20px; border-radius: 50%; background: var(--xl-accent); color: var(--xl-on-accent); }
+.x-layers[data-mark='badge'] .xl-glyph[data-kind='yours'] svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.x-layers[data-mark='badge'] .xl-tab-mark .xl-glyph[data-kind='yours'] { width: 18px; height: 18px; margin: -1px; }
+.x-layers[data-mark='badge'] .xl-tab-mark .xl-glyph[data-kind='yours'] svg { width: 11px; height: 11px; }
+.x-layers .xl-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.x-layers .xl-dot[data-run] { opacity: 0.75; animation: xl-breathe 1.8s ease-in-out infinite; }
+@keyframes xl-breathe { 0%, 100% { opacity: 0.28; transform: scale(0.82); } 50% { opacity: 0.85; transform: scale(1); } }
+
+.x-layers .xl-pane-foot { flex: none; display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 9px 2px; }
+.x-layers .xl-back { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; margin-bottom: 14px; border-radius: var(--xl-r-row); font-weight: 600; transition: background-color var(--xl-t-hover); }
+.x-layers .xl-back:hover { background: var(--xl-hover); }
+.x-layers .xl-back svg { transition: transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-back:hover svg { transform: translateX(-2px); }
+
+/* ---- tabs: Instrument's capsule ---------------------------------------------------------------------------------- */
+
+.x-layers .xl-tabs {
+  top: var(--xl-bar-top); left: var(--xl-tabs-l); height: var(--xl-bar-h); max-width: calc(100vw - var(--xl-tabs-l) - var(--xl-tabs-r));
+  padding: 3px; display: flex; align-items: center; gap: 1px; font: 500 13px/18px var(--xl-font); transition: left var(--xl-t-shell) var(--xl-ease);
+}
+.x-layers .xl-tab { position: relative; display: flex; min-width: 0; max-width: 200px; height: 30px; border-radius: 15px; color: var(--xl-fg2); transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers .xl-tab:hover { background: color-mix(in srgb, var(--xl-fg) 7%, transparent); color: var(--xl-fg); }
+.x-layers .xl-tab[data-current='true'] { color: var(--xl-fg); background: var(--xl-selected); box-shadow: var(--xl-current-shadow); }
+.x-layers[data-scheme='dark'] .xl-tab[data-current='true'] { background: color-mix(in srgb, var(--xl-fg) 13%, transparent); }
+.x-layers .xl-tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 13px 0 8px; border-radius: inherit; white-space: nowrap; }
+/* The system face sets these titles about 5 px wider apiece than Figtree did, and the seam beside the capsule is 30
+   where it was 24: together that is more than the row had left at 1440. The tab's trailing padding gives it back. */
+.x-layers[data-face='system'] .xl-tab-main { padding-right: 9px; }
+.x-layers .xl-tab-mark { display: grid; place-items: center; width: 16px; height: 16px; transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Quiet's exchange: under the pointer the mark steps aside for the close button, in the same place. */
+.x-layers .xl-tab-x { position: absolute; left: 5px; top: 5px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; opacity: 0; transform: scale(0.8); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open), background-color var(--xl-t-hover); }
+.x-layers .xl-tab:hover .xl-tab-mark { opacity: 0; transform: scale(0.8); }
+.x-layers .xl-tab:hover .xl-tab-x { opacity: 1; transform: scale(1); }
+.x-layers .xl-tab-x:hover { background: color-mix(in srgb, var(--xl-fg) 12%, transparent); }
+
+/* ---- the waiting capsule (tinted glass) and the side toggle ------------------------------------------------------ */
+
+.x-layers .xl-round { top: var(--xl-bar-top); right: var(--xl-gap); width: var(--xl-bar-h); height: var(--xl-bar-h); display: grid; place-items: center; }
+.x-layers .xl-waiting {
+  top: var(--xl-bar-top); right: calc(var(--xl-gap) + var(--xl-bar-h) + 8px); height: var(--xl-bar-h); padding: 0 12px; display: flex; align-items: center; gap: 6px;
+}
+.x-layers .xl-waiting[data-alone='true'] { right: var(--xl-gap); }
+/* Ink on the tint is authored: the runtime's pick sat near 4:1 on the orange in round 1. The capsule is the filled
+   thing, so a badge inside it goes back to a plain glyph. */
+.x-layers .xl-waiting .xl-glyph[data-kind] { width: 16px; height: 16px; margin: 0; background: none; color: var(--xl-on-accent); }
+.x-layers[data-mark='badge'] .xl-waiting .xl-glyph[data-kind='yours'] svg { width: 14px; height: 14px; stroke-width: 2; }
+/* Receded, the tint keeps its shade and loses its chroma, so the authored ink gives way to the runtime's. */
+.x-layers[data-pose='inactive'] .xl-waiting .xl-glyph[data-kind] { color: var(--xl-fg); }
+
+/* Paper's mark, when it is not the solid ink badge (DESIGN.md §13.3). The disc stays; what fills it changes. `soft`
+   is the surface's own ink, thin, with the glyph in that ink at full strength: no hue, and a fifth of the weight.
+   `accent` is one pigment, with a hairline of its own shade so the disc keeps an edge on glass nearly as light. */
+.x-layers[data-needs='soft'] .xl-glyph[data-kind='yours'] { background: color-mix(in srgb, var(--xl-fg) 13%, transparent); color: var(--xl-fg); }
+.x-layers[data-needs='accent'] .xl-glyph[data-kind='yours'] { background: var(--xl-pin); color: var(--xl-on-pin); box-shadow: inset 0 0 0 0.5px var(--xl-pin-ring); }
+/* Under both the capsule is clear glass, and what it holds are the discs the rows carry: one object in the pane,
+   the tabs and the capsule. Nothing of the mark is glass, so it keeps its strength in a receded window. */
+.x-layers .xl-waiting[data-clear] { padding: 0 8px; gap: 4px; }
+.x-layers[data-needs] .xl-waiting .xl-glyph[data-kind='yours'] { width: 20px; height: 20px; }
+.x-layers[data-needs] .xl-waiting .xl-glyph[data-kind='yours'] svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.x-layers[data-needs='soft'] .xl-waiting .xl-glyph[data-kind='yours'] { background: color-mix(in srgb, var(--xl-fg) 13%, transparent); color: var(--xl-fg); }
+.x-layers[data-needs='accent'] .xl-waiting .xl-glyph[data-kind='yours'] { background: var(--xl-pin); color: var(--xl-on-pin); }
+
+/* ---- the main space -------------------------------------------------------------------------------------------- */
+
+.x-layers .xl-main { position: absolute; top: 0; bottom: 0; left: var(--xl-main-l); right: var(--xl-main-r); transition: left var(--xl-t-shell) var(--xl-ease), right var(--xl-t-shell) var(--xl-ease); }
+/* The scroll rule: the field is still, blocks and prose travel over it, and everything thins to nothing before it
+   reaches the tab capsule or the composer, so glass never passes under glass. */
+.x-layers .xl-scroll {
+  position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; outline: none;
+  --xl-edge-t: calc(var(--vitrea-bar-inset-top, 46px) + 4px); --xl-edge-b: calc(var(--vitrea-bar-inset-bottom, 150px) + 4px);
+  mask-image: linear-gradient(to bottom, transparent var(--xl-edge-t), #000 calc(var(--xl-edge-t) + 32px), #000 calc(100% - var(--xl-edge-b) - 32px), transparent calc(100% - var(--xl-edge-b)));
+}
+.x-layers .xl-column { position: relative; width: var(--xl-col); margin: 0 auto; padding: calc(var(--vitrea-bar-inset-top, 46px) + 40px) 0 calc(var(--vitrea-bar-inset-bottom, 150px) + 44px); }
+/* Above the attached root's planes, so a block's words are drawn over its glass. */
+.x-layers .xl-items { position: relative; z-index: 1002; user-select: text; }
+
+/* a block: an ordinary element; the Blocks knob decides what it stands on */
+.x-layers .xl-block { position: relative; --xl-fg: var(--xl-ink); --xl-fg2: var(--xl-ink-2); --xl-fg3: var(--xl-ink-3); border-radius: 18px; }
+.x-layers[data-material='glass']:not([data-pose='inactive']) .xl-block { box-shadow: var(--xl-shadow-block); }
+.x-layers[data-material='veil'] .xl-block { background: var(--xl-veil); backdrop-filter: blur(22px) saturate(1.4); box-shadow: inset 0 0 0 0.5px var(--xl-line-2); }
+.x-layers[data-material='opaque'] .xl-block { background: var(--xl-raised); box-shadow: inset 0 0 0 0.5px var(--xl-line); }
+
+.x-layers .xl-user { display: flex; justify-content: flex-end; margin-top: 30px; }
+.x-layers .xl-user:first-child { margin-top: 0; }
+.x-layers .xl-bubble { max-width: 84%; padding: 10px 16px; border-radius: 22px; font-size: 15px; line-height: 22px; }
+
+.x-layers .xl-prose { margin-top: 16px; font-size: 15px; line-height: 24px; text-wrap: pretty; }
+.x-layers .xl-prose p + p { margin-top: 12px; }
+
+/* A folded run: one grey caption (Quiet). The chevron and the time are there only under the pointer. */
+.x-layers .xl-folded { margin-top: 10px; }
+.x-layers .xl-cap {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-left: -10px; padding: 0 10px; border-radius: 999px; color: var(--xl-ink-3);
+  font-size: 13px; line-height: 18px; user-select: none; transition: background-color var(--xl-t-hover), color var(--xl-t-hover);
+}
+.x-layers button.xl-cap:is(:hover, [aria-expanded='true']) { color: var(--xl-ink); }
+.x-layers button.xl-cap:hover { background: var(--xl-hover); }
+.x-layers .xl-cap-chev { opacity: 0; transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-cap:is(:hover, :focus-visible, [aria-expanded='true']) .xl-cap-chev { opacity: 0.6; }
+.x-layers .xl-cap[aria-expanded='true'] .xl-cap-chev { transform: rotate(90deg); }
+.x-layers .xl-cap-time { opacity: 0; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-cap:is(:hover, [aria-expanded='true']) .xl-cap-time { opacity: 1; }
+
+/* Height that opens and closes without knowing its size. */
+.x-layers .xl-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-fold[data-open='true'] { grid-template-rows: 1fr; }
+/* Clipped in height only, so a shadow or a hover fill that reaches past the column edge is not cut. */
+.x-layers .xl-fold-in { min-height: 0; overflow-x: visible; overflow-y: clip; opacity: 0; transition: opacity var(--xl-t-pop) ease; }
+.x-layers .xl-fold[data-open='true'] > .xl-fold-in { opacity: 1; transition-delay: 40ms; }
+
+.x-layers .xl-thought { padding: 4px 0 2px; color: var(--xl-ink-2); font-size: 14px; line-height: 21px; }
+/* Room under the card inside the fold, so its shadow is not clipped where the fold ends. */
+.x-layers .xl-calls-wrap { padding: 6px 0 22px; margin-bottom: -16px; }
+.x-layers .xl-calls { padding: 5px; }
+.x-layers .xl-call { display: flex; align-items: baseline; gap: 10px; min-height: 30px; padding: 6px 10px; border-radius: 13px; font-size: 13px; line-height: 18px; transition: background-color var(--xl-t-hover); }
+.x-layers .xl-call:hover { background: var(--xl-hover); }
+.x-layers .xl-call-verb { flex: none; width: 34px; color: var(--xl-fg3); }
+.x-layers .xl-call-target { flex: 1; min-width: 0; font: 450 12px/18px var(--xl-mono); color: var(--xl-fg); overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+.x-layers .xl-call-detail { flex: none; color: var(--xl-fg3); font-size: 12px; }
+
+.x-layers .xl-edit { margin-top: 14px; overflow: hidden; }
+.x-layers .xl-edit-head { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; padding: 0 14px; font-size: 13px; transition: background-color var(--xl-t-hover); }
+.x-layers .xl-edit-head:hover { background: var(--xl-hover); }
+.x-layers .xl-edit-head > svg { color: var(--xl-fg3); }
+.x-layers .xl-edit-file { flex: 1; min-width: 0; }
+.x-layers .xl-edit-dir { color: var(--xl-fg3); }
+.x-layers .xl-diff { padding: 6px 0 10px; border-top: 0.5px solid var(--xl-line); font: 450 12px/20px var(--xl-mono); overflow-x: auto; scrollbar-width: none; }
+.x-layers .xl-diff-line { display: flex; padding: 0 14px 0 0; white-space: pre; }
+.x-layers .xl-diff-line i { flex: none; width: 30px; text-align: center; font-style: normal; color: var(--xl-ink-4); user-select: none; }
+.x-layers .xl-diff-line[data-sign='+'] i { color: var(--xl-add); }
+.x-layers .xl-diff-line[data-sign='-'] i { color: var(--xl-del); }
+.x-layers .xl-diff-line[data-sign='-'] { background: var(--xl-del-wash); }
+
+.x-layers .xl-live { margin-top: 14px; }
+.x-layers .xl-live-head { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px 0 16px; font: 450 12px/18px var(--xl-mono); }
+.x-layers .xl-live-head .xl-dot { flex: none; color: var(--xl-fg2); }
+.x-layers .xl-live-cmd { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+.x-layers .xl-live-time { flex: none; color: var(--xl-fg3); font: var(--xl-w) 12px/18px var(--xl-font); }
+.x-layers .xl-tail { padding: 2px 16px 12px 33px; font: 450 12px/20px var(--xl-mono); color: var(--xl-fg3); white-space: pre-wrap; }
+.x-layers .xl-tail div:last-child { color: var(--xl-fg); }
+
+.x-layers .xl-stat { flex: none; font: 450 12px/16px var(--xl-mono); color: var(--xl-fg3); }
+.x-layers .xl-add { color: var(--xl-add); }
+.x-layers .xl-del { color: var(--xl-del); }
+.x-layers .xl-mono { font-family: var(--xl-mono); font-size: 12px; }
+.x-layers .xl-num { font-variant-numeric: tabular-nums; }
+.x-layers .xl-quiet { color: var(--xl-fg3); }
+.x-layers .xl-current { color: var(--xl-fg); font-weight: 540; }
+.x-layers .xl-spin { animation: xl-spin 1.1s linear infinite; }
+@keyframes xl-spin { to { transform: rotate(360deg); } }
+
+/* ---- the composer: glass, Quiet's content ------------------------------------------------------------------------ */
+
+.x-layers .xl-composer { --xl-host-r: 26px; --xl-host-shadow: var(--xl-shadow-block); left: var(--xl-col-l); width: var(--xl-col); bottom: 16px; transition: left var(--xl-t-shell) var(--xl-ease); }
+.x-layers .xl-composer[data-home] { bottom: auto; top: calc(44vh - 58px); }
+.x-layers .xl-queued {
+  display: flex; align-items: center; gap: 8px; width: fit-content; max-width: calc(100% - 20px); height: 30px; margin: 10px 10px 0; padding: 0 5px 0 10px;
+  border-radius: 15px; background: var(--xl-well); color: var(--xl-fg2); font-size: 13px;
+}
+.x-layers .xl-queued .xl-fade { flex: 0 1 auto; }
+.x-layers .xl-queued-x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; opacity: 0; transition: opacity var(--xl-t-hover), background-color var(--xl-t-hover); }
+.x-layers .xl-queued:hover .xl-queued-x, .x-layers .xl-queued-x:focus-visible { opacity: 1; }
+.x-layers .xl-queued-x:hover { background: var(--xl-hover); }
+.x-layers .xl-field {
+  display: block; width: 100%; min-height: 48px; max-height: 200px; padding: 15px 20px 4px; border: 0; background: none; resize: none; color: var(--xl-fg);
+  font: var(--xl-w) 15px/22px var(--xl-font); field-sizing: content; cursor: text; user-select: text;
+}
+.x-layers .xl-field::placeholder { color: var(--xl-fg3); }
+.x-layers .xl-field:focus-visible { outline: none; }
+.x-layers .xl-tools { display: flex; align-items: center; gap: 4px; padding: 4px 9px 9px 10px; }
+.x-layers .xl-grow { flex: 1; }
+.x-layers .xl-chip { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px 0 11px; border-radius: 15px; color: var(--xl-fg2); font-size: 13px; transition: background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press); }
+.x-layers .xl-chip:is(:hover, [aria-expanded='true']) { background: var(--xl-hover); color: var(--xl-fg); }
+.x-layers .xl-chip:active { transform: scale(0.97); }
+.x-layers .xl-chip svg:last-child:not(:first-child) { opacity: 0.72; }
+.x-layers .xl-send { display: grid; place-items: center; width: 32px; height: 32px; margin-left: 4px; border-radius: 50%; background: var(--xl-solid); color: var(--xl-on-solid); transition: background-color var(--xl-t-pop), color var(--xl-t-pop), transform var(--xl-t-press); }
+.x-layers .xl-send:active { transform: scale(0.92); }
+.x-layers .xl-send[data-kind='go'] { background: var(--xl-accent); color: var(--xl-on-accent); }
+.x-layers .xl-send[data-kind='idle'] { background: var(--xl-well); color: var(--xl-fg3); }
+.x-layers .xl-send svg { animation: xl-swap var(--xl-t-pop) var(--xl-ease-open); }
+@keyframes xl-swap { from { opacity: 0; transform: scale(0.5) rotate(-30deg); } }
+
+/* ---- new chat: Quiet's layout ----------------------------------------------------------------------------------- */
+
+.x-layers .xl-home { position: absolute; inset: 0; animation: xl-scene-in 340ms var(--xl-ease-open); }
+@keyframes xl-scene-in { from { opacity: 0; transform: translateY(8px); } }
+.x-layers .xl-home-in { position: fixed; left: var(--xl-col-l); width: var(--xl-col); top: calc(44vh - 110px); transition: left var(--xl-t-shell) var(--xl-ease); }
+.x-layers .xl-home-ask { margin: 0 0 18px 20px; font: 560 27px/34px var(--xl-font); letter-spacing: -0.015em; }
+/* Paper's display voice: the owner's picture sets one word in a light, high-contrast serif. Transcript prose stays
+   sans (the owner's ruling); this is the single display line, and only under this colouring. */
+.x-layers:is([data-colour='paper'], [data-paper]):not([data-line='sans']) .xl-home-ask { margin-bottom: 15px; font: 300 37px/44px 'XL Newsreader', ui-serif, 'Apple SD Gothic Neo', serif; font-variation-settings: 'opsz' 72; letter-spacing: -0.014em; }
+/* The same line in the sans, for the owner to weigh against the serif. It follows the Typeface knob. Under Paper it
+   is set lighter and larger than the other colourings set theirs, so that it keeps company with the picture's fine
+   lines as the serif does; a bold line of 27 px reads here as a label on a photograph. */
+.x-layers:is([data-colour='paper'], [data-paper])[data-line='sans'] .xl-home-ask { margin-bottom: 15px; font: 420 33px/42px var(--xl-font); letter-spacing: -0.024em; }
+.x-layers:is([data-colour='paper'], [data-paper])[data-line='sans'][data-face='system'] .xl-home-ask { letter-spacing: -0.02em; }
+.x-layers .xl-home-slot { height: 92px; }
+.x-layers .xl-where { display: flex; align-items: center; gap: 2px; margin: 10px 0 0 9px; }
+.x-layers .xl-where .xl-chip { color: var(--xl-ink-2); }
+
+/* ---- the side column: separate modules, each a piece of glass with the field between them ------------------------ */
+
+.x-layers .xl-side {
+  position: fixed; z-index: 1002; top: calc(var(--xl-bar-top) + var(--xl-bar-h) + 12px); right: var(--xl-gap); bottom: var(--xl-gap); width: var(--xl-side-w);
+  display: flex; flex-direction: column; gap: 12px; pointer-events: none; font-size: 13px; line-height: 18px;
+}
+.x-layers .xl-module {
+  pointer-events: auto; flex: none; padding: 8px 8px 9px; border-radius: 20px; box-shadow: var(--xl-shadow-block);
+  transition: transform var(--xl-t-shell) var(--xl-ease), box-shadow var(--xl-t-pop) ease;
+}
+.x-layers .xl-module > * { transition: opacity var(--xl-t-pop) ease; }
+.x-layers .xl-module[data-shown='false'] { transform: translateX(36px) scale(0.97); pointer-events: none; box-shadow: none; }
+.x-layers .xl-module[data-shown='false'] > * { opacity: 0; }
+.x-layers .xl-module-head { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 8px; color: var(--xl-fg3); font: var(--xl-w-label) 12px/16px var(--xl-font); }
+.x-layers .xl-line { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 8px; border-radius: var(--xl-r-row); color: var(--xl-fg2); transition: background-color var(--xl-t-hover); }
+.x-layers .xl-line:hover { background: var(--xl-hover); }
+.x-layers .xl-line > svg { color: var(--xl-fg3); }
+.x-layers .xl-line[data-top] { align-items: flex-start; }
+.x-layers .xl-line[data-top] > :first-child { margin-top: 1px; }
+.x-layers .xl-line-mark { display: grid; place-items: center; width: 15px; height: 16px; color: var(--xl-fg2); }
+.x-layers .xl-line-text { flex: 1; min-width: 0; }
+.x-layers .xl-line-sub { display: block; color: var(--xl-fg3); font-size: 12px; line-height: 17px; }
+
+/* ---- popovers: the only CSS-drawn material; each one arrives and leaves ----------------------------------------- */
+
+.x-layers .xl-pop {
+  position: fixed; z-index: 3000; min-width: 180px; padding: 5px; border-radius: 18px; corner-shape: squircle; color: var(--xl-ink); font-size: 14px;
+  --xl-fg: var(--xl-ink); --xl-fg2: var(--xl-ink-2); --xl-fg3: var(--xl-ink-3);
+  background: var(--xl-platter); backdrop-filter: blur(30px) saturate(1.7); box-shadow: var(--xl-shadow-pop);
+  animation: xl-pop-in var(--xl-t-pop) var(--xl-ease-open); transition: top 200ms var(--xl-ease-open), left 200ms var(--xl-ease-open);
+}
+.x-layers .xl-pop[data-state='closing'] { animation: xl-pop-out var(--xl-t-pop-out) ease-in forwards; pointer-events: none; }
+@keyframes xl-pop-in { from { opacity: 0; transform: var(--xl-pop-from, translateY(-4px)) scale(0.95); } }
+@keyframes xl-pop-out { to { opacity: 0; transform: scale(0.97); } }
+.x-layers .xl-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 13px; color: var(--xl-fg); transition: background-color var(--xl-t-press); }
+.x-layers button.xl-item:is(:hover, :focus-visible) { background: var(--xl-hover); }
+.x-layers .xl-item svg { color: var(--xl-fg3); }
+.x-layers .xl-item > span:first-of-type { flex: 1; }
+.x-layers .xl-item-value { color: var(--xl-fg3); }
+.x-layers .xl-sep { height: 0.5px; margin: 5px 10px; background: var(--xl-line-2); }
+
+/* The card that follows the pointer down the pane: the second line of every row, kept off the screen (Quiet). */
+.x-layers .xl-card { width: 300px; padding: 14px 16px; border-radius: 22px; }
+.x-layers .xl-card-title { font-weight: 600; }
+.x-layers .xl-card-line { margin-top: 2px; color: var(--xl-fg2); }
+.x-layers .xl-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; color: var(--xl-fg3); font-size: 12px; line-height: 16px; }
+.x-layers .xl-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* The approval: the command, why, and two answers (Quiet). */
+.x-layers .xl-ask { margin-top: 12px; }
+.x-layers .xl-ask-cmd { padding: 8px 10px; border-radius: 11px; background: var(--xl-well); font: 450 12px/18px var(--xl-mono); color: var(--xl-fg); user-select: text; }
+.x-layers .xl-ask-why { margin: 8px 2px 0; color: var(--xl-fg3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-ask-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.x-layers .xl-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 30px; padding: 0 14px; border-radius: 15px; font-weight: 520; font-size: 13px; white-space: nowrap;
+  box-shadow: inset 0 0 0 0.5px var(--xl-line-2); transition: background-color var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-spring);
+}
+.x-layers .xl-btn:hover { background: var(--xl-hover); }
+.x-layers .xl-btn:active { transform: scale(0.97); }
+.x-layers .xl-btn[data-kind='go'] { background: var(--xl-accent); color: var(--xl-on-accent); box-shadow: none; }
+.x-layers .xl-btn[data-kind='go']:hover { background: color-mix(in srgb, var(--xl-accent) 90%, var(--xl-on-accent)); }
+
+.x-layers .xl-wait-list { width: 348px; padding: 6px; border-radius: 22px; }
+.x-layers .xl-wait-item { padding: 10px; border-radius: 16px; transition: background-color var(--xl-t-hover); }
+.x-layers .xl-wait-item + .xl-wait-item { margin-top: 2px; }
+.x-layers .xl-wait-item:hover { background: var(--xl-hover); }
+.x-layers .xl-wait-item[data-open='true']:hover { background: none; }
+.x-layers .xl-wait-head { display: flex; align-items: flex-start; gap: 10px; }
+.x-layers .xl-wait-head .xl-glyph { margin-top: 2px; }
+.x-layers .xl-wait-text { flex: 1; min-width: 0; }
+.x-layers .xl-wait-age { flex: none; color: var(--xl-fg3); font-size: 12px; }
+
+.x-layers .xl-usage { width: 216px; padding: 12px 14px; }
+.x-layers .xl-usage-row { display: flex; align-items: center; gap: 10px; height: 26px; }
+.x-layers .xl-usage-row span:first-of-type { flex: 1; }
+.x-layers .xl-usage-note { margin-top: 6px; color: var(--xl-fg3); font-size: 12px; line-height: 16px; }
+
+/* a glass platter drawn by the runtime (the settings select) */
+.x-layers .xl-platter { --xl-fg: var(--vitrea-foreground, var(--xl-ink)); color: var(--xl-fg); font: var(--xl-w) 13px/18px var(--xl-font); outline: none; }
+.x-layers .xl-menu { min-width: 172px; padding: 6px; display: flex; flex-direction: column; }
+.x-layers .xl-menu-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 12px 0 9px; border-radius: 14px; cursor: default; }
+
+/* ---- settings: Quiet's page, Instrument's controls -------------------------------------------------------------- */
+
+.x-layers .xl-page { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; outline: none; animation: xl-scene-in 340ms var(--xl-ease-open); }
+.x-layers .xl-page-in { display: grid; grid-template-columns: minmax(32px, 1fr) minmax(0, 620px) minmax(272px, 1fr); padding: calc(var(--vitrea-bar-inset-top, 46px) + 14px) 0 40vh; }
+.x-layers .xl-page-col { grid-column: 2; }
+.x-layers .xl-section { scroll-margin-top: 62px; padding-top: 20px; }
+.x-layers .xl-section + .xl-section { margin-top: 28px; }
+.x-layers .xl-section-title { margin: 0 0 6px; font: 600 20px/28px var(--xl-font); letter-spacing: -0.012em; }
+.x-layers .xl-set { position: relative; display: flex; align-items: center; gap: 8px 28px; min-height: 54px; padding: 11px 0; border-top: 0.5px solid var(--xl-line-2); }
+.x-layers .xl-section .xl-set:first-of-type { border-top-color: transparent; }
+.x-layers .xl-set[data-stack='true'] { flex-direction: column; align-items: stretch; padding: 15px 0 16px; }
+.x-layers .xl-set-label { flex: 1; min-width: 0; }
+.x-layers .xl-set-ctl { flex: none; display: flex; align-items: center; gap: 10px; max-width: 64%; }
+.x-layers .xl-set[data-stack='true'] .xl-set-ctl { max-width: none; }
+/* The margin note: the sentence appears beside the row you are on, in space nothing else uses. */
+.x-layers .xl-note {
+  position: absolute; left: calc(100% + 32px); top: 16px; width: 224px; color: var(--xl-ink-2); font-size: 13px; line-height: 19px; text-wrap: pretty; pointer-events: none;
+  opacity: 0; transform: translateX(-6px); transition: opacity var(--xl-t-hover) var(--xl-ease), transform 220ms var(--xl-ease);
+}
+.x-layers .xl-set:is(:hover, :focus-within) > .xl-note { opacity: 1; transform: none; transition-delay: 60ms; }
+
+.x-layers .xl-switch { position: relative; flex: none; width: 38px; height: 22px; border-radius: 11px; background: rgb(var(--xl-ink-rgb) / 0.2); transition: background-color 220ms var(--xl-ease); }
+.x-layers .xl-switch[aria-checked='true'] { background: var(--xl-solid); }
+.x-layers .xl-switch i { position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 9px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.22), 0 0 0 0.5px rgb(0 0 0 / 0.06); transition: transform 420ms var(--xl-spring), width 120ms var(--xl-ease), left 120ms var(--xl-ease), background-color 220ms; }
+.x-layers .xl-switch:active i { width: 22px; }
+.x-layers .xl-switch[aria-checked='true'] i { transform: translateX(16px); background: var(--xl-on-solid); }
+.x-layers .xl-switch[aria-checked='true']:active i { left: -2px; }
+
+.x-layers .xl-seg { position: relative; flex: none; display: inline-flex; padding: 3px; border-radius: 17px; background: var(--xl-well); }
+.x-layers .xl-seg button { position: relative; z-index: 1; height: 28px; padding: 0 13px; border-radius: 14px; font-size: 13px; color: var(--xl-ink-2); white-space: nowrap; transition: color var(--xl-t-hover) var(--xl-ease); }
+.x-layers .xl-seg button[aria-checked='true'] { color: var(--xl-ink); font-weight: 540; }
+.x-layers .xl-seg-thumb { position: absolute; top: 3px; left: 0; height: 28px; border-radius: 14px; background: var(--xl-thumb, #fff); box-shadow: 0 1px 2.5px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.05); transition: transform 440ms var(--xl-spring), width 300ms var(--xl-ease); }
+.x-layers[data-scheme='dark'] .xl-seg-thumb { --xl-thumb: rgb(255 255 255 / 0.18); }
+
+.x-layers .xl-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-layers .xl-pill {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; color: var(--xl-ink-3); box-shadow: inset 0 0 0 1px var(--xl-line-2);
+  transition: background-color 220ms var(--xl-ease), color 220ms var(--xl-ease), box-shadow 220ms var(--xl-ease), transform 220ms var(--xl-spring);
+}
+.x-layers .xl-pill:active { transform: scale(0.96); }
+.x-layers .xl-pill svg { width: 0; height: 13px; stroke-width: 2.5; opacity: 0; transition: width 220ms var(--xl-ease), opacity 220ms var(--xl-ease), margin 220ms var(--xl-ease); }
+.x-layers .xl-pill[aria-pressed='true'] { color: var(--xl-ink); background: var(--xl-selected); box-shadow: inset 0 0 0 1px transparent; }
+.x-layers .xl-pill[aria-pressed='true'] svg { width: 13px; opacity: 1; margin-right: 6px; }
+
+.x-layers .xl-input {
+  flex: 0 1 280px; width: 280px; height: 32px; padding: 0 13px; border: 0; border-radius: 16px; background: var(--xl-well); color: var(--xl-ink); font: var(--xl-w) 13px/18px var(--xl-font);
+  cursor: text; user-select: text; transition: box-shadow var(--xl-t-hover) var(--xl-ease), background-color var(--xl-t-hover) var(--xl-ease);
+}
+.x-layers .xl-input[data-mono='true'] { font: 450 12px/18px var(--xl-mono); }
+.x-layers .xl-input::placeholder { color: var(--xl-ink-3); }
+.x-layers .xl-input:focus-visible { outline: 0; background: transparent; box-shadow: inset 0 0 0 1.5px var(--xl-ink); }
+.x-layers .xl-path { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.x-layers .xl-path code { position: relative; font: 450 12px/18px var(--xl-mono); color: var(--xl-ink-2); white-space: nowrap; }
+.x-layers .xl-badge { flex: none; color: var(--xl-ink-3); font-size: 13px; }
+.x-layers .xl-select { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 13px; border-radius: 15px; font-size: 13px; font-weight: 520; color: var(--xl-ink); background: var(--xl-well); transition: background-color var(--xl-t-hover) var(--xl-ease); }
+.x-layers .xl-select:is(:hover, [data-state='open'], [aria-expanded='true']) { background: var(--xl-selected); }
+.x-layers .xl-select svg { width: 13px; height: 13px; stroke-width: 2; opacity: 0.6; }
+
+/* The plain ground (DESIGN.md §16). The field gathers light and shade under the glass that stays put; a block of the
+   transcript travels, so what gathers under it travels with it as a second, wider shadow in the gathering's own
+   colour: shade under Paper by day, the lamp at night, the orange under a warmer Paper. */
+.x-layers[data-ground='plain'][data-material='glass']:not([data-pose='inactive']) .xl-block {
+  box-shadow: var(--xl-shadow-block), 0 22px 60px -22px rgb(var(--xl-gather-rgb) / var(--xl-gather-a));
+}
+
+/* ---- the open calls about layout (DESIGN.md §13.4, §13.5) -------------------------------------------------------- */
+
+/* Alignment under Open's rule: the reading column is the join. The panes stand one derived room from it, the tabs
+   start on its left edge, the waiting capsule ends on its right edge, and the composer is its width (it already
+   was). The column takes what the panes leave, up to Open's 744. */
+.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file'], [data-shelf]) {
+  --xl-col: min(744px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room)));
+  --xl-wait-r: calc(100vw - var(--xl-col-l) - var(--xl-col));
+  --xl-tabs-r: calc(var(--xl-wait-r) + 84px + var(--xl-seam));
+}
+.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file'], [data-shelf]) .xl-waiting { right: var(--xl-wait-r); transition: right var(--xl-t-shell) var(--xl-ease); }
+/* Settings has a column of its own (620, kept clear of the margin note); the tabs start on that one. */
+.x-layers[data-align='column'][data-scene='settings'] {
+  --xl-col-l: calc(var(--xl-main-l) + max(32px, min((100vw - var(--xl-main-l) - 620px) / 2, 100vw - var(--xl-main-l) - 892px)));
+  --xl-tabs-r: calc(var(--xl-gap) + 16px); /* nothing stands at the top right of this scene */
+}
+/* Open's: when the row is short of room the current tab keeps its whole title and the others thin out. */
+.x-layers[data-align='column'] .xl-tab[data-current='true'] { flex: none; }
+
+/* The right column as one card as tall as the window's content (Sheet's container). */
+.x-layers .xl-one { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: clip; }
+.x-layers .xl-one-in { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 8px 8px 12px; }
+.x-layers .xl-part + .xl-part { margin-top: 16px; }
+
+/* The right column closed to a round glass button that grows into that card (Open's container). The element's own
+   box is what grows; its glass is kept under it by the layer. The button stays where it is throughout. */
+.x-layers .xl-side[data-form='button'] { top: var(--xl-gap); display: block; }
+.x-layers .xl-bud {
+  position: absolute; top: calc(var(--xl-bar-top) - var(--xl-gap)); right: 0; width: var(--xl-bar-h); height: var(--xl-bar-h); padding: 0; overflow: clip;
+  box-shadow: var(--xl-shadow-bar);
+  /* It leaves rest slowly, as the runtime's own springs do: the glass can trail its box by a frame, and a frame is
+     nothing at the start of this curve and 40 px at the start of the layout's. */
+  --xl-bud-ease: cubic-bezier(0.4, 0, 0.1, 1); --xl-bud-t: 500ms;
+  transition: top var(--xl-bud-t) var(--xl-bud-ease), width var(--xl-bud-t) var(--xl-bud-ease), height var(--xl-bud-t) var(--xl-bud-ease), box-shadow var(--xl-bud-t) ease;
+}
+.x-layers .xl-bud[data-grown='true'] { top: 0; width: 100%; height: var(--xl-bud-h); box-shadow: var(--xl-shadow-block); }
+.x-layers .xl-bud-in { position: absolute; top: 0; right: 0; width: var(--xl-side-w); max-height: calc(100vh - 2 * var(--xl-gap)); overflow-y: auto; scrollbar-width: none; padding: 5px 8px 11px; opacity: 0; transition: opacity 110ms ease; }
+.x-layers .xl-bud[data-grown='true'] .xl-bud-in { opacity: 1; transition: opacity 240ms ease 260ms; }
+.x-layers .xl-bud .xl-part:first-child .xl-module-head { padding-right: 34px; }
+.x-layers .xl-bud-btn {
+  position: absolute; top: 3px; right: 3px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; color: var(--xl-fg2); opacity: 1;
+  transition: top var(--xl-bud-t) var(--xl-bud-ease), background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press);
+}
+.x-layers .xl-bud[data-grown='true'] .xl-bud-btn { top: calc(3px + var(--xl-bar-top) - var(--xl-gap)); }
+.x-layers .xl-bud-btn:hover { background: var(--xl-hover); color: var(--xl-fg); }
+.x-layers .xl-bud-btn:active { transform: scale(0.94); }
+/* With the capsule's place taken by the card, the capsule stands beside the card as its neighbour (12 px, as it
+   stood above the modules), and the tabs keep a room from it. Under the column rule it is on the column instead. */
+.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file'], [data-shelf]):not([data-align='column']) {
+  --xl-tabs-r: max(calc(var(--xl-main-r) + 96px + var(--xl-room)), calc(var(--xl-gap) + 128px + var(--xl-room)));
+}
+.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file'], [data-shelf]):not([data-align='column']) .xl-waiting {
+  right: max(calc(var(--xl-main-r) + 12px), calc(var(--xl-gap) + var(--xl-bar-h) + 8px)); transition: right var(--xl-t-shell) var(--xl-ease);
+}
+
+/* ---- a narrower window: the side column leaves first, then the pane -------------------------------------------- */
+
+@media (width < 1180px) {
+  .x-layers { --xl-main-r: 0px; }
+  .x-layers .xl-side, .x-layers .xl-round { display: none; }
+  .x-layers .xl-waiting { right: var(--xl-gap); }
+  .x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file'], [data-shelf]):not([data-align='column']) .xl-waiting { right: var(--xl-gap); }
+}
+@media (width < 900px) {
+  .x-layers { --xl-main-l: 0px; --xl-tabs-min: calc(84px + 36px + var(--xl-room)); }
+  .x-layers .xl-pane { left: calc(-1 * var(--xl-pane-w) - 32px); }
+}
+
+/* ---- the system's own preferences ------------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .x-layers *, .x-layers *::before, .x-layers *::after { transition-duration: 1ms !important; transition-delay: 0ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .x-layers[data-material='veil'] .xl-block, .x-layers .xl-pop { backdrop-filter: none; background: var(--xl-raised); }
+}
+@media (forced-colors: active) {
+  .x-layers .xl-plane { visibility: hidden; }
+  .x-layers .xl-lights i, .x-layers .xl-glyph, .x-layers .xl-dot { forced-color-adjust: none; }
+  .x-layers :is(.xl-block, .xl-module, .xl-pop, .xl-switch, .xl-seg, .xl-seg-thumb, .xl-pill, .xl-input, .xl-select, .xl-btn, .xl-queued) { border: 1px solid CanvasText; }
+  .x-layers :is(.xl-row[data-selected='true'], .xl-tab[data-current='true'], .xl-pill[aria-pressed='true']) { outline: 2px solid Highlight; outline-offset: -2px; }
+  .x-layers :is(.xl-switch[aria-checked='true'], .xl-send, .xl-btn[data-kind='go']) { background: Highlight; color: HighlightText; }
+}
+
+/* ==== 17. The suggested set, folded in (DESIGN.md section 17) =====================================================
+   The Choices board put each smaller part of the session up in several forms; the owner took the suggested one of
+   each, and those forms are the design from here on. They are written below under names of their own, and the
+   rules above for the forms they replace (.xl-bubble, .xl-edit-head, .xl-queued and the rest) are kept as they
+   were, because the board still draws those earlier forms from this sheet as its record of the alternatives. */
+
+.x-layers {
+  /* A count that stands on the field, not on glass, takes a deeper step of its hue in light: the field is a shade
+     darker than a glass body, and darker again where the picture's paper is in shadow. */
+  --xl-add-field: #135a36; --xl-del-field: #92281a;
+}
+.x-layers[data-scheme='dark'] { --xl-add-field: var(--xl-add); --xl-del-field: var(--xl-del); }
+
+/* ---- the scroll rule, with a message waiting above the composer -------------------------------------------------
+   A queued message stands over the composer's top right, outside it. It is the bar's, so content thins out before
+   it reaches the message, as it does before the composer. */
+.x-layers:has(.xl-waits) { --xl-above: 52px; }
+.x-layers .xl-scroll { --xl-edge-b: calc(var(--vitrea-bar-inset-bottom, 150px) + 4px + var(--xl-above, 0px)); }
+.x-layers .xl-column { padding-bottom: calc(var(--vitrea-bar-inset-bottom, 150px) + 44px + var(--xl-above, 0px)); }
+/* A session is read from its end, so a transcript shorter than the window stands on the composer, not under the
+   tabs: what a session waits on is then beside the words that led to it. */
+.x-layers .xl-column { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+
+/* ---- the transcript ------------------------------------------------------------------------------------------- */
+
+/* The person's own message: a wash of the ink on the field, as wide as its words. No material, no shadow. */
+.x-layers .xl-said { max-width: 84%; padding: 10px 16px; border-radius: 20px; background: var(--xl-well); font-size: 15px; line-height: 22px; text-wrap: pretty; }
+
+/* Thinking: the first row of the run it led to; alone, one line. */
+.x-layers .xl-call[data-thought] .xl-call-verb { align-self: center; }
+.x-layers .xl-call-said { flex: 1; min-width: 0; color: var(--xl-fg); }
+.x-layers .xl-cap-lone { cursor: default; }
+.x-layers .xl-cap-lone:is(:hover, :focus-visible) { background: var(--xl-hover); color: var(--xl-ink); }
+.x-layers .xl-cap-lone:focus-visible .xl-cap-time { opacity: 1; }
+
+/* An edit: the file is a caption, the glass holds code, a run of changed lines is one bar of its colour. */
+.x-layers .xl-cap .xl-cap-name { color: var(--xl-ink); }
+.x-layers .xl-cap .xl-stat { margin-left: 2px; }
+.x-layers .xl-cap .xl-add { color: var(--xl-add-field); }
+.x-layers .xl-cap .xl-del { color: var(--xl-del-field); }
+/* Open is this caption's resting state, so it does not read as pressed. */
+.x-layers button.xl-cap-file[aria-expanded='true']:not(:hover) { color: var(--xl-ink-3); }
+.x-layers .xl-cap-file[aria-expanded='true']:not(:hover, :focus-visible) .xl-cap-chev { opacity: 0; }
+.x-layers .xl-code-wrap { padding-top: 4px; }
+.x-layers .xl-code { overflow: hidden; }
+.x-layers .xl-code .xl-diff { border-top: 0; padding: 10px 0; }
+.x-layers .xl-code .xl-diff-line i { position: relative; width: 28px; }
+.x-layers .xl-code .xl-diff-line:is([data-sign='+'], [data-sign='-']) i::before { content: ''; position: absolute; left: 13px; top: 0; bottom: 0; width: 3px; background: var(--xl-add); }
+.x-layers .xl-code .xl-diff-line[data-sign='-'] i::before { background: var(--xl-del); }
+.x-layers .xl-code .xl-diff-line[data-first] i::before { top: 2px; border-top-left-radius: 2px; border-top-right-radius: 2px; }
+.x-layers .xl-code .xl-diff-line[data-last] i::before { bottom: 2px; border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; }
+
+/* What is running: a capsule while it is one row; it opens into its output. */
+.x-layers .xl-run { width: fit-content; max-width: 100%; overflow: hidden; transition: width var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-run .xl-live-head { width: 100%; height: 36px; padding: 0 15px 0 14px; gap: 9px; white-space: nowrap; transition: background-color var(--xl-t-hover); }
+.x-layers .xl-run .xl-live-head:not(:disabled):hover { background: var(--xl-hover); }
+.x-layers .xl-run .xl-live-cmd { overflow: visible; mask-image: none; }
+.x-layers .xl-run .xl-live-time { margin-left: 18px; }
+.x-layers .xl-run .xl-tail { padding: 4px 18px 12px 30px; white-space: nowrap; }
+
+/* Agents that were started: a chip each, with its own state; what it is doing waits for the pointer. */
+.x-layers .xl-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-layers .xl-agent { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px 0 10px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; user-select: none; transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers .xl-agent:is(:hover, :focus-visible) { background: var(--xl-selected); color: var(--xl-ink); }
+.x-layers .xl-agent-line { max-width: 0; overflow: hidden; white-space: nowrap; color: var(--xl-ink-3); opacity: 0; transition: max-width 320ms var(--xl-ease-open), opacity 200ms ease; }
+.x-layers .xl-agent:is(:hover, :focus-visible) .xl-agent-line { max-width: 220px; opacity: 1; }
+
+/* A plan is prose: a heading line, paragraphs, numbered steps. */
+.x-layers .xl-plan { margin-top: 18px; }
+.x-layers .xl-plan-title { font-weight: var(--xl-w-strong); }
+.x-layers .xl-plan p + p { margin-top: 8px; }
+.x-layers .xl-steps { margin: 0; padding: 0; list-style: none; counter-reset: xl-step; }
+.x-layers .xl-steps li { position: relative; padding: 3px 0 3px 26px; counter-increment: xl-step; }
+.x-layers .xl-steps li::before { content: counter(xl-step); position: absolute; left: 0; width: 16px; text-align: right; color: var(--xl-fg3); font-variant-numeric: tabular-nums; }
+.x-layers .xl-plan .xl-steps { margin-top: 10px; }
+.x-layers .xl-steps-card { margin: 0 2px; color: var(--xl-fg); font-size: 13px; line-height: 18px; }
+.x-layers .xl-steps-card li { padding: 2px 0 2px 24px; }
+
+/* What the transcript keeps of an answer. Choices are a message, each under its question; a decision with no words
+   is one mark and one word in the message's own wash, at a caption's size, on the person's side. */
+.x-layers .xl-answer { display: flex; flex-direction: column; gap: 8px; }
+.x-layers .xl-answer-q { color: var(--xl-ink-3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-verdict { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 9px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-user:has(.xl-verdict) { margin-top: 12px; }
+.x-layers .xl-user:has(.xl-verdict) + .xl-run { margin-top: 8px; }
+
+/* ---- the composer ---------------------------------------------------------------------------------------------- */
+
+/* A message that waits for its turn: where it will be sent from, in a message's shape, not yet filled. */
+.x-layers .xl-waits { position: absolute; right: 0; bottom: calc(100% + 12px); display: flex; align-items: center; gap: 6px; max-width: 84%; padding: 8px 9px 8px 16px; border-radius: 20px; border: 1px dashed rgb(var(--xl-ink-rgb) / 0.3); color: var(--xl-ink-2); font-size: 15px; line-height: 22px; }
+.x-layers .xl-waits .xl-fade { flex: 0 1 auto; }
+.x-layers .xl-waits .xl-queued-x { flex: none; }
+.x-layers .xl-waits:is(:hover, :focus-within) .xl-queued-x { opacity: 1; }
+/* The model's chip is there while the pointer or the caret is. */
+.x-layers .xl-chip[data-approach] { opacity: 0; transition: opacity 200ms ease, background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press); }
+.x-layers .xl-composer:is(:hover, :focus-within) .xl-chip[data-approach], .x-layers .xl-chip[data-approach][aria-expanded='true'] { opacity: 1; }
+.x-layers .xl-item .xl-ring { color: var(--xl-fg2); }
+/* Stop is its own quiet square beside send, while a turn runs. */
+.x-layers .xl-stop { color: var(--xl-fg2); }
+/* A decision is a worded button where the round one stands. */
+.x-layers .xl-act { height: 32px; margin-left: 4px; padding: 0 15px; border-radius: 16px; }
+.x-layers .xl-btn:disabled { color: var(--xl-fg3); background: var(--xl-well); box-shadow: none; }
+
+/* What the session waits on rides over the field it is answered in. */
+.x-layers .xl-strip { padding: 12px 12px 0; animation: xl-strip-in 300ms var(--xl-ease-open); }
+@keyframes xl-strip-in { from { opacity: 0; transform: translateY(4px); } }
+.x-layers .xl-strip .xl-ask-why { margin: 7px 8px 0; }
+.x-layers .xl-strip[data-kind='question'] { padding: 0; }
+.x-layers .xl-q-bar { display: flex; align-items: center; gap: 10px; padding: 13px 16px 0 20px; }
+.x-layers .xl-q-ask { margin: 0 2px 7px; color: var(--xl-fg); font-size: 13px; line-height: 18px; font-weight: 540; }
+.x-layers .xl-q-bar .xl-q-ask { flex: 1; margin: 0; font-size: 14px; line-height: 20px; }
+.x-layers .xl-q-dots { display: inline-flex; gap: 2px; }
+.x-layers .xl-q-dots button { position: relative; width: 14px; height: 20px; }
+.x-layers .xl-q-dots button::after { content: ''; position: absolute; left: 4px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--xl-fg) 26%, transparent); transition: background-color var(--xl-t-pop), transform var(--xl-t-pop) var(--xl-spring); }
+.x-layers .xl-q-dots button[aria-current]::after { background: var(--xl-fg); transform: scale(1.15); }
+.x-layers .xl-q-chips { padding: 9px 14px 0 17px; animation: xl-strip-in 280ms var(--xl-ease-open); }
+/* An option: a label; its sentence is a hover away. Chosen, it takes a ring of the ink and keeps its width, so a row
+   never re-wraps under the pointer. Squarer is "any of these", round is "one of these". */
+.x-layers .xl-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-layers .xl-opt {
+  position: relative; display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; color: var(--xl-fg2); white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--xl-line-2); transition: background-color var(--xl-t-hover), color var(--xl-t-hover), box-shadow var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-spring);
+}
+.x-layers .xl-opt[data-multi] { border-radius: 10px; }
+.x-layers .xl-opt:hover { color: var(--xl-fg); background: var(--xl-hover); }
+.x-layers .xl-opt:active { transform: scale(0.96); }
+/* An option's sentence appears above the question it belongs to, never over it. */
+.x-layers .xl-opt[data-tip]::after { bottom: calc(100% + 34px); }
+.x-layers .xl-composer .xl-opt[data-tip]::after { bottom: calc(100% + 46px); }
+.x-layers .xl-opt[aria-pressed='true'] { color: var(--xl-fg); background: color-mix(in srgb, var(--xl-fg) 8%, transparent); box-shadow: inset 0 0 0 1.5px var(--xl-fg); }
+
+/* ---- the card: the same answer from the capsule's list and from the row ------------------------------------------ */
+
+.x-layers .xl-ask-q .xl-q + .xl-q { margin-top: 12px; }
+.x-layers .xl-q-other { display: block; flex: none; width: 100%; margin-top: 12px; }
+/* One item of the list is open at a time; its head opens it, and the arrow that takes the age's place under the
+   pointer opens the session itself. */
+.x-layers .xl-wait-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; }
+.x-layers .xl-wait-main .xl-wait-text > span { display: block; }
+.x-layers .xl-wait-slot { position: relative; flex: none; display: grid; place-items: start end; min-width: 28px; height: 22px; }
+.x-layers .xl-wait-age { transition: opacity var(--xl-t-hover); }
+.x-layers .xl-wait-go { position: absolute; right: -4px; top: -4px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: var(--xl-fg2); opacity: 0; transform: scale(0.8); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open), background-color var(--xl-t-hover); }
+.x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-age { opacity: 0; }
+.x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-go { opacity: 1; transform: none; }
+.x-layers .xl-wait-go:hover { background: var(--xl-selected); color: var(--xl-fg); }
+
+/* ==== 18. The Overview and a file's page (DESIGN.md section 18) ===================================================
+   The product's other scene, and the second surface of the first. Both keep the session page's skeleton (the pane,
+   the tabs on the reading column's edge, a column read on the field, glass on the right) and its rule: what is read
+   is on the field, and glass is what can be opened or answered. A file's page is its session's page with the file
+   where the transcript was, so every rule keyed to a session's scene above is keyed to both. */
+
+/* ---- the Overview ------------------------------------------------------------------------------------------------ */
+
+/* The room on the right is the waiting list's while something waits (348, the capsule's list), and nobody's after. */
+.x-layers[data-scene='overview'] { --xl-side-w: 348px; --xl-tabs-r: calc(var(--xl-main-r) + var(--xl-room)); }
+.x-layers[data-scene='overview'][data-side='closed'] { --xl-tabs-r: calc(var(--xl-gap) + 16px); }
+.x-layers[data-align='column'][data-scene='overview'] { --xl-col: min(744px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room))); }
+@media (width < 1180px) { .x-layers[data-scene='overview'][data-side='open'] { --xl-main-r: calc(var(--xl-gap) + var(--xl-side-w)); } }
+/* No bar stands at the foot of this page: the lines run to the window's edge and thin out over its last 28 px. */
+.x-layers .xl-scroll[data-foot='none'] { --xl-edge-b: -4px; }
+.x-layers[data-scene='overview'] .xl-column { justify-content: flex-start; padding-bottom: 44px; }
+.x-layers .xl-board { user-select: none; container-type: inline-size; animation: xl-scene-in 340ms var(--xl-ease-open); }
+
+/* A session is one line on the field: its glyph, its title, what it is doing or what it ended on. The line hangs
+   12 px outside the column on both sides, so its glyph stands on the column's edge and its hover is a full shape. */
+.x-layers .xl-o-group + .xl-o-group { margin-top: 20px; }
+.x-layers .xl-o-head { display: flex; align-items: center; height: 28px; color: var(--xl-ink-3); font: var(--xl-w-label) 12px/16px var(--xl-font); }
+.x-layers .xl-o-row {
+  display: grid; grid-template-columns: 16px minmax(0, 13.5em) minmax(0, 1fr) auto; align-items: center; column-gap: 12px;
+  width: calc(100% + 24px); height: 36px; margin: 0 -12px; padding: 0 12px; border-radius: var(--xl-r-row); corner-shape: squircle;
+  color: var(--xl-ink-2); white-space: nowrap; transition: background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press);
+}
+.x-layers .xl-o-row:is(:hover, :focus-visible) { background: var(--xl-hover); color: var(--xl-ink); }
+.x-layers .xl-o-row:active { transform: scale(0.995); }
+.x-layers .xl-o-mark { display: grid; place-items: center; width: 16px; height: 16px; }
+.x-layers .xl-o-title { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent); }
+.x-layers .xl-o-line { overflow: hidden; color: var(--xl-ink-3); mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+.x-layers .xl-o-row[data-weight='unread'] { color: var(--xl-ink); }
+.x-layers .xl-o-row[data-weight='unread'] .xl-o-title { font-weight: var(--xl-w-strong); }
+.x-layers .xl-o-row[data-weight='unread'] .xl-o-line { color: var(--xl-ink-2); }
+/* A session at rest is its title. What it ended on was read once already, and comes back under the pointer. */
+.x-layers .xl-o-row[data-weight='rest'] { color: var(--xl-ink-3); }
+/* By day these are the quiet ink low on the page, over the shaded side of the picture's paper (4.61 at 0.7). */
+.x-layers[data-scheme='light'] .xl-o-row[data-weight='rest'] { color: rgb(var(--xl-ink-rgb) / 0.75); }
+.x-layers .xl-o-row[data-weight='rest']:is(:hover, :focus-visible) { color: var(--xl-ink); }
+.x-layers .xl-o-row[data-weight='rest'] .xl-o-line { opacity: 0; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-o-row[data-weight='rest']:is(:hover, :focus-visible) .xl-o-line { opacity: 1; }
+/* The end of a line: where it is and how long ago. Under the pointer these step aside for where it runs and the
+   arrow that opens it, as the age does in the waiting list. */
+.x-layers .xl-o-end { position: relative; display: grid; justify-items: end; align-items: center; min-width: 28px; color: var(--xl-ink-3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-o-end > * { display: inline-flex; align-items: center; }
+.x-layers .xl-o-meta { gap: 14px; }
+.x-layers .xl-o-age { min-width: 30px; text-align: right; }
+/* One of the two is laid out at a time, so the words before them are cut by what is really there. */
+.x-layers .xl-o-more { display: none; gap: 12px; color: var(--xl-ink-2); animation: xl-o-more-in var(--xl-t-pop) var(--xl-ease-open); }
+@keyframes xl-o-more-in { from { opacity: 0; transform: translateX(4px); } }
+.x-layers .xl-o-more > span { display: inline-flex; align-items: center; gap: 4px; }
+.x-layers .xl-o-row:is(:hover, :focus-visible) .xl-o-meta { display: none; }
+.x-layers .xl-o-row:is(:hover, :focus-visible) .xl-o-more { display: inline-flex; }
+/* Where the column is short of room, the project is the first thing a line gives up; it is still under the pointer. */
+@container (width < 600px) {
+  .x-layers .xl-o-meta > .xl-o-where { display: none; }
+}
+
+/* What waits for the person: the capsule's list, standing open on glass where the side column stands on a session. */
+.x-layers .xl-yours {
+  position: fixed; z-index: 1002; top: var(--xl-gap); right: var(--xl-gap); width: var(--xl-side-w); max-height: calc(100vh - 2 * var(--xl-gap));
+  display: flex; flex-direction: column; pointer-events: none; font-size: 14px; line-height: 20px;
+}
+.x-layers .xl-yours-card { min-height: 0; padding: 6px; border-radius: 22px; overflow-y: auto; scrollbar-width: none; }
+.x-layers .xl-yours-card > * { animation: xl-yours-in 420ms var(--xl-ease-open) backwards; }
+.x-layers .xl-yours-card > :nth-child(2) { animation-delay: 50ms; }
+.x-layers .xl-yours-card > :nth-child(n + 3) { animation-delay: 100ms; }
+@keyframes xl-yours-in { from { opacity: 0; } }
+
+/* The other form: every session a card of glass, in a board as wide as the room. */
+.x-layers[data-board='cards'] .xl-column { width: min(1128px, calc(100vw - var(--xl-main-l) - 2 * var(--xl-room))); }
+.x-layers .xl-board[data-form='cards'] .xl-o-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: 12px; align-items: start; }
+.x-layers .xl-board[data-form='cards'] .xl-o-group + .xl-o-group { margin-top: 28px; }
+.x-layers .xl-o-card { border-radius: 20px; font-size: 14px; line-height: 20px; }
+.x-layers .xl-o-card-in { padding: 14px 16px 13px; color: var(--xl-fg2); }
+.x-layers .xl-o-card-head { display: flex; align-items: flex-start; gap: 10px; width: 100%; border-radius: 10px; color: var(--xl-fg); }
+.x-layers .xl-o-card-head .xl-glyph { margin-top: 2px; }
+.x-layers .xl-o-card-text { flex: 1; min-width: 0; }
+.x-layers .xl-o-card-text > span { display: block; }
+.x-layers .xl-o-card-in[data-weight='rest'] .xl-card-title { font-weight: var(--xl-w); color: var(--xl-fg2); }
+.x-layers .xl-o-card-in:not([data-weight='unread']) .xl-card-title { font-weight: var(--xl-w-label); }
+.x-layers .xl-o-card .xl-card-meta { margin-top: 10px; }
+
+/* ---- a file's page ------------------------------------------------------------------------------------------------- */
+
+.x-layers[data-scene='file'] { --xl-file-col: var(--xl-col); }
+.x-layers[data-scene='file'][data-diff='sides'] { --xl-file-col: min(1180px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room))); }
+.x-layers[data-scene='file'] .xl-column { width: var(--xl-file-col); justify-content: flex-start; }
+.x-layers .xl-file { animation: xl-scene-in 340ms var(--xl-ease-open); }
+/* The page's head is the caption an edit has in the transcript: the name, where it is, what changed. */
+.x-layers .xl-file-head { display: flex; align-items: baseline; gap: 6px; min-height: 28px; padding-top: 5px; color: var(--xl-ink-3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-file-head .xl-cap-name { color: var(--xl-ink); }
+.x-layers .xl-file-head .xl-stat { margin-left: 2px; }
+.x-layers .xl-file-head .xl-add { color: var(--xl-add-field); }
+.x-layers .xl-file-head .xl-del { color: var(--xl-del-field); }
+
+/* Code on the field, at the column's own edge, set as it is on a sheet (12 on 20), so 79 columns stand in the
+   reading column at 1280 with both panes open; a longer line is cut at the column's edge and the code moves
+   sideways under it. A line's change is a bar hung in the margin, one bar a run; a line that was taken out keeps
+   its wash. The margin is inside the element, so what hangs there is not cut. */
+.x-layers .xl-src { margin: 8px 0 0 -24px; padding-left: 24px; overflow-x: auto; scrollbar-width: none; font: 450 12px/20px var(--xl-mono); color: var(--xl-ink); white-space: pre; tab-size: 2; cursor: text; }
+.x-layers .xl-src-line { position: relative; min-height: 20px; width: max(100%, max-content); }
+.x-layers .xl-src-line::before { content: ''; position: absolute; z-index: -1; inset: 0 0 0 -22px; transition: background-color var(--xl-t-press); }
+.x-layers .xl-src-line[data-first]::before { border-top-left-radius: 7px; border-top-right-radius: 7px; }
+.x-layers .xl-src-line[data-last]::before { border-bottom-left-radius: 7px; border-bottom-right-radius: 7px; }
+.x-layers .xl-src-line[data-sign='-']::before { background: var(--xl-del-wash); }
+.x-layers .xl-src-line[data-sign='-'] { color: var(--xl-ink-2); }
+.x-layers .xl-src-line:not([data-sign='-'], [data-none]):hover::before { background: var(--xl-hover); border-radius: 7px; }
+.x-layers .xl-src-line[data-picked]::before, .x-layers .xl-src-line[data-picked]:hover::before { background: var(--xl-selected); border-radius: 7px; }
+.x-layers .xl-src-line i { position: absolute; left: -14px; top: 0; bottom: 0; width: 3px; }
+.x-layers .xl-src-line[data-sign='+'] i { background: var(--xl-add-field); }
+.x-layers .xl-src-line[data-sign='-'] i { background: var(--xl-del-field); }
+.x-layers .xl-src-line[data-first] i { top: 2px; border-top-left-radius: 2px; border-top-right-radius: 2px; }
+.x-layers .xl-src-line[data-last] i { bottom: 2px; border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; }
+/* A line's number is not on the page until the line is pointed at, and then only its own. */
+.x-layers .xl-src-no { position: absolute; right: 0; top: 0; color: var(--xl-ink-3); font-size: 11.5px; opacity: 0; user-select: none; pointer-events: none; transition: opacity var(--xl-t-press); }
+.x-layers .xl-src-line:is(:hover, [data-picked]) .xl-src-no { opacity: 1; }
+
+/* Before and after, side by side: the other form of the Changes switch. The column takes the room it can. */
+.x-layers .xl-src[data-form='sides'] .xl-src-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 48px; }
+.x-layers .xl-src[data-form='sides'] .xl-src-text { display: block; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); }
+.x-layers .xl-src[data-form='sides'] .xl-src-line[data-none]::before { background: repeating-linear-gradient(135deg, transparent 0 5px, rgb(var(--xl-ink-rgb) / 0.05) 5px 6px); }
+
+/* The file as one object (the Code switch's first position, and what the owner asked for): a card of glass between
+   the tabs and the composer, as wide as both, with all four of its edges in the window. The page does not scroll;
+   the code does, inside the card, and thins out under the card's top and at its foot. A file shorter than the room
+   is a card as tall as the file. */
+.x-layers .xl-scroll[data-still] { overflow: hidden; mask-image: none; }
+.x-layers[data-scene='file'][data-code='card'] .xl-column {
+  height: 100%; min-height: 0; padding: calc(var(--vitrea-bar-inset-top, 46px) + 12px) 0 calc(var(--vitrea-bar-inset-bottom, 64px) + 12px);
+}
+.x-layers .xl-file[data-ground='card'] { display: flex; flex-direction: column; min-height: 0; }
+.x-layers .xl-file-card { display: flex; flex-direction: column; min-height: 0; border-radius: 20px; overflow: hidden; }
+/* Its top is the file's: the name, where it is, and what changed, set as a module's head is in the side column. */
+.x-layers .xl-file-top { flex: none; display: flex; align-items: baseline; gap: 7px; height: 44px; padding: 14px 18px 0 20px; font-size: 13px; line-height: 18px; color: var(--xl-fg3); white-space: nowrap; }
+.x-layers .xl-file-name { color: var(--xl-fg); font-weight: var(--xl-w-label); font-size: 14px; }
+.x-layers .xl-file-dir { flex: 1; min-width: 0; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); }
+.x-layers .xl-src-scroll {
+  flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; outline: none; padding: 4px 0 14px;
+  /* It thins out under the card's top and at its foot, and before the rail at its right edge, so a line longer than
+     the card is not cut by the card's corner or drawn under the marks. */
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 16px), transparent), linear-gradient(to right, #000 calc(100% - 46px), transparent calc(100% - 22px));
+  mask-composite: intersect; -webkit-mask-composite: source-in;
+}
+.x-layers .xl-file-card .xl-src { margin: 0; padding: 0; overflow: visible; width: max-content; min-width: 100%; }
+/* A line: its number in the gutter, the bar of its change, the code. A line taken out has no number and keeps its
+   wash from edge to edge of the card. */
+.x-layers .xl-file-card .xl-src-line { width: auto; padding: 0 26px 0 60px; }
+.x-layers .xl-file-card .xl-src-line::before { inset: 0; border-radius: 0; }
+.x-layers .xl-file-card .xl-src-line:not([data-sign='-'], [data-none]):hover::before, .x-layers .xl-file-card .xl-src-line[data-picked]::before { border-radius: 0; }
+.x-layers .xl-file-card .xl-src-line i { left: 46px; }
+.x-layers .xl-file-card .xl-src-line[data-sign='+'] i { background: var(--xl-add); }
+.x-layers .xl-file-card .xl-src-line[data-sign='-'] i { background: var(--xl-del); }
+.x-layers .xl-file-card .xl-src-no { left: 0; right: auto; width: 36px; text-align: right; opacity: 1; font-size: 11px; color: var(--xl-fg3); }
+.x-layers .xl-file-card .xl-src-line:is(:hover, [data-picked]) .xl-src-no { color: var(--xl-fg); }
+/* Side by side, a line taken out keeps its old number, on its wash: a step up (4.50 at night in the quiet ink). */
+.x-layers .xl-file-card .xl-src-line[data-sign='-'] .xl-src-no { color: var(--xl-fg2); }
+/* The Numbers switch's other position: no gutter, and a line's number is its own, at its end, when it is pointed at. */
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-line { padding-left: 34px; }
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-line i { left: 18px; }
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-no { left: auto; right: 22px; width: auto; opacity: 0; color: var(--xl-fg3); }
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-line:is(:hover, [data-picked]) .xl-src-no { opacity: 1; }
+/* Before and after inside the card: two files side by side, each with its own numbers, and nothing moves sideways. */
+.x-layers .xl-file-card .xl-src[data-form='sides'] { width: 100%; }
+.x-layers .xl-file-card .xl-src[data-form='sides'] .xl-src-pair { column-gap: 0; }
+.x-layers .xl-file-card .xl-src[data-form='sides'] .xl-src-line { padding-right: 10px; }
+.x-layers .xl-file-card .xl-src[data-form='sides'] .xl-src-pair > :last-child { padding-right: 26px; }
+
+/* Where the changes are in the whole file: the same bars at the file's scale, beside the column, with the part of
+   the file that is in the window as a soft shape behind them. */
+.x-layers .xl-rail {
+  position: fixed; z-index: 1002; top: 100px; bottom: var(--xl-rail-b, 104px); width: 5px;
+  left: calc(var(--xl-main-l) + (100vw - var(--xl-main-l) - var(--xl-main-r)) / 2 + var(--xl-file-col) / 2 + 12px);
+  transition: left var(--xl-t-shell) var(--xl-ease); animation: xl-yours-in 400ms ease 200ms backwards;
+}
+/* Inside the card it stands at the card's right edge, the length of the code. */
+.x-layers .xl-rail[data-in='card'] { position: absolute; z-index: 1; left: auto; right: 9px; top: 52px; bottom: 16px; }
+.x-layers .xl-rail-seen { position: absolute; left: -3px; right: -3px; border-radius: 6px; background: rgb(var(--xl-ink-rgb) / 0.07); transition: top 80ms linear, height 80ms linear; }
+.x-layers .xl-rail-mark { position: absolute; left: 0.5px; width: 4px; border-radius: 2px; background: var(--xl-add-field); transition: transform var(--xl-t-pop) var(--xl-spring); }
+.x-layers .xl-rail-mark[data-sign='-'] { background: var(--xl-del-field); }
+.x-layers .xl-rail-mark::before { content: ''; position: absolute; inset: -4px -8px; }
+.x-layers .xl-rail-mark:hover { transform: scaleX(1.8); }
+
+/* The session's composer, on its file's page: one line at rest, whole again while the caret is in it, while it
+   holds words, or while its menu is open. */
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) { display: flex; align-items: center; }
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) .xl-field { flex: 1; min-height: 0; height: 48px; padding: 13px 8px 13px 20px; }
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) .xl-tools { padding: 0 8px 0 0; }
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) .xl-tools > :is(.xl-gbtn:first-child, .xl-grow, .xl-chip) { display: none; }
+/* The line the next message is about. */
+.x-layers .xl-about { display: inline-flex; align-items: center; gap: 4px; height: 26px; margin-right: 4px; padding: 0 4px 0 10px; border-radius: 13px; background: var(--xl-well); color: var(--xl-fg2); font: 450 12px/18px var(--xl-mono); animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-about .xl-queued-x { opacity: 1; color: var(--xl-fg3); }
+
+/* ---- the ways there ----------------------------------------------------------------------------------------------- */
+
+/* An edit's caption opens its whole file: an arrow that waits for the pointer, as the list's does. */
+.x-layers .xl-cap-go {
+  position: relative; display: inline-grid; place-items: center; width: 26px; height: 26px; margin-left: 2px; border-radius: 9px; vertical-align: top; color: var(--xl-ink-2);
+  opacity: 0; transform: scale(0.8); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open), background-color var(--xl-t-hover);
+}
+.x-layers .xl-folded:hover .xl-cap-go, .x-layers .xl-cap-go:focus-visible { opacity: 1; transform: none; }
+.x-layers .xl-cap-go:hover { background: var(--xl-hover); color: var(--xl-ink); }
+/* A changed file in the side column is pressed to open it; the one on screen is the current line. */
+.x-layers button.xl-line { width: 100%; }
+.x-layers button.xl-line:active { transform: scale(0.99); }
+.x-layers .xl-line[aria-current='page'] { background: var(--xl-selected); color: var(--xl-fg); box-shadow: var(--xl-current-shadow); }
+/* The current line's chip is lighter than the glass it lies on, so what is quiet or coloured on it steps up: the
+   quiet words to the second ink (at night a step past it: 3.7 as it was, 4.47 at the second ink), and at night the
+   two counts to a lighter step of their hues (3.75 and 4.2 before). */
+.x-layers .xl-line[aria-current='page'] .xl-quiet { color: var(--xl-fg2); }
+.x-layers[data-scheme='dark'] .xl-line[aria-current='page'] .xl-quiet { color: color-mix(in srgb, var(--xl-fg) 92%, transparent); }
+.x-layers[data-scheme='dark'] .xl-line[aria-current='page'] { --xl-add: #8ee0b6; --xl-del: #ffbfb2; }
+/* Forced colours: a change's bar is a filled shape, so it keeps its own colour. */
+@media (forced-colors: active) {
+  .x-layers .xl-src-line i, .x-layers .xl-rail-mark { forced-color-adjust: none; }
+  .x-layers :is(.xl-o-row:focus-visible, .xl-src-line[data-picked], .xl-line[aria-current='page']) { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+
+/* ==== 19. Colour for code (DESIGN.md section 19) ==================================================================
+   One palette for the file's card, the transcript's sheet and the file on the field. Three hues and the ink: the
+   language's words in a plum, values (strings, numbers, constants) in a bronze, type names in a slate; comments in
+   the quiet ink; names, calls and punctuation in the ink. None of the three is the green of a line added, the red
+   of a line taken out or the orange of the waiting mark, and each is a deep, low-chroma step of its hue, so a
+   screen of code reads as ink with temperature in it, not as a palette. */
+.x-layers {
+  --xl-syn-key: #6a4380; --xl-syn-value: #6f5210; --xl-syn-type: #375680;
+  --xl-syn-note: var(--xl-fg3, var(--xl-ink-3));
+}
+.x-layers[data-scheme='dark'] {
+  --xl-syn-key: #dcc4ea; --xl-syn-value: #e6d39c; --xl-syn-type: #bed1f2;
+}
+.x-layers .xl-t-key { color: var(--xl-syn-key); }
+.x-layers .xl-t-value { color: var(--xl-syn-value); }
+.x-layers .xl-t-type { color: var(--xl-syn-type); }
+.x-layers .xl-t-note { color: var(--xl-syn-note); }
+/* The Code colour switch's other position: every token in its line's own ink. */
+.x-layers[data-syntax='ink'] :is(.xl-t-key, .xl-t-value, .xl-t-type, .xl-t-note) { color: inherit; }
+/* On the field by day the hues take a deeper step, as the counts do (section 17): the field is a shade darker than a
+   glass body, and darker again over the shaded side of the picture's paper (a value read 4.11 there, a keyword 4.54). */
+.x-layers[data-scheme='light'] .xl-file[data-ground='field'] { --xl-syn-key: #54316a; --xl-syn-value: #563f00; --xl-syn-type: #2a456c; }
+/* A pointed line's fill is lighter than the card at night (white at 15 %), and light text loses to it: a comment
+   read 3.71 there and a keyword 4.81. On the card at night the fill is white at 11 %, and the comment on a pointed
+   line steps up, to the second ink by day and a step past it at night. */
+.x-layers .xl-src-line[data-picked] .xl-t-note { color: var(--xl-fg2, var(--xl-ink-2)); }
+.x-layers[data-scheme='dark'] .xl-file-card .xl-src-line[data-picked]::before { background: rgb(255 255 255 / 0.11); }
+.x-layers[data-scheme='dark'] .xl-file-card .xl-src-line[data-picked] .xl-t-note { color: color-mix(in srgb, var(--xl-fg) 90%, transparent); }
+
+/* ==== 20. More tabs than fit (DESIGN.md section 20) ================================================================
+   The row never grows past its room: it starts on the reading column's left edge and ends a seam short of the
+   waiting capsule, as before. What gives is the tabs, in three steps, and Session.tsx decides which step the row
+   is on from the same numbers these rules draw. */
+.x-layers { --xl-tab-end: 13px; }
+.x-layers[data-face='system'] { --xl-tab-end: 9px; }
+/* 1. The tab on screen keeps its whole title. The others shorten together, as far as a few letters; a title fades
+   out where it is cut. */
+.x-layers .xl-tabs-room { position: fixed; top: 0; height: 0; left: var(--xl-tabs-l); right: var(--xl-tabs-r); visibility: hidden; pointer-events: none; }
+/* A tab that has a name is never narrower than its mark, 26 px of its title (a few letters) and its end. */
+.x-layers .xl-tabs .xl-tab { flex: 0 1 auto; min-width: calc(30px + 26px + var(--xl-tab-end)); }
+.x-layers .xl-tabs .xl-tab[data-current='true'] { flex: none; }
+.x-layers .xl-tabs .xl-tab-main { flex: 1; padding-right: 0; }
+.x-layers .xl-tabs .xl-tab-title {
+  flex: 0 1 auto; min-width: 0; padding-right: var(--xl-tab-end); text-overflow: clip;
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--xl-tab-end)), transparent);
+}
+/* 2. When even that does not fit, tabs give up their names one at a time from the end of the row, each only when
+   the row is full, and stand as their marks: the state's glyph, and so the waiting disc, is what a tab keeps
+   longest. The names that are left take the room that frees. A mark's name is under the pointer. */
+.x-layers .xl-tabs .xl-tab[data-fold] { flex: none; width: 30px; min-width: 0; }
+.x-layers .xl-tabs .xl-tab[data-fold] .xl-tab-main { justify-content: center; gap: 0; padding: 0; }
+.x-layers .xl-tabs .xl-tab[data-fold] .xl-tab-title { display: none; }
+.x-layers .xl-tabs .xl-tab[data-fold]:hover .xl-tab-mark { opacity: 1; transform: none; }
+.x-layers .xl-tabs .xl-tab[data-fold] [data-tip]::after { transition-delay: 160ms; }
+.x-layers .xl-tab-mark { animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+/* A session at rest has no glyph in the pane; a tab needs something to hold, so it is a ring the size of the dot. */
+.x-layers .xl-tab-rest { display: block; width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: 0.55; }
+/* 3. When the marks do not fit either, tabs leave from the end of the row for a menu beside the plus. One that
+   waits never leaves. */
+.x-layers .xl-tab-more[aria-expanded='true'] { background: var(--xl-selected); color: var(--xl-fg); box-shadow: var(--xl-current-shadow); }
+.x-layers .xl-tab-menu { min-width: 236px; max-height: min(60vh, 420px); overflow-y: auto; scrollbar-width: none; }
+.x-layers .xl-tab-menu .xl-tab-mark { color: var(--xl-fg2); }
+.x-layers .xl-tab-menu .xl-item svg { color: inherit; }
+
+/* ==== 21. Artifacts and Customize (DESIGN.md section 21) =========================================================
+   Two lists the app draws as walls of rows, said in the transcript's grammar: a thing is a line on the field, a
+   press opens it into a sheet of glass, and what the page makes or adds is one round button of glass at the top
+   right. The pages take the session page's layout whole (the column rule above is keyed to them too): tabs on the
+   column's left edge, the waiting capsule on its right, the button where the side column's is. */
+.x-layers[data-shelf] .xl-column { justify-content: flex-start; padding-bottom: 44px; }
+.x-layers .xl-shelf { user-select: none; }
+
+/* The head: the search, read on the field like the lines under it, and whatever narrows the list. */
+.x-layers .xl-find { display: flex; align-items: center; gap: 10px; height: 40px; margin: 0 -2px 14px; color: var(--xl-ink-3); }
+.x-layers .xl-find > svg { margin-left: 2px; }
+.x-layers .xl-find-in { flex: 1; min-width: 0; height: 36px; padding: 0; border: 0; background: none; color: var(--xl-ink); font: var(--xl-w) 15px/22px var(--xl-font); cursor: text; user-select: text; }
+.x-layers .xl-find-in::placeholder { color: var(--xl-ink-3); }
+.x-layers .xl-find-in:focus-visible { outline: none; }
+.x-layers .xl-find:focus-within > svg:first-child { color: var(--xl-ink); }
+.x-layers .xl-find .xl-icon { color: var(--xl-ink-2); }
+.x-layers .xl-s-narrow { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; white-space: nowrap; animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers .xl-s-narrow:hover { background: var(--xl-selected); color: var(--xl-ink); }
+.x-layers .xl-s-place { color: var(--xl-ink-2); }
+.x-layers .xl-s-menu { min-width: 208px; }
+.x-layers .xl-s-menu .xl-item > svg:last-child { color: var(--xl-fg2); }
+.x-layers .xl-s-none { margin: 28px 0 0; color: var(--xl-ink-3); font-size: 15px; line-height: 22px; }
+
+/* A line. It is the Overview's line; the press is its title, stretched over the row, so a control at the line's end
+   (a switch, a button) is its own press. */
+.x-layers .xl-s-row { position: relative; grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) auto; }
+.x-layers .xl-s-row:focus-within { background: var(--xl-hover); color: var(--xl-ink); }
+.x-layers .xl-s-item[data-open='true'] > .xl-s-row { color: var(--xl-ink); }
+/* The words that say what a thing is wait for the pointer, as an Overview line at rest keeps what it ended on: at
+   rest a line is its mark, its name and its end. Open, the sheet says them, so the line does not. */
+.x-layers .xl-s-row .xl-o-line { opacity: 0; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-s-row:is(:hover, :focus-within) .xl-o-line { opacity: 1; }
+.x-layers .xl-s-item[data-open='true'] > .xl-s-row .xl-o-line { opacity: 0; }
+.x-layers .xl-s-main .xl-o-title { flex: 0 1 auto; min-width: 0; padding-right: 14px; margin-right: -9px; }
+.x-layers .xl-s-main { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; font-weight: inherit; }
+.x-layers .xl-s-main::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.x-layers .xl-s-main:focus-visible { outline: none; }
+.x-layers .xl-s-main:focus-visible::after { outline: 2px solid var(--xl-focus); outline-offset: -2px; }
+.x-layers .xl-s-row .xl-o-mark { color: var(--xl-ink-2); }
+.x-layers .xl-s-end { position: relative; z-index: 1; min-width: 0; }
+.x-layers .xl-s-end:has(> .xl-o-meta) { pointer-events: none; }
+.x-layers .xl-s-pin { flex: none; color: var(--xl-ink-3); }
+.x-layers .xl-s-new { flex: none; width: 6px; height: 6px; }
+.x-layers .xl-s-flag { position: relative; z-index: 1; display: grid; place-items: center; width: 16px; height: 16px; color: var(--xl-ink-2); }
+.x-layers .xl-s-do { height: 26px; padding: 0 12px; border-radius: 13px; }
+.x-layers .xl-s-mirror { position: relative; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 4px; border-radius: 8px; }
+
+/* The sheet a line opens into: the transcript's block. Facts are one quiet line; what it holds are chips; what can be
+   done is a row of marks, with the one worded button at its end. */
+.x-layers .xl-s-wrap { padding: 4px 0 22px; margin: 0 0 -10px 28px; }
+.x-layers .xl-s-sheet { padding: 13px 14px 10px 16px; font-size: 13px; line-height: 18px; user-select: text; }
+.x-layers .xl-s-about { color: var(--xl-fg); font-size: 14px; line-height: 20px; text-wrap: pretty; }
+.x-layers .xl-s-say { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--xl-fg); font-weight: var(--xl-w-label); }
+.x-layers .xl-s-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--xl-fg3); }
+.x-layers .xl-s-facts > span { display: inline-flex; align-items: center; gap: 5px; }
+.x-layers .xl-s-about + .xl-s-facts, .x-layers .xl-s-chips + .xl-s-facts, .x-layers .xl-ask-cmd + .xl-s-facts, .x-layers .xl-s-pick + .xl-s-facts { margin-top: 10px; }
+.x-layers .xl-s-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.x-layers .xl-s-chip { position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 12px; background: var(--xl-well); color: var(--xl-fg2); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.x-layers .xl-s-chip[data-mono] { font: 450 12px/16px var(--xl-mono); border-radius: 8px; }
+.x-layers button.xl-s-chip { transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers button.xl-s-chip:hover { background: var(--xl-selected); color: var(--xl-fg); }
+.x-layers .xl-s-acts { display: flex; align-items: center; gap: 2px; min-height: 30px; margin: 8px -6px 0; }
+.x-layers .xl-s-acts .xl-btn { margin-right: 6px; }
+.x-layers .xl-s-sheet .xl-ask-cmd { margin-top: 0; }
+.x-layers .xl-s-pick { display: flex; align-items: center; gap: 12px; margin-top: 10px; color: var(--xl-fg2); }
+
+/* The + card: what the page makes, or the front of the catalog. */
+.x-layers .xl-s-make { padding: 0 2px 0 0; gap: 0; }
+.x-layers .xl-s-make-main { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 8px; border-radius: inherit; color: var(--xl-fg2); }
+.x-layers .xl-s-make-main > svg { color: var(--xl-fg3); }
+.x-layers .xl-s-make:hover .xl-s-make-main { color: var(--xl-fg); }
+.x-layers .xl-s-ask { width: 26px; height: 26px; opacity: 0; transition: opacity var(--xl-t-hover), background-color var(--xl-t-hover); }
+.x-layers .xl-s-make:is(:hover, :focus-within) .xl-s-ask { opacity: 1; }
+.x-layers .xl-s-seek { display: block; flex: none; width: calc(100% - 4px); margin: 2px 2px 6px; }
+.x-layers .xl-s-found { padding-right: 2px; }
+.x-layers .xl-s-found-name { display: flex; align-items: center; gap: 5px; color: var(--xl-fg); }
+.x-layers .xl-s-found-name > span { position: relative; display: inline-grid; color: var(--xl-fg3); }
+.x-layers .xl-s-found .xl-icon { margin-top: -2px; }
+.x-layers .xl-s-added { display: grid; place-items: center; width: 30px; height: 30px; margin-top: -2px; color: var(--xl-fg2); animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-s-all { margin-top: 4px; }
+/* Grown, the button that opened the card is what closes it: its plus turns to a cross. */
+.x-layers .xl-side[data-plus] .xl-bud-btn svg { transition: transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-side[data-plus] .xl-bud[data-grown='true'] .xl-bud-btn svg { transform: rotate(45deg); }
+/* The line's middle starts a little after the longest of names, never against it. */
+.x-layers .xl-s-row .xl-o-line { padding-left: 8px; }
+@media (forced-colors: active) {
+  .x-layers :is(.xl-s-sheet, .xl-s-chip, .xl-s-narrow) { border: 1px solid CanvasText; }
+}
+/* A group's head low on these pages, by day, is the quiet ink over the shaded side of the picture's paper (4.65). */
+.x-layers[data-scheme='light'] .xl-shelf .xl-o-head { color: rgb(var(--xl-ink-rgb) / 0.76); }

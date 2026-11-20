@@ -657,12 +657,16 @@ describe('the detached transport: early exits and the crash ladder', () => {
     expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
   });
 
+  // The host answers the handover ask as a real one with a call in flight does (deferred), and is killed once it has: a
+  // fake that cannot answer fails the ask, and its link's recycle then reads the death as no exit at all, whatever the drain
   it('a host killed mid-drain, after it said draining and before its rows detached, is a crash: counted, backed off, told', async () => {
-    const host = await startFake();
+    let deferred = 0;
+    const host = await startFake({ register: (on) => on('host.handover', async () => ((deferred += 1), { state: 'deferred' as const, inFlight: 1, tool: 'artifact_list' })) });
     await supervisor.start();
     const pid = host.pid;
     await until(() => host.emit('host.supervisorStatus', { ...supervisorStatus(pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 1, tool: 'artifact_list' } } as never));
     await until(() => emit.mock.calls.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { pid: number }).pid === pid));
+    await until(() => deferred === 1 && logs.some((line) => line.includes(`pid ${pid} defers its handover`))); // taken back into the handover, its answer read
     await host.die(); // SIGKILL while its tool still runs
     await until(() => state().state === 'ready' && state().pid !== pid);
     expect(state().restarts).toBe(1); // the crash ladder's backoff and count

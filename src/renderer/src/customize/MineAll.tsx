@@ -3,7 +3,9 @@
 // 1. the plugins with an installation here or at user scope, by the name their row shows (the library's Filter and Sort
 //    do not apply), then MAWS's built-in mods by name;
 // 2. every skill of the inventory, by the label its row shows;
-// 3. the configured connectors, by name, ties in the inventory's order.
+// 3. the connectors, by the name each row shows, ties in the inventory's order: the configured ones and (UX wave U11h,
+//    docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §E) a plugin's, by its server's name, with
+//    the plugin list this list already reads.
 // Each row is its kind's own row component with its kind word ("Plugin", "Mod", "Skill", "Connector"), so a plugin's menu,
 // a skill's detail and a connector's Sign in and Remove work from here; not drawn: the plugins' loaded line and group
 // headings, the skills' groups, the connectors' live list and its sentence, each kind's menus in the head. The page's one
@@ -28,14 +30,15 @@ import { INSTALLED_PREFIX, installationOf, installedKey, PluginRow } from '../wi
 import { usePluginsEnv } from '../widgets/plugins/read';
 import { usePluginsLibrary } from '../widgets/PluginsWidget';
 import { SkillDetail, SkillItem, skillRowKey } from '../widgets/skills/SkillsLibrary';
+import { skillExtrasOf } from './SkillFile'; // UX wave U11's skill actions
 import { diskSkillGroups, skillsOfAll, type SkillRow } from '../widgets/skills/skills';
 import { ConnectorRow } from './connectors/ConnectorRow';
-import { Adding, Removed, useConnectorRowFacts } from './connectors/ConnectorsSection';
-import { connectorRows, connectorRowsMatching, type ConnectorRowModel } from './connectors/rows';
+import { Adding, Removed, useConnectorRowFacts, usePluginList, type ConnectorsAnswer } from './connectors/ConnectorsSection';
+import { pluginNameShown, type PluginList } from './connectors/plugin-row';
+import { connectorRows, connectorRowsMatching, shownNameOf, type ConnectorRowModel } from './connectors/rows';
 import { PAGE } from './copy';
 import { usePluginIcons } from './discover/read';
 import { DISCOVER } from './discover/copy';
-import type { Inventory } from './inventory';
 import { InventoryState } from './InventoryState';
 import { useCustomizePage } from './page';
 import { usePlace, WithoutReload } from './place';
@@ -59,7 +62,7 @@ type PluginsPart = { state: 'out' } | { state: 'failed'; words: string | null; r
 type Opened = { kind: 'plugin'; id: string } | { kind: 'skill'; key: string };
 
 export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; toList: number }) {
-  const { directory, session, inventory } = usePlace();
+  const { cwd, directory, session, inventory } = usePlace();
   const { ops } = useManage();
   const env = usePluginsEnv();
   const library = usePluginsLibrary(directory, session);
@@ -87,8 +90,9 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
 
   const skillGroups = useMemo(() => (inventory.data ? diskSkillGroups(inventory.data.skills, { invocable: false }) : []), [inventory.data]);
   const skillRows = skillsOfAll(skillGroups, search);
+  const pluginList = usePluginList(library);
   const connectors = useMemo(() => (inventory.data ? connectorRows(inventory.data) : []), [inventory.data]);
-  const connectorShown = [...connectorRowsMatching(connectors, search)].sort((a, b) => byName(a.name, b.name));
+  const connectorShown = [...connectorRowsMatching(connectors, search, (key) => pluginNameShown(key, pluginList))].sort((a, b) => byName(shownNameOf(a), shownNameOf(b)));
 
   // What the place holds, whatever the search: the empty state and the mods turn on it, never on what a search keeps.
   const holdsItems = identities.some((identity) => identity.group !== null) || skillGroups.length > 0 || connectors.length > 0;
@@ -162,7 +166,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
           onBack={back}
         />
       )}
-      {skillDetail && <SkillDetail row={skillDetail} onBack={back} backTo={L.myItems} />}
+      {skillDetail && <SkillDetail row={skillDetail} onBack={back} backTo={L.myItems} extras={skillExtrasOf(cwd)(skillDetail)} />}
       <div className={showing ? 'hidden' : 'contents'}>
         <div ref={pane} data-customize-all className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
           {nothing ? (
@@ -228,7 +232,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
               </div>
               <div data-all-part="connectors">
                 {connectorResults}
-                {inventory.data && connectorShown.length > 0 && <AllConnectors servers={inventory.data.servers} readAt={inventory.dataUpdatedAt} rows={connectorShown} />}
+                {inventory.data && connectorShown.length > 0 && <AllConnectors inventory={inventory.data} pluginList={pluginList} readAt={inventory.dataUpdatedAt} rows={connectorShown} />}
               </div>
               {nothingMatches && (
                 <Centered role="status">
@@ -240,7 +244,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
               )}
             </>
           )}
-          <InventoryState error={null} pending={false} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
+          <InventoryState error={null} pending={false} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
         </div>
       </div>
     </div>
@@ -248,9 +252,9 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
 }
 
 // The connectors' rows under All: each the Connectors list's own row, with the same facts beside it, ending in its word.
-function AllConnectors({ servers, readAt, rows }: { servers: Inventory['servers']; readAt: number; rows: readonly ConnectorRowModel[] }) {
+function AllConnectors({ inventory, pluginList, readAt, rows }: { inventory: ConnectorsAnswer; pluginList: PluginList; readAt: number; rows: readonly ConnectorRowModel[] }) {
   const { cwd, name, attached, askIn } = usePlace();
-  const rowFacts = useConnectorRowFacts({ servers, readAt, cwd, attached });
+  const rowFacts = useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attached });
   return (
     <WithoutReload>
       <ul aria-label={PAGE.choice.connectors} className="m-0 list-none p-0">

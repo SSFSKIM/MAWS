@@ -21,78 +21,6 @@
     "turnId": "turn:u-denials-002"
   },
   {
-    "at": "2026-09-28T10:40:00.045Z",
-    "autoDenied": 2,
-    "caption": "",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 1,
-    "endedAt": "2026-09-28T10:40:03.729Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": "cell:toolu_synth_deny_1",
-    "id": "divider:turn:u-denials-002",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [],
-    "startedAt": "2026-09-28T10:40:00.100Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 2,
-      "byCategory": {
-        "commands": 3,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0123,
-      "denials": [
-        {
-          "cellId": "cell:toolu_synth_deny_1",
-          "disposition": "denied",
-          "interruption": false,
-          "kind": "user-rejected"
-        },
-        {
-          "cellId": "cell:toolu_synth_deny_2",
-          "disposition": "auto_denied",
-          "interruption": false,
-          "kind": "automode-blocked"
-        },
-        {
-          "cellId": "cell:toolu_synth_deny_3",
-          "disposition": "auto_denied",
-          "interruption": false,
-          "kind": "automode-parsing-error"
-        }
-      ],
-      "durationMs": 3584,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 3,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 3,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 21000,
-        "inputTokens": 12,
-        "outputTokens": 240,
-        "thinkingTokens": null
-      }
-    },
-    "toolCalls": 3,
-    "turnId": "turn:u-denials-002"
-  },
-  {
     "at": "2026-09-28T10:40:00.153Z",
     "durationMs": 32,
     "id": "think:msg_denials_007:0",
@@ -252,6 +180,78 @@
     "turnId": "turn:u-denials-002"
   },
   {
+    "at": "2026-09-28T10:40:00.045Z",
+    "autoDenied": 2,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 1,
+    "endedAt": "2026-09-28T10:40:03.729Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": "cell:toolu_synth_deny_1",
+    "id": "divider:turn:u-denials-002",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [],
+    "startedAt": "2026-09-28T10:40:00.100Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 2,
+      "byCategory": {
+        "commands": 3,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [
+        {
+          "cellId": "cell:toolu_synth_deny_1",
+          "disposition": "denied",
+          "interruption": false,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_2",
+          "disposition": "auto_denied",
+          "interruption": false,
+          "kind": "automode-blocked"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_3",
+          "disposition": "auto_denied",
+          "interruption": false,
+          "kind": "automode-parsing-error"
+        }
+      ],
+      "durationMs": 3584,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:u-denials-002"
+  },
+  {
     "at": "2026-09-28T10:40:03.759Z",
     "attachments": [],
     "dropped": false,
@@ -263,6 +263,51 @@
     "placeholders": [],
     "steer": false,
     "text": "Count to 100 slowly with one Bash call per number.",
+    "turnId": "turn:u-denials-059"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:03.891Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "User rejected tool use"
+      },
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1; echo 1",
+      "cwd": null,
+      "description": "Count 1",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "User rejected tool use",
+      "truncated": null
+    },
+    "doneLabel": "Ran `sleep 1; echo 1` in 0s",
+    "endedAt": "2026-09-28T10:40:03.975Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_4",
+    "kind": "cell",
+    "label": "Stopped: Count 1",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:03.891Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_4",
     "turnId": "turn:u-denials-059"
   },
   {
@@ -328,51 +373,6 @@
     "turnId": "turn:u-denials-059"
   },
   {
-    "agent": null,
-    "at": "2026-09-28T10:40:03.891Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": {
-        "disposition": "stopped",
-        "interruption": true,
-        "kind": "user-rejected",
-        "reason": "User rejected tool use"
-      },
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "sleep 1; echo 1",
-      "cwd": null,
-      "description": "Count 1",
-      "exitCode": null,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "User rejected tool use",
-      "truncated": null
-    },
-    "doneLabel": "Ran `sleep 1; echo 1` in 0s",
-    "endedAt": "2026-09-28T10:40:03.975Z",
-    "expanded": true,
-    "id": "cell:toolu_synth_deny_4",
-    "kind": "cell",
-    "label": "Stopped: Count 1",
-    "paths": [],
-    "startedAt": "2026-09-28T10:40:03.891Z",
-    "status": "stopped",
-    "toolName": "Bash",
-    "toolUseId": "toolu_synth_deny_4",
-    "turnId": "turn:u-denials-059"
-  },
-  {
     "at": "2026-09-28T10:40:04.040Z",
     "attachments": [],
     "dropped": false,
@@ -384,80 +384,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Try the three deploy steps again.",
-    "turnId": "turn:u-denials-077"
-  },
-  {
-    "at": "2026-09-28T10:40:04.040Z",
-    "autoDenied": 0,
-    "caption": "Ran 2 commands (2 stopped)",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T10:40:05.084Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:u-denials-077",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran 2 commands (2 stopped)"
-    ],
-    "startedAt": "2026-09-28T10:40:04.095Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 3,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0123,
-      "denials": [
-        {
-          "cellId": "cell:toolu_synth_deny_5",
-          "disposition": "stopped",
-          "interruption": false,
-          "kind": "automode-unavailable"
-        },
-        {
-          "cellId": "cell:toolu_synth_deny_6",
-          "disposition": "stopped",
-          "interruption": false,
-          "kind": "interrupted"
-        },
-        {
-          "cellId": "cell:toolu_synth_deny_7",
-          "disposition": "stopped",
-          "interruption": false,
-          "kind": "cancelled"
-        }
-      ],
-      "durationMs": 944,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 3,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 3,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 21000,
-        "inputTokens": 12,
-        "outputTokens": 240,
-        "thinkingTokens": null
-      }
-    },
-    "toolCalls": 3,
     "turnId": "turn:u-denials-077"
   },
   {
@@ -615,6 +541,80 @@
     "messageUuid": "a-denials-117",
     "model": "claude-opus-5-5",
     "phase": "answer",
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "at": "2026-09-28T10:40:04.040Z",
+    "autoDenied": 0,
+    "caption": "Ran 2 commands (2 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T10:40:05.084Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-denials-077",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran 2 commands (2 stopped)"
+    ],
+    "startedAt": "2026-09-28T10:40:04.095Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 3,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [
+        {
+          "cellId": "cell:toolu_synth_deny_5",
+          "disposition": "stopped",
+          "interruption": false,
+          "kind": "automode-unavailable"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_6",
+          "disposition": "stopped",
+          "interruption": false,
+          "kind": "interrupted"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_7",
+          "disposition": "stopped",
+          "interruption": false,
+          "kind": "cancelled"
+        }
+      ],
+      "durationMs": 944,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 3,
     "turnId": "turn:u-denials-077"
   },
   {

@@ -46,6 +46,7 @@ import type { SpineView } from '@shared/spine/view';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { admittedFolder } from '../files/allowlist';
 import { FILES_REFUSAL } from '../files/service';
+import { defaultRemote as defaultRemoteOf, remoteHeadBranch } from '../git/default-base';
 import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
@@ -139,7 +140,8 @@ export class ScmService {
     const [trust, gh] = await Promise.all([this.trust(checkout), this.gh(refresh)]);
     const repository = trust.keyKind === 'repo';
     const remotes = repository ? await this.remotes(trust.directory, await this.pushReader()) : [];
-    const defaultRemote = remotes.length > 0 ? await this.defaultRemote(trust.directory, remotes.map((r) => r.name)) : null;
+    // UX wave U5b-2 (decision 13): the default-branch rule's first two steps, where the git service's rule reads them
+    const defaultRemote = remotes.length > 0 ? await defaultRemoteOf(this.deps.read, trust.directory, remotes.map((r) => r.name)) : null;
     return {
       directory: trust.directory,
       repository,
@@ -147,7 +149,7 @@ export class ScmService {
       trustKey: trust.trustKey,
       remotes,
       defaultRemote,
-      defaultBase: defaultRemote === null ? null : await this.defaultBase(trust.directory, defaultRemote),
+      defaultBase: defaultRemote === null ? null : await remoteHeadBranch(this.deps.read, trust.directory, defaultRemote),
       gh,
       checkedAt: new Date(this.now()).toISOString(),
     };
@@ -580,29 +582,6 @@ export class ScmService {
     return [...urls].map(([name, url]) => ({ name, url }));
   }
 
-  // The current branch's upstream remote, else `origin`, else the sole remote.
-  private async defaultRemote(directory: string, names: string[]): Promise<string | null> {
-    const current = (await this.deps.read(directory, ['for-each-ref', '--format=%(HEAD)%00%(upstream:remotename)', 'refs/heads']))
-      .split('\n')
-      .find((line) => line.startsWith('*\0'));
-    const upstream = current?.slice(2) ?? '';
-    if (names.includes(upstream)) return upstream;
-    if (names.includes('origin')) return 'origin';
-    return names.length === 1 ? names[0] : null;
-  }
-
-  // The remote's HEAD branch (`refs/remotes/<remote>/HEAD`, set by clone or `remote set-head`), when git knows it. The
-  // full ref, not `--short`: a local branch named like the remote ref would make the short name ambiguous.
-  private async defaultBase(directory: string, remote: string): Promise<string | null> {
-    try {
-      const ref = (await this.deps.read(directory, ['symbolic-ref', '-q', `refs/remotes/${remote}/HEAD`])).trim();
-      const prefix = `refs/remotes/${remote}/`;
-      return ref.startsWith(prefix) && ref.length > prefix.length ? ref.slice(prefix.length) : null;
-    } catch (error) {
-      if (error instanceof GitCommandError) return null;
-      throw error;
-    }
-  }
 }
 
 // An act while the session is away from its launch folder (UX wave U8c-2): nothing is run.

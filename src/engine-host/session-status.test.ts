@@ -59,6 +59,23 @@ describe('SessionStatusTracker.applyReload', () => {
     reload(54);
     expect(tracker.catalog().skills).toEqual(initSkills.filter((skill) => skill !== 'e8-probe:e8-hello'));
   });
+
+  // UX wave U11h (the branch panel's rulings, 2026-11-16): the answer lists the session's MCP servers as mcp_status does
+  // (pass3/p2-no-prompt-resume-1 seq 30, after the engine applied the plugins' server changes), so the status's servers
+  // are the reload's, observed when its plugins are (`pluginsObservedAt`); an answer without the list keeps the last one.
+  it('replaces the MCP servers with the reload answer’s, by name, status and source; an answer without them keeps the init’s', () => {
+    const p2 = readFileSync(resolve(ROOT, 'spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-1.jsonl'), 'utf8')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as { seq: number; frame: Record<string, unknown> })
+      .find((row) => row.seq === 30)!.frame;
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.observe({ type: 'system', subtype: 'init', plugins: [], mcp_servers: [{ name: 'plugin:gone:srv', status: 'needs-auth', source: 'plugin' }] }, '2026-10-09T07:02:30.000Z');
+    tracker.applyReload(ReloadPluginsResponseSchema.parse({ commands: [], agents: [], plugins: [], error_count: 0 }));
+    expect(tracker.snapshot().mcpServers).toEqual([{ name: 'plugin:gone:srv', status: 'needs-auth', source: 'plugin' }]);
+    tracker.applyReload(ReloadPluginsResponseSchema.parse((p2.response as { response: unknown }).response));
+    expect(tracker.snapshot().mcpServers).toEqual([{ name: 'maws', status: 'connected', source: 'sdk' }]);
+  });
 });
 
 // P2-A start (2026-10-09; X17): `pluginsObservedAt` says when this launch's plugins were reported, so an empty list
@@ -200,5 +217,36 @@ describe('SessionStatusTracker: a background task’s starter', () => {
       { taskId: 'b1', taskType: 'shell', description: 'sleep 30', ambient: false, parentTaskId: 'a1' },
       { taskId: 'b2', taskType: 'shell', description: 'tail', ambient: false },
     ]);
+  });
+});
+
+// Ticket 619: overlapping mcp_status reads. Each answer is the servers as of its own ask, so the later ask's answer stands
+// whichever lands first, and an init frame or a reload between an ask and its answer is the newer report.
+describe('SessionStatusTracker.applyMcpStatus', () => {
+  const answer = (status: string) => ({ mcpServers: [{ name: 'notes', status, source: 'user' }] });
+  const statusOf = (tracker: SessionStatusTracker) => tracker.mcpServers.map((s) => s.status);
+
+  it.each(['in order', 'out of order'] as const)('keeps the later ask’s answer when two overlap (%s)', (order) => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    const first = tracker.askMcp();
+    const second = tracker.askMcp();
+    if (order === 'in order') {
+      expect(tracker.applyMcpStatus(answer('pending'), first)).toBe(true);
+      expect(tracker.applyMcpStatus(answer('connected'), second)).toBe(true);
+    } else {
+      expect(tracker.applyMcpStatus(answer('connected'), second)).toBe(true);
+      expect(tracker.applyMcpStatus(answer('pending'), first), 'an older ask’s answer rolls nothing back').toBe(false);
+    }
+    expect(statusOf(tracker)).toEqual(['connected']);
+  });
+
+  it('drops an answer asked before an init frame that reported the servers', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    const asked = tracker.askMcp();
+    tracker.observe({ type: 'system', subtype: 'init', plugins: [], mcp_servers: [{ name: 'notes', status: 'failed' }] }, '2026-11-20T00:00:00.000Z');
+    expect(tracker.applyMcpStatus(answer('connected'), asked)).toBe(false);
+    expect(statusOf(tracker)).toEqual(['failed']);
+    expect(tracker.applyMcpStatus(answer('connected'), tracker.askMcp())).toBe(true);
+    expect(statusOf(tracker)).toEqual(['connected']);
   });
 });

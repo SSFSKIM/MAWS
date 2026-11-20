@@ -1,8 +1,9 @@
 // The probe-journal fixture gates through the model (C6 execution document, M2 "Proves"): counts read from the
 // journals, over C3's normaliser output (the replay stub's until the rebase). The synthetic-journal pins live in
 // fixtures.test.ts.
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
 import type { SessionEvent } from '@shared/graph/events';
+import { askSteerText } from '@shared/maws/ask';
 import { parseJournalRow } from '@shared/wire/journal';
 import { describe, expect, it } from 'vitest';
 import { loadJournal, loadUxwaveTranscript, type FixturePass } from '../../../../../test/support/fixtures';
@@ -176,7 +177,7 @@ describe('fixture gates through the model', () => {
 
   it('pass1/init: a thinking disclosure then the answer', () => {
     const rows = rowsFor('pass1', 'init');
-    expect(rows.map((row) => row.kind)).toEqual(['time', 'user', 'divider', 'thinking', 'assistant_text', 'error']);
+    expect(rows.map((row) => row.kind)).toEqual(['time', 'user', 'thinking', 'assistant_text', 'divider', 'error']);
     expect(ofKind(rows, 'thinking')[0].durationMs).toBeGreaterThan(0);
     expect(ofKind(rows, 'thinking')[0].id).toBe('think:msg_011CfVbGCWehpRw3sXEAfrCv:0');
     expect(ofKind(rows, 'assistant_text')[0].id).toBe('text:msg_011CfVbGCWehpRw3sXEAfrCv:1');
@@ -201,8 +202,8 @@ describe('fixture gates through the model', () => {
     const STEER = 'user:42a15931-3c9a-4267-a6b2-09fa5697735d';
     const shape = (rows: Row[]) => rows.filter((row) => row.kind !== 'time' && row.kind !== 'error').map((row) =>
       row.kind === 'group' ? `group:${row.cells.map((cell) => (cell.detail.kind === 'shell' ? cell.detail.command.replace('sleep 1 && echo ', '') : cell.toolName)).join(',')}` : row.kind === 'user' ? (row.id === STEER ? 'steer' : 'prompt') : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : row.kind);
-    expect(shape(rowsFor('pass3', 'steer-next'))).toEqual(['prompt', 'divider', 'group:1,2', 'steer', 'commentary:NEXT_OK', 'group:3,4,5,6,7,8', 'answer:COUNTED']);
-    expect(shape(rowsOf(stateOf('pass3', 'steer-next')))).toEqual(['prompt', 'divider', 'steer', 'answer:COUNTED']);
+    expect(shape(rowsFor('pass3', 'steer-next'))).toEqual(['prompt', 'group:1,2', 'steer', 'commentary:NEXT_OK', 'group:3,4,5,6,7,8', 'answer:COUNTED', 'divider']);
+    expect(shape(rowsOf(stateOf('pass3', 'steer-next')))).toEqual(['prompt', 'steer', 'answer:COUNTED', 'divider']);
   });
 
   it('pass3/steer-next: written at seq 46 and not yet taken, the steer is a dimmed tail bubble reading Sends at the next step; taken at seq 71, it moves into the turn', () => {
@@ -305,6 +306,9 @@ describe('the one-writer rule: a `!` command holding the consent sentence', () =
     const frames = userFrames(rows);
     expect(frames.filter((frame) => frame.message.content.includes(command)), 'the command is in the replay and the echo').toHaveLength(2);
     const events = journalToEvents(rows);
+    // These two lines hold whatever rule R does: on the live route the engine host drops the `bash_command` write and
+    // returns on the echo's `shouldQuery: false` before it reads arrivals (engine-host/normalizer.ts). The last line,
+    // each frame's content read on every route, carries the claim.
     expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent'), 'the live route marks no consent').toEqual([]);
     expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn').toEqual([]);
     for (const frame of frames) expect(grantsReadFrom(frame.message.content), frame.message.content).toEqual({ gate: [], live: [], file: [] });
@@ -364,5 +368,38 @@ describe('the one-writer rule: a local command’s output holding the consent se
     const alone = bashOutput.replace(other, '');
     expect(OUTPUT_OPENINGS.filter((each) => alone.includes(each)), 'only this opening is left').toEqual([opening]);
     expectNoGrantWithin(alone, opening);
+  });
+
+  // The chain merge of U1c's review round into ticket 704, rule R under the split: the grants of a joined text are read
+  // in its whole text (the architect's ruling 1), so an output opening in its second part claims the message, and the
+  // sentence its first part holds reads no grant on the gate, the live route or the file route; the split still takes
+  // the envelope out as MAWS's answer. Made by hand: no recording joins a command's output to other members. Each
+  // output is its recorded form cut to its one opening; the control is the same text with that opening removed.
+  const ENVELOPE = askSteerText('toolu_j', [{ id: 'q1', question: 'Which?', modality: 'choice', options: [{ label: 'Grid' }] }], [{ id: 'q1', question: 'Which?', status: 'answered', value: ['Grid'] }]);
+  const outputs: Record<string, () => string> = {
+    '<bash-stdout>': () => bashOutput.replace(/<bash-stderr>.*?<\/bash-stderr>/, ''),
+    '<bash-stderr>': () => bashOutput.replace(/<bash-stdout>.*?<\/bash-stdout>/, ''),
+    '<local-command-stdout>': () => commandOutput('<local-command-stdout>'),
+    '<local-command-stderr>': () => commandOutput('<local-command-stderr>'),
+  };
+  const classesOnFile = (content: string) => readArrivals({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, promptSource: 'sdk', message: { role: 'user', content } }).map((arrival) => arrival.class);
+  const liveConsents = (content: string) => {
+    // a frame the stdin schema takes (`parent_tool_use_id` is required), so the normaliser reads it rather than raising
+    const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content } } };
+    return journalToEvents([parseJournalRow(frame)]).flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent');
+  };
+  it.each(OUTPUT_OPENINGS)('%s in the second part of a joined text: the first part’s sentence reads no grant on any route, and the envelope is still an answer (made by hand)', (opening) => {
+    const output = outputs[opening]!();
+    expect(OUTPUT_OPENINGS.filter((each) => output.includes(each)), 'only this opening is in the output').toEqual([opening]);
+    const subject = ['cat /etc/x'];
+    for (const first of [SENTENCE, `${ENVELOPE}\n${SENTENCE}`]) {
+      const control = `${first}\n${output.replace(opening, '')}`;
+      expect(grantsReadFrom(control), 'the control, the opening removed').toEqual({ gate: subject, live: subject, file: subject });
+      expect(liveConsents(control), 'the control through the normaliser').toHaveLength(1);
+      expect(grantsReadFrom(`${first}\n${output}`)).toEqual({ gate: [], live: [], file: [] });
+      expect(liveConsents(`${first}\n${output}`), 'through the normaliser').toEqual([]);
+    }
+    expect(classesOnFile(`${ENVELOPE}\n${SENTENCE}\n${output.replace(opening, '')}`), 'the control').toEqual(['answer', 'consent']);
+    expect(classesOnFile(`${ENVELOPE}\n${SENTENCE}\n${output}`)).toEqual(['answer']);
   });
 });

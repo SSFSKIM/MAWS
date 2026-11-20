@@ -1,19 +1,22 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { FitAddon } from '@xterm/addon-fit';
-import type { ITerminalOptions } from '@xterm/xterm';
+import type { ITerminalOptions, Terminal } from '@xterm/xterm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RendererOptions } from './renderer';
+import { FakeRenderer } from './renderer.fake';
 import { installScrollUpIntoScrollback } from './scroll-up';
 import { createXtermRenderer } from './xterm';
 
 const recorded = vi.hoisted(() => [] as ITerminalOptions[]);
+const instances = vi.hoisted(() => [] as Terminal[]); // UX wave U6b-5a: the emulator under a renderer, to scroll its viewport
 vi.mock('@xterm/xterm', async (importOriginal) => {
   const xterm = await importOriginal<typeof import('@xterm/xterm')>();
   class RecordingTerminal extends xterm.Terminal {
     constructor(options?: ITerminalOptions) {
       super(options);
       recorded.push(options ?? {});
+      instances.push(this);
     }
   }
   return { ...xterm, Terminal: RecordingTerminal };
@@ -97,6 +100,55 @@ describe('xterm adapter', () => {
       ['xyz', false],
     ]);
     renderer.dispose();
+  });
+
+  // UX wave U6b-5a (decision 6): "what the screen shows" for an attach with nothing selected is the rows the viewport
+  // shows now, not the buffer's end; a soft-wrapped line reads as one line; each line without its trailing spaces; no
+  // blank line at the start or the end.
+  it('reads the rows its viewport shows, a soft-wrapped line as one, without trailing spaces or blank edge lines', async () => {
+    const renderer = createXtermRenderer(options);
+    renderer.resize(10, 4);
+    const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+    await new Promise<void>((resolve) => renderer.write(lines.join('\r\n'), resolve));
+    expect(renderer.screenText()).toBe(['line 9', 'line 10', 'line 11', 'line 12'].join('\n')); // the screen at the end
+    // a person's scroll up, as it leaves the buffer: happy-dom lays nothing out, so xterm's own viewport cannot move it
+    (instances.at(-1) as unknown as { _core: { _bufferService: { scrollLines(rows: number): void } } })._core._bufferService.scrollLines(-5);
+    expect(renderer.screenText()).toBe(['line 4', 'line 5', 'line 6', 'line 7'].join('\n')); // scrolled up: what it shows, not the end
+    renderer.dispose();
+
+    const wrapping = createXtermRenderer(options);
+    wrapping.resize(10, 5);
+    await new Promise<void>((resolve) => wrapping.write('\r\nhello wonderful world   \r\nnext  ', resolve));
+    expect(wrapping.screenText()).toBe('hello wonderful world\nnext'); // the wrap kept whole, its space at the edge included
+    wrapping.dispose();
+
+    // a wide character that does not fit at a row's end goes to the next row, and the cell it left is not text
+    for (const [written, read] of [
+      ['abcd界ef', 'abcd界ef'],
+      ['가나다라마', '가나다라마'],
+      ['abc 한글', 'abc 한글'],
+      ['abc界ef', 'abc界ef'], // the wide character fits at the row's end: nothing to drop
+      ['abcdeX\x1b[1;5H\x1b[X', 'abcd X'], // a cell erased in place before a narrow wrap is a blank, kept
+    ]) {
+      const wide = createXtermRenderer(options);
+      wide.resize(5, 5);
+      await new Promise<void>((resolve) => wide.write(written, resolve));
+      expect(wide.screenText()).toBe(read);
+      wide.dispose();
+    }
+
+    const empty = createXtermRenderer(options);
+    expect(empty.screenText()).toBe('');
+    empty.dispose();
+  });
+
+  it('reads a screen by the same rule in the tests’ renderer', () => {
+    const fake = new FakeRenderer(options);
+    expect(fake.screenText()).toBe('');
+    fake.screen = [{ text: '' }, { text: 'abc   ' }, { text: 'de  ', wrapped: true }, { text: '   ' }, { text: 'f' }, { text: '' }];
+    expect(fake.screenText()).toBe('abc   de\n\nf');
+    fake.screen = [{ text: '  ' }, { text: '' }];
+    expect(fake.screenText()).toBe(''); // only blank: nothing to attach
   });
 
   // C1 (P2-F wave S): the IME's composing text is drawn in the terminal's tokens, never xterm's stock white text on black.
