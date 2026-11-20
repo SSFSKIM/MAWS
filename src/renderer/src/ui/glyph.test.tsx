@@ -7,13 +7,13 @@ import { drawnText } from '../test-support/drawn-text';
 import { NamedGlyph } from './glyph';
 import { POINTING_DELAY_MS } from './pointing';
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })); // React's act and userEvent wait on the others
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 const user = () => userEvent.setup({ delay: null }); // no waits of its own: under fake timers they never end
-const wait = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
 
 const Plus = () => (
@@ -43,9 +43,9 @@ describe('NamedGlyph', () => {
       </NamedGlyph>,
     );
     await user().hover(screen.getByRole('button'));
-    await wait(POINTING_DELAY_MS - 1);
+    wait(POINTING_DELAY_MS - 1);
     expect(tooltip()).toBeNull();
-    await wait(1);
+    wait(1);
     expect(tooltip()).toBe('New slide · ⌘⇧N');
   });
 

@@ -14,13 +14,13 @@ import { Unavailable } from './tip';
 
 const NOTE = 'Archived sessions can be restored from the sidebar.';
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })); // React's act and userEvent wait on the others
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 const user = () => userEvent.setup({ delay: null }); // no waits of its own: under fake timers they never end
-const wait = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 
 function Row({ form, label = 'Archive', note = NOTE }: { form?: RowNoteForm; label?: string; note?: string }) {
   const rowNote = useRowNote();
@@ -47,22 +47,22 @@ describe('the row note', () => {
   it('shows on pointing after the short delay, and closes when the pointer leaves', async () => {
     render(<Row />);
     await user().hover(row());
-    await wait(POINTING_DELAY_MS - 1);
+    wait(POINTING_DELAY_MS - 1);
     expect(shown()).toBe(false);
-    await wait(1);
+    wait(1);
     expect(shown()).toBe(true);
     expect(screen.getByRole('group', { name: 'Archive', description: NOTE })).toBe(row());
     await user().unhover(row());
-    await wait(CLOSE_MOTION.ms);
+    wait(CLOSE_MOTION.ms);
     expect(shown()).toBe(false);
   });
 
   it('shows nothing for a pointer that passes over the row within the delay', async () => {
     render(<Row />);
     await user().hover(row());
-    await wait(POINTING_DELAY_MS / 2);
+    wait(POINTING_DELAY_MS / 2);
     await user().unhover(row());
-    await wait(POINTING_DELAY_MS);
+    wait(POINTING_DELAY_MS);
     expect(shown()).toBe(false);
   });
 
@@ -92,17 +92,17 @@ describe('the row note', () => {
     await keys.tab();
     expect(shown()).toBe(true);
     await keys.tab(); // out of the row
-    await wait(CLOSE_MOTION.ms);
+    wait(CLOSE_MOTION.ms);
     expect(shown()).toBe(false);
 
     await keys.tab({ shift: true }); // back in, then the pointer comes too
     await keys.hover(row());
-    await wait(POINTING_DELAY_MS);
+    wait(POINTING_DELAY_MS);
     await keys.tab(); // focus leaves; the pointer holds it open
-    await wait(CLOSE_MOTION.ms);
+    wait(CLOSE_MOTION.ms);
     expect(shown()).toBe(true);
     await keys.unhover(row());
-    await wait(CLOSE_MOTION.ms);
+    wait(CLOSE_MOTION.ms);
     expect(shown()).toBe(false);
   });
 
@@ -110,10 +110,10 @@ describe('the row note', () => {
     render(<Row />);
     const keys = user();
     await keys.hover(row());
-    await wait(POINTING_DELAY_MS);
+    wait(POINTING_DELAY_MS);
     await keys.tab();
     await keys.unhover(row());
-    await wait(CLOSE_MOTION.ms);
+    wait(CLOSE_MOTION.ms);
     expect(shown()).toBe(true);
   });
 
@@ -144,9 +144,9 @@ describe('the pointed-row line', () => {
     render(<Row form="line" />);
     const keys = user();
     await keys.hover(row());
-    await wait(POINTING_DELAY_MS - 1);
+    wait(POINTING_DELAY_MS - 1);
     expect(shown()).toBe(false);
-    await wait(1);
+    wait(1);
     expect(shown()).toBe(true);
     await keys.unhover(row());
     expect(shown()).toBe(false); // a reserved line has no close motion

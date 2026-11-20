@@ -10,13 +10,13 @@ import { Tip, Unavailable } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })); // React's act and userEvent wait on the others
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 const user = () => userEvent.setup({ delay: null }); // no waits of its own: under fake timers they never end
-const wait = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
 
 function Chip() {
@@ -41,9 +41,9 @@ describe('Tip', () => {
   it('shows on pointing after the short delay', async () => {
     render(<Chip />);
     await user().hover(screen.getByText('Blocked in macOS'));
-    await wait(POINTING_DELAY_MS - 1);
+    wait(POINTING_DELAY_MS - 1);
     expect(tooltip()).toBeNull();
-    await wait(1);
+    wait(1);
     expect(tooltip()).toBe(FACT);
   });
 
@@ -94,7 +94,7 @@ describe('Unavailable', () => {
     const button = screen.getByRole('button', { name: 'Commit', description: 'Write a commit message' });
     const keys = user();
     await keys.hover(button);
-    await wait(POINTING_DELAY_MS);
+    wait(POINTING_DELAY_MS);
     expect(tooltip()).toBe('Write a commit message');
     await keys.click(button);
     expect(commit).not.toHaveBeenCalled();
