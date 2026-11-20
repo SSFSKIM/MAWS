@@ -1,7 +1,7 @@
 // U11a M10 (l8-settings-06, A7; the execution document's Interfaces §G, "Search"): "Search settings" at the top of the
 // index. Results take the sections' place, the first preselected, with Up, Down and Enter; choosing one brings the row
-// into view under its section's heading, marks it for a moment, opens the More it was found behind, and gives the row
-// itself the keyboard, so a second Enter does nothing. ⌘F inside Settings focuses the field; Esc clears it.
+// into view under its section's heading, marks it for a moment, and gives the row itself the keyboard, which opens its
+// note (the word cut, G13 to G15: no More), so a second Enter does nothing. ⌘F inside Settings focuses the field; Esc clears it.
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -63,9 +63,9 @@ afterEach(() => {
 });
 
 describe('Search settings: the field and its results', () => {
-  it('is drawn once the settings are read, with the rows', () => {
+  it('is drawn once the settings are read, with the rows', async () => {
     render(<SettingsView section={null} />);
-    expect(screen.getByText('Reading settings…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Reading settings…' })).toBeTruthy(); // the quiet spinner (G7)
     expect(screen.queryByRole('combobox', { name: 'Search settings' })).toBeNull();
   });
 
@@ -96,11 +96,11 @@ describe('Search settings: the field and its results', () => {
     expect(options()[0]!.children).toHaveLength(2);
   });
 
-  it('reads "No matching settings" when nothing matches', () => {
+  it('reads "No matches" when nothing matches', () => {
     renderView();
     type('zebra crossing');
     expect(options()).toEqual([]);
-    expect(within(index()).getByRole('status').textContent).toBe('No matching settings');
+    expect(within(index()).getByRole('status').textContent).toBe('No matches');
   });
 
   it('controls the listbox only while one is drawn: expanded with results, collapsed and naming none with no match', () => {
@@ -218,28 +218,31 @@ describe('Search settings: choosing a result', () => {
     expect(column.className).toContain('motion-reduce:[&_[data-settings-mark=fading]]:transition-none');
   });
 
-  it('opens the More a row shows now when the words were found there', async () => {
+  it('finds a row by the words its note waits with, and landing on it opens the note', async () => {
     renderView();
-    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    await within(row('Binary')).findByText('2.1.287');
     type('PATH');
     fireEvent.click(options().find((o) => o.textContent === 'BinaryEngine')!);
     const binary = row('Binary');
-    expect(within(binary).getByRole('button', { name: 'Less' }).getAttribute('aria-expanded')).toBe('true');
-    expect(binary.textContent).toContain("claude on your shell's PATH");
     expect(document.activeElement).toBe(binary);
-    // a row found by its line leaves its More closed
+    expect(binary.querySelector('[data-row-note]')!.hasAttribute('data-open')).toBe(true);
+    expect(binary.textContent).toContain("claude on your shell's PATH");
+    expect(within(binary).queryByRole('button', { name: /^(More|Less)$/ })).toBeNull();
+    // Update's words find its button, now on the Binary row (G126, G127), and land on it
     type('runs claude update');
     expect(optionTexts()).toEqual(['Update · Engine']);
     press('Enter');
-    expect(within(row('Update')).getByRole('button', { name: 'More' }).getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(within(binary).getByRole('button', { name: 'Update Claude Code…' }));
   });
 
-  it('lands on the row that reveals a row not drawn: the memory budget off, "stateful" chooses Memory budget', () => {
+  it('lands on the row that reveals a row not drawn: the memory budget off, "stateful" chooses its switch', () => {
     renderView({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudget: { enabled: false } } });
     type('stateful');
-    expect(optionTexts()).toEqual(['Memory budget · Supervisor']);
+    expect(optionTexts()).toEqual(['Release idle sessions over a memory limit · Supervisor']);
     press('Enter');
-    expect(document.activeElement).toBe(row('Memory budget'));
+    expect(document.activeElement).toBe(row('Release idle sessions over a memory limit'));
+    type('memory budget'); // its old name still finds it (G139)
+    expect(optionTexts()).toContain('Release idle sessions over a memory limit · Supervisor');
   });
 
   it('a binding’s mark is not clipped by its table, which rounds its corner rows instead', () => {
@@ -253,7 +256,7 @@ describe('Search settings: choosing a result', () => {
   it('lands on a section’s heading and on a key binding’s row in the table', () => {
     renderView();
     type('voice');
-    expect(optionTexts()[0]).toBe('Voice · Section');
+    expect(optionTexts()[0]).toBe('Voice'); // a section's result is its name alone (G9)
     press('Enter');
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Voice' }));
     type('next needs-you');

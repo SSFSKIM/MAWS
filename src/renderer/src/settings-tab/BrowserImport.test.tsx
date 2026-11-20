@@ -1,9 +1,11 @@
 // E4b Task 3.2: Settings › Browser's imported-profiles block (E4b Design §11, §12; P-21): the Import button with no
 // record, each record with its date, summary and Show report, the extension toggles through `setExtension`, a run in
 // progress shown with Show, and Remove behind its acknowledgement, writing `browser.profile: null` when the setting named
-// the removed profile.
+// the removed profile. The word cut (G70, G73, G74, G76, G77): Import… named in full; a record's row is its date and a
+// "…" menu holding Show report, Sync bookmarks now and Remove, its summary in the report; each extension a switch.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -25,6 +27,13 @@ const calls = (name: string) => b.calls.filter((c) => c.name === name).map((c) =
 const profile = () => screen.getByRole('region', { name: 'Person 1' });
 const row = (name: string) => within(profile()).getByRole('group', { name });
 const dialog = () => screen.getByRole('dialog');
+// the record's "…" menu, opened, and one of its items chosen
+async function choose(item: string) {
+  const region = await screen.findByRole('region', { name: 'Person 1' });
+  await userEvent.setup().click(within(region).getByRole('button', { name: 'Actions for Person 1' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: item }));
+}
+const switchOf = (name: string) => within(row(name)).getByRole('switch', { name });
 
 function renderBlock(answers: ImportBridge['answers'] = {}, profileSetting: string | null = null) {
   b = importBridge({ ...SETTINGS_DEFAULTS_V21, browser: { ...SETTINGS_DEFAULTS_V21.browser, profile: profileSetting } });
@@ -94,18 +103,22 @@ describe('with no imported profile', () => {
 });
 
 describe('an imported profile', () => {
-  it('shows its date and summary, each extension with its state and toggle, and the wallet note', async () => {
+  it('shows its date and its menu, each extension with its state and switch, and the wallet note; the summary is the report’s', async () => {
     renderBlock(withRecord);
     await screen.findByRole('region', { name: 'Person 1' });
     expect(profile().textContent).toContain(`Imported ${formatDate(Date.parse(RECORD.importedAt))}`);
-    expect(profile().textContent).toContain('4 cookies, 4 history entries, 3 extensions · 3 skipped');
+    expect(profile().textContent).not.toContain('4 cookies, 4 history entries, 3 extensions · 3 skipped');
+    expect(within(row('Person 1')).getAllByRole('button').map((x) => x.getAttribute('aria-label'))).toEqual(['Actions for Person 1']);
     expect(row('Probe').textContent).toContain('Loaded · background running');
     expect(row('Fails').textContent).toContain('Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS');
     expect(row('Probe Wallet').textContent).toContain('Off (wallet)');
-    expect(row('Probe Wallet').textContent).toContain('Wallet extensions start off');
+    expect(within(profile()).getByRole('group', { name: 'Probe Wallet', description: 'Wallet extensions start off' })).toBe(row('Probe Wallet')); // its note
     expect(row('Probe').textContent).not.toContain('Wallet extensions start off');
-    expect((within(row('Probe')).getByRole('radio', { name: 'On' }) as HTMLInputElement).checked).toBe(true);
-    expect((within(row('Probe Wallet')).getByRole('radio', { name: 'Off' }) as HTMLInputElement).checked).toBe(true);
+    expect(switchOf('Probe').getAttribute('aria-checked')).toBe('true');
+    expect(switchOf('Probe Wallet').getAttribute('aria-checked')).toBe('false');
+    expect(within(profile()).queryByRole('radio')).toBeNull();
+    // the popup limit: an ⓘ beside the Extensions heading, named by the sentence
+    expect(within(profile()).getByRole('img', { name: 'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.' }).closest('p')!.textContent).toBe('Extensionsⓘ');
   });
 
   it('a toggle writes through setExtension and the row shows main’s answer', async () => {
@@ -118,9 +131,9 @@ describe('an imported profile', () => {
       },
     });
     await screen.findByRole('region', { name: 'Person 1' });
-    fireEvent.click(within(row('Probe Wallet')).getByRole('radio', { name: 'On' }));
+    fireEvent.click(switchOf('Probe Wallet'));
     await within(row('Probe Wallet')).findByText('Loaded · no background');
-    fireEvent.click(within(row('Fails')).getByRole('radio', { name: 'Off' }));
+    fireEvent.click(switchOf('Fails'));
     await within(row('Fails')).findByText('Off');
     expect(calls('browser.import.setExtension')).toEqual([
       { profileDir: 'Default', extensionId: WALLET_ID, enabled: true },
@@ -141,37 +154,47 @@ describe('an imported profile', () => {
       throw new Error('not an imported profile');
     };
     await screen.findByRole('region', { name: 'Person 1' });
-    fireEvent.click(within(row('Probe Wallet')).getByRole('radio', { name: 'On' }));
+    fireEvent.click(switchOf('Probe Wallet'));
     await within(row('Probe Wallet')).findByText('Turning on…');
-    expect(within(row('Probe Wallet')).getByRole('radiogroup').closest('[aria-busy]')!.getAttribute('aria-busy')).toBe('true');
-    fireEvent.click(within(row('Probe Wallet')).getByRole('radio', { name: 'Off' })); // ignored while pending
+    expect(switchOf('Probe Wallet').closest('[aria-busy]')!.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(switchOf('Probe Wallet')); // ignored while pending
     answer();
     await within(row('Probe Wallet')).findByText('Off (wallet)');
     expect(calls('browser.import.setExtension')).toHaveLength(1);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(["Couldn't turn Probe Wallet on: not an imported profile"]);
   });
 
-  it('Show report reopens the sheet on the record’s report', async () => {
+  it('Show report, in the record’s menu, reopens the sheet on the record’s report, which holds its summary', async () => {
     renderBlock(withRecord);
-    fireEvent.click(await within(await screen.findByRole('region', { name: 'Person 1' })).findByRole('button', { name: 'Show report' }));
+    await choose('Show report');
     expect(dialog().dataset.browserImport).toBe('report');
     expect(within(dialog()).getByText('Imported from Person 1')).toBeTruthy();
+    expect(dialog().textContent).toContain('4 cookies, 4 history entries, 3 extensions · 3 skipped');
   });
 
   // cua #90: beside Show report, for a profile whose bookmarks were imported
-  it('Sync bookmarks now asks main for the profile, with the last sync’s time beside it; none without bookmarks', async () => {
+  it('Sync bookmarks now, in the menu, asks main for the profile, the last sync’s time in the row’s note; none without bookmarks', async () => {
     const syncedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
     const consented = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt, count: 46, error: null, errorAt: null } };
     renderBlock({ 'browser.import.list': () => ({ profiles: [consented], fileBroken: false, running: null }), 'browser.bookmarks.sync': () => ({ syncedAt, count: 46 }) });
-    const region = await screen.findByRole('region', { name: 'Person 1' });
-    expect(within(region).getByText('Last synced 2 hours ago')).toBeTruthy();
-    fireEvent.click(within(region).getByRole('button', { name: 'Sync bookmarks now' }));
+    await screen.findByRole('region', { name: 'Person 1' });
+    expect(within(profile()).getByRole('group', { name: 'Person 1', description: 'Last synced 2 hours ago' })).toBe(row('Person 1'));
+    await choose('Sync bookmarks now');
     await vi.waitFor(() => expect(calls('browser.bookmarks.sync')).toEqual([{ profileDir: 'Default' }]));
     cleanup();
     disconnect();
     resetBrowserImport();
     renderBlock(withRecord);
-    expect(within(await screen.findByRole('region', { name: 'Person 1' })).queryByRole('button', { name: 'Sync bookmarks now' })).toBeNull();
+    await userEvent.setup().click(within(await screen.findByRole('region', { name: 'Person 1' })).getByRole('button', { name: 'Actions for Person 1' }));
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(['Show report', 'Remove imported profile']);
+  });
+
+  it('a failed sync keeps its warning on the row at rest', async () => {
+    const failed = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt: null, count: 0, error: 'indexUnavailable' as const, errorAt: RECORD.importedAt } };
+    renderBlock({ 'browser.import.list': () => ({ profiles: [failed], fileBroken: false, running: null }) });
+    await screen.findByRole('region', { name: 'Person 1' });
+    expect(row('Person 1').querySelector('.text-warning')).not.toBeNull();
+    expect(row('Person 1').querySelector('[data-row-note]')).toBeNull();
   });
 });
 
@@ -183,7 +206,7 @@ describe('Remove imported profile', () => {
       sessions: new Map([[A, { tabs: [browserTab(T1, A, { partition: 'persist:maws-chrome-Default' }), browserTab(T2, A)], selected: T1 }]]),
     });
     renderBlock(remove, 'Default');
-    fireEvent.click(await within(await screen.findByRole('region', { name: 'Person 1' })).findByRole('button', { name: 'Remove imported profile' }));
+    await choose('Remove imported profile');
     expect(within(dialog()).getByText('Remove Person 1?')).toBeTruthy();
     expect(dialog().textContent).toContain(
       "Removes Person 1's cookies and site data, its browsing history (4 entries imported), 3 extensions and its 1 open tab from MAWS. Chrome is untouched.",
@@ -201,7 +224,7 @@ describe('Remove imported profile', () => {
 
   it('leaves the setting alone when it named another profile', async () => {
     renderBlock(remove, 'Profile 1');
-    fireEvent.click(await within(await screen.findByRole('region', { name: 'Person 1' })).findByRole('button', { name: 'Remove imported profile' }));
+    await choose('Remove imported profile');
     fireEvent.click(within(dialog()).getByRole('checkbox', { name: 'Remove everything MAWS imported from Person 1' }));
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Remove' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -215,7 +238,7 @@ describe('Remove imported profile', () => {
         throw new Error('an import is running');
       },
     });
-    fireEvent.click(await within(await screen.findByRole('region', { name: 'Person 1' })).findByRole('button', { name: 'Remove imported profile' }));
+    await choose('Remove imported profile');
     fireEvent.click(within(dialog()).getByRole('checkbox', { name: 'Remove everything MAWS imported from Person 1' }));
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Remove' }));
     await within(dialog()).findByText("Couldn't remove the profile: an import is running");

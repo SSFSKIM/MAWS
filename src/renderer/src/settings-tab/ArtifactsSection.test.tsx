@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe('Settings › Artifacts', () => {
-  it('suggests the routed Claude name without saving it, and commits an explicit export name once', async () => {
+  it('suggests the routed Claude name as the placeholder without saving it, and commits an explicit export name once', async () => {
     useUsage.setState({ snapshot: UsageSnapshotSchema.parse({
       available: true, dataDir: '/usage', readAt: '2026-10-23T12:00:00Z', error: null, drainTarget: 'routed', drainTargetIsManual: false, pinsFor: {}, gateway: null, codex: null, activity: null,
       accounts: [{ uuid: 'routed', email: 'not-the-author@example.test', displayName: 'Kim Min', planLabel: null, rateLimitTier: null, needsReauthentication: false, lastSeenActive: null, pinnedSessionCount: 0, credentialOwnership: null, windows: { fiveHour: null, sevenDay: null, scoped: [] } }],
@@ -63,16 +63,13 @@ describe('Settings › Artifacts', () => {
     expect((field as HTMLInputElement).value).toBe('');
     expect((field as HTMLInputElement).placeholder).toBe('Kim Min');
     expect(b.sets).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Use Kim Min' }));
-    await act(async () => {});
-    expect(b.sets).toEqual([{ artifacts: { exportAuthorName: 'Kim Min' } }]);
-    expect((field as HTMLInputElement).value).toBe('Kim Min');
+    expect(screen.queryByRole('button', { name: /^Use / })).toBeNull(); // the word cut (G79): the placeholder is the suggestion, no Use button
     fireEvent.change(field, { target: { value: '  K. Min  ' } });
     fireEvent.keyDown(field, { key: 'Enter' });
     fireEvent.blur(field);
     await act(async () => {});
     expect(b.sets.at(-1)).toEqual({ artifacts: { exportAuthorName: 'K. Min' } });
-    expect(b.sets).toHaveLength(2);
+    expect(b.sets).toHaveLength(1);
     fireEvent.change(field, { target: { value: '' } });
     fireEvent.blur(field);
     await act(async () => {});

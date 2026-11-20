@@ -15,7 +15,8 @@ import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { accessibleText } from '../test-support/accessible-text';
-import { hostStatus } from '../test-support/host-status';
+import { formatClock } from '@shared/app/date-format';
+import { hostStatus, SUPERVISOR_STARTED } from '../test-support/host-status';
 import { settingsBridge } from '../test-support/settings-bridge';
 import { importBridge, RECORD } from '../test-support/browser-import';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
@@ -148,7 +149,7 @@ describe('a fact sent to a tooltip has an owner the keyboard reaches', () => {
     const line = await within(status).findByText('Running · 3 sessions');
     expect(screen.queryByRole('group', { name: 'Machine daemon' })).toBeNull(); // connected: its line is in the tooltip
     act(() => line.focus());
-    expect(tooltip()).toContain('Since 14:02 · pid 48213 · exits 10 min after the last session ends');
+    expect(tooltip()).toContain(`Since ${formatClock(Date.parse(SUPERVISOR_STARTED))} · pid 48213 · exits 10 min after the last session ends`);
     expect(tooltip()).toContain('Machine daemon · This profile only · pid 4100 · machine mRef0123456789abcdefAB');
   });
 
