@@ -24,6 +24,7 @@ import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
 import { AnswerActionsStore, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
+import { keepInPlace } from './keep-in-place'; // board ticket 789
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
 import { useSourcePages } from './source-pages'; // the long-transcript window
@@ -86,6 +87,9 @@ export interface TranscriptListHandle {
   scrollToEnd(): void;
   readonly following: boolean;
   readonly scrollElement: HTMLDivElement | null;
+  // board ticket 789: keep a row where it is on screen for the given time while rows above it open or close; mounted or
+  // not, it is placed by the list's own offset for it (keep-in-place.ts)
+  keepInPlace(rowId: string, ms: number): void;
 }
 
 export interface TranscriptListProps {
@@ -436,6 +440,19 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     get scrollElement() {
       return scrollRef.current;
     },
+    keepInPlace: (rowId, ms) => {
+      const element = scrollRef.current;
+      if (!element) return;
+      const start = () => {
+        const index = rowsRef.current.findIndex((row) => row.id === rowId);
+        return index === -1 ? null : (virtualizer.measurementsCache[index]?.start ?? null);
+      };
+      keepInPlace(element, ms, {
+        element: () => element.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(rowId)}"]`),
+        start,
+        scrollTo: (offset) => virtualizer.scrollToOffset(offset, { behavior: 'instant' }),
+      });
+    },
   }));
 
   // UX wave U2b (R6): what is mounted, for the end of a jump's reveal
@@ -689,6 +706,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
+  const keepRow = useCallback((rowId: RowId, ms: number) => listRef.current?.keepInPlace(rowId, ms), []); // board ticket 789
   // The long-transcript window: a source whose history comes one window at a time pages older ones in as the reader
   // reaches the top, the reader's place kept through each (lane A's rules, source-pages.ts)
   const pages = useSourcePages(source, storeKey, listRef, rows, atRest);
@@ -801,8 +819,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, keepInPlace: keepRow, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor, keepRow],
   );
 
   return (

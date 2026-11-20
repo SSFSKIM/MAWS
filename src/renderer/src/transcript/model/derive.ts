@@ -107,7 +107,8 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
       out.push(time);
     }
     out.push(...rows);
-    previousAt = rows.at(-1)!.at;
+    // board ticket 789: a turn's line ends it but carries its prompt's time; the gap runs from the turn's last other row
+    previousAt = (rows.findLast((row) => row.kind !== 'divider') ?? rows.at(-1)!).at;
   };
   const emitLoose = (after: TurnId | null) => {
     for (const row of looseRows(state, looseAfter.get(after) ?? [], after)) {
@@ -192,10 +193,14 @@ export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail:
   const ofMessage = (row: RowOf<'user'>) => row.messageUuid ?? row.beside ?? null;
   const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && ofMessage(row) !== null && withdrawn.has(ofMessage(row)!) && (row.dropped || row.pending !== undefined)));
   const read = waiting === 'stacked' && kept.some(isUnread) ? kept.filter((row) => !isUnread(row)) : kept;
-  if (tail.length === 0) return read;
-  // board ticket 789: the running turn's line stays the last row, after the messages held for the next turn
-  const line = read.at(-1);
-  return line?.kind === 'divider' && line.state === 'working' ? [...read.slice(0, -1), ...tail, line] : [...read, ...tail];
+  const composed = tail.length === 0 ? read : [...read, ...tail];
+  // board ticket 789: the running turn's line is the last row, below a prompt waiting for the engine and the messages
+  // held for the next turn; it is the last line of the list read from its end
+  let at = composed.length - 1;
+  while (at >= 0 && composed[at]!.kind !== 'divider') at -= 1;
+  const line = composed[at];
+  if (line?.kind !== 'divider' || line.state !== 'working' || at === composed.length - 1) return composed;
+  return [...composed.slice(0, at), ...composed.slice(at + 1), line];
 }
 
 // P5 O9: rows a mount keeps outside the store (a terminal session's reply its interrupt cut before the engine wrote it,
@@ -205,15 +210,21 @@ export function withPlacedRows(rows: Row[], placed: readonly Row[]): Row[] {
   if (placed.length === 0) return rows;
   const after = new Map<TurnId, Row[]>();
   const loose: Row[] = [];
-  const last = new Map<TurnId, number>();
-  rows.forEach((row, i) => row.turnId !== null && row.kind !== 'divider' && last.set(row.turnId, i));
-  rows.forEach((row, i) => row.turnId !== null && row.kind === 'divider' && !last.has(row.turnId) && last.set(row.turnId, i));
+  const last = new Map<TurnId, number>(); // a turn's last row but its line
+  const lines = new Set<TurnId>(); // the turns that draw a line
+  rows.forEach((row, i) => {
+    if (row.turnId === null) return;
+    if (row.kind === 'divider') lines.add(row.turnId);
+    else last.set(row.turnId, i);
+  });
   for (const row of placed) {
-    if (row.turnId === null || !last.has(row.turnId)) loose.push(row);
+    if (row.turnId === null || (!last.has(row.turnId) && !lines.has(row.turnId))) loose.push(row);
     else after.set(row.turnId, [...(after.get(row.turnId) ?? []), row]);
   }
   const out: Row[] = [];
   rows.forEach((row, i) => {
+    // a turn whose line is all it draws takes them before its line
+    if (row.turnId !== null && row.kind === 'divider' && !last.has(row.turnId)) out.push(...(after.get(row.turnId) ?? []));
     out.push(row);
     if (row.turnId !== null && last.get(row.turnId) === i) out.push(...(after.get(row.turnId) ?? []));
   });

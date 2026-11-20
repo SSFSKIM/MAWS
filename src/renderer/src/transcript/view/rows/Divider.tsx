@@ -106,7 +106,7 @@ function TurnLine({ row }: { row: DividerRowData }) {
 }
 
 function FoldingDividerRow({ row }: { row: DividerRowData }) {
-  const { storeKey, idPrefix } = useTranscriptContext();
+  const { storeKey, idPrefix, keepInPlace: keepRow } = useTranscriptContext();
   const motion = useWorkMotion();
   const turn = row.turnId!;
   const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;
@@ -123,8 +123,12 @@ function FoldingDividerRow({ row }: { row: DividerRowData }) {
           onClick={(event) => {
             const target = !row.expanded;
             // board ticket 789: the line ends its turn, so the work opens and folds above it; the line stays under the pointer
+            // (the list's own anchor, which also places the line while the work that opened pushes it out of its window;
+            // outside a list, the line's element alone)
+            const ms = (row.expanded ? CLOSE_MOTION.ms : OPEN_MOTION.ms) + 200;
             const scroller = event.currentTarget.closest<HTMLElement>('[data-transcript-scroller]');
-            if (scroller !== null) keepInPlace(() => document.getElementById(rowElementId(idPrefix, row.id)), scroller, (row.expanded ? CLOSE_MOTION.ms : OPEN_MOTION.ms) + 200);
+            if (keepRow) keepRow(row.id, ms);
+            else if (scroller !== null) keepInPlace(scroller, ms, { element: () => document.getElementById(rowElementId(idPrefix, row.id)) });
             motion.toggle(turn, row.expanded, () => {
               const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
               if (current?.kind === 'divider' && current.expanded !== target) store.toggleTurn(storeKey, turn);
