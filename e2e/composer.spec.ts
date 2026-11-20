@@ -988,12 +988,15 @@ test('ticket 790, Stop with nothing waiting: the pause ends with the stopped tur
     .toBe(true);
 
   const [next, later] = ['Now reply exactly NEXT.', 'Then reply exactly LATER.'];
+  await messageIn(page, 0).click(); // the square's click took the keyboard
   await page.keyboard.type(next);
+  await expect(messageIn(page, 0)).toHaveText(next);
   await page.keyboard.press('Enter'); // idle: sent at once, the next turn
   await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await expect.poll(async () => (await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === next)).toBe(true);
   await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
   await page.keyboard.type(later);
+  await expect(messageIn(page, 0)).toHaveText(later);
   await page.keyboard.press('Meta+Enter'); // for after the turn: MAWS's queue holds it
   await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   const row = list.locator('li');
