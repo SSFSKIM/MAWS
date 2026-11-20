@@ -5,7 +5,7 @@
 // and `[PDF #n]` before the text, as they ride before it. Pure.
 import { asTyped } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
-import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
+import { pastedPlaceholder, replacePasted } from '@shared/composer/pasted-content';
 import { countLines } from '@shared/composer/pasted-framing';
 import type { Prefill } from '../../stores/composer';
 import { atomId, attachmentsOf, type Attachment, type ComposerDoc } from '../editor/doc';
@@ -19,7 +19,7 @@ const base64Of = (block: Base64Block) => (block.source?.type === 'base64' && typ
 // row), and the bodies in placeholder order.
 function extractPasted(text: string): { text: string; bodies: string[] } {
   const bodies: string[] = [];
-  const replaced = text.replace(new RegExp(PASTED_BLOCK.source, 'g'), (match: string, _id: string, body: string) => {
+  const replaced = replacePasted(text, ({ match, body }) => {
     bodies.push(asTyped(body)); // UX wave U1c: as pasted
     const before = match.startsWith('\n') ? '\n' : '';
     const after = match.endsWith('\n') ? '\n' : '';

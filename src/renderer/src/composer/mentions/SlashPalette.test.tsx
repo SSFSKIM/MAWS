@@ -1,5 +1,5 @@
 import { PluginKey } from '@tiptap/pm/state';
-import type { Editor } from '@tiptap/core';
+import { Editor, type JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,8 @@ import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import type { PopupHandle, PopupItem } from './popup';
+import { docOf, paragraph, textNode } from '../editor/doc';
+import { schemaExtensions } from '../editor/schema';
 import { resetChosen } from './rank';
 import { detailSide, detailTop, SlashPalette } from './SlashPalette';
 import { WIDGET_COMMANDS } from './widgets';
@@ -249,5 +251,18 @@ describe('the slash palette keeps the chosen row in view', () => {
       geometry.mockRestore();
       scroll.mockRestore();
     }
+  });
+});
+
+// board ticket 739: a command's name, which a file a model can write gives, enters the draft as one line of literal text
+describe('what the slash palette puts in the draft', () => {
+  it('a command’s row puts /<name> in place of the query as one line of literal text', () => {
+    const name = 'x<br>y<p>z</p>\nw';
+    const { command, options } = open('x', { extra: { commands: [{ name, description: '', argumentHint: null, builtin: false }], skills: [] } });
+    act(() => options().find((o) => o.textContent!.includes('<br>'))!.click());
+    const editor = new Editor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/x'))]) });
+    command.mock.calls[0]![0].apply(editor, { from: 1, to: 3 });
+    expect((editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''))).toEqual(['/x<br>y<p>z</p>\ufffdw ']);
+    editor.destroy();
   });
 });

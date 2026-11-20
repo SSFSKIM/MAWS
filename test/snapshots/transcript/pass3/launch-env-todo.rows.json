@@ -21,63 +21,6 @@
     "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
   },
   {
-    "at": "2026-09-30T09:14:23.573Z",
-    "autoDenied": 0,
-    "caption": "Ran an agent, updated todos, loaded 1 tool",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-30T09:14:35.285Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran an agent",
-      "updated todos",
-      "loaded 1 tool"
-    ],
-    "startedAt": "2026-09-30T09:14:23.578Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 2,
-        "skills": 1,
-        "web": 0
-      },
-      "childAgents": 1,
-      "costUsd": 0.08372160000000001,
-      "denials": [],
-      "durationMs": 11704,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 3,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 3,
-      "usage": {
-        "cacheCreationInputTokens": 7321,
-        "cacheReadInputTokens": 46224,
-        "inputTokens": 6,
-        "outputTokens": 575,
-        "thinkingTokens": 8
-      }
-    },
-    "toolCalls": 3,
-    "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
-  },
-  {
     "agents": [
       {
         "agentId": "ad52937ae4ef74dbd",
@@ -249,6 +192,63 @@
     "messageUuid": "faea7639-337e-4d9c-9395-0c7cfe00f956",
     "model": "claude-opus-5-5",
     "phase": "answer",
+    "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
+  },
+  {
+    "at": "2026-09-30T09:14:23.573Z",
+    "autoDenied": 0,
+    "caption": "Ran an agent, updated todos, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-30T09:14:35.285Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran an agent",
+      "updated todos",
+      "loaded 1 tool"
+    ],
+    "startedAt": "2026-09-30T09:14:23.578Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 2,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.08372160000000001,
+      "denials": [],
+      "durationMs": 11704,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 7321,
+        "cacheReadInputTokens": 46224,
+        "inputTokens": 6,
+        "outputTokens": 575,
+        "thinkingTokens": 8
+      }
+    },
+    "toolCalls": 3,
     "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
   },
   {

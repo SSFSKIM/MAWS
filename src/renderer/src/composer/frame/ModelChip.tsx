@@ -7,6 +7,7 @@
 // hands the keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model.
 // A model asked for and not yet reported running (the binding's `requested`) is marked with the selector's own word for
 // its checked row, "setting…" (P2-F wave S, the sitting's A1.6).
+import { keyboardTaken } from './close-focus';
 import { Popover } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -71,7 +72,7 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
           collisionPadding={8}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            onClosed?.();
+            if (!keyboardTaken()) onClosed?.(); // a menu opened from this one keeps the keyboard (close-focus.ts)
           }}
           className="z-50 w-[254px] overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-ui text-fg shadow-composer"
         >

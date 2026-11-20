@@ -9,12 +9,15 @@
 // daemon's restart among them, `host.status`) the state is read again, and a current read that fails drops what the
 // session held: a state the old daemon reported (`drawnBy` among it) is no longer backed, so the window draws as for a
 // session whose channel answered nothing, and no mirror is drawn on it, until a read answers again.
+// Ticket 627: a session on another machine over RL2 offers no `ownerChannel.state` (the window's helper says so): it is
+// neither read nor followed, and draws as one whose channel answered nothing.
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { OwnerChannelState } from '@shared/owner/state';
 import { ipc } from '../ipc/client';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
 
 interface OwnerChannelStore {
   bySession: ReadonlyMap<AppSessionId, OwnerChannelState>;
@@ -36,6 +39,7 @@ const attachments = new Map<AppSessionId, { count: number; off: () => void }>();
 
 // Hydrates a session's owner channel and keeps it current while anything is attached; the disposer releases one.
 export function attachOwnerChannel(appSessionId: AppSessionId, client: MawsBridge = ipc): () => void {
+  if (remoteUnavailableOf(appSessionId, 'ownerChannel.state') !== null) return () => {};
   const held = attachments.get(appSessionId);
   if (held) held.count += 1;
   else {

@@ -35,12 +35,13 @@ describe('a thinking block’s duration on a session MAWS runs (claude-opus-5-5)
   // it closes it travels on with its recorded number and has no row of its own, and at the run's close it leaves none
   it('a block with no text yet is drawn live from its start inside the run it follows, and has no row once it closes (W1)', () => {
     const rows = journal('p4-r7-loss-stages');
-    const streaming = rowsUpTo(rows, 194).at(-1)!;
+    const aboveLine = (list: Row[]) => list.filter((row) => row.kind !== 'divider').at(-1)!; // the running turn's line is its last row
+    const streaming = aboveLine(rowsUpTo(rows, 194));
     expect(streaming.kind).toBe('group');
     expect(streaming.kind === 'group' && streaming.cells.at(-1), 'its start drawn: a live thought with no text').toMatchObject({ toolName: 'thinking', status: 'running', startedAt: rows.find((row) => row.seq === 194)!.at, detail: { text: '' } });
     const closed = rowsUpTo(rows, 198);
     expect(closed.some((row) => row.kind === 'thinking'), 'no row of its own').toBe(false);
-    const run = closed.at(-1)!;
+    const run = aboveLine(closed);
     expect(run.kind === 'group' && run.cells.at(-1)?.detail).toEqual({ kind: 'thinking', text: '', durationMs: 2_460, recordedMs: 2_460 });
     expect(thinkingLabels(rowsUpTo(rows)), 'at the run’s close it leaves no row (W1)').toEqual(['Thought']);
   });

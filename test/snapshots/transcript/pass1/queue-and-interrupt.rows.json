@@ -21,86 +21,6 @@
     "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
   },
   {
-    "at": "2026-09-28T09:22:18.973Z",
-    "autoDenied": 0,
-    "caption": "Ran 4 commands (4 stopped)",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T09:22:23.032Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran 4 commands (4 stopped)"
-    ],
-    "startedAt": "2026-09-28T09:22:19.024Z",
-    "state": "stopped",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 4,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.000993,
-      "denials": [
-        {
-          "cellId": "cell:toolu_01NEnSoUyJwkZC21vfKNA56Z",
-          "disposition": "stopped",
-          "interruption": true,
-          "kind": "user-rejected"
-        },
-        {
-          "cellId": "cell:toolu_01WXTrdFDMyKeAruZKKbRqst",
-          "disposition": "stopped",
-          "interruption": true,
-          "kind": "user-rejected"
-        },
-        {
-          "cellId": "cell:toolu_011s1GPGyWzPXp6kpcaiHLdE",
-          "disposition": "stopped",
-          "interruption": true,
-          "kind": "user-rejected"
-        },
-        {
-          "cellId": "cell:toolu_01Dn5zKxMdmGMHT2q4RYWJFy",
-          "disposition": "stopped",
-          "interruption": true,
-          "kind": "user-rejected"
-        }
-      ],
-      "durationMs": 4006,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 4,
-        "reviewed": 0
-      },
-      "terminalReason": "aborted_streaming",
-      "toolCalls": 4,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 0,
-        "inputTokens": 0,
-        "outputTokens": 0,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 4,
-    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
-  },
-  {
     "at": "2026-09-28T09:22:19.657Z",
     "cells": [
       {
@@ -314,6 +234,86 @@
     "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
   },
   {
+    "at": "2026-09-28T09:22:18.973Z",
+    "autoDenied": 0,
+    "caption": "Ran 4 commands (4 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:23.032Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran 4 commands (4 stopped)"
+    ],
+    "startedAt": "2026-09-28T09:22:19.024Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 4,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.000993,
+      "denials": [
+        {
+          "cellId": "cell:toolu_01NEnSoUyJwkZC21vfKNA56Z",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_01WXTrdFDMyKeAruZKKbRqst",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_011s1GPGyWzPXp6kpcaiHLdE",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_01Dn5zKxMdmGMHT2q4RYWJFy",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 4006,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 4,
+        "reviewed": 0
+      },
+      "terminalReason": "aborted_streaming",
+      "toolCalls": 4,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 4,
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
     "at": "2026-09-28T09:22:21.810Z",
     "attachments": [],
     "dropped": true,
@@ -339,6 +339,29 @@
     "placeholders": [],
     "steer": false,
     "text": "Counting is cancelled. Reply exactly RESUMED.",
+    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
+  },
+  {
+    "at": "2026-09-28T09:22:23.641Z",
+    "durationMs": 200,
+    "id": "think:msg_011CfVbLjueS3qopFDNCKMnk:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "7359f0c5-644d-4120-a06a-e255a0f5fa7d",
+    "recordedMs": null,
+    "text": "The user is cancelling the counting request and asking me to reply with exactly \"RESUMED\".",
+    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
+  },
+  {
+    "at": "2026-09-28T09:22:23.841Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbLjueS3qopFDNCKMnk:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "RESUMED",
+    "messageUuid": "641c9e3d-30b7-472f-b785-37b3a2197971",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
     "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
   },
   {
@@ -392,29 +415,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
-  },
-  {
-    "at": "2026-09-28T09:22:23.641Z",
-    "durationMs": 200,
-    "id": "think:msg_011CfVbLjueS3qopFDNCKMnk:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "7359f0c5-644d-4120-a06a-e255a0f5fa7d",
-    "recordedMs": null,
-    "text": "The user is cancelling the counting request and asking me to reply with exactly \"RESUMED\".",
-    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
-  },
-  {
-    "at": "2026-09-28T09:22:23.841Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfVbLjueS3qopFDNCKMnk:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "RESUMED",
-    "messageUuid": "641c9e3d-30b7-472f-b785-37b3a2197971",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
   },
   {

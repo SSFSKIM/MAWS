@@ -14,6 +14,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
 import type { DictationSink } from '../composer/editor/controller'; // E9
 import type { AttachedBlock } from '../composer/editor/pasted-block'; // UX wave U6b-5a
+import { oneLine } from '../composer/editor/mention-text'; // board ticket 739
 import type { Anchor } from '@shared/anchor/anchor'; // E11
 import type { AnchorFrame } from '../transcript/model/rows'; // E11
 
@@ -356,9 +357,10 @@ export function setResubmit(appSessionId: AppSessionId, next: ResubmitState | (P
 
 // C11's ask: text at the caret of the session's mounted composer, the document kept. Unfocused (a dialog widget holds the
 // keyboard), at the caret the editor left when it lost focus; at the end when it has had none since its document was set.
+// Board ticket 739: what a widget inserts is a name (a skill's, an agent's), one line by its nature (`oneLine`).
 export function insertComposerText(appSessionId: AppSessionId, text: string): void {
   const target = useComposerStore.getState().focusTargets.get(appSessionId);
-  if (target) target.insertText(text);
+  if (target) target.insertText(oneLine(text));
   else console.warn(`[composer] insertComposerText: no composer is mounted for ${appSessionId}`);
 }
 

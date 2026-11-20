@@ -413,7 +413,9 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const duringBash = bashUse !== undefined && bashResult !== undefined && bashUse.seq < steer!.seq && steer!.seq < bashResult.seq;
       note(`G4: maws.ask.opened blocking false; the acknowledgement {status: "asked", askId} written at seq ${ack.seq}, before the answer's steer; the capsule read "Asked, answer when ready"; the steer (priority next, seq ${steer!.seq}) ${duringBash ? `went while Bash ran (its tool_use at seq ${bashUse!.seq}, its result at seq ${bashResult!.seq})` : `did not land inside Bash's span (tool_use seq ${bashUse?.seq ?? 'none'}, result seq ${bashResult?.seq ?? 'none'})`}, and ${folded ? `folded into the running turn (one main result, seq ${firstResult.seq})` : `did not fold: ${results.length} main results at seqs ${JSON.stringify(results.map((r) => r.seq))}`}; replies ${JSON.stringify(replies)}`);
       expect.soft(duringBash, 'the answer went from the row’s form while Bash ran').toBe(true);
-      expect(replies.some((r) => /ANSWER:\s*Yes/i.test(r))).toBe(true);
+      // the steer names a pick by its place, `option <k>`, never by its label (board ticket 711, `picksOf` in src/shared/maws/ask.ts):
+      // the model may report the answer as the place it read or as the label it maps to
+      expect(replies.some((r) => /ANSWER:\s*(?:"?Yes\b|option 1\b)/i.test(r)), `the answer reached the model\n${replies.join('\n---\n')}`).toBe(true);
       expect.soft(folded, 'the answer folded into the running turn').toBe(true);
       await end(s, session, before);
     });

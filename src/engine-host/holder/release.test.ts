@@ -237,7 +237,7 @@ describe('the work under the engine', () => {
     await table.sampleMemory();
     expect(s.a!.session.status().work?.descendants).toBe(0);
     await table.sampleMemory();
-    expect(s.a!.transport.requestsOf('mcp_status')).toHaveLength(1);
+    expect(s.a!.transport.requestsOf('mcp_status')).toHaveLength(2); // once, and the session's own at ready (ticket 619)
   });
 
   it('a sample whose ps began before a newer read bound the bridge, applied after it, changes nothing: 0 stays 0', async () => {
@@ -312,7 +312,7 @@ describe('D69: the owner’s server shapes on a fresh launch', () => {
     tree = resting();
     await table.sampleMemory();
     await until(() => work(s.a!) === 0, 'the servers bound');
-    expect(s.a!.transport.requestsOf('mcp_status')).toHaveLength(1);
+    expect(s.a!.transport.requestsOf('mcp_status')).toHaveLength(2); // once, and the session's own at ready (ticket 619)
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await until(() => releasing(s.a!), 'the idle release');
   });
@@ -398,7 +398,7 @@ describe('D69: the owner’s server shapes on a fresh launch', () => {
       expect(work(s.a!)).not.toBe(0);
       await table.sampleMemory(); // the helper gone: asked again, and bound
       await until(() => work(s.a!) === 0, `the servers bound (${failure})`);
-      expect(asks()).toBe(3);
+      expect(asks()).toBe(4); // three, and the session's own at ready (ticket 619)
       tables.splice(tables.indexOf(table), 1)[0]!.setIdleRelease({ idleMs: null, active: false });
     }
   });

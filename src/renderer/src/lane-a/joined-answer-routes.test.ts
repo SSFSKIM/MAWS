@@ -291,20 +291,21 @@ describe('a rewind to the joined message (u704-rewind-1, probe 2): the prefill i
     expect(boundaries(drawn(stateOf(events))).map((row) => row.detail)).toEqual([prompt]);
   });
 
-  it('from the file: the anchor’s one-line text (L54, cut inside the opening sentence) gives the prompt’s words', async () => {
+  // board ticket 740: the anchor's one-line text is the session's latest prompt, not the rewound one's; the file's route
+  // passes none and the tooltip is the rewound row's own words, whole, as on the live route
+  it('from the file: the tooltip is the rewound row’s words, the prompt whole; the anchor’s one-line text plays no part', async () => {
     const events = await fromFile(recorded('u704-rewind-1'));
-    const words = (prompt as string).replace(/\n/g, ' ');
-    expect(events.filter((event) => event.kind === 'boundary.rewind').map((event) => event.prefillText)).toEqual([words]);
-    expect(boundaries(drawn(stateOf(events))).map((row) => row.detail)).toEqual([words]);
+    expect(events.filter((event) => event.kind === 'boundary.rewind').map((event) => event.prefillText)).toEqual([null]);
+    expect(boundaries(drawn(stateOf(events))).map((row) => row.detail)).toEqual([prompt]);
   });
 
-  it('made by hand from the recording: an anchor whose one-line text holds an envelope’s head alone has no prefill and no tooltip', async () => {
+  it('made by hand from the recording: an anchor whose one-line text holds an envelope’s head alone changes nothing', async () => {
     const lines = recorded('u704-rewind-1').split('\n');
     const anchor = JSON.parse(lines[53]!) as { lastPrompt: string };
     lines[53] = JSON.stringify({ ...anchor, lastPrompt: anchor.lastPrompt.slice(anchor.lastPrompt.indexOf('[MAWS ask')) });
     const events = await fromFile(lines.join('\n'));
     expect(events.filter((event) => event.kind === 'boundary.rewind').map((event) => event.prefillText)).toEqual([null]);
-    expect(boundaries(drawn(stateOf(events))).map((row) => row.detail)).toEqual([null]);
+    expect(boundaries(drawn(stateOf(events))).map((row) => row.detail)).toEqual([prompt]);
   });
 });
 

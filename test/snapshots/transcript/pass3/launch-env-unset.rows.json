@@ -21,6 +21,38 @@
     "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
   },
   {
+    "agents": [
+      {
+        "agentId": "a3cdc0225aca8f2dd",
+        "glyph": 2,
+        "kind": "agent",
+        "name": "List files in repo",
+        "subagentType": "Explore",
+        "taskId": "a3cdc0225aca8f2dd",
+        "toolUseId": "toolu_01WRpK7GymQHDsuWtpCTPBuD"
+      }
+    ],
+    "at": "2026-09-30T09:13:19.603Z",
+    "id": "subagent:a3cdc0225aca8f2dd",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "List files in repo finished",
+    "status": "finished",
+    "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
+  },
+  {
+    "at": "2026-09-30T09:13:28.112Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfZNGweESkzZidouN2Jm8:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The subagent found one file in the repo, apart from `.git`:\n\n- `one.txt`, a plain text file (it didn't open it, so I don't know what's in it)\n\nI don't have a task-list tool in this session, so here's the two-item list as text:\n\n1. [ ] Open `one.txt` and check what's in it\n2. [ ] Decide what to do next based on what's in the file\n\nTell me what the two items should be if you had something specific in mind.",
+    "messageUuid": "f3e04e56-7260-4c91-8d8b-1d747d069966",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
+  },
+  {
     "at": "2026-09-30T09:13:14.497Z",
     "autoDenied": 0,
     "caption": "Ran an agent",
@@ -73,38 +105,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
-  },
-  {
-    "agents": [
-      {
-        "agentId": "a3cdc0225aca8f2dd",
-        "glyph": 2,
-        "kind": "agent",
-        "name": "List files in repo",
-        "subagentType": "Explore",
-        "taskId": "a3cdc0225aca8f2dd",
-        "toolUseId": "toolu_01WRpK7GymQHDsuWtpCTPBuD"
-      }
-    ],
-    "at": "2026-09-30T09:13:19.603Z",
-    "id": "subagent:a3cdc0225aca8f2dd",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "List files in repo finished",
-    "status": "finished",
-    "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
-  },
-  {
-    "at": "2026-09-30T09:13:28.112Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfZNGweESkzZidouN2Jm8:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "The subagent found one file in the repo, apart from `.git`:\n\n- `one.txt`, a plain text file (it didn't open it, so I don't know what's in it)\n\nI don't have a task-list tool in this session, so here's the two-item list as text:\n\n1. [ ] Open `one.txt` and check what's in it\n2. [ ] Decide what to do next based on what's in the file\n\nTell me what the two items should be if you had something specific in mind.",
-    "messageUuid": "f3e04e56-7260-4c91-8d8b-1d747d069966",
-    "model": "claude-opus-5-5",
-    "phase": "answer",
     "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
   },
   {

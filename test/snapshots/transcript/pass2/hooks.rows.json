@@ -21,6 +21,57 @@
     "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
   },
   {
+    "agent": null,
+    "at": "2026-09-28T10:00:57.487Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "git status --short",
+      "cwd": null,
+      "description": "Show short git status",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:01:00.894Z",
+    "expanded": true,
+    "id": "cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
+    "kind": "cell",
+    "label": "Ran `git status --short` in 3s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:00:57.487Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01Pw5t8WFEWy8m7zrSCNnca1",
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
+    "at": "2026-09-28T10:01:01.509Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeHbjncAVFRXZrmuHk1:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "5fc09e73-3bdf-4ecf-9924-0cfeaf37e839",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
     "at": "2026-09-28T10:00:55.770Z",
     "autoDenied": 0,
     "caption": "Ran a command",
@@ -73,57 +124,6 @@
       }
     },
     "toolCalls": 1,
-    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-28T10:00:57.487Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_flagged",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "git status --short",
-      "cwd": null,
-      "description": "Show short git status",
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T10:01:00.894Z",
-    "expanded": true,
-    "id": "cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
-    "kind": "cell",
-    "label": "Ran `git status --short` in 3s",
-    "paths": [],
-    "startedAt": "2026-09-28T10:00:57.487Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_01Pw5t8WFEWy8m7zrSCNnca1",
-    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
-  },
-  {
-    "at": "2026-09-28T10:01:01.509Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfVeHbjncAVFRXZrmuHk1:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "OK",
-    "messageUuid": "5fc09e73-3bdf-4ecf-9924-0cfeaf37e839",
-    "model": "claude-sonnet-5",
-    "phase": "answer",
     "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
   },
   {

@@ -17,8 +17,10 @@
 //   the engine host's listing of its agents' sidecars, its parent agents' own transcripts and the bridge's agents (the
 //   state stream's, ./agents.ts). Its background shells and monitors and its subagents, derived by sminos's rules
 //   (./jobs.ts) only when one of those changed, go to each watch in its snapshot and as a `subagents` message each time
-//   they change (UX wave U8d M2). When the session's holder ends or its bridge goes, its process is taken as gone: each
-//   watch hears its running jobs and agents `exited` before it ends. A stop is refused for a job the transcript holds
+//   they change (UX wave U8d M2). When the session's holder ends, or its bridge goes and the holder's process with it,
+//   its process is taken as gone: each watch hears its running jobs and agents `exited` before it ends. A bridge that
+//   goes while the holder's process runs (its socket gone, its child restarted) is not that (ticket 701): each watch ends
+//   on the body as last heard, which the window no longer takes to run (status unknown) until the bridge answers again. A stop is refused for a job the transcript holds
 //   ended. The body names its origin (the fence review's ruling): the holder of the bridge child whose agents it holds,
 //   as the probe that opened that child's stream saw it. A holder that moves to another process reprobes in place, so
 //   the body goes on naming the last child's holder, its final body included, until the next child's snapshot replaces
@@ -107,6 +109,7 @@ export interface LaneADeps {
   subagents?(appId: AppSessionId): Promise<SubagentEntry[]>;
   onSubagentsChanged?(listener: (appId: AppSessionId, agents: SubagentEntry[]) => void): () => void;
   onHostStreaming?(listener: () => void): () => void;
+  processAlive?(pid: number): boolean; // whether a holder's process runs (ticket 701); `kill(pid, 0)` by default
 }
 
 export interface SessionHold {
@@ -190,6 +193,16 @@ const record = (value: unknown): Record<string, unknown> | null => (value !== nu
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 const refused = (code: string, message: string): ControlResult => ({ state: 'refused', code, message });
 
+// `kill(pid, 0)`: delivered means alive, EPERM alive under another user; anything else gone.
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 // U8d: the origin the session's body names (the header): the holder its held agents' launch is tied to, else the holder
 // their stream's probe asked under; null before any stream.
 function originOf(s: Session): string | null {
@@ -229,6 +242,7 @@ export interface LaneADriver {
 export function createLaneADriver(deps: LaneADeps): LaneADriver {
   const timing: LaneATiming = { ...LANE_A_TIMING, ...deps.timing };
   const log = deps.log ?? ((line: string) => console.log(`[lane-a] ${line}`));
+  const processAlive = deps.processAlive ?? alive;
   const writer = `maws/${deps.machine}`;
   const sessions = new Map<AppSessionId, Session>();
   let seqs: SeqStore | null = null;
@@ -360,7 +374,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
 
   function unbridge(s: Session, reason: string): void {
     closeState(s);
-    s.follow?.processGone(); // no bridge: the session's process is taken as gone
+    if (!holderRuns(s)) s.follow?.processGone(); // its bridge went with its process
     endWatches(s, reason);
     s.agents.clear(); // what the gone bridge held runs no more (its last body kept each spawn)
     s.lane.dropQueued(reason);
@@ -368,6 +382,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     s.bridge = null;
     s.status = null;
     changed(s);
+  }
+
+  // Whether the process the session's holder names still runs. The registry learns an exit on its own poll, so its record
+  // can still name a process whose bridge went because it ended; the process itself says.
+  function holderRuns(s: Session): boolean {
+    const pid = Number(s.holder.split(':')[1]); // `terminal:<pid>`, `background_job:<pid>:<jobId>`
+    return Number.isSafeInteger(pid) && pid > 0 && processAlive(pid);
   }
 
   // ---- the state stream -----------------------------------------------------------------------------------------------

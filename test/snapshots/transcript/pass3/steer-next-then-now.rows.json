@@ -21,6 +21,46 @@
     "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
   },
   {
+    "agent": null,
+    "at": "2026-10-01T09:21:30.174Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 6 && echo 1",
+      "cwd": null,
+      "description": "Sleep then print 1",
+      "exitCode": null,
+      "interrupted": true,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-10-01T09:21:32.064Z",
+    "error": "Command was aborted before completion",
+    "expanded": true,
+    "id": "cell:toolu_019hqrGKb63xtMsjPwxFE7F6",
+    "kind": "cell",
+    "label": "Failed `sleep 6 && echo 1` in 1s",
+    "paths": [],
+    "startedAt": "2026-10-01T09:21:30.174Z",
+    "status": "error",
+    "toolName": "Bash",
+    "toolUseId": "toolu_019hqrGKb63xtMsjPwxFE7F6",
+    "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
+  },
+  {
     "at": "2026-10-01T09:21:28.568Z",
     "autoDenied": 0,
     "caption": "Ran a command (1 failed)",
@@ -74,46 +114,6 @@
       }
     },
     "toolCalls": 1,
-    "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
-  },
-  {
-    "agent": null,
-    "at": "2026-10-01T09:21:30.174Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_flagged",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "sleep 6 && echo 1",
-      "cwd": null,
-      "description": "Sleep then print 1",
-      "exitCode": null,
-      "interrupted": true,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "",
-      "truncated": null
-    },
-    "endedAt": "2026-10-01T09:21:32.064Z",
-    "error": "Command was aborted before completion",
-    "expanded": true,
-    "id": "cell:toolu_019hqrGKb63xtMsjPwxFE7F6",
-    "kind": "cell",
-    "label": "Failed `sleep 6 && echo 1` in 1s",
-    "paths": [],
-    "startedAt": "2026-10-01T09:21:30.174Z",
-    "status": "error",
-    "toolName": "Bash",
-    "toolUseId": "toolu_019hqrGKb63xtMsjPwxFE7F6",
     "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
   },
   {

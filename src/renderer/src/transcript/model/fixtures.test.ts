@@ -228,9 +228,10 @@ describe('synthetic journals', () => {
     // A4: the successful MessageDisplay, PreToolUse and Stop hooks show nothing; the Bash call is the only work.
     expect(cellsOf(expanded).map((cell) => cell.toolName)).toEqual(['Bash']);
     expect(ofKind(expanded, 'error').filter((row) => row.scope === 'hook')).toEqual([]);
-    // The answer comes after the turn's work, as the last row of its turn.
+    // The answer comes after the turn's work, as the last row above the turn's line.
     const second = inTurn(expanded, state.order[1]);
-    expect(second.at(-1)).toMatchObject({ kind: 'assistant_text', phase: 'answer' });
+    expect(second.at(-2)).toMatchObject({ kind: 'assistant_text', phase: 'answer' });
+    expect(second.at(-1)).toMatchObject({ kind: 'divider' });
   });
 
   it('transcript/math-and-diagrams: the answer carries the math and the mermaid fence verbatim', () => {

@@ -22,6 +22,7 @@ import { useSettings } from '../../stores/settings';
 import type { MachineRef } from '@shared/machine/ref';
 import { artifactHost } from '..';
 import { registerArtifactEditor, type ArtifactEditor, type ArtifactEditorProps } from '../registry';
+import { oneLine } from '../../composer/editor/mention-text'; // board ticket 739
 import { DESIGN_SYSTEM_COPY as C } from './copy';
 import { DeleteSystemSheet } from './DeleteSystemSheet';
 import { DesignSystemBody } from './DesignSystemBody';
@@ -140,7 +141,7 @@ function OpenBody(props: { artifactId: string; machine: MachineRef; handle: Docu
     unavailable: session === null ? C.noSession : null,
     onAsk: () => {
       if (session === null) return;
-      queueComposerAttachment(session, { files: [], text: C.adoptRequest(name, artifactId) });
+      queueComposerAttachment(session, { files: [], text: C.adoptRequest(oneLine(name), artifactId) }); // board ticket 739: the name on one line
       toast({ level: 'info', text: C.adoptAsked, actions: [], dismissible: true });
     },
   };

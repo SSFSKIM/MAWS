@@ -128,8 +128,8 @@ describe('the rows of a js call', () => {
     await waitFor(() => expect(shape(view.container)).not.toContain('cell:j1'));
     const folded = shape(view.container);
     expect(activityRows(view.container)).toEqual(ACTION_ROWS);
-    expect(folded.indexOf('divider')).toBeLessThan(folded.indexOf(ACTION_ROWS[0]));
     expect(folded.indexOf(ACTION_ROWS.at(-1)!)).toBeLessThan(folded.indexOf('assistant_text')); // the call's place, before the answer
+    expect(folded.indexOf('assistant_text')).toBeLessThan(folded.indexOf('divider')); // the turn's line ends the turn (board ticket 789)
     expect(view.container.querySelector('[data-kind="divider"]')!.textContent).toMatch(/ · Read a, used /); // the folded js call is still a part of the turn's caption (UX wave U2)
   });
 

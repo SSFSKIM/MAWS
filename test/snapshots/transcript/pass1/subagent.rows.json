@@ -21,61 +21,6 @@
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   },
   {
-    "at": "2026-09-28T09:22:05.261Z",
-    "autoDenied": 0,
-    "caption": "Ran 2 agents",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T09:22:12.440Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:78bf314c-d854-4662-b810-fede10ae5be3",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran 2 agents"
-    ],
-    "startedAt": "2026-09-28T09:22:05.308Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 2,
-      "costUsd": 0.0594499,
-      "denials": [],
-      "durationMs": 7130,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 10347,
-        "cacheReadInputTokens": 33874,
-        "inputTokens": 18,
-        "outputTokens": 614,
-        "thinkingTokens": 274
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
-  },
-  {
     "at": "2026-09-28T09:22:06.122Z",
     "durationMs": 1746,
     "id": "think:msg_011CfVbKS8JGJgpd1HAKitsJ:0",
@@ -139,6 +84,84 @@
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   },
   {
+    "at": "2026-09-28T09:22:05.261Z",
+    "autoDenied": 0,
+    "caption": "Ran 2 agents",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:12.440Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:78bf314c-d854-4662-b810-fede10ae5be3",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran 2 agents"
+    ],
+    "startedAt": "2026-09-28T09:22:05.308Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 2,
+      "costUsd": 0.0594499,
+      "denials": [],
+      "durationMs": 7130,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 10347,
+        "cacheReadInputTokens": 33874,
+        "inputTokens": 18,
+        "outputTokens": 614,
+        "thinkingTokens": 274
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
+  },
+  {
+    "at": "2026-09-28T09:22:12.953Z",
+    "durationMs": 567,
+    "id": "think:msg_011CfVbKxZsjwpVeScUfSrb6:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "601fa964-aa9c-4db2-aa24-146bd55b02b1",
+    "recordedMs": null,
+    "text": "The first agent has completed and returned \"ONE\" as the content of one.txt. Now I need to wait for the second agent (ae75ba6ce5d866acc) which is running in the background. Let me wait for that notification.",
+    "turnId": "turn:ereplay:journal:355:1"
+  },
+  {
+    "at": "2026-09-28T09:22:13.521Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbKxZsjwpVeScUfSrb6:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "First agent complete: one.txt contains `ONE`. Waiting for second agent.",
+    "messageUuid": "2e68b5bc-3a83-4d1d-9cde-267fc80fa2c5",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:355:1"
+  },
+  {
     "at": "2026-09-28T09:22:12.445Z",
     "autoDenied": 0,
     "caption": "",
@@ -192,27 +215,27 @@
     "turnId": "turn:ereplay:journal:355:1"
   },
   {
-    "at": "2026-09-28T09:22:12.953Z",
-    "durationMs": 567,
-    "id": "think:msg_011CfVbKxZsjwpVeScUfSrb6:0",
+    "at": "2026-09-28T09:22:14.351Z",
+    "durationMs": 596,
+    "id": "think:msg_011CfVbL4V4tG3y87GwBBNF3:0",
     "kind": "thinking",
     "live": false,
-    "messageUuid": "601fa964-aa9c-4db2-aa24-146bd55b02b1",
+    "messageUuid": "0707bb22-bd76-46da-ac4e-cfa9d99ea633",
     "recordedMs": null,
-    "text": "The first agent has completed and returned \"ONE\" as the content of one.txt. Now I need to wait for the second agent (ae75ba6ce5d866acc) which is running in the background. Let me wait for that notification.",
-    "turnId": "turn:ereplay:journal:355:1"
+    "text": "Perfect! Both agents have now completed:\n- First agent: one.txt contains \"ONE\"\n- Second agent: two.txt contains \"TWO\"\n\nNow I need to summarize this in one line as the user requested.",
+    "turnId": "turn:ereplay:journal:425:1"
   },
   {
-    "at": "2026-09-28T09:22:13.521Z",
+    "at": "2026-09-28T09:22:14.948Z",
     "blockIndex": 1,
-    "id": "text:msg_011CfVbKxZsjwpVeScUfSrb6:1",
+    "id": "text:msg_011CfVbL4V4tG3y87GwBBNF3:1",
     "kind": "assistant_text",
     "live": false,
-    "markdown": "First agent complete: one.txt contains `ONE`. Waiting for second agent.",
-    "messageUuid": "2e68b5bc-3a83-4d1d-9cde-267fc80fa2c5",
+    "markdown": "Both agents finished: one.txt is \"ONE\" and two.txt is \"TWO\".",
+    "messageUuid": "5fe8e26b-1f38-4083-8117-f064a4b1dd85",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:ereplay:journal:355:1"
+    "turnId": "turn:ereplay:journal:425:1"
   },
   {
     "at": "2026-09-28T09:22:13.829Z",
@@ -265,29 +288,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:425:1"
-  },
-  {
-    "at": "2026-09-28T09:22:14.351Z",
-    "durationMs": 596,
-    "id": "think:msg_011CfVbL4V4tG3y87GwBBNF3:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "0707bb22-bd76-46da-ac4e-cfa9d99ea633",
-    "recordedMs": null,
-    "text": "Perfect! Both agents have now completed:\n- First agent: one.txt contains \"ONE\"\n- Second agent: two.txt contains \"TWO\"\n\nNow I need to summarize this in one line as the user requested.",
-    "turnId": "turn:ereplay:journal:425:1"
-  },
-  {
-    "at": "2026-09-28T09:22:14.948Z",
-    "blockIndex": 1,
-    "id": "text:msg_011CfVbL4V4tG3y87GwBBNF3:1",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "Both agents finished: one.txt is \"ONE\" and two.txt is \"TWO\".",
-    "messageUuid": "5fe8e26b-1f38-4083-8117-f064a4b1dd85",
-    "model": "claude-haiku-4-5-20251001",
-    "phase": "answer",
     "turnId": "turn:ereplay:journal:425:1"
   },
   {

@@ -4,7 +4,7 @@
 // built by hand where only their kind and the fields the rule reads matter, and from events where the derivation's
 // own shapes do. Every text is invented.
 import { describe, expect, it } from 'vitest';
-import { rowsOf } from '../../transcript/model/derive';
+import { rowsOf, withQueueTail } from '../../transcript/model/derive';
 import { rowId } from '../../transcript/model/keys';
 import { applyEvents, createState, withUi } from '../../transcript/model/reduce';
 import type { Row, TurnId } from '../../transcript/model/rows';
@@ -148,17 +148,45 @@ describe('a stretch’s key (decision 9)', () => {
 });
 
 describe('the rows of no stretch (decision 11)', () => {
-  it('a closed turn’s line is drawn in its place only while a stretch that holds a row of that turn is open', () => {
-    const rows = [prompt(), divider(T1), cell(), text('<message>Done.</message>')];
+  // board ticket 789: a turn's line ends its turn
+  it('a closed turn’s line is drawn in its place, the turn’s end, only while a stretch that holds a row of that turn is open', () => {
+    const rows = [prompt(), cell(), text('<message>Done.</message>'), divider(T1)];
     expect(closed(rows)).toEqual(['user', '› record', 'assistant_text']);
-    expect(opened(rows)).toEqual(['user', 'divider', 'cell', '‹ fold', 'assistant_text']);
+    expect(opened(rows)).toEqual(['user', 'cell', '‹ fold', 'assistant_text', 'divider']);
   });
 
-  it('the running turn’s line is always drawn, directly after the record line that covers its place (ruling 5)', () => {
-    const rows = [prompt(), divider(T1, 'working'), cell(), cell()];
+  // board ticket 789 (the owner, 2026-11-20), reversing ruling 5: the running turn's line is the last row, below the
+  // record lines and the messages, as the engine's terminal draws its spinner
+  it('the running turn’s line is always drawn, in its place at the turn’s end', () => {
+    const rows = [prompt(), cell(), cell(), divider(T1, 'working')];
     expect(closed(rows)).toEqual(['user', '› record', 'divider']);
-    expect(opened(rows)).toEqual(['user', 'divider', 'cell', 'cell', '‹ fold']);
-    expect(closed([prompt(), divider(T1, 'working')])).toEqual(['user', 'divider']); // nothing folded yet: in its place
+    expect(opened(rows)).toEqual(['user', 'cell', 'cell', '‹ fold', 'divider']);
+    expect(closed([prompt(), divider(T1, 'working')])).toEqual(['user', 'divider']); // nothing folded yet
+  });
+
+  it('the running turn’s line, derived, is the view’s last row below its messages and record lines, folded or open', () => {
+    const b = builder();
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.text('m1', 0, '<message>Found one note.</message>');
+    b.toolUse('t2', 'Bash', { command: 'wc -l notes/a.md' });
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+    expect(closed(rows).filter((kind) => kind !== 'time')).toEqual(['user', '› record', 'assistant_text', '› record', 'divider']);
+    expect(opened(rows).at(-1)).toBe('divider');
+  });
+
+  // the review's finding: a prompt waiting for the engine stands after the running turn; the line stays the last row
+  it('the running turn’s line stands below a prompt waiting for the engine, folded or open', () => {
+    const b = builder();
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.emit('user.message', { messageUuid: 's1' as never, content: 'and the drafts', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = withQueueTail(rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 })), new Set(), []);
+    expect(closed(rows).filter((kind) => kind !== 'time').slice(-2)).toEqual(['user', 'divider']);
+    expect(opened(rows).filter((kind) => kind !== 'time').slice(-2)).toEqual(['user', 'divider']);
   });
 
   it('a turn’s line whose place a closed stretch covers is drawn after that record line while another record of its turn is open', () => {
@@ -332,7 +360,7 @@ describe('over a derived session', () => {
     const flat = withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 });
     const rows = rowsOf(flat);
     expect(closed(rows)).toEqual(['time', 'user', 'head', '› record', 'user', '› record', 'assistant_text']);
-    expect(opened(rows)).toEqual(['time', 'user', 'divider', 'assistant_text', 'cell', 'assistant_text', '‹ fold', 'user', 'divider', 'cell', '‹ fold', 'assistant_text']);
+    expect(opened(rows)).toEqual(['time', 'user', 'assistant_text', 'cell', 'assistant_text', '‹ fold', 'divider', 'user', 'cell', '‹ fold', 'assistant_text', 'divider']);
   });
 });
 
@@ -373,9 +401,10 @@ describe('a stretch stays the one the reader opened', () => {
   const lines = (rows: readonly Row[]) => rows.filter((r): r is Extract<Row, { kind: 'record_fold' }> => r.kind === 'record_fold');
 
   it('the derivation’s own shapes: the thought alone, then inside its call’s run, then beside its one call', () => {
-    expect(windowAt(0, false).map((r) => r.kind)).toEqual(['thinking']);
-    expect(windowAt(1, false).map((r) => r.kind)).toEqual(['group']);
-    expect(windowAt(2, false).map((r) => r.kind)).toEqual(['thinking', 'cell']);
+    // each window ends with the turn's line, which ends its turn (board ticket 789)
+    expect(windowAt(0, false).map((r) => r.kind)).toEqual(['thinking', 'divider']);
+    expect(windowAt(1, false).map((r) => r.kind)).toEqual(['group', 'divider']);
+    expect(windowAt(2, false).map((r) => r.kind)).toEqual(['thinking', 'cell', 'divider']);
     expect(stretchesOf(windowAt(0, false))[0].key).not.toBe(stretchesOf(windowAt(1, false))[0].key); // the key as drawn moves
     expect(stretchesOf(windowAt(2, true)).at(-1)!.key).toBe(COMMENTARY);
   });
@@ -402,7 +431,8 @@ describe('a stretch stays the one the reader opened', () => {
       const drawn = mirrorRows(windowAt(step, paged), { openStretches });
       const at = `at ${STEPS[step]}${paged ? ', paged' : ''}`;
       expect(lines(drawn).map((line) => line.open), at).toEqual(paged ? [false, true] : [true]); // the earlier turn's stays closed
-      expect(drawn.at(-1)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
+      expect(drawn.at(-2)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
+      expect(drawn.at(-1)?.kind, at).toBe('divider'); // then the turn's line, which ends its turn (board ticket 789)
       expect(drawn.some((r) => r.kind === 'thinking' || r.kind === 'group'), at).toBe(true); // its rows in sight
     }
     // the press on `‹ fold to report` takes the key the line carries, and the stretch folds
@@ -418,9 +448,9 @@ describe('a stretch stays the one the reader opened', () => {
   // writes), gone once its call comes, where the run that call starts stands in its place, and the run unwrapped at the
   // completion; the opening passes to the run, then to the call.
   it('a thought with no text, opened while it streams alone: still open once its call’s run stands in its place, and once the run unwraps', () => {
-    expect(windowAt(0, false, true).map((r) => r.kind)).toEqual(['thinking']);
-    expect(windowAt(1, false, true).map((r) => r.kind)).toEqual(['group']); // the thought is gone: the run holds the call alone
-    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell']);
+    expect(windowAt(0, false, true).map((r) => r.kind)).toEqual(['thinking', 'divider']);
+    expect(windowAt(1, false, true).map((r) => r.kind)).toEqual(['group', 'divider']); // the thought is gone: the run holds the call alone
+    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell', 'divider']);
     const pressed = lines(mirrorRows(windowAt(0, false, true), {})).at(-1)!;
     const openStretches = new Set([pressed.stretch]);
     let before = windowAt(0, false, true);

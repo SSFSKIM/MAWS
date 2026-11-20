@@ -86,12 +86,12 @@ describe('where an arrival’s row sits (decision 5)', () => {
     b.text('m2', 0, 'It failed; here is why.');
     b.end(['u1']);
     const list = expanded(b.events);
-    expect(kinds(list)).toEqual(['user', 'divider', 'cell', 'assistant_text', 'notice', 'assistant_text']);
+    expect(kinds(list)).toEqual(['user', 'cell', 'assistant_text', 'notice', 'assistant_text', 'divider']);
     expect(of(list, 'assistant_text').map((row) => row.phase)).toEqual(['commentary', 'answer']);
     expect(of(list, 'notice')[0]).toMatchObject({ outcome: 'failed', text: FAILED });
   });
 
-  it('any other arrival at a turn’s head is the first row under the divider, and the divider of a turn the person did not start names it', () => {
+  it('any other arrival at a turn’s head is the turn’s first row, and the line of a turn the person did not start names it', () => {
     const b = builder();
     engineTurn(b);
     carry(b, 'w1', [{ class: 'wake' }], 'the bridge’s prompt');
@@ -104,13 +104,13 @@ describe('where an arrival’s row sits (decision 5)', () => {
     b.result('t1', 'a');
     b.end(['u1']);
     const list = expanded(b.events);
-    expect(kinds(list)).toEqual(['divider', 'notice', 'divider', 'agent_message', 'notice', 'user', 'divider', 'cell']);
+    expect(kinds(list)).toEqual(['notice', 'divider', 'agent_message', 'divider', 'notice', 'user', 'cell', 'divider']);
     expect(divider(list, 0).opener).toEqual({ class: 'wake', line: NOTICE.wake });
     expect(divider(list, 1).opener).toEqual({ class: 'peer', line: 'Message from @docs: hello from the docs session' });
     expect(divider(list, 2).opener).toBeUndefined(); // the person's own turn
   });
 
-  it('names a turn by the first arrival at its head, above the divider or under it, and by none that came after work began', () => {
+  it('names a turn by the first arrival at its head, and by none that came after work began', () => {
     const b = builder();
     engineTurn(b);
     carry(b, 'n1', [task()]);
@@ -178,9 +178,9 @@ describe('what stays through a fold (Interfaces D)', () => {
     b.text('m1', 0, 'Done.');
     endEngine(b);
     const folded = shown(rowsOf(reduce(b.events)));
-    expect(folded.map((row) => (row.kind === 'notice' ? `notice:${row.class}:${row.outcome}` : row.kind))).toEqual(['notice:task:completed', 'divider', 'notice:task:failed', 'notice:schedule:null', 'assistant_text']);
+    expect(folded.map((row) => (row.kind === 'notice' ? `notice:${row.class}:${row.outcome}` : row.kind))).toEqual(['notice:task:completed', 'notice:task:failed', 'notice:schedule:null', 'assistant_text', 'divider']);
     const all = shown(expanded(b.events));
-    expect(all.filter((row) => !isPersistentRow(row)).map((row) => (row.kind === 'notice' ? `notice:${row.class}` : row.kind))).toEqual(['divider', 'cell', 'notice:task', 'notice:answer', 'notice:wake', 'agent_message', 'agent_message']);
+    expect(all.filter((row) => !isPersistentRow(row)).map((row) => (row.kind === 'notice' ? `notice:${row.class}` : row.kind))).toEqual(['cell', 'notice:task', 'notice:answer', 'notice:wake', 'agent_message', 'agent_message', 'divider']);
   });
 
   // UX wave U1b (decision 9): the notice stays the head row a turn's `opener` is read from, so a turn the answer opened
@@ -194,7 +194,7 @@ describe('what stays through a fold (Interfaces D)', () => {
     b.text('m1', 0, 'Going with the first.');
     endEngine(b);
     const folded = shown(rowsOf(reduce(b.events)));
-    expect(kinds(folded)).toEqual(['divider', 'assistant_text']);
+    expect(kinds(folded)).toEqual(['assistant_text', 'divider']);
     expect(of(shown(expanded(b.events)), 'notice').map((row) => row.class)).toEqual(['answer']);
     const line = divider(folded);
     expect(line.opener?.class).toBe('answer');
@@ -543,7 +543,7 @@ describe('a peer’s message is one turn (decision 4)', () => {
     const state = reduce(b.events);
     expect(state.order).toHaveLength(1);
     expect(state.turns.get(state.order[0]!)!.origin).toBe('peer');
-    expect(kinds(rowsOf(withAllExpanded(state)))).toEqual(['divider', 'agent_message']);
+    expect(kinds(rowsOf(withAllExpanded(state)))).toEqual(['agent_message', 'divider']);
   });
 
   it('the same message not marked synthetic opens a second, pending turn of the person’s and draws a bubble: the defect a caller avoids by marking it', () => {
@@ -552,7 +552,7 @@ describe('a peer’s message is one turn (decision 4)', () => {
     const state = reduce(b.events);
     expect(state.order).toHaveLength(2);
     expect(state.turns.get(state.order[1]!)).toMatchObject({ origin: 'human', accepted: false });
-    expect(kinds(rowsOf(withAllExpanded(state)))).toEqual(['divider', 'agent_message', 'user']);
+    expect(kinds(rowsOf(withAllExpanded(state)))).toEqual(['agent_message', 'divider', 'user']);
   });
 });
 

@@ -22,6 +22,103 @@ const group = (list: Row[], n = 0) => find(list, 'group', n);
 
 afterEach(() => configureTime(null));
 
+// Board ticket 789 (the owner, 2026-11-20): the turn's line ends its turn, as the engine's terminal draws its spinner
+// and duration: while the turn runs it is the turn's last row (after the held messages too), and once the turn ends its
+// closing line stays at the end of that turn, folded or open.
+describe('the turn’s line ends its turn', () => {
+  const work = (b: Builder) => {
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.toolUse('t2', 'Bash', { command: 'wc -l notes/a.md' });
+    b.result('t2', '3', { structured: BASH_RESULT('3') });
+  };
+
+  it('while the turn runs, the line is its last row, after the messages held for the next turn', () => {
+    const b = builder(); work(b); b.text('m1', 0, 'Still counting.');
+    const list = rowsOf(reduce(b.events));
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
+    expect(list.at(-1)).toMatchObject({ kind: 'divider', state: 'working' });
+    const held = heldRow({ queueId: 'q-1', content: 'then sort them', createdAt: '2026-09-28T10:00:09.000Z' });
+    expect(withQueueTail(list, new Set(), [held]).map((row) => row.id).slice(-2)).toEqual(['held:q-1', list.at(-1)!.id]);
+  });
+
+  it('once the turn ends, its closing line ends that turn, folded and open, and the next turn follows it', () => {
+    const b = builder(); work(b); b.text('m1', 0, 'Two notes, three lines.'); b.end(['u1']);
+    b.turn('u2', 'and the rest'); b.text('m2', 0, 'Nothing else.'); b.end(['u2']);
+    const first = turnId.ofMessage(uuid('u1'));
+    const ofFirst = (list: Row[]) => kinds(list.filter((row) => row.turnId === first && row.kind !== 'time'));
+    expect(ofFirst(rowsOf(reduce(b.events)))).toEqual(['user', 'assistant_text', 'divider']);
+    expect(ofFirst(rows(b.events))).toEqual(['user', 'group', 'assistant_text', 'divider']);
+    const list = rowsOf(reduce(b.events));
+    expect(list.findIndex((row) => row.id === rowId.divider(first))).toBeLessThan(list.findIndex((row) => row.kind === 'user' && row.turnId !== first));
+  });
+
+  it('keeps a mount’s placed rows before their turn’s line', () => {
+    const b = builder(); work(b); b.end(['u1']);
+    const list = rows(b.events);
+    const first = turnId.ofMessage(uuid('u1'));
+    const kept = { id: 'k1', turnId: first, at: '2026-09-28T10:00:01.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: 'cut short', live: false, phase: 'answer', model: null } as Row;
+    expect(kinds(withPlacedRows(list, [kept]).filter((row) => row.kind !== 'time'))).toEqual(['user', 'group', 'assistant_text', 'divider']);
+  });
+
+  // the review's finding: a turn whose only drawn row is its line (a promptless turn stopped before any reply)
+  it('keeps a mount’s placed rows before the line of a turn that draws nothing else', () => {
+    const turn = turnId.ofMessage(uuid('u9'));
+    const line = { id: rowId.divider(turn), turnId: turn, at: '2026-09-28T10:00:01.000Z', kind: 'divider', state: 'stopped' } as unknown as Row;
+    const kept = { id: 'k1', turnId: turn, at: '2026-09-28T10:00:02.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: 'cut short', live: false, phase: 'answer', model: null } as Row;
+    expect(withPlacedRows([line], [kept]).map((row) => row.id)).toEqual(['k1', line.id]);
+  });
+
+  // the review's finding: a prompt waiting for the engine has a row after the running turn; the line still ends the list
+  it('while the turn runs, its line stands below a prompt waiting for the engine, and below the held messages', () => {
+    const b = builder(); work(b);
+    b.emit('user.message', { messageUuid: uuid('s1'), content: 'and the drafts', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const list = rowsOf(reduce(b.events));
+    expect(list.find((row) => row.kind === 'user' && row.messageUuid === 's1')).toMatchObject({ pending: 'next' });
+    const shown = withQueueTail(list, new Set(), []);
+    expect(shown.at(-1)).toMatchObject({ kind: 'divider', state: 'working' });
+    expect(kinds(shown).slice(-2)).toEqual(['user', 'divider']);
+    const held = heldRow({ queueId: 'q-1', content: 'then sort them', createdAt: '2026-09-28T10:00:09.000Z' });
+    expect(withQueueTail(list, new Set(), [held]).map((row) => row.id).slice(-3)).toEqual([shown.at(-2)!.id, 'held:q-1', shown.at(-1)!.id]);
+    expect(withQueueTail(shown, new Set(), [])).toBe(shown); // nothing to move: the list itself
+  });
+
+  // the review's finding: a separator measures the gap from the turn's end, not from its line's own time (the prompt's)
+  it('a long turn adds no separator before a prompt that follows its end closely', () => {
+    const b = builder('2026-09-28T09:00:00.000Z');
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.tick(80 * 60_000);
+    b.text('m1', 0, 'Two notes.');
+    b.end(['u1']);
+    b.tick(60_000);
+    b.turn('u2', 'and the drafts');
+    b.text('m2', 0, 'None.');
+    b.end(['u2']);
+    expect(kinds(rowsOf(reduce(b.events))).filter((kind) => kind === 'time')).toHaveLength(1);
+  });
+
+  // the review's finding: the gap runs from the turn's recorded end, whichever of its rows the disclosure draws; a late
+  // call that folds away must not decide it
+  it.each([false, true])('a prompt a minute after a long turn with a late call and no answer gets no separator (open=%s)', (open) => {
+    const b = builder('2026-09-28T09:00:00.000Z');
+    b.turn('u1', 'tidy the notes');
+    b.tick(80 * 60_000);
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.end(['u1']);
+    b.tick(60_000);
+    b.turn('u2', 'and the drafts');
+    b.text('m2', 0, 'None.');
+    b.end(['u2']);
+    const list = open ? rows(b.events) : rowsOf(reduce(b.events));
+    expect(list.some((row) => row.kind === 'cell' || row.kind === 'group')).toBe(open);
+    expect(kinds(list).filter((kind) => kind === 'time')).toHaveLength(1);
+  });
+});
+
 describe('group state machine', () => {
   it('starts a group at the first groupable cell and folds consecutive groupable cells into it', () => {
     const b = builder();
@@ -35,7 +132,7 @@ describe('group state machine', () => {
     b.text('m9', 0, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
     const g = group(list);
     expect(g.id).toBe(rowId.group('cell:t1' as never));
     expect(g.cells.map((cell) => cell.id)).toEqual(['cell:t1', 'cell:t2', 'cell:t3']);
@@ -61,7 +158,7 @@ describe('group state machine', () => {
     b.result('t5', 'ok');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'cell', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'cell', 'group', 'divider']);
     expect(group(list, 0).cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2']);
     expect(find(list, 'cell')).toMatchObject({ id: 'cell:t3', status: 'denied' });
     expect(group(list, 1).cells.map((c) => c.id)).toEqual(['cell:t4', 'cell:t5']);
@@ -95,7 +192,7 @@ describe('group state machine', () => {
     b.text('m2', 0, 'Answer');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text', 'group', 'subagent', 'group', 'boundary', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'group', 'subagent', 'group', 'boundary', 'group', 'assistant_text', 'divider']);
     expect(find(list, 'assistant_text', 0)).toMatchObject({ phase: 'commentary', markdown: 'Now the agent.' });
     expect(find(list, 'assistant_text', 1)).toMatchObject({ phase: 'answer', markdown: 'Answer' });
     expect(list.filter((row) => row.kind === 'group').map((row) => (row as Extract<Row, { kind: 'group' }>).cells.length)).toEqual([2, 2, 2, 2]);
@@ -115,7 +212,7 @@ describe('group state machine', () => {
     b.text('m3', 1, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
     const g = group(list);
     expect(g.cells.map((c) => c.id)).toEqual(['cell:think:m1:0', 'cell:t1', 'cell:think:m2:0', 'cell:t2', 'cell:think:m3:0']);
     expect(g.id).toBe('group:cell:t1');
@@ -138,7 +235,7 @@ describe('group state machine', () => {
     b.text('m2', 0, 'DONE');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'thinking', 'cell', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'thinking', 'cell', 'assistant_text', 'divider']);
     expect(find(list, 'cell')).toMatchObject({ id: 'cell:t1', label: 'Ran `git log` in 0s', category: 'commands' });
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'shell', command: 'git log', stdout: '2299dcc seed', exitCode: 0 });
   });
@@ -154,7 +251,7 @@ describe('group state machine', () => {
     b.result('t2', 'ok');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'divider']);
     const g = group(list);
     expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2']);
     expect(g.summary).toBe('Updated todos, ran a command');
@@ -163,7 +260,7 @@ describe('group state machine', () => {
     alone.toolUse('t1', 'EnterPlanMode', {});
     alone.result('t1', 'ok');
     alone.end(['u1']);
-    expect(kinds(rows(alone.events))).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(rows(alone.events))).toEqual(['time', 'user', 'cell', 'divider']);
   });
 
   it('an active group never unwraps and carries its caption so far', () => {
@@ -172,7 +269,7 @@ describe('group state machine', () => {
     b.toolUse('t1', 'Bash', { command: 'pnpm test' });
     b.emit('tool.progress', { toolUseId: tool('t1'), toolName: 'Bash', elapsedSeconds: 3, taskId: null, heartbeat: true });
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'divider']);
     expect(group(list)).toMatchObject({ state: 'active', summary: 'Ran a command' });
     expect(group(list)).not.toHaveProperty('activeLabel');
     expect(group(list).cells[0].status).toBe('running');
@@ -220,7 +317,7 @@ describe('group state machine', () => {
     b.result('t1', [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }], { structured: { isImage: true } });
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(list)).toEqual(['time', 'user', 'cell', 'divider']);
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'image', images: [{ dataUrl: 'data:image/png;base64,AAAA', mediaType: 'image/png' }] });
   });
 
@@ -301,7 +398,7 @@ describe('group state machine', () => {
     b.emit('subagent.started', { taskId: task('k3'), toolUseId: tool('a3'), description: 'C', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'subagent', 'cell', 'subagent']);
+    expect(kinds(list)).toEqual(['time', 'user', 'subagent', 'cell', 'subagent', 'divider']);
     expect(list.filter((row) => row.kind === 'subagent').map((row) => (row as Extract<Row, { kind: 'subagent' }>).agents.map((a) => a.name))).toEqual([['A'], ['B', 'C']]);
   });
 
@@ -314,7 +411,7 @@ describe('group state machine', () => {
     b.end(['u1']);
     const state = reduce(b.events);
     const list = rowsOf(state);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'divider']);
     expect(find(list, 'divider').expanded).toBe(false);
   });
 
@@ -331,9 +428,9 @@ describe('group state machine', () => {
     b.text('m2', 0, 'Red it is.');
     b.end(['u1']);
     const list = rowsOf(reduce(b.events));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'question', 'assistant_text', 'divider']);
     expect(find(list, 'assistant_text')).toMatchObject({ id: 'text:m2:0', phase: 'answer' }); // 'Red it is.'
-    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'divider', 'assistant_text', 'cell', 'question', 'assistant_text']);
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'assistant_text', 'cell', 'question', 'assistant_text', 'divider']);
   });
 });
 
@@ -358,10 +455,10 @@ describe.each(['mcp__doperpowers__AskUserQuestion', 'mcp__sminos__AskUserQuestio
   it('a blocking ask is a question row with the summary’s answers, in view when its turn folds', () => {
     const events = asked({ questions: QUESTIONS }, 'Your questions have been answered: "Which colour?"="Red". You can now continue with these answers in mind.');
     const list = rowsOf(reduce(events));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question']);
+    expect(kinds(list)).toEqual(['time', 'user', 'question', 'divider']);
     expect(find(list, 'question')).toMatchObject({ id: rowId.question(tool('q1')), toolUseId: 'q1', answers: { 'Which colour?': 'Red' }, error: null });
     expect(find(list, 'question').questions).toEqual([{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red', description: null, preview: null }, { label: 'Blue', description: null, preview: null }] }]);
-    expect(kinds(rows(events))).toEqual(['time', 'user', 'divider', 'cell', 'question']);
+    expect(kinds(rows(events))).toEqual(['time', 'user', 'cell', 'question', 'divider']);
   });
 
   it('an async ask is a question row awaiting its answer: no answers, no refusal', () => {
@@ -396,7 +493,7 @@ describe('completed divider changed-file counts', () => {
     b.text('m9', 0, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'assistant_text', 'divider']);
     const divider = find(list, 'divider');
     expect(divider).toMatchObject({ id: rowId.divider(turnId.ofMessage(uuid('u1'))), state: 'completed' });
     expect(divider.files).toEqual([
@@ -440,7 +537,7 @@ describe('divider changed files aggregate successful edits only', () => {
     b.toolUse('t1', 'Edit', { file_path: '/p/a.ts', old_string: 'x', new_string: 'y' });
     b.result('t1', 'String to replace not found in file.', { isError: true });
     b.end(['u1']);
-    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'cell', 'divider']);
     b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
     b.result('t2', 'ok');
     const list = rows(b.events);
@@ -593,8 +690,12 @@ describe('the queue tail', () => {
     expect(held).toMatchObject({ id: 'held:q-1', kind: 'user', turnId: null, pending: 'held', editable: false, text: 'look at b too', messageUuid: null });
     const shown = withQueueTail(rows, new Set(['s1']), [held]);
     expect(shown.filter((row) => row.kind === 'user').map((row) => row.id)).toEqual(['user:u1', 'held:q-1']);
-    expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(rows); // a prompt that ran is never hidden
-    expect(withQueueTail(rows, new Set(), [])).toBe(rows);
+    // a prompt that ran is never hidden; the running turn's line goes below the dropped bubble (board ticket 789)
+    const lineLast = [...rows.filter((row) => row.kind !== 'divider'), ...rows.filter((row) => row.kind === 'divider')];
+    expect(kinds(lineLast).at(-1)).toBe('divider');
+    expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(lineLast);
+    expect(withQueueTail(rows, new Set(), [])).toEqual(lineLast);
+    expect(withQueueTail(lineLast, new Set(), [])).toBe(lineLast);
   });
 
   // UX wave U4a (decision 12): a mount with a stack (`'stacked'`) draws a message there while it is unread, so the
@@ -853,7 +954,7 @@ describe('plugins: log lines, load issues and pinned status lines', () => {
     b.end(['u1']);
     b.emit('plugin.log', { plugin: 'mods-probe', text: 'after the turn' });
     const expanded = rows(b.events);
-    expect(kinds(expanded)).toEqual(['time', 'error', 'user', 'divider', 'cell', 'error', 'assistant_text', 'error']);
+    expect(kinds(expanded)).toEqual(['time', 'error', 'user', 'cell', 'error', 'assistant_text', 'divider', 'error']);
     expect(errors(expanded).map(({ text, severity, scope, turnId: turn }) => ({ text, severity, scope, turn }))).toEqual([
       { text: 'mods-probe: before any turn', severity: 'notice', scope: 'plugin', turn: null },
       { text: 'mods-probe: during the work', severity: 'notice', scope: 'plugin', turn: turnId.ofMessage(uuid('u1')) },
@@ -861,7 +962,7 @@ describe('plugins: log lines, load issues and pinned status lines', () => {
     ]);
     expect(find(expanded, 'assistant_text')).toMatchObject({ phase: 'answer' }); // the log line after the work is not work
     const folded = rowsOf(reduce(b.events)); // the completed turn folds its work area; the plugin's line stays
-    expect(kinds(folded)).toEqual(['time', 'error', 'user', 'divider', 'error', 'assistant_text', 'error']);
+    expect(kinds(folded)).toEqual(['time', 'error', 'user', 'error', 'assistant_text', 'divider', 'error']);
   });
 
   it('a turn whose only rows are a plugin’s gets no work divider', () => {
@@ -1224,7 +1325,7 @@ describe('what joins a run (O-29)', () => {
     b.result('t3', 'two');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(kinds(list)).toEqual(['time', 'user', 'group', 'divider']);
     expect(group(list).cells.map((cell) => cell.toolUseId)).toEqual(['t1', 't2', 't3']);
     expect(group(list).summary).toBe('Read 2 files, updated todos');
   });
@@ -1500,7 +1601,7 @@ describe('the line of a turn an answer opened', () => {
 
   it('with one call reads `Worked for …` and folds its notice with the call', () => {
     const list = opened(true);
-    expect(kinds(list)).toEqual(['divider', 'assistant_text']);
+    expect(kinds(list)).toEqual(['assistant_text', 'divider']);
     const line = find(list, 'divider');
     expect(line.opener).toMatchObject({ class: 'answer' });
     expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');

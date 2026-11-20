@@ -3,6 +3,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { OwnerChannelState } from '@shared/owner/state';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { attachOwnerChannel, resetOwnerChannelStore, useOwnerChannelStore } from './owner-channel';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
+import { leaveRl2, overRl2 } from '../test-support/code-disk'; // ticket 627
 
 const APP = 'app-1' as AppSessionId;
 const OTHER = 'app-2' as AppSessionId;
@@ -12,9 +15,24 @@ const stateOf = (appSessionId: AppSessionId, on: boolean): OwnerChannelState => 
 const held = (appSessionId = APP) => useOwnerChannelStore.getState().bySession.get(appSessionId);
 const settings = (enabled: boolean) => ({ settings: { mods: { toHuman: { enabled } } } });
 
-afterEach(resetOwnerChannelStore);
+afterEach(() => {
+  resetOwnerChannelStore();
+  leaveRl2();
+});
 
 describe('the owner channel store holds each attached session’s lane and marks as main reports them', () => {
+  // Ticket 627: a session on another machine over RL2 offers no `ownerChannel.state`: nothing is read, nor followed
+  it('reads and follows nothing for a session on another machine, in either lane', () => {
+    for (const lane of ['B', 'A'] as const) {
+      const elsewhere = addressOf(OTHER_MACHINE, `app-${lane}` as AppSessionId);
+      overRl2(elsewhere, {}, lane);
+      const f = fakeClient();
+      attachOwnerChannel(elsewhere, f.client)();
+      expect(f.calls).toEqual([]);
+      expect(held(elsewhere)).toBeUndefined();
+    }
+  });
+
   it('subscribes before it reads the state, then follows the changes for its session only', async () => {
     const f = fakeClient();
     const off = attachOwnerChannel(APP, f.client);

@@ -129,7 +129,7 @@ describe('the artifact row', () => {
     b.text('m1', 0, 'Done.');
     b.end(['u1']);
     const rows = foldedRows(b.events);
-    expect(rows.filter((row) => row.kind !== 'time').map((row) => row.kind)).toEqual(['user', 'divider', 'artifact', 'assistant_text']);
+    expect(rows.filter((row) => row.kind !== 'time').map((row) => row.kind)).toEqual(['user', 'artifact', 'assistant_text', 'divider']);
     expect(isPersistentRow(ofKind(rows, 'artifact')[0])).toBe(true);
   });
 

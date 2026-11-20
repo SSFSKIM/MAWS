@@ -3,7 +3,7 @@
 // read C7's rules: `display` is the text as typed with each pasted atom's placeholder in place and the attachments'
 // placeholders after it; `content` frames each pasted body in the terminal's tags and carries the attachments as
 // blocks, images first. Pure.
-import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
+import { pastedPlaceholder, pastedSegments, replacePasted } from '@shared/composer/pasted-content';
 import { countLines, parsePlaceholders, restorePastedTags } from '@shared/composer/pasted-framing';
 import { asTyped } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
@@ -21,7 +21,7 @@ const base64Blocks = (content: FirstMessage['content']): Base64Block[] =>
     : content.filter((b): b is ContentBlock & Base64Block => (b.type === 'image' || b.type === 'document') && (b as Base64Block).source?.type === 'base64');
 
 // The pasted bodies of a sent text, in order, as they were typed (the send neutralised a typed tag inside a body).
-const pastedBodies = (wire: string): string[] => [...wire.matchAll(PASTED_BLOCK)].map((m) => asTyped(restorePastedTags(m[2]!))); // UX wave U1c: as pasted
+const pastedBodies = (wire: string): string[] => pastedSegments(wire).map((segment) => asTyped(restorePastedTags(segment.body))); // UX wave U1c: as pasted
 
 // What returns a retained first message to the editor (`prefillComposer`): its text as typed with the pasted bodies
 // behind their placeholders, and its images re-attached (their `[Image #n]` placeholders dropped, since the attachment
@@ -50,7 +50,7 @@ export function messagePrefill(message: FirstMessage): Prefill {
 export function firstMessageOf(content: FirstMessage['content']): FirstMessage {
   let n = 0;
   const typed = asTyped(restorePastedTags( // UX wave U1c: as typed
-    wireOf(content).replace(PASTED_BLOCK, (_block, _id: string, body: string) => {
+    replacePasted(wireOf(content), ({ body }) => {
       n += 1;
       return pastedPlaceholder(n, countLines(restorePastedTags(body)));
     }),

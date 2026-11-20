@@ -2,6 +2,8 @@
 // background job with a known id attaches in a terminal tab (the engine's own `claude attach`), and any holder can be
 // forked into a copy MAWS runs (the engine allows a fork beside a `--bg` holder, and reads another holder's file as a
 // snapshot). Rendered by C5's `HolderNotice` in place of its placeholder button; never on the Overview card (§5.2).
+// Ticket 627: for a session on another machine over RL2, Take over is drawn disabled with the window's helper's sentence,
+// before any confirmation: that machine takes no `session.takeOver` from here.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -9,6 +11,7 @@ import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { attachOrSay } from './attach';
 import { canTakeOver, forkInPlace, takeOverSession } from './record-ops';
 
@@ -40,6 +43,7 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
   const installed = useInstalledVersion(attachable, machineOf(appSessionId));
   const [attaching, setAttaching] = useState(false);
   const [takingOver, setTakingOver] = useState(false); // W7
+  const takeOverUnavailable = useRemoteUnavailable(appSessionId, 'session.takeOver');
 
   const attach = () => {
     setAttaching(true);
@@ -63,7 +67,8 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
         <button
           type="button"
           className={BUTTON}
-          disabled={takingOver}
+          disabled={takingOver || takeOverUnavailable !== null}
+          title={takeOverUnavailable ?? undefined}
           onClick={() => {
             setTakingOver(true);
             void takeOverSession(appSessionId, holder).finally(() => setTakingOver(false));

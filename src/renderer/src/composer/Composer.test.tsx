@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useSyncExternalStore, type ReactNode } from 'react';
@@ -65,7 +66,7 @@ import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX w
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, hardBreak, mentionNode, paragraph, textNode, type ComposerDoc } from './editor/doc';
+import { docOf, hardBreak, mentionNode, pastedNode, paragraph, textNode, type ComposerDoc } from './editor/doc';
 import { attachPasted, type AttachOutcome } from './attach-pasted'; // UX wave U6b-5a
 import { attachedIn } from '../test-support/attach'; // UX wave U6b-5a
 import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
@@ -85,6 +86,14 @@ import { DictationKeys } from './dictation/DictationKeys'; // E9
 import { modelSelector } from '../widgets/ModelSelector'; // P2-F S chip (review)
 import { resetModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { resetDictationStore, useDictationStore } from './dictation/store'; // E9
+
+// Board ticket 741: the characters the one-writer rule's fold (shared/engine/grant.ts `neutraliseGrant`) goes over, the
+// function itself passed through unchanged
+const fold = vi.hoisted(() => ({ characters: 0 }));
+vi.mock('@shared/engine/grant', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@shared/engine/grant')>();
+  return { ...actual, neutraliseGrant: (text: string, work?: { steps: number }) => ((fold.characters += text.length), actual.neutraliseGrant(text, work)) };
+});
 
 // P5 O6 M2: `A` and `B` are the page's ids (addresses); `fake`, installed as `window.maws`, stands for main, so what it is
 // asked, answers and emits holds the bare `A_ID` and `B_ID`. The builders make main's values; the page's are lifted.
@@ -187,7 +196,7 @@ function mount(panes: { index: 0 | 1; id: AppSessionId }[], extra: ReactNode = n
   );
 }
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean; setContent(content: unknown): boolean }; getText(): string; isFocused: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean; setContent(content: unknown): boolean }; getJSON(): JSONContent; getText(): string; isFocused: boolean } };
 const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
@@ -551,6 +560,20 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('one two and three four');
   });
 
+  // board ticket 739: the handle inserts text as text, never as markup the editor parses; a line break in it (a person's
+  // reply a failed notification kept) stays a line break
+  it('inserts text as text: markup stays as written and a line break stays one', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const lines = () => (editorOf().editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''));
+    act(() => queueComposerAttachment(A, { files: [], text: 'a <p>b</p><br>c' }));
+    await waitFor(() => expect(lines()).toEqual(['a <p>b</p><br>c']));
+    act(() => editorOf().editor.commands.clearContent());
+    act(() => queueComposerAttachment(A, { files: [], text: 'one\ntwo' }));
+    await waitFor(() => expect(lines()).toEqual(['one[hardBreak]two']));
+  });
+
   // P2-B M6 (§5.10): "Use in chat" from a dialog widget closes it and inserts at the composer's caret, the text after the
   // caret kept after the insertion, though the dialog holds the keyboard when the widget asks
   it('a dialog widget’s insertion lands at the caret the editor had when the dialog opened', async () => {
@@ -884,6 +907,25 @@ describe('the view’s switch above the composer', () => {
 });
 
 describe('sending from the box', () => {
+  // board ticket 741: the fold goes over the whole wire text, a pasted body included, so it runs once at the send and
+  // never on an edit; what the box reads on an edit (its mode, whether it holds anything) the fold cannot change
+  it('folds nothing while the person types beside a paste, and folds the wire text at the send', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const body = 'a pasted line\n'.repeat(200);
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('see'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text #1', lines: 200, text: body }))])));
+    act(() => editorOf().focus());
+    fold.characters = 0;
+    for (const letter of ' and fix it') await type(letter);
+    expect(primary().disabled).toBe(false);
+    expect(fold.characters).toBe(0);
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(1));
+    expect((invoked('session.send')[0] as { content: string }).content).toContain(body);
+    expect(fold.characters).toBeGreaterThan(body.length);
+  });
+
   const placeholder = () => editorOf().querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ?? null;
   const cmdEnter = () => key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });
 
@@ -1149,6 +1191,39 @@ describe('the three menu chords', () => {
     await chord(...MODE);
     expect(useComposerStore.getState().modeMenus.has(B)).toBe(false);
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull());
+  });
+
+  // A chip's menu gives the keyboard back when it closes, in Radix's unmount timer (0 ms). A menu opened before that timer
+  // runs (another chord, or the same chord pressed in the case above before the timer ran under load) holds the keyboard
+  // by then, and the closing menu takes it from there no more: before, the editor's focus closed the new menu at once.
+  it('a chord opens its menu over another chip’s open menu, and the menu stays open once the first has closed', async () => {
+    live(A);
+    live(B);
+    tabs(1);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <ComposerAppKeys />);
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    act(() => editorOf(1).focus());
+    await chord(...EFFORT);
+    expect(await screen.findByText('effort view')).toBeTruthy();
+    await chord(...MODE); // from the open effort menu
+    await settle();
+    expect(useComposerStore.getState().chipWidgets.has(B)).toBe(false);
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
+    expect(await within(document.body).findByRole('menu', { name: 'Permission mode' })).toBeTruthy();
+    await chord(...MODEL); // and back, from the open mode menu
+    await settle();
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(false);
+    expect(useComposerStore.getState().chipWidgets.get(B)).toMatchObject({ name: 'model' });
+    expect(await screen.findByText('model list')).toBeTruthy();
+    // the flaky order of the case above, forced: the effort menu closed, ⇧⌘M pressed before its timer gave the keyboard back
+    await chord(...MODEL);
+    await chord(...EFFORT);
+    expect(await screen.findByText('effort view')).toBeTruthy();
+    await chord(...EFFORT);
+    act(() => editorOf(1).focus());
+    act(() => void (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'M', code: 'KeyM', metaKey: true, shiftKey: true })));
+    await settle();
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
   });
 
   // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on

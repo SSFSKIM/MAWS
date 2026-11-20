@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
 import { adoptClientId, applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, hasPending, idAt, insertedBy, mergeMaps, newDoc, stateVector, SuggestionError, transact, type Doc, type Node } from '@artifacts/yjs';
+import { clientIdChangesAsync } from '@artifacts/yjs/client-id-log.fixture';
 import { deletionsOf, liveMarkers } from '@artifacts/yjs/format-cleanup.fixture';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -1025,7 +1026,9 @@ describe('DocumentService: suggestions, fix wave 1', () => {
     now += 5 * MIN;
     const before = new Set(markers('a1').map(({ client, clock }) => `${client}:${clock}`));
     const [first] = markers(key);
-    await service.acceptSuggestion('a1', [{ start: first, end: idAt(text(key), 2)! }], human);
+    // the copy's doc applies the deletions and writes the copy in one transaction, so Yjs gives it a fresh clientID
+    // after the write (the doc is dropped with it) and says so once
+    expect(await clientIdChangesAsync(() => service.acceptSuggestion('a1', [{ start: first, end: idAt(text(key), 2)! }], human))).toBe(1);
     expect(text('a1').toDelta().toJSON()).toEqual(text(key).toDelta().toJSON());
     const provenance = service.provenance('a1');
     expect(insertedBy(provenance, idAt(text('a1'), 2)!)).toEqual({ actor: 'session:app-b', at: typedAt }); // "c"

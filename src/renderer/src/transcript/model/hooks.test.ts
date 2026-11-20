@@ -34,7 +34,7 @@ describe('hooks in the transcript', () => {
     b.end(['u1']);
     const rows = rowsFor(b);
     expect(rows.find((row) => row.kind === 'group')).toBeUndefined(); // the lone Bash call unwraps: no "ran N hooks"
-    expect(rows.at(-1)).toMatchObject({ kind: 'assistant_text', phase: 'answer', markdown: 'Done.' });
+    expect(rows.at(-2)).toMatchObject({ kind: 'assistant_text', phase: 'answer', markdown: 'Done.' }); // the last row above the turn's line
   });
 
   it('a UserPromptSubmit hook that exits 2 blocked the prompt: a notice with Edit prompt, visible with the turn collapsed, and no divider', () => {
@@ -66,7 +66,7 @@ describe('hooks in the transcript', () => {
     b.end(['u1']);
     const collapsed = rowsFor(b, false);
     expect(collapsed.map((row) => (row.kind === 'error' ? row.text : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : row.kind))).toEqual([
-      'time', 'user', 'divider', 'Hook re-prompted Claude · Say REPROMPTED and stop', 'answer:REPROMPTED',
+      'time', 'user', 'Hook re-prompted Claude · Say REPROMPTED and stop', 'answer:REPROMPTED', 'divider',
     ]);
     expect(notices(collapsed)[0].action).toBeUndefined();
   });

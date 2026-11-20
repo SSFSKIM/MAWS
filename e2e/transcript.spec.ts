@@ -543,6 +543,11 @@ test('a follower is at the end in every frame the streamed answer grows in', asy
     watch();
     const rows = new MutationObserver(watch);
     rows.observe(scroller, { childList: true, subtree: true });
+    // An error the browser raises on the window and not in the console: a ResizeObserver notification the list's
+    // following left undelivered (a resize of an ancestor inside its row's delivery)
+    const windowErrors: string[] = [];
+    const onError = (event: ErrorEvent) => windowErrors.push(event.message);
+    window.addEventListener('error', onError);
     const betweenFrames: number[] = [];
     const started = performance.now();
     while (performance.now() - started < durationMs) {
@@ -551,9 +556,10 @@ test('a follower is at the end in every frame the streamed answer grows in', asy
     }
     observer.disconnect();
     rows.disconnect();
+    window.removeEventListener('error', onError);
     const over = (values: number[], px: number) => values.filter((value) => value > px).length;
     return {
-      steps: painted.length, grew, paintedMax: Math.max(0, ...painted), paintedOver1: over(painted, 1),
+      windowErrors, steps: painted.length, grew, paintedMax: Math.max(0, ...painted), paintedOver1: over(painted, 1),
       rafFrames: betweenFrames.length, rafMax: Math.max(0, ...betweenFrames), rafOver1: over(betweenFrames, 1), rafOver80: over(betweenFrames, 80),
     };
   }, 5000);
@@ -563,6 +569,7 @@ test('a follower is at the end in every frame the streamed answer grows in', asy
   expect(after.batches - before.batches, 'the stream ran throughout').toBeGreaterThan(100);
   expect(seen.grew, 'the streamed answer grew').toBeGreaterThan(20);
   expect(seen.paintedMax, 'no painted frame leaves a follower away from the end').toBeLessThanOrEqual(1);
+  expect(seen.windowErrors, 'no error raised on the window while following').toEqual([]);
   expect(after.following, 'still following').toBe(true);
   expect(harness.consoleErrors()).toEqual([]);
 });
@@ -691,6 +698,10 @@ test('collapsing a divider keeps its position', async ({ harness }) => {
   const toggle = divider.locator('button[aria-expanded]').first();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const rowsOpen = (await metrics(page)).rows;
+  // Board ticket 789: the line ends its turn, so the open work stands between the turn's start and it, past the
+  // viewport's bottom; the reader brings it into view before clicking it (the click would, after its place was read).
+  await toggle.scrollIntoViewIfNeeded();
+  await settle(page, 500);
   const top = await divider.evaluate((element) => element.getBoundingClientRect().top);
 
   await toggle.click();
@@ -2830,7 +2841,8 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(opened).toHaveAttribute('aria-expanded', 'true');
     await expect(opened).toBeFocused();
     // The list mounts a window of rows past the viewport and, following its end, keeps the end in view as the record's
-    // rows go in, so its turn's line, above them, can fall outside the window: the record's rows are brought into view.
+    // rows go in, so its turn's line (at the turn's end: board ticket 789) can fall outside the window: the record's rows
+    // are brought into view.
     await opened.scrollIntoViewIfNeeded();
     const turnLine = pane.locator('[data-kind="divider"]');
     await withPaneRows(pane, 'the pane’s rows with the first record open', () => expect(turnLine).toHaveCount(1));

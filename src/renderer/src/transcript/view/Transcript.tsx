@@ -24,6 +24,7 @@ import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
 import { AnswerActionsStore, listElementId, rowElementId, sessionOfStoreKey, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
+import { keepInPlace } from './keep-in-place'; // board ticket 789
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
 import { useSourcePages } from './source-pages'; // the long-transcript window
@@ -51,6 +52,16 @@ export const SCROLL_END_THRESHOLD = 1;
 // downward move resumes (upward intent re-bases it below), so the slack cannot pull back a reader turning away.
 const DOM_END_SLACK = 3;
 const domEndGap = (element: HTMLElement, scrollHeight = element.scrollHeight) => scrollHeight - element.clientHeight - element.scrollTop;
+// The list's sizer as React last committed it, and whether neither it nor the rendered content reaches the measured end yet
+const committedSize = (element: HTMLElement) => Number.parseFloat((element.firstElementChild as HTMLElement).style.height);
+const extentPending = (element: HTMLElement, size: number) => committedSize(element) + SCROLL_END_THRESHOLD < size && element.scrollHeight + SCROLL_END_THRESHOLD < size;
+// Each mounted row at the offset `startOf` gives its index, where it gives one (board ticket 789)
+function placeRows(element: HTMLElement, startOf: (index: number) => number | undefined): void {
+  for (const row of Array.from((element.firstElementChild as HTMLElement).children) as HTMLElement[]) {
+    const start = startOf(Number(row.dataset.index));
+    if (start !== undefined && row.style.top !== `${start}px`) row.style.top = `${start}px`;
+  }
+}
 export const OVERSCAN = 6;
 // Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
 const INPUT_SCROLL_SETTLE_MS = 250;
@@ -87,6 +98,9 @@ export interface TranscriptListHandle {
   scrollToEnd(): void;
   readonly following: boolean;
   readonly scrollElement: HTMLDivElement | null;
+  // board ticket 789: keep a row where it is on screen for the given time while rows above it open or close; mounted or
+  // not, it is placed by the list's own offset for it (keep-in-place.ts)
+  keepInPlace(rowId: string, ms: number): void;
 }
 
 export interface TranscriptListProps {
@@ -109,11 +123,12 @@ export interface TranscriptListProps {
 }
 
 // A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
-function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement): boolean {
+function nestedScrollerOwns(target: EventTarget | null, scroller: HTMLElement, up = true): boolean {
   for (let element = target instanceof Element ? target : null; element && element !== scroller; element = element.parentElement) {
     const style = getComputedStyle(element);
     if (!['auto', 'scroll'].includes(style.overflowY)) continue;
-    if (element.scrollTop > 0 || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
+    const room = up ? element.scrollTop > 0 : element.scrollTop < element.scrollHeight - element.clientHeight - 1;
+    if (room || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
   }
   return false;
 }
@@ -123,6 +138,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const followingRef = useRef(true);
   const scrollbarPointer = useRef<number | null>(null);
   const movementWitness = useRef(false);
+  // board ticket 789: the stop of the row kept in place while a turn's work opens or folds above it, until it ends; an
+  // explicit jump ends it first, or the next frame would put the reader back at the row
+  const anchor = useRef<(() => void) | null>(null);
+  const dropAnchor = useCallback(() => {
+    anchor.current?.();
+    anchor.current = null;
+  }, []);
+  useEffect(() => dropAnchor, [dropAnchor]);
   const changeFollow = useCallback((next: boolean) => {
     if (followingRef.current === next) return;
     followingRef.current = next;
@@ -244,6 +267,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const pointerDown = (event: PointerEvent) => {
       if (event.target === element && event.button === 0 && event.pointerType !== 'touch') {
+        dropAnchor(); // board ticket 789: the reader's own scroll input on this transcript ends a turn line's anchor
         scrollbarPointer.current = event.pointerId;
         observeEnd();
         releaseFollow();
@@ -263,14 +287,16 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const wheel = (event: WheelEvent) => {
       observeEnd();
-      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
+      if (event.deltaY !== 0 && !nestedScrollerOwns(event.target, element, event.deltaY < 0)) dropAnchor();
+      if (event.deltaY < 0 && !nestedScrollerOwns(event.target, element)) releaseUpward();
     };
     let touchY: number | null = null;
     const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
     const touchMove = (event: TouchEvent) => {
       observeEnd();
       const next = event.touches.length === 1 ? event.touches[0].clientY : null;
-      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
+      if (next !== null && touchY !== null && next !== touchY && !nestedScrollerOwns(event.target, element, next > touchY)) dropAnchor();
+      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwns(event.target, element)) releaseUpward();
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {
@@ -278,6 +304,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const pageKey = ['PageUp', 'PageDown', 'Home', 'End'].includes(event.key);
       const navigation = !editor && (event.key.startsWith('Arrow') || event.key === ' ');
       if (!pageKey && !navigation) return;
+      // a key that scrolls this transcript ends a turn line's anchor: not one typed into an editor (the composer, a
+      // row's own) or in another list, nor one a nested scroller here consumes
+      const here = event.target === document.body || (event.target instanceof Node && element.contains(event.target));
+      if (here && !editor && !nestedScrollerOwns(event.target, element, ['PageUp', 'Home', 'ArrowUp'].includes(event.key))) dropAnchor();
       observeEnd();
       armMovement(); // body/editor focus and nested containment do not tell us which list the browser will scroll
     };
@@ -305,7 +335,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       element.removeEventListener('touchmove', touchMove, true);
       window.removeEventListener('keydown', key, true);
     };
-  }, [readScroll, releaseFollow, remember, virtualizer]);
+  }, [dropAnchor, readScroll, releaseFollow, remember, virtualizer]);
 
   // Follow the committed DOM end with an absolute offset, not an index target that can chase later measurements.
   // This command accounts for current sizes, retiring any anchor compensation it already absorbed. Releasing follow
@@ -314,21 +344,30 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const element = scrollRef.current;
     if (!element) return;
     const size = virtualizer.getTotalSize();
-    const committed = Number.parseFloat((element.firstElementChild as HTMLElement).style.height);
+    const committed = committedSize(element);
     // A clamped command cannot absorb positive compensation before the larger extent commits. Keep it pending;
     // the content observer will follow that commit unless reader input has already released following.
-    if (committed + SCROLL_END_THRESHOLD < size && element.scrollHeight + SCROLL_END_THRESHOLD < size) return;
+    if (extentPending(element, size)) return;
     // A pending shrink is already reachable. Otherwise use the browser's actual end, including overflowing content
     // or rounding beyond the logical sizer (the virtualiser's last-row/end alignment does the same).
     const end = committed > size + SCROLL_END_THRESHOLD ? Math.max(0, size - element.clientHeight) : element.scrollHeight;
     virtualizer.scrollToOffset(end, { behavior: 'instant' });
   }, [virtualizer]);
   // As the content observer below: movement the reader made first (a witnessed key, a reversed scrollbar drag) is read
-  // before the end is followed.
+  // before the end is followed. Board ticket 789: the running turn's line is the last row, so the streamed answer grows
+  // in the row above it, and its growth reaches the DOM's end only past the line, which stands where the last commit put
+  // it. Where neither the sizer nor the rendered content reaches the measured end, the mounted rows are put at their
+  // measured offsets here, before the frame paints: the line moves below the answer, overflowing the sizer to the
+  // measured end, which is followed. Only their offsets change, which no observer watches: this runs inside a row's
+  // observer delivery, and a resize there (the sizer, or a row re-rendered) is left undelivered, an error on the window.
+  // The virtualiser's own re-render commits the same offsets and the sizer's height after.
   useLayoutEffect(() => {
     followGrowth.current = () => {
       readScroll(virtualizer.getTotalSize());
-      if (followingRef.current) pinEnd();
+      if (!followingRef.current) return;
+      const element = scrollRef.current;
+      if (element && extentPending(element, virtualizer.getTotalSize())) placeRows(element, (index) => virtualizer.measurementsCache[index]?.start);
+      pinEnd();
     };
   }, [pinEnd, readScroll, virtualizer]);
 
@@ -422,11 +461,13 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
 
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => {
+      dropAnchor();
       remember();
       virtualizer.scrollToIndex(index, { align, behavior: 'instant' });
       leaveIfAway(virtualizer.getTotalSize()); // P2-C
     },
     scrollToEnd: () => {
+      dropAnchor();
       remember();
       changeFollow(true);
       pinEnd();
@@ -437,17 +478,40 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     get scrollElement() {
       return scrollRef.current;
     },
+    keepInPlace: (rowId, ms) => {
+      const element = scrollRef.current;
+      if (!element) return;
+      const start = () => {
+        const index = rowsRef.current.findIndex((row) => row.id === rowId);
+        return index === -1 ? null : (virtualizer.measurementsCache[index]?.start ?? null);
+      };
+      dropAnchor();
+      anchor.current = keepInPlace(element, ms, {
+        element: () => element.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(rowId)}"]`),
+        start,
+        scrollTo: (offset) => virtualizer.scrollToOffset(offset, { behavior: 'instant' }),
+      });
+    },
   }));
 
+  // Board ticket 789: a row the growth follow placed takes the offset this render gave it, even where React's own prop
+  // did not change since (a growth undone before the virtualiser re-rendered)
+  const virtualItems = virtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    const rendered = new Map(virtualItems.map((item) => [item.index, item.start]));
+    if (element) placeRows(element, (index) => rendered.get(index));
+  });
+
   // UX wave U2b (R6): what is mounted, for the end of a jump's reveal
-  const mountedIds = virtualizer.getVirtualItems().map((item) => rows[item.index]?.id ?? '').join('\n');
+  const mountedIds = virtualItems.map((item) => rows[item.index]?.id ?? '').join('\n');
   useLayoutEffect(() => onMounted?.(mountedIds === '' ? [] : mountedIds.split('\n'), rows), [mountedIds, rows, onMounted]);
 
   return (
     <div className={`min-h-0 ${className ?? ''}`}>
       <div ref={scrollRef} id={id} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-          {virtualizer.getVirtualItems().map((item) => {
+          {virtualItems.map((item) => {
             const row = rows[item.index];
             return (
               <div
@@ -690,6 +754,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
+  const keepRow = useCallback((rowId: RowId, ms: number) => listRef.current?.keepInPlace(rowId, ms), []); // board ticket 789
   // The long-transcript window: a source whose history comes one window at a time pages older ones in as the reader
   // reaches the top, the reader's place kept through each (lane A's rules, source-pages.ts)
   const pages = useSourcePages(source, storeKey, listRef, rows, atRest);
@@ -817,8 +882,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const merged: TranscriptActions = { ...DEFAULT_ACTIONS, ...actions };
     const acts: TranscriptActions =
       childAgent === null ? merged : { ...merged, openFile: (path, line, appSessionId, options) => merged.openFile(path, line, appSessionId, { ...options, agent: childAgent, ...(childConversation !== null && { conversation: childConversation }) }) };
-    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
-  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor]);
+    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, keepInPlace: keepRow, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
+  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor, keepRow]);
 
   return (
     <TranscriptProvider value={context}>
