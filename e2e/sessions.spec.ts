@@ -30,7 +30,7 @@ import { activeMainTab, backToTabs, mainTabById, mainTabs, mountedTabs, openAppD
 import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the linked PDF, drawn
 import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
-import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
+import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U6b-4c: assistantRecord, a subagent's answer
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -1353,6 +1353,204 @@ test.describe('sessions', () => {
       expect(await invoke(page, 'files.write', { appSessionId: s! as never, path: file('notes.txt'), content: 'overwritten', expectedHash: sha256Of(readFileSync(file('notes.txt'))) }), 'files.write takes the folders alone').toMatchObject(refusal);
       expect(readFileSync(file('notes.txt'), 'utf8')).toBe(THEIRS);
       for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name)), `${name} untouched`).toEqual(Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8'));
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, §H; acceptance K1, K2, K3, K6,
+  // K7): a link in a Markdown file shown in MAWS opens the file it names from outside the session's folder, editable,
+  // once the files service has read the Markdown file itself and found the link (`files.follow`), and records what it
+  // found in the profile (`sessions/file-links.json`), so the tab comes back after a relaunch and saves again. A relative
+  // link in a Markdown file outside the folder, chosen with Open File…, opens the file beside it. A path the Markdown file
+  // writes only in a code fence, or a link in a file that is not Markdown, is followed to nothing. Staged as the case above
+  // stages its files: invented files under a temporary folder outside the session's, by their real paths.
+  test("a link in a shown Markdown file opens a file from outside the session's folder, editable, and the tab comes back", async () => {
+    test.setTimeout(240_000);
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u6b4c-outside-'))); // the chooser and the record take real paths
+    try {
+      const file = (name: string) => join(outside, name);
+      const NOTES = 'Invented notes, linked from a guide in the working folder.';
+      const NEXT = 'The invented next page, beside the index.';
+      const texts: Record<string, string> = {
+        'notes.txt': `${NOTES}\n`, 'fenced.txt': 'Written only in a code fence.\n', 'next.md': `${NEXT}\n`,
+        'index.md': '# An invented index\n\nRead [next](next.md) after this.\n',
+      };
+      for (const [name, text] of Object.entries(texts)) writeFileSync(file(name), text);
+      const guidePath = join(repo.root, 'guide.md');
+      writeFileSync(guidePath, `# An invented guide\n\nSee [the notes](${file('notes.txt')}).\n\n\`\`\`text\n[fenced](${file('fenced.txt')})\n\`\`\`\n`);
+      const plainPath = join(repo.root, 'links.txt'); // the same link's text in a file the window does not draw as Markdown
+      writeFileSync(plainPath, `See [the notes](${file('notes.txt')}).\n`);
+      const S = '5e551011-0000-4000-8000-0000000000f1';
+      await store.addTranscript(repo.root, S, [{ type: 'user', uuid: `u-${S}`, parentUuid: null, cwd: repo.root, sessionId: S, timestamp: '2026-11-18T10:00:00.000Z', message: { role: 'user', content: 'A session whose guide links a file' } }]);
+      const first = await launchCase({ fixtures: [], trusted: [repo.root], store });
+      current = { ...first, repos: [repo] };
+      const { page, maws } = first;
+      const [s] = await indexed(page, [S]);
+      await (await sidebarRow(page, { appSessionId: s! })).click();
+      const linksFile = join(maws.userData, 'sessions', 'file-links.json');
+      type Links = { version: number; sessions: Record<string, { real: string; from: { file: string } | { agent: string; engineSessionId?: string }; why?: string }[]> };
+      const linksHeld = () => (existsSync(linksFile) ? (JSON.parse(readFileSync(linksFile, 'utf8')) as Links) : null);
+      const viewerOf = (path: string, scope: Locator = sideColumn(page)) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
+      const linkIn = (viewer: Locator, title: string) => viewer.locator(`[data-markdown-view] [data-chip="path"][title="${title}"]`);
+
+      await test.step('K1: the guide opened from Files’ tree; its link opens the outside file beside the chat, editable, and Save writes it', async () => {
+        await openSurface(page, 'Files');
+        const files = surface(page, 'files');
+        const treeRow = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${path}"]`).first();
+        await expect(treeRow(repo.root)).toBeVisible({ timeout: 20_000 });
+        if ((await treeRow(repo.root).getAttribute('aria-expanded')) !== 'true') await treeRow(repo.root).click();
+        await treeRow(guidePath).click({ timeout: 20_000 });
+        const guide = viewerOf(guidePath);
+        await expect(linkIn(guide, file('notes.txt')), 'the guide drawn as Markdown, its link a path link').toBeVisible({ timeout: 20_000 });
+        await expect(linkIn(guide, file('fenced.txt')), 'a link in a code fence is no link').toHaveCount(0);
+        await linkIn(guide, file('notes.txt')).click();
+        const notes = viewerOf(file('notes.txt'));
+        const content = notes.locator('.cm-content');
+        await expect(content, 'the outside file, read').toHaveText(NOTES, { timeout: 20_000 });
+        await expect(notes).toHaveAttribute('data-editable', 'true');
+        await expect(notes.locator('[data-read-only]'), 'no "Read-only" label').toHaveCount(0);
+        await expect(notes.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${file('notes.txt')}`);
+        await content.click();
+        await page.keyboard.press('Meta+a');
+        await page.keyboard.type('Notes edited through the guide’s link.');
+        await expect(notes).toHaveAttribute('data-dirty', 'true');
+        expect(readFileSync(file('notes.txt'), 'utf8'), 'nothing written before Save').toBe(texts['notes.txt']);
+        await appMenu(maws, 'file.save');
+        await expect.poll(() => readFileSync(file('notes.txt'), 'utf8'), { timeout: 20_000, message: '⌘S wrote the linked file' }).toBe('Notes edited through the guide’s link.');
+        await expect(notes).toHaveAttribute('data-dirty', 'false');
+        // K2: the daemon's record of the link, one entry for the session, where the link stood
+        const held = linksHeld();
+        expect(held && Object.keys(held.sessions), 'the links file names the one session').toHaveLength(1);
+        expect(Object.values(held!.sessions).flat(), 'one entry: the outside file, from the guide, savable').toEqual([expect.objectContaining({ real: file('notes.txt'), from: { file: guidePath } })]);
+        expect(Object.values(held!.sessions).flat()[0]!.why, 'a record that admits a save holds no why').toBeUndefined();
+      });
+      expect(maws.consoleErrors()).toEqual([]);
+      await maws.app.close();
+
+      const again = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: maws.userData });
+      current = { ...again, repos: [repo], dispose: async () => (await again.maws.cleanup(), await maws.cleanup()) };
+      const p2 = again.page;
+      const m2 = again.maws;
+      const side2 = () => sideColumn(p2);
+      const notes2 = side2().locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
+
+      await test.step('K2: after a relaunch the tab is there, reads the saved text, and saves again', async () => {
+        await expect(sideTab(side2(), 'notes.txt'), 'the linked file’s tab is back beside the chat').toBeVisible({ timeout: 20_000 });
+        await sideTab(side2(), 'notes.txt').click();
+        const content2 = notes2.locator('.cm-content');
+        await expect(content2).toHaveText('Notes edited through the guide’s link.', { timeout: 20_000 });
+        await expect(notes2).toHaveAttribute('data-editable', 'true');
+        await content2.click();
+        await p2.keyboard.press('Meta+End');
+        await p2.keyboard.type(' Kept across a relaunch.');
+        await appMenu(m2, 'file.save');
+        await expect.poll(() => readFileSync(file('notes.txt'), 'utf8'), { timeout: 20_000, message: 'the restored tab saves' }).toBe('Notes edited through the guide’s link. Kept across a relaunch.');
+        await expect(notes2).toHaveAttribute('data-dirty', 'false');
+      });
+
+      await test.step('K3: a Markdown file outside the folder, chosen with Open File…, opens the file its relative link names beside it', async () => {
+        assertPickSeamBuilt(m2);
+        await (await sidebarRow(p2, { appSessionId: s! })).click();
+        await expect.poll(() => menuEnabled(m2, 'file.open'), { message: 'the session’s chat in front' }).toBe(true);
+        await m2.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), file('index.md'));
+        await appMenu(m2, 'file.open');
+        const index = side2().locator(`[data-file-viewer][data-path="${file('index.md')}"]`);
+        await expect(index.locator('[data-markdown-view] [data-chip="path"][title="next.md"]'), 'the chosen index drawn as Markdown').toBeVisible({ timeout: 20_000 });
+        await index.locator('[data-markdown-view] [data-chip="path"][title="next.md"]').click();
+        const next = side2().locator(`[data-file-viewer][data-path="${file('next.md')}"]`);
+        await expect(next.locator('[data-markdown-view]'), 'the file beside the index, read').toContainText(NEXT, { timeout: 20_000 });
+        await expect(next.locator('[data-read-only]'), 'with no "Read-only" label').toHaveCount(0);
+      });
+
+      await test.step('K6, K7: a path written only in a code fence, and a link in a file that is not Markdown, are followed to nothing', async () => {
+        const recorded = () => Object.values(linksHeld()?.sessions ?? {}).flat().map((entry) => entry.real).sort();
+        const clicked = [file('next.md'), file('notes.txt')].sort();
+        expect(recorded(), 'the two links a click followed').toEqual(clicked);
+        const before = readFileSync(linksFile);
+        const follow = (path: string, from: string) => invoke(p2, 'files.follow', { appSessionId: s! as never, path, from: { file: from } });
+        expect(value(await follow(file('fenced.txt'), guidePath)), 'a path the guide writes only in a code fence').toEqual({ status: 'not-linked' });
+        expect(await invoke(p2, 'files.read', { appSessionId: s! as never, path: file('fenced.txt'), named: true }), 'and a read of it is refused').toMatchObject({ ok: false, error: { message: "path outside the session's directories" } });
+        expect(value(await follow(file('notes.txt'), plainPath)), 'the same link’s text in a .txt file').toEqual({ status: 'not-linked' });
+        expect(readFileSync(linksFile), 'neither wrote the links file').toEqual(before);
+        expect(value(await follow(file('notes.txt'), guidePath)), 'the control: the guide’s own link, followed directly').toEqual({ status: 'linked' });
+        expect(recorded(), 'it renews the entry it had, and nothing more is recorded').toEqual(clicked);
+      });
+      expect(m2.consoleErrors()).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // UX wave U6b-4c (§H; acceptance K5): a link in a subagent's own text opens by the rule of the session's own transcript,
+  // read over that subagent's file. Staged as the X-168 case above stages its background agent (the parent's Agent call
+  // and its launch result in the session's transcript, the child's file and its meta beside it), with no terminal holding
+  // the session: nobody holds its transcript, so its agent reads as ended with the session and its row folds with the
+  // turn, which the scene unfolds as a person does. The child's answer links a file outside the session's folder that
+  // neither the parent's records nor the call's prompt and result write. The agent is opened by the app's own drill-in (its
+  // row in the transcript opens Subagents on it) and the link is clicked there: the click is the proof.
+  test("a link in a subagent's transcript, clicked in its drill-in, opens a file from outside the session's folder, editable, and saves", async () => {
+    test.setTimeout(180_000);
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u6b4c-agent-'))); // the record takes the real path
+    try {
+      const byAgent = join(outside, 'by-agent.txt');
+      const TEXT = 'Invented findings the subagent wrote down.\n';
+      writeFileSync(byAgent, TEXT);
+      const sid = '5e551011-0000-4000-8000-0000000000f2';
+      const agent = { agentId: 'a5e55000000000002', description: 'Gather the findings', prompt: 'Gather the findings in this folder.', at: '2026-11-18T10:00:01.000Z' };
+      const ask = `u-${sid}`;
+      const turn = backgroundAgentRecords(sid, repo.root, ask, agent);
+      const end = turnEndRecords(sid, repo.root, turn.at(-1)!.uuid as string, '2026-11-18T10:00:02.000Z');
+      const parentRows = [userRecord(sid, repo.root, ask, null, 'Gather the findings in the background.', '2026-11-18T10:00:00.000Z'), ...turn, ...end].map((r) => JSON.stringify(r));
+      expect(parentRows.filter((line) => line.includes(byAgent)), 'the parent’s records do not write the path').toEqual([]);
+      await store.addTranscript(repo.root, sid, parentRows);
+      const child = await backgroundAgentSidecars(store, sid, repo.root, agent);
+      const answer = { ...assistantRecord(sid, repo.root, 'a-u6b4c-agent-1', child.last, `I wrote them to [the findings](${byAgent}).`, '2026-11-18T10:00:03.000Z'), isSidechain: true, agentId: agent.agentId };
+      await store.appendLines(child.transcript, [JSON.stringify(answer)]);
+      const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+      current = { ...launched, repos: [repo] };
+      const { page, maws } = launched;
+      const [id] = await indexed(page, [sid]);
+      await (await sidebarRow(page, { appSessionId: id! })).click();
+      const main = page.locator('[data-region="main"]');
+      await expect(main.getByText('It is working in the background.').first(), 'the session’s transcript drawn').toBeVisible({ timeout: 20_000 });
+
+      // the agent's row, under its turn's line unfolded (the line is unfolded only where it was folded); its row opens the
+      // drill-in, which draws the child's own transcript
+      const turnLine = main.locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').first(); // the one turn's
+      await expect(turnLine, 'the turn’s line').toBeVisible({ timeout: 20_000 });
+      if ((await turnLine.getAttribute('aria-expanded')) !== 'true') await turnLine.click();
+      await expect(turnLine).toHaveAttribute('aria-expanded', 'true');
+      const agentRow = main.locator('.transcript-subagent', { hasText: agent.description });
+      await expect(agentRow, 'the agent’s row in the session’s transcript').toBeVisible({ timeout: 15_000 });
+      await agentRow.locator('button.transcript-subagent-line').click();
+      const drillIn = surface(page, 'subagents').locator('[data-view="agent"]');
+      const link = drillIn.locator(`[data-chip="path"][title="${byAgent}"]`);
+      await expect(link, 'the drill-in draws the child’s answer with its link').toBeVisible({ timeout: 20_000 });
+
+      // the click: the file opens beside the chat, editable, and saves
+      await link.click();
+      const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${byAgent}"]`);
+      const content = viewer.locator('.cm-content');
+      await expect(content, 'the outside file the subagent linked, read').toHaveText(TEXT.trimEnd(), { timeout: 20_000 });
+      await expect(viewer).toHaveAttribute('data-editable', 'true');
+      await expect(viewer.locator('[data-read-only]'), 'no "Read-only" label').toHaveCount(0);
+      await content.click();
+      await page.keyboard.press('Meta+End');
+      await page.keyboard.type(' Checked in MAWS.');
+      await expect(viewer).toHaveAttribute('data-dirty', 'true');
+      expect(readFileSync(byAgent, 'utf8'), 'nothing written before Save').toBe(TEXT);
+      await appMenu(maws, 'file.save');
+      await expect.poll(() => readFileSync(byAgent, 'utf8'), { timeout: 20_000, message: '⌘S wrote the file the subagent linked' }).toBe(`${TEXT} Checked in MAWS.`);
+      await expect(viewer).toHaveAttribute('data-dirty', 'false');
+      const links = JSON.parse(readFileSync(join(maws.userData, 'sessions', 'file-links.json'), 'utf8')) as { sessions: Record<string, { real: string; from: unknown; why?: string }[]> };
+      expect(Object.values(links.sessions).flat(), 'one record: the file, from the subagent, savable').toEqual([expect.objectContaining({ real: byAgent, from: { agent: agent.agentId, engineSessionId: sid } })]); // the conversation the drill-in was drawn for, as the follow asked (Decision Log 17)
+      expect(Object.values(links.sessions).flat()[0]!.why).toBeUndefined();
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });

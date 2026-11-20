@@ -3,7 +3,7 @@
 // request-card renderer, and view-only disclosure state (bubbles, pasted blocks, thinking) that must survive a row
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
@@ -23,8 +23,11 @@ export interface TranscriptActions {
   openCommit?(appSessionId: AppSessionId, commit: string, path?: string): void;
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
   // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine. UX wave U6b-1: the
-  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
-  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
+  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area. UX wave U6b-4c (decision 9):
+  // `agent`, the subagent whose transcript the click is in, which a child's mount adds to every open (Transcript.tsx), with
+  // `conversation`, the engine session the session was in when that mount drew the child's rows (the branch panel); a
+  // mount may ignore both.
+  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean; agent?: string; conversation?: SessionId }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
   // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block).
   // UX wave U6b-4b (R3, decision 13): `external`, a ⌘-click, asks for the system browser where the mount would open the
@@ -246,10 +249,10 @@ export const useActions = () => useContext(TranscriptContext).actions;
 export const rowElementId = (idPrefix: string, rowId: string) => `${idPrefix}-${rowId}`;
 // E1: the app session a row belongs to: the store key is the session's id, or `<appSessionId>:<agentId>` for a child's
 // transcript (ipcSource), whose rows act on the parent session; null outside a mounted transcript.
-export const useRowSession = (): AppSessionId | null => {
-  const { storeKey } = useContext(TranscriptContext);
-  return storeKey === '' ? null : ((storeKey.includes(':') ? storeKey.slice(0, storeKey.indexOf(':')) : storeKey) as AppSessionId);
-};
+export const useRowSession = (): AppSessionId | null => sessionOfStoreKey(useContext(TranscriptContext).storeKey);
+/** The session of a transcript's store key (`<appSessionId>` or `<appSessionId>:<agentId>`); null for none. */
+export const sessionOfStoreKey = (storeKey: string): AppSessionId | null =>
+  storeKey === '' ? null : ((storeKey.includes(':') ? storeKey.slice(0, storeKey.indexOf(':')) : storeKey) as AppSessionId);
 // The list's scroll container: the one mounted element a divider's aria-controls can name (its rows are virtual).
 export const listElementId = (idPrefix: string) => `${idPrefix}-list`;
 

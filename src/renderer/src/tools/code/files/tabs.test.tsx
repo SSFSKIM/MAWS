@@ -14,7 +14,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/
 import { connectPanelHost, panelHost, registerPanelTool, togglePinned } from '../../../panel/host';
 import { SurfaceRow } from '../../../panel/SurfaceRow';
 import { surfaceTabs } from '../../../panel/surface-model';
-import { useLayout } from '../../../stores/layout';
+import { persistLayout, useLayout } from '../../../stores/layout';
 import { activeTab, allTabs, openTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
@@ -74,6 +74,7 @@ function mainFor(files: Record<string, string>, opts: { refused?: string[]; held
       return ok({ status: 'ready', token, url: frameUrl(token, (input.path as string).slice((input.path as string).lastIndexOf('/') + 1)), framed: 'pdf' });
     }
     if (name === 'layout.releaseFrame') return ok();
+    if (name === 'files.follow') return ok({ status: 'inside' }); // UX wave U6b-4c: every path here is inside the folders
     return fail(`unexpected ${name}`);
   });
 }
@@ -504,15 +505,15 @@ describe('no way of pinning pins a file’s tab', () => {
 
 describe('before the layout is read', () => {
   const FILES_T = { id: 'files:tree', toolId: 'files', pinned: true };
-  async function launch(values: Record<string, unknown>, before: () => void) {
+  async function launch(values: Record<string, unknown>, before: (main: ReturnType<typeof mainFor>) => void) {
     resetPanelStores({ hydrated: false });
     unregisterFiles = registerPanelTool(filesTool); // the reset forgot every registration
-    mainFor({ '/r/a.ts': 'a\n' });
+    const main = mainFor({ '/r/a.ts': 'a\n' });
     const bridge = heldBridge(persisted(values));
     offs.push(connectPanelHost());
-    await hydrateHeld(bridge, before);
+    await hydrateHeld(bridge, () => before(main));
     await settle();
-    return bridge;
+    return { ...bridge, main };
   }
 
   it('the barrier: a file’s add reserved beside a restored pinned tree-only tab gets its own unpinned tab; the pin stays the tree', async () => {
@@ -548,6 +549,21 @@ describe('before the layout is read', () => {
     expect(paramsOf(preview.id)).toEqual({ file: '/r/d.ts', line: null, preview: true }); // c, then d, in the preview tab
     expect(paramsOf(kept.id)).toEqual({ file: '/r/a.ts', line: 7 });
     expect(inView(A)).toEqual([kept.id]);
+  });
+
+  // UX wave U6b-4c (W1 e): the follow of a link's open is sent when the open is made, so the read the made tab starts waits
+  // for it, and never for an open withdrawn before then
+  it('an open through a link made before the read sends its follow when it is made, not when it is kept (W1 e)', async () => {
+    let answer: ReturnType<typeof openFile> | undefined;
+    let whenKept: unknown[] = [];
+    const { main } = await launch({}, (served) => {
+      answer = openFile(A, '/r/a.ts', null, { from: { file: '/r/doc.md' } });
+      whenKept = served.callsOf('files.follow');
+    });
+    expect(answer).toBeNull();
+    expect(whenKept).toEqual([]);
+    expect(main.callsOf('files.follow')).toEqual([{ appSessionId: bareOf(A), path: '/r/a.ts', from: { file: '/r/doc.md' } }]);
+    expect(paramsOf(filesOf(A)[0].id)).toEqual({ file: '/r/a.ts', line: null, preview: true }); // nothing of the source on the tab
   });
 
   // UX wave U6b-4b (S2): a relative path is resolved when the open is asked, with the record known then; an open kept with
@@ -613,6 +629,39 @@ describe('the read of a stored layout', () => {
 });
 
 // ---- an open the agent asked for (UX wave U6e, decision 19; sequence W9) --------------------------------------------------
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, K2; UC-14): the source of a link is
+// held in memory alone, so what layout.json holds after an open through a link is what a plain open of the path leaves.
+describe('an open through a link stores what a plain open stores (U6b-4c, K2)', () => {
+  // A launch over an empty layout, one open, and the quit: every key as layout.json then holds it, the file's tab id named
+  async function stored(open: () => void) {
+    resetPanelStores({ hydrated: false });
+    unregisterFiles = registerPanelTool(filesTool); // the reset forgot every registration
+    const main = mainFor({ '/r/a.ts': 'a\n' });
+    const bridge = heldBridge(persisted({}));
+    const stop = persistLayout(bridge.client);
+    const off = connectPanelHost();
+    await hydrateHeld(bridge);
+    await settle();
+    act(open);
+    await settle();
+    const [tab] = filesOf(A);
+    stop(); // the quit: what is pending is written
+    off();
+    const written = Object.fromEntries(bridge.sets.map((set) => [set.key, set.value]));
+    return { main, tab, layout: JSON.stringify(written).split(tab.id).join('files:the-tab') };
+  }
+
+  it('main.tabs, the session’s side list and panelTools.params hold after a followed open what they hold after a plain one', async () => {
+    const followed = await stored(() => void openFile(A, '/r/a.ts', 3, { from: { file: '/r/docs/guide.md' } }));
+    expect(followed.main.callsOf('files.follow')).toEqual([{ appSessionId: bareOf(A), path: '/r/a.ts', from: { file: '/r/docs/guide.md' } }]);
+    const plain = await stored(() => void openFile(A, '/r/a.ts', 3));
+    expect(plain.main.callsOf('files.follow')).toEqual([]);
+    expect(followed.layout).toContain('files:the-tab'); // the file's tab was written
+    expect(followed.layout).toBe(plain.layout);
+    expect(followed.layout).not.toContain('guide.md');
+  });
+});
 
 describe('an open the agent asked for (U6e)', () => {
   const OUT = '/elsewhere/chosen.txt';

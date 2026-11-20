@@ -3,15 +3,24 @@
 // transcript here is made of invented records, written into a scratch store.
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, openSync, readdirSync, readFileSync } from 'node:fs';
-import { open as fsOpen, readFile, rename, writeFile, mkdir, stat, type FileHandle } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { cp, open as fsOpen, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile, mkdir, stat, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { readArrivals } from '@shared/engine/arrival';
 import { callClass, rowClaim } from '@shared/files/named';
-import { loadUxwaveTranscript } from '../../../test/support/fixtures';
+import { SubagentReader } from '../../engine-host/fs/subagents';
+import { loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX, type Naming, type NamedPathsOptions } from './named';
+import { OPENS_CONFIRMED, WALKED } from '../fs/no-link';
+import { createNamedPaths, NAMED_AGENT_DIRS_MAX, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX, type Naming, type NamedPathsOptions } from './named';
+
+// UX wave U6b-4c (M3): the directories read (`readdir`, which the search over a subagent's transcript walks by), counted
+const dirReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, readdir: ((...args: Parameters<typeof actual.readdir>) => ((dirReads.count += 1), actual.readdir(...args))) as typeof actual.readdir };
+});
 
 const S = 'app-named' as AppSessionId;
 const P = '/work/out/report.md';
@@ -41,7 +50,8 @@ const bytesOf = (records: object[]) => records.reduce((sum, record) => sum + Buf
 
 let fixture: StoreFixture;
 let file: string | null;
-let holds: Partial<Record<'opened' | 'searched', () => Promise<void>>>;
+type HoldPoint = 'opened' | 'searched' | 'found' | 'walked';
+let holds: Partial<Record<HoldPoint, () => Promise<void>>>;
 let failRead: ((n: number) => boolean) | null;
 const stats = { opens: 0, reads: 0, bytes: 0 };
 
@@ -61,7 +71,7 @@ const counting: NonNullable<NamedPathsOptions['open']> = async (path, flags) => 
   });
   return handle;
 };
-const reset = () => Object.assign(stats, { opens: 0, reads: 0, bytes: 0 });
+const reset = () => (Object.assign(stats, { opens: 0, reads: 0, bytes: 0 }), (dirReads.count = 0));
 
 function paths(extra: Partial<NamedPathsOptions> = {}) {
   return createNamedPaths({
@@ -93,7 +103,7 @@ function deferred() {
   return { promise, resolve };
 }
 // A hold at `point` that says when it is reached and waits for the test's release.
-function holdAt(point: 'opened' | 'searched', during?: () => Promise<void>) {
+function holdAt(point: HoldPoint, during?: () => Promise<void>) {
   const reached = deferred();
   const release = deferred();
   holds[point] = async () => {
@@ -107,12 +117,15 @@ const turns = async (n = 20) => {
   for (let i = 0; i < n; i += 1) await new Promise((resolve) => setImmediate(resolve));
 };
 // An open whose reads answer at once from the file's bytes as they were at the open, with no wait on the file system,
-// each read noting `onRead` first: the loop then turns only where the search gives it back (fix round 1, item 4).
+// each read noting `onRead` first: the loop then turns only where the search gives it back (fix round 1, item 4). U6b-4c:
+// over the descriptor of a real open with the flags asked, which a subagent's open confirms on Linux.
 function instant(onRead: () => void = () => {}): NonNullable<NamedPathsOptions['open']> {
-  return async (path) => {
+  return async (path, flags) => {
+    const opened = await fsOpen(path, flags);
     const bytes = await readFile(path);
     const status = await stat(path, { bigint: true });
     return {
+      fd: opened.fd,
       stat: async () => status,
       read: (buffer: Buffer, offset: number, length: number, position: number) => {
         onRead();
@@ -120,7 +133,7 @@ function instant(onRead: () => void = () => {}): NonNullable<NamedPathsOptions['
         bytes.copy(buffer, offset, position, position + n);
         return Promise.resolve({ bytesRead: n, buffer });
       },
-      close: async () => {},
+      close: () => opened.close(),
     } as unknown as FileHandle;
   };
 }
@@ -149,7 +162,7 @@ afterEach(async () => {
 
 describe('the bounds', () => {
   it('are the document’s', () => {
-    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX }).toEqual({
+    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX, NAMED_AGENT_DIRS_MAX }).toEqual({
       NAMED_SCAN_BYTES: 1024 ** 3,
       NAMED_CHUNK_BYTES: 1024 * 1024,
       NAMED_ROW_BYTES: 4 * 1024 * 1024,
@@ -160,6 +173,7 @@ describe('the bounds', () => {
       NAMED_PENDING_MAX: 256,
       NAMED_CLAIM_STEPS: 64,
       NAMED_PATH_MAX: 4096,
+      NAMED_AGENT_DIRS_MAX: 4096,
     });
   });
 });
@@ -948,5 +962,402 @@ describe('the search and the rule agree', () => {
       const chunk = 64 + Math.floor(random() * 2048);
       expect(await paths({ bounds: { chunk, scan } }).names(S, P), `round ${round}, chunk ${chunk}, scan ${scan}: ${records.map(lineOf).join('\n')}`).toBe(expected);
     }
+  });
+});
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, M3; Interfaces §E, R2 and R4): the
+// search over one subagent's transcript, which a follow names by the agent's id. The file is found under the session's
+// own transcript folder by reading directories alone, opened with no link on its way, and read by the subagent's rule.
+describe('namesInAgent: what one subagent’s transcript names', () => {
+  const AGENT = 'a1b2c3';
+  const THEIRS = 'app-theirs' as AppSessionId;
+  const folderOf = (transcript: string) => transcript.slice(0, -'.jsonl'.length);
+  // The conversation a transcript is of (its engine session, the file's name), and the subagent a follow names in it
+  const conversationOf = (transcript: string) => basename(transcript, '.jsonl');
+  const agent = (id = AGENT, transcript: string | null = file) => ({ id, engineSessionId: transcript === null ? 'engine-session-none' : conversationOf(transcript) });
+  const agentFile = (agentId: string, dirs: string[] = [], transcript = file!) => join(folderOf(transcript), 'subagents', ...dirs, `agent-${agentId}.jsonl`);
+  // Every record as the engine writes a subagent's: its conversation's id and the agent's own (a record's own keys win)
+  async function writeAgent(agentId: string, records: object[], dirs: string[] = [], transcript = file!): Promise<string> {
+    const path = agentFile(agentId, dirs, transcript);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, records.map((record) => `${lineOf({ sessionId: conversationOf(transcript), agentId, ...record })}\n`).join(''));
+    return path;
+  }
+  // A subagent's records as the engine writes them (test/fixtures/transcripts/…/subagents/): every one a sidechain and none
+  // with an origin; its first `user` record is the prompt its parent wrote
+  const sidechain = (record: object) => ({ ...record, isSidechain: true });
+  const prompt = (content: string) => sidechain({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content } });
+  const returned = (id: string, content: string) => sidechain({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] } });
+  const linking = () => [prompt('Look into the report.'), sidechain(linkTo(P))];
+  // Replace `path` by a link to `target`, keeping it beside under another name.
+  async function swapForLink(path: string, target: string) {
+    await rename(path, `${path}.away`);
+    await symlink(target, path);
+  }
+  // Another session's transcript and its folder, and a search that knows both sessions
+  async function theirs(): Promise<string> {
+    return fixture.addTranscript('/work/theirs', 'engine-session-9', filler(2).map(lineOf));
+  }
+  const both = (their: string, extra: Partial<NamedPathsOptions> = {}) => paths({ transcript: async (appSessionId) => (appSessionId === THEIRS ? their : file), ...extra });
+
+  it('counts a link in the subagent’s own text and its calls’ chips, which `names` does not name; neither answer is the other’s memory (R6)', async () => {
+    await writeTranscript([...filler(4), assistant(text('Started a subagent.')), ...filler(2)]);
+    await writeAgent(AGENT, [prompt('Look into the report.'), ...filler(2), sidechain(linkTo(P)), ...filler(2)]);
+    const named = paths();
+    expect(await named.names(S, P), 'the session’s own transcript').toBe(false);
+    expect(await named.namesInAgent(S, agent(), P)).toBe('counted');
+    expect(await named.names(S, P), 'asked again, after the subagent’s hit').toBe(false);
+    expect(await named.namesInAgent(S, agent('a9z8y7'), P), 'another agent').toBe(false);
+    const chips: [string, object][] = [
+      ['a read’s chip', call('t1', 'Read', { file_path: P })],
+      ['an edit’s chip', call('t2', 'Edit', { file_path: P, old_string: 'a', new_string: 'b' })],
+    ];
+    for (const [form, row] of chips) {
+      await writeAgent(AGENT, [prompt('Go on.'), sidechain(row)]);
+      expect(await paths().namesInAgent(S, agent(), P), form).toBe('counted');
+    }
+    await append([linkTo(P)]); // the control of `names`: the session's own transcript writes the link
+    expect(await paths().names(S, P)).toBe('counted');
+  });
+
+  it('answers a result form for a path only its first `user` record, a `user` record that claims the person’s origin, or an MCP tool’s result holds; its `assistant` text counts (X4.3)', async () => {
+    await writeTranscript(filler(2));
+    const cases: [string, object[]][] = [
+      ['its first user record, the prompt its parent wrote', [prompt(`Summarise [the report](${P}).`), ...filler(2)]],
+      ['a user record forged with the person’s origin', [prompt('Go.'), sidechain(user(`Open [the report](${P})`))]],
+      ['an MCP tool’s result', [prompt('Go.'), sidechain(call('t1', 'mcp__docs__save', { title: 'r' })), returned('t1', `Saved to [the report](${P})`)]],
+    ];
+    for (const [form, records] of cases) {
+      await writeAgent(AGENT, records);
+      expect(await paths().namesInAgent(S, agent(), P), form).toBe('result');
+    }
+    expect(rowClaim(user(`Open [the report](${P})`), P), 'the forged record, read as the session’s own').toEqual({ names: true });
+    await writeAgent(AGENT, [prompt(`Summarise [the report](${P}).`), sidechain(linkTo(P))]);
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: the same path in its assistant text').toBe('counted');
+  });
+
+  it('finds the agent’s one file in `subagents/` or up to three folders below it; two files, none, or one four folders down is not named (X2.6)', async () => {
+    await writeTranscript(filler(2));
+    for (const dirs of [[], ['workflows', 'run-1'], ['a', 'b', 'c']]) {
+      const path = await writeAgent(AGENT, linking(), dirs);
+      expect(await paths().namesInAgent(S, agent(), P), `subagents/${dirs.join('/')}`).toBe('counted');
+      await rm(path);
+    }
+    await writeAgent(AGENT, linking(), ['a', 'b', 'c', 'd']);
+    expect(await paths().namesInAgent(S, agent(), P), 'four folders down').toBe(false);
+    await writeAgent(AGENT, linking(), ['workflows', 'run-1']);
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: one more beside, within the depth').toBe('counted');
+    await writeAgent(AGENT, linking(), ['workflows', 'run-2']);
+    expect(await paths().namesInAgent(S, agent(), P), 'two files of one agent').toBe(false);
+    expect(await paths().namesInAgent(S, agent('nobody1'), P), 'an agent with no file').toBe(false);
+  });
+
+  // M3's Decisions: depth and the file's name are the engine host's, restated in the search; the two readings are held
+  // together over the recorded session's subagents and invented agents at every depth either could read apart
+  it('finds exactly the agents the engine host’s listing finds, over the recorded session and at every depth (src/engine-host/fs/subagents.ts)', async () => {
+    await writeTranscript(filler(2));
+    await cp(join(TEST_FIXTURE_DIR, 'transcripts', '9a1d4262-0b43-46ad-acb9-5982f31d209c', 'subagents'), join(folderOf(file!), 'subagents'), { recursive: true });
+    const placed: [string, string[]][] = [['d0', []], ['d1', ['workflows']], ['d2', ['workflows', 'run-1']], ['d3', ['a', 'b', 'c']], ['d4', ['a', 'b', 'c', 'd']], ['d5', ['workflows', 'run-1', 'x', 'y']]];
+    for (const [agentId, dirs] of placed) await writeAgent(agentId, [prompt('Go.')], dirs);
+    // every agent file there, at any depth, gains a record that links a path of its own
+    const ids: string[] = [];
+    const mark = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const id = /^agent-(.+)\.jsonl$/.exec(entry.name)?.[1];
+        if (entry.isDirectory()) await mark(join(dir, entry.name));
+        else if (id !== undefined && entry.isFile()) {
+          ids.push(id);
+          await writeFile(join(dir, entry.name), `${lineOf({ sessionId: conversationOf(file!), agentId: id, ...sidechain(linkTo(`/work/out/${id}.md`)) })}\n`, { flag: 'a' });
+        }
+      }
+    };
+    await mark(join(folderOf(file!), 'subagents'));
+    expect(ids, 'the recorded agents are among them').toEqual(expect.arrayContaining(['ad286defbc77bc090', 'ae75ba6ce5d866acc', 'd4', 'd5']));
+    const listed = (await new SubagentReader().list(folderOf(file!))).map((agent) => agent.agentId as string);
+    const named = paths();
+    const found: string[] = [];
+    for (const id of ids) if ((await named.namesInAgent(S, agent(id), `/work/out/${id}.md`)) === 'counted') found.push(id);
+    expect(found.sort()).toEqual(listed.sort());
+    expect(listed.sort()).toEqual(['ad286defbc77bc090', 'ae75ba6ce5d866acc', 'd0', 'd1', 'd2', 'd3']);
+  });
+
+  it('reads no subagent’s file reached through a link: the session’s folder, `subagents`, a folder under it, or the file itself; nor one whose folder became a link after the walk found it (X2.9)', async () => {
+    const their = await theirs();
+    await writeAgent(AGENT, linking(), ['workflows', 'run-1'], their);
+    expect(await both(their).namesInAgent(THEIRS, agent(AGENT, their), P), 'the control: their file, under their session').toBe('counted');
+    const mine = await writeTranscript(filler(2));
+    const subagents = join(folderOf(mine), 'subagents');
+    await symlink(folderOf(their), folderOf(mine));
+    expect(await both(their).namesInAgent(S, agent(), P), 'the session’s folder a link').toBe(false);
+    await unlink(folderOf(mine));
+    await mkdir(folderOf(mine));
+    await symlink(join(folderOf(their), 'subagents'), subagents);
+    expect(await both(their).namesInAgent(S, agent(), P), '`subagents` a link').toBe(false);
+    await unlink(subagents);
+    await mkdir(subagents);
+    await symlink(join(folderOf(their), 'subagents', 'workflows'), join(subagents, 'workflows'));
+    expect(await both(their).namesInAgent(S, agent(), P), 'a folder under `subagents` a link').toBe(false);
+    await unlink(join(subagents, 'workflows'));
+    await mkdir(join(subagents, 'workflows', 'run-1'), { recursive: true });
+    await symlink(agentFile(AGENT, ['workflows', 'run-1'], their), agentFile(AGENT, ['workflows', 'run-1']));
+    expect(await both(their).namesInAgent(S, agent(), P), 'the file a link').toBe(false);
+    await unlink(agentFile(AGENT, ['workflows', 'run-1']));
+    await writeAgent(AGENT, linking(), ['workflows', 'run-1']);
+    expect(await both(their).namesInAgent(S, agent(), P), 'the control: the same file, reached with no link').toBe('counted');
+    // the session's file no longer links the path, theirs does: a way through a link would read theirs
+    await writeAgent(AGENT, [prompt('Go.')], ['workflows', 'run-1']);
+    holds.found = () => swapForLink(join(subagents, 'workflows'), join(folderOf(their), 'subagents', 'workflows'));
+    expect(await both(their).namesInAgent(S, agent(), P), 'a folder on its way swapped for a link after the walk').toBe(false);
+    expect(holds.found, 'the walk found the file').toBeUndefined();
+  });
+
+  // The branch panel (scalpel-2, finding 1): the walk and the open hand on a path alone, so a regular file renamed into the
+  // found file's place between them is what is opened; only records that this agent of this conversation wrote count
+  it('counts only records that carry its conversation’s id and the agent’s: a file put in the found file’s place between the walk and the open names nothing (the branch panel)', async () => {
+    const their = await theirs();
+    await writeTranscript(filler(2));
+    const found = await writeAgent(AGENT, [prompt('Go.')]);
+    // an agent of the same id in another conversation, and another agent of this one, each linking the path
+    const elsewhere = await writeAgent(AGENT, linking(), [], their);
+    const sibling = await writeAgent('d9e8f7', linking());
+    for (const [what, replacement] of [['another conversation’s agent of the same id', elsewhere], ['another agent of this conversation', sibling]] as const) {
+      const copy = `${found}.next`;
+      await cp(replacement, copy);
+      holds.found = () => rename(copy, found);
+      expect(await both(their).namesInAgent(S, agent(), P), what).toBe(false);
+      expect(holds.found, `${what}: the walk found the file`).toBeUndefined();
+    }
+    await writeAgent(AGENT, [prompt('Go.'), { ...sidechain(linkTo(P)), agentId: undefined }]);
+    expect(await paths().namesInAgent(S, agent(), P), 'a record with no agent’s id').toBe(false);
+    await writeAgent(AGENT, linking());
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: its own records').toBe('counted');
+  });
+
+  // The branch panel (scalpel-2, finding 3): a follow from a drill-in still shown after `/clear` names the conversation it
+  // was drawn for, which the session's transcript no longer is (Q11)
+  it('names nothing for a conversation the session is no longer bound to, though the one it is bound to has the agent (Q11, the branch panel)', async () => {
+    await writeTranscript(filler(2));
+    await writeAgent(AGENT, linking());
+    expect(await paths().namesInAgent(S, { id: AGENT, engineSessionId: 'engine-session-0' }, P), 'a conversation left behind').toBe(false);
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: the conversation it is bound to').toBe('counted');
+  });
+
+  // Where the open helper walks the folders first (Linux), a folder swapped between its walk and its open is followed by
+  // the open, and refused by the descriptor's own path (`confirmOpened`)
+  it.runIf(WALKED && OPENS_CONFIRMED)('refuses a folder swapped for a link between the open’s own walk and the open, by the descriptor’s own path (X2.9, Linux)', async () => {
+    const their = await theirs();
+    await writeAgent(AGENT, linking(), ['workflows', 'run-1'], their);
+    await writeTranscript(filler(2));
+    await writeAgent(AGENT, [prompt('Go.')], ['workflows', 'run-1']);
+    holds.walked = () => swapForLink(join(folderOf(file!), 'subagents', 'workflows'), join(folderOf(their), 'subagents', 'workflows'));
+    expect(await both(their).namesInAgent(S, agent(), P)).toBe(false);
+    expect(holds.walked, 'the open walked').toBeUndefined();
+    expect(await both(their).namesInAgent(THEIRS, agent(AGENT, their), P), 'the control: the file the link leads to names the path').toBe('counted');
+  });
+
+  it('finds an agent’s file only under its own session’s transcript folder, and reads nothing for a session with no transcript (X2.7, X2.8)', async () => {
+    const their = await theirs();
+    await writeAgent(AGENT, linking(), [], their);
+    await writeTranscript(filler(2));
+    await mkdir(join(folderOf(file!), 'subagents'), { recursive: true });
+    expect(await both(their).namesInAgent(S, agent(), P), 'asked under this session').toBe(false);
+    expect(await both(their).namesInAgent(THEIRS, agent(AGENT, their), P), 'the control: asked under its own').toBe('counted');
+    reset();
+    expect(await paths({ transcript: async () => null }).namesInAgent(S, agent(), P), 'no transcript').toBe(false);
+    expect(await paths({ transcript: async () => `${folderOf(their)}.json` }).namesInAgent(THEIRS, agent(AGENT, their), P), 'a transcript not named `.jsonl`').toBe(false);
+    expect({ dirs: dirReads.count, opens: stats.opens }).toEqual({ dirs: 0, opens: 0 });
+  });
+
+  // The branch's M3 review: a search whose last waiter left starts no further stage on the disk (W2 a, W3). Its client ends
+  // after the walk found the file: nothing is opened, the slot is free, and the job waiting behind it runs.
+  it('starts no further stage once its last waiter has left: an abort after the walk found the file opens nothing, and the next job runs', async () => {
+    await writeTranscript([linkTo('/work/out/next.md')]);
+    await writeAgent(AGENT, linking());
+    for (const point of ['found', ...(WALKED ? ['walked' as const] : [])] as const) {
+      const named = paths();
+      const client = new AbortController();
+      const held = holdAt(point, async () => client.abort());
+      const abandoned = named.namesInAgent(S, agent(), P, client.signal);
+      await held.reached;
+      const next = named.names(S, '/work/out/next.md'); // waits behind it, in the one slot
+      reset();
+      held.release();
+      expect(await abandoned, point).toBe(false);
+      expect(await next, `${point}: the next job runs`).toBe('counted');
+      expect(stats.opens, `${point}: only the next job's transcript is opened`).toBe(1);
+    }
+    expect(await paths().namesInAgent(S, agent(), P), 'the control: the same search, not abandoned').toBe('counted');
+  });
+
+  // The branch's M3 re-review: the client ends while the agent file's open is under way, and the open then succeeds: the
+  // descriptor is closed with nothing asked of it (no stat), and the job waiting behind runs.
+  it('closes, unread, an agent file whose open answered after its last waiter left, and the next job runs', async () => {
+    await writeTranscript([linkTo('/work/out/next.md')]);
+    const agentPath = await realpath(await writeAgent(AGENT, linking())); // as the search opens it: under the real path of the transcript's folder
+    const client = new AbortController();
+    const asked: string[] = [];
+    const open: NonNullable<NamedPathsOptions['open']> = async (path, flags) => {
+      const handle = await counting(path, flags);
+      if (path !== agentPath) return handle;
+      client.abort(); // while the open was pending: it answers after the last waiter left
+      const stat = handle.stat.bind(handle);
+      const close = handle.close.bind(handle);
+      return Object.assign(handle, {
+        stat: (...args: Parameters<FileHandle['stat']>) => (asked.push('stat'), stat(...args)),
+        close: () => (asked.push('close'), close()),
+      });
+    };
+    const named = paths({ open });
+    const held = holdAt('found');
+    const abandoned = named.namesInAgent(S, agent(), P, client.signal);
+    await held.reached;
+    const next = named.names(S, '/work/out/next.md'); // waits behind it, in the one slot
+    held.release();
+    expect(await abandoned).toBe(false);
+    expect(await next, 'the next job runs').toBe('counted');
+    expect(asked, 'closed, with no stat').toEqual(['close']);
+    expect(await paths({ open }).namesInAgent(S, agent(), P), 'the control: the same open, its waiter still there').toBe('counted');
+  });
+
+  it('a request made after the session is bound to another transcript does not join the search of the old one’s subagent (X2.11, W3)', async () => {
+    await writeTranscript(filler(2));
+    await writeAgent(AGENT, linking());
+    const rebound = await fixture.addTranscript('/work/repo', 'engine-session-2', filler(2).map(lineOf));
+    const named = paths();
+    const held = holdAt('opened');
+    const before = named.namesInAgent(S, agent(), P);
+    await held.reached;
+    file = rebound; // `/clear`: the session's transcript is now another, whose folder holds no such agent
+    const after = named.namesInAgent(S, agent(), P);
+    held.release();
+    expect(await before).toBe('counted');
+    expect(await after).toBe(false);
+    await writeAgent(AGENT, linking(), [], rebound);
+    expect(await named.namesInAgent(S, agent(), P), 'the control: the new folder’s agent').toBe('counted');
+  });
+
+  it('finds one agent’s file among 4,000 by reading folders alone: one file opened (K13)', async () => {
+    await writeTranscript(filler(2));
+    const subagents = join(folderOf(file!), 'subagents');
+    const run = join(subagents, 'workflows', 'run-1');
+    await mkdir(run, { recursive: true });
+    const other = `${lineOf(prompt('Go.'))}\n`;
+    for (let i = 0; i < 4000; i += 200) await Promise.all(Array.from({ length: 200 }, (_, n) => writeFile(join((i + n) % 4 === 0 ? run : subagents, `agent-x${i + n}.jsonl`), other)));
+    await writeAgent(AGENT, linking(), ['workflows', 'run-1']);
+    reset();
+    expect(await paths().namesInAgent(S, agent(), P)).toBe('counted');
+    expect({ opens: stats.opens, dirs: dirReads.count }).toEqual({ opens: 1, dirs: 3 }); // subagents, workflows, run-1
+  });
+
+  it('reads at most its bound of folders to find the file; past it, not named', async () => {
+    await writeTranscript(filler(2));
+    for (const dir of ['a', 'b']) await mkdir(join(folderOf(file!), 'subagents', dir), { recursive: true });
+    await writeAgent(AGENT, linking(), ['c']);
+    expect(await paths({ bounds: { dirs: 4 } }).namesInAgent(S, agent(), P), 'subagents and its three folders').toBe('counted');
+    expect(await paths({ bounds: { dirs: 3 } }).namesInAgent(S, agent(), P)).toBe(false);
+  });
+
+  it('gives the event loop back after every read of the subagent’s file, as the session’s search does (K13)', async () => {
+    await writeTranscript(filler(2));
+    await writeAgent(AGENT, [prompt('Go.'), sidechain(linkTo(P)), ...filler(400)]);
+    const loop = ticker();
+    const at: number[] = [];
+    try {
+      expect(await paths({ open: instant(() => at.push(loop.ticks())), bounds: { chunk: 2048 } }).namesInAgent(S, agent(), P)).toBe('counted');
+    } finally {
+      loop.stop();
+    }
+    expect(at.length).toBeGreaterThan(20);
+    for (let i = 1; i < at.length; i += 1) expect(at[i], `read ${i}`).toBeGreaterThan(at[i - 1]!);
+  });
+
+  it('shares the one slot and the queue of eight: with eight jobs waiting, a burst of asks for the session is answered at once and reads no folder (K13)', async () => {
+    const others = Array.from({ length: NAMED_WAITING_MAX }, (_, i) => `/work/out/waiting-${i}.md`);
+    await writeTranscript([linkTo(P), ...others.map(linkTo)]);
+    await writeAgent(AGENT, linking());
+    const named = paths();
+    const held = holdAt('opened');
+    const running = named.names(S, P);
+    await held.reached;
+    const waiting = others.map((path) => named.names(S, path));
+    await turns(2); // their transcript found, they wait
+    reset();
+    const located = vi.fn();
+    const burst = await Promise.all(['/work/out/a.md', '/work/out/b.md', P].map((path) => named.namesInAgent(S, agent(), path, undefined, located)));
+    expect(burst).toEqual([false, false, false]);
+    expect({ dirs: dirReads.count, opens: stats.opens, located: located.mock.calls.length }).toEqual({ dirs: 0, opens: 0, located: 3 });
+    held.release();
+    expect(await running).toBe('counted');
+    expect(await Promise.all(waiting)).toEqual(others.map(() => 'counted'));
+    expect(await named.namesInAgent(S, agent(), P), 'the control, the queue free').toBe('counted');
+  });
+
+  // Interfaces §D, Decision Log 10: a follow keeps its place until its search's call of the transcript locator has
+  // settled. `located` is called exactly once, then: when the locator answered, threw, or was never asked, and also
+  // after the request itself was answered.
+  describe('`located`: once, when the request’s call of the locator has settled', () => {
+    it('after the locator answered, whatever the search then answers', async () => {
+      await writeTranscript(filler(2));
+      await writeAgent(AGENT, linking());
+      for (const [path, answer] of [[P, 'counted'], ['/work/out/other.md', false]] as const) {
+        const located = vi.fn();
+        expect(await paths().namesInAgent(S, agent(), path, undefined, located)).toBe(answer);
+        expect(located, String(answer)).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('after the request was answered first: its patience ran out, or its client ended, while the locator was held', async () => {
+      await writeTranscript(filler(2));
+      await writeAgent(AGENT, linking());
+      const locator = deferred();
+      const named = paths({ transcript: () => locator.promise.then(() => file), bounds: { waitMs: 20 } });
+      const timedOut = vi.fn();
+      const ended = vi.fn();
+      expect(await named.namesInAgent(S, agent(), P, undefined, timedOut)).toBe(false);
+      const client = new AbortController();
+      const asked = named.namesInAgent(S, agent(), P, client.signal, ended);
+      client.abort();
+      expect(await asked).toBe(false);
+      expect({ timedOut: timedOut.mock.calls.length, ended: ended.mock.calls.length }, 'answered, the locator still held').toEqual({ timedOut: 0, ended: 0 });
+      reset();
+      locator.resolve();
+      await turns();
+      expect({ timedOut: timedOut.mock.calls.length, ended: ended.mock.calls.length }).toEqual({ timedOut: 1, ended: 1 });
+      expect({ dirs: dirReads.count, opens: stats.opens }, 'neither queued a search').toEqual({ dirs: 0, opens: 0 });
+    });
+
+    it('when the locator rejects, or throws as it is called: not named, and nothing thrown', async () => {
+      await writeTranscript(filler(2));
+      await writeAgent(AGENT, linking());
+      const locators: [string, NamedPathsOptions['transcript']][] = [
+        ['rejects', () => Promise.reject(new Error('index closed'))],
+        ['throws', () => {
+          throw new Error('index closed');
+        }],
+      ];
+      for (const [how, transcript] of locators) {
+        const located = vi.fn();
+        expect(await paths({ transcript }).namesInAgent(S, agent(), P, undefined, located), how).toBe(false);
+        expect(located, how).toHaveBeenCalledTimes(1);
+      }
+      const located = vi.fn();
+      expect(await paths().namesInAgent(S, agent(), P, undefined, located), 'the control').toBe('counted');
+      expect(located).toHaveBeenCalledTimes(1);
+    });
+
+    it('at once when no locator call is made: a client already ended, a path past NAMED_PATH_MAX', async () => {
+      await writeTranscript(filler(2));
+      const long = `/work/out/${'d'.repeat(NAMED_PATH_MAX)}.md`;
+      await writeAgent(AGENT, [...linking(), sidechain(linkTo(long))]);
+      const locate = vi.fn(async () => file);
+      const named = paths({ transcript: locate });
+      for (const [why, path, signal] of [['ended', P, AbortSignal.abort()], ['too long', long, undefined]] as const) {
+        const located = vi.fn();
+        expect(await named.namesInAgent(S, agent(), path, signal, located), why).toBe(false);
+        expect(located, why).toHaveBeenCalledTimes(1);
+      }
+      expect(locate).not.toHaveBeenCalled();
+      expect(await named.namesInAgent(S, agent(), P), 'the control').toBe('counted');
+    });
   });
 });

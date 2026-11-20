@@ -1,8 +1,8 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import fs, { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
 import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
@@ -44,6 +44,42 @@ describe('files allowlist', () => {
     // the worktree realpaths to the directory itself, and an additional directory repeats through a link
     const roots = await rootsOf(record(repo, [extra, join(base, 'repo-link')], join(base, 'repo-link')));
     expect(roots).toEqual([join(real, 'repo'), join(real, 'extra')]);
+  });
+
+  // UX wave U6b-4c (the branch panel): a caller that counts its work until it has ended (a follow's place, decision 7) is
+  // answered only once every read of git's files has settled, so one folder's read failing at once does not answer while
+  // the other folder's read is still out
+  it('answers a fact’s folder only once both folders’ git reads have settled, one refusing at once while the other is held', async () => {
+    const anchor = join(base, 'anchor');
+    const folder = join(base, 'folder');
+    mkdirSync(anchor);
+    mkdirSync(folder);
+    writeFileSync(join(folder, '.git'), 'not a pointer\n'); // git's layout refused: this folder's discovery throws
+    const anchorReal = await realpath(anchor);
+    const stat = fs.promises.stat.bind(fs.promises);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    vi.spyOn(fs.promises, 'stat').mockImplementation((async (path: string, ...rest: unknown[]) => {
+      if (path === anchorReal) {
+        reach();
+        await held;
+      }
+      return stat(path, ...(rest as []));
+    }) as never);
+    try {
+      let settled = false;
+      const answer = admittedFolder({ directory: anchor, additionalDirectories: [], worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: null, linked: false } }, 'path').then((value) => ((settled = true), value));
+      await reached;
+      // the folder's own reads run to its refusal meanwhile: many round trips of the file system's threads
+      for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
+      expect(settled, 'the anchor’s read is still out').toBe(false);
+      release();
+      expect(await answer).toBeNull();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('drops a root that does not resolve and never falls back to the record string', async () => {

@@ -1,8 +1,12 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
+import type { Anchor } from '@shared/anchor/anchor'; // UX wave U6b-4c
+import { anchoredMessage } from '@shared/anchor/message'; // UX wave U6b-4c
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
+import { useSessions } from '../../stores/sessions'; // UX wave U6b-4c (the branch panel)
+import { record } from '../../../../../test/support/builders'; // UX wave U6b-4c (the branch panel)
 import { useAttention } from '../../stores/attention'; // UX wave U1b
 import type { AttentionItem } from '@shared/graph/attention'; // UX wave U1b
 import { afterAccepted } from '../../composer/editor/submit';
@@ -848,5 +852,89 @@ describe('the compaction’s row', () => {
   it('is guessed at the turn line’s height before it is measured', () => {
     const activity = { id: 'activity:compacting' as never, turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'activity' as const, activity: 'compacting' as const, since: '2026-11-15T10:00:00.000Z' };
     expect(estimateRow(activity)).toBe(40);
+  });
+});
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, decision 9): a child's mount gives its
+// rows an `openFile` that adds the agent's id to the options, so every click source (a path link, a read's chip, an edit's
+// chip, an anchored comment's chip) carries it with no edit of its own; a session's own transcript adds none. Invented paths.
+describe('the agent’s id on what a child’s transcript opens', () => {
+  const SESSION = at('app-parent' as AppSessionId);
+  const ANCHOR: Anchor = { kind: 'file-line', locator: '/x/anchored.txt#L4', label: 'anchored.txt:4', path: '/x/anchored.txt', line: 4 };
+  const HUNK = { oldStart: 7, oldLines: 1, newStart: 7, newLines: 1, lines: ['-a', '+b'] };
+  function events() {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: anchoredMessage({ anchor: ANCHOR, text: 'Why twice?', destination: 'main', screenshot: false }), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.toolUse('t1', 'Read', { file_path: '/x/read.txt' });
+    b.result('t1', '1\tread');
+    b.toolUse('t2', 'Edit', { file_path: '/x/edited.txt', old_string: 'a', new_string: 'b' });
+    b.result('t2', 'ok', { structured: { filePath: '/x/edited.txt', structuredPatch: [HUNK] } });
+    b.text('m1', 0, 'Wrote [the notes](/x/linked.txt).');
+    b.end(['u1']);
+    return b.events;
+  }
+  // Every click source of the mount, clicked once, in this order; what `openFile` heard
+  async function clicked(variant: 'session' | 'child', key: string, agentId?: AgentId) {
+    const source: TranscriptSource = { key, ...(agentId && { agentId }), subscribe: () => () => {}, snapshot: () => Promise.resolve(events()) };
+    const openFile = vi.fn();
+    render(<Transcript source={source} variant={variant} actions={{ openFile }} browserActivity={false} />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    act(() => useTranscriptStore.getState().expandAll(key, { cells: true }));
+    const chips = [
+      '[data-chip="path"][title="/x/linked.txt"]',
+      '.transcript-read .transcript-chip[title="/x/read.txt"]',
+      '.transcript-chip[title="/x/edited.txt"]',
+      '[data-chip="anchor"]',
+    ];
+    for (const selector of chips) {
+      await waitFor(() => expect(document.querySelector(selector)).not.toBeNull());
+      fireEvent.click(document.querySelector(selector)!);
+    }
+    return openFile.mock.calls as [string, number | undefined, AppSessionId | null, { main?: boolean; agent?: string } | undefined][];
+  }
+
+  it('a child’s link, read chip, edit chip and anchored comment each open with the agent’s id; a session’s own add none', async () => {
+    const child = await clicked('child', `${SESSION}:agent-x`, 'agent-x' as AgentId);
+    expect(child.map(([path, line, session, options]) => [path, line, session, options?.agent])).toEqual([
+      ['/x/linked.txt', undefined, SESSION, 'agent-x'],
+      ['/x/read.txt', undefined, SESSION, 'agent-x'],
+      ['/x/edited.txt', 7, SESSION, 'agent-x'],
+      ['/x/anchored.txt', 4, SESSION, 'agent-x'],
+    ]);
+    expect(child[0][3]).toEqual({ main: false, agent: 'agent-x' }); // the link's own option kept beside it
+    cleanup();
+    const own = await clicked('session', SESSION);
+    expect(own.map(([path, line, session, options]) => [path, line, session, options?.agent])).toEqual([
+      ['/x/linked.txt', undefined, SESSION, undefined],
+      ['/x/read.txt', undefined, SESSION, undefined],
+      ['/x/edited.txt', 7, SESSION, undefined],
+      ['/x/anchored.txt', 4, SESSION, undefined],
+    ]);
+    expect(own.every(([, , , options]) => options === undefined || !('agent' in options))).toBe(true);
+  });
+
+  it('a child’s mount whose source names no agent adds none', async () => {
+    const calls = await clicked('child', `${SESSION}:unnamed`);
+    expect(calls.every(([, , , options]) => options === undefined || !('agent' in options))).toBe(true);
+    expect(calls).toHaveLength(4);
+  });
+
+  // The branch panel (scalpel-2, finding 3): a drill-in left on screen after `/clear` names the conversation it was drawn
+  // for, not the one the session is in when the link is clicked, so the daemon can keep Q11's refusal
+  it('a child’s opens carry the conversation the session was in when the mount took its source, also after the session moved to another (`/clear`; the branch panel)', async () => {
+    const engine = (id: string) => useSessions.setState({ records: new Map([[SESSION, record(SESSION, { engineSessionId: id as SessionId })]]) });
+    onTestFinished(() => useSessions.setState({ records: new Map() }));
+    engine('engine-drawn');
+    const key = `${SESSION}:agent-y`;
+    const source: TranscriptSource = { key, agentId: 'agent-y' as AgentId, subscribe: () => () => {}, snapshot: () => Promise.resolve(events()) };
+    const openFile = vi.fn();
+    render(<Transcript source={source} variant="child" actions={{ openFile }} browserActivity={false} />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    act(() => engine('engine-cleared'));
+    const link = '[data-chip="path"][title="/x/linked.txt"]';
+    await waitFor(() => expect(document.querySelector(link)).not.toBeNull());
+    fireEvent.click(document.querySelector(link)!);
+    expect(openFile.mock.calls[0]?.[3]).toEqual({ main: false, agent: 'agent-y', conversation: 'engine-drawn' });
   });
 });

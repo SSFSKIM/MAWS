@@ -5,7 +5,7 @@
 // BINARY_SNIFF_BYTES, or a mime that is not text), never the extension alone, so a `.txt` full of NULs is external and a
 // `.dat` of text is code. Pure; no CodeMirror here (this module is in the main chunk).
 import { framedKindOf } from '@shared/files/framed';
-import { extensionOf } from '@shared/files/mime';
+import { isMarkdownName, MARKDOWN_RENDER_CAP } from '@shared/files/markdown';
 import type { FilesReadOutput } from '@shared/ipc/schema/files';
 
 export type ViewerKind = 'code' | 'markdown' | 'image' | 'frame' | 'external' | 'head';
@@ -13,10 +13,9 @@ export type ExternalKind = 'PDF' | 'HTML' | 'Audio' | 'Video' | 'Image' | 'Binar
 type Encoding = FilesReadOutput['encoding'];
 
 export const CODE_CAP = 4 * 1024 * 1024; // a text past this opens as a bounded head
-export const MARKDOWN_RENDER_CAP = 1024 * 1024; // markdown past this is shown as its source
+export { MARKDOWN_RENDER_CAP }; // markdown past this is shown as its source; the daemon's follow shares it (UX wave U6b-4c)
 export const IMAGE_CAP = 8 * 1024 * 1024; // one files.read call (FILES_READ_MAX_LENGTH)
 
-const MARKDOWN = new Set(['md', 'mdx', 'markdown']);
 // The image types Chromium draws in an <img>; another image type (tiff, heic) is an external row.
 const INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/x-icon', 'image/avif', 'image/svg+xml']);
 
@@ -37,7 +36,7 @@ export function kindOf(file: { name: string; mime: string; bytes: number; encodi
   if (framedKindOf(file.mime) !== null) return 'frame'; // UX wave U6b-2
   if (externalKindOf(file) !== null) return 'external';
   if (file.bytes > CODE_CAP) return 'head';
-  if (MARKDOWN.has(extensionOf(file.name)) && file.bytes <= MARKDOWN_RENDER_CAP) return 'markdown';
+  if (isMarkdownName(file.name) && file.bytes <= MARKDOWN_RENDER_CAP) return 'markdown';
   return 'code';
 }
 

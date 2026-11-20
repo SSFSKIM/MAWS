@@ -116,8 +116,11 @@ function outsideOf(entry: ViewerEntry | null): string | null {
 
 // UX wave U6f (§E): and `elsewhere`, an outside file of a session on another machine its standing does not let this
 // person save there, with the window's helper's sentence and no Open File…
-type LabelledReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'outside';
-const labelled = (reason: ReadOnlyReason | null): reason is LabelledReason => reason === 'maws' || reason === 'elsewhere' || reason === 'added' || reason === 'result' || reason === 'outside';
+// UX wave U6b-4c (Q2): and `linked`, a file opened through a link in a Markdown file that is itself read-only for the
+// session, with Open File… as for `result` and `added`
+type LabelledReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'linked' | 'outside';
+const labelled = (reason: ReadOnlyReason | null): reason is LabelledReason =>
+  reason === 'maws' || reason === 'elsewhere' || reason === 'added' || reason === 'result' || reason === 'linked' || reason === 'outside';
 
 // UX wave U6e (§D, K2, K5, K8, K10, K11, K13): "Read-only", in the normal text colour, a button whose accessible
 // description is the reason's sentence; a press (Enter or Space with the keyboard on it) opens the panel under it with the
@@ -131,7 +134,7 @@ function ReadOnlyLabel({ reason, sentence, appSessionId }: { reason: LabelledRea
   const trigger = useRef<HTMLButtonElement>(null);
   const [column, setColumn] = useState<Element | null>(null);
   const [width, setWidth] = useState(0);
-  const offersOpenFile = reason === 'added' || reason === 'result';
+  const offersOpenFile = reason === 'added' || reason === 'result' || reason === 'linked';
   const opened = (open: boolean) => {
     if (!open) return;
     const at = trigger.current?.closest('[data-file-viewer]') ?? null;

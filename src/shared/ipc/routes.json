@@ -150,6 +150,7 @@
   "engine.observedFacts",
   "files.admit",
   "files.chooseOutside",
+  "files.follow",
   "files.grant",
   "files.list",
   "files.listOutside",

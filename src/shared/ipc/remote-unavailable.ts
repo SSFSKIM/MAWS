@@ -71,6 +71,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   // on the asking client
   'files.openExternal': notYet('opening a file there; open a copy here instead'),
   'files.reveal': notYet('showing a file in that machine’s Finder'),
+  'files.follow': notYet('following a link to a file outside that session’s folders'), // UX wave U6b-4c (R1, Q6)
   'side.screenshot.preview': notYet('screenshots'),
   // the owner channel, attention, the side thread, the mods
   'ownerChannel.state': notYet('the owner channel'),

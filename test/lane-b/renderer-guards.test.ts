@@ -76,7 +76,8 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['files.openExternal'],
     guard: 'issued only when machineFor(appSessionId) is this Mac’s (the named open of UX wave U6c); a session on another machine opens through lane-b/open-copy.ts’ openSessionFile, under that module’s entry',
   },
-  'test-support/code-disk.ts': { commands: ['files.openExternal'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e)' },
+  'tools/code/follow.ts': { commands: ['files.follow'], guard: 'sent only for a session on this Mac (the module’s own test of the session’s machine), as a read asks by name only there (UX wave U6b-4c)' },
+  'test-support/code-disk.ts': { commands: ['files.openExternal', 'files.follow'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e, U6b-4c)' },
   // reported: issued for a session on another machine with no guard
   'lane-b/open-copy.ts': {
     commands: ['files.openExternal'],
