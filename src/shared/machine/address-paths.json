@@ -44,6 +44,7 @@
 "commands.engine.sessions.output":["[].appSessionId AppSessionId"],
 "commands.files.admit.input":[".appSessionId AppSessionId"],
 "commands.files.chooseOutside.input":[".appSessionId AppSessionId"],
+"commands.files.follow.input":[".appSessionId AppSessionId"],
 "commands.files.grant.input":[".appSessionId AppSessionId"],
 "commands.files.list.input":[".appSessionId AppSessionId"],
 "commands.files.listOutside.input":[".appSessionId AppSessionId"],

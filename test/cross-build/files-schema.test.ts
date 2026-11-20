@@ -46,6 +46,18 @@ describe.each(PEERS)('a peer of build $build', (peer) => {
     expect(Object.keys(built)).toEqual(expect.arrayContaining(['files.writeOutside', 'files.grant']));
   });
 
+  // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, K11, K12): the follow of a link is
+  // a command neither peer knows, so a window of this build on either daemon goes on to the read, which that daemon
+  // refuses for a file outside the folders; and neither answers a read with outside, so neither answers its linked
+  it('knows no files.follow, so its daemon answers unknown_command and records nothing', () => {
+    const known = new Set([...peer.names.commands, ...peer.names.mainOnlyCommands, ...Object.keys(peer.schema.commands)]);
+    expect(known.has('files.follow')).toBe(false);
+    expect(Object.keys(built)).toContain('files.follow');
+    const linked = { ...READ_OUTPUT, named: true, outside: { real: '/work/notes.txt', writable: false, why: 'result', linked: true } };
+    expect(FilesReadOutputSchema.safeParse(linked).success).toBe(true);
+    expect(droppedBy(readTolerant(peerOutput('files.read'), linked))).toEqual(peer.knowsNamed ? ['outside'] : ['named', 'outside']);
+  });
+
   // UX wave U6b-4a (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4a-open-in.md, decision 1): neither peer knows Open in's
   // admission, so its daemon answers unknown_command and main opens nothing
   it('knows no files.admit, so Open in opens nothing against its daemon', () => {

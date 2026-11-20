@@ -20,8 +20,14 @@
 // working folder of the session the read is made for (UC-4), lexically; with neither it stays relative and the read's
 // refusal says so. No other session's folder is consulted. An open kept for the layout with its path still relative is
 // resolved again when it is made, with the record known then.
+//
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §F; W1): an open that names
+// where its link stands (`from`: a shown Markdown file, or a subagent's transcript) asks the daemon to follow it first, when
+// the open is made (an open kept for the layout follows when it is made, not when it is kept), before the tab is placed,
+// so the tab's read waits for it; an open the agent asked for never follows. The source is held in memory alone: nothing
+// of it reaches the layout or a tab's params (UC-14).
 import type { AppSessionId } from '@shared/graph/ids';
-import { normalizeLexically } from '@shared/files/named';
+import { normalizeLexically, resolveRelative } from '@shared/files/named';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { machineFor } from '../../ipc/machine';
 import { panelHost, shownSession } from '../../panel/host';
@@ -29,25 +35,24 @@ import { surfaceSession } from '../../panel/surface-model';
 import { quietly, useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
+import { follow, type LinkSource } from './follow'; // UX wave U6b-4c
 import { dropSideViews, holdSideViews } from '../../shell/transfer'; // M4: ⌘-click on a file beside the chat is a move to main
 import { fileKey, fileOfTab, FILES_TOOL_ID, placeOpen, sideFileOf, type FilesTabParams } from './files/tabs';
 import { useViewer } from './viewer/viewer-store';
 
-// `normalizeLexically` lives in the rule of a file the transcript names (UX wave U6c, `src/shared/files/named.ts`), so the
-// daemon's check reads a path as the click does; exported here as before.
-export { normalizeLexically };
+// `normalizeLexically` and `resolveRelative` live in the rule of a file the transcript names (UX wave U6c, U6b-4c:
+// `src/shared/files/named.ts`), so the daemon's check reads a path, and resolves a Markdown file's relative link, as the
+// click does; exported here as before.
+export { normalizeLexically, resolveRelative };
 
 export interface OpenFileOptions {
   main?: boolean; // ⌘-click: a main tab, every side tab of the file dropped (rule 3)
   keep?: boolean; // the tab is kept, not the preview
   asked?: 'agent'; // not the person's act (UX wave U7b): no page closes, and what comes to the front comes behind it
   base?: string | null; // an absolute folder a relative path is resolved against; absent, the session's working folder; null, no resolution
+  from?: LinkSource; // UX wave U6b-4c: where the clicked link stands; the daemon is asked to follow it before the tab reads
 }
 
-/** `path` when it begins with `/`, or when `base` is not an absolute path; else `base`, `/` and `path`, lexically normal. Reads no disk. */
-export function resolveRelative(base: string | null, path: string): string {
-  return path.startsWith('/') || base === null || !base.startsWith('/') ? path : normalizeLexically(`${base}/${path}`);
-}
 export type Opened = { surface: 'main' | 'side'; tabId: string };
 // The two ends of an open kept for the layout that open no tab: its session is not one the read keeps, or the layout was
 // not read within the wait.
@@ -142,6 +147,7 @@ function decide(request: Request): Opened {
 }
 
 function place({ appSessionId, path, line, options }: Request): Opened {
+  if (options.from !== undefined && options.asked !== 'agent') follow(appSessionId, path, options.from); // U6b-4c (W1)
   const layout = useLayout.getState();
   const machine = machineFor(appSessionId);
   const key = fileKey(machine, path);
@@ -232,12 +238,14 @@ export function sessionOfTurn(turnId: TurnId): AppSessionId | null {
 
 // The transcript's callbacks C8c supplies (K3), registered through C6's `registerTranscriptActions` from App.tsx's C8c
 // block: a receipt's "Review changes" (and a file row of it) opens Review on the turn, a path chip opens the viewer (a
-// path link's ⌘-click in the main area: UX wave U6b-1).
+// path link's ⌘-click in the main area: UX wave U6b-1). UX wave U6b-4c (decision 9): a subagent's row opens with its agent's
+// id (its transcript's mount adds it), the source of a follow.
 export const codeTranscriptActions: Pick<TranscriptActions, 'reviewChanges' | 'openFile'> = {
   reviewChanges(turnId, path) {
     const appSessionId = shownSession() ?? sessionOfTurn(turnId);
     if (appSessionId === null) return;
     panelHost.addTool('review', { appSessionId, params: { scope: 'turn', turnId, ...(path ? { path } : {}) } });
   },
-  openFile: (path, line, appSessionId, options) => void openFile(appSessionId ?? shownSession(), path, line, { main: options?.main === true }),
+  openFile: (path, line, appSessionId, options) =>
+    void openFile(appSessionId ?? shownSession(), path, line, { main: options?.main === true, ...(options?.agent !== undefined && { from: { agent: options.agent, ...(options.conversation !== undefined && { engineSessionId: options.conversation }) } }) }),
 };

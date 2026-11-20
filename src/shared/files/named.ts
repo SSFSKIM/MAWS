@@ -10,6 +10,11 @@
 // a `file:` URL with an empty host (`file:///work/x.md`) names exactly what its rest names written scheme-less, read by
 // the reader the window shares (`./file-url.ts`). A `file:` URL with a host, without `//`, as an autolink or as a
 // reference's destination names nothing.
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §A) reads two more
+// sources with the same forms, for the daemon's follow of one link: the text of a Markdown file the session may read,
+// whose inline links (`fileLinkSteps`) are each resolved against the file's own folder as the window's `MarkdownView`
+// resolves a chip (`resolveRelative`, one copy for both sides); and the transcript of one of the session's subagents,
+// read record by record as the session's own (`agentRowClaimSteps`), where only an `assistant` record counts.
 import { ANCHOR_TAG_OPENING, commentsMessage, readAnchoredMessage } from '../anchor/message';
 import { neutralisePastedTags } from '../composer/pasted-framing';
 import { framePasted } from '../composer/pasted-content';
@@ -34,6 +39,11 @@ export function normalizeLexically(path: string): string {
   }
   const joined = out.join('/');
   return absolute ? `/${joined}` : joined || '.';
+}
+
+/** `path` when it begins with `/`, or when `base` is not an absolute path; else `base`, `/` and `path`, lexically normal. Reads no disk. Moved here from tools/code/open-file.ts (U6b-4b), which exports it on. */
+export function resolveRelative(base: string | null, path: string): string {
+  return path.startsWith('/') || base === null || !base.startsWith('/') ? path : normalizeLexically(`${base}/${path}`);
 }
 
 const asciiAlphanumeric = (code: number) => (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
@@ -1048,6 +1058,31 @@ function* linkSteps(text: string, m: Meter = meterFor(text)): Generator<string |
   }
 }
 
+// UX wave U6b-4c (Interfaces §A, R3's first test): one inline link of a Markdown file, the path as the link writes it
+// (`clickPath`'s answer, which the daemon resolves again against the folder it confirmed) and as the window's click asks
+// for it in a file standing in the folder `base`.
+export interface FileLink {
+  written: string;
+  path: string;
+}
+
+// The links of a Markdown file's text when the file stands in the folder `base` (absolute): every path `linkSteps` names,
+// as written and resolved by `resolveRelative`, a link that names none passed over. The scan is `linkSteps`' own, one
+// bounded step at a time with its pauses and its meter, and nothing is added to it.
+export function* fileLinkSteps(text: string, base: string): Generator<FileLink | typeof PAUSE, void, void> {
+  for (const step of linkSteps(text)) {
+    if (step === PAUSE) yield PAUSE;
+    else if (step !== null) yield { written: step, path: resolveRelative(base, step) };
+  }
+}
+
+// Every `path` of `fileLinkSteps`, run at once (tests, the differential).
+export function fileLinkTargets(text: string, base: string): string[] {
+  const out: string[] = [];
+  for (const step of fileLinkSteps(text, base)) if (step !== PAUSE) out.push(step.path);
+  return out;
+}
+
 // The inline pass over one context. The bracket openers are a stack walked by no link: the link openers below
 // `inactiveBelow` are the ones a link closed after them made inactive, and `images` counts the image openers open.
 function* contextLinks(text: string, start: number, end: number, defined: ReadonlySet<string>, m: Meter): Generator<string | null | typeof PAUSE, void, void> {
@@ -1539,6 +1574,16 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
     default:
       return NOTHING;
   }
+}
+
+// UX wave U6b-4c (Interfaces §A, R4's second point): a record of a subagent's transcript, read as `rowClaimSteps` reads
+// one, except that only an `assistant` record names a path by a counted form. A `user` record or an attachment there is
+// never the person's own text, whatever its fields say (its first `user` record is the prompt the parent wrote), so a
+// counted answer from one is the result form already resolved; the guard is its own and does not rest on the engine
+// leaving `origin` out of such a record.
+export function* agentRowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
+  const claim = yield* rowClaimSteps(row, path);
+  return claim.names && record(row).type !== 'assistant' ? OTHER : claim;
 }
 
 // The class of the call `toolUseId` names, read from its own `tool_use` block in an `assistant` record; null for any

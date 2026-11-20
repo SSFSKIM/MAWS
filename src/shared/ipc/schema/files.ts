@@ -128,8 +128,10 @@ export const FilesReadOutputSchema = z.strictObject({
   named: z.literal(true).optional(),
   // UX wave U6e (§B): present exactly when `named` is, on a daemon of U6e or later. `real`: the confirmed real path, which a
   // save names (`files.writeOutside`); `writable`: false for a file only a tool's result names (`why: 'result'`) or only a
-  // record of the Library the person added admits (`why: 'added'`), which no save writes
-  outside: z.strictObject({ real: z.string(), writable: z.boolean(), why: z.enum(['result', 'added']).optional() }).optional(),
+  // record of the Library the person added admits (`why: 'added'`), which no save writes. UX wave U6b-4c (decision 11):
+  // `linked`, present exactly on a file admitted for a read alone because the file that links it admits no save
+  // (`files.follow`), beside `why: 'result'`, which a window from before it reads in its place
+  outside: z.strictObject({ real: z.string(), writable: z.boolean(), why: z.enum(['result', 'added']).optional(), linked: z.literal(true).optional() }).optional(),
   // UX wave U6e (decision 8): the file is under one of MAWS's own folders (its profile folder, an app bundle of it), which no
   // write reaches; on any read, inside the directories too
   own: z.literal(true).optional(),
@@ -201,6 +203,24 @@ export type FilesChooseOutsideOutput = z.infer<typeof FilesChooseOutsideOutputSc
 export const FILES_PROTECTED = 'the file is in a folder macOS protects';
 
 const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string() });
+
+// UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §C, R1): the follow of a link
+// the person clicked, for a session of this machine, sent by the app window's page alone and offered to no other machine.
+// `from` says only where the link stands: the shown Markdown file's path, as its tab holds it, or the subagent whose
+// transcript holds it (the id's pattern is `laneA.watch`'s), with the conversation (the engine session) whose subagent
+// drew the link; a follow naming none, or one the session is no longer in, links nothing (the branch panel, Q11). The daemon reads that source itself and, when it holds a link
+// to `path`, records the file for the session, so every later read, frame, open outside MAWS and save of it asks by name
+// as before and is admitted. Three answers and no reason: `linked`, `inside` (the path is under the session's folders,
+// and nothing is recorded), `not-linked` (anything else, a failure inside the follow included).
+export const FilesFollowInputSchema = SessionPathSchema.extend({
+  from: z.union([
+    z.strictObject({ file: z.string() }), // the shown Markdown file's path, as its tab holds it
+    z.strictObject({ agent: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), engineSessionId: z.string().min(1).optional() }), // the subagent whose transcript holds the link, and its conversation (an engine session id)
+  ]),
+});
+export type FilesFollowInput = z.infer<typeof FilesFollowInputSchema>;
+export const FilesFollowOutputSchema = z.strictObject({ status: z.enum(['linked', 'inside', 'not-linked']) });
+export type FilesFollowOutput = z.infer<typeof FilesFollowOutputSchema>;
 // UX wave U6c: `files.openExternal` takes `named` as `files.read` does; U6e: and `agent`
 export const FilesOpenExternalInputSchema = SessionPathSchema.extend({ named: z.literal(true).optional(), agent: z.literal(true).optional() });
 export type FilesOpenExternalInput = z.infer<typeof FilesOpenExternalInputSchema>;
@@ -351,6 +371,7 @@ export const commands = {
   'files.readOutside': { input: FilesReadOutsideInputSchema, output: FilesReadOutputSchema, owner: 'machine' },
   'files.listOutside': { input: FilesListOutsideInputSchema, output: FilesListOutsideOutputSchema, owner: 'machine' },
   'files.chooseOutside': { input: FilesChooseOutsideInputSchema, output: FilesChooseOutsideOutputSchema, owner: 'machine' },
+  'files.follow': { input: FilesFollowInputSchema, output: FilesFollowOutputSchema, owner: 'machine' }, // UX wave U6b-4c: bridged
   'files.admit': { input: FilesAdmitInputSchema, output: FilesAdmitOutputSchema, owner: 'machine' }, // UX wave U6b-4a: main-only
   'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'machine' }, // E1
   'files.readResolved': { input: FilesReadResolvedInputSchema, output: FilesReadOutputSchema, owner: 'machine' }, // P5 O3-E: main-only

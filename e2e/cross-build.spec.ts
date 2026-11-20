@@ -140,6 +140,10 @@
 // UX wave U2b: (to-human, from the peer) and (to-human, to the peer), the to-human view across the cutover (who draws, the
 // launch's reservation, the summaries' switch); their block is at the end of this file, and their rows are in U13a's
 // UC-14 coverage table.
+// UX wave U6b-4c: (a followed link, both ways), the daemon's records of followed links, a profile file neither older
+// build names, across build F and build M; its block is after U6e's, and its row is in U13a's UC-14 coverage table.
+// (outside file, on the peer's daemon) gains its step: a link in a Markdown file is followed to the peer's
+// `unknown_command`, and the tab shows the first notice.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -1889,6 +1893,18 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | `rl2.outside-files`                           | none: Open File… and a link say to update B, B's      | offers.test.ts over both builds' committed tables  |
 //   |                                               | ledger and log hold nothing of them, a save inside    |                                                    |
 //   |                                               | B's checkout lands. Both peers (F, M) run it          |                                                    |
+//   | U6b-4c: `sessions/file-links.json`, a profile | (a followed link, both ways), for F and for M: the    | the return: both files read and savable again, the |
+//   | file the peer does not know; the tab of a     | peer draws its Files tree beside the chat and no      | one beside the chat saving once more; the links    |
+//   | followed file (a Files tab, a main `file`     | viewer, the main tab's refusal, refuses no value,     | file as this build left it. An older window on     |
+//   | tab)                                          | writes its pin, and leaves the links file's bytes as  | this build's daemon is not staged; at the schema   |
+//   |                                               | they were. On the wire, `files.follow`: (outside      | (test/cross-build/files-schema.test.ts,            |
+//   |                                               | file, on the peer's daemon), for F and for M: the     | src/shared/ipc/schema.test.ts): F's and M's        |
+//   |                                               | click shows the first notice and a direct             | readers drop the whole `outside` object (F also    |
+//   |                                               | `files.follow` through the page's bridge answers      | `named`), while a wave reader from before U6b-4c   |
+//   |                                               | unknown_command; that the click sends the follow      | that knows `outside` drops only `outside.linked`   |
+//   |                                               | before its read is held by the unit (viewer.test.tsx, | and keeps `why: 'result'`, the file read-only      |
+//   |                                               | W1 (b) and K11), since the page cannot observe its    |                                                    |
+//   |                                               | own click's call                                      |                                                    |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -4043,6 +4059,10 @@ async function typeAndSave(run: Run, viewer: Locator, path: string, text: string
   await expect(viewer).toHaveAttribute('data-dirty', 'false');
 }
 const grantsOf = (s: Scratch) => join(s.userData, 'sessions', 'file-grants.json');
+// UX wave U6b-4c: the daemon's records of followed links, a profile file neither older build names; a Markdown file's
+// text whose inline links name each of `paths`, as written
+const linksOf = (s: Scratch) => join(s.userData, 'sessions', 'file-links.json');
+const followedGuide = (...paths: string[]) => `# An invented guide\n\n${paths.map((path, n) => `- [link ${n + 1}](${path})`).join('\n')}\n`;
 
 test('(an outside file, both ways) two files this build chose with Open File…, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the grants file as it was; this build reads both again and saves', async () => {
   const { here, peer } = builds();
@@ -4127,7 +4147,13 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
     mkdirSync(outside);
     const [linked, chosen] = [join(outside, 'linked.txt'), join(outside, 'chosen.txt')];
     for (const path of [linked, chosen]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
-    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}).`);
+    // UX wave U6b-4c: a Markdown file of the session's folder linking a file outside it and one beside it
+    const followed = join(outside, 'followed.txt');
+    writeFileSync(followed, OUTSIDE_TEXT('followed.txt'));
+    const [guide, inside] = [join(s.repo, 'guide.md'), join(s.repo, 'inside.txt')];
+    writeFileSync(guide, followedGuide(followed, 'inside.txt'));
+    writeFileSync(inside, 'An invented file inside the session’s folder.\n');
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}) and [the guide](${guide}).`);
     await withUnit(s, peer, 'xb-u6e-unit', async (unit) => {
       const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}), pid ${unit.pid}`];
       const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
@@ -4164,11 +4190,129 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       const answer = await invoke(run.page, 'files.writeOutside', { appSessionId: id, path: linked, real: linked, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(linked)).digest('hex') });
       expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
+
+      // UX wave U6b-4c (§H): a link in a shown Markdown file is followed first (`files.follow`), which the peer's daemon
+      // does not know: the follow settles as one that found nothing, the read is sent, and the peer's refusal shows
+      // U6b-4b's first notice (master's daemon too: its transcript links the guide, not the file the guide links). The proof
+      // is split: the page cannot observe what its own click sends (its bridge is contextBridge's and cannot be wrapped,
+      // and neither main nor either peer's mawsd logs an unknown command), so that the click sends the follow before its
+      // read is held by the unit (viewer.test.tsx, W1 (b) and K11, over the fake disk's older daemon), and the peer's
+      // answer to the follow by the direct call through the page's bridge below. A link to a file inside the folders opens.
+      const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
+      const openGuide = async () => {
+        await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();
+        await expect(guideViewer.locator('[data-markdown-view]'), 'the guide drawn as Markdown beside the chat').toBeVisible({ timeout: 20_000 });
+      };
+      await openGuide();
+      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][title="${followed}"]`).click();
+      const followedNotice = sideColumn(run.page).locator(`[data-file-viewer][data-path="${followed}"] [data-refusal]`);
+      await expect(followedNotice.locator('p').first(), 'the peer refuses the file the guide links: the first notice').toHaveText(NOTICE_OUTSIDE, { timeout: 20_000 });
+      await expect(followedNotice).toHaveAttribute('data-notice-cause', 'outside');
+      expect(await invoke(run.page, 'files.follow', { appSessionId: id, path: followed, from: { file: guide } }), 'the peer’s daemon answers the follow unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
+      await openGuide();
+      await guideViewer.locator('[data-markdown-view] [data-chip="path"][title="inside.txt"]').click();
+      await expect(sideColumn(run.page).locator(`[data-file-viewer][data-path="${inside}"] .cm-content`), 'a link to a file inside the folders opens').toContainText('inside the session’s folder', { timeout: 20_000 });
+      expect(existsSync(linksOf(s)), 'nothing recorded').toBe(false);
       expect(run.maws.consoleErrors()).toEqual([]);
-      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written; a Markdown file's link: files.follow unknown_command, the first notice; its link inside the folders opens`);
       await s.quit(run);
       record(said);
     });
+  });
+});
+
+// ---- UX wave U6b-4c: a followed link, the two older builds (UC-14) ----------------------------------------------------
+// U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, "What is stored and sent"; §H) stores one
+// profile file neither older build names, `sessions/file-links.json` (the links the daemon found by `files.follow`, per
+// session), and nothing new in a tab: the tab of a followed file is a Files tab or a main `file` tab of U6b-1's shape.
+// Its peers are U6e's, told by the same marks (`u6ePeer`): build F and a master from before U6e, neither of which knows a
+// grant or a link record.
+//   (a followed link, both ways)  this build follows a link in a Markdown file of the session's folder to two text files
+//                                 outside it, saves the first beside the chat and moves the second to the main area, and
+//                                 quits; the peer, on its own daemon, draws its Files tree beside the chat and no viewer,
+//                                 in the main tab the refusal it could always give (its transcript links the guide, not
+//                                 the files the guide links), refuses no layout value, pins that tab so that it writes,
+//                                 and quits; the links file's bytes are what they were; this build reads both files
+//                                 again, savable, and the one beside the chat saves once more.
+test('(a followed link, both ways) two files a Markdown file links, followed by this build, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the links file as it was; this build reads both again and saves', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.setTimeout(300_000);
+  await withScratch('xb-u6b4c-both', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) follows two links of a Markdown file to files outside the session's folders; ${peer.label} (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}) reads the profile`];
+    const outside = join(s.root, 'outside'); // beside the repository and the profile, under neither
+    mkdirSync(outside);
+    const [beside, inMain] = [join(outside, 'beside.txt'), join(outside, 'in-main.txt')];
+    for (const path of [beside, inMain]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+    const guide = join(s.repo, 'guide.md');
+    writeFileSync(guide, followedGuide(beside, inMain));
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Start with [the guide](${guide}).`);
+
+    // this build: the guide opened from the transcript's link; each of its links followed, the first edited and saved
+    // beside the chat, the second moved to the main area
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const machine = await localRef(run.page);
+    const mainTabId = `file:${machine}:${inMain}`;
+    await showSession(run.page, id, `session:${address}`);
+    const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
+    const follow = async (path: string): Promise<Locator> => {
+      await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();
+      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][title="${path}"]`).click({ timeout: 20_000 });
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${path}"]`);
+      await expect(viewer, `${basename(path)} followed and beside the chat, savable`).toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+      return viewer;
+    };
+    await typeAndSave(run, await follow(beside), beside, 'Saved by this build.');
+    await (await follow(inMain)).locator('[data-move-to-main]').click();
+    await expect(mainTabById(run.page, mainTabId), 'the second followed file a main tab, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect.poll(() => (existsSync(linksOf(s)) ? Object.values((JSON.parse(readFileSync(linksOf(s), 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions).flat().map((entry) => entry.real).sort() : []), { timeout: 20_000, message: 'the two links recorded in the profile' }).toEqual([beside, inMain].sort());
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const links = readFileSync(linksOf(s));
+    const saved = readFileSync(beside, 'utf8');
+    said.push(`  ${here.label}: ${basename(beside)} followed and saved beside the chat, ${basename(inMain)} followed and a main tab; ${links.length} bytes of link records`);
+
+    // the peer: the main tab its refusal (no older daemon knows a link record), pinned so that it writes; under the
+    // session, its Files surface with its tree and no viewer of the file beside the chat
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await mainTabById(old.page, mainTabId).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"] [data-refusal]`), `${peer.label} refuses the followed file it cannot know`).toContainText(FILES_REFUSED, { timeout: 20_000 });
+    await pinTab(old.page, mainTabId);
+    await expect.poll(() => pinnedIn((layoutJson(s)['main.tabs'] ?? null) as StoredSets | null), { timeout: 20_000, message: `${peer.label} writes main.tabs with its pin` }).toContain(mainTabId);
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await expect(toolBody(old.page, 'Files').getByRole('treeitem').first(), `${peer.label}'s Files surface draws its tree`).toBeVisible({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-file-viewer][data-path="${beside}"]`), `${peer.label} draws no file beside the chat`).toHaveCount(0);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(readFileSync(linksOf(s)), `${peer.label} left the links file as it was`).toEqual(links);
+    expect([readFileSync(beside, 'utf8'), readFileSync(inMain, 'utf8')], `${peer.label} wrote neither file`).toEqual([saved, OUTSIDE_TEXT(basename(inMain))]);
+    said.push(`  ${peer.label}: ${basename(inMain)} refused in its main tab and pinned, its Files tree under the session, nothing refused; the links file untouched`);
+
+    // this build again: the main tab reads the file, savable; the one beside the chat shows the saved text and saves again
+    const back = await s.launch();
+    await s.ready(back.page);
+    await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
+    const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
+    await expect(backMain, 'the main tab of the followed file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await showSession(back.page, id, `session:${address}`);
+    await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
+    const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);
+    await expect(backBeside.locator('.cm-content'), 'the saved text, beside the chat').toContainText('Saved by this build.', { timeout: 20_000 });
+    await typeAndSave(back, backBeside, beside, ' And once more after the peer.');
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${basename(inMain)} savable in its main tab; ${basename(beside)} saved once more`);
+    record(said);
   });
 });
 
@@ -4926,6 +5070,9 @@ const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-
 // A peer of before U2b's first landing draws its own report (the bar's component is in its source); a later peer draws
 // MAWS's mirror, whose record line is the stretch's fold row, closed
 const drawsOwnReport = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/owner/report/ReportBar.tsx'));
+// A peer that knows `drawnBy` (its src/shared/owner/state.ts names it) is of U2b: it decides a launch at 9 and carries
+// the summaries' value itself, so a scene about a peer that launches at 8 is not about it
+const knowsDrawnBy = (build: Build) => sourceHas(build, 'src/shared/owner/state.ts', 'drawnBy');
 const recordLine = (page: Page) => page.locator(`[data-region="main"] [data-row-id="record-fold:closed:${TO_HUMAN_ROWS.call}"]`).getByRole('button');
 // The resume journal of the scene's stub: the handshake, the scene's turn once its prompt is sent, then held at a prompt
 // no one sends (e2e/support/to-human-replay.ts)
@@ -4987,6 +5134,7 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
   test.setTimeout(420_000);
   const { here, peer } = builds();
   test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  test.skip(knowsDrawnBy(peer), `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of U2b, so its own launch advertises 9 and carries the summaries' value, and the scene is about a peer that launches at 8`);
   await withScratch('xb-to-human-to', async (s) => {
     const said: string[] = [`${here.label} (wire ${wireOf(here)}) launches a session at 9 and turns new summaries off; ${peer.label} (wire ${wireOf(peer)}) opens the profile, draws its report and launches it again; ${here.label} reads it back`];
     trustIn(s, [s.repo]);
@@ -5074,8 +5222,7 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
 // §H, rows 3 and 4, on a unit mawsd of the other build (as (update, render) and (pre-O17 app, unit mawsd) do: a private
 // mawsd of another build would be restarted by the app's build check). The owner channel's commands are the machine's
 // (`owner: 'machine'`), so the daemon answers them and its own build decides the lane. A peer that knows `drawnBy`
-// (its src/shared/owner/state.ts names it) is of this landing, and neither row is about it.
-const knowsDrawnBy = (build: Build) => sourceHas(build, 'src/shared/owner/state.ts', 'drawnBy');
+// (its src/shared/owner/state.ts names it, knowsDrawnBy above) is of this landing, and neither row is about it.
 const unitPeer = (peer: Build): string | null =>
   !takesStubEngine(peer) ? `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: its engine host cannot run the stub`
   : knowsDrawnBy(peer) ? `the peer (wire ${wireOf(peer)}) names drawnBy in its src/shared/owner/state.ts: it is of this landing, so §H's rows 3 and 4 are not about it`
