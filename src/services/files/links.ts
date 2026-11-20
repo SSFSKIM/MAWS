@@ -26,7 +26,7 @@ import type { FileGrantsOptions } from './grants';
 
 export const LINKS_PER_SESSION_MAX = 256;
 export type LinkWhy = 'result' | 'linked'; // why a followed file admits no save; absent, it admits one
-export type LinkSource = { file: string } | { agent: string };
+export type LinkSource = { file: string } | { agent: string; engineSessionId?: string }; // the agent's conversation, as the follow gave it (Decision Log 17)
 
 export interface FileLinks {
   /** Records the real path for the session, as the newest, with where the link stood. Throws for a session the view

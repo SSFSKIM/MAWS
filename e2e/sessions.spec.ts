@@ -1392,7 +1392,7 @@ test.describe('sessions', () => {
       const [s] = await indexed(page, [S]);
       await (await sidebarRow(page, { appSessionId: s! })).click();
       const linksFile = join(maws.userData, 'sessions', 'file-links.json');
-      type Links = { version: number; sessions: Record<string, { real: string; from: { file: string } | { agent: string }; why?: string }[]> };
+      type Links = { version: number; sessions: Record<string, { real: string; from: { file: string } | { agent: string; engineSessionId?: string }; why?: string }[]> };
       const linksHeld = () => (existsSync(linksFile) ? (JSON.parse(readFileSync(linksFile, 'utf8')) as Links) : null);
       const viewerOf = (path: string, scope: Locator = sideColumn(page)) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
       const linkIn = (viewer: Locator, title: string) => viewer.locator(`[data-markdown-view] [data-chip="path"][title="${title}"]`);
@@ -1549,7 +1549,7 @@ test.describe('sessions', () => {
       await expect.poll(() => readFileSync(byAgent, 'utf8'), { timeout: 20_000, message: '⌘S wrote the file the subagent linked' }).toBe(`${TEXT} Checked in MAWS.`);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
       const links = JSON.parse(readFileSync(join(maws.userData, 'sessions', 'file-links.json'), 'utf8')) as { sessions: Record<string, { real: string; from: unknown; why?: string }[]> };
-      expect(Object.values(links.sessions).flat(), 'one record: the file, from the subagent, savable').toEqual([expect.objectContaining({ real: byAgent, from: { agent: agent.agentId } })]);
+      expect(Object.values(links.sessions).flat(), 'one record: the file, from the subagent, savable').toEqual([expect.objectContaining({ real: byAgent, from: { agent: agent.agentId, engineSessionId: sid } })]); // the conversation the drill-in was drawn for, as the follow asked (Decision Log 17)
       expect(Object.values(links.sessions).flat()[0]!.why).toBeUndefined();
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
