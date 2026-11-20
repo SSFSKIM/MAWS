@@ -596,7 +596,8 @@ export function createArtifactHost({ ipc, ports, machine, log = (line) => consol
           if (released) return;
           released = true;
           lostOnResync.delete(invalidate);
-          call('artifacts.releaseDatasets', { holdId }, { machine }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
+          // Holds are tracked by this window's main, even when it acquired one on a peer.
+          call('artifacts.releaseDatasets', { holdId }, { machine: ipc.localMachine }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
         },
       };
     },
