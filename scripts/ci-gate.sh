@@ -121,6 +121,9 @@
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
 # The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer, --peer-exact), then the run's
 # `MiniCopy:` trailers, one per group, or `MiniCopy: none (<reason>)` under --no-mini-copy.
+# Last, `Change:`, the piece of work the run tests, for ci-kit's gate ledger, which pairs a red attempt with a later green
+# one of the same change: the worktree's branch; for a detached commit or a bare sha, the --label less a trailing short
+# sha of a commit this checkout holds; with neither, no trailer. gate-plan.mjs does not read it.
 # Direct e2e runs without --lane hosted or no-hosted add `Mac-Backlog:` when the caller can read the account queues and
 # self-hosted runners and mini lane publication (cached for 60 s).
 # The plan may overflow eligible groups to EC2 or the mini; an absent or older-than-five-minute sample preserves normal placement.
@@ -271,6 +274,18 @@ fi
 short=${sha:0:8}
 label=${label//[^A-Za-z0-9._-]/-}
 ref=ci/$label-$short
+
+# The change this run tests, the same across its retries (ci-kit's gate ledger finds a red's later green by it; the ref's
+# label changes per retry): the worktree's branch, verbatim (a refname holds no space, newline or control character);
+# for a detached commit, the --label less a trailing `-<sha>` (or `.`/`_`) that names a commit here, so a date or a
+# number is kept; else none.
+change=$branch
+if [[ -z $change && -n $label ]]; then
+  change=$label
+  if [[ $label =~ ^(.*[^._-])[._-]([0-9a-f]{7,40})$ ]] && git -C "$git_dir" rev-parse --verify --quiet "${BASH_REMATCH[2]}^{commit}" >/dev/null; then
+    change=${BASH_REMATCH[1]}
+  fi
+fi
 
 # The peer of the PEER_E2E groups and both trees' wires, as trailers (ci-gate-peer.mjs), read before the alert check, whose
 # plan they can add a Mac job to; what it decided is said once the transcript starts.
@@ -453,6 +468,8 @@ if [[ -n $gates_trailer ]]; then
     trailers+=$'\n''E2E-Coverage: note: spec-import coverage failed; no advice available'
   fi
 fi
+# Last, after the label and the pool hint were derived from the others: it identifies the change, not the run.
+[[ -z $change ]] || trailers+=$'\n'"Change: $change"
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
 run_id=''
