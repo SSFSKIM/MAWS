@@ -662,6 +662,47 @@ describe('session.events of a live launch reaches the transcript before it (tick
     transport!.exit(0);
     await host.ipc.table.get(id)!.exited;
   });
+
+  // the review's race: the snapshot holds only the handshake, and the launch's first turn reaches the transcript and the
+  // stream before the transcript is read through; the seam is still where the launch's messages begin
+  it('places the seam by what the stream holds once the transcript is read, not when the snapshot was taken', async () => {
+    const turn = turnLines(7, 'd6', 7);
+    await fixture.addTranscript(LONG_DIR, LONG_SESSION, [...longTranscript(6), ...turn.lines]); // the engine wrote it first
+    fs = new FsService({ paths: fixture.paths, emit: () => true });
+    await fs.start();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
+    const id = 'app-raced' as AppSessionId;
+    fs.bind([{ sessionId: LONG_SESSION, appSessionId: id }]);
+    const service = fs;
+    let transport: ScriptedTransport | null = null;
+    let host: ReturnType<typeof engineHost> | null = null;
+    host = engineHost({
+      diskEvents: (appSessionId, request, quiet) => service.eventsSnapshot(appSessionId, null, request, quiet),
+      diskSeam: async (appSessionId, journal) => {
+        // between the snapshot and the transcript's read: the turn streams
+        transport!.push({ type: 'user', message: { role: 'user', content: JSON.parse(turn.lines[0]!).message.content }, session_id: LONG_SESSION, parent_tool_use_id: null, uuid: 'u7', isReplay: true });
+        await until(() => host!.ipc.table.get(appSessionId)!.status().process === 'ready' && host!.events(appSessionId).some((e) => e.kind === 'user.message' && e.messageUuid === 'u7'), 'the streamed prompt');
+        return service.historySeam(appSessionId, journal);
+      },
+      checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })),
+    });
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host!.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const answer = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(answer.events.some((e) => e.kind === 'user.message' && e.messageUuid === 'u7')).toBe(false); // taken before it streamed
+    const pages: SessionEvent[][] = [];
+    for (let earlier: EventId | undefined = answer.earlier; earlier !== undefined; ) {
+      const page: CommandOutput<'session.events'> = await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null, before: earlier });
+      pages.unshift(page.events);
+      earlier = page.earlier;
+    }
+    const older = pages.flat();
+    expect(older.length).toBeGreaterThan(0);
+    expect(older.some((e) => ('messageUuid' in e && (e.messageUuid === 'u7' || e.messageUuid === 'a7')) || (e.kind === 'turn.started' && e.userMessageUuid === 'u7'))).toBe(false);
+    transport!.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
 });
 
 // C7 start: the catalogue's publication and the queue's pause reason through the host's handlers (C7 M1)
