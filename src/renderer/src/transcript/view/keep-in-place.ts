@@ -44,7 +44,7 @@ export function keepInPlace(scroller: HTMLElement, ms: number, { element, start 
       rendered = offsetOf(row); // mounted again after the list placed it: kept from here
     } else {
       const at = placed === null ? null : start();
-      if (at === null) return stop(); // gone from the list
+      if (at === null || placed === null) return stop(); // gone from the list
       if (at - placed !== scroller.scrollTop) scrollTo(at - placed);
     }
     if (performance.now() < until) frame(step);
