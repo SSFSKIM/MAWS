@@ -8,6 +8,10 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { ASK_ACTIONABLE_MS, connectSurfaceAsks } from './asks';
+import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
+import { leaveRl2, overRl2 } from '../test-support/code-disk'; // ticket 627
 
 const nine = scenarioFile('nine-sessions');
 const [shown, other] = nine.sessions.map((r) => r.appId);
@@ -29,9 +33,24 @@ beforeEach(() => {
   fake = fakeClient({ 'session.ui.answer': { outcome: 'delivered' } });
   disconnect = connectSurfaceAsks(fake.client);
 });
-afterEach(() => disconnect());
+afterEach(() => {
+  disconnect();
+  leaveRl2();
+});
 
 describe('the surface’s requests, answered by this window (R2)', () => {
+  // Ticket 627: a session on another machine over RL2 takes no `session.ui.answer`, so its asks are left to that machine
+  it('answers no ask of a session on another machine, in either lane: nothing is copied and nothing sent', async () => {
+    for (const lane of ['B', 'A'] as const) {
+      const elsewhere = addressOf(OTHER_MACHINE, `app-${lane}` as AppSessionId);
+      overRl2(elsewhere, {}, lane);
+      fake.event('session.eventBatch', { appSessionId: elsewhere, events: [ask(19, { requestId: `copy-${lane}`, ask: 'copy', text: 'x' })] });
+    }
+    await settle();
+    expect(writeText).not.toHaveBeenCalled();
+    expect(fake.invoked('session.ui.answer')).toEqual([]);
+  });
+
   it('a copy writes the clipboard, says "Copied" and answers copied', async () => {
     fake.event('session.eventBatch', { appSessionId: other, events: [ask(19, { requestId: 'copy-1', ask: 'copy', plugin: 'mods-probe', text: 'MODS_PROBE_COPY' })] });
     await settle();

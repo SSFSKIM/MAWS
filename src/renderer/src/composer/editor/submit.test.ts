@@ -8,7 +8,8 @@ import { memoryTargetLabel, memoryTargetOptions } from '../modes/memory';
 import { docOf, paragraph, textNode } from './doc';
 import { serializeDraft, type Serialized } from './serialize';
 import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
-import { submitHumanSerialized, submitSerialized } from './submit';
+import { appendHistory, submitHumanSerialized, submitSerialized } from './submit';
+import { leaveRl2, overRl2 } from '../../test-support/code-disk'; // ticket 627
 import { addressOf } from '@shared/machine/address'; // board 525
 import { remoteRow } from '../../../../../test/support/builders'; // board 525
 import { OTHER_MACHINE } from '../../../../../test/support/machine'; // board 525
@@ -164,6 +165,20 @@ describe('the # target menu', () => {
 // Board 525: another machine's terminal session has no record, and a send it refused is said all the same, never
 // nothing; one refused at the member's grade there offers no Retry. An unstarted session with no record stays quiet. A
 // prompt the host took for another member's session is kept as the member's own.
+// Ticket 627: a session on another machine over RL2 keeps its own prompt history, a terminal's (lane A) as lane B's
+describe('the prompt history of a session on another machine', () => {
+  it('appends nothing for a session over RL2, in either lane', () => {
+    const { bridge, calls } = client();
+    for (const lane of ['B', 'A'] as const) {
+      const elsewhere = addressOf(OTHER_MACHINE, `app-${lane}` as AppSessionId);
+      overRl2(elsewhere, {}, lane);
+      appendHistory(bridge, elsewhere, serialized({}));
+    }
+    expect(calls).toEqual([]);
+    leaveRl2();
+  });
+});
+
 describe('a session on another machine with no record', () => {
   const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
   const port = (result: object) => ({ send: vi.fn(async () => result) }) as unknown as SessionControls;
