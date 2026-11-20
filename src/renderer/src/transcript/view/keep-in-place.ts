@@ -3,7 +3,8 @@
 // given time after the click, each frame scrolls the list by however far the row has moved since the click, whatever
 // moved it (the fold's motion, the list's measurements, its own anchoring). While the row is not mounted (the work that
 // opened pushed it out of the list's window), the list's own offset for the row places it, and the next frame, with the
-// row mounted again, refines that. A reader's own scroll input ends it: from then on the place is theirs.
+// row mounted again, refines that. A reader's own scroll input ends it: from then on the place is theirs. It returns its
+// stop, for whoever moves the list on purpose before the time is up (a jump to the end or to a row).
 
 export interface Anchored {
   element: () => HTMLElement | null; // the row's element, while the list mounts it
@@ -12,13 +13,13 @@ export interface Anchored {
   frame?: (step: () => void) => unknown;
 }
 
-export function keepInPlace(scroller: HTMLElement, ms: number, { element, start = () => null, scrollTo = (offset) => { scroller.scrollTop = offset; }, frame = (step) => requestAnimationFrame(step) }: Anchored): void {
+export function keepInPlace(scroller: HTMLElement, ms: number, { element, start = () => null, scrollTo = (offset) => { scroller.scrollTop = offset; }, frame = (step) => requestAnimationFrame(step) }: Anchored): () => void {
   const offsetOf = (row: HTMLElement) => row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
   const mounted = element();
   const first = start();
   let rendered = mounted === null ? null : offsetOf(mounted); // the row's place on screen, as the reader saw it
   const placed = first === null ? null : first - scroller.scrollTop; // the same place, in the list's offsets
-  if (rendered === null && placed === null) return;
+  if (rendered === null && placed === null) return () => undefined;
   const until = performance.now() + ms;
   let done = false;
   // a press on the scroller itself is on its scrollbar; one on a row is not the reader scrolling
@@ -51,4 +52,5 @@ export function keepInPlace(scroller: HTMLElement, ms: number, { element, start 
     else stop();
   };
   frame(step);
+  return stop;
 }

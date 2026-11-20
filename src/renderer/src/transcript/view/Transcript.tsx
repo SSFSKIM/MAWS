@@ -126,6 +126,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const followingRef = useRef(true);
   const scrollbarPointer = useRef<number | null>(null);
   const movementWitness = useRef(false);
+  // board ticket 789: the stop of the row kept in place while a turn's work opens or folds above it, until it ends; an
+  // explicit jump ends it first, or the next frame would put the reader back at the row
+  const anchor = useRef<(() => void) | null>(null);
+  const dropAnchor = useCallback(() => {
+    anchor.current?.();
+    anchor.current = null;
+  }, []);
+  useEffect(() => dropAnchor, [dropAnchor]);
   const changeFollow = useCallback((next: boolean) => {
     if (followingRef.current === next) return;
     followingRef.current = next;
@@ -425,11 +433,13 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
 
   useImperativeHandle(handle, () => ({
     scrollToIndex: (index, align) => {
+      dropAnchor();
       remember();
       virtualizer.scrollToIndex(index, { align, behavior: 'instant' });
       leaveIfAway(virtualizer.getTotalSize()); // P2-C
     },
     scrollToEnd: () => {
+      dropAnchor();
       remember();
       changeFollow(true);
       pinEnd();
@@ -447,7 +457,8 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
         const index = rowsRef.current.findIndex((row) => row.id === rowId);
         return index === -1 ? null : (virtualizer.measurementsCache[index]?.start ?? null);
       };
-      keepInPlace(element, ms, {
+      dropAnchor();
+      anchor.current = keepInPlace(element, ms, {
         element: () => element.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(rowId)}"]`),
         start,
         scrollTo: (offset) => virtualizer.scrollToOffset(offset, { behavior: 'instant' }),
