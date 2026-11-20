@@ -31,6 +31,7 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-19 23:00Z) U6b-5a's merged head (`06f265e4a` on `ux-wave/U6b-5`) merged into the branch (`e4af0692e`, the resolution's fix `31e832468`); the statements to check again hold on it (Decision Log 17). On the build VM at `31e832468`: the three typechecks exit 0, `src/main/browser` passes, and the gate's script tests pass 588 of 588.
 - [x] (2026-11-20) M2 built, `0c5110117` to `34dee1867`. The red cases at `0c5110117` are 40 failures, each placement failing with the Mac's recorded reading. At `34dee1867`: step 5's vitest set and the store's importers pass (290 files, 4,311 cases); the typechecks of node, web and e2e exit 0; eslint on the changed files exits 0; the desk's web app's typecheck, build and 801 cases pass; the routes patch holds `layout.zoom` alone (client class, no wire minor); the gate's script tests pass 588 of 588. The Toolbar's leading box is fixed (`a7f6672a4`, `d74b2ba8c`; Decision Log 18).
 - [x] (2026-11-20) M2 — Zoom: reviewed clean (`31e832468` to `97b9eba20`). The task review found five Important items and the re-review one more. All were fixed red-first (Decision Log 19). At the fixes' heads, on the build VM: tsc node and web exit 0; eslint exits 0 on the changed files; vitest passes over the renderer's browser tools (655), main's browser (1,144) and the step-5 set at `8df3835e9` (2,754, none failed); the desk's web app passes 801; the gate's script tests pass 588 of 588.
+- [ ] (2026-11-20) M3 built, `6b4f6aae1` and `e20ffca4a`, with master's last merge at `ea3310be2` (its fix `98f8e8c41`). At `e20ffca4a`, on the build VM: the e2e typecheck and eslint exit 0, and the gate's script tests pass 588 of 588. At `98f8e8c41`, the acceptance run (step 7): typecheck 0 and lint 0. The unit suite fails 11 of 2,935 files, each one on the build brief's list with its record or passing alone; `src/artifacts/document/markdown-runs.test.ts`, new to that list, passes alone 5 of 5. `src/shared/machine` fails only the two `git-reads` cases (board ticket 756). No scene has run. The unit suite exited 1. Its one failure not on the brief's list, `markdown-runs.test.ts`, timed out under load and passes alone; the controller set it aside as the VM's load and gave it to the architect for the brief's list (Decision Log 22). The task review returned six Important findings, which are being fixed.
 - [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
 
 ## Words used in this document
@@ -426,7 +427,7 @@ Not edited: `src/main/presentations/`, `src/main/repair/` (unless M1's row g); t
 
 ### §I. The scenes (M3), by group, each with what it waits on
 
-No spec file is added. Every scene reads a state it polls for; a scene that reads a native rectangle calls `placedOn` first (decision 36).
+No spec file is added. Every scene reads a state it polls for; a scene that reads a native rectangle calls `placedOn` first (decision 36). The one exception is an extension's popup: it is placed by main from its kept anchor, not from a pane's report, so it has no `placed` record, and the seam's `popup()` bounds are its acknowledgment (amended 2026-11-20, Decision Log 22).
 
 | group, file | the scene | what it waits on |
 |---|---|---|
@@ -665,6 +666,29 @@ Found while this document was written and reviewed; each changed a decision abov
       - a report that moves a view to another window while it is staged for its still takes attach's window-change step, which is older than M2.
       These come beside the rows "Left over" names and row j.
     - **The chip against Chromium:** §I's `e2e:browser` scene asserts the chip's text against the page's own `innerWidth` and `innerHeight` at 1.25 and at 2 (Decision Log 19).
+
+21. **2026-11-20 (UTC) · M3: the means its executor chose.**
+    - **`e2e/support/zoom-probe.ts` is gone.** Its one surviving helper, `timesFactor`, is in a new `e2e/support/zoom.ts` with the scenes' own helpers. The rest set the zoom in main or wrote probe lines, which an asserting scene must not do.
+    - **The scenes zoom through View's items, never in main.** Each clicks the item by id once main reads it enabled, then waits on the root's `--app-zoom`. Main sends `layout.zoomChanged` only after S3's steps 3 and 4, so the store's factor implies main's.
+    - **`expectOnPane` takes the factor as a sixth argument, `factor = 1`, and calls `placedOn` first,** with the caller's own timeout. At 1 it is the old comparison with the acknowledgment ahead of it. Every existing call is unchanged.
+    - **§I's "with a menu open over it" is read as the in-app browser's own Browser options menu.** That is the one DOM menu that overlaps the page, the cover's path. The native menus over the page are browser-chrome's scene.
+    - **Mark up's "covering what it covers at 100 %"** is read as: the layer lies on the pane, and the still's pixels per view point are the same at 150 % as at 100 %, within 2 %. Before M2 the two had the same pixels while the frame was drawn 1.5 times larger, and the ratio tells those apart.
+    - **Mobile reads exactly 375 at 0.5 and 1.25, and 375 or 376 at 0.8 and 2,** where 375 ÷ f is not a whole CSS pixel (decision 35 as amended in Decision Log 19). At all four factors the chip is held to the page's own `innerWidth × innerHeight`, which covers Decision Log 20's 1.25 and 2.
+    - **The terminal's size is read from inside the shell** (`stty size`) and set beside the emulator's columns, so the page's terminal seam is not widened.
+    - **The transcript scene runs in the product app,** because the transcript harness mounts no `connectZoom`.
+    - **The cross-build scene skips through the file's `layoutSchemaNames(peer, 'window.zoom')`** and reuses its `storedLayout`.
+    - **The merge of master's batch 5 (`ea3310be2`) is resolved in `finder.ts` with U6b-5a's own line** (`98f8e8c41`: `end('withdrawn: …')` for master's `end(reason)`). It is the same character for character as `ux-wave/U6b-5`'s, so the later merge of that branch meets no conflict.
+    - **The tracker gains seven rows:** four for "Left over", row j, and Decision Log 20's two. The 2026-10-24 row loses zoom. The 2026-10-27 row stays open and names `e2e:transcript`'s zoom scene, which has not run yet, as the one that decides it.
+    - **Found:** the toast host pauses a toast's timer while the window is blurred or the pointer rests over the toasts (Radix). A browser scene's wait for the zoom line to be gone can be held by that on a Mac run. The remedy, if a run shows it, is in the scene: a focus or a pointer move before the wait.
+
+22. **2026-11-20 (UTC) · M3's task review, and what goes back.** The review of `2ab89eaf1..e20ffca4a` found nothing Critical and six Important findings. Five are fixed in the scenes:
+    1. The transcript scene must hold a streaming turn and reach the clamp onto the rounded end while the key's witness is armed, or it cannot decide the row of 2026-10-27.
+    2. The device fit case drives the chip's own menu at a controlled width, where a size fits at one factor and not at another.
+    3. Each wait for the zoom line to be gone first witnesses the line it expects. The pointer is kept off the toasts. The menus' scene proves replacement while the first line's timer is held.
+    4. `expectOnPane` takes the acknowledged rectangle and the page's rectangle from the same sample, and compares the four edges.
+    5. Settings reads `settings.json` after View's zoom items have been used, with a known binding as the reader's control.
+
+    The sixth is the record of the acceptance run. Progress now says the unit suite exited 1, and `markdown-runs.test.ts` is set aside as the VM's load: it passes alone 5 of 5, and the architect adds it to the brief's list. §I's rule on `placedOn` names the popup's exception. The Minor, on the presenter scene, polls for the audience and the presenter, as the existing scene does, and is fixed with the rest.
 
 ## Outcomes & Retrospective
 
