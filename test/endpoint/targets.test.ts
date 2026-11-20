@@ -374,6 +374,47 @@ describe('the spawner as owner (P5 O12 M11)', () => {
     expect(await gone).toBe('grade');
   });
 
+  // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §D, and M2's review: a first lane B record whose
+  // project is a sminos declared channel's id is refused, never held, and is still a record seen: the bridge ends there
+  it('ends the bridge at a first record whose project is a declared channel’s id, though the record is refused and never held', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-s', org.B, { recorded: 'eng-s', live: 'eng-s' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'subbed' });
+    expect(await statusOf(b, 'app-s')).toBe('ok');
+    const sm = await sminos(f);
+    const from = b.inbox.length;
+    sm.send({ t: 'member', ...laneBMember('eng-s', [org.B], { project: '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c' }) });
+    expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ t: 'ended' });
+    expect(f.endpoint.rl10.members.get('eng-s')).toBeNull();
+    expect(await statusOf(b, 'app-s')).toBe('grade');
+    expect(await act(b, sendOf(f, b, s, 'after the refused record'))).toBe('grade');
+    expect(f.host.runs).toEqual([]);
+    await until(() => handedOff(f).includes('app-s'), 'the hand-off on disk');
+  });
+
+  // M2's review round 3: the refused record of a held, unjoined member whose engine session a `/clear` replaced, while
+  // its spawner holds a subscription on the replacement by the bridge: the member leaves first, and the lookup that
+  // follows hands the app session off and tells it, joining nothing
+  it('ends the bridge on the replacement engine session when a held, unjoined member’s next record is refused after a `/clear`', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-r', org.B, { recorded: 'eng-1', live: 'eng-1' }, 'op-r');
+    s.engineSessionId = 'eng-2'; // the `/clear`, before sminos's first record of eng-1
+    f.spine.set('app-r', 'eng-2', { launchedBy: launchedBy(org.B, 'op-r') });
+    const sm = await sminos(f, [laneAMember(), laneBMember('eng-1', [org.B])]); // no spawn act: neither the live rows nor a spawn joins it
+    await until(() => f.endpoint.rl10.members.get('eng-1') !== null, 'eng-1 held');
+    expect(f.endpoint.rl10.members.appSessionId('eng-1')).toBeNull();
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-r' })).toMatchObject({ t: 'subbed' }); // on eng-2, by the bridge
+    const from = b.inbox.length;
+    sm.send({ t: 'member', ...laneBMember('eng-1', [org.B], { project: '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c', ownersProof: [spawnProof('op-r')] }) });
+    expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ t: 'ended' });
+    await until(() => handedOff(f).includes('app-r'), 'the hand-off on disk');
+    expect(f.endpoint.rl10.members.get('eng-1')).toBeNull();
+    expect(f.endpoint.rl10.members.appSessionId('eng-1')).toBeNull();
+    expect(await statusOf(b, 'app-r')).toBe('grade');
+  });
+
   // the review's finding: before M11 a first record could only grant; under the bridge it can take, and its join awaits
   // the engine host, so the held subscription is held at the record, by its engine session, not after the join
   it('holds a subscription the bridge granted as soon as a first record grants its spawner nothing, before its join answers', async () => {
@@ -667,6 +708,31 @@ describe('a record the join can’t place under its app session, placed by its s
     expect(members.appSessionId('eng-1')).toBeNull();
     expect(members.handedOff(laneB('eng-2', 'app-g'))).toBe(true);
     expect(changes).toContainEqual(laneB('eng-1', 'app-g'));
+  });
+
+  // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, M2's review round 2: a first record refused because its
+  // project is a sminos declared channel's id is placed as the join places one, never held, with no decision between
+  // it and a `/clear` to pass the engine session's mark on
+  const CHANNEL = '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c';
+  it('hands off the app session of a refused channel record, so the engine session after a later `/clear` is no bridge', async () => {
+    const { members, reports } = membersOf({ live: () => [{ appSessionId: 'app-a', engineSessionId: 'eng-1' }], records: () => [] });
+    await members.member(laneBMember('eng-1', [org.B], { project: CHANNEL }));
+    expect(members.get('eng-1')).toBeNull();
+    expect(members.appSessionId('eng-1')).toBeNull();
+    expect(reports).toEqual([]);
+    expect(members.handedOff(laneB('eng-2', 'app-a'))).toBe(true); // the `/clear`'s engine session, never decided on
+  });
+
+  it('hands off, by its spawn, the app session of a refused channel record that arrives after a `/clear`', async () => {
+    const { members, reports } = membersOf({
+      live: () => [{ appSessionId: 'app-b', engineSessionId: 'eng-2' }],
+      records: () => [{ appId: 'app-b', engineSessionId: 'eng-2', launchedBy: launchedBy(org.B, 'op-b') }],
+    });
+    await members.member(laneBMember('eng-1', [org.B], { project: CHANNEL, ownersProof: [spawnProof('op-b')] }));
+    expect(members.get('eng-1')).toBeNull();
+    expect(members.appSessionId('eng-1')).toBeNull();
+    expect(reports).toEqual([]);
+    expect(members.handedOff(laneB('eng-2', 'app-b'))).toBe(true);
   });
 
   // the review's finding: a predecessor's record placed by its spawn after its successor's never replaces the listing

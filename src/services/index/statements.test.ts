@@ -324,6 +324,31 @@ describe('the stored statements', () => {
       expect((await add(folder('later'))).project).toMatchObject({ directory: join(tree.path, 'later') });
     });
 
+    // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §D: a folder is linked to a project, never to a
+    // sminos declared channel, whether a record lists the channel's id as known or the folder's own .smns names it
+    it('refuses a link to a declared channel’s id, `channel-id`, the statement unchanged', async () => {
+      await open();
+      const C = '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c';
+      const words = `channel-id: ${C} is a sminos channel, not a project: a folder is linked to a project`;
+      const channelRefusal = expect.objectContaining({ ipcError: expect.objectContaining({ code: 'invalid_input', message: words }) });
+      seam.projects.set(C, { hub: true, nameRev: 0 }); // a record lists it, as `known`
+      const listed = folder('listed');
+      await add(listed);
+      const before = columns(listed);
+      await expect(add(listed, { into: C })).rejects.toEqual(channelRefusal);
+      await expect(index.statements.link(row(listed)!.id, C)).rejects.toEqual(channelRefusal);
+      expect(columns(listed)).toEqual(before);
+      seam.projects.delete(C);
+      const named = folder('named');
+      writeFileSync(join(named, '.smns'), JSON.stringify({ project: C, hub: { org: ENROLLED.org } }));
+      await expect(add(named, { into: C })).rejects.toEqual(channelRefusal);
+      expect(columns(named)?.stated_linked ?? null).toBeNull();
+      await add(named);
+      const declared = columns(named);
+      await expect(index.statements.link(row(named)!.id, C)).rejects.toEqual(channelRefusal);
+      expect(columns(named)).toEqual(declared);
+    });
+
     it('relocate points a row at its folder’s new path, merges an unstated row there and refuses a stated one', async () => {
       await open();
       const old = folder('before');

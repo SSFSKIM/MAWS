@@ -51,6 +51,12 @@
 // advertises it too, and every org frame carries `complete` and, once anything is known of them, this machine's
 // `locations`; sminos answers each kept frame with `locations-kept {gen}`, which counts only on the connection that
 // carried that `gen` (`locationsKept`). Any other sminos is told neither, nor the capability: it reads the frame as before.
+//
+// sminos's declared channels (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §C). To an sminos whose
+// hello advertises `channels` the welcome advertises it too, last, and from then each held lane A member's counted
+// `channels` (members.ts, `memberChannels`) are logs this machine holds a member of, beside each held member's project:
+// `sminosView().sessionProjects()`, which the registry's `known` reads, is the one place they are read. Any other sminos
+// is not told the capability, and a member frame's `channels` count for nothing.
 import { RL1_CAPABILITIES, type Action, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
@@ -62,7 +68,7 @@ import { InboundIndex } from './inbound-index';
 import { LegacyKey } from './legacy';
 import { localPolicy, digestOf, withdrawnBy, type AudienceContext } from './audiences';
 import { LogRelay, type RelayContext } from './log-relay';
-import { Members, type MembersContext } from './members';
+import { Members, memberChannels, type MembersContext } from './members';
 import { PolicyCache } from './policy-cache';
 import { decideReach } from './reach';
 import { Rebuild } from './rebuild';
@@ -82,6 +88,12 @@ export const RL10_CAPABILITIES = ['access', 'reach'] as const;
  * welcome once this build serves the three `record.*` offers.
  */
 export const RECORD_CAPABILITY = 'record';
+
+/**
+ * sminos's declared channels (Interfaces §C): listed in sminos's hello, it makes a lane A member frame's `channels`
+ * count; the welcome lists it, last, only in answer.
+ */
+export const CHANNELS_CAPABILITY = 'channels';
 
 /** The welcome's capabilities: RL10_CAPABILITIES, and `record` exactly when `offers` serve every record act. */
 export function welcomeCapabilities(offers: Offers = OFFERS): string[] {
@@ -185,9 +197,15 @@ export class Rl10 {
   #told: { revoked: string; org: string } | null = null;
   /** The last restatement queued (`#restate`). */
   #restating: Promise<void> = Promise.resolve();
-  #welcomed = false;
+  /**
+   * The connection last welcomed, until the link closes. It is the link's only while it is still the server's current
+   * one (`#live`): a replacement is current from its hello, and welcomed only at its turn (`#inTurn`).
+   */
+  #welcomed: Rl10Connection | null = null;
   #wanted = false;
   #changing: Promise<void> = Promise.resolve();
+  /** The last connection's hello or frame taken (`#inTurn`). */
+  #taking: Promise<void> = Promise.resolve();
 
   constructor(ctx: Rl10Context) {
     this.#ctx = ctx;
@@ -268,8 +286,11 @@ export class Rl10 {
       build: ctx.build,
       log: ctx.log,
       handlers: {
-        hello: (c, f) => this.#hello(c, f),
-        frame: (c, f) => this.#frame(c, f),
+        // One frame at a time, across a replacement too: the server hands one connection's lines on one at a time, and
+        // every connection's hello and frames take their turn here, so nothing of a replacement (its welcome, the
+        // restatement it opens, its frames) is taken while the replaced connection's handler is in flight.
+        hello: (c, f) => this.#inTurn(() => this.#hello(c, f)),
+        frame: (c, f) => this.#inTurn(() => this.#frame(c, f)),
         // A connection a newer one replaced closes after the newer one's hello: it ends nothing of the newer one's.
         closed: (c) => {
           const current = this.#server.current;
@@ -297,6 +318,11 @@ export class Rl10 {
     return this.#sminos.includes(LOCATIONS_CAPABILITY);
   }
 
+  /** Whether sminos's hello on this connection advertised `channels` (Interfaces §C). */
+  get #channels(): boolean {
+    return this.#sminos.includes(CHANNELS_CAPABILITY);
+  }
+
   /** P5 O8 M6b: what the welcomed sminos's hello advertised, null while none is connected and welcomed. */
   sminosCapabilities(): readonly string[] | null {
     return this.connected ? this.#sminos : null;
@@ -309,7 +335,13 @@ export class Rl10 {
 
   /** Whether a sminos is connected and welcomed. */
   get connected(): boolean {
-    return this.#server.current !== null && this.#welcomed;
+    return this.#live !== null;
+  }
+
+  /** The welcomed connection while it is still the current one; null while none is, or a replacement awaits its turn. */
+  get #live(): Rl10Connection | null {
+    const welcomed = this.#welcomed;
+    return welcomed !== null && welcomed === this.#server.current ? welcomed : null;
   }
 
   /** Serves RL10 (the machine is enrolled and listed); a failure is logged and leaves it unserved. */
@@ -340,9 +372,9 @@ export class Rl10 {
     return this.#changing;
   }
 
-  /** A frame down to sminos; dropped while none is connected. */
+  /** A frame down to sminos; dropped while none is connected, and while a replacement awaits its welcome. */
   send(frame: object): void {
-    if (this.#welcomed) this.#server.current?.send(frame);
+    this.#live?.send(frame);
   }
 
   /**
@@ -350,7 +382,7 @@ export class Rl10 {
    * revocation reaches sminos before what the new head lets through), then the arriving events held for it judged again.
    */
   async adopted(): Promise<void> {
-    if (!this.#welcomed) return;
+    if (this.#live === null) return; // a replacement awaiting its turn is told the head by its welcome's restatement
     await this.#restate(false);
     // A head moves what `@machine` resolves to, so every local audience is stated again where it moved.
     for (const session of this.members.sessions()) await this.#recordMoved(session);
@@ -387,7 +419,7 @@ export class Rl10 {
    * sminos holds no member list; absent when it withdrew none.
    */
   #tellAudience(session: string, policy: { owners: string[]; members: string[] | null; policyRev: number; withdrawn?: string[] }): void {
-    if (!this.#welcomed || !this.#streams) return;
+    if (this.#live === null || !this.#streams) return;
     const withdrawn = policy.withdrawn !== undefined && policy.withdrawn.length > 0 ? { withdrawn: policy.withdrawn } : {};
     const frame = { t: 'audience', session, owners: policy.owners, members: policy.members, digest: digestOf(policy.members), policyRev: policy.policyRev, ...withdrawn };
     const text = JSON.stringify(frame);
@@ -434,20 +466,30 @@ export class Rl10 {
     return () => this.#projectsMoved.delete(listener);
   }
 
-  /** What the registry reads of the connected sminos (registry.ts' `SminosView`); null while none is welcomed. */
+  /**
+   * What the registry reads of the connected sminos (registry.ts' `SminosView`); null while none is welcomed. The logs
+   * this machine holds a member of are each held member's project and, when this connection's hello listed `channels`,
+   * each held lane A member's counted declared channels (Interfaces §C; lane B's count for nothing, D1).
+   */
   sminosView(): { capabilities: readonly string[]; restating: boolean; sessionProjects(): string[]; logProjects(): Array<{ project: string; name: string; follow: boolean }> } | null {
     if (!this.connected) return null;
+    const channels = this.#channels;
     return {
       capabilities: this.#sminos,
       restating: this.members.restating,
-      sessionProjects: () => this.members.sessions().flatMap((session) => this.members.get(session)?.project ?? []),
+      sessionProjects: () =>
+        this.members.sessions().flatMap((session) => {
+          const member = this.members.get(session);
+          if (member === null) return [];
+          return channels && member.lane === 'A' ? [member.project, ...memberChannels(member)] : [member.project];
+        }),
       logProjects: () => this.relay.hellos(),
     };
   }
 
   /** The org frame stated again where it changed (the registry moved: this machine's locations, the records, `complete`). */
   restate(): Promise<void> {
-    if (!this.#welcomed) return Promise.resolve();
+    if (this.#live === null) return Promise.resolve();
     return this.#restate(false);
   }
 
@@ -624,7 +666,20 @@ export class Rl10 {
 
   // ---- A connection -----------------------------------------------------------------------------------------------
 
+  /**
+   * `take` once the hello or frame taken before it settled, of whichever connection; its failure is the caller's (the
+   * server logs it) and holds up nothing after it. A replaced connection's lines still queued are not taken (the server
+   * skips a closed connection's), and one already queued here is dropped by `#frame`'s entry check.
+   */
+  #inTurn(take: () => Promise<void>): Promise<void> {
+    const taken = this.#taking.then(take);
+    this.#taking = taken.catch(() => {});
+    return taken;
+  }
+
   async #hello(connection: Rl10Connection, hello: Frame): Promise<void> {
+    // closed while it waited for the last connection's handler (its close ended the link), or replaced by a newer one
+    if (connection !== this.#server.current) return;
     const protocol = hello.protocol as { major?: unknown } | undefined;
     const identity = this.#ctx.identity();
     const head = this.#ctx.head();
@@ -637,7 +692,7 @@ export class Rl10 {
     // A connection replaced: what the last one held open on RL1 closes, and is opened again by this one's hellos.
     this.relay.closeAll();
     this.#rebuild.ended();
-    if (this.#welcomed) this.#link(false);
+    if (this.#welcomed !== null) this.#link(false);
     this.#told = null;
     this.#sminos = Array.isArray(hello.capabilities) ? hello.capabilities.filter((c): c is string => typeof c === 'string').slice(0, 32) : [];
     this.#audienceSent.clear();
@@ -648,14 +703,15 @@ export class Rl10 {
       t: 'welcome',
       protocol: RL10_PROTOCOL,
       // P5 O18 D9: sminos may send a member's access, shares and policyRev, and ask `reach?`; P5 O8 M6b: `record`, while
-      // this build serves the record acts; the project registry: `locations`, to an sminos that reads them.
-      capabilities: [...welcomeCapabilities(this.#ctx.offers), ...(this.#locations ? [LOCATIONS_CAPABILITY] : [])],
+      // this build serves the record acts; the project registry: `locations`, to an sminos that reads them; sminos's
+      // declared channels: `channels`, last, to an sminos that sends them.
+      capabilities: [...welcomeCapabilities(this.#ctx.offers), ...(this.#locations ? [LOCATIONS_CAPABILITY] : []), ...(this.#channels ? [CHANNELS_CAPABILITY] : [])],
       build: this.#ctx.build,
       identity: { org: identity.org, hub: identity.hub, name: identity.name, former: formerNames(head.state, identity.ref, identity.name), ref: identity.ref, enrolled: identity.enrolled },
       policy: { read_only: current.read_only, ceiling: current.ceiling },
       stateVersion: head.state.version,
     });
-    this.#welcomed = true;
+    this.#welcomed = connection;
     // The restatement is open before the link's listeners hear of the connection: the registry's publication they queue
     // reads `known` from the sessions held, which only a closed restatement answers for (panel 1, scalpel-3#1).
     this.members.welcome();
@@ -667,8 +723,8 @@ export class Rl10 {
   }
 
   #closed(): void {
-    if (this.#welcomed) this.#link(false);
-    this.#welcomed = false;
+    if (this.#welcomed !== null) this.#link(false);
+    this.#welcomed = null;
     this.#sentGen = 0;
     this.#keptGen = 0;
     this.members.stop();
@@ -716,7 +772,7 @@ export class Rl10 {
   }
 
   async #frame(connection: Rl10Connection, frame: Frame): Promise<void> {
-    if (!this.#welcomed || connection !== this.#server.current) return;
+    if (connection !== this.#live) return;
     switch (frame.t) {
       case 'hello':
         this.relay.hello(frame);

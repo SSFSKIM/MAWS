@@ -480,6 +480,41 @@ describe('the registry seam', () => {
     expect(r.own.record()?.body.known).toEqual([{ id: 'id-held', name: 'Held' }]);
   });
 
+  // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §C: a declared channel RL10 counts among the
+  // logs with sessions here is `known` by a project's rule, sorted among the projects, and goes when it is counted no more
+  it('counts as `known` a declared channel held by a member whose log sminos opened without follow, and not one it follows', async () => {
+    const w = await world();
+    const C = '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c';
+    const followed = '0123abcd-4567-8abc-a123-456789abcdef';
+    let sessions = ['id-held', C, followed];
+    const logs = [
+      { project: C, name: 'Design', follow: false },
+      { project: followed, name: 'Followed', follow: true },
+      { project: 'id-held', name: 'Held', follow: false },
+    ];
+    const { r, setSminos } = await registry(w, { sminos: view(['locations', 'channels'], { sessionProjects: () => sessions, logProjects: () => logs }) });
+    w.source.set([row('/Users/me/scrape')]);
+    await r.own.publish();
+    expect(r.own.record()?.body.known).toEqual([
+      { id: C, name: 'Design' },
+      { id: 'id-held', name: 'Held' },
+    ]);
+    // restating: the last answer stands, the channel's with it
+    setSminos(view(['locations', 'channels'], { restating: true }));
+    w.source.set([row('/Users/me/scrape'), row('/Users/me/other')]);
+    await r.own.publish();
+    expect(r.own.record()?.body.known).toEqual([
+      { id: C, name: 'Design' },
+      { id: 'id-held', name: 'Held' },
+    ]);
+    // the last member stating it gone: the channel leaves `known`
+    sessions = ['id-held'];
+    setSminos(view(['locations', 'channels'], { sessionProjects: () => sessions, logProjects: () => logs }));
+    r.knownMoved();
+    await r.own.publish();
+    expect(r.own.record()?.body.known).toEqual([{ id: 'id-held', name: 'Held' }]);
+  });
+
   it('answers a statement change once sminos acknowledged the locations that carry it, unrestated with no sminos that reads them', async () => {
     const w = await world();
     expect(await (await registry(w)).r.published()).toEqual({ restated: false });

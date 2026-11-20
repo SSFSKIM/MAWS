@@ -1,0 +1,881 @@
+{
+  "about": "The endpoint’s frames for an sminos whose hello does not list `channels` (MAWS docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §K): one scripted session lane against desk-hub’s Worker in Miniflare, `down` every frame sminos received on RL10 and `up` every frame handed to the hub link’s `send`, grouped by `t` and normalized by the rules of version `normalization`. Written by test/endpoint/mixed-fleet.local.test.ts’s capture mode on commit `from`, never by hand.",
+  "from": "77af813a4a4a642d747f7511a343448db489a9ab",
+  "normalization": 1,
+  "variants": {
+    "with": {
+      "down": {
+        "audience": [
+          {
+            "digest": null,
+            "members": null,
+            "owners": [
+              "{{member}}"
+            ],
+            "policyRev": 0,
+            "session": "51515151-5151-4151-8151-515151515151",
+            "t": "audience"
+          },
+          {
+            "digest": null,
+            "members": null,
+            "owners": [
+              "{{member}}"
+            ],
+            "policyRev": 0,
+            "session": "52525252-5252-4252-8252-525252525252",
+            "t": "audience"
+          }
+        ],
+        "have": [
+          {
+            "archive": false,
+            "have": {},
+            "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+            "t": "have"
+          },
+          {
+            "archive": false,
+            "have": {},
+            "project": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+            "t": "have"
+          },
+          {
+            "archive": false,
+            "have": {},
+            "project": "9c8b7a6f-5e4d-4c3b-a2a1-0f9e8d7c6b5a",
+            "t": "have"
+          },
+          {
+            "archive": false,
+            "have": {},
+            "project": "5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c",
+            "t": "have"
+          }
+        ],
+        "legacy-key?": [
+          {
+            "t": "legacy-key?"
+          }
+        ],
+        "org": [
+          {
+            "complete": true,
+            "locations": {
+              "at": [
+                {
+                  "path": "/srv/fleet/plain",
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b"
+                }
+              ],
+              "gen": "{{clock:1}}"
+            },
+            "machines": [
+              {
+                "name": "{{name}}",
+                "online": false,
+                "seen": null
+              }
+            ],
+            "projects": [
+              {
+                "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                "kind": "hub",
+                "name": "plain",
+                "retired": false
+              },
+              {
+                "id": "bee03f82-2138-5aea-8e30-928e917416b4",
+                "kind": "machine",
+                "machine": "{{name}}",
+                "name": "{{name}}",
+                "retired": false
+              }
+            ],
+            "t": "org"
+          },
+          {
+            "complete": true,
+            "locations": {
+              "at": [
+                {
+                  "path": "/srv/fleet/plain",
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b"
+                }
+              ],
+              "gen": "{{clock:1}}"
+            },
+            "machines": [
+              {
+                "name": "{{name}}",
+                "online": false,
+                "seen": null
+              }
+            ],
+            "projects": [
+              {
+                "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                "kind": "hub",
+                "name": "plain",
+                "retired": false
+              },
+              {
+                "id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+                "kind": "hub",
+                "name": "log-6a7b",
+                "retired": false
+              },
+              {
+                "id": "bee03f82-2138-5aea-8e30-928e917416b4",
+                "kind": "machine",
+                "machine": "{{name}}",
+                "name": "{{name}}",
+                "retired": false
+              }
+            ],
+            "t": "org"
+          },
+          {
+            "complete": true,
+            "locations": {
+              "at": [
+                {
+                  "path": "/srv/fleet/plain",
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b"
+                }
+              ],
+              "gen": "{{clock:1}}"
+            },
+            "machines": [
+              {
+                "name": "{{name}}",
+                "online": false,
+                "seen": null
+              }
+            ],
+            "projects": [
+              {
+                "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                "kind": "hub",
+                "name": "plain",
+                "retired": false
+              },
+              {
+                "id": "bee03f82-2138-5aea-8e30-928e917416b4",
+                "kind": "machine",
+                "machine": "{{name}}",
+                "name": "{{name}}",
+                "retired": false
+              }
+            ],
+            "t": "org"
+          }
+        ],
+        "revoked": [
+          {
+            "devices": [],
+            "keys": [],
+            "members": [],
+            "t": "revoked",
+            "version": 2
+          }
+        ],
+        "snapshots?": [
+          {
+            "id": "{{ask:1}}",
+            "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+            "t": "snapshots?"
+          },
+          {
+            "id": "{{ask:2}}",
+            "project": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+            "t": "snapshots?"
+          },
+          {
+            "id": "{{ask:3}}",
+            "project": "9c8b7a6f-5e4d-4c3b-a2a1-0f9e8d7c6b5a",
+            "t": "snapshots?"
+          },
+          {
+            "id": "{{ask:4}}",
+            "project": "5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c",
+            "t": "snapshots?"
+          }
+        ],
+        "welcome": [
+          {
+            "build": "{{build}}",
+            "capabilities": [
+              "access",
+              "reach",
+              "record",
+              "locations"
+            ],
+            "identity": {
+              "enrolled": "{{enrolled}}",
+              "former": [],
+              "hub": "{{hub}}",
+              "name": "{{name}}",
+              "org": "{{org}}",
+              "ref": "{{ref}}"
+            },
+            "policy": {
+              "ceiling": "settings",
+              "read_only": false
+            },
+            "protocol": {
+              "major": 1,
+              "minor": 0
+            },
+            "stateVersion": 2,
+            "t": "welcome"
+          }
+        ]
+      },
+      "up": {
+        "endpoint": [
+          {
+            "record": {
+              "body": {
+                "addresses": [],
+                "issued": "{{time:1}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "endpoint"
+          }
+        ],
+        "listing": [
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [
+                    "{{member}}"
+                  ],
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                  "state": "idle",
+                  "title": "the main session"
+                },
+                "issued": "{{time:2}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:2}}",
+                "session": "51515151-5151-4151-8151-515151515151"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          },
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [
+                    "{{member}}"
+                  ],
+                  "project": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+                  "state": "idle",
+                  "title": "another session"
+                },
+                "issued": "{{time:3}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:3}}",
+                "session": "52525252-5252-4252-8252-525252525252"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          },
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [
+                    "{{member}}"
+                  ],
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                  "state": "idle",
+                  "title": "the main session, renamed"
+                },
+                "issued": "{{time:4}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:4}}",
+                "session": "51515151-5151-4151-8151-515151515151"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          },
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [],
+                  "project": null,
+                  "state": "gone",
+                  "title": ""
+                },
+                "issued": "{{time:5}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:5}}",
+                "session": "52525252-5252-4252-8252-525252525252"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          }
+        ],
+        "projects": [
+          {
+            "record": {
+              "body": {
+                "issued": "{{time:6}}",
+                "known": [],
+                "locations": [
+                  {
+                    "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                    "key": "folder:x:/srv/fleet/plain",
+                    "name": "plain",
+                    "path": "/srv/fleet/plain",
+                    "pid": "pfleetplain",
+                    "source": "folder",
+                    "stated": "minted"
+                  }
+                ],
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:6}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "projects"
+          },
+          {
+            "record": {
+              "body": {
+                "issued": "{{time:7}}",
+                "known": [
+                  {
+                    "id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+                    "name": "log-6a7b"
+                  }
+                ],
+                "locations": [
+                  {
+                    "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                    "key": "folder:x:/srv/fleet/plain",
+                    "name": "plain",
+                    "path": "/srv/fleet/plain",
+                    "pid": "pfleetplain",
+                    "source": "folder",
+                    "stated": "minted"
+                  }
+                ],
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:7}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "projects"
+          },
+          {
+            "record": {
+              "body": {
+                "issued": "{{time:8}}",
+                "known": [],
+                "locations": [
+                  {
+                    "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                    "key": "folder:x:/srv/fleet/plain",
+                    "name": "plain",
+                    "path": "/srv/fleet/plain",
+                    "pid": "pfleetplain",
+                    "source": "folder",
+                    "stated": "minted"
+                  }
+                ],
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:8}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "projects"
+          }
+        ]
+      }
+    },
+    "without": {
+      "down": {
+        "audience": [
+          {
+            "digest": null,
+            "members": null,
+            "owners": [
+              "{{member}}"
+            ],
+            "policyRev": 0,
+            "session": "51515151-5151-4151-8151-515151515151",
+            "t": "audience"
+          },
+          {
+            "digest": null,
+            "members": null,
+            "owners": [
+              "{{member}}"
+            ],
+            "policyRev": 0,
+            "session": "52525252-5252-4252-8252-525252525252",
+            "t": "audience"
+          }
+        ],
+        "have": [
+          {
+            "archive": false,
+            "have": {},
+            "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+            "t": "have"
+          },
+          {
+            "archive": false,
+            "have": {},
+            "project": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+            "t": "have"
+          },
+          {
+            "archive": false,
+            "have": {},
+            "project": "9c8b7a6f-5e4d-4c3b-a2a1-0f9e8d7c6b5a",
+            "t": "have"
+          },
+          {
+            "archive": false,
+            "have": {},
+            "project": "5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c",
+            "t": "have"
+          }
+        ],
+        "legacy-key?": [
+          {
+            "t": "legacy-key?"
+          }
+        ],
+        "org": [
+          {
+            "complete": true,
+            "locations": {
+              "at": [
+                {
+                  "path": "/srv/fleet/plain",
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b"
+                }
+              ],
+              "gen": "{{clock:1}}"
+            },
+            "machines": [
+              {
+                "name": "{{name}}",
+                "online": false,
+                "seen": null
+              }
+            ],
+            "projects": [
+              {
+                "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                "kind": "hub",
+                "name": "plain",
+                "retired": false
+              },
+              {
+                "id": "bee03f82-2138-5aea-8e30-928e917416b4",
+                "kind": "machine",
+                "machine": "{{name}}",
+                "name": "{{name}}",
+                "retired": false
+              }
+            ],
+            "t": "org"
+          },
+          {
+            "complete": true,
+            "locations": {
+              "at": [
+                {
+                  "path": "/srv/fleet/plain",
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b"
+                }
+              ],
+              "gen": "{{clock:1}}"
+            },
+            "machines": [
+              {
+                "name": "{{name}}",
+                "online": false,
+                "seen": null
+              }
+            ],
+            "projects": [
+              {
+                "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                "kind": "hub",
+                "name": "plain",
+                "retired": false
+              },
+              {
+                "id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+                "kind": "hub",
+                "name": "log-6a7b",
+                "retired": false
+              },
+              {
+                "id": "bee03f82-2138-5aea-8e30-928e917416b4",
+                "kind": "machine",
+                "machine": "{{name}}",
+                "name": "{{name}}",
+                "retired": false
+              }
+            ],
+            "t": "org"
+          },
+          {
+            "complete": true,
+            "locations": {
+              "at": [
+                {
+                  "path": "/srv/fleet/plain",
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b"
+                }
+              ],
+              "gen": "{{clock:1}}"
+            },
+            "machines": [
+              {
+                "name": "{{name}}",
+                "online": false,
+                "seen": null
+              }
+            ],
+            "projects": [
+              {
+                "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                "kind": "hub",
+                "name": "plain",
+                "retired": false
+              },
+              {
+                "id": "bee03f82-2138-5aea-8e30-928e917416b4",
+                "kind": "machine",
+                "machine": "{{name}}",
+                "name": "{{name}}",
+                "retired": false
+              }
+            ],
+            "t": "org"
+          }
+        ],
+        "revoked": [
+          {
+            "devices": [],
+            "keys": [],
+            "members": [],
+            "t": "revoked",
+            "version": 2
+          }
+        ],
+        "snapshots?": [
+          {
+            "id": "{{ask:1}}",
+            "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+            "t": "snapshots?"
+          },
+          {
+            "id": "{{ask:2}}",
+            "project": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+            "t": "snapshots?"
+          },
+          {
+            "id": "{{ask:3}}",
+            "project": "9c8b7a6f-5e4d-4c3b-a2a1-0f9e8d7c6b5a",
+            "t": "snapshots?"
+          },
+          {
+            "id": "{{ask:4}}",
+            "project": "5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c",
+            "t": "snapshots?"
+          }
+        ],
+        "welcome": [
+          {
+            "build": "{{build}}",
+            "capabilities": [
+              "access",
+              "reach",
+              "record",
+              "locations"
+            ],
+            "identity": {
+              "enrolled": "{{enrolled}}",
+              "former": [],
+              "hub": "{{hub}}",
+              "name": "{{name}}",
+              "org": "{{org}}",
+              "ref": "{{ref}}"
+            },
+            "policy": {
+              "ceiling": "settings",
+              "read_only": false
+            },
+            "protocol": {
+              "major": 1,
+              "minor": 0
+            },
+            "stateVersion": 2,
+            "t": "welcome"
+          }
+        ]
+      },
+      "up": {
+        "endpoint": [
+          {
+            "record": {
+              "body": {
+                "addresses": [],
+                "issued": "{{time:1}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "endpoint"
+          }
+        ],
+        "listing": [
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [
+                    "{{member}}"
+                  ],
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                  "state": "idle",
+                  "title": "the main session"
+                },
+                "issued": "{{time:2}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:2}}",
+                "session": "51515151-5151-4151-8151-515151515151"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          },
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [
+                    "{{member}}"
+                  ],
+                  "project": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+                  "state": "idle",
+                  "title": "another session"
+                },
+                "issued": "{{time:3}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:3}}",
+                "session": "52525252-5252-4252-8252-525252525252"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          },
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [
+                    "{{member}}"
+                  ],
+                  "project": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                  "state": "idle",
+                  "title": "the main session, renamed"
+                },
+                "issued": "{{time:4}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:4}}",
+                "session": "51515151-5151-4151-8151-515151515151"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          },
+          {
+            "record": {
+              "body": {
+                "fields": {
+                  "lane": "A",
+                  "owners": [],
+                  "project": null,
+                  "state": "gone",
+                  "title": ""
+                },
+                "issued": "{{time:5}}",
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:5}}",
+                "session": "52525252-5252-4252-8252-525252525252"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "listing"
+          }
+        ],
+        "projects": [
+          {
+            "record": {
+              "body": {
+                "issued": "{{time:6}}",
+                "known": [],
+                "locations": [
+                  {
+                    "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                    "key": "folder:x:/srv/fleet/plain",
+                    "name": "plain",
+                    "path": "/srv/fleet/plain",
+                    "pid": "pfleetplain",
+                    "source": "folder",
+                    "stated": "minted"
+                  }
+                ],
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:6}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "projects"
+          },
+          {
+            "record": {
+              "body": {
+                "issued": "{{time:7}}",
+                "known": [
+                  {
+                    "id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+                    "name": "log-6a7b"
+                  }
+                ],
+                "locations": [
+                  {
+                    "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                    "key": "folder:x:/srv/fleet/plain",
+                    "name": "plain",
+                    "path": "/srv/fleet/plain",
+                    "pid": "pfleetplain",
+                    "source": "folder",
+                    "stated": "minted"
+                  }
+                ],
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:7}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "projects"
+          },
+          {
+            "record": {
+              "body": {
+                "issued": "{{time:8}}",
+                "known": [],
+                "locations": [
+                  {
+                    "id": "3f6c1a2e-5b4d-4e7f-9a1b-2c3d4e5f6a7b",
+                    "key": "folder:x:/srv/fleet/plain",
+                    "name": "plain",
+                    "path": "/srv/fleet/plain",
+                    "pid": "pfleetplain",
+                    "source": "folder",
+                    "stated": "minted"
+                  }
+                ],
+                "machine": "{{ref}}",
+                "org": "{{org}}",
+                "revision": "{{clock:8}}"
+              },
+              "sig": {
+                "kid": "{{kid}}",
+                "value": "{{sig}}"
+              }
+            },
+            "t": "projects"
+          }
+        ]
+      }
+    }
+  }
+}
