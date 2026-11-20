@@ -113,7 +113,7 @@ function deps(): DocumentTabDeps {
 // another body over the same state (a pane move's remount).
 function mountIn(scope: EditorHostScope) {
   const editor = artifactEditorFor('document')!;
-  const hold = holdArtifactEditorState<DocumentTabState>(scope, DOC, 'document', editor as never);
+  const hold = holdArtifactEditorState<DocumentTabState>(scope, DOC, TEST_MACHINE, 'document', editor as never);
   const Body = scope.surface === 'panel' ? editor.Panel : editor.Main;
   const tree = (slot: string) => (
     <EditorHostScopeContext.Provider value={scope}>
@@ -173,7 +173,7 @@ describe('a comment being sent when its document moves', () => {
     act(() => {
       stageArtifactEditorState(panel);
       source.view.unmount();
-      adoptStagedArtifactEditorState(DOC, main);
+      adoptStagedArtifactEditorState(DOC, TEST_MACHINE, main);
     });
     const target = mountIn(main);
     await replacementFormSendsNothing(before);
@@ -185,7 +185,7 @@ describe('a comment being sent when its document moves', () => {
     act(() => {
       stageArtifactEditorState(main);
       target.view.unmount();
-      adoptStagedArtifactEditorState(DOC, panel);
+      adoptStagedArtifactEditorState(DOC, TEST_MACHINE, panel);
     });
     mountIn(panel);
     await waitFor(() => expect(field()).not.toBe(again));
@@ -203,7 +203,7 @@ describe('an unsent comment when its document moves onto a view of it already op
   beforeEach(() => {
     resetPanelHost();
     const row: LibraryRow = { id: DOC, kind: 'document', title: 'Launch plan', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [] };
-    library.setState({ reads: new Map([[rowKey(DOC), { status: 'ready', value: row, error: null }]]) });
+    library.setState({ reads: new Map([[rowKey(DOC, TEST_MACHINE), { status: 'ready', value: row, error: null }]]) });
     offs.push(registerPanelTool(artifactsTool));
   });
 
@@ -303,7 +303,7 @@ describe('an unsent comment when its document moves onto a view of it already op
     const source = recordInPanel();
     const kept = mountIn(main);
     const threadId = await typedUnsent(); // typed in main's card: main's draft, not the panel's
-    holdArtifactEditorState(source, DOC, 'document', artifactEditorFor('document') as never);
+    holdArtifactEditorState(source, DOC, TEST_MACHINE, 'document', artifactEditorFor('document') as never);
     act(() => void registerEditorHost(source, { title: 'Launch plan', closeGuard: async () => false })); // the record keeps itself
     let moved = true;
     await act(async () => void (moved = await moveArtifactToTab(source.tabId)));

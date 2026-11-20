@@ -24,17 +24,14 @@
 // the host hands back to the tab restored at the next launch, so the tab shows the same record, pinned or a session's.
 // P5 O6 M2 (OX2): a record names its artifact's machine too (`{target, machine}`), as a main artifact tab does; a record
 // persisted before O6 holds none and is the local machine's.
-// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Which machine an artifact is on"): the machine a
-// record shows its artifact on is the page's table's (artifacts/machines.ts): an open that names one (a restored tab, a
-// move) tells the table, one that names none (a row of the list) takes the table's, and a remote session's transcript
-// opens its artifacts on the session's machine.
+// An open keeps the machine of its source: the list, the restored record or the session's transcript.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { AppSessionId } from '@shared/graph/ids';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
-import { artifactMachineOf, recordArtifactMachine, sessionArtifactMachine } from '../../artifacts/machines';
+import { artifactKey, recordArtifactMachine, sessionArtifactMachine } from '../../artifacts/machines';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { ipc } from '../../ipc/client';
@@ -84,7 +81,6 @@ export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactI
   if (!canShowArtifactInPanel(appSessionId)) return;
   // P5 O7 M5a: a session's artifacts are on its machine (UX wave U6d: the rule a mention's look for its main tab shares)
   const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
-  recordArtifactMachine(artifactId, machine, ipc.localMachine);
   const params: ArtifactsParams = { target: artifactId, machine, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
 }
@@ -189,15 +185,15 @@ export class ArtifactsHandle {
   // it names none, superseding any earlier ask; a move the guard refused cancels its own); no target shows the list.
   open = (params: ArtifactsParams | undefined) => {
     if (params?.scope !== undefined && params.scope !== this.state.scope) this.update({ scope: params.scope, scrollTop: 0 });
-    const target = params?.target;
-    if (target === undefined) return this.back();
+    if (params?.target === undefined) return this.back();
+    const { target } = params;
     // P4-B3: a move between surfaces carries its viewer's state and asks for nothing (any ask left for it goes); P4-B4: every
     // other open asks for its version and a link's place
-    const serial = params?.carried ? null : requestArtifactOpen(target, params?.at ?? 'latest', this.editorScope.surface, params?.location);
-    if (serial === null) withdrawVersionRequest(target, this.editorScope.surface);
+    const machine = params.machine ?? sessionArtifactMachine(this.state.appSessionId, target, ipc.localMachine);
+    recordArtifactMachine(target, machine, ipc.localMachine);
+    const serial = params.carried ? null : requestArtifactOpen(target, machine, params.at ?? 'latest', this.editorScope.surface, params.location);
+    if (serial === null) withdrawVersionRequest(target, machine, this.editorScope.surface);
     const { view } = this.state;
-    if (params?.machine !== undefined) recordArtifactMachine(target, params.machine, ipc.localMachine);
-    const machine = artifactMachineOf(target) ?? ipc.localMachine;
     if (view.kind === 'record' && view.artifactId === target && view.machine === machine) return this.withdraw();
     this.leaveThen({ kind: 'record', artifactId: target, machine }, () => serial !== null && cancelOpenRequest(serial));
   };
@@ -252,7 +248,7 @@ function ArtifactsBody({ state, ctx }: { state: ArtifactsHandle; ctx: PanelToolC
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   useEffect(() => state.follow(ctx.appSessionId), [state, ctx.appSessionId]);
   const { view } = snapshot;
-  if (view.kind === 'record') return <ArtifactRecordView key={view.artifactId} artifactId={view.artifactId} scope={state.editorScope} visible={ctx.visible} onBack={state.back} />;
+  if (view.kind === 'record') return <ArtifactRecordView key={artifactKey(view.artifactId, view.machine)} artifactId={view.artifactId} machine={view.machine} scope={state.editorScope} visible={ctx.visible} onBack={state.back} />;
   const own = snapshot.appSessionId === ctx.appSessionId; // until the follow lands, another session's scroll is not restored
   return (
     <ArtifactsList
@@ -262,7 +258,7 @@ function ArtifactsBody({ state, ctx }: { state: ArtifactsHandle; ctx: PanelToolC
       scrollTop={own ? snapshot.scrollTop : 0}
       onScope={state.setScope}
       onScroll={state.setScrollTop}
-      onOpen={(target) => state.open({ target })}
+      onOpen={(target, machine) => state.open({ target, machine })}
     />
   );
 }

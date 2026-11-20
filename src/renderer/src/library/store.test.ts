@@ -1,6 +1,7 @@
 // The renderer's library store over a fake main (the P3-L execution document, M3): the lists, rows and Spaces the
 // window watches, read on first watch and read again on every `library.changed`; a failed read keeps the last good
 // answer; an answer a newer read superseded is dropped; what nobody watches is not refreshed and is forgotten past a cap.
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -101,7 +102,7 @@ describe('library.changed', () => {
   it('reads again every watched list, row and the Spaces, and nothing nobody watches', async () => {
     watch(watchLibraryList({ kind: 'file' }));
     const offHtml = watch(watchLibraryList({ kind: 'html' }));
-    watch(watchLibraryRow(id(1)));
+    watch(watchLibraryRow(id(1), TEST_MACHINE));
     watch(watchLibrarySpaces());
     await fake.reply('library.list', answer());
     await fake.reply('library.list', answer(row(1)));
@@ -115,42 +116,42 @@ describe('library.changed', () => {
     await fake.reply('library.list', answer());
     await fake.reply('library.get', { row: null }); // deleted
     await fake.reply('library.spaces', { spaces: [] });
-    expect(libraryRow(state(), id(1))).toMatchObject({ status: 'ready', value: null });
+    expect(libraryRow(state(), id(1), TEST_MACHINE)).toMatchObject({ status: 'ready', value: null });
     expect(librarySpaces(state()).value).toEqual([]);
   });
 
   it('refreshLibrary reads every watched read again (a Retry)', async () => {
-    watch(watchLibraryRow(id(1)));
+    watch(watchLibraryRow(id(1), TEST_MACHINE));
     await fake.fail('library.get', 'timeout');
-    expect(libraryRow(state(), id(1))).toMatchObject({ status: 'error', error: 'timeout', value: undefined });
+    expect(libraryRow(state(), id(1), TEST_MACHINE)).toMatchObject({ status: 'error', error: 'timeout', value: undefined });
     refreshLibrary();
     await fake.reply('library.get', { row: row(1) });
-    expect(libraryRow(state(), id(1)).value?.title).toBe('Page 1');
+    expect(libraryRow(state(), id(1), TEST_MACHINE).value?.title).toBe('Page 1');
   });
 });
 
 describe('a read nobody watches', () => {
   it('is kept to show at once when watched again, and read again then', async () => {
-    const off = watchLibraryRow(id(1));
+    const off = watchLibraryRow(id(1), TEST_MACHINE);
     await fake.reply('library.get', { row: row(1) });
     off();
     fake.event('library.changed', { revision: 2 });
     expect(fake.pending('library.get'), 'unwatched: not refreshed').toBe(0);
-    watch(watchLibraryRow(id(1)));
-    expect(libraryRow(state(), id(1))).toMatchObject({ status: 'reading' });
-    expect(libraryRow(state(), id(1)).value?.title, 'the kept answer, shown while it is read again').toBe('Page 1');
+    watch(watchLibraryRow(id(1), TEST_MACHINE));
+    expect(libraryRow(state(), id(1), TEST_MACHINE)).toMatchObject({ status: 'reading' });
+    expect(libraryRow(state(), id(1), TEST_MACHINE).value?.title, 'the kept answer, shown while it is read again').toBe('Page 1');
     await fake.reply('library.get', { row: row(1, { title: 'Renamed' }) });
-    expect(libraryRow(state(), id(1)).value?.title).toBe('Renamed');
+    expect(libraryRow(state(), id(1), TEST_MACHINE).value?.title).toBe('Renamed');
   });
 
   it('is forgotten past the cap, oldest first', async () => {
     for (let n = 1; n <= UNWATCHED_KEPT + 1; n++) {
-      const off = watchLibraryRow(id(n));
+      const off = watchLibraryRow(id(n), TEST_MACHINE);
       await fake.reply('library.get', { row: row(n) });
       off();
     }
-    expect(state().reads.has(`row:${id(1)}`)).toBe(false);
-    expect(state().reads.has(`row:${id(2)}`)).toBe(true);
+    expect(state().reads.has(`row:${TEST_MACHINE}:${id(1)}`)).toBe(false);
+    expect(state().reads.has(`row:${TEST_MACHINE}:${id(2)}`)).toBe(true);
     expect(state().reads.size).toBe(UNWATCHED_KEPT);
   });
 

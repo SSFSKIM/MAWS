@@ -1,6 +1,7 @@
 // P3-E1 M3 (X32's lifetime rule): a design tab's state is C's deck tab state with the workbench's view beside it. The
 // header's Zoom to fit acts with no body mounted (it waits for the body's room, then fits every board), the view is the
 // tab's (a body remounting finds it where it was), and the deck tab's lifetime (the session, the close) is unchanged.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { Awareness } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -57,7 +58,7 @@ function handleOf(doc = designDoc()): DocumentHandle & { closed: boolean; frames
 async function opened() {
   const handle = handleOf();
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
-  const state = new DesignTabState({ artifactId: 'design-1', kind: 'design', surface: 'main' }, { host, log: () => {}, confirmDiscard: async () => true });
+  const state = new DesignTabState({ artifactId: 'design-1', machine: TEST_MACHINE, kind: 'design', surface: 'main' }, { host, log: () => {}, confirmDiscard: async () => true });
   await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
   return { handle, state };
 }
@@ -69,7 +70,7 @@ describe('a design tab’s state', () => {
     vi.spyOn(handle, 'state').mockReturnValue({ phase: 'off', synced: false, unsaved: 1, revision: 1, integrated: 0, readOnly: true });
     const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
     const confirmDiscard = vi.fn(async () => false);
-    const state = new DesignTabState({ artifactId: 'design-1', kind: 'design', surface: 'main' }, { host, log: () => {}, confirmDiscard, saveWaitMs: 30 });
+    const state = new DesignTabState({ artifactId: 'design-1', machine: TEST_MACHINE, kind: 'design', surface: 'main' }, { host, log: () => {}, confirmDiscard, saveWaitMs: 30 });
     await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
     await expect(state.closeGuard()).resolves.toBe(false);
     expect(confirmDiscard).toHaveBeenCalledTimes(1);
@@ -152,7 +153,7 @@ describe('a design moved between a main tab and the panel', () => {
     const off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
     const main = { surface: 'main', tabId: 'artifact:design-1' } as const;
     const panel = { surface: 'panel', tabId: 'p1' } as const;
-    const { state } = holdArtifactEditorState<DesignTabState>(main, 'design-1', 'design', artifactEditorFor('design') as never);
+    const { state } = holdArtifactEditorState<DesignTabState>(main, 'design-1', TEST_MACHINE, 'design', artifactEditorFor('design') as never);
     await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
     state.view.setRoom({ w: 900, h: 700 });
     state.view.setViewport({ zoom: 0.5, x: 10, y: 20 });
@@ -160,7 +161,7 @@ describe('a design moved between a main tab and the panel', () => {
 
     stageArtifactEditorState(main);
     releaseArtifactEditorState(main);
-    adoptStagedArtifactEditorState('design-1', panel);
+    adoptStagedArtifactEditorState('design-1', TEST_MACHINE, panel);
     expect(state.surface).toBe('panel');
     expect(state.view.snapshot()).toMatchObject({ viewport: { zoom: 0.5, x: 10, y: 20 }, frame: 'poster' });
     expect(openDesignTabs()).toContain(state);

@@ -3,13 +3,13 @@
 // the library of the artifact's machine lists the artifact (null until that read has answered), and the sentence Undo is
 // disabled with on another machine (UC-7's `disabledWords`). The act is disabled while it runs, so a second press sends
 // nothing; an act that ends without its effect leaves its sentence until the next press.
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { disabledWords } from '@shared/ipc/remote-unavailable';
 import type { MachineRef } from '@shared/machine/ref';
 import { useLinkPhase } from '../app/machine-mark';
 import { subscribeDeletedReplicas, unsentWhileDeleted } from '../artifacts/deleted-replicas';
-import { recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
+import { sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useMachines } from '../stores/machines';
@@ -50,8 +50,8 @@ export function useUndoAct(undo: () => Promise<string | null>): UndoAct {
 }
 
 /** Whether the library of the artifact's machine lists it: null until the read has answered. */
-export function useListed(artifactId: string): boolean | null {
-  const read = useLibraryRow(artifactId);
+export function useListed(artifactId: string, machine: MachineRef): boolean | null {
+  const read = useLibraryRow(artifactId, machine);
   // fix wave 4 (the ruling's predicate): a row is restoration only as a successful read's answer; a read refused since
   // keeps its last good row (library/store.ts), which proves nothing, so it is not known. A read under way keeps the last
   // successful answer when nothing has contradicted it; fix wave 5: after a refusal it does not (the store keeps the
@@ -61,13 +61,10 @@ export function useListed(artifactId: string): boolean | null {
 }
 
 /**
- * For the row of a session's call: the artifact's machine recorded as the side column's open records it
- * (`sessionArtifactMachine`), so the library is read there, also for an artifact the window has never listed. The record
- * is the effect declared first, so it runs before the library's watch reads the machine.
+ * For a row of a session's call, read on the same machine as the side column's open.
  */
 export function useSessionArtifactListed(appSessionId: AppSessionId | null, artifactId: string): boolean | null {
-  useEffect(() => recordArtifactMachine(artifactId, sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine), ipc.localMachine), [appSessionId, artifactId]);
-  return useListed(artifactId);
+  return useListed(artifactId, sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine));
 }
 
 /** Why the row's Undo is disabled for a session on another machine (the one helper every session control reads). */
@@ -89,6 +86,6 @@ export function useMachineUndoUnavailable(machine: MachineRef): string | null {
 
 /** Whether a replica of the artifact waiting for its restore holds an edit the host never acknowledged (the notice's
  * "Your last edit is not saved"); the store's own snapshot, so a compiled render follows it. */
-export function useUnsentWhileDeleted(artifactId: string): boolean {
-  return useSyncExternalStore(subscribeDeletedReplicas, () => unsentWhileDeleted(artifactId));
+export function useUnsentWhileDeleted(artifactId: string, machine: MachineRef): boolean {
+  return useSyncExternalStore(subscribeDeletedReplicas, () => unsentWhileDeleted(artifactId, machine));
 }

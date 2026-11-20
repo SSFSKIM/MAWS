@@ -3,6 +3,7 @@
 // the card host's id is the document's; the composing card survives that remount (P2's host keeps it), so its draft
 // must too, or the card would send an anchor naming a deleted thread. The draft goes when its card closes unsent or
 // the editor as a whole goes (P2's host closes the card then).
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -108,7 +109,7 @@ it('withdraws a closing tab’s acknowledged unsent draft at the host, not only 
   memory.write((d) => createDocument(d, { title: 'Draft', body: schemaFor().nodeFromJSON(doc(para('p1', 'The plan ships quarterly.'))) }));
   let tabHandle: (DocumentHandle & { closed?: boolean }) | null = null;
   const state = new DocumentTabState(
-    { artifactId: A, kind: 'document', surface: 'panel' },
+    { artifactId: A, machine: TEST_MACHINE, kind: 'document', surface: 'panel' },
     {
       host: {
         ...owner,

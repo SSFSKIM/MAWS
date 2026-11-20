@@ -4,6 +4,7 @@
 // going inactive, its window's document hiding and a history preview hide the surface, never ending the watch; the tab's
 // end closes it. The view's label says the live pause; the source sheet's Start runs H's context and start policy (an
 // artifact with no context refuses in H's words), and nothing starts a session from a mount or ten minutes of timers.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
@@ -127,7 +128,7 @@ function mount() {
   });
   off = registerDashboardEditor(deps);
   const editor = artifactEditorFor('dashboard')!;
-  const hold = holdArtifactEditorState<DashboardTabState>(scope, A, 'dashboard', editor as never);
+  const hold = holdArtifactEditorState<DashboardTabState>(scope, A, TEST_MACHINE, 'dashboard', editor as never);
   const state = hold.state as DashboardTabState;
   const view = (visible: boolean) => (
     <EditorHostScopeContext.Provider value={scope}>

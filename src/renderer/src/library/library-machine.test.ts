@@ -81,7 +81,7 @@ describe('a machine’s changes and resyncs', () => {
     const { client } = setup;
     offs.push(watchLibraryList({}, client, OTHER_MACHINE), watchLibraryList({}, client), watchLibrarySpaces(client, OTHER_MACHINE), watchLibrarySpaces(client));
     await settle(); // the lists answered: artifact 1 is the other machine's
-    offs.push(watchLibraryRow(ON_OTHER.id, client), watchLibraryRow(HERE.id, client));
+    offs.push(watchLibraryRow(ON_OTHER.id, OTHER_MACHINE, client), watchLibraryRow(HERE.id, TEST_MACHINE, client));
     await settle();
     return setup;
   }

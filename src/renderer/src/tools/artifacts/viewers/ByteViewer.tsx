@@ -147,18 +147,18 @@ function useReaderSession(home: AppSessionId | null): AppSessionId | null {
 
 // ---- the editor --------------------------------------------------------------------------------------------------------
 
-function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: ArtifactEditorProps<ByteViewerState> & { kind: ByteKind }) {
+function ByteViewer({ kind, artifactId, machine, state, scope, visible, onShown }: ArtifactEditorProps<ByteViewerState> & { kind: ByteKind }) {
   const { selected, reloads } = useStore(state.view);
-  const row = useLibraryRow(artifactId).value;
+  const row = useLibraryRow(artifactId, machine).value;
   const title = row?.title ?? VIEWERS_COPY.fallbackTitle;
   // read again as the row moves on (a publish), the versions read before standing meanwhile, so the version shown keeps
   // its frame and an Open asked meanwhile is placed; a Reload reads from nothing
-  const versionsRead = useRead(`${artifactId}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }), row?.revision);
+  const versionsRead = useRead(`${artifactId}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }, { machine }), row?.revision);
   const ordered = useMemo(() => (versionsRead.status === 'ready' ? versionsInOrder(versionsRead.value.versions) : null), [versionsRead]);
   const shown = ordered ? shownVersion(ordered, placeOfOpenAt(ordered, selected)) : null;
   const revision = shown?.version.seq;
   const contentRead = useRead<LibraryContent>(ordered === null ? null : `${artifactId}@${revision ?? 'latest'}#${reloads}`, () =>
-    ipc.invoke('library.content', { artifactId, ...(revision !== undefined && { revision }) }),
+    ipc.invoke('library.content', { artifactId, ...(revision !== undefined && { revision }) }, { machine }),
   );
   const content = contentRead.status === 'ready' ? contentRead.value : null;
   const body: BodyKind | null = content === null ? null : kind === 'html' ? 'html' : bodyOf(content.name);
@@ -191,7 +191,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // P4-B4: a place's version (a retained version's id, a link's `#v<id>`) names the version shown; a place without one, `at`
   const chooseAt = (at: ArtifactOpenAt, location?: ArtifactLocation) => ordered !== null && state.view.setState({ selected: selectionOfOpen(ordered, at, location) });
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
-  const request = useOpenRequest(artifactId, scope.surface);
+  const request = useOpenRequest(artifactId, machine, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
     noteArtifactVersions(artifactId, ordered);

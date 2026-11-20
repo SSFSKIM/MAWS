@@ -13,6 +13,7 @@ import { embedUrl } from '@artifacts/slides/render-rules';
 import { artifactHost } from '../../artifacts';
 import { DesignSystemHostProvider } from '../../artifacts/design-system/provider';
 import { useLibraryRow } from '../../library/store';
+import { ipc } from '../../ipc/client';
 import { useSettings } from '../../stores/settings';
 import { useDeckSystem } from './governing';
 
@@ -73,7 +74,7 @@ function Show({ params, close }: { params: PresentParams; close: () => void }) {
     };
   }, [artifactId]);
 
-  const row = useLibraryRow(artifactId).value;
+  const row = useLibraryRow(artifactId, ipc.localMachine).value;
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
   const assetUrl = useMemo(() => (ref: string) => artifactHost().assetUrl(artifactId, ref), [artifactId]);

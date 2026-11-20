@@ -10,6 +10,7 @@
 // place number; when present it names the version shown.
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactLocation } from '@shared/artifacts/link';
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { EditorHostScope } from '../../../panel/editor-host';
@@ -17,6 +18,7 @@ import type { EditorHostScope } from '../../../panel/editor-host';
 export interface OpenRequest {
   serial: number;
   artifactId: string;
+  machine: MachineRef;
   at: ArtifactOpenAt;
   location?: ArtifactLocation; // P4-B4: absent when the open names no place
   surface: EditorHostScope['surface'];
@@ -26,9 +28,9 @@ const store = createStore<{ request: OpenRequest | null }>()(() => ({ request: n
 let serials = 0;
 
 // Answers the request's serial, for `cancelOpenRequest`.
-export function requestArtifactOpen(artifactId: string, at: ArtifactOpenAt, surface: EditorHostScope['surface'], location?: ArtifactLocation): number {
+export function requestArtifactOpen(artifactId: string, machine: MachineRef, at: ArtifactOpenAt, surface: EditorHostScope['surface'], location?: ArtifactLocation): number {
   const serial = ++serials;
-  store.setState({ request: { serial, artifactId, at, ...(location !== undefined && { location }), surface } });
+  store.setState({ request: { serial, artifactId, machine, at, ...(location !== undefined && { location }), surface } });
   return serial;
 }
 
@@ -40,13 +42,13 @@ export function cancelOpenRequest(serial: number): void {
 // P4-B3: an open that carries its viewer's state (a move between surfaces) asks for no version, and an ask still left for
 // that artifact on that surface goes, so the moved viewer keeps the version it shows. P4-B4 (at the B3 merge): the open
 // request carries a link's place too, which goes with it: a moved viewer keeps its place as well.
-export function withdrawVersionRequest(artifactId: string, surface: EditorHostScope['surface']): void {
+export function withdrawVersionRequest(artifactId: string, machine: MachineRef, surface: EditorHostScope['surface']): void {
   const request = store.getState().request;
-  if (request?.artifactId === artifactId && request.surface === surface) store.setState({ request: null });
+  if (request?.artifactId === artifactId && request.machine === machine && request.surface === surface) store.setState({ request: null });
 }
 
 // The request an editor of `artifactId` on `surface` should take, or null.
-export function useOpenRequest(artifactId: string, surface: EditorHostScope['surface']): OpenRequest | null {
+export function useOpenRequest(artifactId: string, machine: MachineRef, surface: EditorHostScope['surface']): OpenRequest | null {
   return useStore(store, (s) => (s.request?.artifactId === artifactId && s.request.surface === surface ? s.request : null));
 }
 

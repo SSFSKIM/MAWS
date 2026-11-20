@@ -107,7 +107,7 @@ const recordOf = (id: string) => (instanceOf(id)?.state as ArtifactsHandle | und
 const mainIds = () => allTabs(useLayout.getState().main).map((t) => t.id);
 const artifactsTabOfA = () => panelOf(A)?.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)?.id;
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-const readyForTransfer = () => waitFor(() => expect(libraryRow(library.getState(), DOC).value).toBeDefined());
+const readyForTransfer = () => waitFor(() => expect(libraryRow(library.getState(), DOC, TEST_MACHINE).value).toBeDefined());
 // What a pointer over `region`'s editable content hits: a drop layer covering the content when one is mounted, else the
 // content itself (happy-dom does no hit-testing).
 const hitIn = (region: Element) => region.querySelector('[data-drop-overlay]') ?? region.querySelector('[data-editable]')!;

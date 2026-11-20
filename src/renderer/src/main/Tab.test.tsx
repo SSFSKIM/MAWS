@@ -42,7 +42,7 @@ const artifactTabOpen = () => allTabs(useLayout.getState().main).some((t) => t.i
 const viewOf = (id: string | undefined) => (id ? (instanceOf(id)?.state as ArtifactsHandle | undefined)?.snapshot().view : undefined);
 
 async function menuItem(): Promise<HTMLElement> {
-  await waitFor(() => expect(libraryRow(library.getState(), DECK).value).toEqual(metadata));
+  await waitFor(() => expect(libraryRow(library.getState(), DECK, TEST_MACHINE).value).toEqual(metadata));
   fireEvent.contextMenu(document.querySelector<HTMLElement>(`[data-tab-id="${ARTIFACT.id}"]`)!);
   const menu = await screen.findByRole('menu');
   return within(menu).getByRole('menuitem', { name: SHOW_IN_PANEL_COPY.label });

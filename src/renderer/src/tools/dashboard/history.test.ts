@@ -1,6 +1,7 @@
 // P3-E2 M4 (E's Decision Log 8 and 28 (4)): the history hook's path to B's rail. `extraChanges` on HistoryApiDeps
 // reaches the HistoryApi B's controller reads, and on DocumentTabDeps reaches the tab's history; a dashboard's tab state
 // gives its dataset changes there, while a document's tab, made without it, has no hook (B's history unchanged).
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { describe, expect, it, vi } from 'vitest';
 import { datasetChanges } from '@artifacts/dashboard/history';
 import type { ArtifactHost } from '@artifacts/host';
@@ -33,8 +34,8 @@ describe('the history hook’s path (P3-E2 M4)', () => {
   });
 
   it('a dashboard tab’s history counts its dataset changes; a document tab’s has no hook', () => {
-    const dashboard = new DashboardTabState({ artifactId: A, kind: 'dashboard', surface: 'panel' }, deps());
-    const document = new DocumentTabState({ artifactId: A, kind: 'document', surface: 'panel' }, deps());
+    const dashboard = new DashboardTabState({ artifactId: A, machine: TEST_MACHINE, kind: 'dashboard', surface: 'panel' }, deps());
+    const document = new DocumentTabState({ artifactId: A, machine: TEST_MACHINE, kind: 'document', surface: 'panel' }, deps());
     try {
       expect(dashboard.document.history.extraChanges).toBe(datasetChanges);
       expect(document.history.extraChanges).toBeUndefined();

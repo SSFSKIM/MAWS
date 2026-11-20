@@ -5,6 +5,7 @@
 // and with no context the card says why. The notice in the card's place is withdrawn with its draft by Close, Escape,
 // a later card, or the editor going, and a start that settles after that opens nothing.
 // Runs in `renderer` and, compiled, in `renderer-compiled` (vitest.config.ts): every render reads stores through hooks.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -92,7 +93,7 @@ const sessionCalls = () => fake.calls.filter((call) => /^invoke session\.(create
 // ---- the target ----------------------------------------------------------------------------------------------------
 
 function Target({ artifactId = ARTIFACT }: { artifactId?: string }) {
-  const target = useArtifactCommentTarget(artifactId);
+  const target = useArtifactCommentTarget(artifactId, TEST_MACHINE);
   return <output data-testid="target">{JSON.stringify(target)}</output>;
 }
 const target = () => JSON.parse(screen.getByTestId('target').textContent!) as unknown;

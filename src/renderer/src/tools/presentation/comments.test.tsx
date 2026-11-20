@@ -1,6 +1,7 @@
 // P3-C M7 fix wave 1 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9; Decision Log 33, 35): a deck's
 // comment opens P2's card through B's surface on an `artifact-comment` anchor that names the presentation kind, so the
 // agent's lead names the element and the presentation (Decision Log 36); a document's anchor stays as B writes it.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Awareness } from '@y/protocols/awareness';
@@ -110,7 +111,7 @@ describe('a deck’s compose card keeps its draft', () => {
     act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
     off = registerPresentationEditor(() => ({ host, log: () => {}, confirmDiscard }));
     const editor = artifactEditorFor('presentation')!;
-    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, 'presentation', editor as never);
+    const hold = holdArtifactEditorState<DeckTabState>(scope, DECK, TEST_MACHINE, 'presentation', editor as never);
     const Main = editor.Main;
     const view = render(
       <EditorHostScopeContext.Provider value={scope}>
@@ -161,7 +162,7 @@ describe('a deck’s compose card keeps its draft', () => {
     // the panel shows the deck too: the move's destination
     const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
     const editor = artifactEditorFor('presentation')!;
-    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, 'presentation', editor as never);
+    const kept = holdArtifactEditorState<DeckTabState>(panelScope, DECK, TEST_MACHINE, 'presentation', editor as never);
     const Panel = editor.Panel;
     const panel = render(
       <EditorHostScopeContext.Provider value={panelScope}>

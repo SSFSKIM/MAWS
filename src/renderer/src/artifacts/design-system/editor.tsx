@@ -19,6 +19,7 @@ import { useArtifactTitle } from '../../library/store';
 import { useLayout } from '../../stores/layout';
 import { toast } from '../../stores/notices';
 import { useSettings } from '../../stores/settings';
+import type { MachineRef } from '@shared/machine/ref';
 import { artifactHost } from '..';
 import { registerArtifactEditor, type ArtifactEditor, type ArtifactEditorProps } from '../registry';
 import { DESIGN_SYSTEM_COPY as C } from './copy';
@@ -101,13 +102,13 @@ export class OpenedSystem {
 }
 
 export interface DesignSystemEditorDeps {
-  host(): ArtifactHost;
+  host(machine: MachineRef): ArtifactHost;
 }
 
 export function createDesignSystemEditor(deps: DesignSystemEditorDeps): ArtifactEditor<OpenedSystem> {
   return {
     Panel: DesignSystemPanel,
-    createState: ({ artifactId }) => new OpenedSystem(artifactId, deps.host()),
+    createState: ({ artifactId, machine }) => new OpenedSystem(artifactId, deps.host(machine)),
     dispose: (state) => state.dispose(),
   };
 }
@@ -116,20 +117,20 @@ export function createDesignSystemEditor(deps: DesignSystemEditorDeps): Artifact
 export const registerDesignSystemEditor = (deps: DesignSystemEditorDeps = { host: artifactHost }): (() => void) =>
   registerArtifactEditor('design_system', createDesignSystemEditor(deps));
 
-function DesignSystemPanel({ artifactId, state, scope, visible, onShown }: ArtifactEditorProps<OpenedSystem>) {
+function DesignSystemPanel({ artifactId, machine, state, scope, visible, onShown }: ArtifactEditorProps<OpenedSystem>) {
   const opening = useSyncExternalStore(state.subscribe, state.get);
   if (opening.status === 'opening') return <Quiet>{C.opening}</Quiet>;
   if (opening.status === 'failed') return <Quiet>{C.openFailed(opening.error)}</Quiet>;
   return (
     <EditorHostScopeContext.Provider value={scope}>
-      <OpenBody artifactId={artifactId} handle={opening.handle} state={state} visible={visible} onShown={onShown} />
+      <OpenBody artifactId={artifactId} machine={machine} handle={opening.handle} state={state} visible={visible} onShown={onShown} />
     </EditorHostScopeContext.Provider>
   );
 }
 
-function OpenBody(props: { artifactId: string; handle: DocumentHandle; state: OpenedSystem; visible: boolean; onShown(): void }) {
-  const { artifactId, handle, state, visible, onShown } = props;
-  const title = useArtifactTitle(artifactId); // Decision Log 29: the artifact's title, the library's
+function OpenBody(props: { artifactId: string; machine: MachineRef; handle: DocumentHandle; state: OpenedSystem; visible: boolean; onShown(): void }) {
+  const { artifactId, machine, handle, state, visible, onShown } = props;
+  const title = useArtifactTitle(artifactId, machine); // Decision Log 29: the artifact's title, the library's
   const systemName = usePageState(handle.doc).system.meta?.name;
   const name = title ?? systemName ?? C.untitled;
   const isDefault = useSettings((s) => s.state?.settings.artifacts.defaultDesignSystem === artifactId);

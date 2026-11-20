@@ -59,7 +59,7 @@ function tabOf(artifactId: string, client: ReturnType<typeof preload>['client'])
   const handle = { doc, awareness: null, state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close: () => {} } as unknown as DocumentHandle;
   const host = { ...createConnectorHost(client), open: async () => handle, identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' }) } as unknown as ArtifactHost;
   const deps: DocumentTabDeps = { host, ipc: client, log: () => {}, confirm: () => true, sessionTitle: () => undefined, sessions: () => [] };
-  const tab = new DashboardTabState({ artifactId, kind: 'dashboard', surface: 'panel' }, deps);
+  const tab = new DashboardTabState({ artifactId, machine: TEST_MACHINE, kind: 'dashboard', surface: 'panel' }, deps);
   tabs.push(tab);
   return tab;
 }

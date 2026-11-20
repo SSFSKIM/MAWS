@@ -1,6 +1,7 @@
 // P3-F slide-editor (scalpel-2#1, scalpel-2#2): the deck's body over its tab's replica, under happy-dom. The header's
 // Present is offered only while the deck has a slide to show, following the deck live, and a deck with no slide at all
 // records the owner's view as a drawn first slide does.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { Awareness } from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,7 +52,7 @@ async function mount(doc: Doc) {
   const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;
   const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
-  const state = new DeckTabState({ artifactId: DECK, kind: 'presentation', surface: 'panel' }, { host, log: () => {}, confirmDiscard: async () => true });
+  const state = new DeckTabState({ artifactId: DECK, machine: TEST_MACHINE, kind: 'presentation', surface: 'panel' }, { host, log: () => {}, confirmDiscard: async () => true });
   states.push(state);
   const onShown = vi.fn();
   render(
@@ -96,12 +97,12 @@ describe('the deck body', () => {
     const { state } = await mount(deckOf(['a', 'b', 'c']));
     const session = state.snapshot().session!;
     expect(session.snapshot().currentSlide).toBe('a');
-    const serial = requestArtifactOpen(DECK, 'latest', 'main', { slide: 'c' }); // another surface's: this body leaves it
+    const serial = requestArtifactOpen(DECK, TEST_MACHINE, 'latest', 'main', { slide: 'c' }); // another surface's: this body leaves it
     await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
     expect(session.snapshot().currentSlide).toBe('a');
     expect(takeOpenRequest(serial)).toBe(true);
     let asked = 0;
-    act(() => void (asked = requestArtifactOpen(DECK, 'latest', 'panel', { slide: 'c' })));
+    act(() => void (asked = requestArtifactOpen(DECK, TEST_MACHINE, 'latest', 'panel', { slide: 'c' })));
     await waitFor(() => expect(session.snapshot().currentSlide).toBe('c'));
     expect(takeOpenRequest(asked)).toBe(false);
   });

@@ -16,6 +16,7 @@ import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { artifactClient } from '../../artifacts/machine-client';
 import { createArtifactHost } from '../../artifacts/host';
 import { artifactMachineOf, recordArtifactMachine, resetArtifactMachines } from '../../artifacts/machines';
 import { TranscriptLink } from '../../transcript/view/markdown/Link';
@@ -34,7 +35,7 @@ import { useLayout } from '../../stores/layout';
 import { allTabs } from '../../stores/layout-model';
 import { fail, installFakeMain, ok } from '../../test-support/code';
 import { resetPanelStores } from '../../test-support/panel';
-import { countsOf, libraryRow } from '../../test-support/remote-artifacts';
+import { artifactRow, countsOf, libraryRow } from '../../test-support/remote-artifacts';
 import { ipc } from '../../ipc/client';
 import { registerDocumentEditor } from '../document';
 import { artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
@@ -209,23 +210,27 @@ it('opens and edits each machine’s document when both copies have the same art
   const main = installFakeMain((name, input, machine) => {
     const row = machine === OTHER_MACHINE ? remoteRow : localRow;
     if (name === 'library.get') return ok({ row: input.artifactId === DECK.id ? row : null });
-    if (name === 'artifacts.get') return ok({ artifact: input.artifactId === DECK.id ? row : null });
+    if (name === 'artifacts.get') return ok({ artifact: input.artifactId === DECK.id ? artifactRow(1, { title: row.title }) : null });
     if (name === 'artifacts.open') {
       const host = machine === OTHER_MACHINE ? remote : local;
       ports.set(++channel, host.connect() as unknown as PortLike);
       return ok({ channel });
     }
     if (name === 'artifacts.status') return ok({ status: 'ok', reason: null });
+    if (name === 'artifacts.attributions') return ok({ bytes: new Uint8Array() });
     if (name === 'artifacts.versions') return ok({ versions: [] });
     if (name === 'library.spaces') return ok({ spaces: [] });
     if (name === 'artifacts.markViewed' || name === 'layout.set') return ok();
     return fail(`unexpected ${name}`);
   });
-  const host = createArtifactHost({ ipc, ports: { take: async (id) => ports.get(id)! }, log: () => {} });
-  offs.push(registerDocumentEditor(() => ({ host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [] })));
+  offs.push(registerDocumentEditor((machine) => ({
+    host: createArtifactHost({ ipc, machine, ports: { take: async (id) => ports.get(id)! }, log: () => {} }),
+    ipc: artifactClient(ipc, machine), log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [],
+  })));
   // Open as a palette pick would: the selected row's machine is already known.
   openArtifactTab(DECK.id, undefined, TEST_MACHINE);
   const tab = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
+  if (tab.kind !== 'artifact') throw new Error('expected an artifact tab');
   try {
     await mount({ target: DECK.id, machine: OTHER_MACHINE });
     const mainView = render(<ArtifactTab tab={tab} />);
@@ -236,8 +241,10 @@ it('opens and edits each machine’s document when both copies have the same art
       expect(editorAt(panel)).toBeDefined();
     });
     expect.soft(main.targetsOf('library.get')).toEqual([OTHER_MACHINE, TEST_MACHINE]);
-    expect.soft(editorHostOf({ surface: 'main', tabId: tab.id })?.title).toBe('Field notes');
-    expect.soft(editorHostOf({ surface: 'panel', tabId: TAB })?.title).toBe('Lab notes');
+    await waitFor(() => {
+      expect(editorHostOf({ surface: 'main', tabId: tab.id })?.title).toBe('Field notes');
+      expect(editorHostOf({ surface: 'panel', tabId: TAB })?.title).toBe('Lab notes');
+    });
     act(() => {
       editorAt(mainView.container)!.commands.insertContent('Field observation');
       editorAt(panel)!.commands.insertContent('Lab result');

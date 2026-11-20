@@ -2,6 +2,7 @@
 // comment opens P2's card through B's surface on an `artifact-comment` anchor naming the design kind and its target, a
 // board or an element, so the agent's lead says which; a deck's and a document's anchors stay as they were written.
 // P3-F (L230): a design opened as its own main tab with no chat shown offers a new comment as the document and the deck do.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Awareness } from '@y/protocols/awareness';
@@ -117,7 +118,7 @@ describe('a design opened as its own tab', () => {
     const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
     off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
     const editor = artifactEditorFor('design')!;
-    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, 'design', editor as never);
+    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, TEST_MACHINE, 'design', editor as never);
     const Main = editor.Main;
     render(
       <EditorHostScopeContext.Provider value={scope}>
@@ -187,7 +188,7 @@ describe('a design’s compose card keeps its draft', () => {
     act(() => useLayout.getState().openSession(PARENT)); // a chat shown: the comment goes to it
     off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard }));
     const editor = artifactEditorFor('design')!;
-    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, 'design', editor as never);
+    const hold = holdArtifactEditorState<DesignTabState>(scope, DESIGN, TEST_MACHINE, 'design', editor as never);
     const Main = editor.Main;
     render(
       <EditorHostScopeContext.Provider value={scope}>
@@ -223,7 +224,7 @@ describe('a design’s compose card keeps its draft', () => {
     await comment();
     await userEvent.type(field(), 'Taller?');
     const panelScope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
-    const kept = holdArtifactEditorState<DesignTabState>(panelScope, DESIGN, 'design', artifactEditorFor('design')! as never);
+    const kept = holdArtifactEditorState<DesignTabState>(panelScope, DESIGN, TEST_MACHINE, 'design', artifactEditorFor('design')! as never);
     expect(await state.closeGuard({ moving: true })).toBe(true);
     expect(handArtifactViewOver(scope, panelScope)).toBe(true);
     expect(useCommentCard.getState().open?.hostId).toBe(kept.state.commentHostId);

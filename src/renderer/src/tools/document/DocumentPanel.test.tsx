@@ -4,6 +4,7 @@
 // scope given (the title, the saved word, History toggling the rail the tab holds, the close guard the tab's), the page
 // a Mark-up surface while visible, Comment offered only with a session to send to, and the page inside the governing
 // system's scope once D's apply API is provided.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
@@ -94,7 +95,7 @@ function deps(): DocumentTabDeps {
 function mount({ visible = true, onShown = vi.fn<() => void>() }: { visible?: boolean; onShown?: ReturnType<typeof vi.fn<() => void>> } = {}) {
   off = registerDocumentEditor(deps);
   const editor = artifactEditorFor('document')!;
-  const hold = holdArtifactEditorState<DocumentTabState>(scope, A, 'document', editor as never);
+  const hold = holdArtifactEditorState<DocumentTabState>(scope, A, TEST_MACHINE, 'document', editor as never);
   const Panel = editor.Panel;
   const tree = (shownNow: boolean) => (
     <EditorHostScopeContext.Provider value={scope}>
@@ -114,7 +115,7 @@ describe('an open at a place', () => {
   it('reveals the block a link names in its tab and takes the request', async () => {
     const body = schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b9' }, content: [{ type: 'text', text: 'The answer' }] }] });
     memory.write((doc) => addTab(doc, { title: 'Findings', id: 't2', body }));
-    const serial = requestArtifactOpen(A, 'latest', 'panel', { block: 'b9' });
+    const serial = requestArtifactOpen(A, TEST_MACHINE, 'latest', 'panel', { block: 'b9' });
     mount();
     await shown();
     await until(() => screen.queryByRole('tab', { selected: true })?.textContent?.includes('Findings') === true, 'the block’s tab');
@@ -125,7 +126,7 @@ describe('an open at a place', () => {
 
   it('opens the history rail previewing a retained version a link names, after the request is taken', async () => {
     versions = [{ id: 3, seq: 1, at: Date.now(), actor: { kind: 'human' }, kind: 'named', label: 'Draft', assetRefs: [] }];
-    requestArtifactOpen(A, 'latest', 'panel', { version: 3 });
+    requestArtifactOpen(A, TEST_MACHINE, 'latest', 'panel', { version: 3 });
     mount();
     await shown();
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null, 'the history rail');

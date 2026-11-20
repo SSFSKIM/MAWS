@@ -1,31 +1,26 @@
-// Which machine an artifact is on, as the page knows it (P5 O7 M5a, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md,
-// M5, "Which machine an artifact is on"; main's twin is src/main/artifacts/machines.ts). An artifact id is a v4 UUID and
-// the scheme's origin, so it stays the key everywhere and the machine is a property of the artifact: this table holds it
-// for every artifact of another machine the page has heard of, and nothing else in the page decides it.
-//
-// - Its writers: the rows and records a machine answers (`heardArtifacts`, called by the renderer's client after each
-//   answer), and a surface that carries the machine beside the id (a tab's ref or params, a session's address:
-//   `recordArtifactMachine`).
-// - Its reader: `artifactMachineOf`. The renderer's client asks it for every command whose input names an artifact
-//   (`artifactId`, or the asset copy's `to`) and no machine, so every artifact-keyed invoke goes to the artifact's machine
-//   (an explicit `opts.machine`, and a machine the input's addresses name, still win). A surface reads it for what
-//   differs on another machine (Open externally opens a copy, Reveal is greyed).
-// - A local id never enters: an answer from this Mac takes the id out, so an id two machines answered keeps the later
-//   answer (a v4 collision does not happen; a copied profile directory could make one, the spec's known residual).
+// Open views and rows carry their machine. These observations are only route hints for callers that have no
+// machine (for example, a bare link); no answer or open can overwrite the machine of another copy.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName } from '@shared/ipc/schema';
 import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 
-const table = new Map<string, MachineRef>();
+const LOCAL = null;
+const table = new Map<string, Set<MachineRef | null>>();
 const listeners = new Set<() => void>();
 
 const changed = () => {
   for (const listener of [...listeners]) listener();
 };
 
-/** The artifact's machine when it is another machine's; null for this Mac's (or an id the page has not heard of). */
-export const artifactMachineOf = (artifactId: string): MachineRef | null => table.get(artifactId) ?? null;
+/** A unique remote route hint, or null for local, unknown or multiple copies. */
+export function artifactMachineOf(artifactId: string): MachineRef | null {
+  const machines = table.get(artifactId);
+  return machines?.size === 1 ? (machines.values().next().value ?? null) : null;
+}
+
+// Machine refs cannot contain a colon; keep the artifact id intact.
+export const artifactKey = (artifactId: string, machine: MachineRef): string => `${machine}:${artifactId}`;
 
 /**
  * The machine a session's view reads the artifact on (P5 O7 M5a): the session's when it is another machine's, else the
@@ -38,14 +33,14 @@ export function sessionArtifactMachine(appSessionId: AppSessionId | null, artifa
   return remote ?? artifactMachineOf(artifactId) ?? local;
 }
 
-/** The artifact is on `machine` (this Mac's when it is `local`): the later word wins. */
+/** Remember each copy separately, including this Mac's: it makes an id-only route ambiguous. */
 export function recordArtifactMachine(artifactId: string, machine: MachineRef, local: MachineRef): void {
-  if (machine === local) {
-    if (table.delete(artifactId)) changed();
-    return;
-  }
-  if (table.get(artifactId) === machine) return;
-  table.set(artifactId, machine);
+  const machines = table.get(artifactId) ?? new Set<MachineRef | null>();
+  // Null is the local hint's representation; retain the fact it was seen without returning it as a remote route.
+  const route = machine === local ? LOCAL : machine;
+  if (machines.has(route)) return;
+  machines.add(route);
+  table.set(artifactId, machines);
   changed();
 }
 

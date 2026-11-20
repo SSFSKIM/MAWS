@@ -56,7 +56,7 @@ export function undeleteSessionArtifact(appSessionId: AppSessionId, artifactId: 
   return undeleteArtifact(artifactId, machine, client);
 }
 // Decision Log 15: once per open, by the surface that showed the artifact's content to the owner, never by the list.
-export const markArtifactViewed = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.markViewed', { artifactId }, nothing);
+export const markArtifactViewed = (artifactId: string, machine: MachineRef, client: MawsBridge = ipc) => run(client, 'artifacts.markViewed', { artifactId }, nothing, { machine });
 
 // ---- Spaces ------------------------------------------------------------------------------------------------------------
 
@@ -85,11 +85,12 @@ export async function setSpaceInstructions(spaceId: string, text: string, client
 // machine a link's source is on (its session's, the Markdown artifact it is written in), told to the table first, so an
 // artifact the page has not listed yet opens there.
 export function openArtifactTab(artifactId: string, location?: ArtifactLocation, machine?: MachineRef): void {
-  if (machine !== undefined) recordArtifactMachine(artifactId, machine, ipc.localMachine);
-  if (location !== undefined) requestArtifactOpen(artifactId, 'latest', 'main', location);
+  const on = machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
+  recordArtifactMachine(artifactId, on, ipc.localMachine);
+  if (location !== undefined) requestArtifactOpen(artifactId, on, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
-  layout.openTab({ kind: 'artifact', artifactId, machine: artifactMachineOf(artifactId) ?? ipc.localMachine });
+  layout.openTab({ kind: 'artifact', artifactId, machine: on });
 }
 
 // UX wave U6d (card C5, "Show that tab"; the execution document's decisions 1 to 3): the main tab that already shows the

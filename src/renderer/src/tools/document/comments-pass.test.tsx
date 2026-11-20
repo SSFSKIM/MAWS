@@ -4,6 +4,7 @@
 // tab's close asks about it. A tab closed while a comment is in flight withdraws its ordinary draft at once and leaves
 // the comment in flight its thread, its replica hold and its settlement: success records the message under its mark, a
 // refusal withdraws both, and the replica closes once all is written.
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -85,7 +86,7 @@ async function openTab(confirm: () => boolean = () => false) {
     sessions: () => [],
   } as DocumentTabDeps;
   const editor: ArtifactEditor<DocumentTabState> = { Panel: () => null, createState: (target) => new DocumentTabState(target, deps), dispose: (state) => state.dispose() };
-  const { state } = holdArtifactEditorState(SCOPE, A, 'document', editor);
+  const { state } = holdArtifactEditorState(SCOPE, A, TEST_MACHINE, 'document', editor);
   await until(() => state.snapshot().ready, 'the tab to open');
   // M3's review, finding 4: every hold of the replica is counted, and each release, so a second release shows
   const holds = { taken: 0, released: 0, twice: 0 };

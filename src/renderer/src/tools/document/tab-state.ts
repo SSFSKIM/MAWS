@@ -111,6 +111,7 @@ let commentHosts = 0; // P4-B3 M6
 
 export class DocumentTabState {
   readonly artifactId: string;
+  readonly machine: ArtifactEditorTarget['machine'];
   readonly history: HistoryApi;
   readonly mentions: MentionSource;
   readonly host: ArtifactHost; // the editor's assets and the identity it writes as
@@ -139,6 +140,7 @@ export class DocumentTabState {
     private readonly deps: DocumentTabDeps,
   ) {
     this.artifactId = target.artifactId;
+    this.machine = target.machine;
     this.host = deps.host;
     this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, saving: false, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, shown: null, exporting: null };
     this.whenShown = new Promise((resolve) => (this.resolveShown = resolve));
@@ -383,7 +385,7 @@ export class DocumentTabState {
    * UX wave U5a: the comment is the artifact's pass's, which ends with its last view, so only the last view's close asks.
    */
   closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
-    const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
+    const draft = ask?.moving || artifactViews(this.artifactId, this.machine) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
     if (draft && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
     if (!handle || handle.state().unsaved === 0) return true;

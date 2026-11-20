@@ -5,6 +5,8 @@
 // its body is unmounted. In a window main loaded for the e2e harness the design's seam is installed with it.
 import { artifactHost } from '../../artifacts';
 import { e2eRequested } from '../../artifacts/e2e-seam';
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactClient } from '../../artifacts/machine-client';
 import { ipc } from '../../ipc/client';
 import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
@@ -16,10 +18,10 @@ import { installDesignSeam } from './e2e-seam';
 import { DesignTabState, type DesignTabDeps } from './tab-state';
 import { actorSessionOnPage } from '../../ipc/machine';
 
-const windowDeps = (): DesignTabDeps => ({
-  host: artifactHost(),
+const windowDeps = (machine: MachineRef): DesignTabDeps => ({
+  host: artifactHost(machine),
   log: (line) => console.warn(`[design] ${line}`),
-  ipc,
+  ipc: artifactClient(ipc, machine),
   sessionTitle: (appSessionId) => {
     const session = actorSessionOnPage(appSessionId); // P5 O6 M2: the artifact holds main's bare id; P5 O7 M5a: none for the withheld one
     const record = session === null ? undefined : useSessions.getState().records.get(session);
@@ -36,12 +38,12 @@ const windowDeps = (): DesignTabDeps => ({
 });
 
 /** Registers the design workbench (App.tsx's P3-E block); returns the registration's removal. */
-export function registerDesignEditor(deps: () => DesignTabDeps = windowDeps): () => void {
+export function registerDesignEditor(deps: (machine: MachineRef) => DesignTabDeps = windowDeps): () => void {
   if (e2eRequested(location.search)) installDesignSeam(window, artifactHost);
   return registerArtifactEditor<DesignTabState>('design', {
     Panel: DesignPanel,
     Main: DesignMain,
-    createState: (target) => new DesignTabState(target, deps()),
+    createState: (target) => new DesignTabState(target, deps(target.machine)),
     dispose: (state) => state.dispose(),
     moved: (state, target) => state.moveTo(target.surface), // P4-B3: the e2e seam reports the surface it is on
     // P4-B2 (D16; the review's P1): the compose card and its unsent comment go to the view an activate-existing move keeps

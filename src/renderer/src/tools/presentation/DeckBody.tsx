@@ -69,9 +69,9 @@ function useDeckCount(session: DeckSession | null, count: (doc: Doc) => number):
   return useSyncExternalStore(subscribe, () => (session ? count(session.doc) : null));
 }
 
-function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckEditorBodyProps & { compact: boolean }) {
+function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact }: DeckEditorBodyProps & { compact: boolean }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
-  const row = useLibraryRow(artifactId).value;
+  const row = useLibraryRow(artifactId, machine).value;
   const title = row?.title ?? 'Presentation';
   useEffect(() => state.setTitle(title), [state, title]);
   // M6: the actions drive the tab's own session (X32's lifetime rule), Present from the slide it shows
@@ -93,7 +93,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown,
   // to the deck's own context; not offered only while that is unread
-  const target = useArtifactCommentTarget(artifactId);
+  const target = useArtifactCommentTarget(artifactId, machine);
   // P4-B2 (D16): X36's draft rule, as the document's (Comment asks draft() first, the tab's close guard reads it), the host
   // id the tab state's, so the guard knows its card
   const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'presentation', hostId: state.commentHostId }); // UX wave U5a: X36's draft rule is every card host's
@@ -141,7 +141,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const history = useMemo(() => (state.history && handle ? { api: state.history, handle } : undefined), [state.history, handle]);
   const onPreviewDrawn = useCallback((ms: number) => session && recordPreview(session, ms), [session]);
   const onThumbnailsDrawn = useCallback((thumbnails: number) => session?.markDrawn(thumbnails), [session]);
-  const reveal = useOpenRequest(artifactId, scope.surface); // P4-B4: an open's place (a link's slide or version)
+  const reveal = useOpenRequest(artifactId, machine, scope.surface); // P4-B4: an open's place (a link's slide or version)
 
   if (snapshot.failed !== null) return <Notice>{`This presentation could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.handle || !session) return <Notice>Opening the presentation…</Notice>;

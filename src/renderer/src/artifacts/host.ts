@@ -69,6 +69,7 @@ import { ArtifactCommandError } from './command-error';
 import { createConnectorHost } from './connectors';
 import { noteDeletedReplica } from './deleted-replicas'; // UX wave U10b
 import { artifactMachineOf } from './machines';
+import { artifactClient } from './machine-client';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
 // Fix wave 2: the store's refusals of a standing read that say the artifact is not there for this window (`notFound`
@@ -95,20 +96,22 @@ export interface DocPorts {
 export interface ArtifactHostDeps {
   ipc: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>;
   ports: DocPorts;
+  machine?: MachineRef; // the view’s machine; absent for bare-id callers
   log?: (line: string) => void;
 }
 
 const HUMAN: Actor = { kind: 'human' };
 
-export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[artifacts] ${line}`) }: ArtifactHostDeps): ArtifactHost {
+export function createArtifactHost({ ipc, ports, machine, log = (line) => console.warn(`[artifacts] ${line}`) }: ArtifactHostDeps): ArtifactHost {
   const replicas = new Set<Replica>();
+  const client = machine === undefined ? ipc : artifactClient(ipc, machine);
   let hostRevision = -1; // the engine host's state revision last heard; a consumer keeps the higher (HostState)
   let hostIsReady = false; // what that state said
   // P5 O7 M5b: each other machine's link, up or not, as its latest `remote.session` said it (absent: not heard yet)
   const linkUp = new Map<MachineRef, boolean>();
 
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
-    const result = await ipc.invoke(name, input, ...opts);
+    const result = await client.invoke(name, input, ...opts);
     if (!result.ok) throw new ArtifactCommandError(result.error);
     return result.value;
   };
@@ -116,7 +119,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   // E3: the window's dataset holds the host's restart takes away (holdDatasets below); P5 O7 M5a: per machine
   const resyncs = new Map<MachineRef, number>();
   const lostOnResync = new Map<() => void, MachineRef>(); // each hold's invalidation, by its artifact's machine
-  const machineOf = (artifactId: string): MachineRef => artifactMachineOf(artifactId) ?? ipc.localMachine;
+  const machineOf = (artifactId: string): MachineRef => machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
   ipc.on('artifacts.resync', (_resync, from) => {
     resyncs.set(from.machine, (resyncs.get(from.machine) ?? 0) + 1);
     for (const replica of replicas) if ((replica.machine() ?? ipc.localMachine) === from.machine) replica.resynced(); // fix wave 4
@@ -155,10 +158,10 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
   // UX wave U10b (M5): a delete announces `deleted`, which a replica of the artifact asks the host about; an undelete
   // announces `created`, which ends a replica's wait.
-  ipc.on('artifacts.changed', (change) => {
+  ipc.on('artifacts.changed', (change, from) => {
     if (change.change !== 'created' && change.change !== 'deleted') return;
     for (const replica of replicas) {
-      if (replica.artifactId !== change.artifactId) continue;
+      if (replica.artifactId !== change.artifactId || machineOf(replica.artifactId) !== from.machine) continue;
       if (change.change === 'created') replica.restored();
       else void replica.deleted();
     }
@@ -202,7 +205,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
     /** P5 O7 M5b: the machine the document is on when it is another's (the page's table), else null. */
     machine(): MachineRef | null {
-      return artifactMachineOf(this.artifactId);
+      const on = machineOf(this.artifactId);
+      return on === ipc.localMachine ? null : on;
     }
     /** Whether what this replica's port stands on is there: this Mac's engine host, or another machine's link. */
     private live(): boolean {
@@ -238,7 +242,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       this.askAgain = false;
       this.stopFirstFrame();
       replicas.delete(this);
-      noteDeletedReplica(this, this.artifactId, null); // UX wave U10b
+      noteDeletedReplica(this, this.artifactId, machineOf(this.artifactId), null); // UX wave U10b
       this.provider.destroy();
       this.listeners.clear();
       this.settleFirst?.reject(new Error('closed before it synced'));
@@ -368,7 +372,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private unpark(): void {
       this.deletedByAgent = false;
       this.standingUnknown = false;
-      noteDeletedReplica(this, this.artifactId, null);
+      noteDeletedReplica(this, this.artifactId, machineOf(this.artifactId), null);
       this.stopTimer();
       this.askAgain = false;
       this.attempt = 0;
@@ -469,7 +473,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       // fix wave 4: a sync never ends a wait (a step 2 held from before the deletion would say synced): only a read does
       const wasSynced = this.synced;
       this.synced = state.synced;
-      noteDeletedReplica(this, this.artifactId, this.deletedByAgent || this.standingUnknown ? state.unsaved : null);
+      noteDeletedReplica(this, this.artifactId, machineOf(this.artifactId), this.deletedByAgent || this.standingUnknown ? state.unsaved : null);
       if (state.phase !== 'handshake') this.stopFirstFrame();
       if (state.synced) {
         if (!wasSynced) this.supersede(); // fix wave 2: a read asked before this sync is older than it
@@ -600,6 +604,6 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // P3-F (F1): an editor's link, through main's one scheme-checked opener (src/main/open-external.ts); a URL it refuses
     // is logged here, never thrown into the editor
     openExternal: (url) => void call('layout.openExternal', { url }).catch((error: unknown) => log(`a link was not opened: ${error instanceof Error ? error.message : String(error)}`)),
-    ...createConnectorHost(ipc), // P3-H H4: a page's connector surface and the owner's grants
+    ...createConnectorHost(ipc, machine), // P3-H H4: a page's connector surface and the owner's grants
   };
 }

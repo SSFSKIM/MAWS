@@ -36,7 +36,7 @@ describe('the library’s writes', () => {
     await moveArtifactToSpace(A, null);
     await duplicateArtifact(A);
     await deleteArtifact(A);
-    await markArtifactViewed(A);
+    await markArtifactViewed(A, TEST_MACHINE);
     expect(await createSpace('Research', '/repo')).toEqual({ ok: true, value: space });
     await renameSpace(S, 'Reading');
     await linkSpaceDirectory(S, null);
@@ -84,7 +84,7 @@ describe('opening an artifact', () => {
   // plain open asks nothing of it (the tab keeps the version it shows)
   it('asks the main tab’s editor for the place it names, at the latest; a plain open asks nothing', () => {
     resetOpenRequests();
-    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
     act(() => openArtifactTab(A));
     expect(asked.result.current).toBeNull();
     act(() => openArtifactTab(A, { block: 'b7' }));
@@ -173,7 +173,7 @@ describe('showing the main tab that already shows an artifact', () => {
   it('asks the tab’s editor for the place the link names; with none, asks nothing', () => {
     resetOpenRequests();
     openArtifactTab(A);
-    const asked = renderHook(() => useOpenRequest(A, 'main'));
+    const asked = renderHook(() => useOpenRequest(A, TEST_MACHINE, 'main'));
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A));
     expect(asked.result.current).toBeNull();
     act(() => void showOpenArtifactTab(LOCAL_SESSION, A, { block: 'b7' }));
