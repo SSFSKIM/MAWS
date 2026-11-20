@@ -102,7 +102,7 @@ describe('settings tab writes one field per row', () => {
   // U11a M9 (A5): each section's rows, in the order of the child's table; Engine's three; no Plugins paragraph
   it('each section holds the rows of the table, in its order; Engine holds Binary alone, and the Plugins paragraph is gone', async () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
-    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    await within(row('Binary')).findByText('2.1.287'); // the version read; its path is the chip's tooltip and in the note
     expect(labelsIn(region('Appearance'))).toEqual(['Theme', 'Transcript width', 'Monospace font']);
     expect(labelsIn(region('Notifications'))).toEqual(['Messages to you', 'Notify me', 'For', 'Sound']);
     expect(within(region('Keyboard')).getByRole('table', { name: 'Key bindings' })).toBeTruthy();
@@ -213,7 +213,7 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));
     expect(b.calls.find((c) => c.name === 'layout.pickFiles')!.input).toEqual({ kind: 'files', directory: null, multiple: false });
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
-    expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
+    await vi.waitFor(() => expect(noteOf(row('Binary')).textContent).toContain('/opt/claude/2.1.290/claude'));
     expect(within(row('Binary')).queryByText(/re-pin|refuse/)).toBeNull(); // W13: a version never refuses
     // C12; P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write (P5 O7 M9: and Gateway its default route)
     const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name).filter((name) => name !== 'plugins.list' && name !== 'fs.state' && name !== 'machineSettings.get'); // P5 O7 M9: Gateway's default route, read again at each settings change
@@ -495,7 +495,7 @@ describe('settings tab writes one field per row', () => {
   // U11a M9 (A6): the rows stack by the body's own width (its column is a container of its own) and the index by the view's.
   it('stacks in a narrow body: every fixed column gives way under the body’s container, and the index under the view’s', async () => {
     const { container } = renderView();
-    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    await within(row('Binary')).findByText('2.1.287'); // the version read; its path is the chip's tooltip and in the note
     const root = container.firstElementChild!;
     const classes = (el: Element) => [...el.classList];
     const fixedColumns = (el: Element) => classes(el).some((c) => /^grid-cols-\[.*\d+px/.test(c));
