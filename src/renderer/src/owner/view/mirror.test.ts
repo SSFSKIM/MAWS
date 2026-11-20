@@ -4,7 +4,7 @@
 // built by hand where only their kind and the fields the rule reads matter, and from events where the derivation's
 // own shapes do. Every text is invented.
 import { describe, expect, it } from 'vitest';
-import { rowsOf } from '../../transcript/model/derive';
+import { rowsOf, withQueueTail } from '../../transcript/model/derive';
 import { rowId } from '../../transcript/model/keys';
 import { applyEvents, createState, withUi } from '../../transcript/model/reduce';
 import type { Row, TurnId } from '../../transcript/model/rows';
@@ -175,6 +175,18 @@ describe('the rows of no stretch (decision 11)', () => {
     const rows = rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
     expect(closed(rows).filter((kind) => kind !== 'time')).toEqual(['user', '› record', 'assistant_text', '› record', 'divider']);
     expect(opened(rows).at(-1)).toBe('divider');
+  });
+
+  // the review's finding: a prompt waiting for the engine stands after the running turn; the line stays the last row
+  it('the running turn’s line stands below a prompt waiting for the engine, folded or open', () => {
+    const b = builder();
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.emit('user.message', { messageUuid: 's1' as never, content: 'and the drafts', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = withQueueTail(rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 })), new Set(), []);
+    expect(closed(rows).filter((kind) => kind !== 'time').slice(-2)).toEqual(['user', 'divider']);
+    expect(opened(rows).filter((kind) => kind !== 'time').slice(-2)).toEqual(['user', 'divider']);
   });
 
   it('a turn’s line whose place a closed stretch covers is drawn after that record line while another record of its turn is open', () => {

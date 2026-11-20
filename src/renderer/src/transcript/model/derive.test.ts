@@ -61,6 +61,44 @@ describe('the turn’s line ends its turn', () => {
     const kept = { id: 'k1', turnId: first, at: '2026-09-28T10:00:01.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: 'cut short', live: false, phase: 'answer', model: null } as Row;
     expect(kinds(withPlacedRows(list, [kept]).filter((row) => row.kind !== 'time'))).toEqual(['user', 'group', 'assistant_text', 'divider']);
   });
+
+  // the review's finding: a turn whose only drawn row is its line (a promptless turn stopped before any reply)
+  it('keeps a mount’s placed rows before the line of a turn that draws nothing else', () => {
+    const turn = turnId.ofMessage(uuid('u9'));
+    const line = { id: rowId.divider(turn), turnId: turn, at: '2026-09-28T10:00:01.000Z', kind: 'divider', state: 'stopped' } as unknown as Row;
+    const kept = { id: 'k1', turnId: turn, at: '2026-09-28T10:00:02.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: 'cut short', live: false, phase: 'answer', model: null } as Row;
+    expect(withPlacedRows([line], [kept]).map((row) => row.id)).toEqual(['k1', line.id]);
+  });
+
+  // the review's finding: a prompt waiting for the engine has a row after the running turn; the line still ends the list
+  it('while the turn runs, its line stands below a prompt waiting for the engine, and below the held messages', () => {
+    const b = builder(); work(b);
+    b.emit('user.message', { messageUuid: uuid('s1'), content: 'and the drafts', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const list = rowsOf(reduce(b.events));
+    expect(list.find((row) => row.kind === 'user' && row.messageUuid === 's1')).toMatchObject({ pending: 'next' });
+    const shown = withQueueTail(list, new Set(), []);
+    expect(shown.at(-1)).toMatchObject({ kind: 'divider', state: 'working' });
+    expect(kinds(shown).slice(-2)).toEqual(['user', 'divider']);
+    const held = heldRow({ queueId: 'q-1', content: 'then sort them', createdAt: '2026-09-28T10:00:09.000Z' });
+    expect(withQueueTail(list, new Set(), [held]).map((row) => row.id).slice(-3)).toEqual([shown.at(-2)!.id, 'held:q-1', shown.at(-1)!.id]);
+    expect(withQueueTail(shown, new Set(), [])).toBe(shown); // nothing to move: the list itself
+  });
+
+  // the review's finding: a separator measures the gap from the turn's end, not from its line's own time (the prompt's)
+  it('a long turn adds no separator before a prompt that follows its end closely', () => {
+    const b = builder('2026-09-28T09:00:00.000Z');
+    b.turn('u1', 'tidy the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'a.md', { structured: BASH_RESULT('a.md') });
+    b.tick(80 * 60_000);
+    b.text('m1', 0, 'Two notes.');
+    b.end(['u1']);
+    b.tick(60_000);
+    b.turn('u2', 'and the drafts');
+    b.text('m2', 0, 'None.');
+    b.end(['u2']);
+    expect(kinds(rowsOf(reduce(b.events))).filter((kind) => kind === 'time')).toHaveLength(1);
+  });
 });
 
 describe('group state machine', () => {

@@ -721,3 +721,30 @@ it('a following reader stays at the end when the compaction’s row appears and 
   expect(s.handle.current!.following).toBe(true);
   expect(s.changed.mock.calls).toEqual([]);
 });
+
+// Board ticket 789: a click on a turn's line opens the work above it, and the list keeps the line where the reader saw
+// it. Work tall enough to push the line out of the list's window for a frame: the list places it by its own offset
+// for the row, the line's distance from the scroller's top kept.
+it('keeps an anchored row at its place on screen when rows inserted above push it out of the mounted window', async () => {
+  const s = await scene();
+  s.readerMove(-600);
+  expect(s.handle.current!.following).toBe(false);
+  const top = s.scroller.scrollTop;
+  const visible = [...s.scroller.querySelectorAll<HTMLElement>('[data-index]')].filter((row) => Number.parseFloat(row.style.top) > top && Number.parseFloat(row.style.top) < top + 200);
+  const anchor = visible[1] ?? visible[0]!;
+  const id = anchor.getAttribute('data-row-id')!;
+  const index = Number(anchor.getAttribute('data-index'));
+  const place = () => {
+    const element = s.scroller.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
+    return element === null ? null : Number.parseFloat(element.style.top) - s.scroller.scrollTop;
+  };
+  const before = place();
+  const frames: (() => void)[] = [];
+  vi.stubGlobal('requestAnimationFrame', (step: () => void) => frames.push(step));
+  act(() => s.handle.current!.keepInPlace(id, 500));
+  const opened: Row[] = Array.from({ length: 40 }, (_, i) => ({ id: `opened-row-${i}` as RowId, turnId: null, at: '', kind: 'time', label: `Opened ${i}` }));
+  s.redraw([...s.rows.slice(0, index), ...opened, ...s.rows.slice(index)]);
+  expect(place()).toBeNull(); // out of the window: the opened work stands between the reader and it
+  for (let i = 0; i < 3 && frames.length > 0; i += 1) act(() => frames.shift()!());
+  expect(place()).toBe(before);
+});
