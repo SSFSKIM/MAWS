@@ -256,12 +256,13 @@ async function clickAt(page: Page, at: { x: number; y: number }): Promise<void> 
   await page.mouse.up();
 }
 
-// The card closed (P2-E2); the view keeps to the pane, which has its whole height back.
-async function dismiss(s: BrowserScene, t: CommentTab, card: Locator): Promise<void> {
+// The card closed (P2-E2); the view keeps to the pane, which has its whole height back (at the window's zoom `factor`,
+// UX wave U6b-5b).
+async function dismiss(s: BrowserScene, t: CommentTab, card: Locator, factor = 1): Promise<void> {
   await card.getByRole('button', { name: 'Close' }).click();
   await expect(card).toHaveCount(0);
   await expect(t.panel.locator('[data-card-dock]')).toHaveJSProperty('offsetHeight', 0);
-  await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
+  await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel', 2_000, factor);
 }
 
 // What the page's own recorder heard (every pointer, mouse and wheel event type, in the capture phase on `window`), each
@@ -1610,8 +1611,69 @@ test('zoom: the pin on the picked element at 50 %, 80 % and 125 %', async () => 
           { message: `at ${f} the pin on the picked element` },
         )
         .toBe('on the element');
-      await dismiss(s, t, card);
+      await dismiss(s, t, card, f);
     }
+    await zoomTo(s.maws.app, s.page, 1);
+  });
+});
+
+// UX wave U6b-5b (the branch review's fix wave, scalpel-3#3): the pin of a page at a device size narrower than its
+// column. The view stands centred in the column, so the caret, drawn from the column, takes the view's inset there, and
+// the inset follows the window's zoom: Mobile is 300 CSS pixels at 125 % and 250 at 150 %. The premise is witnessed (the
+// column wider than the view, so the inset is not zero); the element is picked at 125 % and the window zoomed by View's
+// item with the card open; at each factor the caret stands on the element where the window draws it, the view's native
+// bounds plus the element's centre in the tab (window points, the tab at its own 100 %) divided by the factor. Every
+// read follows main's acknowledgment of the pane's rect and is polled; no time is asserted.
+test('zoom: the pin of a page at the Mobile size, centred in a wider column, at 125 % and after a zoom to 150 %', async () => {
+  await commentScene({ titles: ['U6b-5b: zoom, the pin at a device size'] }, async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    const t = await openCommentPage(s, id);
+    const pane = paneIn(t.panel);
+    await zoomTo(s.maws.app, s.page, 1.25);
+    await zoomLineGone(s.page, 1.25);
+    await t.panel.getByRole('button', { name: 'Browser options' }).click();
+    await s.page.getByRole('menuitem', { name: 'Viewport', exact: true }).click();
+    await s.page.locator('[data-viewport="mobile"]').click();
+    for (let k = 0; k < 3 && (await s.page.getByRole('menu').count()) > 0; k++) await s.page.keyboard.press('Escape');
+    await expect.poll(async () => (await tabState(s, t.tabId)).tab?.viewport).toEqual({ width: 375, height: 812 });
+    await expect(s.page.getByRole('menu')).toHaveCount(0);
+    await expectOnPane(s, t.tabId, pane, 'panel', 5_000, 1.25);
+    const [column, view] = [await rectOf(t.panel.locator('[data-browser-column]')), await rectOf(pane)];
+    expect(view.x - column.x, `the premise: the column is wider than the view, which stands inset in it: ${JSON.stringify({ column, view })}`).toBeGreaterThan(2);
+
+    const target = t.page.locator('#increment');
+    await target.evaluate((el) => el.scrollIntoView({ block: 'center', inline: 'center' }));
+    const button = await rectOf(target);
+    await arm(s, t);
+    await t.page.mouse.move(centre(button).x, centre(button).y);
+    await expect(t.page.locator('maws-comment-overlay')).toBeVisible();
+    await t.page.mouse.down();
+    await t.page.mouse.up();
+    await lastPicked(s, 1);
+    const card = cardOf(s, INCREMENT_LABEL);
+    await expect(card).toBeVisible();
+    const caret = t.panel.locator('[data-card-dock] [data-card-caret]');
+    await expect(caret).toBeVisible();
+    const onElement = async (f: number) => {
+      await expectOnPane(s, t.tabId, pane, 'panel', 5_000, f);
+      await expect
+        .poll(
+          async () => {
+            const [bounds, now, box] = [(await viewOf(s, t.tabId))!.bounds!, await rectOf(target), (await caret.boundingBox())!];
+            const drawnX = (bounds.x + now.x + now.width / 2) / f; // the element's centre where the window draws it
+            const x = box.x + box.width / 2;
+            return Math.abs(x - drawnX) <= 1.5 ? 'on the element' : JSON.stringify({ caret: x, drawnX, bounds, button: now });
+          },
+          { message: `at ${f} the pin on the picked element` },
+        )
+        .toBe('on the element');
+    };
+    await onElement(1.25);
+    await zoomTo(s.maws.app, s.page, 1.5);
+    await zoomLineGone(s.page, 1.5);
+    await expect(card, 'the card stays open across the zoom').toBeVisible();
+    await onElement(1.5);
+    await dismiss(s, t, card, 1.5);
     await zoomTo(s.maws.app, s.page, 1);
   });
 });

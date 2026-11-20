@@ -76,3 +76,28 @@ export function timesFactor(r: Rect, f: number): Rect {
   const y = Math.round(r.y * f);
   return { x, y, width: Math.round((r.x + r.width) * f) - x, height: Math.round((r.y + r.height) * f) - y };
 }
+
+// What a page reads as one side of its size (`innerWidth`, `innerHeight`) when its view is `points` window points on
+// that side, at the tab's zoom on a display of `scale` device pixels per point: Blink's rule, mirrored here apart from
+// the renderer's own (src/renderer/src/tools/browser/viewport.ts `innerSize`) so that a scene checks the chip against
+// Blink rather than against itself. `LocalDOMWindow::innerWidth` is `AdjustForAbsoluteZoom::AdjustInt(GetViewportSize()
+// .width(), GetFrame()->LayoutZoomFactor())` (third_party/blink/renderer/core/frame/local_dom_window.cc): the frame's
+// size in device pixels over the layout zoom, the display's scale times the tab's zoom in floats
+// (`WebFrameWidgetImpl::SetZoomLevel`, core/frame/web_frame_widget_impl.cc). `AdjustInt(int value, float zoom_factor)`
+// (third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h) returns the value at a zoom of 1; above 1 it adds
+// 0.5 first; then `RoundForImpreciseConversion<int>(fvalue / zoom_factor)` adds 0.01 and truncates
+// (core/css/css_primitive_value.h). Read at Chromium 152.0.7977.130, Electron 44.4.5's.
+export function blinkInner(points: number, tabZoom: number, scale: number): number {
+  const value = Math.round(points * scale);
+  const factor = Math.fround(Math.fround(scale) * Math.fround(tabZoom));
+  if (factor === 1) return value;
+  const fvalue = Math.fround(factor > 1 ? value + 0.5 : value);
+  return Math.trunc(Math.fround(fvalue / factor) + 0.01);
+}
+
+// The device pixels per point of the display the app's visible window is on, as Electron's screen reports it.
+export const displayScale = (app: ElectronApplication): Promise<number> =>
+  app.evaluate(({ BrowserWindow, screen }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+    return screen.getDisplayMatching(win.getBounds()).scaleFactor;
+  });

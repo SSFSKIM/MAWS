@@ -26,7 +26,7 @@ import { latencyBudgets } from './support/latency';
 import { zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
 import {
   address, attachShot, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
-  preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
+  preloadRunsAt, readsAsBlink, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
 test.describe.configure({ timeout: 180_000 });
@@ -1195,18 +1195,20 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     expect(room.width, 'the room is narrower than Tablet').toBeLessThan(768);
     await expectOnPane(s, t, pane, 'panel');
 
-    // Mobile: the page element 375 × 812, centred and top-aligned in its room; the page reads 375; the chip
+    // Mobile: the page element 375 × 812, centred and top-aligned in its room; the page and the chip read the view
     await (await viewportItem(s, panel, 'mobile')).click();
     await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
     const chip = panel.locator('[data-browser-viewport-chip]');
-    await expect(chip).toHaveText('375 × 812');
-    await expect(chip).toHaveAccessibleName('Viewport: 375 × 812');
+    await expect(chip).toBeVisible();
     await expectOnPane(s, t, pane, 'panel');
     const sized = await rectOf(pane);
     expect({ width: Math.round(sized.width), height: Math.round(sized.height) }).toEqual({ width: 375, height: 812 });
     expect(near(sized.x + sized.width / 2, room.x + room.width / 2), JSON.stringify({ sized, room })).toBe(true);
     expect(near(sized.y, room.y), 'top-aligned').toBe(true);
-    await expect.poll(innerWidth).toBe(375);
+    // what the page reads, and the chip's text and name, by Blink's rule over the view's native bounds at the display's
+    // scale (support/browser-scene.ts `readsAsBlink`), never a constant
+    const asBlink = (message: string) => expect.poll(() => readsAsBlink(s, t, pageA, chip), { message }).toBe('as Blink');
+    await asBlink('Mobile: the page and the chip read the view as Blink does');
     await attachShot(s, 'u12a-device-size-mobile', pane, pageA);
 
     // the options menu over the page: the view yields to its frozen picture, which lies on the page element's box
@@ -1227,20 +1229,14 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1.25);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(469);
     await expectOnPane(s, t, pane, 'panel');
-    await expect.poll(innerWidth).toBe(375);
     // the chip reads what the page reads (the view's real size, Interfaces §D): at 125% Mobile's 1,015 points of height
-    // fit this room only on a tall enough window, so its height is the page's own, read from the page, not a constant
-    const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
-    const chipAgainstPage = async () => {
-      const [text, page] = [(await chip.textContent())?.trim(), await reads()];
-      return text === page ? 'the same' : `chip ${text}, page ${page}`;
-    };
-    await expect.poll(chipAgainstPage, { message: 'the chip reads the page’s innerWidth × innerHeight' }).toBe('the same');
-    expect(await chip.textContent()).toMatch(/^375 × \d+$/);
+    // fit this room only on a tall enough window, so both sides come from the view's bounds, the tab's zoom and the scale
+    await asBlink('at a tab zoom of 125%: the page and the chip read the view as Blink does');
     await overflow(s, panel, 'Reset zoom');
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(375);
-    await expect(chip).toHaveText('375 × 812'); // at 100% the room made above holds the whole size again
+    await expectOnPane(s, t, pane, 'panel');
+    await asBlink('back at 100%: the page and the chip read the view as Blink does');
 
     // Tablet does not fit this pane: disabled, its hint in place of its numbers
     const tablet = await viewportItem(s, panel, 'tablet');
@@ -1302,15 +1298,16 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
       await send('Emulation.setDeviceMetricsOverride', override);
       await expect.poll(innerWidth).toBe(640);
       await send('Emulation.clearDeviceMetricsOverride');
-      await expect.poll(innerWidth).toBe(375);
+      await expect.poll(() => readsAsBlink(s, t, pageA), { message: 'the override cleared: the page reads its view again' }).toBe('as Blink');
       await send('Emulation.setDeviceMetricsOverride', override);
       await expect.poll(innerWidth).toBe(640);
       await host.request('debugger.detach', { tabId: native.id });
-      await expect.poll(innerWidth).toBe(375);
+      await expect.poll(() => readsAsBlink(s, t, pageA), { message: 'the lease let go: MAWS’s undo leaves the page reading its view' }).toBe('as Blink');
     } finally {
       await host.close();
     }
     await expectOnPane(s, t, pane, 'panel');
+    await asBlink('after the agent’s override: the page and the chip read the view as Blink does');
 
     // the chip opens the same three choices; Responsive takes the size away and the page fills its room again
     await chip.click();
@@ -1426,8 +1423,9 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
 // Browser options menu open over it the page yields to its still, which lies on the pane, and the view comes back on
 // its frame after; the traffic lights stand centred in the toolbar's height and clear of its first control. Mark up's
 // still of the pane at 150 % is the whole view at the same pixels per point as at 100 %, laid on the pane. At the
-// Mobile size, in a room the panel's Expand surface makes ample: the page reads 375 wide (376 where its element's
-// edges round over, as at 200 %), the chip says what the page reads, and the chip's menu offers exactly the sizes whose
+// Mobile size, in a room the panel's Expand surface makes ample: the page reads its view as Blink does over the view's
+// native bounds at the display's scale (`readsAsBlink`: 375 or 376 wide, as the element's edges round), the chip says
+// exactly that, and the chip's menu offers exactly the sizes whose
 // width over the factor fits the room (decision 35). Before that, in a room the panel's separator sets to 390 to 450
 // CSS pixels, the chip's menu offers Mobile at 100 % and not at 80 %. Every read is polled; no time is asserted.
 
@@ -1570,23 +1568,15 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
     expect(await chipOffers('mobile'), `at 0.8 Mobile (468.75 CSS pixels) in a room of ${atSmallerRoom}, by the chip's menu`).toBe(false);
 
     await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
-    const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
-    const chipAgainstPage = async () => {
-      const [text, page] = [(await chip.textContent())?.trim(), await reads()];
-      return text === page ? 'the same' : `chip ${text}, page ${page}`;
-    };
     for (const f of ZOOM_FACTORS) {
       await zoomTo(app, s.page, f);
       await zoomLineGone(s.page, f);
       await expectOnPane(s, t, pane, 'panel', 5_000, f);
       const room = (await rectOf(box)).width;
       expect(room, `at ${f} the room holds Mobile's ${375 / f} CSS pixels`).toBeGreaterThanOrEqual(375 / f);
-      await expect.poll(chipAgainstPage, { message: `at ${f} the chip reads the page’s innerWidth × innerHeight` }).toBe('the same');
-      const width = await pageA.evaluate(() => window.innerWidth);
-      // 375 over the factor is a whole CSS pixel at 50 % and 125 %; elsewhere the element is rounded and its placed
-      // edges can make the page one pixel wider
-      if (Number.isInteger(375 / f)) expect(width, `at ${f} the page reads 375`).toBe(375);
-      else expect([375, 376], `at ${f} the page reads 375 or 376`).toContain(width);
+      // the page's both sides and the chip's text and name, against Blink's rule over the view's native bounds at the
+      // display's actual scale, never a constant (the architect's rule of the branch review's fix wave)
+      await expect.poll(() => readsAsBlink(s, t, pageA, chip), { message: `at ${f} the page and the chip read the view as Blink does` }).toBe('as Blink');
       // the menu offers a size exactly when its width over the factor fits the room; a room within a pixel of a
       // threshold is said, not judged
       for (const [size, wide] of [['mobile', 375], ['tablet', 768]] as const) {

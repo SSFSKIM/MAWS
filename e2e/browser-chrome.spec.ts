@@ -61,7 +61,7 @@ import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, 
 import { invoke, value } from './support/c7-replay';
 import { clearToasts, closeScene, show, type Scratch } from './support/maws-tools';
 import { menuAfter, menuAt, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
-import { timesFactor, zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
+import { pointerOffToasts, timesFactor, zoomAct, zoomLineGone, zoomLineOf, zoomLines, zoomTo } from './support/zoom'; // UX wave U6b-5b
 import { popupBounds } from '@shared/browser/popup-bounds'; // UX wave U6b-5b M2: main's own clamp (its Decision Log 12)
 
 test.describe.configure({ timeout: 240_000 });
@@ -1011,6 +1011,69 @@ test('zoom: a popup under its icon and the menus at their buttons, at 50 % and 1
         expect(within(actionAt, press), `at ${f} the action's menu at the press: ${JSON.stringify({ icon: iconNow, at: actionAt, press })}`).toBe(true);
       }
       await zoomTo(s.maws.app, s.page, 1);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
+  } finally {
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U6b-5b (the branch review's fix wave, sweep#1; the document's Decision Log 24): a popup open across a change of
+// the window's zoom closes, S3's own act, since its button moves with the toolbar's reflow and main knows a button's box
+// only from a click. The popup is opened at 125 % and witnessed open; Actual Size is clicked in View. The cover would
+// close the popup too, so the page is held at the Mobile size, centred and top-aligned in the main tab and clear of the
+// line at the window's bottom right corner (a work area of about 1,440 × 1,100 points or more), and the premise is
+// witnessed while the zoom's line is drawn: the line's box apart from the pane's, and the tab's view still shown (a
+// cover hides it); the popup is then gone. Every read is polled; no time is asserted.
+test('zoom: an extension popup open across a change of the zoom closes', async () => {
+  const server = await startBrowserServer();
+  const { scratch, chrome } = importScratch(['U6b-5b: zoom closes the popup'], { bookmarksOrigin: server.origin });
+  const probeId = chrome.extensions.probe.id;
+  try {
+    const s = await launchBarScene(scratch, server, chrome, { keychain: `file:${chrome.passwordFile}` });
+    const [id] = s.ids as [AppSessionId];
+    try {
+      await importThrough(s, { history: false, cookies: false });
+      await closeSheet(s);
+      await expect.poll(() => settingsFile(s.maws.userData).browser.profile).toBe('Default');
+      const panel = await browserPanel(s, id);
+      await address(panel, server.url('/a.html'));
+      const tabId = await tabAt(s, id, server.url('/a.html'));
+      await overflow(s, panel, 'Open in tab'); // a main tab: the bar and the icons inline
+      const main = browserIn(s, 'main');
+      const probe = actionIn(main, probeId);
+      await hideSurface(s.page, 'Browser');
+      await s.maws.app.evaluate(({ BrowserWindow, screen }) => {
+        const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+        win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+      });
+      await zoomTo(s.maws.app, s.page, 1.25);
+      await zoomLineGone(s.page, 1.25);
+      await main.getByRole('button', { name: 'Browser options' }).click();
+      await s.page.getByRole('menuitem', { name: 'Viewport', exact: true }).click();
+      await s.page.locator('[data-viewport="mobile"]').click();
+      for (let k = 0; k < 3 && (await s.page.getByRole('menu').count()) > 0; k++) await s.page.keyboard.press('Escape');
+      await expect(s.page.getByRole('menu')).toHaveCount(0);
+      await expect(main.locator('[data-browser-viewport-chip]'), 'the Mobile size on').toBeVisible();
+      await expect(probe, 'at 1.25 the extension’s icon inline').toBeVisible();
+      await probe.click();
+      await expect.poll(async () => (await popupOf(s))?.url, { message: 'the popup open at 125 %' }).toBe(`chrome-extension://${probeId}/popup.html`);
+
+      await pointerOffToasts(s.page);
+      await zoomAct(s.maws.app, s.page, 'zoom.reset');
+      await expect(zoomLines(s.page), 'the zoom’s line drawn').toHaveText([zoomLineOf(1)]);
+      const [line, pane] = [(await zoomLines(s.page).boundingBox())!, await paneRect(paneIn(main))];
+      const apart = line.x >= pane.x + pane.width || line.x + line.width <= pane.x || line.y >= pane.y + pane.height || line.y + line.height <= pane.y;
+      expect(apart, `the premise: the zoom's line lies apart from the pane, so no cover closes the popup: ${JSON.stringify({ line, pane })}`).toBe(true);
+      expect((await viewOf(s, tabId))?.visible, 'the premise: the tab’s view is shown, not covered').toBe(true);
+      await expect.poll(() => popupOf(s), { message: 'the popup closed at the change of zoom' }).toBeNull();
+      await expect(zoomLines(s.page), 'the line still drawn when the popup was seen gone').toHaveText([zoomLineOf(1)]);
+      expect((await viewOf(s, tabId))?.visible, 'the tab’s view still shown').toBe(true);
+      await zoomLineGone(s.page, 1);
     } catch (error) {
       await s.maws.cleanup();
       throw error;

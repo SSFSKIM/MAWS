@@ -22,7 +22,7 @@ import { invoke, value } from './c7-replay';
 import { clearToasts, closeScene, launchScene, scratchProject, type Scene, type Scratch } from './maws-tools';
 import { REPO_ROOT } from './launch';
 import { startBrowserServer, type BrowserServer } from './browser-server';
-import { timesFactor } from './zoom'; // UX wave U6b-5b: decision 27's rule
+import { blinkInner, displayScale, timesFactor } from './zoom'; // UX wave U6b-5b: decision 27's rule; Blink's reading
 
 export type Surface = 'panel' | 'main';
 type Rect = { x: number; y: number; width: number; height: number };
@@ -263,6 +263,19 @@ export async function expectOnPane(s: Scene, tabId: string, pane: Locator, surfa
       { timeout, intervals: [16, 16, 33, 50, 100], message: 'main acknowledged the pane’s rect for the tab, and the view lies on it' },
     )
     .toBe('on the pane');
+}
+
+// UX wave U6b-5b (the branch review's fix wave; the architect's rule): what the tab's page should read as its size,
+// worked out apart from the renderer: Blink's rule (support/zoom.ts `blinkInner`) over main's native bounds of the view,
+// the display's actual scale and the tab's zoom, all from one sample. Answers 'as Blink' when the page's own
+// `innerWidth × innerHeight` is that, and, given the chip, the chip's text and its accessible name too; else what was
+// read. Poll it after the scene's `expectOnPane`.
+export async function readsAsBlink(s: Scene, tabId: string, page: Page, chip?: Locator): Promise<string> {
+  const [{ tab, view }, scale, inner] = await Promise.all([tabState(s, tabId), displayScale(s.maws.app), page.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`)]);
+  if (tab === null || view === null || view.bounds === null) return JSON.stringify({ tab: tab?.tabId ?? null, bounds: view?.bounds ?? null });
+  const want = `${blinkInner(view.bounds.width, tab.zoom, scale)} × ${blinkInner(view.bounds.height, tab.zoom, scale)}`;
+  const [text, name] = chip ? [(await chip.textContent())?.trim() ?? null, await chip.getAttribute('aria-label')] : [want, `Viewport: ${want}`];
+  return inner === want && text === want && name === `Viewport: ${want}` ? 'as Blink' : JSON.stringify({ want, page: inner, chip: text, name, bounds: view.bounds, zoom: tab.zoom, scale });
 }
 
 // Where the view lies against the pane two animation frames after the call (the pane reports from a frame callback,

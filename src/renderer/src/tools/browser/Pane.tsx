@@ -134,7 +134,11 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
         const rect = paneRect(pane.getBoundingClientRect());
         if (rect) {
           const column = pane.closest('[data-browser-column]')?.getBoundingClientRect();
-          const next = { rect, inset: column ? { x: rect.x - column.left, y: rect.y - column.top } : NO_INSET, scale: displayScale() };
+          // the pin is in CSS pixels from the view's native origin, which main rounds to a point (decision 27): the inset
+          // is that origin back in CSS pixels (the fix wave's task review)
+          const app = useZoom.getState().factor;
+          const native = (css: number) => Math.round(css * app) / app;
+          const next = { rect, inset: column ? { x: native(rect.x) - column.left, y: native(rect.y) - column.top } : NO_INSET, scale: displayScale() };
           setPlaced((previous) => (samePlaced(previous, next) ? previous : next));
         }
         return rect;
