@@ -9,7 +9,8 @@
 // only returning to the bottom or Jump to latest resumes it. While following, structural changes and measurements
 // keep the end pinned.
 import { elementScroll, measureElement, useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type Ref } from 'react';
+import { flushSync } from 'react-dom';
 import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
@@ -52,6 +53,9 @@ export const SCROLL_END_THRESHOLD = 1;
 // downward move resumes (upward intent re-bases it below), so the slack cannot pull back a reader turning away.
 const DOM_END_SLACK = 3;
 const domEndGap = (element: HTMLElement, scrollHeight = element.scrollHeight) => scrollHeight - element.clientHeight - element.scrollTop;
+// The list's sizer as React last committed it, and whether neither it nor the rendered content reaches the measured end yet
+const committedSize = (element: HTMLElement) => Number.parseFloat((element.firstElementChild as HTMLElement).style.height);
+const extentPending = (element: HTMLElement, size: number) => committedSize(element) + SCROLL_END_THRESHOLD < size && element.scrollHeight + SCROLL_END_THRESHOLD < size;
 export const OVERSCAN = 6;
 // Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
 const INPUT_SCROLL_SETTLE_MS = 250;
@@ -334,21 +338,28 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const element = scrollRef.current;
     if (!element) return;
     const size = virtualizer.getTotalSize();
-    const committed = Number.parseFloat((element.firstElementChild as HTMLElement).style.height);
+    const committed = committedSize(element);
     // A clamped command cannot absorb positive compensation before the larger extent commits. Keep it pending;
     // the content observer will follow that commit unless reader input has already released following.
-    if (committed + SCROLL_END_THRESHOLD < size && element.scrollHeight + SCROLL_END_THRESHOLD < size) return;
+    if (extentPending(element, size)) return;
     // A pending shrink is already reachable. Otherwise use the browser's actual end, including overflowing content
     // or rounding beyond the logical sizer (the virtualiser's last-row/end alignment does the same).
     const end = committed > size + SCROLL_END_THRESHOLD ? Math.max(0, size - element.clientHeight) : element.scrollHeight;
     virtualizer.scrollToOffset(end, { behavior: 'instant' });
   }, [virtualizer]);
   // As the content observer below: movement the reader made first (a witnessed key, a reversed scrollbar drag) is read
-  // before the end is followed.
+  // before the end is followed. Board ticket 789: the running turn's line is the last row, so the streamed answer grows
+  // in the row above it, and its growth reaches the DOM's end only past the line, which stands where the last commit put
+  // it. Where neither the sizer nor the rendered content reaches the measured end, the measured sizes are committed here,
+  // before the frame paints: the line moves below the answer and the end followed is the measured one.
+  const [, commitMeasured] = useReducer((n: number) => n + 1, 0);
   useLayoutEffect(() => {
     followGrowth.current = () => {
       readScroll(virtualizer.getTotalSize());
-      if (followingRef.current) pinEnd();
+      if (!followingRef.current) return;
+      const element = scrollRef.current;
+      if (element && extentPending(element, virtualizer.getTotalSize())) flushSync(commitMeasured);
+      pinEnd();
     };
   }, [pinEnd, readScroll, virtualizer]);
 
