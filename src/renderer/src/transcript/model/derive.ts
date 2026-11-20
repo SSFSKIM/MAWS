@@ -107,8 +107,10 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
       out.push(time);
     }
     out.push(...rows);
-    // board ticket 789: a turn's line ends it but carries its prompt's time; the gap runs from the turn's last other row
-    previousAt = (rows.findLast((row) => row.kind !== 'divider') ?? rows.at(-1)!).at;
+    // board ticket 789: a turn's line ends it but carries its prompt's time. The gap runs from a closed turn's recorded
+    // end, whichever of its rows the fold draws, and from a running turn's last other row
+    const line = rows.find((row) => row.kind === 'divider');
+    previousAt = line?.kind === 'divider' && line.endedAt !== null ? line.endedAt : (rows.findLast((row) => row.kind !== 'divider') ?? rows.at(-1)!).at;
   };
   const emitLoose = (after: TurnId | null) => {
     for (const row of looseRows(state, looseAfter.get(after) ?? [], after)) {
