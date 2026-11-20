@@ -3300,7 +3300,9 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     const chip = await linkIn();
     const first = main.hold('files.read');
     const second = main.hold('files.read');
-    showFile(OUT);
+    // the tab's view mounted through the store alone: a megabyte drawn by the editor would only slow the case
+    act(() => void openFile(A, OUT, null, { main: true }));
+    act(() => void useViewer.getState().mount(FILE(OUT), { appSessionId: A, path: OUT, line: null }));
     await waitFor(() => expect(reads(main)).toHaveLength(1));
     await act(async () => {
       first.release();
@@ -3310,7 +3312,9 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     click(chip);
     await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
     await act(async () => second.release());
-    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', complete: true, text: lines('b'), locked: null, editable: true }));
+    const changed = lines('b');
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', complete: true, locked: null, editable: true }));
+    expect(shown()!.text === changed, 'the whole changed file').toBe(true);
     expect(reads(main)).toHaveLength(4); // the two of the first open, and the whole file once more in two
   });
 
