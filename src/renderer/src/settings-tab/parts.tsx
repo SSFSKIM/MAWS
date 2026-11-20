@@ -58,7 +58,7 @@ const holdsTabbable = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement
 function useTabStop(row: RefObject<HTMLElement | null>, hasNote: boolean) {
   useLayoutEffect(() => {
     const element = row.current;
-    if (element !== null) element.tabIndex = hasNote && !holdsTabbable(element) ? 0 : -1;
+    if (element !== null) element.setAttribute('tabindex', hasNote && !holdsTabbable(element) ? '0' : '-1');
   });
 }
 
