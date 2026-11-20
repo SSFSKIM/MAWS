@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ConnectorSurface } from '@artifacts/host';
 import type { ConnectorCallOutcome, ConnectorGrant } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
+import { TEST_MACHINE } from '../../../../../../../test/support/machine';
 import type { ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
 import type { PagePort } from './relay';
 import { ConnectorsTab, type ConnectorsTabDeps } from './tab';
@@ -141,42 +142,42 @@ describe('an HTML artifact tab’s connectors', () => {
     tab.attach(port);
     port.send({ id: 1, op: 'watch', request: { ...TOOL, intervalMs: 60_000 } });
     await settle();
-    void tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    void tab.start({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null });
     await settle();
     expect(tab.view.getState().start).toEqual({ phase: 'starting', appSessionId: SESSION });
     expect(surfaces[0]!.refreshWatch).not.toHaveBeenCalled();
     await first.end({ status: 'ready', appSessionId: SESSION });
     expect(surfaces[0]!.refreshWatch).toHaveBeenCalledWith('w1');
     expect(tab.view.getState().start).toEqual({ phase: 'ready', appSessionId: SESSION });
-    await tab.start({ kind: 'directory', path: '/work/app', projectId: null }); // again: the same session, not another
-    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION);
+    await tab.start({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null }); // again: the same session, not another
+    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null }, SESSION);
   });
 
   it('settles a start whose setup failed, shows why, and lets the owner start the same session again', async () => {
     const first = starting();
     const { tab, deps, surfaces } = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => first.answer) });
     tab.attach(portFake().port);
-    void tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    void tab.start({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null });
     await settle();
     await first.end({ status: 'refused', appSessionId: SESSION, words: 'the engine would not start' });
     expect(tab.view.getState().start).toEqual({ phase: 'refused', appSessionId: SESSION, words: 'the engine would not start' });
     expect(surfaces[0]!.refreshWatch).not.toHaveBeenCalled();
     const relay = starting();
     vi.mocked(deps.startSession).mockResolvedValueOnce(relay.answer);
-    void tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    void tab.start({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null });
     await settle();
-    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION); // the intent it made
+    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null }, SESSION); // the intent it made
     await relay.end({ status: 'card', appSessionId: SESSION, words: 'The relay is unreachable · the session offers Run direct' });
     expect(tab.view.getState().start).toMatchObject({ phase: 'card', appSessionId: SESSION });
   });
 
   it('keeps the session a refused start named, and answers a start that threw as a refusal', async () => {
     const { tab, deps } = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => ({ status: 'refused', appSessionId: SESSION, words: 'A prompt is waiting in this session' })) });
-    await tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    await tab.start({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null });
     expect(tab.view.getState().start).toEqual({ phase: 'refused', appSessionId: SESSION, words: 'A prompt is waiting in this session' });
     vi.mocked(deps.startSession).mockRejectedValueOnce(new Error('main is gone'));
-    await tab.start({ kind: 'directory', path: '/work/app', projectId: null });
-    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION);
+    await tab.start({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null });
+    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', machine: TEST_MACHINE, path: '/work/app', projectId: null }, SESSION);
     expect(tab.view.getState().start).toEqual({ phase: 'refused', appSessionId: SESSION, words: 'main is gone' });
   });
 

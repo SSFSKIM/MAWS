@@ -495,7 +495,7 @@ describe('a comment on its way outlives its card', () => {
     for (const p of [passage, second]) addThread(doc, { threadId: p.threadId, tabId: 'tab1', blockId: 'p1', quote: p.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach = liveReach(doc);
     let open: ((p: typeof passage) => void) | null = null;
-    const view = render(<Editor reach={reach} onOpen={(o) => (open = o)} holdReplica={holdReplica} />);
+    const view = render(<Editor machine={TEST_MACHINE} reach={reach} onOpen={(o) => (open = o)} holdReplica={holdReplica} />);
     return { doc, reach, view, comment: (p: typeof passage = passage) => act(() => open!(p)) };
   }
   const bodies = (doc: Doc, threadId: string) => getThread(doc, threadId)?.messages.map((message) => message.body) ?? null;
