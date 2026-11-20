@@ -23,7 +23,8 @@ import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
-import { zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
+import { displayScale, zoomLineGone, zoomTo } from './support/zoom'; // UX wave U6b-5b
+import { CROP_MAX_EDGE } from '@shared/browser/comment'; // UX wave U6b-5b: Mark up's still's cap
 import {
   address, attachShot, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
   preloadRunsAt, readsAsBlink, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
@@ -1422,7 +1423,8 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
 // within a point, so a press lands on the page wherever the frame draws it and on the app everywhere else; with the
 // Browser options menu open over it the page yields to its still, which lies on the pane, and the view comes back on
 // its frame after; the traffic lights stand centred in the toolbar's height and clear of its first control. Mark up's
-// still of the pane at 150 % is the whole view at the same pixels per point as at 100 %, laid on the pane. At the
+// still at 100 % and at 150 % is taken by the same rule, laid on the pane: the whole view at its device pixels, the
+// longer edge brought down to the cap (`stillOfView`), so that at either factor it holds what the view shows. At the
 // Mobile size, in a room the panel's Expand surface makes ample: the page reads its view as Blink does over the view's
 // native bounds at the display's scale (`readsAsBlink`: 375 or 376 wide, as the element's edges round), the chip says
 // exactly that, and the chip's menu offers exactly the sizes whose
@@ -1433,6 +1435,17 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
 // right): Electron reports only the group's position; M1's look confirmed where they stand
 const LIGHTS = { diameter: 14, span: 54 };
 const ZOOM_FACTORS = [0.5, 0.8, 1.25, 2] as const;
+// Mark up's still of a view as main takes it (src/main/browser/capture.ts, `encodeCrop`): the view's whole capture at
+// the display's device pixels, its longer edge brought down to CROP_MAX_EDGE when it is longer, the other side in
+// proportion. It is computed from the view's native bounds and the display's scale, never a constant: whether the cap
+// applies depends on the display and on how many points the view has at the factor.
+const stillOfView = (bounds: { width: number; height: number }, scale: number) => {
+  const device = { width: Math.round(bounds.width * scale), height: Math.round(bounds.height * scale) };
+  const longest = Math.max(device.width, device.height);
+  if (longest <= CROP_MAX_EDGE) return { ...device, capped: false };
+  const k = CROP_MAX_EDGE / longest;
+  return { width: Math.max(1, Math.round(device.width * k)), height: Math.max(1, Math.round(device.height * k)), capped: true };
+};
 const lightsOf = (s: Scene) =>
   s.maws.app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
@@ -1483,7 +1496,10 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
       expect(lights!.x + LIGHTS.span, `at ${f} the lights clear of the first control: ${JSON.stringify({ lights, first })}`).toBeLessThanOrEqual(first.x * f);
     }
 
-    // Mark up's still at 100 % and at 150 %: the layer on the pane, its picture the whole view at the same pixels per point
+    // Mark up's still at 100 % and at 150 %: the layer on the pane, its picture the whole view at its device pixels or the
+    // cap, whichever is smaller (B12: the still is the same at 150 % as at 100 %). Pixels per view point are no measure of
+    // that: under the cap they fall as the view grows in points, and the view is a different size at each factor.
+    const scale = await displayScale(app);
     const markUp = sideGroup(s.page, 'upper').locator('[data-side-strip]').getByRole('button', { name: 'Mark up', exact: true });
     const layer = s.page.getByRole('region', { name: 'Mark-up' });
     const stillOf = async (f: number) => {
@@ -1502,13 +1518,14 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
       await s.page.keyboard.press('Escape');
       await expect(layer).toHaveCount(0);
       await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
-      return { width: natural.width / bounds.width, height: natural.height / bounds.height, natural, bounds };
+      const expected = stillOfView(bounds, scale);
+      test.info().annotations.push({ type: `zoom: Mark up's still at ${f}`, description: JSON.stringify({ natural, bounds, scale, expected }) });
+      for (const side of ['width', 'height'] as const) {
+        expect(near(natural[side], expected[side]), `at ${f} the still's ${side} is the whole view's at device pixels or the cap of ${CROP_MAX_EDGE}: ${JSON.stringify({ natural, bounds, scale, expected })}`).toBe(true);
+      }
     };
-    const atActual = await stillOf(1);
-    const atLarger = await stillOf(1.5);
-    for (const side of ['width', 'height'] as const) {
-      expect(Math.abs(atLarger[side] - atActual[side]) / atActual[side], `the still's ${side} at 150 % covers the view as at 100 %: ${JSON.stringify({ atActual, atLarger })}`).toBeLessThanOrEqual(0.02);
-    }
+    await stillOf(1);
+    await stillOf(1.5);
 
     // the Mobile size: the chip's own menu in a room the panel's separator sets, then the chip in an ample room
     await zoomTo(app, s.page, 1);
