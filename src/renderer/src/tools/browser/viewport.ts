@@ -54,9 +54,14 @@ export function pageBox(viewport: BrowserViewport | null, zoom: number, room: Ro
   const height = Math.min(Math.round((viewport.height * zoom) / app), room.height);
   const at = room.placed ?? { x: 0, y: 0, width, height };
   const scale = room.scale ?? 1;
-  const reads = { width: innerSize(placed(at.x, at.x + at.width, app), zoom, scale), height: innerSize(placed(at.y, at.y + at.height, app), zoom, scale) };
+  const reads = { width: innerSize(placed(at.x, at.x + sent(at.width, width), app), zoom, scale), height: innerSize(placed(at.y, at.y + sent(at.height, height), app), zoom, scale) };
   return { width, height, reads };
 }
+
+// A side of the rect as sent, while it is this element's: its rounded edges are within a pixel of the element's size. A
+// rect sent before the element took a new size (a size just chosen, the factor just changed) is the old element's until
+// the pane's next report, and the side is then the element's own from the sent origin.
+const sent = (side: number, element: number) => (Math.abs(side - element) <= 1 ? side : element);
 
 /** Whether a device size's width fits the room now: viewport.width * zoom / app <= room.width. */
 export function fits(viewport: BrowserViewport, zoom: number, room: Room, app: number): boolean {

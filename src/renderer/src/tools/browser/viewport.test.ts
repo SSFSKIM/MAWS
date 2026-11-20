@@ -83,6 +83,13 @@ describe('the app window’s zoom (U6b-5b, placement 6)', () => {
     expect(pageBox(MOBILE, 0.75, room(352), 0.8)!.reads.width).toBe(376); // the control: the nominal 352 from the same origin
   });
 
+  // a rect sent before the element took its new size (Tablet just chosen in a pane that was Responsive) is the old
+  // element's until the pane reports again: the side is read from the element's own size, not the old rect's
+  it('reads the element’s own size from a rect that is not yet this element’s', () => {
+    const before = { width: 1000, height: 900, placed: { x: 0, y: 40, width: 1000, height: 900 } };
+    expect(pageBox(TABLET, 1, before, 1)!.reads).toEqual({ width: 768, height: 900 }); // the height is the room's, as sent
+  });
+
   // The branch review (scalpel-3#1): Blink's `innerWidth` and `innerHeight` are `AdjustForAbsoluteZoom::AdjustInt` of the
   // frame's size in device pixels by the layout zoom (the display's scale times the tab's zoom): biased by half a pixel
   // above a zoom of 1, then truncated with a tolerance of 0.01, which is not a rounding to the nearest. 894 points at a tab
