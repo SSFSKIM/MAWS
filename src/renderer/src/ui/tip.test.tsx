@@ -5,17 +5,18 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { drawnText } from '../test-support/drawn-text';
+import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { POINTING_DELAY_MS } from './pointing';
 import { Tip, Unavailable } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
-beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })); // React's act and userEvent wait on the others
+beforeEach(fakeTimeouts);
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
+  realTimeouts();
 });
-const user = () => userEvent.setup({ delay: null }); // no waits of its own: under fake timers they never end
+const user = () => userEvent.setup({ delay: null });
 const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
 
