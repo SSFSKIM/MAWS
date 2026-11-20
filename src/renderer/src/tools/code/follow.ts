@@ -7,26 +7,27 @@
 // it is answered.
 //
 // One follow at a time per session, path and source: a second click while one is under way starts none. A subagent's
-// source is its agent's id with the engine session the session's record holds at the call, so a click after `/clear` is a
-// follow of its own (W3). The viewer's store waits for every follow under way for its session and path before a read
+// source is its agent's id with the conversation (the engine session) whose subagent drew the link, which the follow
+// carries (the branch panel): a click in a drill-in drawn before `/clear` is a follow of its own, and the daemon refuses it
+// (W3, Q11). The viewer's store waits for every follow under way for its session and path before a read
 // (`following`), and notes how many have answered `linked` (`linkedCount`) to know whether a read it sent before is stale
 // (W1 g). Nothing here is stored: the source lives in memory alone (UC-14).
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
 import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
-import { useSessions } from '../../stores/sessions';
 
-/** Where a link stands: a shown Markdown file (its path, as its tab holds it), or a subagent's transcript (its agent's id). */
-export type LinkSource = { file: string } | { agent: string };
+/** Where a link stands: a shown Markdown file (its path, as its tab holds it), or a subagent's transcript (its agent's id,
+    and the conversation whose subagent drew the link when the window knows it). */
+export type LinkSource = { file: string } | { agent: string; engineSessionId?: SessionId };
 
 const keyOf = (appSessionId: AppSessionId, path: string) => `${appSessionId}\0${path}`;
 // Each session and path: its follows under way, by source
 const underWay = new Map<string, Map<string, Promise<void>>>();
 const linked = new Map<string, number>();
 
-const sourceKey = (appSessionId: AppSessionId, from: LinkSource): string =>
-  'file' in from ? JSON.stringify(['file', from.file]) : JSON.stringify(['agent', from.agent, useSessions.getState().records.get(appSessionId)?.engineSessionId ?? null]);
+const sourceKey = (from: LinkSource): string =>
+  'file' in from ? JSON.stringify(['file', from.file]) : JSON.stringify(['agent', from.agent, from.engineSessionId ?? null]);
 
 const onThisMac = (appSessionId: AppSessionId): boolean => isAddress(appSessionId) && machineOf(appSessionId) === ipc.localMachine;
 
@@ -41,7 +42,7 @@ export function follow(appSessionId: AppSessionId | null, path: string, from: Li
   let call: Promise<CommandResult<'files.follow'>>;
   try {
     if (!onThisMac(appSessionId)) return;
-    source = sourceKey(appSessionId, from);
+    source = sourceKey(from);
     if (sources.has(source)) return;
     call = ipc.invoke('files.follow', { appSessionId, path, from });
   } catch {

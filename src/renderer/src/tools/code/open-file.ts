@@ -247,5 +247,5 @@ export const codeTranscriptActions: Pick<TranscriptActions, 'reviewChanges' | 'o
     panelHost.addTool('review', { appSessionId, params: { scope: 'turn', turnId, ...(path ? { path } : {}) } });
   },
   openFile: (path, line, appSessionId, options) =>
-    void openFile(appSessionId ?? shownSession(), path, line, { main: options?.main === true, ...(options?.agent !== undefined && { from: { agent: options.agent } }) }),
+    void openFile(appSessionId ?? shownSession(), path, line, { main: options?.main === true, ...(options?.agent !== undefined && { from: { agent: options.agent, ...(options.conversation !== undefined && { engineSessionId: options.conversation }) } }) }),
 };

@@ -22,7 +22,7 @@ import { compactingRow } from './compacting'; // UX wave U3b (M4)
 import type { CellId, Row, RowId, RowKind, TurnId } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
-import { AnswerActionsStore, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { AnswerActionsStore, listElementId, rowElementId, sessionOfStoreKey, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
@@ -34,6 +34,7 @@ import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
 import { withBrowserActivityRows, type BrowserActivityAttachment } from '../model/browser-activity'; // E13
 import type { TranscriptState } from '../model/reduce';
 import type { AppSessionId } from '@shared/graph/ids'; // E13
+import { useSessions } from '../../stores/sessions'; // UX wave U6b-4c (the branch panel)
 import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror'; // UX wave U2b
 import { labelsOf } from '../../owner/view/label'; // UX wave U2b (M7)
 import { foldMoments, momentWatch, type FoldMoments } from '../../stores/folds'; // UX wave U2b (M7)
@@ -804,11 +805,19 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   // file with the agent's id, which the window's follow names as the link's source; given here, so every click source of
   // the mount carries it and none has to (a path link, a read's chip, an edit's chip, an anchored comment's chip).
   const childAgent = variant === 'child' && typeof source.agentId === 'string' ? source.agentId : null;
+  // The branch panel: and the conversation (the engine session) the session was in when this mount took the child's source,
+  // read once per source and not followed, so a click in a drill-in left on screen after `/clear` names the conversation
+  // that drew it, which the daemon refuses (Q11)
+  const childConversation = useMemo(() => {
+    const session = childAgent === null ? null : sessionOfStoreKey(storeKey);
+    return session === null ? null : (useSessions.getState().records.get(session)?.engineSessionId ?? null);
+  }, [childAgent, storeKey, source]);
   const context = useMemo<TranscriptContextValue>(() => {
     const merged: TranscriptActions = { ...DEFAULT_ACTIONS, ...actions };
-    const acts: TranscriptActions = childAgent === null ? merged : { ...merged, openFile: (path, line, appSessionId, options) => merged.openFile(path, line, appSessionId, { ...options, agent: childAgent }) };
+    const acts: TranscriptActions =
+      childAgent === null ? merged : { ...merged, openFile: (path, line, appSessionId, options) => merged.openFile(path, line, appSessionId, { ...options, agent: childAgent, ...(childConversation !== null && { conversation: childConversation }) }) };
     return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
-  }, [storeKey, variant, actions, childAgent, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor]);
+  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor]);
 
   return (
     <TranscriptProvider value={context}>

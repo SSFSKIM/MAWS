@@ -22,7 +22,7 @@
 // unasked (`open`).
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
-import { AppSessionIdSchema } from '@shared/graph/ids';
+import { AppSessionIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import type { CommandSpec } from './common';
 
 // Declared before the registry, which reads them when this module loads.
@@ -207,14 +207,15 @@ const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, pat
 // UX wave U6b-4c (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4c-markdown-links.md, Interfaces §C, R1): the follow of a link
 // the person clicked, for a session of this machine, sent by the app window's page alone and offered to no other machine.
 // `from` says only where the link stands: the shown Markdown file's path, as its tab holds it, or the subagent whose
-// transcript holds it (the id's pattern is `laneA.watch`'s). The daemon reads that source itself and, when it holds a link
+// transcript holds it (the id's pattern is `laneA.watch`'s), with the conversation (the engine session) whose subagent
+// drew the link; a follow naming none, or one the session is no longer in, links nothing (the branch panel, Q11). The daemon reads that source itself and, when it holds a link
 // to `path`, records the file for the session, so every later read, frame, open outside MAWS and save of it asks by name
 // as before and is admitted. Three answers and no reason: `linked`, `inside` (the path is under the session's folders,
 // and nothing is recorded), `not-linked` (anything else, a failure inside the follow included).
 export const FilesFollowInputSchema = SessionPathSchema.extend({
   from: z.union([
     z.strictObject({ file: z.string() }), // the shown Markdown file's path, as its tab holds it
-    z.strictObject({ agent: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/) }), // the subagent whose transcript holds the link
+    z.strictObject({ agent: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), engineSessionId: SessionIdSchema.optional() }), // the subagent whose transcript holds the link, and its conversation
   ]),
 });
 export type FilesFollowInput = z.infer<typeof FilesFollowInputSchema>;
