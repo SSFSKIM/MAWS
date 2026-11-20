@@ -4341,7 +4341,7 @@ describe('files saves outside the folders', () => {
 
       // The branch panel (scalpel-3, finding 3, and the sweep): the Markdown proof reads the follow's patience between file
       // system calls, its whole-file read included, so a call that answers late is followed by none
-      it('starts no file system call of its Markdown proof once its patience has run out: none after a late resolution of the source, no stat after a late confirmation's realpath, and no second read after a late first one (X5.12, the branch panel)', async () => {
+      it('starts no file system call of its Markdown proof once its patience has run out: none after a late resolution of the source, no stat after a late confirmation’s realpath, and no second read after a late first one (X5.12, the branch panel)', async () => {
         const realpath = fs.promises.realpath.bind(fs.promises);
         const lstat = fs.promises.lstat.bind(fs.promises);
         const stat = fs.promises.stat.bind(fs.promises);
