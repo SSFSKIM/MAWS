@@ -1513,8 +1513,11 @@ test('zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %, with 
       await expect(image).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
       await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { message: 'the still decoded' }).toBe(true);
       const natural = await image.evaluate((el: HTMLImageElement) => ({ width: el.naturalWidth, height: el.naturalHeight }));
-      const [l, p] = [await rectOf(layer), await rectOf(pane)];
-      for (const key of ['x', 'y', 'width', 'height'] as const) expect(near(l[key], p[key]), `at ${f} the layer's ${key} on the pane's`).toBe(true);
+      const [l, i, p] = [await rectOf(layer), await rectOf(image), await rectOf(pane)];
+      for (const key of ['x', 'y', 'width', 'height'] as const) {
+        expect(near(l[key], p[key]), `at ${f} the layer's ${key} on the pane's`).toBe(true);
+        expect(near(i[key], p[key]), `at ${f} the still's own ${key} on the pane's: ${JSON.stringify({ still: i, pane: p })}`).toBe(true);
+      }
       await s.page.keyboard.press('Escape');
       await expect(layer).toHaveCount(0);
       await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);

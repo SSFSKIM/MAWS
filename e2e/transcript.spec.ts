@@ -23,7 +23,7 @@ import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
 import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { idle, scene, show } from './support/maws-tools'; // UX wave U6b-5b
-import { displayScale, zoomTo } from './support/zoom'; // UX wave U6b-5b
+import { zoomTo } from './support/zoom'; // UX wave U6b-5b
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
@@ -3117,53 +3117,36 @@ function followJournal(dir: string, fill: number, streams: number, holds: number
   return path;
 }
 
-// The tracker's case: a follower at the browser's reachable end at 110 % and at 80 %, a page key pressed in Files' field
-// in the side column (witnessed by the transcript as a key that may scroll, and consumed by the field), and, in that
-// key's own dispatch, the transcript's viewport growing (the composer below shrinking back: E11's case), so the browser
-// clamps the offset onto the new reachable end. Then the held engine goes on, its next part appended, and the follower
-// is still at the end: no "Jump to latest", and the scroller within the 3 px the list itself reads as the end.
-// Where the reachable end lies is the browser's: the offset clamps to whole device pixels of the scroller's snapped
-// sizes, while scrollHeight and clientHeight are each rounded to a whole CSS pixel, so the end can sit short of
-// scrollHeight - clientHeight by up to a CSS pixel of that rounding plus about a device pixel's worth, 1 ÷ (the display's
-// scale × the zoom) CSS px. It is more than 1 px short (the list's leaving threshold: the row's condition) only where
-// the roundings fall nearly opposite, which a scale of 2 makes rarer than a scale of 1. The scene measures it
-// rather than assume it: before each clamp it steps the composer's padding by an eighth of a pixel over two pixels, with
-// no key pressed (nothing may release following then), and takes the first padding at which the follower's settled end
-// is more than 1 px short, else the one nearest to it; the clamp then lands on that end, and is measured.
-// The verdict follows what was reached (the architect's ruling of 2026-11-20, that a failure here stands for the row
-// only when the row's condition was reached):
-// - a release after a clamp more than 1 px short is the row: the case is marked expected to fail at that point
-//   (`test.fail`, citing docs/tech-debt-tracker.md's row of 2026-10-27, "At a zoom other than 100% a follower sits at
-//   the browser's reachable maximum") and fails saying so;
-// - a release after a clamp 1 px short or less is no part of the row, and fails as a fault of its own;
-// - a follower that held after a clamp more than 1 px short fails too, saying that the row is fixed: close it and take
-//   this verdict out;
-// - no clamp more than 1 px short at either zoom skips the case, as no evidence about the row at this display's scale.
-// Every clamp, its zoom and the display's scale are annotated. Every read is polled; no time is asserted.
+// The child's probe 4: a follower at the end at 110 % and at 80 %, a page key pressed in Files' field in the side column
+// (witnessed by the transcript as a key that may scroll, and consumed by the field), and, in that key's own dispatch,
+// the transcript's viewport growing (the composer below shrinking back: E11's case), so the browser clamps the offset
+// onto the new reachable end. Then the held engine goes on, its next part appended, and the follower is still at the
+// end: no "Jump to latest", and the end's gap within the 3 px the list reads as the end. The gap is the product's own
+// (`Transcript.tsx`, `leaveIfAway`): min(scrollHeight, the virtualiser's total) - clientHeight - scrollTop, the total
+// read as the list commits it, its sizer's height. Each clamp's gap is measured in the key's dispatch, the moment the
+// list judges it, and the largest at each zoom is annotated: a clamp more than 1 px short is docs/tech-debt-tracker.md's
+// row of 2026-10-27 ("At a zoom other than 100% a follower sits at the browser's reachable maximum"), and a release
+// after it turns this scene red. Every read is polled; no time is asserted.
 test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key is pressed in a side surface', async () => {
   test.setTimeout(300_000);
-  const ROW = "docs/tech-debt-tracker.md, the row of 2026-10-27 (\"At a zoom other than 100% a follower sits at the browser's reachable maximum\")";
   const FILL = 24;
   const HOLDS = 6;
   const FACTORS = [1.1, 0.8] as const;
-  const REST_STEP = 0.125; // CSS px: the composer's padding is stepped by this, 0 to 2 px, to find the row's condition
-  const REST_STEPS = 16;
-  type Clamp = { before: number; after: number; gap: number; observed: boolean };
-  const clamps: { f: number; part: number; rest: number; gap: number; held: boolean }[] = [];
-  let scale = Number.NaN;
   await scene({ titles: ['Zoom follow'], label: 'u6b5b-follow' }, async (s) => {
     const { page } = s;
     const id = s.ids[0]!;
     await launchReady(page, id, followJournal(s.scratch.root, FILL, FACTORS.length, HOLDS), { cwd: s.repo });
     await show(s, id);
-    scale = await displayScale(s.maws.app);
     const scroller = s.pane.locator('[data-transcript-scroller]');
     const composer = s.pane.locator('section[data-composer]');
     const jump = s.pane.getByRole('button', { name: 'Jump to latest' });
     // `sizer` is the list's inner box, the virtualiser's total: it grows with every row, where the scroller's
-    // scrollHeight stays at its clientHeight while the rows still fit
+    // scrollHeight stays at its clientHeight while the rows still fit; `gap` is the end's gap as the list judges it
     const heights = () =>
-      scroller.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, gap: el.scrollHeight - el.clientHeight - el.scrollTop, sizer: (el.firstElementChild as HTMLElement).offsetHeight }));
+      scroller.evaluate((el) => {
+        const total = Number.parseFloat((el.firstElementChild as HTMLElement).style.height);
+        return { scroll: el.scrollHeight, client: el.clientHeight, gap: Math.min(el.scrollHeight, total) - el.clientHeight - el.scrollTop, sizer: (el.firstElementChild as HTMLElement).offsetHeight };
+      });
     let sent = 0;
     const send = async () => value(await invoke(page, 'session.send', { appSessionId: id, content: `turn ${++sent}` }));
     // the list's sizer grown past `before` and settled (two reads in a row the same height)
@@ -3184,29 +3167,6 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
       await expect(jump, message).toHaveCount(0);
       await expect.poll(async () => (await heights()).gap, { message }).toBeLessThanOrEqual(3);
     };
-    // the follower's end once two reads in a row agree, within the list's 3 px: how far short of
-    // scrollHeight - clientHeight the browser lets it sit
-    const settledGap = async (message: string): Promise<number> => {
-      let last = '';
-      let gap = Number.NaN;
-      await expect
-        .poll(
-          async () => {
-            const read = await heights();
-            const key = JSON.stringify(read);
-            const same = key === last;
-            last = key;
-            gap = read.gap;
-            return same && read.gap <= 3;
-          },
-          { message },
-        )
-        .toBe(true);
-      return gap;
-    };
-    // the composer's own top padding, which every step below adds to
-    const base = await composer.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop) || 0);
-    const padTo = (px: number) => composer.evaluate((el, value) => { el.style.paddingTop = `${value}px`; }, px);
     // the transcript filled past its viewport, so following is a scroll the list keeps doing
     while (sent < FILL) {
       const before = (await heights()).sizer;
@@ -3228,42 +3188,31 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
       await expect(s.pane.getByText(followLine(turn, 0, 3)).first()).toBeVisible(); // the reply streams, and the engine holds
       await grownFrom(before, `at ${f}, turn ${turn}'s first part grew the list`);
       await following(`at ${f}, turn ${turn}'s first part followed`);
+      let largest = Number.NEGATIVE_INFINITY;
       for (let part = 1; part <= HOLDS; part++) {
         const at = `at ${f}, before part ${part}`;
-        // the row's condition sought for this content: the first padding at which the settled end is more than 1 px
-        // short, else the one nearest to it
-        let rest = 0;
-        let nearest = Number.NEGATIVE_INFINITY;
-        for (let k = 0; k <= REST_STEPS; k++) {
-          await padTo(base + k * REST_STEP);
-          const gap = await settledGap(`${at}, the follower settled with the composer ${k * REST_STEP} px taller`);
-          if (gap > nearest) [nearest, rest] = [gap, k * REST_STEP];
-          if (gap > 1) break;
-        }
-        await padTo(base + rest);
-        await settledGap(`${at}, the follower settled with the composer ${rest} px taller`);
-        // the composer grows by `grow` px, followed
+        // the composer grows by `grow` px (a different growth each time, so the offset drops a different distance), followed
         const grow = 40 + part;
         const open = (await heights()).client;
-        await padTo(base + rest + grow);
+        await composer.evaluate((el, px) => { el.style.paddingTop = `${px}px`; }, grow);
         await expect.poll(async () => (await heights()).client, { message: `${at}, the composer's growth narrowed the transcript` }).toBeLessThanOrEqual(open - grow + 1);
         await following(`${at}, the composer's growth followed`);
         // the clamp, made in the key's own dispatch, after the transcript's witness (an earlier listener of the same
-        // phase): the composer back to the padding found above; `observed` is a resize observer made after the list's,
-        // so its report follows theirs
-        await page.evaluate((px) => {
+        // phase); `observed` is a resize observer made after the list's, so its report follows theirs
+        await page.evaluate(() => {
           const pane = document.querySelector('[data-region="main"] [data-pane="0"]')!;
           const list = pane.querySelector<HTMLElement>('[data-transcript-scroller]')!;
           const dock = pane.querySelector<HTMLElement>('section[data-composer]')!;
-          const w = window as unknown as { u6b5bClamp?: Clamp };
+          const w = window as unknown as { u6b5bClamp?: { before: number; after: number; gap: number; observed: boolean } };
           delete w.u6b5bClamp;
           const key = (event: KeyboardEvent) => {
             if (event.key !== 'PageUp') return;
             window.removeEventListener('keydown', key, true);
             const before = list.scrollTop;
-            dock.style.paddingTop = `${px}px`;
+            dock.style.paddingTop = '';
             const after = list.scrollTop; // a forced layout: the browser's clamp onto the new reachable end
-            const clamp = { before, after, gap: list.scrollHeight - list.clientHeight - after, observed: false };
+            const total = Number.parseFloat((list.firstElementChild as HTMLElement).style.height);
+            const clamp = { before, after, gap: Math.min(list.scrollHeight, total) - list.clientHeight - after, observed: false };
             w.u6b5bClamp = clamp;
             const observer = new ResizeObserver(() => {
               clamp.observed = true;
@@ -3272,37 +3221,24 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
             observer.observe(list);
           };
           window.addEventListener('keydown', key, true);
-        }, base + rest);
+        });
         await field.press('PageUp');
-        const clampOf = () => page.evaluate(() => (window as unknown as { u6b5bClamp?: Clamp }).u6b5bClamp ?? null);
+        const clampOf = () => page.evaluate(() => (window as unknown as { u6b5bClamp?: { before: number; after: number; gap: number; observed: boolean } }).u6b5bClamp ?? null);
         await expect.poll(async () => (await clampOf())?.observed ?? false, { message: `${at}, the key pressed and the list's observers past the clamp` }).toBe(true);
         const clamp = (await clampOf())!;
         expect(clamp.after, `${at}, the viewport's growth clamped the offset: ${JSON.stringify(clamp)}`).toBeLessThan(clamp.before);
-        const reached = clamp.gap > 1;
+        largest = Math.max(largest, clamp.gap);
         // the engine goes on: the next part appended, and the follower at the end
         const held = (await heights()).sizer;
         value(await invoke(page, 'session.getContextUsage', { appSessionId: id, detail: 'summary' }));
         await expect(s.pane.getByText(followLine(turn, part, 3)).first()).toBeVisible();
         await grownFrom(held, `${at}, part ${part} grew the list`);
-        const released = await following(`at ${f}, part ${part} followed after a clamp ${clamp.gap.toFixed(2)} px short of the end`).then(
-          () => null,
-          (error: unknown) => error,
-        );
-        clamps.push({ f, part, rest, gap: clamp.gap, held: released === null });
-        test.info().annotations.push({ type: 'zoom follow: a clamp', description: JSON.stringify({ scale, f, part, rest, clamp, followed: released === null }) });
-        if (released !== null && reached) {
-          test.fail(true, `${ROW}: a witnessed key during a clamp that lands more than 1 px short of the end releases following. When a clamp so short is followed, close the row and take this verdict out.`);
-          throw new Error(`${ROW}, reached: at ${f} on a display of scale ${scale}, following was released after a clamp ${clamp.gap.toFixed(2)} px short of the end`);
-        }
-        if (released !== null) throw released; // a release the row does not explain: the clamp was 1 px short or less
+        await following(`at ${f}, part ${part} followed after a clamp ${clamp.gap.toFixed(2)} px short of the end`);
       }
-      await composer.evaluate((el) => { el.style.paddingTop = ''; }); // the composer as the app draws it
+      test.info().annotations.push({ type: `zoom follow at ${f}: the largest gap a clamp left, as the list judges it`, description: `${largest.toFixed(2)} px (the row of 2026-10-27's condition is more than 1 px)` });
       await idle(s, id);
       await following(`at ${f}, the end of turn ${turn} followed`);
     }
     await zoomTo(s.maws.app, page, 1);
   });
-  const shortOnes = clamps.filter((clamp) => clamp.gap > 1);
-  expect(shortOnes, `${ROW}: its condition was reached and following held after each such clamp, so the row is fixed: close it and take this verdict out`).toEqual([]);
-  test.skip(true, `not evidence about ${ROW}: on a display of scale ${scale}, no clamp landed more than 1 px short of the end at ${FACTORS.join(' or ')} (the largest ${Math.max(...clamps.map((clamp) => clamp.gap)).toFixed(2)} px; each clamp is annotated)`);
 });
