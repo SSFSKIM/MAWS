@@ -4341,15 +4341,19 @@ describe('files saves outside the folders', () => {
 
       // The branch panel (scalpel-3, finding 3, and the sweep): the Markdown proof reads the follow's patience between file
       // system calls, its whole-file read included, so a call that answers late is followed by none
-      it('starts no file system call of its Markdown proof once its patience has run out: none after a late resolution of the source, and no second read after a late first one (X5.12, the branch panel)', async () => {
+      it('starts no file system call of its Markdown proof once its patience has run out: none after a late resolution of the source, no stat after a late confirmation's realpath, and no second read after a late first one (X5.12, the branch panel)', async () => {
         const realpath = fs.promises.realpath.bind(fs.promises);
         const lstat = fs.promises.lstat.bind(fs.promises);
+        const stat = fs.promises.stat.bind(fs.promises);
         const open = fs.promises.open.bind(fs.promises);
         const sourceReal = realpathSync(guide());
         const calls: string[] = [];
-        // one call held once, where the case says: the source's resolution, or the first read of its descriptor
-        let hold: { at: 'realpath' | 'read'; until: Promise<void>; reach: () => void } | null = null;
-        const holding = async (at: 'realpath' | 'read') => {
+        // one call held once, where the case says: the source's resolution, its confirmation's realpath once its descriptor
+        // is open, or the first read of that descriptor
+        type At = 'realpath' | 'confirm' | 'read';
+        let hold: { at: At; until: Promise<void>; reach: () => void } | null = null;
+        let opened = false;
+        const holding = async (at: At) => {
           if (hold?.at !== at) return;
           const { until, reach } = hold;
           hold = null;
@@ -4357,14 +4361,16 @@ describe('files saves outside the folders', () => {
           await until;
         };
         vi.spyOn(fs.promises, 'realpath').mockImplementation((async (path: string, ...rest: unknown[]) => {
-          if (path === guide()) await holding('realpath');
+          if (path === guide()) await holding(opened ? 'confirm' : 'realpath');
           return realpath(path, ...(rest as []));
         }) as never);
+        vi.spyOn(fs.promises, 'stat').mockImplementation(((path: string, ...rest: unknown[]) => (calls.push(`stat ${path}`), stat(path, ...(rest as [])))) as never);
         vi.spyOn(fs.promises, 'lstat').mockImplementation(((path: string, ...rest: unknown[]) => (calls.push(`lstat ${path}`), lstat(path, ...(rest as [])))) as never);
         vi.spyOn(fs.promises, 'open').mockImplementation((async (path: string, ...rest: unknown[]) => {
           calls.push(`open ${path}`);
           const handle = await open(path, ...(rest as []));
           if (String(path) !== sourceReal) return handle;
+          opened = true;
           const read = handle.read.bind(handle) as (...args: unknown[]) => Promise<{ bytesRead: number; buffer: Buffer }>;
           return Object.assign(handle, {
             read: async (...args: unknown[]) => {
@@ -4377,7 +4383,8 @@ describe('files saves outside the folders', () => {
         const files = followService();
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         try {
-          for (const at of ['realpath', 'read'] as const) {
+          for (const at of ['realpath', 'confirm', 'read'] as const) {
+            opened = false;
             let release!: () => void;
             let reach!: () => void;
             const reached = new Promise<void>((resolve) => (reach = resolve));
@@ -4389,7 +4396,7 @@ describe('files saves outside the folders', () => {
             calls.length = 0;
             release();
             for (let i = 0; i < 100; i += 1) await new Promise((resolve) => fs.stat(base, () => resolve(undefined)));
-            const after = at === 'realpath' ? calls.filter((call) => call === `lstat ${guide()}` || call.startsWith('open ')) : calls.filter((call) => call === 'read');
+            const after = calls.filter((call) => (at === 'realpath' ? call === `lstat ${guide()}` || call.startsWith('open ') : at === 'confirm' ? call === `stat ${sourceReal}` : call === 'read'));
             expect(after, `${at}: nothing after the call that answered late`).toEqual([]);
           }
         } finally {
