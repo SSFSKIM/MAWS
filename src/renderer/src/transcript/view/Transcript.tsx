@@ -811,6 +811,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const childConversation = useMemo(() => {
     const session = childAgent === null ? null : sessionOfStoreKey(storeKey);
     return session === null ? null : (useSessions.getState().records.get(session)?.engineSessionId ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `source` keys the read: a new child source reads the record anew
   }, [childAgent, storeKey, source]);
   const context = useMemo<TranscriptContextValue>(() => {
     const merged: TranscriptActions = { ...DEFAULT_ACTIONS, ...actions };
