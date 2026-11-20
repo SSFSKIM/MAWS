@@ -8,6 +8,9 @@
 /* C6: Tailwind's `dark:` variant follows MAWS's theme attribute (C1's signal), so Streamdown's dual themes switch with it. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 /* end C6 */
+/* The word cut's note placement prototype (ui/row-note.tsx): with data-note-placement="overlay" on the document root, a
+   row note or a pointed-row line floats over the rows that follow instead of taking room in the list. */
+@custom-variant note-overlay (&:where([data-note-placement="overlay"] *));
 
 /* Tailwind's default palette and scales are removed: palette classes compile to nothing and only X7 tokens exist. */
 @theme {
