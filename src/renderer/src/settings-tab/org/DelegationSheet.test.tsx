@@ -12,7 +12,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { DELEGATION_MAX_USES, DELEGATION_TTL_DAYS, type DelegationResult, type DelegationRun, type OrgDelegationRow, type ProvisioningSecret } from '@shared/ipc/schema/org';
-import { ANA, ME, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer, foot, findFoot } from './test-support';
+import { ANA, ME, ROOT, emit, group, renderSection, resetHarness, sent, signing, viewWith, type Signer, foot, findFoot } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });

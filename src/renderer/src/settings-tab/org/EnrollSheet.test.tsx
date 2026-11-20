@@ -7,7 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { formatClock } from '@shared/app/date-format';
 import { ENROLL_PROBLEMS, ENROLL_REFUSALS, type EnrollStartResult, type OrgEnrollingStatus, type SignResult } from '@shared/ipc/schema/org';
 import { observed, started as startedRun, type EnrollRun } from './EnrollSheet';
-import { MINI, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, foot, findFoot, choose, menuItems } from './test-support';
+import { MINI, ROOT, emit, found, group, renderSection, resetHarness, sent, signing, viewWith, foot, findFoot, choose, menuItems } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
