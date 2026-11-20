@@ -63,7 +63,9 @@
 // or at the next mount), never over unsaved edits, and only for the entry and generation it landed in. That read again
 // holds the guard the notice's Retry holds (`retrying`), each read of the two taking it in turn, so neither starts while
 // the other's read is on its way. A file opened read-only because the Markdown file that links it is read-only for the
-// session is locked `linked` (`outside.linked`), with its own sentence.
+// session is locked `linked` (`outside.linked`), with its own sentence. The branch panel: a load superseded while in flight
+// holds no read again back (`loadLive`); a continuation that found a read-only file changed is compared as such an answer
+// is; and a Save that answers while a load issued since it began is out issues that load again after the write.
 //
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
@@ -486,6 +488,9 @@ export function createViewerStore(client: MawsBridge) {
   const guards = new Map<string, number>(); // UX wave U6b-4c: each tab's latest turn of the read again's guard (`retrying`)
   let lastGuard = 0;
   const owed = new Map<string, Landed>(); // UX wave U6b-4c (W1 g): a read again owed, kept until the entry can read again
+  // UX wave U6b-4c (the branch panel): each tab's newest load while it runs, by its generation; a load in flight whose
+  // generation is no longer the tab's lands nowhere, so it holds back no read again
+  const loading = new Map<string, number>();
 
   return create<ViewerStore>()((set, get) => {
     const patch = (tabId: string, next: Partial<ViewerEntry>) =>
@@ -547,6 +552,7 @@ export function createViewerStore(client: MawsBridge) {
       pressedOpen.delete(tabId);
       guards.delete(tabId); // UX wave U6b-4c
       owed.delete(tabId);
+      loading.delete(tabId);
       mounted.delete(tabId);
       views.delete(tabId);
       set((s) => {
@@ -610,7 +616,11 @@ export function createViewerStore(client: MawsBridge) {
     // read as it was first (an `open` load), a shown one as a re-read (a `change` load, the content standing until the
     // new one is whole).
     // UX wave U6b-2 (M5, decision 4; A4): and an entry whose frame failed.
-    const revisitable = (entry: ViewerEntry) => (entry.status === 'error' || entry.named || entry.frame?.status === 'failed') && entry.pending === 0 && !unsaved(entry);
+    // UX wave U6b-4c (the branch panel): a load in flight holds it back only while it can still land; a superseded one,
+    // whose answer lands nowhere, does not (the person's open that took an agent's tab back, its read refused, and the
+    // agent's own read still out: the link's click then reads after its follow)
+    const loadLive = (tabId: string) => loading.has(tabId) && loading.get(tabId) === generations.get(tabId);
+    const revisitable = (entry: ViewerEntry) => (entry.status === 'error' || entry.named || entry.frame?.status === 'failed') && !loadLive(entry.tabId) && !unsaved(entry);
     const reasonOf = (entry: ViewerEntry): 'open' | 'change' => (entry.status === 'error' && !unsaved(entry) ? 'open' : 'change');
 
     // U6f (decision 18; Decision Log 20; W3): what a failure shows. A UC-7 sentence (`issues.refusal`) as it is; a folder
@@ -846,7 +856,9 @@ export function createViewerStore(client: MawsBridge) {
         // U6e (decision 6): each answer's admission is the latest from the moment it lands, from itself alone, also where its
         // content is not taken (a chunk of another version, or none at all), the pin standing until the content commits.
         admit(tabId, asked, next.value);
-        if (hash !== null && next.value.hash !== hash) return null;
+        // U6b-4c (the branch panel): an answer read-only from a file outside the folders, which no watch follows, is compared
+        // with the follows as any such answer is, so the file is read again, whole, once a follow has found its link
+        if (hash !== null && next.value.hash !== hash) return next.value.outside?.writable === false ? landed() : null;
         real = admissionOf(next.value).real;
         last = next.value;
         if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
@@ -868,7 +880,11 @@ export function createViewerStore(client: MawsBridge) {
       const issued = get().entries.get(tabId);
       if (!issued) return;
       patch(tabId, { pending: issued.pending + 1 });
-      const landed = await loadOnce(tabId, reason, cause);
+      const running = loadOnce(tabId, reason, cause);
+      const generation = generations.get(tabId)!; // drawn by the load as it began
+      loading.set(tabId, generation);
+      const landed = await running;
+      if (loading.get(tabId) === generation) loading.delete(tabId);
       const entry = get().entries.get(tabId);
       if (entry && incarnations.get(tabId) === incarnation) patch(tabId, { loads: entry.loads + 1, pending: entry.pending - 1 });
       // U6b-4c (W1 g): outside the load, which has left `pending`; a read again owed meanwhile may be possible now
@@ -1213,6 +1229,7 @@ export function createViewerStore(client: MawsBridge) {
         if (content === undefined) return 'noop';
         const incarnation = incarnations.get(tabId);
         const current = () => incarnations.get(tabId) === incarnation;
+        const began = generations.get(tabId); // U6b-4c (the branch panel): the loads issued before the save
         patch(tabId, { saving: true, saveError: null });
         const { appSessionId, path, pin } = entry;
         if (appSessionId === null) return 'noop'; // P3-L: an artifact's file read by the artifact is never written
@@ -1228,8 +1245,13 @@ export function createViewerStore(client: MawsBridge) {
           return 'error';
         }
         if (answer.value.status === 'conflict') return (await conflicted(tabId, get().entries.get(tabId)!, current)) ? 'conflict' : 'noop';
+        // U6b-4c (the branch panel): a load issued since the save began (the tab moved to another session, its read waiting on
+        // a follow) is superseded with the rest, since its read may have been sent before the write; it is issued again,
+        // after the write, so the tab shows what that load would
+        const issuedSince = loadLive(tabId) && generations.get(tabId) !== began;
         supersede(tabId); // a read issued before the write lands nowhere
         moveBaseline(tabId, { text: content, hash: answer.value.hash, saving: false });
+        if (issuedSince) refresh(tabId);
         return 'ok';
       },
 
@@ -1402,6 +1424,7 @@ export function createViewerStore(client: MawsBridge) {
         incarnations.clear();
         mounted.clear();
         stale.clear();
+        loading.clear(); // UX wave U6b-4c
         used.clear();
         held.clear();
         views.clear();
