@@ -65,7 +65,7 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
   useEffect(() => {
     if (!drawn) return;
     const me = { close: () => setOpen(false) };
-    if (showing !== me) showing?.close();
+    showing?.close();
     showing = me;
     return () => {
       if (showing === me) showing = null;
