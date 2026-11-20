@@ -150,6 +150,32 @@ describe('what is not clickable today yields no path chip', () => {
   });
 });
 
+// Four columns measured from the line and four measured from an item's content are different in CommonMark.
+// These are parser cases only: the destination is a directory, and no file action is dispatched.
+describe.each([false, true])('block indentation in the window and the rule (live: %s)', (live) => {
+  it.each([
+    ['table followed by indented code', '| a | b |\n|---|---|\n    [r](@)'],
+    ['table followed by indented code with a pipe', '| a | b |\n|---|---|\n    [r](@) | x'],
+    ['empty bullet item', '-\n    `a\n[r](@) `'],
+    ['empty ordered item', '1.\n    `a\n[r](@) `'],
+    ['empty item followed by a lazy continuation', '- \n    `a\n  [r](@)\nx `y'],
+    ['fence inside a bullet item', '-   a\n    ~~~\n    [r](@)\n    ~~~'],
+    ['fence inside an ordered item', '10.  a\n     ~~~\n     [r](@)\n     ~~~'],
+  ])('%s contains no path link', (_, source) => {
+    for (const destination of ['/', 'file:///']) {
+      const markdown = source.replace('@', destination);
+      expect(chipPaths(markdown, live)).toEqual([]);
+      expect(linkPaths(markdown)).toEqual([]);
+    }
+  });
+
+  it('the heading inside the item does contain a path link', () => {
+    const markdown = '-   a\n    # [r](/)';
+    expect(chipPaths(markdown, live)).toEqual(['/']);
+    expect(linkPaths(markdown)).toEqual(['/']);
+  });
+});
+
 // The branch review's finding 1: text shaped like a link inside a link's destination or title, an image's resource or a
 // reference definition is no link in the window, and the rule names nothing from it; a link after a resource is one.
 describe('a resource is read once: nothing inside it is a link', () => {
