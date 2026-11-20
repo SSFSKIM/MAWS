@@ -1837,6 +1837,31 @@ describe('a framed file (UX wave U6b-2)', () => {
     expect(main.callsOf('files.read')).toHaveLength(2);
   });
 
+  // Ticket 775: an event in the folder (one naming the folder alone, or the file itself) that leaves the file as it was keeps
+  // the frame, its token and the page's state; a change of the file asks a new one, as before.
+  it('an event that leaves the framed file as it was keeps its frame and token; a change asks a new one', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    show();
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r', kind: 'changed' })); // the folder alone
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    changed(main); // the file itself, its bytes as they were
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(3));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+    expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[0] });
+    expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`);
+    expect(main.released()).toEqual([]);
+    expect(document.querySelector('[data-updated]')).toBeNull();
+    main.files[PDF] = '%PDF-1.4 invented, revised\n';
+    changed(main);
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[1]!, 'ledger.pdf')}#navpanes=0`));
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+  });
+
   it('frameFailed for a token the entry no longer holds changes nothing', async () => {
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
     offs.push(connectCodeEvents());
