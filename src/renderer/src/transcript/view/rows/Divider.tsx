@@ -47,16 +47,16 @@ function useDuration(row: DividerRowData | undefined, storeKey: string): number 
   return row === undefined ? 0 : working ? (frozen ?? workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, now)) : completedMs(row);
 }
 
-// The rows of an open work area: the turn's rows after its divider up to its receipt, without those that stay in view
-// when it folds (W1: a steer at its delivery position splits the work around it; derive.ts, isPersistentRow), time
-// separators skipped.
+// The rows of an open work area: the turn's rows before its divider, which ends the turn (board ticket 789), without
+// its receipt and those that stay in view when it folds (W1: a steer at its delivery position splits the work around
+// it; derive.ts, isPersistentRow), time separators skipped.
 function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[] {
   const ids: string[] = [];
-  for (let i = rows.findIndex((candidate) => candidate.id === divider.id) + 1; i > 0 && i < rows.length; i += 1) {
+  for (let i = rows.findIndex((candidate) => candidate.id === divider.id) - 1; i >= 0; i -= 1) {
     const row = rows[i];
-    if (row.kind === 'time') continue;
-    if (row.turnId !== divider.turnId || row.kind === 'receipt') break;
-    if (!isPersistentRow(row)) ids.push(row.id);
+    if (row.kind === 'time' || row.kind === 'receipt') continue;
+    if (row.turnId !== divider.turnId) break;
+    if (!isPersistentRow(row)) ids.unshift(row.id);
   }
   return ids;
 }
