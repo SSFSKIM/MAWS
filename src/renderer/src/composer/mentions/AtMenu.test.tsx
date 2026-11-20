@@ -82,4 +82,13 @@ describe('what the @ menu puts in the draft', () => {
     await act(() => fake.reply('git.lsFiles', files(['src/a.ts', 'src/b\nc.ts', 'src/d\u0085e.ts', 'src/f\u2028g.ts'])));
     expect(options()).toEqual([['src/a.ts', null]]);
   });
+
+  it('in path mode leaves out every file under a directory whose name holds a control character', async () => {
+    render(<AtMenu {...props('/sr', '/repo')} ctx={{ ...props('/sr', '/repo').ctx, additionalDirectories: ['/work/odd\tdir', '/work/plain'] }} />);
+    await waitFor(() => expect(fake.pending('git.lsFiles')).toBe(3));
+    await act(() => fake.reply('git.lsFiles', files(['src/a.ts']), 0));
+    await act(() => fake.reply('git.lsFiles', files(['src/b.ts']), 0));
+    await act(() => fake.reply('git.lsFiles', files(['src/c.ts']), 0));
+    expect(options().map(([path]) => path)).toEqual(['/repo/src/a.ts', '/work/plain/src/c.ts']);
+  });
 });
