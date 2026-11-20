@@ -209,10 +209,9 @@ export class ViewManager {
   // cua #90 end
 
   // UX wave U6b-5b (S3 step 4): the window's zoom changed, so each view placed in it takes its rect at the new factor; the
-  // window sends no report for a CSS rect that did not change. A placement is no report, so nothing is acknowledged. A view
-  // staged for its still stays at the stage's origin: staging's return places it, at the factor of that moment.
+  // window sends no report for a CSS rect that did not change. A placement is no report, so nothing is acknowledged.
   placeAgain(win: BrowserWindow): void {
-    for (const entry of this.placedIn(win)) if (entry.view && entry.host === win && !this.staged.has(entry)) entry.view.setBounds(this.pointsOf(entry.placement!));
+    for (const entry of this.placedIn(win)) if (entry.host === win) this.attach(entry);
   }
 
   // U6b-5b M1: the placement last acted on for the tab, for the e2e seam (inspect.ts); null before the first
@@ -252,7 +251,8 @@ export class ViewManager {
     return toPoints(placement.rect, this.deps.zoomOf?.(placement.window) ?? 1);
   }
 
-  // Puts the view in its owner's window at its owner's rect (no-op without a view or an owner).
+  // Puts the view in its owner's window at its owner's rect (no-op without a view or an owner). UX wave U6b-5b: a view
+  // staged for its still keeps the stage's bounds; staging's return places it at the latest rect and the factor then.
   private attach(entry: TabEntry): void {
     const { view, placement } = entry;
     if (!view || !placement) return;
@@ -262,7 +262,7 @@ export class ViewManager {
       entry.host = placement.window;
       this.viewAdded(placement.window); // cua #90
     }
-    view.setBounds(this.pointsOf(placement));
+    if (!this.staged.has(entry)) view.setBounds(this.pointsOf(placement));
   }
 
   // Takes the view out of its window, hidden (`visible` always says what the view shows).
