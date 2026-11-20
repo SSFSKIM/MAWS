@@ -10,7 +10,6 @@
 // keep the end pinned.
 import { elementScroll, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
-import { flushSync } from 'react-dom';
 import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
@@ -56,6 +55,13 @@ const domEndGap = (element: HTMLElement, scrollHeight = element.scrollHeight) =>
 // The list's sizer as React last committed it, and whether neither it nor the rendered content reaches the measured end yet
 const committedSize = (element: HTMLElement) => Number.parseFloat((element.firstElementChild as HTMLElement).style.height);
 const extentPending = (element: HTMLElement, size: number) => committedSize(element) + SCROLL_END_THRESHOLD < size && element.scrollHeight + SCROLL_END_THRESHOLD < size;
+// Each mounted row at the offset `startOf` gives its index, where it gives one (board ticket 789)
+function placeRows(element: HTMLElement, startOf: (index: number) => number | undefined): void {
+  for (const row of Array.from((element.firstElementChild as HTMLElement).children) as HTMLElement[]) {
+    const start = startOf(Number(row.dataset.index));
+    if (start !== undefined && row.style.top !== `${start}px`) row.style.top = `${start}px`;
+  }
+}
 export const OVERSCAN = 6;
 // Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
 const INPUT_SCROLL_SETTLE_MS = 250;
@@ -350,21 +356,17 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   // As the content observer below: movement the reader made first (a witnessed key, a reversed scrollbar drag) is read
   // before the end is followed. Board ticket 789: the running turn's line is the last row, so the streamed answer grows
   // in the row above it, and its growth reaches the DOM's end only past the line, which stands where the last commit put
-  // it. Where neither the sizer nor the rendered content reaches the measured end, the rows' measured places are
-  // committed here, before the frame paints: the line moves below the answer and the end followed is the measured one.
-  // The sizer keeps its committed height in that commit (the moved rows overflow it to the measured end): it is an
-  // ancestor of the row whose observer delivery this runs in, and resizing it there leaves its own notification
-  // undelivered, which the browser reports as an error on the window. The virtualiser's own re-render grows it after.
-  const [heldSizer, holdSizer] = useState<{ height: number } | null>(null); // a new object each time, so each commits
+  // it. Where neither the sizer nor the rendered content reaches the measured end, the mounted rows are put at their
+  // measured offsets here, before the frame paints: the line moves below the answer, overflowing the sizer to the
+  // measured end, which is followed. Only their offsets change, which no observer watches: this runs inside a row's
+  // observer delivery, and a resize there (the sizer, or a row re-rendered) is left undelivered, an error on the window.
+  // The virtualiser's own re-render commits the same offsets and the sizer's height after.
   useLayoutEffect(() => {
     followGrowth.current = () => {
       readScroll(virtualizer.getTotalSize());
       if (!followingRef.current) return;
       const element = scrollRef.current;
-      if (element && extentPending(element, virtualizer.getTotalSize())) {
-        flushSync(() => holdSizer({ height: committedSize(element) }));
-        holdSizer(null); // released in a later render, outside this delivery
-      }
+      if (element && extentPending(element, virtualizer.getTotalSize())) placeRows(element, (index) => virtualizer.measurementsCache[index]?.start);
       pinEnd();
     };
   }, [pinEnd, readScroll, virtualizer]);
@@ -492,15 +494,24 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     },
   }));
 
+  // Board ticket 789: a row the growth follow placed takes the offset this render gave it, even where React's own prop
+  // did not change since (a growth undone before the virtualiser re-rendered)
+  const virtualItems = virtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    const rendered = new Map(virtualItems.map((item) => [item.index, item.start]));
+    if (element) placeRows(element, (index) => rendered.get(index));
+  });
+
   // UX wave U2b (R6): what is mounted, for the end of a jump's reveal
-  const mountedIds = virtualizer.getVirtualItems().map((item) => rows[item.index]?.id ?? '').join('\n');
+  const mountedIds = virtualItems.map((item) => rows[item.index]?.id ?? '').join('\n');
   useLayoutEffect(() => onMounted?.(mountedIds === '' ? [] : mountedIds.split('\n'), rows), [mountedIds, rows, onMounted]);
 
   return (
     <div className={`min-h-0 ${className ?? ''}`}>
       <div ref={scrollRef} id={id} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
-        <div className="relative w-full" style={{ height: heldSizer?.height ?? virtualizer.getTotalSize() }}>
-          {virtualizer.getVirtualItems().map((item) => {
+        <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+          {virtualItems.map((item) => {
             const row = rows[item.index];
             return (
               <div
