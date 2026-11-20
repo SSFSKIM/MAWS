@@ -27,6 +27,7 @@ export interface SiteAnswer {
   hooked: boolean;
   props: Record<string, unknown>; // what core was handed (a hook's rewrite of the props)
   rewritten: boolean;
+  asked?: Record<string, unknown>; // the props the answer was asked with, where an ask made it
 }
 
 interface Entry extends SiteAddress {
@@ -104,7 +105,7 @@ async function ask(key: string): Promise<void> {
     // whether the component is hooked, but may never replace a newer row's drawing.
     if (generation === generationOf(appSessionId)) {
       useSurfaceAnswers.setState((s) => ({ hooked: new Map(s.hooked).set(hookKey(appSessionId, component), result.value.hooked) }));
-      if (propsKey === entry.propsKey) store(key, answerOf(result.value));
+      if (propsKey === entry.propsKey) store(key, { ...answerOf(result.value), asked: props });
     }
   } else {
     console.warn(`[engine-surface] ${component} ${instanceId} not drawn: ${result.error.message}`);

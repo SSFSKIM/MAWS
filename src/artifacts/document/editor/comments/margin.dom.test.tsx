@@ -5,6 +5,7 @@
 // from the agent's bare replica (its reply, its resolve), so the human-only rule is exercised end to end.
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ICON_GAP_PX, MARGIN_CARD_INSET_PX, MARGIN_GAP_PX } from '../../../comments/margin-layout';
 import { CARD_MIN_PX, ICON_PX, MARGIN_PAGE_GUTTER_PX } from '../../../comments/margin-tiers';
@@ -88,29 +89,37 @@ async function mount(content: JSONContent, initial: { rail?: DocumentRail; comme
     },
   };
   const rails: DocumentRail[] = [];
-  let props = { rail: initial.rail ?? null, commentsView: initial.commentsView ?? 'expand' };
-  // the host holds the rail (the tab's state): the editor's report becomes the prop, as DocumentPanel does
+  let props: { rail: DocumentRail; commentsView: CommentsView } = { rail: initial.rail ?? null, commentsView: initial.commentsView ?? 'expand' };
+  // the host holds the rail (the tab's state): the editor's report becomes the prop, as DocumentPanel does. It goes
+  // through the host's own state, so it renders inside the act that caused it: a `rerender` (an act of its own) called
+  // from the editor's effect would end the running act's queue early and leave the rest of its updates unwrapped.
+  function RailHost({ rail: given, commentsView, pass }: { rail: DocumentRail; commentsView: CommentsView; pass: number }): JSX.Element {
+    const [held, setHeld] = useState({ pass, rail: given });
+    if (held.pass !== pass) setHeld({ pass, rail: given }); // each `rerender` of the case passes its rail anew
+    return (
+      <DocumentEditor
+        artifactId="doc1"
+        handle={handle}
+        host={owner}
+        onEditor={(e) => {
+          current = e;
+          if (e) stubCoords(e); // P4-B1: the margin anchors through coordsAtPos
+        }}
+        {...(initial.surface !== false && { comments })}
+        rail={held.pass === pass ? held.rail : given}
+        onRailChange={(rail) => {
+          rails.push(rail);
+          props = { ...props, rail };
+          setHeld({ pass, rail });
+        }}
+        commentsView={commentsView}
+        onCommentsViewChange={() => {}}
+      />
+    );
+  }
   let view: ReturnType<typeof render> | null = null;
-  const element = (): JSX.Element => (
-    <DocumentEditor
-      artifactId="doc1"
-      handle={handle}
-      host={owner}
-      onEditor={(e) => {
-        current = e;
-        if (e) stubCoords(e); // P4-B1: the margin anchors through coordsAtPos
-      }}
-      {...(initial.surface !== false && { comments })}
-      rail={props.rail}
-      onRailChange={(rail) => {
-        rails.push(rail);
-        props = { ...props, rail };
-        view?.rerender(element());
-      }}
-      commentsView={props.commentsView}
-      onCommentsViewChange={() => {}}
-    />
-  );
+  let passes = 0;
+  const element = (): JSX.Element => <RailHost rail={props.rail} commentsView={props.commentsView} pass={(passes += 1)} />;
   view = render(element());
   await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
   return {

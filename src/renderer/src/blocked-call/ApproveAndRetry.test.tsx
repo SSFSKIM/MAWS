@@ -562,7 +562,9 @@ describe('where there is no button, where it is disabled, and a terminal session
     b.end(['u1']);
     const store = await storeAt(at('no-name'), b.events);
     ready(store.key);
-    for (const cell of cellsOf(store.rows()).filter((cell) => cell.classification.denial !== null)) expect(drawn(store, cell.id).button(), cell.id).toBeNull();
+    const denied = cellsOf(store.rows()).filter((cell) => cell.classification.denial !== null);
+    expect(denied).toHaveLength(3); // the three blocked calls, so the loop below asserts on each
+    for (const cell of denied) expect(drawn(store, cell.id).button(), cell.id).toBeNull();
   });
 
   // M4 (Decision Log 11; probe T, findings-uxwave-u1c-terminal-grant.txt, 3 of 3 in each state): every state offered,

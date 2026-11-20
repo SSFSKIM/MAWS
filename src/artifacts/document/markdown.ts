@@ -534,7 +534,8 @@ function toSentinels(markdown: string, ids: string[]): string {
   /** The raw region a line opened: its closing line, the containers it sits in, and whether it is code. */
   let raw: { close: RegExp; depth: number; code: boolean } | null = null;
   const id = (value: string) => ids.push(value) - 1;
-  for (const line of markdown.replace(/\r\n?/g, '\n').split('\n')) {
+  const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
+  for (const [index, line] of lines.entries()) {
     const { depth, ...within } = continuing(line, open);
     let { prefix, rest } = within;
     if (raw && depth === raw.depth) {
@@ -563,9 +564,11 @@ function toSentinels(markdown: string, ids: string[]): string {
     const plain = unescapeLiteralMilestones(stripMilestones(rest));
     let match = MARKER_LINE.exec(plain);
     if (match && !opened) {
-      // a block of its own, between blank lines of its container
+      // a block of its own, between blank lines of its container. On the text's last line, the line ending that ends
+      // the text is the blank after it: one more would read as an empty paragraph nobody wrote (ticket 616)
       const blank = prefix.replace(/[ \t]+$/, '');
-      out.push(blank, `${prefix}${sentinel(BLOCK, id(match[1]))}`, blank);
+      const last = index === lines.length - 2 && lines[index + 1] === '';
+      out.push(blank, `${prefix}${sentinel(BLOCK, id(match[1]))}`, ...(last ? [] : [blank]));
       continue;
     }
     if (match) {

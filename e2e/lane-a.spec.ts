@@ -865,6 +865,69 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
+  // Ticket 701: the terminal's bridge goes (its socket gone, its child restarting) while the terminal's process runs.
+  // Main reads that as the bridge alone going: the agent and the shell it drove are no longer known to run, so neither
+  // card holds them and nothing reads "ended with the session" (the panel lists the agent on disk, its status
+  // unavailable) until the bridge answers again and its watch says they run. The process then ending ends them.
+  test('a bridge that goes while its terminal runs: the cards leave and nothing reads ended with the session, the agent on disk with its status unavailable; the bridge back, both run again; the terminal going then ends them with the session', async () => {
+    test.setTimeout(120_000);
+    const agent: BackgroundAgent = { agentId: 'a1e2e000000000007', description: 'Count the notes', prompt: 'Count notes.md.', at: '2026-10-28T10:00:04.000Z' };
+    const job = { taskId: 'bwatch07', command: 'sleep 600', description: 'Watch the tests', at: '2026-10-28T10:00:03.000Z' };
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const shell = backgroundBashRecords(sid, cwd, ask, job);
+      const turn = backgroundAgentRecords(sid, cwd, shell.at(-1)!.uuid as string, agent);
+      return [userRecord(sid, cwd, ask, after, 'Watch the tests and count the notes.', '2026-10-28T10:00:03.000Z'), ...shell, ...turn, ...turnEndRecords(sid, cwd, turn.at(-1)!.uuid as string, '2026-10-28T10:00:05.000Z')];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
+    const { page } = c;
+    const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
+    const states = async () => value(await invoke(page, 'laneA.list', undefined)).states.length;
+    const subagents = sessionCard(page, 'Subagents');
+    const background = sessionCard(page, 'Background tasks');
+    const running = async () => {
+      await showSessionCards(page);
+      await expect(subagents.locator(`[data-agent-row="${agent.agentId}"]`), 'the agent on the Subagents card').toContainText(agent.description, { timeout: 15_000 });
+      await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell on the Background tasks card').toContainText(job.description, { timeout: 15_000 });
+    };
+    // the panel's section `name`, unfolded, once its heading reads `heading`
+    const section = async (name: string, heading: string): Promise<Locator> => {
+      await openSurface(page, 'Subagents');
+      const found = surface(page, 'subagents').locator(`section[data-section="${name}"]`);
+      await expect(found).toHaveAttribute('aria-label', heading, { timeout: 15_000 });
+      const unfold = found.getByRole('heading').getByRole('button');
+      if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+      return found;
+    };
+    const terminal = await drive(c);
+    await running();
+
+    await terminal.bridge.close();
+    await expect.poll(states, { timeout: 10_000, message: 'its bridge gone: no lane A state' }).toBe(0);
+    expect(await holder(), 'the terminal still holds the session').toBe('terminal');
+    await expect(subagents, 'the agent is no longer known to run: the Subagents card leaves').toHaveCount(0, { timeout: 15_000 });
+    await expect(background, 'nor the shell: the Background tasks card leaves').toHaveCount(0, { timeout: 15_000 });
+    const disk = await section('disk', 'On disk 1');
+    await expect(disk.locator(`[data-agent-row="${agent.agentId}"]`), 'its status unknown, not ended').toContainText('status unavailable');
+    await expect(surface(page, 'subagents').locator('section[data-section="done"]'), 'nothing reads ended').toHaveCount(0);
+    await expect(surface(page, 'subagents')).not.toContainText('ended with the session');
+
+    // the bridge answers again under the same terminal: its watch says both run
+    const back = await startFakeBridge({ home: c.maws.sminosHome, session: c.sid, pid: terminal.pid, sessionInfo: { session: c.sid, cwd: c.repo.root, model: 'claude-opus-4-5', version: '2.1.300' } });
+    back.emit({ type: 'catalog', ...CATALOG });
+    c.terminal = { bridge: back, pid: terminal.pid, close: async () => (await terminal.close(), await back.close()) };
+    await expect.poll(states, { timeout: 15_000, message: 'its bridge back' }).toBe(1);
+    await running();
+
+    // the terminal's process ends: what ran ended with the session
+    await c.terminal.close();
+    c.terminal = null;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(subagents, 'nothing of the session runs').toHaveCount(0, { timeout: 15_000 });
+    await expect((await section('done', 'Done 1')).locator(`[data-agent-row="${agent.agentId}"]`)).toContainText('ended with the session');
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
   test('a permission the bridge raised: Needs you and the pane within 1 s, the hover preview, the Overview card and the badge; allowed here, then answered in the terminal, then a late answer reading who won', async () => {
     test.setTimeout(120_000);
     const c = await begin();

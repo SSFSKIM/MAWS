@@ -115,7 +115,7 @@ describe('turn boundaries', () => {
     expect(state.order).toEqual([one, two]);
     expect(state.current).toBe(two);
     list = rowsOf(state);
-    expect(list.filter((row) => row.turnId === two).map((row) => row.kind)).toEqual(['user', 'divider', 'assistant_text']);
+    expect(list.filter((row) => row.turnId === two).map((row) => row.kind)).toEqual(['user', 'assistant_text', 'divider']);
     expect(list.filter((row) => row.kind === 'user')).toHaveLength(2);
   });
 
@@ -150,7 +150,7 @@ describe('turn boundaries', () => {
     expect(state.turns.get(one)!.state).toBe('closed');
     expect(state.current).toBeNull();
     list = rowsOf(state); // closed and collapsed: the steer bubble stays, outside the work area
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'user', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'user', 'assistant_text', 'divider']);
     expect(find(list, 'user', 1)).toMatchObject({ steer: true, text: 'also check the logs' });
     // The engine's inbound replay of the folded prompt adds nothing.
     const before = rowsOf(state);
@@ -526,7 +526,7 @@ describe('turn boundaries', () => {
     state = reduce(b.events);
     expect(state.order).toEqual([turnId.ofMessage(uuid('u1'))]);
     list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'local_command', 'local_command', 'user', 'divider', 'cell', 'local_command', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'local_command', 'local_command', 'user', 'cell', 'local_command', 'assistant_text', 'divider']);
     expect(find(list, 'local_command', 2)).toMatchObject({ turnId: turnId.ofMessage(uuid('u1')), text: 'Context usage: 12k / 200k tokens' });
     expect(find(list, 'user').text).toBe('prompt u1');
   });
@@ -584,7 +584,7 @@ describe('turn boundaries', () => {
     b.emit('user.message', { messageUuid: uuid('im1'), content: [{ type: 'text', text: '[Request interrupted by user]' }], isReplay: false, isSynthetic: false, origin: 'interrupt-marker', bash: null });
     b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_streaming' });
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(kinds(list)).toEqual(['time', 'user', 'cell', 'divider']);
     expect(find(list, 'divider').state).toBe('stopped');
     expect(find(list, 'cell').status).toBe('stopped');
   });
@@ -803,7 +803,7 @@ describe('child traffic', () => {
     const turn = state.turns.get(turnId.ofMessage(uuid('u1')))!;
     expect(turn.children.get(tool('agent1'))).toHaveLength(2);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'subagent', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'subagent', 'assistant_text', 'divider']);
     expect(find(list, 'subagent')).toMatchObject({ sentence: 'Survey finished', status: 'finished' });
     expect(find(list, 'subagent').agents[0]).toMatchObject({ taskId: 'task1', toolUseId: 'agent1', name: 'Survey', kind: 'agent' });
   });
@@ -818,7 +818,7 @@ describe('child traffic', () => {
     const list = rowsOf(withAllExpanded(state));
     // the slice never closes its turn; the answer after the read completes the read's group, which unwraps (W1: the
     // answer is in the turn's event order, after the work it follows)
-    expect(kinds(list)).toEqual(['time', 'divider', 'cell', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'cell', 'assistant_text', 'divider']);
     expect(find(list, 'cell').id).toBe('cell:c1');
   });
 });
@@ -895,7 +895,7 @@ describe('revisable log', () => {
     b.text('m2', 0, 'Two');
     b.end(['u2']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'divider', 'cell', 'boundary', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'cell', 'boundary', 'assistant_text', 'divider']);
     expect(find(list, 'boundary', 0)).toMatchObject({ boundaryKind: 'compaction', turnId: null, text: 'Context compacted · 160k → 24k tokens · auto' });
     expect(find(list, 'boundary', 1)).toMatchObject({ boundaryKind: 'reset', turnId: turnId.ofMessage(uuid('u2')) });
   });
@@ -936,12 +936,12 @@ describe('requests', () => {
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [{ question: 'Which?', header: 'Pick', options: [{ label: 'A', description: null, preview: null }, { label: 'B', description: null, preview: null }], multiSelect: false }] });
     let state = reduce(b.events);
     let list = rowsOf(withAllExpanded(state));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question']);
+    expect(kinds(list)).toEqual(['time', 'user', 'question', 'divider']);
     expect(find(list, 'question')).toMatchObject({ id: rowId.question(tool('q1')), answers: null });
     const answered = b.emit('question.answered', { requestId: request('r1'), toolUseId: tool('q1'), answers: { 'Which?': 'A' } });
     state = applyEvents(state, [answered]);
     list = rowsOf(withAllExpanded(state));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question']);
+    expect(kinds(list)).toEqual(['time', 'user', 'question', 'divider']);
     expect(find(list, 'question')).toMatchObject({ id: rowId.question(tool('q1')), answers: { 'Which?': 'A' } });
     expect(state.pending.size).toBe(0);
   });
@@ -1015,7 +1015,7 @@ describe('denial disposition', () => {
     b.end(['u1']);
     const list = rows(b.events);
     expect(find(list, 'divider')).toMatchObject({ toolCalls: 4, denied: 1, autoDenied: 2, firstDeniedCell: 'cell:t2' });
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell', 'cell', 'cell', 'cell']);
+    expect(kinds(list)).toEqual(['time', 'user', 'cell', 'cell', 'cell', 'cell', 'divider']);
     const labels = list.filter((row) => row.kind === 'cell').map((row) => (row as Extract<Row, { kind: 'cell' }>).label);
     expect(labels).toEqual(['Ran `a` in 0s', 'Denied: `b` · Nope', 'Auto mode blocked: `c`' /* UX wave U1c: a text that is not the engine's gives no reason */, 'Auto mode blocked: `d` · review unreadable']);
   });

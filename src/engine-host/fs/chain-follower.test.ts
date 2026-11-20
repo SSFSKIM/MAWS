@@ -296,7 +296,7 @@ describe('follows the leaf across a rewind', () => {
     expect(rewinds).toHaveLength(1);
     expect(short(rewinds[0].precedingAssistantUuid)).toBe('edf0f954');
     expect(short(rewinds[0].targetMessageUuid)).toBe('36a2aa44');
-    expect(rewinds[0].prefillText).toBe('Also remember the word BANANA. Reply OK.');
+    expect(rewinds[0].prefillText).toBeNull(); // board ticket 740: the anchor's `lastPrompt` is the session's latest prompt, not the rewound one
     expect(rewinds[0].id).toMatch(/^anchor:\d+$/);
     expect(out.of('boundary.retraction')).toEqual([]);
     expect(out.of('notice.posted')).toEqual([]);
@@ -432,7 +432,7 @@ describe('follows the leaf across a rewind', () => {
     expect(follower.snapshot().gap).toBeNull();
     const rewinds = out.of('boundary.rewind');
     expect(rewinds).toHaveLength(1);
-    expect(rewinds[0]).toMatchObject({ precedingAssistantUuid: 'a1', targetMessageUuid: 'u2', prefillText: 'Also remember BANANA.' });
+    expect(rewinds[0]).toMatchObject({ precedingAssistantUuid: 'a1', targetMessageUuid: 'u2', prefillText: null }); // board ticket 740
     expect(out.of('boundary.retraction')).toEqual([]);
     // `s1` (system/informational, on the abandoned branch) was delivered before the cut as an unknown system subtype.
     expect(out.of('frame.unknown').map((e) => [e.id, e.frameType, e.subtype])).toEqual([['s1', 'transcript:system', 'informational']]);
@@ -449,7 +449,7 @@ describe('follows the leaf across a rewind', () => {
     ];
     const { reader, follower, out } = await started(joined(lines), 'S' as SessionId);
     expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'u2', 'a2']);
-    expect(follower.snapshot().rewind).toMatchObject({ phase: 'unanchored', leafUuid: 'not-here', prefillText: 'two' });
+    expect(follower.snapshot().rewind).toMatchObject({ phase: 'unanchored', leafUuid: 'not-here', prefillText: null }); // board ticket 740
     expect(out.of('boundary.rewind')).toEqual([]);
 
     reader.append(joined([line({ type: 'user', uuid: 'u3', parentUuid: 'a1', timestamp: at(4), message: { role: 'user', content: 'three' } })]));
@@ -458,7 +458,7 @@ describe('follows the leaf across a rewind', () => {
     expect(follower.snapshot().rewind).toBeNull();
     const rewinds = out.of('boundary.rewind');
     expect(rewinds).toHaveLength(1);
-    expect(rewinds[0]).toMatchObject({ precedingAssistantUuid: 'not-here', targetMessageUuid: 'u2', prefillText: 'two' });
+    expect(rewinds[0]).toMatchObject({ precedingAssistantUuid: 'not-here', targetMessageUuid: 'u2', prefillText: null });
     expect(out.of('boundary.retraction')).toEqual([]);
     expect(out.of('notice.posted')).toEqual([]);
     expectWellFormed(out.events());

@@ -21,76 +21,6 @@
     "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"
   },
   {
-    "at": "2026-09-28T09:22:25.274Z",
-    "autoDenied": 0,
-    "caption": "Created 2 files",
-    "counts": {
-      "added": 12,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T09:22:31.747Z",
-    "expanded": true,
-    "files": [
-      {
-        "added": 11,
-        "cellId": "cell:toolu_011PWfSNncXejckNmSaQWjkW",
-        "change": "create",
-        "path": "/Users/new/.claude/projects/-private-tmp-maws-probe-4Yw2cX/memory/zebra.md",
-        "removed": 0
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_01MQzbZUziwWJr2CsS1peg9u",
-        "change": "create",
-        "path": "/Users/new/.claude/projects/-private-tmp-maws-probe-4Yw2cX/memory/MEMORY.md",
-        "removed": 0
-      }
-    ],
-    "firstDeniedCell": null,
-    "id": "divider:turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "created 2 files"
-    ],
-    "startedAt": "2026-09-28T09:22:25.320Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 2,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.026682400000000002,
-      "denials": [],
-      "durationMs": 6425,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 2,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 2,
-      "usage": {
-        "cacheCreationInputTokens": 9840,
-        "cacheReadInputTokens": 33824,
-        "inputTokens": 18,
-        "outputTokens": 526,
-        "thinkingTokens": 265
-      }
-    },
-    "toolCalls": 2,
-    "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"
-  },
-  {
     "at": "2026-09-28T09:22:25.978Z",
     "durationMs": 2777,
     "id": "think:msg_011CfVbLuaoxoNgtnP7npcRH:0",
@@ -264,6 +194,76 @@
     "messageUuid": "afc2a1e4-1116-47e2-96c2-06fb714d46b0",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
+    "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"
+  },
+  {
+    "at": "2026-09-28T09:22:25.274Z",
+    "autoDenied": 0,
+    "caption": "Created 2 files",
+    "counts": {
+      "added": 12,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:31.747Z",
+    "expanded": true,
+    "files": [
+      {
+        "added": 11,
+        "cellId": "cell:toolu_011PWfSNncXejckNmSaQWjkW",
+        "change": "create",
+        "path": "/Users/new/.claude/projects/-private-tmp-maws-probe-4Yw2cX/memory/zebra.md",
+        "removed": 0
+      },
+      {
+        "added": 1,
+        "cellId": "cell:toolu_01MQzbZUziwWJr2CsS1peg9u",
+        "change": "create",
+        "path": "/Users/new/.claude/projects/-private-tmp-maws-probe-4Yw2cX/memory/MEMORY.md",
+        "removed": 0
+      }
+    ],
+    "firstDeniedCell": null,
+    "id": "divider:turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "created 2 files"
+    ],
+    "startedAt": "2026-09-28T09:22:25.320Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 2,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.026682400000000002,
+      "denials": [],
+      "durationMs": 6425,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 2,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 9840,
+        "cacheReadInputTokens": 33824,
+        "inputTokens": 18,
+        "outputTokens": 526,
+        "thinkingTokens": 265
+      }
+    },
+    "toolCalls": 2,
     "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"
   },
   {

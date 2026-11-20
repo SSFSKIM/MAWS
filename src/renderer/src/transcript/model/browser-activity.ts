@@ -157,10 +157,11 @@ export function browserActivityRow(entry: BrowserActivityEntry, call: { toolUseI
 }
 
 const times = new WeakMap<Row, number>();
+// A turn's line stands at the turn's end (board ticket 789): it is placed by its end, a running turn's after everything.
 const timeOf = (row: Row) => {
   let t = times.get(row);
   if (t === undefined) {
-    t = Date.parse(row.at);
+    t = row.kind !== 'divider' ? Date.parse(row.at) : row.endedAt === null ? Infinity : Date.parse(row.endedAt);
     times.set(row, t);
   }
   return t;

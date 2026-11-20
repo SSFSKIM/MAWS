@@ -47,6 +47,57 @@
     "turnId": "turn:u-hooks-answer-027"
   },
   {
+    "agent": null,
+    "at": "2026-09-28T11:40:00.510Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "date +%H:%M",
+      "cwd": null,
+      "description": "Read the time",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "10:00",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T11:40:00.585Z",
+    "expanded": true,
+    "id": "cell:toolu_hooks_answer_1",
+    "kind": "cell",
+    "label": "Ran `date +%H:%M` in 0s",
+    "paths": [],
+    "startedAt": "2026-09-28T11:40:00.510Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_hooks_answer_1",
+    "turnId": "turn:u-hooks-answer-027"
+  },
+  {
+    "at": "2026-09-28T11:40:00.645Z",
+    "blockIndex": 0,
+    "id": "text:msg_hooksanswer_003:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "\nto human\n\nIt is 10:00.\n",
+    "messageUuid": "a-hooks-answer-048",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-hooks-answer-027"
+  },
+  {
     "at": "2026-09-28T11:40:00.405Z",
     "autoDenied": 0,
     "caption": "Ran a command",
@@ -99,57 +150,6 @@
       }
     },
     "toolCalls": 1,
-    "turnId": "turn:u-hooks-answer-027"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-28T11:40:00.510Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "date +%H:%M",
-      "cwd": null,
-      "description": "Read the time",
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "10:00",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T11:40:00.585Z",
-    "expanded": true,
-    "id": "cell:toolu_hooks_answer_1",
-    "kind": "cell",
-    "label": "Ran `date +%H:%M` in 0s",
-    "paths": [],
-    "startedAt": "2026-09-28T11:40:00.510Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_hooks_answer_1",
-    "turnId": "turn:u-hooks-answer-027"
-  },
-  {
-    "at": "2026-09-28T11:40:00.645Z",
-    "blockIndex": 0,
-    "id": "text:msg_hooksanswer_003:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "\nto human\n\nIt is 10:00.\n",
-    "messageUuid": "a-hooks-answer-048",
-    "model": "claude-opus-5-5",
-    "phase": "answer",
     "turnId": "turn:u-hooks-answer-027"
   },
   {

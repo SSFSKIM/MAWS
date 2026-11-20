@@ -21,68 +21,6 @@
     "turnId": "turn:u-exploration-and-web-002"
   },
   {
-    "at": "2026-09-28T10:30:00.045Z",
-    "autoDenied": 0,
-    "caption": "Searched code, searched for files, read 6 files, and 5 more actions",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T10:30:03.169Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:u-exploration-and-web-002",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "searched code",
-      "searched for files",
-      "read 6 files",
-      "searched the web",
-      "fetched a page",
-      "ran /test-driven-development",
-      "loaded 2 tools",
-      "used docs · search"
-    ],
-    "startedAt": "2026-09-28T10:30:00.100Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 8,
-        "files": 0,
-        "mcp": 1,
-        "other": 0,
-        "skills": 2,
-        "web": 2
-      },
-      "childAgents": 0,
-      "costUsd": 0.0123,
-      "denials": [],
-      "durationMs": 3024,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 13,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 13,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 21000,
-        "inputTokens": 12,
-        "outputTokens": 240,
-        "thinkingTokens": null
-      }
-    },
-    "toolCalls": 13,
-    "turnId": "turn:u-exploration-and-web-002"
-  },
-  {
     "at": "2026-09-28T10:30:00.153Z",
     "cells": [
       {
@@ -629,6 +567,68 @@
     "messageUuid": "a-exploration-and-web-139",
     "model": "claude-opus-5-5",
     "phase": "answer",
+    "turnId": "turn:u-exploration-and-web-002"
+  },
+  {
+    "at": "2026-09-28T10:30:00.045Z",
+    "autoDenied": 0,
+    "caption": "Searched code, searched for files, read 6 files, and 5 more actions",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T10:30:03.169Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-exploration-and-web-002",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "searched code",
+      "searched for files",
+      "read 6 files",
+      "searched the web",
+      "fetched a page",
+      "ran /test-driven-development",
+      "loaded 2 tools",
+      "used docs · search"
+    ],
+    "startedAt": "2026-09-28T10:30:00.100Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 8,
+        "files": 0,
+        "mcp": 1,
+        "other": 0,
+        "skills": 2,
+        "web": 2
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [],
+      "durationMs": 3024,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 13,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 13,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 13,
     "turnId": "turn:u-exploration-and-web-002"
   },
   {

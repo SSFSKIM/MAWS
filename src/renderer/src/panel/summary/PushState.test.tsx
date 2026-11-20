@@ -203,6 +203,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
   it('Install opens cli.github.com when gh is missing; Sign in types gh auth login into a Terminal tab', async () => {
     const user = userEvent.setup();
     const addTool = vi.spyOn(panelHost, 'addTool');
+    registerPanelTool(probeTool('terminal').tool); // the tab Sign in opens (the panel refuses a tool it does not know)
     bridge({ 'scm.status': { ...SCM, gh: { state: 'missing' } }, 'scm.pr.state': { ...PR, gh: { state: 'missing' }, pr: null, error: 'gh_missing', checkedAt: SCM.checkedAt } });
     const view = await mount();
     await lineReads('GitHub CLI not installed · Install');

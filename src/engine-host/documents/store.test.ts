@@ -13,6 +13,7 @@ import { schemaFor } from '@artifacts/document/schema';
 import { createDocument } from '@artifacts/document/tabs';
 import { encodeFrame } from '@artifacts/provider/frames';
 import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, insertedBy, mergeUpdates, newDoc, onUpdate, stateV2, stateVector, transact, type Doc } from '@artifacts/yjs';
+import { clientIdChangesAsync } from '@artifacts/yjs/client-id-log.fixture';
 import { deletionsOf, liveMarkers } from '@artifacts/yjs/format-cleanup.fixture';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { Actor } from '@shared/artifacts/actor';
@@ -407,13 +408,20 @@ describe('ArtifactStore: a duplicate’s origin (P4 W1, tracker 2026-10-19 L277)
     const origin = { route: 'default' as const, key: 'maws', at: now };
     const house = await store.create({ kind: 'design_system', title: 'MAWS', initial: (doc) => void writeSystem(doc, defaultSystem('maws')!.files, origin, { name: 'MAWS' }) }, human);
     const v1 = (await store.createVersion(house.id, { kind: 'named', actor: human, label: 'v1' }))!;
-    const copy = await store.duplicate(house.id, {}, human);
+    // the copy loads the source's state and the kind's hook writes the origin in one transaction of the writer's host
+    // replica, so Yjs gives that replica a fresh clientID after the write and says so once per copy
+    const duplicate = async (...args: Parameters<typeof store.duplicate>) => {
+      let copied: Awaited<ReturnType<typeof store.duplicate>> | undefined;
+      expect(await clientIdChangesAsync(async () => void (copied = await store.duplicate(...args)))).toBe(1);
+      return copied!;
+    };
+    const copy = await duplicate(house.id, {}, human);
     expect(readOrigin(service.live(copy.id))).toEqual({ ...origin, copiedFrom: 'MAWS' });
     expect(readOrigin(service.live(house.id))).toEqual(origin);
     await store.update(house.id, { title: 'House' });
-    const old = await store.duplicate(house.id, { versionId: v1, title: 'Mine' }, human);
+    const old = await duplicate(house.id, { versionId: v1, title: 'Mine' }, human);
     expect(readOrigin(service.live(old.id))).toEqual({ ...origin, copiedFrom: 'House' });
-    const again = await store.duplicate(copy.id, {}, human);
+    const again = await duplicate(copy.id, {}, human);
     expect(readOrigin(service.live(again.id))).toEqual({ ...origin, copiedFrom: 'Copy of MAWS' });
   });
 });

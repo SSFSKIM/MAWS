@@ -302,7 +302,7 @@ describe('the ask capsule', () => {
     b.text('m1', 0, 'Blue it is.');
     b.end(['u1']);
     const rows = foldedRows(b.events);
-    expect(rows.filter((row) => row.kind !== 'time').map((row) => row.kind)).toEqual(['user', 'divider', 'ask', 'assistant_text']);
+    expect(rows.filter((row) => row.kind !== 'time').map((row) => row.kind)).toEqual(['user', 'ask', 'assistant_text', 'divider']);
     expect(ofKind(rows, 'assistant_text').map((row) => [row.markdown, row.phase])).toEqual([['Blue it is.', 'answer']]);
     expect(isPersistentRow(capsule(rows))).toBe(true);
   });

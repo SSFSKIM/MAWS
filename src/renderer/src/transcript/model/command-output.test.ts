@@ -169,14 +169,14 @@ describe('a command output’s row', () => {
       expect(unseparated.map(shape)).toContainEqual(['user', 'output Error: No messages to compact']);
     });
 
-    // Decided with the fix: the turn's own line is the bubble's, so an output under a command's running (or stopped)
-    // turn line is not drawn alone, and its name does not come and go as the turn ends.
-    it('an output under its command’s own turn line, while the command runs, is not alone', () => {
+    // Decided with the fix: an output directly under its command's bubble is not drawn alone while the command runs (or
+    // after it was stopped), and its name does not come and go as the turn ends; the turn's line ends the turn, after it.
+    it('an output in its command’s own turn, above the turn’s line while the command runs, is not alone', () => {
       const b = builder();
       b.turn('u1', '/usage');
       output(b, 'o1', '<local-command-stdout>Total cost: $0.03</local-command-stdout>', commandEntry({ run: USAGE, plain: false })); // no turn.ended yet
       const drawn = rowsOf(applyEvents(createState(null, null), b.events)).filter((row) => row.kind !== 'time');
-      expect(shape(drawn)).toEqual(['user', 'divider', 'output Total cost: $0.03']);
+      expect(shape(drawn)).toEqual(['user', 'output Total cost: $0.03', 'divider']);
     });
 
     it('a separated output that carries a run keeps its standalone prefix when drawn and when copied', () => {

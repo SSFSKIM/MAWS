@@ -21,6 +21,38 @@
     "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
   },
   {
+    "agents": [
+      {
+        "agentId": "ab46b2438028eda01",
+        "glyph": 3,
+        "kind": "agent",
+        "name": "List repo files",
+        "subagentType": "Explore",
+        "taskId": "ab46b2438028eda01",
+        "toolUseId": "toolu_01N47uG7ZmHrpx7qB5LyVkwB"
+      }
+    ],
+    "at": "2026-09-30T09:14:05.991Z",
+    "id": "subagent:ab46b2438028eda01",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "List repo files finished",
+    "status": "finished",
+    "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
+  },
+  {
+    "at": "2026-09-30T09:14:08.040Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfZNKwVdN456bVMQTZLxa:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "I've started a subagent to list the files, and it's still running. I'll pass on what it finds once it reports back.\n\nI don't have a task-tracking tool in this session, so here's the task list as text for now:\n\n1. **List the files in the repo.** In progress.\n2. **Summarize the file listing for you.** Waiting on item 1.",
+    "messageUuid": "62ee1da0-57a2-40e6-b460-54d3827888d1",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
+  },
+  {
     "at": "2026-09-30T09:14:02.476Z",
     "autoDenied": 0,
     "caption": "Ran an agent",
@@ -73,38 +105,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
-  },
-  {
-    "agents": [
-      {
-        "agentId": "ab46b2438028eda01",
-        "glyph": 3,
-        "kind": "agent",
-        "name": "List repo files",
-        "subagentType": "Explore",
-        "taskId": "ab46b2438028eda01",
-        "toolUseId": "toolu_01N47uG7ZmHrpx7qB5LyVkwB"
-      }
-    ],
-    "at": "2026-09-30T09:14:05.991Z",
-    "id": "subagent:ab46b2438028eda01",
-    "kind": "subagent",
-    "overflow": 0,
-    "sentence": "List repo files finished",
-    "status": "finished",
-    "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
-  },
-  {
-    "at": "2026-09-30T09:14:08.040Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfZNKwVdN456bVMQTZLxa:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "I've started a subagent to list the files, and it's still running. I'll pass on what it finds once it reports back.\n\nI don't have a task-tracking tool in this session, so here's the task list as text for now:\n\n1. **List the files in the repo.** In progress.\n2. **Summarize the file listing for you.** Waiting on item 1.",
-    "messageUuid": "62ee1da0-57a2-40e6-b460-54d3827888d1",
-    "model": "claude-opus-5-5",
-    "phase": "answer",
     "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
   },
   {

@@ -413,6 +413,10 @@ test('UX wave U5a: in a body under 720 px, a comment’s card that became its si
     // draws the thread's own row of the comment as taken (no `data-pending`, so no longer waiting in MAWS's queue): the
     // host wrote the prompt to the engine, which it does only once the child's process is ready
     await expect(card.locator('[data-card-thread] section.transcript-user:not([data-pending])'), 'the comment taken by the thread').toBeVisible({ timeout: 20_000 });
+    // ...and the thread bound: the host names it through its engine after the prompt (the journal's rename, which the
+    // replay holds the context read behind), and its setup intent goes only once that rename is answered (setup.ts,
+    // finishBinding). A read before it meets the replay still waiting for the rename and is answered as unrecorded.
+    await expect.poll(async () => value(await invoke(page, 'session.intent.get', { appSessionId: child as never })), { message: 'the thread bound, its rename answered', timeout: 20_000 }).toBeNull();
     value(await invoke(page, 'session.getContextUsage', { appSessionId: child as never, detail: 'summary' }));
     await expect(card, 'folded to the passage’s mark').toHaveCount(0, { timeout: 20_000 });
     await expect(text.locator('[data-thread]'), 'the mark stays').toHaveCount(1);

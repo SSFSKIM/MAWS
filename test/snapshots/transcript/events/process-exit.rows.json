@@ -21,6 +21,46 @@
     "turnId": "turn:u-exit-1"
   },
   {
+    "agent": null,
+    "at": "2026-09-28T12:00:01.010Z",
+    "background": false,
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "./release.sh",
+      "cwd": null,
+      "description": "Run the release script",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "doneLabel": "Ran `./release.sh` in 3s",
+    "endedAt": null,
+    "expanded": true,
+    "id": "cell:toolu_exit_1",
+    "kind": "cell",
+    "label": "Stopped: Run the release script",
+    "paths": [],
+    "startedAt": "2026-09-28T12:00:01.010Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_exit_1",
+    "turnId": "turn:u-exit-1"
+  },
+  {
     "at": "2026-09-28T12:00:00.010Z",
     "autoDenied": 0,
     "caption": "Ran a command (1 stopped)",
@@ -68,46 +108,6 @@
       "usage": null
     },
     "toolCalls": 1,
-    "turnId": "turn:u-exit-1"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-28T12:00:01.010Z",
-    "background": false,
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "./release.sh",
-      "cwd": null,
-      "description": "Run the release script",
-      "exitCode": null,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "",
-      "truncated": null
-    },
-    "doneLabel": "Ran `./release.sh` in 3s",
-    "endedAt": null,
-    "expanded": true,
-    "id": "cell:toolu_exit_1",
-    "kind": "cell",
-    "label": "Stopped: Run the release script",
-    "paths": [],
-    "startedAt": "2026-09-28T12:00:01.010Z",
-    "status": "stopped",
-    "toolName": "Bash",
-    "toolUseId": "toolu_exit_1",
     "turnId": "turn:u-exit-1"
   },
   {

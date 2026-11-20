@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { liveMarkedRowIds, liveMarksOf, mirrorRows } from '../../owner/view/mirror';
 import { viewRowsOf } from '../../owner/view/test-support';
 import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
+import { withQueueTail } from '../../transcript/model/derive';
 import { api, builder } from '../../transcript/model/test-events';
 import { renderRow, rowOf, storeWith } from '../../transcript/view/rows/test-support';
 import type { StreamBlock } from '../stream/layer';
@@ -84,7 +85,8 @@ describe('the streaming rows', () => {
       expect(entry.state.ui.noTurnFold).toBe(true);
       const visible = (rows: typeof entry.rows, outside: typeof entry.rows) => mode === 'report' ? mirrorRows(rows, entry.state.ui, liveMarksOf(liveMarkedRowIds(entry.state), outside)) : rows;
       const nativeRows = visible(entry.rows, []);
-      const deskRows = visible([...entry.rows.filter((row) => row.id !== native.id), desk], [desk]);
+      // the desk's row comes in as the list's tail, which stands before the running turn's line (board ticket 789)
+      const deskRows = visible(withQueueTail(entry.rows.filter((row) => row.id !== native.id), new Set(), [desk]), [desk]);
       expect(deskRows.map((row) => row.kind)).toEqual(nativeRows.map((row) => row.kind));
       expect(deskRows).toContain(desk);
       expect(nativeRows).toContain(native);

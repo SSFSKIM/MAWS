@@ -21,61 +21,6 @@
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
   {
-    "at": "2026-09-28T09:21:49.996Z",
-    "autoDenied": 0,
-    "caption": "Ran a command",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": "2026-09-28T09:21:53.436Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [
-      "ran a command"
-    ],
-    "startedAt": "2026-09-28T09:21:50.042Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 1,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0238106,
-      "denials": [],
-      "durationMs": 3392,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 1,
-      "usage": {
-        "cacheCreationInputTokens": 9328,
-        "cacheReadInputTokens": 33826,
-        "inputTokens": 18,
-        "outputTokens": 157,
-        "thinkingTokens": 66
-      }
-    },
-    "toolCalls": 1,
-    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
-  },
-  {
     "at": "2026-09-28T09:21:50.808Z",
     "durationMs": 463,
     "id": "think:msg_011CfVbJKTBQYfwR82Y76xFE:0",
@@ -149,37 +94,25 @@
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
   {
-    "at": "2026-09-28T09:21:53.436Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
-    "placeholders": [],
-    "steer": false,
-    "text": "Use Bash to run exactly git branch --show-current. If denied, stop.",
-    "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
-  },
-  {
-    "at": "2026-09-28T09:21:53.436Z",
+    "at": "2026-09-28T09:21:49.996Z",
     "autoDenied": 0,
-    "caption": "",
+    "caption": "Ran a command",
     "counts": {
       "added": 0,
       "removed": 0
     },
-    "denied": 1,
-    "endedAt": "2026-09-28T09:21:56.005Z",
+    "denied": 0,
+    "endedAt": "2026-09-28T09:21:53.436Z",
     "expanded": true,
     "files": [],
-    "firstDeniedCell": "cell:toolu_01WfZTvMV6147Psn1MBSesXw",
-    "id": "divider:turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
+    "firstDeniedCell": null,
+    "id": "divider:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
     "kind": "divider",
     "origin": "human",
-    "parts": [],
-    "startedAt": "2026-09-28T09:21:53.438Z",
+    "parts": [
+      "ran a command"
+    ],
+    "startedAt": "2026-09-28T09:21:50.042Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -193,16 +126,9 @@
         "web": 0
       },
       "childAgents": 0,
-      "costUsd": 0.0294669,
-      "denials": [
-        {
-          "cellId": "cell:toolu_01WfZTvMV6147Psn1MBSesXw",
-          "disposition": "denied",
-          "interruption": false,
-          "kind": "permission-rule"
-        }
-      ],
-      "durationMs": 2566,
+      "costUsd": 0.0238106,
+      "denials": [],
+      "durationMs": 3392,
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
@@ -212,14 +138,28 @@
       "terminalReason": "completed",
       "toolCalls": 1,
       "usage": {
-        "cacheCreationInputTokens": 226,
-        "cacheReadInputTokens": 43363,
+        "cacheCreationInputTokens": 9328,
+        "cacheReadInputTokens": 33826,
         "inputTokens": 18,
-        "outputTokens": 170,
-        "thinkingTokens": 77
+        "outputTokens": 157,
+        "thinkingTokens": 66
       }
     },
     "toolCalls": 1,
+    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
+  },
+  {
+    "at": "2026-09-28T09:21:53.436Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
+    "placeholders": [],
+    "steer": false,
+    "text": "Use Bash to run exactly git branch --show-current. If denied, stop.",
     "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
   },
   {
@@ -301,39 +241,23 @@
     "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
   },
   {
-    "at": "2026-09-28T09:21:56.005Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:7c9e7143-c066-41a4-bef7-e28aee59c6eb",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "7c9e7143-c066-41a4-bef7-e28aee59c6eb",
-    "placeholders": [],
-    "steer": false,
-    "text": "Use Bash to run exactly git status --short. Then say DONE.",
-    "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
-  },
-  {
-    "at": "2026-09-28T09:21:56.005Z",
+    "at": "2026-09-28T09:21:53.436Z",
     "autoDenied": 0,
-    "caption": "Ran a command",
+    "caption": "",
     "counts": {
       "added": 0,
       "removed": 0
     },
-    "denied": 0,
-    "endedAt": "2026-09-28T09:21:58.238Z",
+    "denied": 1,
+    "endedAt": "2026-09-28T09:21:56.005Z",
     "expanded": true,
     "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb",
+    "firstDeniedCell": "cell:toolu_01WfZTvMV6147Psn1MBSesXw",
+    "id": "divider:turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
     "kind": "divider",
     "origin": "human",
-    "parts": [
-      "ran a command"
-    ],
-    "startedAt": "2026-09-28T09:21:56.006Z",
+    "parts": [],
+    "startedAt": "2026-09-28T09:21:53.438Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -347,9 +271,16 @@
         "web": 0
       },
       "childAgents": 0,
-      "costUsd": 0.035047999999999996,
-      "denials": [],
-      "durationMs": 2231,
+      "costUsd": 0.0294669,
+      "denials": [
+        {
+          "cellId": "cell:toolu_01WfZTvMV6147Psn1MBSesXw",
+          "disposition": "denied",
+          "interruption": false,
+          "kind": "permission-rule"
+        }
+      ],
+      "durationMs": 2566,
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
@@ -359,14 +290,28 @@
       "terminalReason": "completed",
       "toolCalls": 1,
       "usage": {
-        "cacheCreationInputTokens": 213,
-        "cacheReadInputTokens": 43821,
+        "cacheCreationInputTokens": 226,
+        "cacheReadInputTokens": 43363,
         "inputTokens": 18,
-        "outputTokens": 151,
-        "thinkingTokens": 63
+        "outputTokens": 170,
+        "thinkingTokens": 77
       }
     },
     "toolCalls": 1,
+    "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
+  },
+  {
+    "at": "2026-09-28T09:21:56.005Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:7c9e7143-c066-41a4-bef7-e28aee59c6eb",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "7c9e7143-c066-41a4-bef7-e28aee59c6eb",
+    "placeholders": [],
+    "steer": false,
+    "text": "Use Bash to run exactly git status --short. Then say DONE.",
     "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
   },
   {
@@ -440,6 +385,61 @@
     "messageUuid": "47d0a625-b6b0-4a31-aca2-02fd6edc3979",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
+    "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
+  },
+  {
+    "at": "2026-09-28T09:21:56.005Z",
+    "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": "2026-09-28T09:21:58.238Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
+    "startedAt": "2026-09-28T09:21:56.006Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.035047999999999996,
+      "denials": [],
+      "durationMs": 2231,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 213,
+        "cacheReadInputTokens": 43821,
+        "inputTokens": 18,
+        "outputTokens": 151,
+        "thinkingTokens": 63
+      }
+    },
+    "toolCalls": 1,
     "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
   },
   {

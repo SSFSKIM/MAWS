@@ -313,7 +313,7 @@ describe('a followed session backfills, then tails its transcript', () => {
     await expect.poll(() => delivered().some((e) => e.kind === 'boundary.rewind'), { interval: 5, timeout: 1000 }).toBe(true);
     expect(Date.now() - anchorAt).toBeLessThan(300);
     const rewind = delivered().find((e) => e.kind === 'boundary.rewind');
-    expect(rewind).toMatchObject({ precedingAssistantUuid: expect.stringMatching(/^edf0f954/), prefillText: 'Also remember the word BANANA. Reply OK.' });
+    expect(rewind).toMatchObject({ precedingAssistantUuid: expect.stringMatching(/^edf0f954/), prefillText: null }); // board ticket 740: no text from the anchor
     await expect.poll(() => lastState()?.chainLength).toBe(backfill!.chainLength - 3);
 
     await fixture.appendLines(path, rewindLines.slice(27));

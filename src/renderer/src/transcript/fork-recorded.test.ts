@@ -103,3 +103,14 @@ describe('the rewind boundary of a fork from a delivered prompt (u3b-fork-delive
     expect(boundary).toMatchObject({ kind: 'boundary', boundaryKind: 'rewind', detail: 'UXW delivered: reply with only the word DELIVERED.' });
   });
 });
+
+// Board ticket 740: the engine's `last-prompt` anchor of a rewind holds the session's latest prompt, not the rewound one
+// (p5-o3-rewind-resume-post: T3 is cut, the anchor reads T4). The rewind line's title is the rewound message's own words,
+// from the branch the rewind hid, on the file's route as on the live one.
+describe('the rewind line’s title on a rewind read from the file (p5-o3-rewind-resume-post)', () => {
+  it('reads the rewound message’s own words, never the anchor’s latest prompt', async () => {
+    const text = readFileSync(join(FIXTURE_DIR, 'p5', 'p5-o3-rewind-resume-transcripts', 'p5-o3-rewind-resume-post.jsonl'), 'utf8');
+    const boundary = drawn(await fromFile(text)).find((row) => row.kind === 'boundary' && row.boundaryKind === 'rewind');
+    expect(boundary).toMatchObject({ kind: 'boundary', boundaryKind: 'rewind', detail: '[[O3F:T3]] PROMPT_T3 Do step T3.' });
+  });
+});

@@ -21,53 +21,6 @@
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   },
   {
-    "at": "2026-09-28T09:22:05.261Z",
-    "autoDenied": 0,
-    "caption": "",
-    "counts": {
-      "added": 0,
-      "removed": 0
-    },
-    "denied": 0,
-    "endedAt": null,
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:78bf314c-d854-4662-b810-fede10ae5be3",
-    "kind": "divider",
-    "origin": "human",
-    "parts": [],
-    "startedAt": "2026-09-28T09:22:05.308Z",
-    "state": "working",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 3,
-      "costUsd": null,
-      "denials": [],
-      "durationMs": null,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": null,
-      "toolCalls": 0,
-      "usage": null
-    },
-    "toolCalls": 0,
-    "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
-  },
-  {
     "at": "2026-09-28T09:22:06.122Z",
     "durationMs": 1746,
     "id": "think:msg_011CfVbKS8JGJgpd1HAKitsJ:0",
@@ -167,6 +120,53 @@
     "overflow": 0,
     "sentence": "Read file after sleep started working",
     "status": "started",
+    "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
+  },
+  {
+    "at": "2026-09-28T09:22:05.261Z",
+    "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
+    "denied": 0,
+    "endedAt": null,
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:78bf314c-d854-4662-b810-fede10ae5be3",
+    "kind": "divider",
+    "origin": "human",
+    "parts": [],
+    "startedAt": "2026-09-28T09:22:05.308Z",
+    "state": "working",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 3,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 0,
+      "usage": null
+    },
+    "toolCalls": 0,
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   }
 ]

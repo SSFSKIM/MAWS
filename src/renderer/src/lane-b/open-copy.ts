@@ -3,11 +3,15 @@
 // which means nothing on this Mac, so none is offered there: a file of a lane B session on another machine, a library
 // file of another machine's artifact, opens as a copy main pages here (`remote.openCopy`, into the temporary directory,
 // 64 MiB at most) and hands to the OS. Reveal in Finder stays greyed "on <machine>": there is nothing here to reveal.
+// Ticket 627: a terminal (lane A) session there over RL2 has no copy route (the copy reads through lane B's adapter) and
+// takes no `files.openExternal`: its open answers the window's helper's sentence and sends nothing.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
+import { ipcError } from '@shared/ipc/errors';
 import { isRemoteLaneB } from './remote-session';
+import { remoteUnavailableOf } from './remote-unavailable';
 
 export const COPY_WORDS = {
   title: (machine: string) => `Opens a copy of this file from ${machine} on this Mac`,
@@ -20,7 +24,11 @@ type Opened = CommandResult<'files.openExternal'>;
  * U6f (Decision Log 33 (3)): `open`, the person opened the protected folder the file lies in there, rides the copy alone.
  */
 export function openSessionFile(appSessionId: AppSessionId, path: string, client: MawsBridge, { open }: { open?: true } = {}): Promise<Opened> {
-  if (!isRemoteLaneB(appSessionId)) return client.invoke('files.openExternal', { appSessionId, path });
+  if (!isRemoteLaneB(appSessionId)) {
+    const unavailable = remoteUnavailableOf(appSessionId, 'files.openExternal');
+    if (unavailable !== null) return Promise.resolve({ ok: false, error: ipcError('internal', unavailable) });
+    return client.invoke('files.openExternal', { appSessionId, path });
+  }
   // the session's address sends it to its machine, whose file it reads; main answers it here (its allow-list)
   return client.invoke('remote.openCopy', { machine: machineOf(appSessionId), source: { appSessionId, path }, ...(open && { open }) });
 }

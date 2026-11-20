@@ -74,6 +74,7 @@ import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-
 import { markIdOf } from '@shared/owner/marks';
 import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
 import { markRead } from '../owner/report/answering';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // ticket 627
 import { ESSENTIAL } from '../owner/report/copy';
 // P2-C end
 
@@ -533,9 +534,11 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
 }
 
 // P2-C start (2026-10-10; M6's fix wave): a must-read's Mark read; one that failed is said on the card beside it, the
-// button staying to try again
+// button staying to try again. Ticket 627: for a session on another machine over RL2 it is drawn disabled, the window's
+// helper's sentence its title.
 function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSessionId']; anchor: ItemAnchor }) {
   const [failed, setFailed] = useState<string | null>(null);
+  const unavailable = useRemoteUnavailable(appSessionId, 'ownerChannel.markRead');
   const read = async () => {
     setFailed(null);
     setFailed(await markRead(appSessionId, [markIdOf(bareOf(appSessionId), 'essential', anchor)])); // P5 O6 M2: main's mark id, on the bare session id
@@ -547,7 +550,9 @@ function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSe
           {ESSENTIAL.notMarked(failed)}
         </span>
       )}
-      <CardButton onClick={() => void read()}>{ESSENTIAL.markRead}</CardButton>
+      <CardButton disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void read()}>
+        {ESSENTIAL.markRead}
+      </CardButton>
     </>
   );
 }

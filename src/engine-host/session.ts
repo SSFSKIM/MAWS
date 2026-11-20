@@ -23,7 +23,7 @@ import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { legacyRouteOf, type ObservedRoute } from '@shared/engine/route'; // P5 O7 M9
 import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
-import { HookCallbackRequestSchema, type GetStatusResponse, type InterruptResponse, type ReloadPluginsResponse } from '@shared/wire/control';
+import { HookCallbackRequestSchema, type GetStatusResponse, type InterruptResponse, type McpStatusResponse, type ReloadPluginsResponse } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
@@ -53,7 +53,7 @@ import { hardReasons } from './budget';
 import { ControlClient, ControlError, ControlTimeout } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
-import { isPermissionMode, SessionStatusTracker, type Catalog, type TrackedStatus } from './session-status';
+import { isPermissionMode, SessionStatusTracker, type Catalog, type McpAsk, type TrackedStatus } from './session-status';
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
@@ -814,8 +814,10 @@ export class EngineSession {
   stdioServers(): Promise<StdioServers | null> {
     const client = this.client;
     if (client === null || this.processState !== 'ready') return Promise.resolve(null);
+    const asked = this.mcpRead === null ? this.mcpAsked() : null; // ticket 619: its answer is the status's servers too
     this.mcpRead ??= mcpStatus(client, {}).then(
       (answer) => {
+        if (asked !== null) this.noteMcpStatus(answer, asked);
         const stdio = answer.mcpServers.filter((server) => (stdioConfigOf(server)?.type ?? (server as { transport?: unknown }).transport) === 'stdio');
         const commands = stdio.flatMap((server) => {
           const config = stdioConfigOf(server);
@@ -917,6 +919,16 @@ export class EngineSession {
   noteCwd(cwd: string): void {
     this.tracker.engineCwd = cwd;
     this.touch();
+  }
+
+  // Ticket 619: an mcp_status answer (this session's own read and a page's alike) is its servers now, published when they
+  // changed, unless a newer report came since it was asked (`mcpAsked()` then).
+  mcpAsked(): McpAsk {
+    return this.tracker.askMcp();
+  }
+
+  noteMcpStatus(answer: McpStatusResponse, asked: McpAsk): void {
+    if (this.tracker.applyMcpStatus(answer, asked)) this.touch();
   }
 
   // E8 (D-13): a successful reload_plugins answer, published as the status and the catalogue an init frame would publish.
@@ -1235,6 +1247,7 @@ export class EngineSession {
     if (this.frozen) return; // P5 O16 M3b fix wave 1: never ready, nothing held dispatched, once frozen
     this.setProcess('ready');
     void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
+    if (!adopted) void this.readMcpServers(); // ticket 619: the servers before the first turn's system/init (not at an adopted ready: a tracker row)
     if (adopted) {
       // fix wave 1: the gate opens; what it held is dispatched in order, as if it had arrived now
       const held = this.handshakeHeld ?? [];
@@ -2088,6 +2101,20 @@ export class EngineSession {
   // The status line's `ctx` once ready and after every turn (debt wave 3): the engine's context read, whose answer the normaliser turns
   // into `context.sample` from its journal row; a failed read samples nothing and the last sample stands. E11: a read a
   // replay never recorded is logged by nothing but its journal row.
+  // Ticket 619: the servers once the session is ready, before any system/init (which the engine sends with the first
+  // turn): mcp_status asked once at ready. A server still pending then is said by the next init frame, reload or read
+  // (a page's, the dialog's), which the status keeps too.
+  private async readMcpServers(): Promise<void> {
+    const client = this.client;
+    if (client === null) return;
+    const asked = this.mcpAsked();
+    try {
+      this.noteMcpStatus(await mcpStatus(client, {}), asked);
+    } catch (error) {
+      if (!(error instanceof ControlError && error.code === 'replay_unrecorded')) this.log(`mcp_status for the session's servers failed: ${messageOf(error)}`);
+    }
+  }
+
   private async sampleContext(): Promise<void> {
     const client = this.client;
     if (!client) return;

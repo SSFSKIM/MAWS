@@ -238,6 +238,19 @@ describe('the header’s app actions', () => {
     expect(queued[0]!.text).toContain(`Adopt a law for the design system “Imported Harbor” (artifact ${DS})`);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The request is in the chat’s message box; send it when it reads right.']);
   });
+
+  // board ticket 739: a system's name, which a model can write, enters the request as one line
+  it('names the system in the adopt request on one line', async () => {
+    installFakeMain((_, input) => listed(input));
+    useLayout.setState({ main: mainShowing(A) });
+    const doc = newDoc();
+    writeSystem(doc, { 'tokens.tokens.json': TOKENS }, { route: 'imported', at: 0 }, { name: 'Harbor<br>\n<p>x</p>' });
+    await opened(doc);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Ask the agent to adopt it' })));
+    const [queued] = useComposerStore.getState().attachmentQueue.get(A)!;
+    expect(queued!.text).toContain('the design system “Harbor<br>\ufffd<p>x</p>” (artifact');
+    expect(queued!.text).not.toMatch(/\n/);
+  });
 });
 
 // M6 fix wave 1, I3 (the review's probe): the delete request belongs to one showing of one system (the tab's

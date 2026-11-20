@@ -47,7 +47,10 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
       guard:
         'delete: its dialog opens from "Delete conversation…", which remoteSessionActions never offers, and from the archived dialog’s Delete…, which reads the helper; intent.get: adoptFork, which a fork on another machine skips (forkThere) and the side thread reaches behind side/comment-form.ts and side/BtwView.tsx',
     },
-    { commands: ['session.takeOver'], reported: 'takeOverSession, reached from sessions/HolderActions.tsx and HolderNotice for a record of another machine a background job holds, issues it with no guard (sessions/)' },
+    {
+      commands: ['session.takeOver'],
+      guard: 'takeOverSession: reached from sessions/HolderActions.tsx, whose Take over here reads the helper and is drawn disabled before any confirmation, and from the session menu’s Take over in MAWS, which remoteSessionActions never offers (ticket 627)',
+    },
   ],
   'sessions/DeleteDialog.tsx': { commands: ['session.deletions.preview'], guard: 'the delete dialog: opened only as record-ops.ts’ entry says' },
   'sessions/SessionDialogs.tsx': { commands: ['session.deletions.keep'], guard: 'a manifest’s notice; manifests come from session.deletions.list, which this Mac answers' },
@@ -78,29 +81,10 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   },
   'tools/code/follow.ts': { commands: ['files.follow'], guard: 'sent only for a session on this Mac (the module’s own test of the session’s machine), as a read asks by name only there (UX wave U6b-4c)' },
   'test-support/code-disk.ts': { commands: ['files.openExternal', 'files.follow'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e, U6b-4c)' },
-  // reported: issued for a session on another machine with no guard
-  'lane-b/open-copy.ts': {
-    commands: ['files.openExternal'],
-    reported: 'openSessionFile branches to a copy opened here on isRemoteLaneB alone, so for a terminal (lane A) session over RL2 it opens the path on this Mac with files.openExternal (lane-b/)',
-  },
-  'tools/maws/actions.ts': {
-    commands: ['files.reveal'],
-    reported: 'its caller transcript/view/rows/Delivery.tsx disables Reveal by useElsewhereMachine, which is lane B’s alone, so a terminal (lane A) session over RL2 reveals the path on this Mac (tools/maws/, transcript/view/)',
-  },
-  'engine-surface/asks.ts': { commands: ['session.ui.answer'], reported: 'an automatic answer to a mod’s ask, with no control, sent for every session’s plugin.ask, another machine’s included (engine-surface/)' },
-  'owner/report/answering.ts': {
-    commands: ['ownerChannel.markRead'], // UX wave U2b: the report's cards, and their answer and cancel, are gone
-    reported: 'request-card/RequestCard.tsx’s MarkRead marks an essential item read with no guard, an item of another machine’s attention feed included (request-card/, owner/report/)',
-  },
   'stores/folds.ts': { commands: ['ownerChannel.folds'], guard: 'UX wave U2b (M7): read only while transcript/view/TranscriptSlot.tsx enables it, which it does for this Mac’s sessions alone (a session on another machine is given no key)' },
-  'stores/owner-channel.ts': { commands: ['ownerChannel.state'], reported: 'read at mount by transcript/view/TranscriptSlot.tsx for a lane B session on another machine (stores/, transcript/view/)' },
   'composer/editor/submit.ts': {
     commands: ['session.history.append'],
-    reported: 'appendHistory returns early on isRemoteLaneB alone, so a terminal session on an RL2 machine appends (composer/editor/; isOverRl2 or the helper would close it)',
-  },
-  'widgets/model.ts': {
-    commands: ['session.applyFlagSettings'],
-    reported: '`/fast off` (widgets/typed.ts’ applyFast) issues it with no guard for a ready session on another machine; ModelSelector.tsx greys its own control (widgets/)',
+    guard: 'appendHistory returns early on isOverRl2: a session on another machine over RL2, lane B’s or a terminal’s (lane A), keeps its own prompt history (ticket 627)',
   },
 };
 

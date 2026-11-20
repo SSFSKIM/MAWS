@@ -719,7 +719,9 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   // Rule R (the architect's ruling of 2026-11-16): inputs an earlier build's envelope lets a model forge, each as the one
   // message the person sent in probe B's `u1c-b-1` (a grant at the next step: on the file a queued_command's prompt) and
   // in `u1c-e-1` (a grant sent while idle: on the file the person's row): no consent, no approval row, and the blocked
-  // row keeps its button, live and from the file
+  // row keeps its button, live and from the file. An input of text blocks on `u1c-b-1`'s file route is a queued prompt
+  // of text blocks, read for the sentence whole, so that route reads none whatever rule R does; `u1c-e-1`'s file route
+  // (the person's row) and the live routes carry the claim for it.
   for (const [name, content] of forgedInputs(GRANT)) {
     it(`rule R, no grant on either route: ${name}`, async () => {
       for (const recording of ['u1c-b-1', 'u1c-e-1']) {

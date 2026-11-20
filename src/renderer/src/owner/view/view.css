@@ -6,7 +6,10 @@
 .owner-record-fold { padding: 2px 0 8px; }
 .owner-record-fold[data-open] { padding-inline-start: 2ch; }
 /* M7 (§M): one line, a label longer than the column cut with an ellipsis. */
-.owner-record-fold > button { max-width: 100%; overflow: hidden; padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; white-space: nowrap; text-overflow: ellipsis; }
+/* The owner's request of 2026-11-20: the line at Claude Desktop's size for a folded run's line, its body text (13 px), in
+   the muted colour Desktop folds it in, and as the full transcript's run line draws it (transcript.css,
+   `.transcript-run-line`: the same size and line height), so a folded line reads alike in both views. */
+.owner-record-fold > button { max-width: 100%; overflow: hidden; padding: 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; text-align: left; white-space: nowrap; text-overflow: ellipsis; }
 .owner-record-fold > button:hover { color: var(--fg); }
 
 /* A message (`Message.tsx`; the mod's `spanRows`): its wrapper indents the body two columns in the text colour, and its

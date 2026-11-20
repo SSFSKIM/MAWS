@@ -237,6 +237,9 @@ export interface TranscriptContextValue {
   // ("Your message"): a session another member owns names its owners
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
   answerActions?: AnswerActionsSource; // additive (UX wave U3b): absent outside a mounted transcript, which places none
+  // additive (board ticket 789): keep a row where it is on screen for the given time while rows above it open or close;
+  // the mounted list's, absent outside one
+  keepInPlace?: (rowId: RowId, ms: number) => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
