@@ -10,7 +10,7 @@ import { PERMISSION_MODES, type AutoModeRefusalCode, type PermissionMode } from 
 import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
+import type { InitializeResponse, McpStatusResponse, ReloadPluginsResponse } from '@shared/wire/control';
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { browserHoldOf, CRON_TOOLS, sessionCronsOf, WorkState, type BrowserEntry, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2; P5 O17 M7: the browser entry
 
@@ -264,6 +264,16 @@ export class SessionStatusTracker {
     this.pluginsObservedAt = new Date().toISOString(); // P2-A
     const names = new Set(list(answer.commands).map((command) => command.name));
     this.setCatalog({ commands: answer.commands, agents: answer.agents, skills: this.catalogState.skills.filter((skill) => names.has(skill)) });
+  }
+
+  // Ticket 619: an mcp_status answer is the session's servers now: the engine answers it once the session is ready, before
+  // the first turn's system/init (which the list was otherwise filled from). The plugins' observation stays the init's
+  // and the reload's: the answer says nothing of them. True when the list changed.
+  applyMcpStatus(answer: McpStatusResponse): boolean {
+    const next = mcpServersOf(answer.mcpServers);
+    if (JSON.stringify(next) === JSON.stringify(this.mcpServers)) return false;
+    this.mcpServers = next;
+    return true;
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {

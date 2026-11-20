@@ -673,7 +673,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.getWorkspaceDiff', read('get_workspace_diff'));
   handle('session.exportConversation', read('export_conversation'));
   handle('session.getStatus', read('get_status'));
-  handle('session.mcpStatus', async (input) => rendererMcpStatus(await read('mcp_status')(input))); // P3-H: never a header value
+  handle('session.mcpStatus', async (input) => {
+    const answer = await read('mcp_status')(input);
+    table.get(input.appSessionId)?.noteMcpStatus(answer); // ticket 619: the session's servers now
+    return rendererMcpStatus(answer); // P3-H: never a header value
+  });
   // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone; an engine refusal answers in its words
   const refusedOr = async <T>(run: () => Promise<T>): Promise<T | { ok: false; message: string }> => {
     try {

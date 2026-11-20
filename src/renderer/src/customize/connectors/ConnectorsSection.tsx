@@ -158,12 +158,11 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
   // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
   const readInput = useMemo(() => ({ appSessionId: attached ?? ('' as AppSessionId) }), [attached]);
   const read = useEngineRead('session.mcpStatus', readInput, { enabled: attached !== null });
-  // U11a M8 (§A): the servers each ready session holds, for a row of MAWS's own list. The store's list is the engine's
-  // init frame's, which a session started with no message has not sent (P7 run 43386195217); for the attached session
-  // the page's own mcp_status read says it too. A ready session that is not the attached one and has had no first turn
-  // is still not found (ticket 619). U11h (the branch panel's ruling of 2026-11-16): a session's servers are its latest
-  // report, whole: the attached session's answer, once it exists, replaces its seed, so a server the answer omits is not
-  // read from the seed. An answer asked before the session's latest report does not stand (`useAnsweredAfterReport`).
+  // U11a M8 (§A): the servers each ready session holds, for a row of MAWS's own list. The store's list is the engine
+  // host's: its mcp_status answers from the moment the session is ready (ticket 619), then the init frame and the
+  // reloads; for the attached session the page's own mcp_status read says it too. U11h (the branch panel's ruling of
+  // 2026-11-16): a session's servers are its latest report, whole: the attached session's answer, once it exists,
+  // replaces its seed, so a server the answer omits is not read from the seed. An answer asked before the session's latest report does not stand (`useAnsweredAfterReport`).
   const current = useAnsweredAfterReport(readInput, attached === null ? null : (engine.get(attached)?.pluginsObservedAt ?? null));
   const attachedServers = current ? read.data?.mcpServers : undefined;
   const attachedReadAt = read.readAt;
