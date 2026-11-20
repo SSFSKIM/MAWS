@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { pastedBodies } from '../engine/arrival';
 import { framePasted, PASTED_BLOCK, pastedSegments, replacePasted } from './pasted-content';
 import { neutralisePastedTags, wrapPasted } from './pasted-framing';
 
@@ -46,6 +47,36 @@ describe('pastedSegments reads what PASTED_BLOCK reads', () => {
     const text = `before\n\n${framePasted('abcd', 'one\ntwo')}\n\nafter ${framePasted('beef', 'x')} end`;
     const replace = (_match: string, id: string, body: string) => `[${id}:${body.split('\n').length}]`;
     expect(replacePasted(text, (segment) => replace(segment.match, segment.id, segment.body))).toBe(text.replace(PASTED_BLOCK, replace));
+  });
+});
+
+// The envelope reader and rule R mark pasted lines with `pastedBodies`, which the search text's worker runs from its own
+// source; it reads the segments this reader reads, line by line: from the opening tag's line to the closing tag's
+describe('pastedBodies marks the lines of the segments pastedSegments reads', () => {
+  const mask = (text: string) => {
+    const lineAt = (at: number) => text.slice(0, at).split('\n').length - 1;
+    const marked = text.split('\n').map(() => false);
+    for (const { index, match } of pastedSegments(text)) {
+      const open = index + match.indexOf('<pasted_content');
+      const close = index + match.indexOf('\n</pasted_content') + 1;
+      for (let line = lineAt(open); line <= lineAt(close); line += 1) marked[line] = true;
+    }
+    return marked;
+  };
+
+  // On texts the writer makes; a text no writer makes, a closing tag with an opening one after it on its line, is read
+  // differently by the two (docs/tech-debt-tracker.md, the batch 7 row)
+  it('on texts the writer makes', () => {
+    const next = random(715);
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
+    const words = ['Fix the header.', 'see <pasted_content id="1a2b"> here', '', 'two\n\nlines', '</pasted_content id="1a2b">', 'thanks'];
+    const bodies = ['one line', 'a\nb\nc', '', '\n', 'trailing\n', '<pasted_content id="1a2b">\nnested\n</pasted_content id="1a2b">', 'a log\n\n\nwith gaps'];
+    for (let n = 0; n < 400; n += 1) {
+      const parts: string[] = [];
+      for (let k = Math.floor(next() * 5); k >= 0; k -= 1) parts.push(next() < 0.5 ? neutralisePastedTags(pick(words)) : wrapPasted(pick(['1a2b', 'ffff', '0000']), pick(bodies)));
+      const text = parts.join(pick(['', '\n', '\n\n', ' ']));
+      expect(pastedBodies(text.split('\n')), JSON.stringify(text)).toEqual(mask(text));
+    }
   });
 });
 
