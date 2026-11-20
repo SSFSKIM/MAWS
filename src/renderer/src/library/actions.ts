@@ -77,13 +77,11 @@ export async function setSpaceInstructions(spaceId: string, text: string, client
 
 // ---- opening -----------------------------------------------------------------------------------------------------------
 
-// An artifact in a main tab of its own (one per artifact: opened again, its tab is activated), in the current tab set.
+// An artifact in a main tab of its own (one per machine and artifact: opened again, its tab is activated), in the current tab set.
 // The tab lives in the main area, so a maximized or floating panel docks first, as `openArtifacts` does for the library.
 // P4-B4: at the place `location` names (an artifact link's fragment), asked of the tab's editor at the latest version
 // unless it names one; a plain open asks nothing of the editor, so a tab opened again keeps the version it shows.
-// P5 O7 M5a: on the artifact's machine (artifacts/machines.ts; the library lists one machine's at a time). `machine`: the
-// machine a link's source is on (its session's, the Markdown artifact it is written in), told to the table first, so an
-// artifact the page has not listed yet opens there.
+// Use the chosen row or the link source's machine, when known. Bare links use the window's route hints.
 export function openArtifactTab(artifactId: string, location?: ArtifactLocation, machine?: MachineRef): void {
   const on = machine ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
   recordArtifactMachine(artifactId, on, ipc.localMachine);
