@@ -745,7 +745,7 @@ describe('an HTML page’s connectors', () => {
       const refused = pagePorts(frame('html')!);
       load(frame('html')!);
       await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-      expect(refused).toEqual([]);
+      expect(refused.length, 'ports handed to the page').toBe(0);
       expect(main.callsOf('connectors.open')).toEqual([]);
       cleanup();
 
@@ -753,7 +753,7 @@ describe('an HTML page’s connectors', () => {
       await waitFor(() => expect(frame('html')).not.toBeNull());
       const handed = pagePorts(frame('html')!);
       load(frame('html')!);
-      await waitFor(() => expect(handed).toHaveLength(1));
+      await waitFor(() => expect(handed.length, 'ports handed to the page').toBe(1));
       await waitFor(() => expect(main.callsOf('connectors.open')).toEqual([{ artifactId: ID }]));
       handed[0]!.close();
     } finally {

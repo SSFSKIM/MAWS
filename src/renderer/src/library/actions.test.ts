@@ -217,6 +217,7 @@ it('a bare open that guesses local does not mask a later confirmed peer copy', a
 // The branch's third review: a bare link (no source machine) for an id the window has no copy of on record reuses the one
 // machine's tab the strip already holds for it (a tab restored at launch), without taking that tab as a confirmed copy.
 describe('a bare link with no route hint', () => {
+  beforeEach(() => resetArtifactMachines()); // the cases above leave copies on record
   afterEach(() => resetArtifactMachines());
 
   it('reuses the strip’s one restored tab of the id on another machine, and records no route', () => {
