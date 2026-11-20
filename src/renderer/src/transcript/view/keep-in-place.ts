@@ -3,8 +3,9 @@
 // given time after the click, each frame scrolls the list by however far the row has moved since the click, whatever
 // moved it (the fold's motion, the list's measurements, its own anchoring). While the row is not mounted (the work that
 // opened pushed it out of the list's window), the list's own offset for the row places it, and the next frame, with the
-// row mounted again, refines that. A reader's own scroll input ends it: from then on the place is theirs. It returns its
-// stop, for whoever moves the list on purpose before the time is up (a jump to the end or to a row).
+// row mounted again, refines that. It returns its stop: the list calls it at the reader's own scroll input on the
+// transcript (from then on the place is theirs, Transcript.tsx) and before it moves on purpose (a jump to the end or to
+// a row).
 
 export interface Anchored {
   element: () => HTMLElement | null; // the row's element, while the list mounts it
@@ -22,19 +23,7 @@ export function keepInPlace(scroller: HTMLElement, ms: number, { element, start 
   if (rendered === null && placed === null) return () => undefined;
   const until = performance.now() + ms;
   let done = false;
-  // a press on the scroller itself is on its scrollbar; one on a row is not the reader scrolling
-  const press = (event: Event) => { if (event.target === scroller) stop(); };
-  function stop() {
-    done = true;
-    scroller.removeEventListener('wheel', stop, true);
-    scroller.removeEventListener('touchstart', stop, true);
-    scroller.removeEventListener('pointerdown', press, true);
-    window.removeEventListener('keydown', stop, true);
-  }
-  scroller.addEventListener('wheel', stop, { capture: true, passive: true });
-  scroller.addEventListener('touchstart', stop, { capture: true, passive: true });
-  scroller.addEventListener('pointerdown', press, true);
-  window.addEventListener('keydown', stop, true);
+  const stop = () => { done = true; };
   const step = () => {
     if (done) return;
     const row = element();

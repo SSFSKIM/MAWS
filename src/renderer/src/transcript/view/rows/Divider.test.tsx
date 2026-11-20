@@ -57,29 +57,17 @@ describe('divider row', () => {
     await waitFor(() => expect(store.rows()).toHaveLength(before));
   });
 
-  // Board ticket 789: the line ends its turn, so a click opens or folds the work above it; the list scrolls by however far
-  // the line moved, frame by frame through the motion, so the line stays under the pointer.
-  it.each([false, true])('keeps the clicked line where it is on screen while the work above it opens or folds (folding=%s)', async (folding) => {
+  // Board ticket 789: the line ends its turn, so a click opens or folds the work above it; the line asks the list to keep
+  // it where it is on screen through the motion (the list's anchor: keep-in-place.test.ts, Transcript-scroll.test.tsx)
+  it.each([false, true])('asks the list to keep the clicked line in place while the work above it opens or folds (folding=%s)', async (folding) => {
     const store = await storeWith(deniedTurn().events);
     if (folding) act(() => useTranscriptStore.getState().toggleTurn(store.key, rowOf(store.rows(), 'divider').turnId!));
-    const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
-    const scroller = document.createElement('div');
-    scroller.setAttribute('data-transcript-scroller', '');
-    let offset = 1000;
-    Object.defineProperty(scroller, 'scrollTop', { get: () => offset, set: (value: number) => { offset = value; } });
-    view.container.replaceWith(scroller);
-    scroller.append(view.container);
-    const frames: (() => void)[] = [];
-    vi.stubGlobal('requestAnimationFrame', (step: () => void) => frames.push(step));
-    let top = 400;
-    const line = document.getElementById(`t-${rowOf(store.rows(), 'divider').id}`)!;
-    vi.spyOn(line, 'getBoundingClientRect').mockImplementation(() => ({ top: top - (offset - 1000) }) as DOMRect);
+    const keepInPlace = vi.fn();
+    const line = rowOf(store.rows(), 'divider');
+    renderRow(line, { storeKey: store.key, keepInPlace });
     fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
-    top = folding ? 280 : 640; // the rows above it grew or shrank by this much, the scroll not yet moved
-    frames.shift()!();
-    expect(line.getBoundingClientRect().top).toBe(400);
-    expect(offset).toBe(folding ? 880 : 1240);
-    vi.unstubAllGlobals();
+    expect(keepInPlace).toHaveBeenCalledOnce();
+    expect(keepInPlace).toHaveBeenCalledWith(line.id, expect.any(Number));
     // the row tests share one motion (context.tsx, NO_MOTION): the fold this click started runs out here, not in the next case
     await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the 150 ms close
   });

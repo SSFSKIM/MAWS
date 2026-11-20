@@ -19,7 +19,6 @@ import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
 import type { CellId, Row, RowId, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron, LineCounts } from './parts';
-import { keepInPlace } from '../keep-in-place'; // board ticket 789
 import { CLOSE_MOTION, OPEN_MOTION } from '../../../ui/disclosure';
 import { Backdrop } from '../../../sessions/scrim'; // board 523 (U11a): the one scrim
 import { turnDurationMs } from '../../surface/adapters'; // UX wave U2b
@@ -106,7 +105,7 @@ function TurnLine({ row }: { row: DividerRowData }) {
 }
 
 function FoldingDividerRow({ row }: { row: DividerRowData }) {
-  const { storeKey, idPrefix, keepInPlace: keepRow } = useTranscriptContext();
+  const { storeKey, keepInPlace: keepRow } = useTranscriptContext();
   const motion = useWorkMotion();
   const turn = row.turnId!;
   const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;
@@ -120,15 +119,11 @@ function FoldingDividerRow({ row }: { row: DividerRowData }) {
           className="transcript-disclosure"
           aria-expanded={open}
           aria-controls={controls || undefined}
-          onClick={(event) => {
+          onClick={() => {
             const target = !row.expanded;
             // board ticket 789: the line ends its turn, so the work opens and folds above it; the line stays under the pointer
-            // (the list's own anchor, which also places the line while the work that opened pushes it out of its window;
-            // outside a list, the line's element alone)
-            const ms = (row.expanded ? CLOSE_MOTION.ms : OPEN_MOTION.ms) + 200;
-            const scroller = event.currentTarget.closest<HTMLElement>('[data-transcript-scroller]');
-            if (keepRow) keepRow(row.id, ms);
-            else if (scroller !== null) keepInPlace(scroller, ms, { element: () => document.getElementById(rowElementId(idPrefix, row.id)) });
+            // (the list's anchor, which also places the line while the work that opened pushes it out of its window)
+            keepRow?.(row.id, (row.expanded ? CLOSE_MOTION.ms : OPEN_MOTION.ms) + 200);
             motion.toggle(turn, row.expanded, () => {
               const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
               if (current?.kind === 'divider' && current.expanded !== target) store.toggleTurn(storeKey, turn);

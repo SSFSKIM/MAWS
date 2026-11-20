@@ -112,11 +112,12 @@ export interface TranscriptListProps {
 }
 
 // A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
-function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement): boolean {
+function nestedScrollerOwns(target: EventTarget | null, scroller: HTMLElement, up = true): boolean {
   for (let element = target instanceof Element ? target : null; element && element !== scroller; element = element.parentElement) {
     const style = getComputedStyle(element);
     if (!['auto', 'scroll'].includes(style.overflowY)) continue;
-    if (element.scrollTop > 0 || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
+    const room = up ? element.scrollTop > 0 : element.scrollTop < element.scrollHeight - element.clientHeight - 1;
+    if (room || ['contain', 'none'].includes(style.overscrollBehaviorY || style.overscrollBehavior)) return true;
   }
   return false;
 }
@@ -255,6 +256,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const pointerDown = (event: PointerEvent) => {
       if (event.target === element && event.button === 0 && event.pointerType !== 'touch') {
+        dropAnchor(); // board ticket 789: the reader's own scroll input on this transcript ends a turn line's anchor
         scrollbarPointer.current = event.pointerId;
         observeEnd();
         releaseFollow();
@@ -274,14 +276,16 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     };
     const wheel = (event: WheelEvent) => {
       observeEnd();
-      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
+      if (event.deltaY !== 0 && !nestedScrollerOwns(event.target, element, event.deltaY < 0)) dropAnchor();
+      if (event.deltaY < 0 && !nestedScrollerOwns(event.target, element)) releaseUpward();
     };
     let touchY: number | null = null;
     const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
     const touchMove = (event: TouchEvent) => {
       observeEnd();
       const next = event.touches.length === 1 ? event.touches[0].clientY : null;
-      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
+      if (next !== null && touchY !== null && next !== touchY && !nestedScrollerOwns(event.target, element, next > touchY)) dropAnchor();
+      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwns(event.target, element)) releaseUpward();
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {
@@ -289,6 +293,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const pageKey = ['PageUp', 'PageDown', 'Home', 'End'].includes(event.key);
       const navigation = !editor && (event.key.startsWith('Arrow') || event.key === ' ');
       if (!pageKey && !navigation) return;
+      // a key that scrolls this transcript ends a turn line's anchor: not one typed into an editor (the composer, a
+      // row's own) or in another list, nor one a nested scroller here consumes
+      const here = event.target === document.body || (event.target instanceof Node && element.contains(event.target));
+      if (here && !editor && !nestedScrollerOwns(event.target, element, ['PageUp', 'Home', 'ArrowUp'].includes(event.key))) dropAnchor();
       observeEnd();
       armMovement(); // body/editor focus and nested containment do not tell us which list the browser will scroll
     };
@@ -316,7 +324,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       element.removeEventListener('touchmove', touchMove, true);
       window.removeEventListener('keydown', key, true);
     };
-  }, [readScroll, releaseFollow, remember, virtualizer]);
+  }, [dropAnchor, readScroll, releaseFollow, remember, virtualizer]);
 
   // Follow the committed DOM end with an absolute offset, not an index target that can chase later measurements.
   // This command accounts for current sizes, retiring any anchor compensation it already absorbed. Releasing follow

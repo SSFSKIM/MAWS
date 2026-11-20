@@ -1,5 +1,5 @@
 // Board ticket 789: the clicked turn line keeps its place on screen while the work above it opens or folds, also when
-// that work pushes it out of the list's window for a frame, and a reader's own scroll input takes the place back.
+// that work pushes it out of the list's window for a frame, until its stop is called.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { keepInPlace } from './keep-in-place';
 
@@ -48,26 +48,12 @@ describe('keepInPlace', () => {
     expect(s.row.getBoundingClientRect().top).toBe(300);
   });
 
-  it.each([
-    ['a wheel', (s: HTMLElement) => s.dispatchEvent(new Event('wheel', { bubbles: true }))],
-    ['a touch', (s: HTMLElement) => s.dispatchEvent(new Event('touchstart', { bubbles: true }))],
-    ['a key', () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }))],
-    ['a press on the scrollbar', (s: HTMLElement) => s.dispatchEvent(new Event('pointerdown', { bubbles: true }))],
-  ])('stops at the reader’s own scroll input (%s)', (_name, input) => {
+  it('its stop ends it: the list stops it at the reader’s own scroll input and before its own jumps', () => {
     const s = scene();
-    keepInPlace(s.scroller, 500, { element: () => s.row, frame: s.frame, scrollTo: s.scrollTo });
-    input(s.scroller);
+    const stop = keepInPlace(s.scroller, 500, { element: () => s.row, frame: s.frame, scrollTo: s.scrollTo });
+    stop();
     s.grow(240);
     while (s.frames.length > 0) s.frames.shift()!();
     expect(s.scrolls).toEqual([]);
-  });
-
-  it('a press on a row is not the reader scrolling', () => {
-    const s = scene();
-    keepInPlace(s.scroller, 500, { element: () => s.row, frame: s.frame, scrollTo: s.scrollTo });
-    s.row.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    s.grow(240);
-    s.frames.shift()!();
-    expect(s.scrolls).toEqual([1140]);
   });
 });

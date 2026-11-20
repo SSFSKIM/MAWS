@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import { vi } from 'vitest';
 import { at } from '../../../../../../test/support/machine';
 import { useTranscriptStore } from '../../../stores/transcript';
-import type { Row } from '../../model/rows';
+import type { Row, RowId } from '../../model/rows';
 import type { TranscriptSource } from '../../source/types';
 import { Disclosures, NO_ACTIONS, TranscriptProvider, type AnswerActionsSource, type RewindInterface, type TranscriptActions } from '../context';
 import { RowView } from './Row';
@@ -58,6 +58,7 @@ export function renderRow(
     effort?: string; // W8: the session's effort, as the live thinking label names it
     variant?: 'session' | 'child';
     answerActions?: AnswerActionsSource; // UX wave U3b: the mount's placement of the answers' action rows
+    keepInPlace?: (rowId: RowId, ms: number) => void; // board ticket 789: the mounted list's anchor
   } = {},
 ) {
   const actions = options.actions ?? spyActions();
@@ -66,6 +67,7 @@ export function renderRow(
     disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null, effort: options.effort ?? null,
     ...(options.sessionCwd !== undefined && { sessionCwd: options.sessionCwd }),
     ...(options.answerActions !== undefined && { answerActions: options.answerActions }),
+    ...(options.keepInPlace !== undefined && { keepInPlace: options.keepInPlace }),
   };
   const view = render(
     <TranscriptProvider value={value}>
