@@ -46,10 +46,10 @@ export function innerOpeningEnvelope(askId: string, sentence: string): string {
 }
 
 // Made by hand (ticket 704, the frontier review's input): the opening line for ask `outer`, a whole envelope for ask
-// `inner`, `pairs` repetitions of a line `not JSON` and a line closing a fence, then the answered block for `outer`, both
-// blocks with no answers. The first pass takes `inner` in one check; on what it leaves, a slice from `outer`'s opening
-// ends at every closing line, so the second pass needs `pairs + 1` checks.
+// `inner`, `pairs` json blocks that hold `not JSON`, then the answered block for `outer`, both blocks with no answers.
+// The first pass takes `inner` in one check; on what it leaves, a slice from `outer`'s opening can end at each block's
+// close (ticket 734: a check a result block), so the second pass needs `pairs + 1` checks.
 export function laterPassOverTheCap(pairs = 65): string {
   const [opening, ...block] = askSteerText('outer', [], []).split('\n');
-  return [opening!, askSteerText('inner', [], []), ...Array.from({ length: pairs }, () => ['not JSON', '```']).flat(), ...block].join('\n');
+  return [opening!, askSteerText('inner', [], []), ...Array.from({ length: pairs }, () => ['```json', 'not JSON', '```']).flat(), ...block].join('\n');
 }

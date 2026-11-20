@@ -4,6 +4,7 @@
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
 import { checkUpdate, hasPending } from './check';
+import { clientIdChanges } from './client-id-log.fixture';
 import { newDoc, newSuggestionDoc } from './doc';
 import { insertedBy } from './attribution';
 import { clientAbove, planAccept, planReject, SuggestionError, type SuggestionPlan, type SuggestionRange } from './suggest';
@@ -55,9 +56,11 @@ function world({ agentClient }: { agentClient?: number } = {}) {
       const replica = newDoc();
       Y.applyUpdateV2(replica, Y.encodeStateAsUpdateV2(main));
       replica.clientID = clientAbove([main, suggestion]);
+      const copyClient = replica.clientID;
       let update: Uint8Array | null = null;
       replica.on('update', (u: Uint8Array) => (update = u));
-      replica.transact(() => plan.edit!(replica));
+      // an edit that applies deletions and writes the copy leaves the replica a fresh clientID, and Yjs says so once
+      expect(clientIdChanges(() => replica.transact(() => plan.edit!(replica)))).toBe(replica.clientID === copyClient ? 0 : 1);
       expect(checkUpdate(main, update!)).toBeNull();
       Y.applyUpdate(main, update!);
       pairs = plan.pairs(replica);
@@ -254,15 +257,16 @@ function textWorld(paragraphs: Record<string, [string, Record<string, unknown>?]
     const replica = newDoc();
     Y.applyUpdateV2(replica, Y.encodeStateAsUpdateV2(main));
     replica.clientID = clientAbove([main, suggestion]);
+    const copyClient = replica.clientID; // the copy's writer (the edit can leave the replica a fresh clientID after it)
     let update: Uint8Array | null = null;
     replica.on('update', (u: Uint8Array) => (update = u));
-    replica.transact(() => plan.edit!(replica));
+    expect(clientIdChanges(() => replica.transact(() => plan.edit!(replica)))).toBe(replica.clientID === copyClient ? 0 : 1);
     expect(checkUpdate(main, update!)).toBeNull();
     Y.applyUpdate(main, update!);
     const pairs = plan.pairs(replica);
     if (plan.remove) Y.applyUpdate(suggestion, plan.remove);
     for (const doc of [main, suggestion]) expect(hasPending(doc)).toBe(false);
-    return { pairs: pairs!, attributions: Y.mergeContentMaps(maps), copyClient: replica.clientID };
+    return { pairs: pairs!, attributions: Y.mergeContentMaps(maps), copyClient };
   };
   const text = (doc: Y.Doc, id: string) => byId(doc.get('default'), id);
   const ends = (node: Y.Node) => {
@@ -313,6 +317,7 @@ describe('suggestions: fix wave 3', () => {
         if (!item.deleted && item.content instanceof Y.ContentFormat && item.id.client === copyClient) copied.push([item.id.client, item.id.clock]);
       }
     }
+    expect(copied.length).toBeGreaterThan(0); // the copy's own markers, read under the clientID that wrote them
     for (const marker of copied) expect(markerCopies).toContainEqual(marker);
   });
 });

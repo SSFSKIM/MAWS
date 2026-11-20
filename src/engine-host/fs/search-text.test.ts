@@ -368,6 +368,28 @@ describe('a joined answer in the engine’s file (ticket 704)', () => {
   });
 });
 
+// Board ticket 715: a row whose origin names a kind no reader knows. The backfill lowers that origin to none, so the
+// split reads the row as a person's and takes its envelope out; the worker reads it as the split does.
+describe('made by hand: a person’s words and an envelope in a row of an origin kind no reader knows (ticket 715)', () => {
+  const envelope = recordedJoin('u704-end-env-first-1').envelopes[0]!;
+  const row = { type: 'user', uuid: 'b0b0b0b0-0000-4000-8000-000000000715', parentUuid: null, timestamp: '2026-11-19T10:00:00.000Z', origin: { kind: 'a-later-kind' }, message: { role: 'user', content: `Words of the person.\n${envelope}` } };
+
+  it('the backfill: the origin lowered to none, the person’s words a message of their own and the envelope one of its own', () => {
+    const ctx = createBackfillContext({ sessionId: 'sess-715' as SessionId, agent: null });
+    const messages = recordToEvents(TranscriptRecordSchema.parse(row), ctx).filter((event) => event.kind === 'user.message');
+    expect(messages.map((event) => [event.origin, event.content])).toEqual([[null, 'Words of the person.'], [null, envelope]]);
+  });
+
+  it('the search text: the person’s words, nothing of the envelope', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-715-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, `${JSON.stringify(row)}\n${JSON.stringify({ ...row, uuid: 'b0b0b0b0-0000-4000-8000-000000000716', origin: { kind: 'peer' } })}\n`);
+      expect(await wholeText(path)).toBe(`Words of the person.\n${row.message.content}`); // a peer's row, a kind the readers know, as today
+    } finally { await rm(dir, { recursive: true }); }
+  });
+});
+
 // The branch panel's finding 2 and the landing session's ruling (2026-11-16): a shell row is no person's text to read
 // envelopes out of. The worker passes it over by the backfill's own test of a shell row (`parseBash`, run from its
 // source), so the search text holds what the window draws of it: the whole command, the whole output.

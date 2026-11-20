@@ -74,7 +74,9 @@ function searchableText(text) {
 }
 // The text blocks a line holds, or null when it is not JSON. A person's row (a user row with no origin, or the person's,
 // that is no shell row: the row's form of the split's gate, the shell test the backfill's own) has its envelopes read
-// out; a text left empty yields nothing.
+// out; a text left empty yields nothing. Board ticket 715: an origin of a kind no reader names is none, as the backfill
+// lowers it (its message's origin is the person's or none), so the split reads that row as a person's.
+const KNOWN_ORIGINS = ['human', 'peer', 'plugin', 'task-notification', 'coordinator'];
 function blocksOf(line) {
   let row;
   try { row = JSON.parse(line.toString('utf8')); } catch { return null; }
@@ -82,7 +84,8 @@ function blocksOf(line) {
     const content = row.message?.content;
     const texts = typeof content === 'string' ? [content] : Array.isArray(content)
       ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];
-    const persons = row.type === 'user' && (row.origin == null || typeof row.origin !== 'object' || row.origin.kind === 'human') && !(typeof content === 'string' && parseBash(content) !== null);
+    const kind = row.origin != null && typeof row.origin === 'object' ? row.origin.kind : undefined;
+    const persons = row.type === 'user' && (kind === 'human' || !KNOWN_ORIGINS.includes(kind)) && !(typeof content === 'string' && parseBash(content) !== null);
     return persons ? texts.map(searchableText).filter((text) => text !== null) : texts;
   }
   return [];
