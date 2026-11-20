@@ -7,10 +7,26 @@ import { defaultRehypePlugins, defaultRemarkPlugins, type UrlTransform } from 's
 import type { Pluggable, Plugin, Processor } from 'unified';
 import type { Node, Parent } from 'unist';
 import { visit } from 'unist-util-visit';
+import { fileUrlRest } from '@shared/files/file-url';
+import { fileLinksTurned } from '../context';
 
 const SCHEME = /^([a-zA-Z][a-zA-Z0-9+.-]*):/;
 
 type MdNode = Node & { url?: string; title?: string | null; alt?: string | null; value?: string };
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R1): the path a `file:` link with an empty
+// host names, when the link is an inline one; null for any other link. An autolink (`<file:///a>`) stays text, as the rule
+// of a file the transcript names reads it as no link: its node spans the URL and its two brackets exactly (Markdown does
+// not decode an autolink), where an inline link's spans at least four more characters (`[`, `](`, `)`; a destination as
+// written is never shorter than its decoded form). Told by the node's own offsets, never by an index into the text: the
+// parser drops a leading byte order mark before it counts. A node that lacks either offset stays text.
+function inlineFileLinkPath(node: MdNode, url: string): string | null {
+  const rest = fileUrlRest(url);
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (rest === null || typeof start !== 'number' || typeof end !== 'number' || end - start === url.length + 2) return null;
+  return rest;
+}
 
 // Raw HTML is shown as written and never deleted (W1, A3; the owner's ruling of 2026-10-01: tags such as an output
 // style's `<to-human>` read literally until an extension handles them). CommonMark's HTML constructs are switched off
@@ -34,7 +50,13 @@ export const remarkTranscriptSources: Plugin = () => (tree) =>
       parent.children[index] = FLOW_PARENTS.has(parent.type) ? ({ type: 'paragraph', children: [text] } as Node) : text;
       return;
     }
-    if (node.type === 'link' && !SCHEME.test(node.url!)) node.url = `maws-path:${node.url}`; // a scheme-less href is a path chip, never a navigable link
+    if (node.type === 'link') {
+      if (!SCHEME.test(node.url!)) node.url = `maws-path:${node.url}`; // a scheme-less href is a path chip, never a navigable link
+      else if (fileLinksTurned()) {
+        const rest = inlineFileLinkPath(node, node.url!); // U6b-4b: a `file:` link with an empty host is the path chip of its rest
+        if (rest !== null) node.url = `maws-path:${rest}`;
+      }
+    }
     if (node.type === 'image' && !/^data:image\//i.test(node.url!)) {
       // a markdown image that is not inline data becomes a chip naming its source
       parent.children[index] = { type: 'link', url: `maws-image:${node.url}`, title: node.title, children: [{ type: 'text', value: node.alt ?? '' }] } as Node;

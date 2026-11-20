@@ -26,8 +26,10 @@ export interface TranscriptActions {
   // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
   openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
-  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
-  openExternal(url: string, appSessionId?: AppSessionId | null): void;
+  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block).
+  // UX wave U6b-4b (R3, decision 13): `external`, a ⌘-click, asks for the system browser where the mount would open the
+  // link in the app (a loopback link of a session on this Mac: tools/browser/local-link.ts); a mount may ignore it.
+  openExternal(url: string, appSessionId?: AppSessionId | null, options?: { external?: boolean }): void;
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
   // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts). P5 O6 M4: `appSessionId` is the session
@@ -153,6 +155,20 @@ export const NO_ACTIONS: TranscriptActions = {
 let hostActions: TranscriptActions = NO_ACTIONS;
 export function setHostActions(actions: TranscriptActions): void {
   hostActions = actions;
+}
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, decision 17): whether the Markdown pipeline
+// turns a `file:` link with an empty host into a path link (sanitize.ts, `remarkTranscriptSources`). Off until one of the
+// window's two entries (App.tsx, harness/main.tsx) turns it on as it loads; the desk's web app, which mounts this
+// Markdown with no file action, never does, so a `file:` link there stays its text. Here and not in default-actions.ts,
+// which the desk loads too; a light module, so the Markdown chunk is not imported to set a flag.
+let fileLinks = false;
+/** Whether a `file:` link is turned into a path link. Off until one of the window's entries turns it on; the desk's web app never does. */
+export function turnFileLinks(on: boolean): void {
+  fileLinks = on;
+}
+export function fileLinksTurned(): boolean {
+  return fileLinks;
 }
 
 // Open/closed flags by id, kept per mounted transcript rather than in a row's own state.

@@ -29,6 +29,9 @@
 // "Files" bar. A tab Go to file chose is finding: its column is drawn for the search whatever the fold, and the tree's
 // button ends that before it does what it did. M2: while the field holds text the list stands in the tree's place, the
 // tree kept mounted (its hold on the git store) and drawing nothing.
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; decision 9, "The look"): a root or folder
+// whose listing failed says the notice's sentences for a folder (`viewer/notice.ts`): the roots' failure all of them, with
+// the list's own refresh as Retry where reading again can help; a row of the tree its first sentence, at its height.
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -48,10 +51,12 @@ import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
 import { useLayout } from '../../../stores/layout';
 import { paramsHoldFile } from '../../../stores/layout-model';
-import { FILES_COPY, OPEN_FILE_COPY, REFUSAL, REVIEW_COPY } from '../copy';
+import { FILES_COPY, NOTICE_COPY, OPEN_FILE_COPY, REVIEW_COPY } from '../copy';
 import { closeGuardOf, registerSideFile } from '../editor/register';
 import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
+import { classifyFailure, type FileFailure } from '../viewer/notice'; // UX wave U6b-4b
+import { useNoticePlace, type NoticePlace } from '../viewer/notice-place'; // UX wave U6b-4b
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
@@ -502,7 +507,7 @@ function SessionTree({ tabId, appSessionId, session, marked, chosen, searching }
   return (
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
-        {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
+        {roots?.status === 'error' ? <RootsFailure message={roots.message} failure={roots.failure} appSessionId={appSessionId} refresh={refresh} /> : null}
         <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} tabId={tabId} settled={roots !== undefined && roots.status !== 'loading'} />
       </div>
     </FilesMenu>
@@ -658,6 +663,7 @@ function TreeList({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const tree = useRef<HTMLDivElement>(null);
+  const place = useNoticePlace(appSessionId); // UX wave U6b-4b: what a failed folder's row is said with
   // UX wave U6b-3a (M2 decision 8; Decision Log 6, note 1): Refresh and its room are the first root's row's, wherever in
   // the list it stands, with or without a Changed group above it.
   const rootAt = rows.findIndex((row) => row.kind === 'root');
@@ -783,7 +789,7 @@ function TreeList({
                 ) : row.kind === 'changed' ? (
                   <ChangedItem row={row.row} changed={changed} width={width} fonts={fonts} />
                 ) : (
-                  <Row row={row} marks={changed.marks} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} />
+                  <Row row={row} marks={changed.marks} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} place={place} />
                 )}
               </div>
             );
@@ -814,12 +820,36 @@ function RefreshButton({ refresh }: { refresh(): void }) {
   return <button type="button" aria-label={FILES_COPY.refresh} title={FILES_COPY.refresh} onClick={refresh} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"><RefreshIcon className="size-3.5" /></button>;
 }
 
-function RootsFailure({ message }: { message: string }) {
-  if (message.startsWith(UNKNOWN_SESSION)) return <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>;
+// UX wave U6b-4b: the notice's sentences for a folder, the command's own words under them, and Retry (the list's refresh).
+// Fix wave 1 (review, Minor a): one control lists the roots again: Retry where the notice offers it, else Refresh beside.
+function RootsFailure({ message, failure, appSessionId, refresh }: { message: string; failure: FileFailure; appSessionId: AppSessionId; refresh(): void }) {
+  const place = useNoticePlace(appSessionId);
+  const notice = message.startsWith(UNKNOWN_SESSION) ? null : classifyFailure(failure, { ...place, subject: 'folder' });
   return (
-    <p role="alert" className="px-3 py-2 text-ui-sm text-danger">
-      {message === REFUSAL ? FILES_COPY.refused(message) : FILES_COPY.couldNotList(message)}
-    </p>
+    <div className="flex items-center justify-between pr-1">
+      {notice === null ? (
+        <p className="px-3 py-2 text-ui-sm text-fg-muted">{FILES_COPY.noSession}</p>
+      ) : (
+        <div role="alert" data-notice-cause={notice.cause} className="flex min-w-0 flex-col items-start gap-1 px-3 py-2 text-ui-sm">
+          {notice.lines.map((line) => (
+            <p key={line} className="text-danger">
+              {line}
+            </p>
+          ))}
+          {notice.retry ? (
+            <button type="button" data-notice-retry="" className="rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={refresh}>
+              {NOTICE_COPY.retry}
+            </button>
+          ) : null}
+          {notice.detail !== '' ? (
+            <p data-notice-detail="" className="text-fg-muted break-all">
+              {notice.detail}
+            </p>
+          ) : null}
+        </div>
+      )}
+      {notice?.retry === true ? null : <RefreshButton refresh={refresh} />}
+    </div>
   );
 }
 
@@ -929,18 +959,14 @@ function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed:
   );
 }
 
-function Row({ row, marks, selected, activate, keepRow }: { row: ListedRow; marks: Marks; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void }) {
+function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRow; marks: Marks; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void; place: NoticePlace }) {
   if (row.kind === 'notice') {
-    const text =
-      row.notice === 'empty'
-        ? FILES_COPY.empty
-        : row.notice === 'truncated'
-          ? FILES_COPY.truncated
-          : row.notice === 'refused'
-            ? FILES_COPY.refused(row.message ?? REFUSAL)
-            : FILES_COPY.couldNotList(row.message ?? '');
+    // UX wave U6b-4b: a failed listing's row reads its notice's first sentence; its title holds that sentence whole (a narrow
+    // row cuts it) and the command's own words (fix wave 1)
+    const failed = row.failure === null ? null : classifyFailure(row.failure, { ...place, subject: 'folder' });
+    const text = row.notice === 'empty' ? FILES_COPY.empty : row.notice === 'truncated' ? FILES_COPY.truncated : (failed?.lines[0] ?? NOTICE_COPY.other.folder);
     return (
-      <div data-notice={row.notice} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
+      <div data-notice={row.notice} data-notice-cause={failed?.cause} title={failed === null ? undefined : [failed.lines[0], failed.detail].filter((part) => part !== '').join('\n')} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
         <span className={row.notice === 'refused' || row.notice === 'error' ? 'text-danger' : ''}>{text}</span>
         {row.notice === 'refused' ? <span className="truncate font-mono text-fg-faint">{row.path}</span> : null}
       </div>

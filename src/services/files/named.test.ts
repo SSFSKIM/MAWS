@@ -267,6 +267,41 @@ describe('names: what the transcript names', () => {
     expect(await named.names(S, outer)).toBe('counted');
   });
 
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, N1.11): the window draws as many cells of a
+  // row as the table's head has; a path linked only in a cell past them is not named
+  it('a path linked only in a table cell past the head’s width is not named; in a cell the head covers it is', async () => {
+    await writeTranscript([...filler(4), assistant(text(`| a | b |\n|---|---|\n| x | y | [r](${P}) |`)), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe(false);
+    await writeTranscript([...filler(4), assistant(text(`| a | b |\n|---|---|\n| x | [r](${P}) | y |`)), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe('counted');
+    await writeTranscript([...filler(4), assistant(text(`| a | b |\n|---|---|\n| x | y | [r](file://${P}) |`)), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe(false);
+  });
+
+  // UX wave U6b-4b (R1, N1.7): an inline `file:` link with an empty host names its path as the scheme-less link does; a
+  // transcript whose only mention of the path is another `file:` form names nothing
+  it('a `file:` link with an empty host names the path; one with a host, without `//`, as an autolink or a reference does not', async () => {
+    const others = [`[r](file://host${P})`, `[r](file://localhost${P})`, `[r](file:${P})`, `<file://${P}>`, `[r][l]\n\n[l]: file://${P}`];
+    await writeTranscript([...filler(4), ...others.map((form) => assistant(text(form))), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe(false);
+    await writeTranscript([...filler(4), ...others.map((form) => assistant(text(form))), assistant(text(`Wrote [the report](file://${P}).`)), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe('counted');
+    await writeTranscript([...filler(4), call('t1', 'mcp__docs__save', {}), result('t1', `Saved to [r](FILE://${P})`), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe('result');
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, L14): a subagent's own transcript adds no
+  // evidence; the search reads the session's transcript alone
+  it('a path written only in a subagent’s transcript file is not named; written in the session’s own, it is', async () => {
+    await writeTranscript([...filler(4), assistant(text('Started a subagent.')), ...filler(4)]);
+    const subagent = join(dirname(file!), 'engine-session-1', 'subagents', 'agent-a1.jsonl');
+    await mkdir(dirname(subagent), { recursive: true });
+    await writeFile(subagent, [...filler(2), linkTo(P), ...filler(2)].map((record) => `${lineOf(record)}\n`).join(''));
+    expect(await paths().names(S, P)).toBe(false);
+    await append([linkTo(P)]); // the control: the session's own transcript writes the same link
+    expect(await paths().names(S, P)).toBe('counted');
+  });
+
   it('a hit before a compaction boundary still names the path', async () => {
     await writeTranscript([linkTo(P), ...filler(4), { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }, user('Summary of the conversation so far', { isCompactSummary: true }), ...filler(4)]);
     expect(await paths().names(S, P)).toBe('counted');

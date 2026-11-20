@@ -2,7 +2,7 @@
 // desktop. P5 O7 M5a (A10): it opens a copy of the file here instead (`remote.openCopy`), saying where the file is; a
 // local session's opens as before. UX wave U6c (M3, Interfaces §E): a session on this Mac asks with `named`, so a file
 // outside its folders that its transcript names opens; a session on another machine is asked as today.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -67,6 +67,34 @@ describe('Open externally', () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith('files.openExternal', { appSessionId: LOCAL, path: '/r/doc.pdf', named: true });
   });
 
+  // UX wave U6b-4b (M3; decision 9, L11): the line under the button reads the first sentence of the refusal's cause
+  it.each([
+    ['outside the folders', { code: 'internal', message: "path outside the session's directories" }, 'This file is outside the folders this session works in.'],
+    ['gone', { code: 'internal', message: 'not found: /r/doc.pdf' }, 'No file at this path.'],
+    ['this Mac’s service not answering', { code: 'host_unavailable', message: 'files.openExternal: the files service is not running' }, "MAWS's service on this Mac is not answering."],
+  ] as const)('a refused open of a local session’s file (%s) reads the first sentence of its cause', async (_, error, sentence) => {
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error } as never);
+    render(<OpenExternally appSessionId={addressOf(TEST_MACHINE, 'app-l' as AppSessionId)} path="/r/doc.pdf" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(sentence);
+  });
+
+  it('the line is drawn from the failure kept, so a roster that arrives after the click names the machine', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error: { code: 'host_unavailable', message: 'remote.openCopy: machine mini is not reachable' } } as never);
+    render(<OpenExternally appSessionId={REMOTE} path="/r/doc.pdf" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(`${OTHER_MACHINE} is not reachable.`); // no roster yet: the ref
+    act(() =>
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+      ]),
+    );
+    expect(screen.getByRole('alert').textContent).toBe('mini is not reachable.');
+  });
+
   it('asks without named for a session on another machine that MAWS does not run there', () => {
     const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: true, message: null } } as never);
     const TERMINAL = addressOf(OTHER_MACHINE, 'app-t' as AppSessionId); // no lane B state for it: not a session MAWS runs there
@@ -123,6 +151,7 @@ describe('what a row says (rowWords)', () => {
     hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 1, pending: 0, readOnly: false, named: false, frame: null,
     locked: null, pin: null, agent: false, textEditable: false, // UX wave U6e's fields of the entry
     said: false, needsOpen: false, offersOpenFile: false, saveSaid: false, // UX wave U6f's
+    failure: null, retrying: false, // UX wave U6b-4b's
     ...over,
   });
   const openButton = () => screen.queryByRole('button', { name: 'Open externally' });

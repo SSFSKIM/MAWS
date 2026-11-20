@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { FilesChanged } from '@shared/ipc/schema/files';
 import { ipc } from '../../../ipc/client';
+import { failureOf } from '../viewer/notice'; // UX wave U6b-4b
 import { basename, dirname, sameFile, type Listing } from './tree';
 
 export const WATCH_GRACE_MS = 5000;
@@ -90,7 +91,7 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
         // longer holds it, and its late answer is not put back.
         if (at !== generation || inflight.get(key) !== flight) return;
         inflight.delete(key);
-        put(key, result.ok ? { status: 'ok', value: result.value } : { status: 'error', message: result.error.message });
+        put(key, result.ok ? { status: 'ok', value: result.value } : { status: 'error', message: result.error.message, failure: failureOf(result.error) });
         if (flight.again) list(appSessionId, path);
       });
     };

@@ -22,7 +22,8 @@ import { FIELD } from '../sessions/ui';
 import { liveThinkingLabel } from '../transcript/model/copy';
 import { duration } from '../transcript/model/time';
 import { useTicker } from '../transcript/view/rows/parts';
-import { Exchange, SideActions, useSideAsk } from './BtwView';
+import { answerFiles, Exchange, SideActions, useSideAsk } from './BtwView';
+import { TranscriptActionsProvider } from '../transcript/view/context'; // UX wave U6b-4b (R4): a path in an answer opens for this session
 import { SIDE_COPY } from './copy';
 import { visibleSessions } from '../session/visibility';
 import { useFloatingCard } from '../shell/floating';
@@ -134,17 +135,19 @@ function OpenCard({ parent, placement }: { parent: AppSessionId; placement: BtwC
       </header>
       {shown.length > 0 && (
         <div ref={log} role="log" aria-label={COPY.log} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          <ol className="m-0 flex list-none flex-col gap-4 p-0">
-            {shown.map((exchange) => (
-              <Exchange
-                key={exchange.id}
-                exchange={exchange}
-                canRetry={canAsk}
-                onRetry={() => void side.retry(exchange)}
-                waiting={<WaitingLine parent={parent} exchange={exchange} className="block text-ui-sm text-fg-muted" />}
-              />
-            ))}
-          </ol>
+          <TranscriptActionsProvider actions={answerFiles(parent)}>
+            <ol className="m-0 flex list-none flex-col gap-4 p-0">
+              {shown.map((exchange) => (
+                <Exchange
+                  key={exchange.id}
+                  exchange={exchange}
+                  canRetry={canAsk}
+                  onRetry={() => void side.retry(exchange)}
+                  waiting={<WaitingLine parent={parent} exchange={exchange} className="block text-ui-sm text-fg-muted" />}
+                />
+              ))}
+            </ol>
+          </TranscriptActionsProvider>
         </div>
       )}
       <div className={`flex shrink-0 flex-col gap-2 px-3 py-2.5 ${shown.length > 0 ? 'border-t border-border' : ''}`}>

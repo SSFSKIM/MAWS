@@ -683,7 +683,7 @@ describe('an expanded project', () => {
     expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Hide', 'Actions for Somersault terminal run', 'Mark unread']); // UX wave U7, O-16: the row's own Hide
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Open in']); // UX wave U7, O-16: Hide after the opens; U6b-4a: Open in, for a terminal session too
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in', 'Hide']); // UX wave U7, O-16: Hide after the opens; U6b-4a: Open in, for a terminal session too
   });
 
   it('toggles an unread row on hover without opening or pinning it, retaining an accessible unread marker', async () => {
@@ -726,8 +726,8 @@ describe('an expanded project', () => {
     const items = within(menu).getAllByRole('menuitem');
     // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place. UX wave U7, O-16: Hide
     // directly after Pin, always enabled, and nothing of it after "Delete conversation…"
-    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Hide', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…', 'Open in']); // UX wave U6b-4a: Open in, last
-    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, false, true, true, true, true, true, false]);
+    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Open in', 'Pin', 'Hide', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']); // UX wave U6b-4a: Open in, with the opens
+    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, false, true, false, true, true, true, true, true]);
   });
 
   // P5 O2 M2: the owner's Keep running mark, offered while the session's engine status reports it
@@ -867,7 +867,7 @@ describe('hiding a session', () => {
     expect(row('Fix sidebar drag').dataset.indented).toBeUndefined();
     expect(useHidden.getState().hidden.has(idOf('Charter + research'))).toBe(true);
     fireEvent.contextMenu(shown);
-    expect(await menuItems()).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Unhide', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…', 'Open in']);
+    expect(await menuItems()).toEqual(['Open', 'Open in new tab', 'Open in split', 'Open in', 'Pin', 'Unhide', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
   });
 
   it('Hide from the three dots, for a local record, without opening it', async () => {
@@ -2019,8 +2019,8 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build');
-      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive', 'Open in (the folder is on Studio)']); // UX wave U6b-4a
-      expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, false, false, false, false, true]);
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on Studio)', 'Hide', 'Rename…', 'Fork', 'Archive']); // UX wave U6b-4a
+      expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, true, false, false, false, false]);
     });
 
     it('draws each disabled with the update sentence on a machine whose build doesn’t list the capability (A14)', async () => {
@@ -2033,11 +2033,11 @@ describe('listed rows from another machine', () => {
       expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
         ['Open', false, null],
         ['Open in new tab', false, null],
+        ['Open in (the folder is on Studio)', true, null], // UX wave U6b-4a
         ['Hide', false, null],
         ['Rename…', true, 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
         ['Fork', true, 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
         ['Archive', true, 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
-        ['Open in (the folder is on Studio)', true, null], // UX wave U6b-4a
       ]);
     });
 
@@ -2049,7 +2049,7 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build (record)');
-      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Hide', 'Rename…', 'Fork', 'Archive', 'Open in (the folder is on Studio)']); // U7a's Hide after Pin; U6b-4a's Open in
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Open in (the folder is on Studio)', 'Pin', 'Hide', 'Rename…', 'Fork', 'Archive']); // U7a's Hide after Pin; U6b-4a's Open in
       const fork = items.find((m) => m.textContent === 'Fork')!;
       expect(fork.hasAttribute('data-disabled')).toBe(true);
       expect(fork.getAttribute('title')).toBe('Only Studio’s owners can fork a session there.');
@@ -2281,8 +2281,8 @@ describe('listed rows from another machine', () => {
     expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
       ['Open', true, 'Not available here'],
       ['Open in new tab', true, 'Not available here'],
-      ['Hide', false, null], // UX wave U7, O-16: hiding needs no opener
       ['Open in (the folder is on Studio)', true, null], // UX wave U6b-4a
+      ['Hide', false, null], // UX wave U7, O-16: hiding needs no opener
     ]);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
@@ -2308,7 +2308,7 @@ describe('listed rows from another machine', () => {
     const menu = await screen.findByRole('menu');
     // the opens, Hide (U7's rule), then U9's acts over the link (disabled here: this case registers no handler for them),
     // the order the architect ruled on 2026-11-13
-    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Hide', false], ['Rename…', true], ['Fork', true], ['Archive', true], ['Open in (the folder is on Studio)', true]]);
+    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Open in (the folder is on Studio)', true], ['Hide', false], ['Rename…', true], ['Fork', true], ['Archive', true]]);
     await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open' }));
     fireEvent.contextMenu(row('Studio build'));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }));
@@ -2333,11 +2333,11 @@ describe('listed rows from another machine', () => {
     render(<Sidebar />);
     await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
     // a listing you own: the opens, Hide, U9's acts (the architect's ruling of 2026-11-13)
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive', 'Open in (the folder is on Studio)']);
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in (the folder is on Studio)', 'Hide', 'Rename…', 'Fork', 'Archive']);
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
     await user.keyboard('{Escape}');
     await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Open in']); // UX wave U6b-4a: a terminal session on this Mac has Open in
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in', 'Hide']); // UX wave U6b-4a: a terminal session on this Mac has Open in
   });
 
   it('Hide from its three dots takes a listed row under Hidden, opening nothing; Unhide brings it back', async () => {

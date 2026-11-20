@@ -396,7 +396,8 @@ function DrawnFile({ tabId, session, artifact, path, onReady, inView }: { tabId:
   useEffect(() => {
     if (read) onReady();
   }, [read, onReady]);
-  return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly inView={inView} {...(session === null && { artifact })} />;
+  // UX wave U6b-4b (decision 4): told as an artifact's view by its mount, since `artifact` is passed only with no session
+  return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly inView={inView} artifactView {...(session === null && { artifact })} />;
 }
 
 // ---- the header (X32) --------------------------------------------------------------------------------------------------

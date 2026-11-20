@@ -4065,7 +4065,10 @@ function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
   return { which, why: '' };
 }
 const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
-const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
+const FILES_REFUSED = "Refused: path outside the session's directories"; // each older build's files service and viewer copy
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; acceptance L7): this build's viewer reads
+// the same refusal as the first notice, its headline first; the service's words stay in its small line
+const NOTICE_OUTSIDE = 'This file is outside the folders this session works in.';
 // An agent's row that links `text`'s paths, appended to the session's transcript (U6c's form: the agent's own text)
 function appendReply(path: string, sid: string, cwd: string, text: string): void {
   const rows = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown });
@@ -4193,7 +4196,10 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       await chip.click();
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
       if (known.which === 'dropsNamed') {
-        await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
+        const refusal = viewer.locator('[data-refusal]');
+        await expect(refusal.locator('p').first(), 'F’s daemon drops `named`: the file is refused, as F refuses it, and this build’s notice says why').toHaveText(NOTICE_OUTSIDE, { timeout: 20_000 });
+        await expect(refusal).toHaveAttribute('data-notice-cause', 'outside');
+        await expect(refusal.locator('[data-notice-detail]'), 'the service’s own words, small').toHaveText("path outside the session's directories");
       } else {
         await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
         await expect(viewer.locator('[data-read-only="outside"]'), 'with no `outside`, held read-only (W6)').toBeVisible();

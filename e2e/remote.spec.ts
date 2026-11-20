@@ -599,8 +599,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       .toBe(B_SESSION);
     await scene.sminos.list({ engine: B_SESSION, app, owners: [scene.member], project: PROJECT, title: TITLE, cwd: checkout });
 
-    // 1. Through the hub: B's address maps to a closed port, so the link comes up over the relay.
-    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } });
+    // 1. Through the hub: B's address maps to a closed port, so the link comes up over the relay. UX wave U6b-4b: what A's
+    // main would hand the system browser is written to `openLog` here too (M3's ⌘-click hands it nothing).
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_OPEN_LOG: openLog } });
     keepMainLines(a);
     const page = a.page;
     await expect
@@ -640,13 +641,12 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await row.click({ button: 'right' });
       await expect(page.getByRole('menu')).toBeVisible();
       const items = await page.getByRole('menuitem').allTextContents();
-      expect(items.slice(0, 3), 'a listed row’s menu: its two opens, then Hide').toEqual(['Open', 'Open in new tab', 'Hide']);
+      // UX wave U6b-4a: "Open in" with the opens, disabled, its label saying the folder is on B
+      const elsewhere = `Open in (the folder is on ${B_NAME})`;
+      expect(items.slice(0, 4), 'a listed row’s menu: its two opens, Open in, then Hide').toEqual(['Open', 'Open in new tab', elsewhere, 'Hide']);
       // after Hide, U9's acts over the link for a lane B listing that is yours, in their order, then Share and Add owner
       const acts = remoteSessionActions({ lane: 'B', record: false, mine: true, remoteReading: true }).map((id) => SESSION_ACTIONS[id]);
-      // UX wave U6b-4a: and "Open in", disabled, its label saying the folder is on B (before Share and Add owner)
-      const elsewhere = `Open in (the folder is on ${B_NAME})`;
-      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…' && item !== elsewhere), 'after Hide, the acts over the link (U9) and nothing else but Open in, Share and Add owner').toEqual(acts);
-      expect(items, 'Open in is in the listed row’s menu').toContain(elsewhere);
+      expect(items.slice(4).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'after Hide, the acts over the link (U9) and nothing else but Share and Add owner').toEqual(acts);
       await expect(page.getByRole('menuitem', { name: elsewhere, exact: true }), 'drawn disabled').toHaveAttribute('aria-disabled', 'true');
       await page.keyboard.press('Escape');
       await expect(page.getByRole('menu')).toHaveCount(0);
@@ -1015,7 +1015,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const mark = page.locator('[data-browser-view="panel"] [data-browser-chip] [data-forward-mark]');
       await expect(mark, `the browser's tab, marked forwarded\n${mainSaid(page)}\nB's log:\n${bPtyLines()}`).toHaveText(`forwarded from ${B_NAME}`, { timeout: 60_000 });
       await expect(mark).toHaveAttribute('title', `Port ${devPort} on ${B_NAME}, forwarded to this Mac`);
-      type Tab = { url: string; forward?: { machine: string; port: number; localPort: number } };
+      type Tab = { tabId: string; url: string; forward?: { machine: string; port: number; localPort: number } };
       const forwardedTab = async () => (await invoke<{ tabs: Tab[] }>(page, 'browser.tabs.list', { appSessionId: app }, b.ref)).tabs.find((t) => t.forward?.port === devPort);
       await expect.poll(async () => (await forwardedTab()) !== undefined, { timeout: 30_000, message: 'the session’s browser holds the forwarded tab' }).toBe(true);
       const tab = (await forwardedTab())!;
@@ -1025,14 +1025,31 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(tab.url, 'the page loads from A’s listener').toBe(`http://127.0.0.1:${localPort}/`);
 
       // The page is the directory listing B's server sent for the checkout.
-      const pageText = () =>
+      const pageAt = (origin: string) =>
         a!.app.evaluate(async ({ webContents }, origin) => {
           const view = webContents.getAllWebContents().find((w) => w.getURL().startsWith(origin));
           return view ? ((await view.executeJavaScript('document.body ? document.body.innerText : ""')) as string) : null;
-        }, `http://127.0.0.1:${localPort}/`);
+        }, origin);
+      const pageText = () => pageAt(`http://127.0.0.1:${localPort}/`);
       await expect.poll(pageText, { timeout: 60_000, message: 'the forwarded page shows B’s checkout' }).toContain('Directory listing for /');
       const listed = (await pageText())!;
       for (const name of [NOTES, ON_B, WHILE_CUT]) expect(listed, `the listing names ${name}`).toContain(name);
+      // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; R3, N3.4): with ⌘ held the link of
+      // B's session is forwarded as without it, and nothing reaches A's system browser, which would reach A's own
+      // loopback. The forwarded tab is closed first, so the ⌘-click is seen opening one again.
+      await invoke(page, 'browser.tabs.close', { tabId: tab.tabId });
+      await expect.poll(async () => (await forwardedTab()) === undefined, { timeout: 30_000, message: 'the forwarded tab closed' }).toBe(true);
+      await expect.poll(pageText, { timeout: 30_000, message: 'the first page went with its tab' }).toBeNull();
+      await link.click({ modifiers: ['Meta'] });
+      await quoting(expect.poll(async () => (await forwardedTab()) !== undefined, { timeout: 60_000, message: '⌘-click forwards B’s link again' }).toBe(true), () => `${mainSaid(page)}\nB's log:\n${bPtyLines()}`);
+      const reopened = (await forwardedTab())!;
+      expect(reopened.tabId, 'a new tab').not.toBe(tab.tabId);
+      expect(reopened.forward!.machine, 'forwarded from B').toBe(b.ref);
+      expect(reopened.url, 'loading from A’s listener').toBe(`http://127.0.0.1:${reopened.forward!.localPort}/`);
+      // the page loads again, from the new tab's own address: B's listing, read from the page now open there
+      await expect.poll(() => pageAt(reopened.url), { timeout: 60_000, message: 'the forwarded page shows B’s checkout again' }).toContain('Directory listing for /');
+      const handedOut = (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line === `openExternal ${devServerUrl(devPort)}`);
+      expect(handedOut, 'nothing handed to A’s system browser').toEqual([]);
       // Back in the Terminal tool (the browser may have taken its place): B's server logged the page's request, and ⌃C
       // stops it.
       await openSurface(page, 'Terminal');
@@ -3884,6 +3901,103 @@ test('U6b-3b G7, a session on B: Go to file lists a file that exists on B alone;
     scene.aHub.restore();
     await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
     await quoting(expect(result, 'asked again: the file listed again').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G; acceptance L9): a session MAWS runs on
+// B, whose reply links a file in B's checkout and, by a relative link, a file outside B's folders that its transcript never
+// writes whole. A, whose member owns B, opens the second: B's daemon runs the open and finds no evidence, and the tab's
+// notice names B, says the three ways a file from elsewhere opens and offers Copy path, with no Retry. Then A's way to the
+// hub is cut (B unreachable, as G7 makes it), and a file in B's checkout, clicked once the link is offline, reads "<B> is
+// not reachable." with Retry. Restored, A's main tells the folder of every files watch it gives back on the session's
+// reopened feed invalidated, and an errored tab whose folder's watch stood is read again by itself (seen on the Mac run of
+// 2026-11-19): so Retry is proved on a file in a folder nothing watched before the cut (its watch failed
+// with the read, and nothing gives it back), whose notice stands with the link up until Retry shows it; and the file in the
+// checkout's own folder, which the Files tree may have watched, is shown again, read by itself or by Retry, whichever comes
+// first. Waits on the notice's cause, the link's offline mark, A's link up and the file's text. Every name is invented.
+const NOTICE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000f7';
+const NOTICE_LINK = 'the tide notes';
+const NOTICE_TEXT = 'Invented tide notes, in B’s checkout.\n';
+const NOTICE_LOG_TEXT = 'Invented tide log, in a folder of B’s checkout.\n';
+const NOTICE_RELATIVE = '../elsewhere/old-notes.md'; // from B's checkout, a file outside it
+test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming B; with B unreachable a file reads so with Retry, which shows it once B is back', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-notice-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-notice-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const inside = join(checkout, 'tide-notes.txt');
+    const logged = join(checkout, 'logs', 'tide-log.txt'); // in a folder of the checkout that no tree opens before the cut
+    const outside = join(root, 'elsewhere', 'old-notes.md');
+    mkdirSync(join(root, 'elsewhere'));
+    writeFileSync(outside, 'Invented old notes, outside B’s checkout.\n');
+    const journal = new SideJournal(NOTICE_SESSION, checkout);
+    journal.turn(`Read [${NOTICE_LINK}](${inside}), [the tide log](${logged}) and [the old notes](${NOTICE_RELATIVE}).`);
+    const { scene, b, page } = await laneBOpened({ root, aUserData, journal, first: 'Where are the notes?', firstReply: NOTICE_LINK, title: 'B’s notes session' }, held);
+    writeFileSync(inside, NOTICE_TEXT); // the checkout laneBOpened made
+    mkdirSync(dirname(logged));
+    writeFileSync(logged, NOTICE_LOG_TEXT);
+    const said = () => `${mainSaid(page)}\nB's log:\n${b.log().slice(-3000)}`;
+
+    await test.step('a file outside B’s folders that B has no evidence for: the notice names B, says the three ways and offers Copy path', async () => {
+      const chip = main(page).locator(`[data-chip="path"][title="${NOTICE_RELATIVE}"]`);
+      await expect(chip, 'the relative link drawn as a path link').toBeVisible({ timeout: 60_000 });
+      await chip.click();
+      const notice = sideColumn(page).locator(`[data-file-viewer][data-path="${outside}"] [data-refusal]`);
+      await quoting(expect(notice, 'the tab at the path the link names, B’s refusal classified').toHaveAttribute('data-notice-cause', 'outside', { timeout: 60_000 }), said);
+      await expect
+        .poll(() => notice.locator('p').allTextContents(), { message: 'the sentences, the path, and the words B answered' })
+        .toEqual([
+          `This file is outside the folders this session works in on ${B_NAME}.`,
+          "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+          'Ask the agent to send the file to see it here.',
+          outside,
+          "Not opened: path outside the session's directories",
+        ]);
+      await expect(notice.locator('[data-notice-copy]')).toHaveText('Copy path');
+      await expect(notice.locator('[data-notice-retry]'), 'no Retry: trying again cannot help').toHaveCount(0);
+    });
+
+    await test.step('B unreachable: a file reads that B is not reachable, with Retry; B reachable again, Retry shows a file nothing read again, and the other is shown', async () => {
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page), 'the link’s offline mark').toHaveAttribute('data-link-phase', 'offline', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
+      const unreachable = async (path: string) => {
+        await main(page).locator(`[data-chip="path"][title="${path}"]`).click();
+        const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);
+        const notice = viewer.locator('[data-refusal]');
+        await quoting(expect(notice, `the read of ${path} failed for the link`).toHaveAttribute('data-notice-cause', 'unreachable', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
+        await expect(notice.locator('p').first()).toHaveText(`${B_NAME} is not reachable.`);
+        await expect(notice.locator('[data-notice-copy]'), 'Copy path is the outside notice’s alone').toHaveCount(0);
+        await expect(notice.locator('[data-notice-retry]')).toHaveText('Retry');
+        return { viewer, notice, retry: notice.locator('[data-notice-retry]') };
+      };
+      await unreachable(inside);
+      const log = await unreachable(logged); // shown last, so its tab is the one in view when B is back
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      // the folder's watch failed with the read, so the reopened feed gives nothing back for it: the notice stands
+      await expect(log.notice, 'the notice stands with the link up: nothing read the file again').toHaveAttribute('data-notice-cause', 'unreachable');
+      await expect(log.retry, 'Retry ready once nothing is pending').toBeEnabled({ timeout: 30_000 });
+      await log.retry.click();
+      await quoting(expect(log.viewer.locator('.cm-content'), 'Retry read the file on B').toContainText('Invented tide log', { timeout: 60_000 }), said);
+      await expect(log.viewer.locator('[data-refusal]'), 'the notice gone').toHaveCount(0);
+
+      // the file in the checkout's own folder: read again by the invalidation of a watch that stood, by its showing again,
+      // or by Retry where its notice still offers it
+      await main(page).locator(`[data-chip="path"][title="${inside}"]`).click();
+      const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${inside}"]`);
+      const text = viewer.locator('.cm-content', { hasText: 'Invented tide notes' });
+      const offered = viewer.locator('[data-refusal] [data-notice-retry]:enabled');
+      await quoting(expect(text.or(offered).first(), 'the file, or Retry offered').toBeVisible({ timeout: 60_000 }), said);
+      if (await offered.isVisible()) await offered.click({ timeout: 5_000 }).catch(() => undefined); // a read that lands first takes the notice away
+      await quoting(expect(text, 'the file read on B once B is back').toBeVisible({ timeout: 60_000 }), said);
+      await expect(viewer.locator('[data-refusal]'), 'the notice gone').toHaveCount(0);
+    });
   } finally {
     await held.a?.cleanup();
     await held.scene?.stop();

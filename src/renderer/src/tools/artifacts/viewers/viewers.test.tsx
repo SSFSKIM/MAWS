@@ -22,6 +22,9 @@ import { openComment } from '../../../side/register';
 import type { CardFrame } from '../../../side/card/CardHost';
 import { openCard, useCommentCard } from '../../../side/card/store';
 import { useSessions } from '../../../stores/sessions';
+import { useLayout } from '../../../stores/layout'; // UX wave U6b-4b
+import { allTabs } from '../../../stores/layout-model';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { deferred, installFakeMain, ok } from '../../../test-support/code';
 import { registerCommentComposer, type CommentContext } from '../../code/anchor/anchor';
 import { useViewer } from '../../code/viewer/viewer-store';
@@ -55,6 +58,9 @@ let main: ReturnType<typeof installFakeMain>;
 let versionsAnswer: (() => Promise<ReturnType<typeof ok>>) | null; // fix wave 1: a read answered when the case says
 let connectorMain: ((name: string, input: Record<string, unknown>) => ReturnType<typeof ok> | null) | null = null; // P3-H H4
 const offs: (() => void)[] = [];
+// The stored file's bytes as main reads them, by the session or by the artifact alone (UX wave U6b-4b: a Markdown file's)
+let served: { content: string; mime: string };
+const readAnswer = () => ok({ encoding: 'utf8', content: served.content, bytes: served.content.length, offset: 0, length: served.content.length, truncated: false, mime: served.mime, hash: 'a'.repeat(64), utf8: true });
 
 function rowOf(kind: ArtifactKind, over: Partial<LibraryRow> = {}): LibraryRow {
   return {
@@ -92,6 +98,7 @@ beforeEach(() => {
   versions = [version(1, 4), version(2, 9)];
   names = { 4: 'index.html', 9: 'index.html' };
   versionsAnswer = null;
+  served = { content: 'month,amount\n', mime: 'text/csv' };
   main = installFakeMain((name, input) => {
     const connectorAnswer = connectorMain?.(name, input); // P3-H H4: a connectors case's own answers
     if (connectorAnswer) return connectorAnswer;
@@ -102,8 +109,8 @@ beforeEach(() => {
       return ok({ revision, kind: row.kind, name: names[revision], path: `/store/${revision}/${names[revision]}` });
     }
     if (name === 'library.exportFormats') return ok({ formats: input.kind === 'html' ? ['pdf', 'png', 'html'] : [] }); // U10b: main serves html/html
-    if (name === 'files.read') return ok({ encoding: 'utf8', content: 'month,amount\n', bytes: 13, offset: 0, length: 13, truncated: false, mime: 'text/csv', hash: 'a'.repeat(64), utf8: true });
-    if (name === 'library.read') return ok({ encoding: 'utf8', content: 'month,amount\n', bytes: 13, offset: 0, length: 13, truncated: false, mime: 'text/csv', hash: 'a'.repeat(64), utf8: true }); // M6b fix wave 2
+    if (name === 'files.read') return readAnswer();
+    if (name === 'library.read') return readAnswer(); // M6b fix wave 2
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     return new Promise(() => {});
   });
@@ -614,6 +621,29 @@ describe('the File viewer', () => {
     mount('file');
     await waitFor(() => expect(main.callsOf('library.read')).toHaveLength(2));
     expect(main.callsOf('files.read')).toEqual([]);
+  });
+
+  // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, decision 4, N2.7): a view's path may be the
+  // store's, so a relative link in a Markdown file's view is resolved against nothing, with a session and without one
+  it('leaves a relative link in a Markdown file’s view relative, under the session that made it and with none (N2.7)', async () => {
+    names = { 9: 'notes.md' };
+    served = { content: '[setup](setup.md)', mime: 'text/markdown' };
+    const opened = () => allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'file');
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+    mount('file');
+    const chip = await screen.findByTitle('setup.md');
+    act(() => void fireEvent.click(chip, { metaKey: true }));
+    expect(opened()).toEqual([expect.objectContaining({ path: 'setup.md', appSessionId: PAGE_P })]); // not /store/9/setup.md, nor /repo/setup.md
+    cleanup();
+    useViewer.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    row = rowOf('file', { title: 'notes', sessions: [] });
+    useSessions.setState({ records: new Map() });
+    mount('file');
+    const alone = await screen.findByTitle('setup.md');
+    act(() => void fireEvent.click(alone, { metaKey: true }));
+    expect(opened()).toEqual([expect.objectContaining({ path: 'setup.md', appSessionId: null })]);
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
   });
 
   it('has no Comment, and its Export menu saves a copy', async () => {
