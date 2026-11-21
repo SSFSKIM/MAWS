@@ -1540,7 +1540,8 @@ test('a browser call’s time shows on pointing along its line and on its phrase
   try {
     const noHover = await page.evaluate(() => matchMedia('(hover: none)').matches);
     if (noHover) await expect(quiet).toHaveCSS('opacity', '1');
-    else test.info().annotations.push({ type: 'not reached', description: 'touch emulation left (hover: none) unmatched; pointed-actions.test.ts reads the rule from the stylesheet' });
+    // unverified, not proof: the always-drawn rule then stands only on pointed-actions.test.ts's reading of the stylesheet
+    else test.info().annotations.push({ type: 'unverified', description: 'not reached: touch emulation left (hover: none) unmatched, so the browser actions’ always-drawn opacity was not exercised in this run' });
   } finally {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
     await cdp.detach();
@@ -2029,10 +2030,10 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     const rest = await measure(row);
     expect(rest.shown, `${name}: at rest the controls are hidden`).toBe('0');
     expect(rest.actions.width, `${name}, R20: at rest they take no width`).toBe(0);
-    // hidden, the three keep their widths: none of their boxes may lie past the end of the box that clips them, where a
-    // narrow pane or a phone's screen ends (the desk's phone scenes count a control whose box is past the screen). A
-    // button overhangs its place by its 2 px of side padding, as it does when shown.
-    for (const part of rest.parts.slice(0, 3)) expect(part.box.right, `${name}: at rest “${part.text}” ends at the line’s end`).toBeLessThanOrEqual(rest.actions.right + 2.5);
+    // hidden, the time and the controls keep their widths: none of their boxes may lie past the end of the box that clips
+    // them, where a narrow pane or a phone's screen ends (the desk's phone scenes count a control whose box is past the
+    // screen). A button overhangs its place by its 2 px of side padding, as it does when shown.
+    for (const part of rest.parts.slice(0, 1 + words.length)) expect(part.box.right, `${name}: at rest “${part.text}” ends at the line’s end`).toBeLessThanOrEqual(rest.actions.right + 2.5);
     expect(rest.row.height - rest.bubble.height, `${name}: the row is the bubble’s height plus 16 px`).toBe(16);
     await row.hover();
     await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on hover`).toHaveCSS('opacity', '1');
@@ -2119,7 +2120,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
 
   // R21 (amended 2026-11-17): Copy's and Edit's targets overhang the line 7 px up and 1 px down, 1 px clear of the turn
   // line's button, more than the virtual list's rounding of a row's height can take; at 360 and 280 px neither overlaps
-  // the other or the turn line's button. R20 at 280 px: at rest the caption is whole.
+  // the other or the turn line's button. R20 at 280 px: the taken steer has no caption (a waiting steer's, below).
   for (const width of [360, 280]) {
     await paneWidth(page, width);
     await atRest();
@@ -2142,8 +2143,8 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
   }
 
   // R14: where the line cannot fit, the controls keep their width and nothing wraps or spills past the column. The word
-  // cut (T42) took the steer's caption, "Sent during this turn", the one this fixture cut with an ellipsis: the steer's
-  // line is now its time and its controls alone, at 200 px as at any width
+  // cut (T42) took the taken steer's caption, "Sent during this turn": its line is now its time and its controls alone,
+  // at 200 px as at any width. The caption that shrinks is a waiting steer's, below.
   await paneWidth(page, 1280);
   await mounted(page, steer);
   await steer.getByRole('button', { name: 'Copy' }).focus();
@@ -2167,6 +2168,45 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
   expect(dropped.parts.at(-1)!.text).toBe('Not sent');
   expectNear(dropped.tail!.box.right, dropped.bubble.right, 'M2-2: flush with the bubble’s edge');
   await expect(page.locator('.transcript-not-sent')).toBeVisible();
+
+  // R12, R14 and R20 on a caption the word cut kept: a steer still waiting for the engine reads "Sends at the next step"
+  // (PENDING_CAPTION.next) until the engine takes it, and has Copy and no Edit. pass3/steer-next is released one event at
+  // a time until that steer is drawn, so it stays waiting while it is measured.
+  const WAITING_CAPTION = 'Sends at the next step';
+  await load(page, 'pass3/steer-next');
+  const released = await page.evaluate(async () => {
+    const api = (window as unknown as HarnessWindow).__maws_harness;
+    const painted = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    for (let k = 0; k < 2000; k++) {
+      if (document.querySelector('section.transcript-user[data-pending="next"]') !== null) return k;
+      api.step();
+      await painted();
+    }
+    return -1;
+  });
+  expect(released, 'pass3/steer-next: its steer drawn waiting for the engine').toBeGreaterThan(0);
+  const waiting = page.locator('.transcript-row[data-kind="user"]').filter({ has: page.locator('section.transcript-user[data-pending="next"]') });
+  await expect(waiting).toContainText('Reply NEXT_OK');
+  await checkRow(waiting, '1280 px, a steer waiting for the engine', ['Copy'], WAITING_CAPTION);
+  await atRest();
+  const waitingRest = await measure(waiting);
+  expect(waitingRest.tail, 'the waiting steer’s caption last on the line, whole, its sentence as its title').toMatchObject({ whole: true, last: true, title: WAITING_CAPTION });
+  await paneWidth(page, 280);
+  await atRest();
+  expect((await measure(waiting)).tail, '280 px, R20: at rest the caption has the whole line and is whole').toMatchObject({ whole: true, title: WAITING_CAPTION });
+  await paneWidth(page, 1280);
+  await mounted(page, waiting);
+  await waiting.getByRole('button', { name: 'Copy' }).focus();
+  const waitingControls = (await measure(waiting)).actions.width;
+  await paneWidth(page, 200);
+  await mounted(page, waiting);
+  await waiting.getByRole('button', { name: 'Copy' }).focus();
+  const cut = await measure(waiting);
+  expect(cut.tail, '200 px, R14: the caption alone shrinks, cut, last on the line, its sentence as its title').toMatchObject({ whole: false, last: true, title: WAITING_CAPTION });
+  expectNear(cut.actions.width, waitingControls, '200 px, R14: the controls keep their width');
+  expect(cut.line.height, '200 px: nothing wraps').toBe(16);
+  expect(cut.lineScrolls, '200 px: nothing spills').toBe(false);
+  expect(cut.line.left >= cut.column.left - 0.5 && cut.line.right <= cut.column.right + 0.5, '200 px: the line stays inside the column').toBe(true);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
