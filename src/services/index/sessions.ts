@@ -320,7 +320,10 @@ export class SessionStore {
   upsertFromSummary(summary: TranscriptSummary): { record: SessionRecord; created: boolean; advanced: boolean } {
     return this.db.transaction(() => {
       const existing = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', summary.sessionId);
-      const location = locate(summary.relocatedCwd ?? summary.directory);
+      // A summary that names no folder (a transcript read before its first row landed: writeFile creates the file empty,
+      // and the watcher can hear it so) keeps the record's: it says nothing of where the session is, so it moves it out
+      // of no project.
+      const location = locate(summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? null);
       // New chat (2026-10-01): the home directory is no project, so a chat that works in no project lists under Other
       // sessions (a project already made for it stays)
       const projectId = this.projects.projectAt(location, summary.hasMessages && location.projectDirectory !== homeDirectory());
