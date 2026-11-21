@@ -143,6 +143,26 @@ describe('channelEntries: people’s words', () => {
     ]);
   });
 
+  // X8: a machine's notice is never a person's words; it draws as words by `<program>@<machine>`, nobody's, never yours.
+  it('draws a machine’s notice by its program and machine, as no member’s and never yours', () => {
+    const to = [{ session: A, alias: 'maws-45' }];
+    const notice = (extra: Record<string, unknown>) => ev({ kind: 'human', writer: 'dc-x/human', from: 'human', to, text: 'the box is up', ts: T(0), notice: 'devcloud', ...extra });
+    const entries = project([notice({}), notice({ member: OWNER.id }), notice({ notice: 'Dev Cloud' }), notice({ writer: 'dc-x/human~0123456789abcdef' })], { me: OWNER.id });
+    expect(entries).toMatchObject([
+      { kind: 'words', member: null, name: 'devcloud@dc-x', you: false, notice: true, to, text: 'the box is up' },
+      { kind: 'words', member: null, name: 'devcloud@dc-x', you: false, notice: true },
+      { kind: 'words', member: null, name: 'notice@dc-x', you: false, notice: true },
+      { kind: 'words', member: null, name: 'devcloud@dc-x', you: false, notice: true },
+    ]);
+    // the field marks nothing on a device's words, nor as an empty string: those draw as today
+    const marked = project([human(OWNER, 1, 'mine', { notice: 'devcloud' }), notice({ notice: '', member: OWNER.id })], { me: OWNER.id });
+    expect(marked).toMatchObject([
+      { kind: 'words', member: OWNER.id, name: 'You', you: true },
+      { kind: 'words', member: OWNER.id, name: 'You', you: true },
+    ]);
+    for (const entry of marked) expect(entry).not.toHaveProperty('notice');
+  });
+
   it('a migrated word with no author is named by its member id', () => {
     const [entry] = project([ev({ kind: 'human', writer: 'hub/legacy', from: 'human', member: ANA.id, to: '*', text: 'from before', ts: T(0) }, { label: 'migrated', by: 'mini' })]);
     expect(entry).toMatchObject({ kind: 'words', name: 'member ana00000', label: 'migrated', by: 'mini' });

@@ -31,7 +31,7 @@ function WordsRow({ entry }: { entry: WordsEntry }) {
   return (
     <article data-channel-entry="words" data-offset={entry.offset ?? undefined} data-channel-label={entry.label} data-word-state={stateName(state)} className={`flex min-w-0 flex-col gap-1 ${faintOf(entry)}`}>
       <header className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
-        <span className="truncate font-medium text-fg" title={entry.offset !== null && entry.label === 'verified' ? CHANNEL.signedBy(entry.you ? null : entry.name) : undefined}>
+        <span className="truncate font-medium text-fg" title={entry.offset !== null && entry.label === 'verified' && entry.notice === undefined ? CHANNEL.signedBy(entry.you ? null : entry.name) : undefined}>
           {entry.name}
         </span>
         <Recipients to={entry.to} />
