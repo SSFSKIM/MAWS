@@ -1133,7 +1133,7 @@ describe('cross-session rows (E7)', () => {
   });
 
   // P3-F L260: the row names a known agent by its ref's name, whatever the call addressed it by
-  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name), named by its ref; main and parent are from_child', () => {
+  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name), named by its ref; main and parent are from_child, each one going out to the party it names', () => {
     const b = builder();
     agentTurn(b);
     b.turn('u2');
@@ -1143,11 +1143,12 @@ describe('cross-session rows (E7)', () => {
     b.toolUse('s4', 'SendMessage', { to: 'parent', message: 'up too' });
     b.end(['u2']);
     const list = messages(rows(b.events));
-    expect(list.map((row) => [row.direction, row.text, row.to?.taskId ?? null, row.peer])).toEqual([
-      ['to_child', 'Survey src: by id', 'a1', undefined],
-      ['to_child', 'Survey src: by name', 'a1', undefined],
-      ['from_child', 'main: up', null, undefined],
-      ['from_child', 'parent: up too', null, undefined],
+    // Task 2 fix round 1 (T73): routed up as from_child, a child's send to its parent still goes out to the party it names
+    expect(list.map((row) => [row.direction, row.flow, row.text, row.to?.taskId ?? null, row.peer])).toEqual([
+      ['to_child', 'out', 'Survey src: by id', 'a1', undefined],
+      ['to_child', 'out', 'Survey src: by name', 'a1', undefined],
+      ['from_child', 'out', 'main: up', null, undefined],
+      ['from_child', 'out', 'parent: up too', null, undefined],
     ]);
     expect(list[0]!.to).toEqual({ taskId: 'a1', agentId: 'a1', toolUseId: 'ag1', name: 'Survey src', glyph: list[0]!.to!.glyph, kind: 'agent', subagentType: 'general-purpose' });
   });
@@ -1163,11 +1164,11 @@ describe('cross-session rows (E7)', () => {
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'first line\nsecond line' });
     b.end([], { origin: 'peer' });
     const list = messages(rows(b.events));
-    expect(list.map((row) => [row.direction, row.text, row.from?.taskId ?? null, row.report, row.body])).toEqual([
-      ['from_child', 'Report from Survey src: line one', 'a1', 'line one\n\nline two', undefined],
-      ['from_child', 'Survey src: a plain note', 'a1', undefined, 'a plain note'], // U3 (the ruling of 2026-11-13): the whole message the line opens to
-      ['from_child', 'a9: from a stranger', null, undefined, 'from a stranger'],
-      ['from_child', 'Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
+    expect(list.map((row) => [row.direction, row.flow, row.text, row.from?.taskId ?? null, row.report, row.body])).toEqual([
+      ['from_child', 'in', 'Report from Survey src: line one', 'a1', 'line one\n\nline two', undefined],
+      ['from_child', 'in', 'Survey src: a plain note', 'a1', undefined, 'a plain note'], // U3 (the ruling of 2026-11-13): the whole message the line opens to
+      ['from_child', 'in', 'a9: from a stranger', null, undefined, 'from a stranger'],
+      ['from_child', 'in', 'Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
     ]);
     expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual([]);
   });

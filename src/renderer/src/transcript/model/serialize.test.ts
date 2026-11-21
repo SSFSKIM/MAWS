@@ -75,6 +75,7 @@ describe('serializeRows', () => {
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  done\n  all of it' });
     b.toolUse('s2', 'SendMessage', { to: 'peer-c', message: '  padded  \n' }); // whitespace hides nothing: no quote
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'note\nmore' });
+    b.toolUse('s3', 'SendMessage', { to: 'main', message: 'up' }); // a child's send to its parent goes out (task 2 fix round 1)
     b.end(['u1']);
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'agent_list' || row.kind === 'agent_message'));
     expect(markdown).toBe([
@@ -85,6 +86,7 @@ describe('serializeRows', () => {
       '- Report from a1: done\n  > done\n  > all of it', // U3 (O-12): a hand-back's line carries the report's first line
       '- → @peer-c: padded',
       '- ← a1: note\n  > note\n  > more',
+      '- → main: up',
     ].join('\n\n'));
   });
 

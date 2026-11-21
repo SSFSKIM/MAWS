@@ -269,11 +269,11 @@ export const subagentDetail = (name: string, lastTool: string | null, elapsedMs:
 // keeps its words and the › mark.
 export const MESSAGE_LINE = { from: '←', to: '→', report: 'Report from', mark: '›', named: { from: 'Message from', to: 'Sent to' } } as const;
 const messageLine = (who: string, preview: string) => `${who}: ${preview}`;
-// A message's arrow and the words it stands for, by its direction (a report has none: its words say it)
-export function messageArrow(row: { direction: 'to_child' | 'from_child' | 'between'; report?: string; peer?: { sender: unknown } }): '←' | '→' | null {
+// A message's arrow and the words it stands for, by whether it comes in from the party its line names or goes out to it,
+// whatever its routing (a report has none: its words say it)
+export function messageArrow(row: { flow: 'in' | 'out'; report?: string }): '←' | '→' | null {
   if (row.report !== undefined) return null;
-  if (row.peer !== undefined) return row.peer.sender !== null ? MESSAGE_LINE.from : MESSAGE_LINE.to;
-  return row.direction === 'to_child' ? MESSAGE_LINE.to : MESSAGE_LINE.from;
+  return row.flow === 'out' ? MESSAGE_LINE.to : MESSAGE_LINE.from;
 }
 export const messageArrowWords = (arrow: '←' | '→') => (arrow === MESSAGE_LINE.from ? MESSAGE_LINE.named.from : MESSAGE_LINE.named.to);
 

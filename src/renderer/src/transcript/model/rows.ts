@@ -113,6 +113,9 @@ export type Row = RowBase &
     | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; phase?: string; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; phase (the word cut, T87): a working workflow's phase, for its line's pointing; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
+        // the word cut (T73): whether the message comes in from the party its line names or goes out to it, apart from its
+        // routing (a child's send to `main` is routed up, `from_child`, and goes out to main)
+        flow: 'in' | 'out';
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
         body?: string; // E7: an in-process agent's whole message; U3 (O-12): of every message to or from a subagent, which its line opens to
       }

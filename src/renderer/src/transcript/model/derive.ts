@@ -794,7 +794,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         }
         const name = event.direction === 'to_child' ? event.toAgentId : event.fromAgentId;
         const preview = previewOf(event.text); // UX wave U3 (O-12): one line, the whole message opened under it
-        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, preview), body: event.text } });
+        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, flow: event.direction === 'to_child' ? 'out' : 'in', from: null, to: null, text: agentMessageCopy(event.direction, name, preview), body: event.text } });
         break;
       }
       case 'permission.requested':
@@ -1544,7 +1544,7 @@ function hasCompanion(event: Event<'user.message'>, companions: ReadonlySet<Mess
 function inboundRow(event: Event<'peer.message'>, turnId: TurnId, owners: string[] | null): RowOf<'agent_message'> {
   const preview = previewOf(event.text);
   return {
-    id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message', direction: 'between', from: null, to: null, text: peerMessageCopy.inbound(peerLabel(event.from, event.fromName), preview),
+    id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message', direction: 'between', flow: 'in', from: null, to: null, text: peerMessageCopy.inbound(peerLabel(event.from, event.fromName), preview),
     peer: {
       sender: { name: event.fromName, address: event.from, session: event.fromSession, owners }, recipient: null, body: event.text, preview, replyTo: event.replyable ? event.from : null,
       toolUseId: null, messageUuid: event.messageUuid, result: null, resultText: null, summary: null,
@@ -1552,15 +1552,15 @@ function inboundRow(event: Event<'peer.message'>, turnId: TurnId, owners: string
   };
 }
 
-// A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
-// parent's message down (`to_child`, the agent named by its ref, P3-F L260; one no loaded turn launched by the host's
-// lookup, L197), to anything else a message to another session (`between`:
+// A SendMessage call, which goes out to whom it names: to `main` or `parent` a child's report up (`from_child`), to an
+// agent this transcript knows the parent's message down (`to_child`, the agent named by its ref, P3-F L260; one no
+// loaded turn launched by the host's lookup, L197), to anything else a message to another session (`between`:
 // a peer's name or address, a teammate), refined by its result; one whose turn closed with none was never answered (E11).
 function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], agentOf: (key: string) => SubagentRef | null, context: TurnContext): RowOf<'agent_message'> {
   const input = record(use.input);
   const to = str(input.to);
   const message = str(input.message, str(input.content));
-  const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
+  const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, flow: 'out' as const, from: null };
   const preview = previewOf(message); // UX wave U3 (O-12): every send is one line, the whole message opened under it
   const body = { body: message }; // the whole message, which the line opens to
   if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, preview), ...body };
@@ -1585,7 +1585,7 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agent
   const agent = event.fromAgentId === null ? null : agentOf(event.fromAgentId);
   const title = agent?.name ?? event.fromAgentId;
   const report = handbackReport(event.text);
-  const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };
+  const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, flow: 'in' as const, from: agent, to: null };
   if (report !== null) return { ...base, text: peerMessageCopy.report(title, previewOf(report)), report }; // UX wave U3: the report's first line on the line
   const preview = previewOf(event.text);
   return { ...base, text: agentMessageCopy('from_child', title, preview), body: event.text };

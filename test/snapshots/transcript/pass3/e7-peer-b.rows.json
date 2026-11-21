@@ -97,6 +97,7 @@
   {
     "at": "2026-10-06T10:54:24.926Z",
     "direction": "between",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:replay:journal:77:1",
     "kind": "agent_message",
@@ -190,6 +191,7 @@
   {
     "at": "2026-10-06T10:54:30.258Z",
     "direction": "between",
+    "flow": "in",
     "from": null,
     "id": "agentmsg:replay:journal:106:2",
     "kind": "agent_message",
@@ -286,6 +288,7 @@
   {
     "at": "2026-10-06T10:54:49.710Z",
     "direction": "between",
+    "flow": "in",
     "from": null,
     "id": "agentmsg:replay:journal:142:2",
     "kind": "agent_message",
@@ -396,6 +399,7 @@
   {
     "at": "2026-10-06T10:55:10.597Z",
     "direction": "between",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:replay:journal:207:1",
     "kind": "agent_message",

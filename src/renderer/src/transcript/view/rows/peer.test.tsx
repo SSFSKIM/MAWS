@@ -220,6 +220,18 @@ describe('a message from another session', () => {
       cleanup();
     }
   });
+
+  // Task 2 fix round 1 (T73): routed up, a child's send to its parent still goes out to the party its line names
+  it('draws a child’s send to its parent as sent: → and Sent to, as its copy does', () => {
+    const rows = derived((b) => {
+      b.turn('u1');
+      b.toolUse('s1', 'SendMessage', { to: 'main', message: 'done here' });
+    }).filter((row): row is Message => row.kind === 'agent_message');
+    const { container } = renderRow(rows[0]!, { storeKey: A });
+    const line = screen.getByRole('button', { name: /^Sent to main ?: done here$/ });
+    expect(line.textContent).toContain('→');
+    expect(container.textContent).not.toContain('←');
+  });
 });
 
 // UX wave U3 (O-12; the U3a document, Acceptance 3): the one message line.
