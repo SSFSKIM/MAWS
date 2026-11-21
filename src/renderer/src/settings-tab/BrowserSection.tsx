@@ -7,7 +7,8 @@
 //   (main then browses with the default and says so, Design §9). It applies to tabs opened afterwards.
 // - Search engine: the address field's search template, written on Enter or blur only when it is an http(s) address
 //   with %s (the schema refuses anything else; a refusal is said in words and the field goes back).
-// - Links that open a new window: a new tab of the session, or the system browser (Decision Log 11).
+// - New-window links (the word cut, G67 to G69: "Links that open a new window" until then): a new tab of the session,
+//   or the system browser (Decision Log 11).
 // - cua #90: Bookmarks bar, next to the profile: settings 12's switch, which ⌘⇧B in the browser flips too.
 import type { Settings } from '@shared/ipc/schema';
 import { isSearchUrlTemplate } from '@shared/browser/url';

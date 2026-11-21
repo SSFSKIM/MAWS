@@ -12,6 +12,10 @@
 // - The read reads the machine's ledger, so it runs when the row opens, when a sheet of its opens, at its
 //   `org.grants.changed` and when the sign-in changes; never at each `org.changed`. Only the latest read lands, and none
 //   once the sign-in it was made under has ended; the sheets close with that sign-in too.
+// - The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): Up is a green dot named and tipped "Up",
+//   any other state its word (G171); the key waits behind a chevron (G171); the actions are one "…" menu (G173); rights
+//   read in the page's words (G174); a machine nobody was granted rights on says nothing of it (G175); a certified
+//   machine reads "Via delegation" (G176).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatClock, formatDayTime } from '@shared/app/date-format';
 import type { GrantsView, OrgChange, OrgEnrollingStatus, OrgView } from '@shared/ipc/schema/org';
@@ -19,9 +23,11 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 import { useMachines } from '../../stores/machines';
 import { ORG } from '../copy';
-import { Chip, Setting, TEXT_ACTION } from '../parts';
+import { Tip } from '../../ui/tip';
+import { Chip, Setting, TEXT_ACTION, WORD_OWNER } from '../parts';
+import { RowMenu } from '../row-menu';
 import { GrantSheet, RegrantSheet, type GrantDraft } from './GrantSheet';
-import { failed, inWords, machineRowId, memberName, OUTCOME_UNKNOWN, OutcomeLine, Unread, type Outcome, type ViewMachine } from './parts';
+import { Disclosure, DisclosureChevron, failed, inWords, machineRowId, memberName, OUTCOME_UNKNOWN, OutcomeLine, Unread, useDisclosed, type Outcome, type ViewMachine } from './parts';
 
 type Shown = Extract<GrantsView, { ok: true }>;
 type Sheet = { at: 'grant'; draft: GrantDraft | null; signIn: string } | { at: 'regrant'; signIn: string };
@@ -80,6 +86,7 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
   const grants = useGrantsView(machine.ref, signIn);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  const key = useDisclosed();
   if (sheet !== null && sheet.signIn !== signIn) setSheet(null); // the sign-in it opened under has ended
   const { name, ref, certified } = machine;
   const may = view.maySign && !certified;
@@ -90,9 +97,6 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
   // Why the machine's grants are unknown, said with Retry in the row and in its sheets: main's refusal of the read, or a
   // read that failed before any answered. Nothing signs against grants not known.
   const unread = grants.view?.ok === false ? (damaged ? ORG.grantsDamaged : ORG.grantsUnread(name, ORG.grantRefusals[grants.view.reason])) : shown === null && grants.failed ? ORG.grantsUnread(name) : null;
-  const me = view.members.find((m) => m.you)?.id;
-  // Who may read every member's entry: an owner, or an admin for an org-owned machine; anyone else reads their own.
-  const seesAll = machine.owners === 'org' ? admin : me !== undefined && machine.owners.includes(me);
   const open = (next: Sheet) => {
     setOutcome(null);
     grants.reload(); // read again as the sheet opens
@@ -103,30 +107,30 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
   return (
     <div id={machineRowId(ref)} tabIndex={-1} className="rounded-sm outline-accent data-sought:outline-2">
       <Setting label={name}>
-        <span className={linked === 'up' ? 'text-fg' : 'text-fg-muted'}>{ORG.machineState[linked]}</span>
+        {linked === 'up' ? (
+          <Tip content={ORG.machineState.up}>
+            <span role="img" aria-label={ORG.machineState.up} tabIndex={0} className={`inline-flex size-4 cursor-default items-center justify-center ${WORD_OWNER}`}>
+              <span aria-hidden className="size-2 rounded-full bg-success" />
+            </span>
+          </Tip>
+        ) : (
+          <span className="text-fg-muted">{ORG.machineState[linked]}</span>
+        )}
         {thisMac && <Chip>{ORG.thisMacMark}</Chip>}
         <span className="text-fg-muted">{owners(machine.owners)}</span>
-        <span className="font-mono text-fg-muted">{ORG.machineKey(machine.keyId)}</span>
-        {mayGrant && (
-          <button type="button" className={TEXT_ACTION} onClick={() => grant(null)}>
-            {ORG.grant}
-          </button>
-        )}
-        {may && (
-          <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['machine.owners'](name), { kind: 'machine.owners', ref, owners: machine.owners })}>
-            {ORG.ownersAction}
-          </button>
-        )}
-        {may && admin && enrolling === null && (
-          <button type="button" className={TEXT_ACTION} onClick={() => reenroll(null)}>
-            {ORG.reenroll}
-          </button>
-        )}
-        {may && !thisMac && (
-          <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['machine.drop'](name), { kind: 'machine.drop', ref, revoke: false })}>
-            {ORG.drop}
-          </button>
-        )}
+        <DisclosureChevron label={ORG.keyDetails} disclosed={key} />
+        <RowMenu
+          label={ORG.machineActions(name)}
+          actions={[
+            mayGrant && { label: ORG.grant, onSelect: () => grant(null) },
+            may && { label: ORG.ownersAction, onSelect: () => ask(ORG.changeTitles['machine.owners'](name), { kind: 'machine.owners', ref, owners: machine.owners }) },
+            may && admin && enrolling === null && { label: ORG.reenroll, onSelect: () => reenroll(null) },
+            may && !thisMac && { label: ORG.drop, danger: true, onSelect: () => ask(ORG.changeTitles['machine.drop'](name), { kind: 'machine.drop', ref, revoke: false }) },
+          ]}
+        />
+        <Disclosure disclosed={key}>
+          <span className="font-mono text-fg-muted">{ORG.machineKey(machine.keyId)}</span>
+        </Disclosure>
         {certified && machine.delegation !== null && <span className="basis-full text-fg-muted">{ORG.certifiedOwners(machine.delegation)}</span>}
         {enrolling !== null && (
           <div className="flex basis-full flex-wrap items-center gap-2">
@@ -137,7 +141,7 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
           </div>
         )}
         {unread !== null && <Unread line={unread} retry={grants.reload} />}
-        {shown !== null && <Rights machine={machine} view={view} shown={shown} seesAll={seesAll} mayGrant={mayGrant} signAgain={grant} regrant={() => signIn !== null && open({ at: 'regrant', signIn })} />}
+        {shown !== null && <Rights machine={machine} view={view} shown={shown} mayGrant={mayGrant} signAgain={grant} regrant={() => signIn !== null && open({ at: 'regrant', signIn })} />}
         <OutcomeLine outcome={outcome} />
       </Setting>
       {sheet?.at === 'grant' && (
@@ -148,9 +152,9 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
   );
 }
 
-type RightsProps = { machine: ViewMachine; view: OrgView; shown: Shown; seesAll: boolean; mayGrant: boolean; signAgain(draft: GrantDraft): void; regrant(): void };
+type RightsProps = { machine: ViewMachine; view: OrgView; shown: Shown; mayGrant: boolean; signAgain(draft: GrantDraft): void; regrant(): void };
 
-function Rights({ machine, view, shown, seesAll, mayGrant, signAgain, regrant }: RightsProps) {
+function Rights({ machine, view, shown, mayGrant, signAgain, regrant }: RightsProps) {
   const { name } = machine;
   return (
     <>
@@ -159,7 +163,7 @@ function Rights({ machine, view, shown, seesAll, mayGrant, signAgain, regrant }:
         return (
           <div key={g.member} data-org-grant className="flex min-w-0 basis-full flex-wrap items-center gap-2">
             <span>{memberName(view.members, g.member)}</span>
-            <span className="text-fg-muted">{g.rights.length === 0 ? ORG.withdrawn : inWords(g.rights)}</span>
+            <span className="text-fg-muted">{g.rights.length === 0 ? ORG.withdrawn : inWords(g.rights.map((right) => ORG.rightWords[right]))}</span>
             {g.state === 'pending' && <Chip>{ORG.notYetOn(name)}</Chip>}
             {g.state === 'refused' && (
               <>
@@ -183,7 +187,6 @@ function Rights({ machine, view, shown, seesAll, mayGrant, signAgain, regrant }:
           </div>
         );
       })}
-      {shown.grants.length === 0 && <span className="basis-full text-fg-muted">{seesAll ? ORG.onlyOwners : ORG.noRightsYou}</span>}
       {!shown.live && <span className="basis-full text-fg-muted">{shown.asOf === null ? ORG.rightsUnanswered(name) : ORG.rightsAsOf(name, formatDayTime(Date.parse(shown.asOf)))}</span>}
       {shown.missing.length > 0 && (
         <div className="flex min-w-0 basis-full flex-wrap items-center gap-2">

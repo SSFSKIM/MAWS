@@ -8,7 +8,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { GRANT_REFUSALS, type GrantRegrantResult, type GrantSetResult, type GrantsView, type OrgView } from '@shared/ipc/schema/org';
 import { GrantSheet } from './GrantSheet';
-import { ANA, BEN, CAT, ME, MINI, ROOT, emit, emitGrants, found, grantsOf, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { ANA, BEN, CAT, ME, MINI, ROOT, emit, emitGrants, found, grantsOf, renderSection, resetHarness, row, sent, signing, viewWith, choose } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -33,7 +33,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 async function openGrant() {
-  fireEvent.click(await within(await found('mini')).findByRole('button', { name: 'Grant…' }));
+  await choose(await found('mini'), 'Actions for mini', 'Grant…'); // its row's "…" menu (the word cut, G173)
   return screen.findByRole('dialog', { name: 'Rights on mini' });
 }
 const GRANT_BOXES = ['spawn', 'shell', 'machine-admin'] as const;

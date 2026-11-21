@@ -1,6 +1,8 @@
 // The Keyboard section's capture on screen (C11 execution document, M5 pins): a row records the next chord, refuses a
 // conflict and a bare menu key in words while it keeps listening, unbinds on Backspace, cancels on Escape, and writes
-// the whole override map as one field; Reset to defaults clears it after a confirm.
+// the whole override map as one field; Reset to defaults clears it after a confirm. The word cut (G39, G40, G44): a row's
+// Change shows on pointing at the row or with the keyboard on it; an unbound action's key cap is empty, named Unbound;
+// Reset to defaults is drawn only once a binding differs from its default.
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -29,7 +31,13 @@ function renderSection(keymap = {}) {
   render(<Live />);
 }
 const row = (title: string) => within(screen.getByRole('table', { name: 'Key bindings' })).getByRole('row', { name: title });
-const chordOf = (title: string) => row(title).querySelector('kbd')!.textContent;
+// a key cap's chord, or the empty cap's name (Unbound)
+const chordOf = (title: string) => {
+  const cap = row(title).querySelector('kbd')!;
+  if (cap.getAttribute('role') !== 'img') return cap.textContent;
+  expect(cap.textContent).toBe('');
+  return cap.getAttribute('aria-label');
+};
 const record = (title: string) => {
   fireEvent.click(within(row(title)).getByRole('button', { name: `Change ${title}` }));
   return within(row(title)).getByLabelText(`${title}: Press keys… esc cancels`);
@@ -93,7 +101,22 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Reset' }));
     await vi.waitFor(() => expect(b.sets).toEqual([{ keymap: {} }]));
     expect(chordOf('Command palette')).toBe('⌘K');
-    expect((screen.getByRole('button', { name: 'Reset to defaults' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull(); // nothing left to reset
+  });
+
+  it('draws no Reset to defaults for saved overrides that change no binding: one equal to its default, one the table ignores (G44)', () => {
+    renderSection({ 'attention.next': 'Cmd+Shift+J', 'composer.submit': 'Cmd+Enter' }); // Send is fixed: its override is never read
+    expect(chordOf('Next Needs-you')).toBe('⌘⇧J');
+    expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull();
+  });
+
+  it('draws no Reset to defaults while every binding is its default, and a row’s Change waits for the pointer or the keyboard', () => {
+    renderSection();
+    expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull();
+    const change = within(row('Next Needs-you')).getByRole('button', { name: 'Change Next Needs-you' });
+    expect(change.className.split(' ')).toEqual(expect.arrayContaining(['opacity-0', 'group-hover/binding:opacity-100', 'focus-visible:opacity-100']));
+    expect(row('Next Needs-you').className.split(' ')).toContain('group/binding');
+    expect(within(row('Hold to dictate')).getByRole('img', { name: 'Unbound' }).getAttribute('tabindex')).toBe('0'); // its tooltip's owner
   });
 
   it('sets the menu shortcuts aside while a row records, and back when it ends by a chord, Escape, blur or unmount', async () => {

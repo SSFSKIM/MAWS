@@ -20,15 +20,17 @@ import { useUsage } from '../stores/usage';
 import { READ_ONLY_CONTROLS, useUsageControlState } from './controls';
 import { UsagePanel } from './UsagePanel';
 import { UsageRing } from './UsageRing';
+import { accessibleText } from '../test-support/accessible-text';
 import { REL } from '../test-support/relative-time';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const NOW = Date.parse('2026-09-29T07:36:17Z');
-const HINT = "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now";
+const HINT = "Use ClaudeUsage's own panel to route or remove accounts";
 let fixture: UsageSnapshot;
 let calls: { name: string; input: unknown }[];
 let usageChanged: ((payload: unknown) => void)[];
 let installed: boolean;
+let relayDown: boolean;
 let controls: UsageControlsAnswer; // W6 route executor: what main answers for ClaudeUsage's control route
 let answerAction: (action: UsageAction) => UsageActionResult | Promise<UsageActionResult>;
 
@@ -43,6 +45,7 @@ beforeEach(() => {
   calls = [];
   usageChanged = [];
   installed = true;
+  relayDown = false;
   controls = { available: false, reason: 'no_route', state: null };
   answerAction = () => ({ ok: false, reason: 'no_route', message: 'not there' });
   window.maws = {
@@ -53,6 +56,7 @@ beforeEach(() => {
       if (!checked.ok) return checked;
       switch (name) {
         case 'engine.relayHealth':
+          if (relayDown) return { ok: true, value: { url: 'http://127.0.0.1:8641', ok: false, status: null, latencyMs: null, checkedAt: new Date(NOW).toISOString(), error: 'connection refused' } };
           return { ok: true, value: { url: 'http://127.0.0.1:8641', ok: true, status: 200, latencyMs: 2.6, checkedAt: new Date(NOW - 12_000).toISOString(), error: null } };
         case 'settings.claudeUsage.status':
           return { ok: true, value: { installed, running: true, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: new Date(NOW).toISOString() } };
@@ -93,9 +97,13 @@ async function openPanel(snapshot: UsageSnapshot | null = fixture) {
   return shownPanel();
 }
 const card = (panel: HTMLElement, email: string) => within(panel).getByRole('region', { name: email });
+// The word cut (W177, W178, G115): an account's tier, saved sessions and what it served are its email's tooltip and
+// description, the email taking keyboard focus for it.
+const emailOf = (panel: HTMLElement, email: string) => within(card(panel, email)).getByText(email);
+const describedBy = (owner: HTMLElement) => (owner.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
 
 describe('the usage panel', () => {
-  it("copies ClaudeUsage's panel: header, accounts with activity and limits, add, Codex, toggle, relay and health", async () => {
+  it("copies ClaudeUsage's panel: header, accounts with activity and limits, add, Codex, toggle, and health while it had trouble", async () => {
     const panel = await openPanel();
     expect(within(panel).getByRole('heading', { name: 'Claude accounts' })).toBeTruthy();
     expect(within(panel).queryByRole('heading', { name: 'Claude Usage' })).toBeNull();
@@ -106,9 +114,13 @@ describe('the usage panel', () => {
     expect(panel.querySelector('[data-columns]')!.getAttribute('data-columns')).toBe('2');
     const routing = card(panel, '3@example.test');
     expect(routing.textContent).toContain('Routing here · weekly resets soonest of the usable accounts');
-    expect(routing.textContent).toContain('8 saved sessions');
-    expect(routing.querySelector('[data-serving="latest"]')!.textContent).toBe(`5 requests · 97% cached · ${REL.now}`);
-    expect(card(panel, '1@example.test').querySelector('[data-serving="recent"]')!.textContent).toBe(`1 request · 63% cached · ${REL.agoNarrow(3, 'minute')}`);
+    // the tier, the saved sessions and what it served wait in the email's tooltip, which the keyboard reaches (W177, W178)
+    expect(accessibleText(routing)).not.toContain('8 saved sessions');
+    expect(routing.querySelector('[data-serving]')).toBeNull();
+    const email = emailOf(panel, '3@example.test');
+    expect(email.tabIndex).toBe(0);
+    expect(describedBy(email)).toBe(`default_claude_max_20x · 8 saved sessions · 5 requests · 97% cached · ${REL.now}`);
+    expect(describedBy(emailOf(panel, '1@example.test'))).toContain(`1 request · 63% cached · ${REL.agoNarrow(3, 'minute')}`);
     expect(within(routing).getAllByRole('meter').map((m) => [m.getAttribute('aria-label'), m.getAttribute('aria-valuenow')])).toEqual([
       ['Five-hour usage', '53'],
       ['Weekly usage', '63'],
@@ -120,7 +132,7 @@ describe('the usage panel', () => {
     expect(within(routing).getByRole('meter', { name: 'Five-hour usage' }).firstElementChild!.className).toContain('bg-success');
 
     const codex = within(panel).getByRole('region', { name: 'Codex accounts' });
-    expect(codex.textContent).toContain('Used by GPT models routed through this app.');
+    expect(codex.textContent).not.toContain('Used by GPT models'); // no sentence under its title (P485, G119)
     expect(within(codex).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['6@example.test', '7@example.test']);
     expect(card(codex, '6@example.test').textContent).toContain('Routing here · chosen by the relay');
     expect(card(codex, '6@example.test').textContent).toContain("Limits show in ClaudeUsage's own panel");
@@ -128,7 +140,8 @@ describe('the usage panel', () => {
 
     const toggle = within(panel).getByRole('checkbox', { name: 'Route Claude Code through this app' });
     expect([(toggle as HTMLInputElement).checked, (toggle as HTMLInputElement).disabled]).toEqual([true, true]);
-    expect(panel.querySelector('[data-relay-line]')!.textContent).toBe(`Relay listening on 127.0.0.1:8641 · checked ${REL.now} · 3 ms`);
+    // a listening relay is said in Settings › Gateway's Relay row, not here (G121); its ten minutes had trouble, so they stay (P488)
+    expect(panel.querySelector('[data-relay-line]')).toBeNull();
     expect(panel.querySelector('[data-health]')!.textContent).toBe('Last 10 min: 8 requests · response start median 1.0s, p95 3.2s · 1 stall, 1 connection error, 1 refused, 1 held');
     expect(panel.querySelector('[data-health]')!.getAttribute('data-health')).toBe('degraded');
   });
@@ -168,9 +181,25 @@ describe('the usage panel', () => {
     expect(within(card(panel, '3@example.test')).queryByRole('button', { name: 'Route requests here' })).toBeNull();
     expect(within(card(panel, '5@example.test')).getByRole('button', { name: 'Reconnect…' })).toBeTruthy();
     expect(within(card(panel, '5@example.test')).queryByRole('button', { name: 'Route requests here' })).toBeNull();
+    // the account to sign in again says so, what follows from it the word's tooltip (W181)
+    const signIn = within(card(panel, '5@example.test')).getByText('Sign in again');
+    expect(signIn.tabIndex).toBe(0);
+    expect(describedBy(signIn)).toBe('The relay skips it until it is reconnected; readings are last known');
+    expect(accessibleText(card(panel, '5@example.test'))).not.toContain('reconnected');
     expect(READ_ONLY_CONTROLS.unavailable).toBe(HINT);
     // nothing reached main but the reads the popover makes on open
     expect([...new Set(calls.map((c) => c.name))].sort()).toEqual(['engine.relayHealth', 'settings.claudeUsage.status', 'settings.usageControls']);
+  });
+
+  it('says the relay in its foot only while it does not answer, and no ten minutes that had no trouble (G121, P488)', async () => {
+    const quiet = { ...fixture, activity: fixture.activity && { ...fixture.activity, health: { ...fixture.activity.health, stalls: 0, transportFailures: 0, refused: 0, held: 0, unreachable: 0 } } };
+    let panel = await openPanel(quiet);
+    expect(panel.querySelector('[data-relay-line]')).toBeNull();
+    expect(panel.querySelector('[data-health]')).toBeNull();
+    cleanup();
+    relayDown = true;
+    panel = await openPanel(quiet);
+    expect(panel.querySelector('[data-relay-line]')!.textContent).toBe('Relay not answering · connection refused');
   });
 
   it("hands off to ClaudeUsage's own panel and waits for its rewrite; Refresh re-checks the relay", async () => {
@@ -201,12 +230,16 @@ describe('the usage panel', () => {
   // W6: from the retired Accounts tab's suite (C11 M5 pins), now the popover's
   it('shows each account’s saved sessions and a reset that passed as 0 % with no reading since', async () => {
     const panel = await openPanel();
-    expect(card(panel, '1@example.test').textContent).toContain('1 saved session');
+    expect(describedBy(emailOf(panel, '1@example.test'))).toContain('1 saved session'); // the email's tooltip and description (G115)
+    expect(accessibleText(card(panel, '1@example.test'))).not.toContain('saved session');
     expect(card(panel, '1@example.test').textContent).not.toContain('Routing here');
     const twoFive = within(card(panel, '2@example.test')).getByRole('meter', { name: 'Five-hour usage' });
     expect(twoFive.getAttribute('aria-valuenow')).toBe('0');
     expect(card(panel, '2@example.test').textContent).toContain('5h · no reading since the window reset');
-    expect(card(panel, '3@example.test').textContent).toContain('Max · default_claude_max_20x');
+    // the plan alone beside the email; the rate-limit tier is the email's tooltip (W177)
+    expect(accessibleText(card(panel, '3@example.test'))).toContain('Max');
+    expect(accessibleText(card(panel, '3@example.test'))).not.toContain('default_claude_max_20x');
+    expect(describedBy(emailOf(panel, '3@example.test'))).toContain('default_claude_max_20x');
   });
 
   it('a second hand-off while waiting restarts the 60 s wait', async () => {

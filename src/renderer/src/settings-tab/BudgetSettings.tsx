@@ -28,8 +28,8 @@ export function BudgetSwitch({ settings }: { settings: Settings }) {
   const { enabled } = settings.engine.memoryBudget;
   return (
     <Setting row="supervisor.memoryBudget" state={enabled ? 'on' : 'off'}>
+      {/* the word cut (G139): the row's label says it; the switch keeps the sentence as its name */}
       <Switch checked={enabled} label={BUDGET_SETTINGS.enabledLabel} onChange={(next) => void writeSettings({ engine: { memoryBudget: { enabled: next } } })} />
-      <span>{BUDGET_SETTINGS.enabledLabel}</span>
     </Setting>
   );
 }

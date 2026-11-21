@@ -4,7 +4,8 @@
 // its attempt names (`refused.attempt`), one naming none in a row of its own.
 import { fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { CODE, DEVICE, FINGERPRINT, MY_OTHER_MAC, REGISTERED, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, VIEW } from './test-support';
+import { accessibleText } from '../../test-support/accessible-text';
+import { CODE, DEVICE, FINGERPRINT, MY_OTHER_MAC, REGISTERED, ROOT, disclose, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith, VIEW } from './test-support';
 
 // The file's own clock: Date is frozen before any module loads, so `app/use-now`'s module-level `now` (read at import,
 // at each first subscribe and at each tick) equals every `Date.now()` here. On the real clock it could lag a test's own
@@ -21,8 +22,10 @@ afterEach(resetHarness);
 describe('Settings › Org', () => {
   it('registered and signed in: org, account, the device id’s first 8, the hub, the org state’s age, Sign out', async () => {
     renderSection(REGISTERED);
+    disclose(await group('org'), 'Details'); // the word cut (G180): the org's id waits behind Details
     expect(within(await found('Org')).getByText('org-1f2e')).toBeTruthy();
     expect(within(row('Account')).getByText('owner@example.com')).toBeTruthy();
+    disclose(row('This Mac'), 'Device id and fingerprint'); // G156
     expect(within(row('This Mac')).getByText(DEVICE.slice(0, 8))).toBeTruthy();
     expect(screen.queryByText(DEVICE)).toBeNull();
     expect(within(row('Hub')).getByText('Connected')).toBeTruthy();
@@ -56,6 +59,7 @@ describe('Settings › Org', () => {
     renderSection({ ...REGISTERED, problem: 'held-chain', head: null });
     expect(within(await found('Problem')).getByText(/stays closed here until you re-anchor/)).toBeTruthy();
     expect(within(row('Pairing code')).getByText(/replaces the org state this Mac trusted/)).toBeTruthy();
+    expect(accessibleText(row('Pairing code'))).toContain('replaces the org state this Mac trusted'); // at rest: a trust change (the word cut)
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     const field = within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }) as HTMLInputElement;
     fireEvent.change(field, { target: { value: ` ${CODE} ` } });
@@ -78,7 +82,8 @@ describe('Settings › Org', () => {
     renderSection({ ...REGISTERED, session: 'removed' });
     expect(await screen.findByText('This Mac is no longer in the org.')).toBeTruthy();
     await group('people');
-    expect(screen.queryByRole('button')).toBeNull();
+    // nothing to act on: only the chevrons that show what waits behind them (the word cut, G156, G171, G180)
+    expect(screen.getAllByRole('button').filter((b) => !b.hasAttribute('aria-expanded'))).toEqual([]);
   });
 });
 
@@ -92,7 +97,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     expect(screen.queryByText(/root add/)).toBeNull();
     expect(screen.queryByText('This Mac signs the org state.')).toBeNull();
 
-    expect(within(row('Pairing code')).getByText(/stays signed in on its old keys/)).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Pairing code', description: /stays signed in on its old keys/ })).toBeTruthy(); // its note (the word cut)
     const field = within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }) as HTMLInputElement;
     fireEvent.change(field, { target: { value: ` ${CODE} ` } });
     fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Make new keys' }));
@@ -127,7 +132,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
   it('a removed device: no longer in the org, with the new-keys offer', async () => {
     renderSection(signing({}, { session: 'removed' }));
     expect(await screen.findByText('This Mac is no longer in the org.')).toBeTruthy();
-    expect(within(row('Pairing code')).getByText(/To rejoin, make new keys/)).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Pairing code', description: /To rejoin, make new keys/ })).toBeTruthy(); // its note (the word cut)
     fireEvent.change(within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }), { target: { value: CODE } });
     fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Make new keys' }));
     await vi.waitFor(() => expect(sent('org.rekey')).toEqual([{ code: CODE }]));
@@ -139,10 +144,13 @@ describe('Settings › Org: You (M4a)', () => {
     renderSection(signing(ROOT));
     const you = await group('you');
     expect(within(you).getByRole('group', { name: 'This Mac' })).toBeTruthy();
-    expect(await within(row('This Mac')).findByText(FINGERPRINT)).toBeTruthy();
-    expect(within(row('Your other devices')).getByText(MY_OTHER_MAC.slice(0, 8))).toBeTruthy();
-    expect(within(row('Your other devices')).getByText(/Mac/)).toBeTruthy();
-    expect(within(row('Your other devices')).queryByText(DEVICE.slice(0, 8))).toBeNull(); // this Mac is its own row
+    await found('Your other devices');
+    disclose(row('This Mac'), 'Device id and fingerprint'); // the word cut (G156)
+    expect(within(row('This Mac')).getByText(FINGERPRINT)).toBeTruthy();
+    // the word cut (G160): a device's id is its kind's tooltip and description
+    const kind = within(row('Your other devices')).getByText('Mac');
+    expect(document.getElementById(kind.getAttribute('aria-describedby')!)!.textContent).toBe(MY_OTHER_MAC.slice(0, 8));
+    expect(accessibleText(row('Your other devices'))).not.toContain(DEVICE.slice(0, 8)); // this Mac is its own row
 
     resetHarness();
     renderSection(signing(ROOT), { 'org.view': () => viewWith({ members: [{ ...VIEW.members[0]!, devices: [VIEW.members[0]!.devices[0]!] }, ...VIEW.members.slice(1)] }) });

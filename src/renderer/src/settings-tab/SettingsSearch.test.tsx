@@ -1,7 +1,7 @@
 // U11a M10 (l8-settings-06, A7; the execution document's Interfaces §G, "Search"): "Search settings" at the top of the
 // index. Results take the sections' place, the first preselected, with Up, Down and Enter; choosing one brings the row
-// into view under its section's heading, marks it for a moment, opens the More it was found behind, and gives the row
-// itself the keyboard, so a second Enter does nothing. ⌘F inside Settings focuses the field; Esc clears it.
+// into view under its section's heading, marks it for a moment, and gives the row itself the keyboard, which opens its
+// note (the word cut, G13 to G15: no More), so a second Enter does nothing. ⌘F inside Settings focuses the field; Esc clears it.
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -11,15 +11,20 @@ import type { AppMcpServer } from '@shared/engine/app-mcp-servers';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
+import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useLayout } from '../stores/layout';
 import { useSettings } from '../stores/settings';
 import { importBridge, RECORD } from '../test-support/browser-import';
+import { hostStatus } from '../test-support/host-status';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { grantsOf, REGISTERED, VIEW } from './org/test-support';
 import { scrollTopToLand } from './SettingsSearch';
+import { openEngineUpdate } from './engine-update';
 import { SettingsView } from './SettingsView';
+
+vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn(() => 'terminal:update') })); // the panel host is not under test here
 
 const NOTES: AppMcpServer = { name: 'notes', type: 'http', url: 'https://mcp.example.com/mcp' };
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
@@ -58,14 +63,15 @@ afterEach(() => {
   resetBrowserImport();
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
+  useHosts.setState({ supervisor: null, hosts: { engine: null, pty: null } });
   delete (window as { maws?: PreloadBridge }).maws;
   vi.restoreAllMocks();
 });
 
 describe('Search settings: the field and its results', () => {
-  it('is drawn once the settings are read, with the rows', () => {
+  it('is drawn once the settings are read, with the rows', async () => {
     render(<SettingsView section={null} />);
-    expect(screen.getByText('Reading settings…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Reading settings…' })).toBeTruthy(); // the quiet spinner (G7)
     expect(screen.queryByRole('combobox', { name: 'Search settings' })).toBeNull();
   });
 
@@ -96,11 +102,11 @@ describe('Search settings: the field and its results', () => {
     expect(options()[0]!.children).toHaveLength(2);
   });
 
-  it('reads "No matching settings" when nothing matches', () => {
+  it('reads "No matches" when nothing matches', () => {
     renderView();
     type('zebra crossing');
     expect(options()).toEqual([]);
-    expect(within(index()).getByRole('status').textContent).toBe('No matching settings');
+    expect(within(index()).getByRole('status').textContent).toBe('No matches');
   });
 
   it('controls the listbox only while one is drawn: expanded with results, collapsed and naming none with no match', () => {
@@ -218,28 +224,58 @@ describe('Search settings: choosing a result', () => {
     expect(column.className).toContain('motion-reduce:[&_[data-settings-mark=fading]]:transition-none');
   });
 
-  it('opens the More a row shows now when the words were found there', async () => {
+  it('finds a row by the words its note waits with, and landing on it opens the note', async () => {
     renderView();
-    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    await within(row('Binary')).findByText('2.1.287');
     type('PATH');
     fireEvent.click(options().find((o) => o.textContent === 'BinaryEngine')!);
     const binary = row('Binary');
-    expect(within(binary).getByRole('button', { name: 'Less' }).getAttribute('aria-expanded')).toBe('true');
-    expect(binary.textContent).toContain("claude on your shell's PATH");
     expect(document.activeElement).toBe(binary);
-    // a row found by its line leaves its More closed
+    expect(binary.querySelector('[data-row-note]')!.hasAttribute('data-open')).toBe(true);
+    expect(binary.textContent).toContain("claude on your shell's PATH");
+    expect(within(binary).queryByRole('button', { name: /^(More|Less)$/ })).toBeNull();
+  });
+
+  it('finds Update by its words and lands on the Binary row it sits on, so a second Enter starts no update (G126, G127)', async () => {
+    vi.mocked(openEngineUpdate).mockClear();
+    renderView();
+    const binary = row('Binary');
+    await within(binary).findByText('2.1.287');
     type('runs claude update');
     expect(optionTexts()).toEqual(['Update · Engine']);
     press('Enter');
-    expect(within(row('Update')).getByRole('button', { name: 'More' }).getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(binary);
+    expect(binary.dataset.settingsMark).toBe('on');
+    const user = userEvent.setup();
+    await user.keyboard('{Enter}');
+    expect(openEngineUpdate).not.toHaveBeenCalled();
+    await user.click(within(binary).getByRole('button', { name: 'Update Claude Code…' })); // a deliberate press still runs it
+    expect(openEngineUpdate).toHaveBeenCalledOnce();
   });
 
-  it('lands on the row that reveals a row not drawn: the memory budget off, "stateful" chooses Memory budget', () => {
+  it('a word of the row whose tooltip holds the words found takes the landing, so the tooltip shows them (the daemon, G133)', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, { 'host.status': () => hostStatus() });
+    const status = await within(row('Status')).findByRole('status');
+    await vi.waitFor(() => expect(status.textContent).toBe('Running · 3 sessions'));
+    type('machine daemon');
+    expect(optionTexts()).toEqual(['Status · Supervisor']);
+    press('Enter');
+    expect(document.activeElement).toBe(status); // a word, not an action
+    expect(screen.getByRole('tooltip').textContent).toContain('Machine daemon · This profile only');
+    expect(row('Status').dataset.settingsMark).toBe('on');
+    type('status'); // found by its own words, the row itself lands
+    fireEvent.click(options().find((o) => o.textContent === 'StatusSupervisor')!);
+    expect(document.activeElement).toBe(row('Status'));
+  });
+
+  it('lands on the row that reveals a row not drawn: the memory budget off, "stateful" chooses its switch', () => {
     renderView({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudget: { enabled: false } } });
     type('stateful');
-    expect(optionTexts()).toEqual(['Memory budget · Supervisor']);
+    expect(optionTexts()).toEqual(['Release idle sessions over a memory limit · Supervisor']);
     press('Enter');
-    expect(document.activeElement).toBe(row('Memory budget'));
+    expect(document.activeElement).toBe(row('Release idle sessions over a memory limit'));
+    type('memory budget'); // its old name still finds it (G139)
+    expect(optionTexts()).toContain('Release idle sessions over a memory limit · Supervisor');
   });
 
   it('a binding’s mark is not clipped by its table, which rounds its corner rows instead', () => {
@@ -253,7 +289,7 @@ describe('Search settings: choosing a result', () => {
   it('lands on a section’s heading and on a key binding’s row in the table', () => {
     renderView();
     type('voice');
-    expect(optionTexts()[0]).toBe('Voice · Section');
+    expect(optionTexts()[0]).toBe('Voice'); // a section's result is its name alone (G9)
     press('Enter');
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Voice' }));
     type('next needs-you');
@@ -292,7 +328,7 @@ describe('Search settings: choosing a result', () => {
 
   it('lists no Org group while this Mac is not in an org', async () => {
     renderView();
-    await screen.findByText('This Mac isn’t signed in to an org.');
+    await screen.findByRole('button', { name: 'Sign in…' }); // the Org page has read its status (the word cut, G147)
     type('people');
     expect(options()).toEqual([]);
   });
@@ -327,6 +363,28 @@ describe('Search settings: the row under its section’s heading', () => {
     expect(scrollTopToLand({ sectionTop: 400, rowTop: 1200, rowHeight: 40, viewHeight: 600 })).toBe(920); // 1200 - (600 - 40) / 2
   });
 
+  it('lands a row taller than the view at its top, under its heading, never at its middle (the key bindings, scalpel-2#3)', () => {
+    expect(scrollTopToLand({ sectionTop: 400, rowTop: 440, rowHeight: 1500, viewHeight: 600 })).toBe(400); // the heading, then the table's top
+    expect(scrollTopToLand({ sectionTop: 400, rowTop: 1100, rowHeight: 1500, viewHeight: 600 })).toBe(1100); // too far under its heading: its own top
+  });
+
+  it('a search for the reset at default bindings lands on the top of the key bindings, the Keyboard heading in view', () => {
+    renderView();
+    const body = document.querySelector<HTMLElement>('[data-settings-body]')!;
+    const at = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === body) return at(100, 600);
+      if (this.matches('section[aria-labelledby="settings-keyboard"]')) return at(1100, 1600);
+      if (this.matches('[data-settings-row="keyboard.bindings"]')) return at(1140, 1500); // taller than the body
+      return at(0, 0);
+    });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 600 });
+    type('reset to defaults');
+    expect(optionTexts()).toEqual(['Key bindings · Keyboard']); // Reset is not drawn at the defaults: the table that reveals it
+    press('Enter');
+    expect(body.scrollTop).toBe(1000); // the Keyboard heading at the body's top, the table under it
+  });
+
   it('scrolls the body by that rule when a result is chosen', () => {
     renderView();
     const body = document.querySelector<HTMLElement>('[data-settings-body]')!;
@@ -341,6 +399,24 @@ describe('Search settings: the row under its section’s heading', () => {
     type('archive sessions');
     press('Enter');
     expect(body.scrollTop).toBe(1000); // the heading at the body's top: 1100 - 100
+  });
+
+  it('measures the landed row with the note its focus opens, so a note near the bottom is not left below the fold', () => {
+    renderView();
+    const body = document.querySelector<HTMLElement>('[data-settings-body]')!;
+    const at = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === body) return at(100, 600);
+      if (this.matches('section[aria-labelledby="settings-sessions"]')) return at(1100, 900);
+      if (this.matches('[data-settings-row="sessions.archive"]')) return at(1500, 34);
+      if (this.parentElement?.matches('[data-settings-row="sessions.archive"] [data-row-note][data-open]')) return at(1534, 200); // the opened note's words
+      return at(0, 0);
+    });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 600 });
+    type('archive sessions');
+    press('Enter');
+    // row and note: 1400 to 1634 in the body's content, past the heading's view (1000 to 1600), so the pair is centred
+    expect(body.scrollTop).toBe(1400 - (600 - 234) / 2);
   });
 });
 

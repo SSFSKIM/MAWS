@@ -1,13 +1,19 @@
 // The Org page's shared pieces (P5 O8 M4a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, *The split*): a
 // group's heading, M1's pairing-code field, fingerprint and refusal line (moved unchanged from OrgSection.tsx), a
 // device's line as People and You draw it, and a sign's outcome in one line. Tokens only, at the Settings rows' weight.
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): identifiers wait behind a disclosure chevron
+// named by what it shows (G156, G171, G180, G188), and a device's id is its kind's tooltip (G160).
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
 import type { DiscardResult, OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
+import { ChevronDownIcon } from '../../app/IconButton';
 import { toast } from '../../stores/notices';
+import { DisclosureBody } from '../../ui/disclosure';
+import { NamedGlyph } from '../../ui/glyph';
 import { ORG } from '../copy';
 import { useDrawnGroup } from '../drawn';
-import { Chip, INPUT, LANDING, Setting, TEXT_ACTION } from '../parts';
+import { Chip, INPUT, LANDING, Setting, TEXT_ACTION, TipWord, WORD_OWNER } from '../parts';
+import { ROW_GLYPH } from '../row-menu';
 
 export type Registered = Extract<OrgStatus, { state: 'registered' }>;
 export type Member = OrgView['members'][number];
@@ -25,13 +31,50 @@ export function failed(error: IpcError) {
   toast({ level: 'warning', text: ORG.failed(error.message), actions: [], dismissible: true });
 }
 
+/** A disclosure's state: open or not, and the id of the body it controls. While `held`, it opens and stays open; `show`
+ * opens it for what its body must not hide (a refusal that answers while it is folded). */
+export type Disclosed = { open: boolean; id: string; toggle(): void; show(): void };
+export function useDisclosed(held = false): Disclosed {
+  const [open, setOpen] = useState(held);
+  if (held && !open) setOpen(true);
+  return { open, id: useId(), toggle: () => setOpen((was) => !was), show: () => setOpen(true) };
+}
+
+/** The chevron that opens what waits behind it: a glyph named, and tipped, by what it shows. */
+export function DisclosureChevron({ label, disclosed }: { label: string; disclosed: Disclosed }) {
+  return (
+    <NamedGlyph label={label} aria-expanded={disclosed.open} aria-controls={disclosed.open ? disclosed.id : undefined} onClick={disclosed.toggle} className={ROW_GLYPH}>
+      <ChevronDownIcon className={`size-3.5 transition-transform motion-reduce:transition-none ${disclosed.open ? '' : '-rotate-90'}`} />
+    </NamedGlyph>
+  );
+}
+
+/** What waits behind a chevron, on a line of its own in the row, with the shared disclosure motion. */
+export function Disclosure({ disclosed, children }: { disclosed: Disclosed; children: ReactNode }) {
+  return (
+    <DisclosureBody open={disclosed.open} id={disclosed.id} className="min-w-0 basis-full">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
+    </DisclosureBody>
+  );
+}
+
 /** One of Q1's four groups: its heading, then its rows. U11a M10: it tells the view it is drawn, for the search, and
- * takes the keyboard when the search lands on it. */
-export function Group({ id, title, children }: { id: 'you' | 'people' | 'machines' | 'org'; title: string; children: ReactNode }) {
+ * takes the keyboard when the search lands on it. The word cut (G180): `details`, rows that wait behind a Details
+ * chevron beside the heading. */
+export function Group({ id, title, details, children }: { id: 'you' | 'people' | 'machines' | 'org'; title: string; details?: ReactNode; children: ReactNode }) {
   useDrawnGroup(id);
+  const disclosed = useDisclosed();
   return (
     <div data-org-group={id} tabIndex={-1} className={`mt-3 first:mt-1 ${LANDING}`}>
-      <h4 className="m-0 mb-0.5 text-ui-sm font-semibold text-fg">{title}</h4>
+      <div className="mb-0.5 flex items-center gap-1">
+        <h4 className="m-0 text-ui-sm font-semibold text-fg">{title}</h4>
+        {details !== undefined && <DisclosureChevron label={ORG.details} disclosed={disclosed} />}
+      </div>
+      {details !== undefined && (
+        <DisclosureBody open={disclosed.open} id={disclosed.id}>
+          {details}
+        </DisclosureBody>
+      )}
       {children}
     </div>
   );
@@ -85,6 +128,9 @@ export function memberName(members: readonly Member[], id: string): string {
   return member === undefined ? ORG.formerMember : member.you ? ORG.youMark : member.name;
 }
 
+/** The emails of the members who hold a root the head lists, each once. */
+export const rootEmails = (view: OrgView): string[] => [...new Set(view.roots.flatMap((root) => ('unlisted' in root ? [] : (view.members.find((m) => m.id === root.member)?.email ?? []))))];
+
 // "a, b and c": machine names, holders and owners in a line.
 export function inWords(items: readonly string[]): string {
   return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
@@ -123,12 +169,17 @@ export function OutcomeLine({ outcome }: { outcome: Outcome }) {
   );
 }
 
-// A device as the org state lists it: its id's first 8 (as `show` does), its class, and its marks.
+// A device as the org state lists it: its class, its id's first 8 (as `show` does) the class's tooltip (G160), and its
+// marks.
+export const deviceShort = (device: ViewDevice) => device.id.slice(0, 8);
 export function DeviceLine({ device, children }: { device: ViewDevice; children?: ReactNode }) {
   return (
     <div data-org-device className="flex min-w-0 basis-full flex-wrap items-center gap-2">
-      <span className="font-mono">{device.id.slice(0, 8)}</span>
-      <span className="text-fg-muted">{ORG.classes[device.class]}</span>
+      <TipWord tip={deviceShort(device)}>
+        <span tabIndex={0} className={`cursor-default text-fg-muted ${WORD_OWNER}`}>
+          {ORG.classes[device.class]}
+        </span>
+      </TipWord>
       {device.root && <Chip>{ORG.rootMark}</Chip>}
       {device.thisMac && <Chip>{ORG.thisMacMark}</Chip>}
       {children}
@@ -139,19 +190,32 @@ export function DeviceLine({ device, children }: { device: ViewDevice; children?
 // A new device entry's fingerprint, large in the monospace token, to compare with the approving device's.
 export function Fingerprint({ value }: { value: string }) {
   return (
-    <Setting label={ORG.fingerprint} note={ORG.fingerprintNote}>
+    <Setting label={ORG.fingerprint} line={ORG.fingerprintNote}>
       <span className="font-mono text-prose font-semibold tracking-wide text-fg select-all">{value}</span>
     </Setting>
   );
 }
 
-// The pairing-code field: typed here, sent trimmed on the button or Enter, and cleared once sent.
-export function CodeField({ action, note, pending, refusal, onSend }: { action: string; note: string; pending: boolean; refusal: OrgRefusal | null; onSend(code: string): void }) {
+// The pairing-code field: typed here, sent trimmed on the button or Enter, and cleared once sent. `focus`: it takes the
+// keyboard as it is drawn (opened by Sign in…), which opens its row's note. Where to get a code is the row's `note`;
+// what the code's act changes in this Mac's trust (Re-anchor's) is a `line`, at rest. A refusal that answers a code sent
+// here is brought into view under the field: the field can sit at the scroll area's lower edge (the Org section is
+// Settings' last), where its answer would draw out of sight. A refusal standing as the page draws scrolls nothing.
+type CodeWords = { note: string; line?: undefined } | { line: string; note?: undefined };
+export function CodeField({ action, note, line, pending, refusal, focus = false, onSend }: CodeWords & { action: string; pending: boolean; refusal: OrgRefusal | null; focus?: boolean; onSend(code: string): void }) {
   const [draft, setDraft] = useState('');
+  const sent = useRef(false);
+  const answer = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (refusal === null || !sent.current) return;
+    sent.current = false;
+    answer.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [refusal]);
   const send = () => {
     const code = draft.trim();
     if (code === '' || pending) return;
     setDraft('');
+    sent.current = true;
     onSend(code);
   };
   const keys = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -159,20 +223,20 @@ export function CodeField({ action, note, pending, refusal, onSend }: { action: 
     if (e.key === 'Escape') setDraft('');
   };
   return (
-    <Setting label={ORG.code} note={note}>
-      <input aria-label={ORG.code} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys} spellCheck={false} autoComplete="off" className={`${INPUT} max-w-[320px] flex-1 font-mono`} />
+    <Setting label={ORG.code} note={note} line={line}>
+      <input aria-label={ORG.code} autoFocus={focus} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys} spellCheck={false} autoComplete="off" className={`${INPUT} max-w-[320px] flex-1 font-mono`} />
       <button type="button" className={TEXT_ACTION} disabled={pending || draft.trim() === ''} onClick={send}>
         {action}
       </button>
-      <Refusal refusal={refusal} />
+      <Refusal refusal={refusal} ref={answer} />
     </Setting>
   );
 }
 
-export function Refusal({ refusal }: { refusal: OrgRefusal | null }) {
+export function Refusal({ refusal, ref }: { refusal: OrgRefusal | null; ref?: Ref<HTMLSpanElement> }) {
   if (refusal === null) return null;
   return (
-    <span role="alert" className="min-w-0 basis-full text-ui-sm text-warning [overflow-wrap:anywhere]">
+    <span ref={ref} role="alert" className="min-w-0 basis-full text-ui-sm text-warning [overflow-wrap:anywhere]">
       {refusalText(refusal)}
     </span>
   );

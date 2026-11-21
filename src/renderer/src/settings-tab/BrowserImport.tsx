@@ -12,9 +12,12 @@
 //
 // The records and the run come from the import store (App.tsx connects it); the toggles live in `profiles.json`, never
 // in settings (Decision Log 1). The sheets render here, on this block's own state (Decision Log 21).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): Import… is named in full (G70); a profile's
+// row is its date and a "…" menu holding Show report, Sync bookmarks now and Remove, its summary in the report (G73,
+// G74), a failed sync's line at rest and a good one in the row's note; the popup limit is an ⓘ beside the Extensions
+// heading (G76); each extension is a switch (G77).
 import { useState } from 'react';
 import type { ImportedExtension } from '@shared/browser/import';
-import { summaryWords } from '@shared/browser/import-summary';
 import type { ImportedBookmarks, ImportedProfile } from '@shared/browser/profiles';
 import { useNow } from '../app/use-now';
 import { syncLine } from '../tools/browser/chrome/profile';
@@ -24,13 +27,11 @@ import { ImportSheet } from '../tools/browser/import/ImportSheet';
 import { RemoveSheet } from '../tools/browser/import/RemoveSheet';
 import { StatusChip } from '../tools/browser/import/Report';
 import { openImport, setExtension, showReport, syncBookmarks, useBrowserImport } from '../tools/browser/import/store';
+import { QuietSpinner } from '../ui/spinner';
+import { Tip } from '../ui/tip';
 import { BROWSER } from './copy';
-import { Segment, Setting, TEXT_ACTION } from './parts';
-
-// TEXT_ACTION in the danger colour, at rest and on hover.
-const DANGER_ACTION = TEXT_ACTION.split(' ')
-  .map((name) => (name === 'text-fg-muted' ? 'text-danger' : name === 'hover:text-fg' ? 'hover:text-danger' : name))
-  .join(' ');
+import { Setting, Switch, TEXT_ACTION, WORD_OWNER } from './parts';
+import { RowMenu } from './row-menu';
 
 export function BrowserImport() {
   const [sheet, setSheet] = useState(false);
@@ -62,7 +63,7 @@ export function BrowserImport() {
                 </button>
               </>
             )}
-            <button type="button" className={TEXT_ACTION} onClick={() => open(openImport)}>
+            <button type="button" aria-label={BROWSER.importName} className={TEXT_ACTION} onClick={() => open(openImport)}>
               {BROWSER.import}
             </button>
           </>
@@ -71,18 +72,18 @@ export function BrowserImport() {
       {records.map((record) => (
         <section key={record.profileDir} aria-label={record.name} data-imported-profile={record.profileDir} className="border-t border-border pt-1">
           {/* U11a M9: a row made at run time, drawn under the profile's own name from its declaration */}
-          <Setting row="browser.importedProfile" label={record.name} values={{ summary: summaryWords(record.report) }}>
-            <span className="text-fg-muted">{BROWSER.importedOn(importDate(record.importedAt))}</span>
-            <button type="button" className={TEXT_ACTION} disabled={running !== null} onClick={() => open(() => showReport(record.report))}>
-              {BROWSER.showReport}
-            </button>
-            {record.bookmarks !== null && <SyncBookmarks profileDir={record.profileDir} bookmarks={record.bookmarks} />}
-            <button type="button" className={DANGER_ACTION} onClick={() => setRemoving(record)}>
-              {BROWSER.remove}
-            </button>
-          </Setting>
-          {record.extensions.length > 0 && <p className="m-0 mt-1 text-ui-sm font-medium text-fg-muted">{BROWSER.extensions}</p>}
-          {record.extensions.length > 0 && <p data-extension-popup-limit="" className="m-0 text-ui-sm text-fg-muted">{BROWSER.popupLimit}</p> /* cua #90 */}
+          <ProfileRow record={record} running={running !== null} onReport={() => open(() => showReport(record.report))} onRemove={() => setRemoving(record)} />
+          {record.extensions.length > 0 && (
+            <p className="m-0 mt-1 flex items-center gap-1.5 text-ui-sm font-medium text-fg-muted">
+              {BROWSER.extensions}
+              {/* cua #90: what their popups cannot see here */}
+              <Tip content={BROWSER.popupLimit}>
+                <span role="img" aria-label={BROWSER.popupLimit} tabIndex={0} data-extension-popup-limit="" className={`cursor-default font-normal ${WORD_OWNER}`}>
+                  ⓘ
+                </span>
+              </Tip>
+            </p>
+          )}
           {record.extensions.map((extension) => (
             <ExtensionToggle key={extension.id} profileDir={record.profileDir} extension={extension} />
           ))}
@@ -94,22 +95,34 @@ export function BrowserImport() {
   );
 }
 
-// cua #90: Sync bookmarks now, the last read's time (or why it failed) before it, as the profile popover says it
-function SyncBookmarks({ profileDir, bookmarks }: { profileDir: string; bookmarks: ImportedBookmarks }) {
+// An imported profile's row: its date and its "…" menu. Show report waits while an import runs; cua #90: Sync bookmarks
+// now, when its bookmarks were imported, with the last read's time in the row's note, or why it failed at rest, as the
+// profile popover says it. A sync in flight is the row's quiet spinner, named by its words, since the menu that started
+// it has closed; an old failure waits for its answer.
+function ProfileRow({ record, running, onReport, onRemove }: { record: ImportedProfile; running: boolean; onReport(): void; onRemove(): void }) {
   const [syncing, setSyncing] = useState(false);
-  const line = syncLine(bookmarks, useNow());
+  const now = useNow();
+  const bookmarks: ImportedBookmarks | null = record.bookmarks;
+  const line = bookmarks === null ? null : syncLine(bookmarks, now);
+  const failed = bookmarks !== null && bookmarks.error !== null;
   const sync = async () => {
     setSyncing(true);
-    await syncBookmarks(profileDir);
+    await syncBookmarks(record.profileDir);
     setSyncing(false);
   };
   return (
-    <>
-      {line && <span className={bookmarks.error === null ? 'text-fg-muted' : 'text-warning'}>{line}</span>}
-      <button type="button" className={TEXT_ACTION} disabled={syncing} onClick={() => void sync()}>
-        {syncing ? BROWSER_COPY.profile.syncing : BROWSER_COPY.profile.syncNow}
-      </button>
-    </>
+    <Setting row="browser.importedProfile" label={record.name} noteEnd={line !== null && !failed ? <p className="m-0">{line}</p> : undefined}>
+      <span className="text-fg-muted">{BROWSER.importedOn(importDate(record.importedAt))}</span>
+      {syncing ? <QuietSpinner label={BROWSER_COPY.profile.syncing} /> : line !== null && failed && <span className="text-warning">{line}</span>}
+      <RowMenu
+        label={BROWSER.actions(record.name)}
+        actions={[
+          { label: BROWSER.showReport, disabled: running, onSelect: onReport },
+          bookmarks !== null && { label: syncing ? BROWSER_COPY.profile.syncing : BROWSER_COPY.profile.syncNow, disabled: syncing, onSelect: () => void sync() },
+          { label: BROWSER.remove, danger: true, onSelect: onRemove },
+        ]}
+      />
+    </Setting>
   );
 }
 
@@ -132,8 +145,8 @@ function ExtensionToggle({ profileDir, extension }: { profileDir: string; extens
           {IMPORT_COPY.toggling(pending)}
         </span>
       )}
-      <span aria-busy={pending !== null} className={`flex max-w-[260px] flex-1 ${pending === null ? '' : 'pointer-events-none opacity-60'}`}>
-        <Segment label={extension.name} value={(pending ?? extension.enabled) ? 'on' : 'off'} options={BROWSER.toggles} onChange={(next) => void toggle(next === 'on')} />
+      <span aria-busy={pending !== null} className={`inline-flex ${pending === null ? '' : 'pointer-events-none opacity-60'}`}>
+        <Switch checked={pending ?? extension.enabled} label={extension.name} onChange={(next) => void toggle(next)} />
       </span>
     </Setting>
   );

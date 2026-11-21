@@ -28,7 +28,7 @@ const QUOTA = 'Quota reset recovery'; // routed, its engine id unpinned: the dra
 const PROBE = 'Settings idle probe'; // routed, re-pinned below to account 477e393c… (1@example.test)
 const PINNED_ENGINE_ID = '73171552-c2ff-47db-b361-ca541bdf560e';
 const ORDER = ['3@example.test', '4@example.test', '1@example.test', '5@example.test', '2@example.test'];
-const HINT = "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now";
+const HINT = "Use ClaudeUsage's own panel to route or remove accounts"; // the word cut (G124)
 
 let scratch: string;
 let usageDir: string;
@@ -92,6 +92,9 @@ const popoverOf = (page: Page) => page.getByRole('dialog', { name: 'Usage', exac
 // Settings › Usage: the whole panel, in the Settings dialog
 const panelOf = (page: Page) => settingsDialog(page).locator('[data-usage-panel]');
 const accountIn = (scope: Locator, email: string) => scope.locator(`[data-account][aria-label="${email}"]`);
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; W177, W178, G115): an account's email takes the
+// keyboard, its tooltip and description the rate-limit tier, the saved sessions and what it served, joined by " · "
+const emailOf = (card: Locator, email: string) => card.getByText(email, { exact: true });
 const claudeAccounts = (scope: Locator) => scope.locator('[data-account]:not([data-codex] [data-account])');
 const meter = (scope: Locator, name: string) => scope.getByRole('meter', { name, exact: true });
 // The popover's link opens Settings at Usage and closes the popover.
@@ -193,10 +196,9 @@ test('usage: the ring, the popover’s accounts, and in Settings › Usage the g
 
     const routing = accountIn(panel, '3@example.test');
     await expect(routing).toContainText('Routing here · weekly resets soonest of the usable accounts');
-    await expect(routing).toContainText('8 saved sessions');
-    await expect(routing.locator('[data-serving="latest"]')).toHaveText(/^5 requests · 97% cached · (now|1m ago|지금|1분 전)$/);
+    await expect(emailOf(routing, '3@example.test')).toHaveAccessibleDescription(/(^| · )8 saved sessions · 5 requests · 97% cached · (now|1m ago|지금|1분 전)$/);
     for (const email of ORDER.slice(1)) {
-      await expect(accountIn(panel, email)).toContainText('1 saved session');
+      await expect(emailOf(accountIn(panel, email), email)).toHaveAccessibleDescription(/(^| · )1 saved session( · |$)/);
       await expect(accountIn(panel, email)).not.toContainText('Routing here');
     }
     for (const email of ORDER) {
@@ -224,12 +226,15 @@ test('usage: the ring, the popover’s accounts, and in Settings › Usage the g
     await expect(toggle).toBeDisabled();
     await expect(panel.locator('[data-health]')).toHaveText('Last 10 min: 8 requests · response start median 1.0s, p95 3.2s · 1 stall, 1 connection error, 1 refused, 1 held');
 
-    // The four actions render disabled under the one hint.
+    // The four actions render disabled under the one hint, which is each one's description.
     await expect(panel.getByText(HINT, { exact: true })).toBeVisible();
     for (const [name, count] of [['Route requests here', 4], ['Remove account…', 5], ['Add account…', 1]] as const) {
       const buttons = panel.getByRole('button', { name, exact: true });
       await expect(buttons).toHaveCount(count);
-      for (const button of await buttons.all()) await expect(button).toBeDisabled();
+      for (const button of await buttons.all()) {
+        await expect(button).toBeDisabled();
+        await expect(button).toHaveAccessibleDescription(HINT);
+      }
     }
     await test.info().attach('usage-settings-light', { body: await page.screenshot(), contentType: 'image/png' });
 
@@ -238,7 +243,10 @@ test('usage: the ring, the popover’s accounts, and in Settings › Usage the g
     const accounts = JSON.parse(readFileSync(accountsFile, 'utf8')) as { email: string; needsReauthentication: boolean }[];
     writeFileSync(accountsFile, JSON.stringify(accounts.map((x) => (x.email === '5@example.test' ? { ...x, needsReauthentication: true } : x)), null, 2));
     await expect(accountIn(panel, '5@example.test')).toHaveAttribute('data-state', 'needs_reauth', { timeout: 10_000 });
-    await expect(accountIn(panel, '5@example.test')).toContainText('Needs reauthentication · the relay skips it until it is reconnected; readings are last known');
+    // the word cut (W181): "Sign in again" in the warning tone, what follows from it its tooltip and description
+    const signIn = accountIn(panel, '5@example.test').getByText('Sign in again', { exact: true });
+    await expect(signIn).toBeVisible();
+    await expect(signIn).toHaveAccessibleDescription('The relay skips it until it is reconnected; readings are last known');
     await expect(accountIn(panel, '5@example.test').getByRole('button', { name: 'Reconnect…' })).toBeDisabled();
     await expect(accountIn(panel, '5@example.test').getByRole('button', { name: 'Route requests here' })).toHaveCount(0);
     expect(await cards.evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).toEqual(['3@example.test', '4@example.test', '1@example.test', '2@example.test', '5@example.test']);

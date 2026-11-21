@@ -1,9 +1,12 @@
 // A square icon button for the toolbar and region headers. When it mirrors an action of the table its tooltip carries
-// the action's effective chord (overrides included), so the tooltip, the menu and the palette never disagree.
+// the action's effective chord (overrides included), so the tooltip, the menu and the palette never disagree. Its
+// tooltip is the system's `title`, which the keyboard does not reach; the word cut's named glyph (ui/glyph.tsx) has
+// the same look with a tooltip that keyboard focus shows.
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { effectiveChord, type ActionId } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { useSettings } from '../stores/settings';
+import { GLYPH_BUTTON } from '../ui/glyph'; // the word cut: the look the named glyph shares
 
 export function useChordHint(action: ActionId | undefined): string | null {
   const overrides = useSettings((s) => s.state?.settings.keymap);
@@ -31,7 +34,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       aria-label={label}
       aria-pressed={pressed}
       title={chord ? `${label} · ${chord}` : label}
-      className={`inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent aria-pressed:bg-bg-active aria-pressed:text-fg ${className}`}
+      className={`${GLYPH_BUTTON} ${className}`}
       {...rest}
     >
       {children}

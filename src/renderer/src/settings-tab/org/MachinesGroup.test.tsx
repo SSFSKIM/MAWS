@@ -4,14 +4,17 @@
 // no new head). M4b: while this Mac may sign, Owners…, Re-enroll… and Drop… on each attended machine (no Drop for this
 // Mac's own) and Enroll a machine…; Grant… where `mayGrant` says, whatever `maySign` says (Fork B); a certified
 // machine's owners are its delegation's; each machine's rights from `org.grants.view`, read when its row opens and at
-// `org.grants.changed`, never at each `org.changed`; a dropped machine's hub row left behind, with Retry.
+// `org.grants.changed`, never at each `org.changed`; a dropped machine's hub row left behind, with Retry. The word cut
+// (G171, G173 to G176, G178): Up is a dot named Up, the key waits behind a chevron, the actions are one "…" menu, rights
+// read in the page's words, no line for a machine nobody holds rights on, and Enroll a machine… ends the group alone.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import type { DropRetryResult, GrantsView, OrgView } from '@shared/ipc/schema/org';
 import { useMachines } from '../../stores/machines';
+import { accessibleText } from '../../test-support/accessible-text';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
-import { ANA, BEN, CAT, ME, MINI, ROOT, VIEW, VM, emit, emitGrants, found, grantsOf, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { ANA, BEN, CAT, ME, MINI, ROOT, VIEW, VM, emit, emitGrants, found, grantsOf, group, renderSection, resetHarness, row, sent, signing, viewWith, foot, findFoot, disclose, menuItems } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -30,7 +33,11 @@ type Machine = OrgView['machines'][number];
 const machine = (patch: Partial<Machine> & Pick<Machine, 'name' | 'ref'>): Machine => ({ owners: [ME], keyId: `${patch.name}Kid`, certified: false, delegation: null, mayGrant: false, ...patch });
 const THIS_MAC = machine({ name: 'this-mbp', ref: TEST_MACHINE });
 const CI_VM = machine({ name: 'ci-vm-7', ref: 'CiVmRef0000000000007', owners: [ANA], certified: true, delegation: 'dlg-ci' });
-const buttons = (label: string) => within(row(label)).queryAllByRole('button').map((b) => b.textContent);
+// A machine's actions, in its row's "…" menu (none drawn when none is offered).
+const actions = async (label: string) => (within(row(label)).queryByRole('button', { name: `Actions for ${label}` }) === null ? [] : menuItems(row(label), `Actions for ${label}`));
+// The row's other buttons: not its menu, not its key's chevron.
+const buttons = (label: string) => within(row(label)).queryAllByRole('button').filter((b) => !b.hasAttribute('aria-expanded')).map((b) => b.textContent);
+const footButtons = () => within(foot('enroll')).queryAllByRole('button').map((b) => b.textContent);
 const notSigning = { root: false, maySign: false } as const;
 
 describe('Settings › Org: Machines (M4a)', () => {
@@ -38,6 +45,7 @@ describe('Settings › Org: Machines (M4a)', () => {
     renderSection(signing(ROOT), { 'org.view': () => viewWith({ machines: [...VIEW.machines, { name: 'old-box', ref: 'OldBoxRef00000000003', owners: ['ffffffffffffffffffffffffffffffff'], keyId: 'oldBoxKeyId03', certified: false, delegation: null, mayGrant: false }] }) });
     await group('machines');
     expect(within(await found('mini')).getByText('Owned by you and Ana')).toBeTruthy();
+    disclose(row('mini'), 'Key');
     expect(within(row('mini')).getByText('key miniKeyId0001').className).toContain('font-mono');
     expect(within(row('build-vm')).getByText('Owned by the org')).toBeTruthy();
     expect(within(row('old-box')).getByText('Owned by a former member')).toBeTruthy();
@@ -50,9 +58,9 @@ describe('Settings › Org: Machines (M4a)', () => {
     const reads = sent('org.view').length;
     machinesChanged([linked(MINI, 'connecting'), linked(VM, 'up')]);
     expect(within(row('mini')).getByText('Connecting…')).toBeTruthy();
-    expect(within(row('build-vm')).getByText('Up')).toBeTruthy();
+    expect(within(row('build-vm')).getByRole('img', { name: 'Up' })).toBeTruthy(); // a dot named Up (the word cut, G171)
     machinesChanged([linked(MINI, 'up'), linked(VM, 'down')]);
-    expect(within(row('mini')).getByText('Up')).toBeTruthy();
+    expect(within(row('mini')).getByRole('img', { name: 'Up' })).toBeTruthy();
     expect(within(row('build-vm')).getByText('Offline')).toBeTruthy();
     expect(sent('org.view')).toHaveLength(reads); // no new view: the version is the same
     expect(within(row('Org state')).getByText(/^Version 12 /)).toBeTruthy();
@@ -60,7 +68,7 @@ describe('Settings › Org: Machines (M4a)', () => {
     // and a new head leaves the up state where the store has it
     emit(signing(ROOT, { head: { version: 13, issued: new Date().toISOString() } }));
     await vi.waitFor(() => expect(sent('org.view')).toHaveLength(reads + 1));
-    expect(within(row('mini')).getByText('Up')).toBeTruthy();
+    expect(within(row('mini')).getByRole('img', { name: 'Up' })).toBeTruthy();
   });
 
   it('no machine enrolled yet is said so', async () => {
@@ -74,28 +82,38 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
   it('while this Mac may sign: Owners…, Re-enroll… and Drop… on each attended machine, no Drop for this Mac’s own, none on a certified one, and Enroll a machine…', async () => {
     renderSection(signing(ROOT), { 'org.view': () => viewWith({ machines: [...VIEW.machines, THIS_MAC, CI_VM] }) });
     await found('ci-vm-7');
-    expect(buttons('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…']);
-    expect(buttons('build-vm')).toEqual(['Owners…', 'Re-enroll…', 'Drop…']);
-    expect(buttons('this-mbp')).toEqual(['Owners…', 'Re-enroll…']); // it leaves through `mawsd endpoint unenroll` on it
+    expect(await actions('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…']);
+    expect(await actions('build-vm')).toEqual(['Owners…', 'Re-enroll…', 'Drop…']);
+    expect(await actions('this-mbp')).toEqual(['Owners…', 'Re-enroll…']); // it leaves through `mawsd endpoint unenroll` on it
     expect(within(row('this-mbp')).getByText('this Mac')).toBeTruthy();
-    expect(buttons('ci-vm-7')).toEqual([]);
+    expect(await actions('ci-vm-7')).toEqual([]);
     expect(within(row('ci-vm-7')).getByText('Owned by Ana')).toBeTruthy();
-    expect(within(row('ci-vm-7')).getByText('Certified through delegation dlg-ci: its owners are the delegation’s, and change with it.')).toBeTruthy();
-    expect(buttons('Enroll a machine')).toEqual(['Enroll a machine…']);
+    expect(within(row('ci-vm-7')).getByText('Via delegation dlg-ci')).toBeTruthy(); // the word cut (G176)
+    expect(footButtons()).toEqual(['Enroll a machine…']);
+    expect(screen.queryByRole('group', { name: 'Enroll a machine' })).toBeNull(); // the button alone, with no label (G178)
   });
 
-  it('without maySign the org-state actions are read-only, and Enroll says why to an admin; Grant… follows mayGrant whatever maySign says', async () => {
+  it('without maySign the org-state actions are read-only, the page’s top line saying why; Grant… follows mayGrant whatever maySign says', async () => {
     renderSection(signing(notSigning), { 'org.view': () => viewWith({ maySign: false, machines: [machine({ name: 'mini', ref: MINI, mayGrant: true }), machine({ name: 'build-vm', ref: VM, owners: 'org' })] }) });
     await found('build-vm');
-    expect(buttons('mini')).toEqual(['Grant…']); // an owner who isn't a root grants on their own machine (Fork B)
-    expect(buttons('build-vm')).toEqual([]);
-    expect(buttons('Enroll a machine')).toEqual([]);
-    expect(within(row('Enroll a machine')).getByText('This Mac can’t sign: enroll from an admin’s Mac that does.')).toBeTruthy();
+    expect(await actions('mini')).toEqual(['Grant…']); // an owner who isn't a root grants on their own machine (Fork B)
+    expect(await actions('build-vm')).toEqual([]);
+    // the word cut (G170): no Enroll line of its own; the page's one line says who signs
+    expect(document.querySelector('[data-org-enroll]')).toBeNull();
+    expect(screen.getByText('View only: owner@example.com signs changes')).toBeTruthy();
+    expect(accessibleText(await group('machines'))).not.toContain('This Mac can’t sign');
 
-    // a member who isn't an admin is told who enrolls
+    // a member who isn't an admin reads the same line, and no Enroll words of their own
     resetHarness();
     renderSection(signing(notSigning), { 'org.view': () => viewWith({ maySign: false, members: VIEW.members.map((m) => (m.you ? { ...m, role: 'member' as const } : m)) }) });
-    expect(within(await found('Enroll a machine')).getByText('An admin enrolls machines from their Org page.')).toBeTruthy();
+    await found('mini');
+    expect(document.querySelector('[data-org-enroll]')).toBeNull();
+    expect(screen.getByText('View only: owner@example.com signs changes')).toBeTruthy();
+
+    // one able to sign who isn't an admin is told who enrolls
+    resetHarness();
+    renderSection(signing(ROOT), { 'org.view': () => viewWith({ members: VIEW.members.map((m) => (m.you ? { ...m, role: 'member' as const } : m)) }) });
+    expect(within(await findFoot('enroll')).getByText('An admin enrolls machines from their Org page.')).toBeTruthy();
   });
 
   it('a grant left sending across a restart reads that this Mac stopped, not that the machine refused it', async () => {
@@ -124,17 +142,18 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
       'org.grants.view': (input: { ref: string }) => (input.ref === MINI ? answer : grantsOf(input.ref)),
     });
     const mini = await found('mini');
-    expect(await within(mini).findByText('spawn and shell')).toBeTruthy();
+    // the word cut (G174): the rights in the page's words
+    expect(await within(mini).findByText('sessions and terminal')).toBeTruthy();
     const line = (name: string) => within(row('mini')).getByText(name).closest('[data-org-grant]') as HTMLElement;
-    expect(within(line('Ben')).getByText('spawn and shell')).toBeTruthy();
-    expect(within(line('Cat')).getByText('machine-admin')).toBeTruthy();
+    expect(within(line('Ben')).getByText('sessions and terminal')).toBeTruthy();
+    expect(within(line('Cat')).getByText('connectors')).toBeTruthy();
     expect(within(line('Cat')).getByText('Not yet on mini')).toBeTruthy();
     expect(within(line('Ana')).getByText('Another device changed this grant: sign again')).toBeTruthy();
     expect(within(line('Ana')).getByRole('button', { name: 'Sign again…' })).toBeTruthy();
     expect(within(line('a former member')).getByText('every right withdrawn')).toBeTruthy();
     expect(within(line('a former member')).getByText('mini refused it: it no longer holds the key this grant names. Sign again')).toBeTruthy();
     expect(within(line('a former member')).getByText('not-held')).toBeTruthy(); // the code, beside its line
-    expect(within(row('build-vm')).getByText('Only its owners have rights on it, and they hold every one.')).toBeTruthy();
+    expect(accessibleText(row('build-vm'))).not.toContain('Only its owners have rights on it'); // nobody granted: no line (G175)
     expect(sent('org.grants.view')).toEqual([{ ref: MINI }, { ref: VM }]);
 
     // a new head reads the view again, never a machine's ledger
@@ -159,7 +178,7 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     const mini = await found('mini');
     expect(await within(mini).findByText(/^mini didn’t answer: as of its last answer, /)).toBeTruthy();
     expect(within(row('build-vm')).getByText('build-vm hasn’t answered yet: as this Mac issued them')).toBeTruthy();
-    expect(within(row('build-vm')).getByText('You hold no rights on it.')).toBeTruthy(); // Ana's machine: you see only your own entry
+    expect(accessibleText(row('build-vm'))).not.toContain('You hold no rights on it.'); // Ana's machine, none of yours: no line (G175)
   });
 
   it('a damaged grants record says grants can’t be signed here, and nothing offers to sign one', async () => {
@@ -169,7 +188,8 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     });
     const mini = await found('mini');
     expect(await within(mini).findByText('Grants can’t be signed on this Mac: its record of the grants it issued is damaged. Sign them from another device of the machine’s owner.')).toBeTruthy();
-    expect(buttons('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…', 'Retry']); // Retry reads again; nothing signs
+    expect(await actions('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…']); // nothing signs
+    expect(buttons('mini')).toEqual(['Retry']); // Retry reads again
   });
 
   // U11a board 540: an enrollment's end on its row names who can act, or what to do next
@@ -182,7 +202,7 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
       for (const replace of [null, MINI]) {
         const enrolling = { generation: 3, name: replace === null ? 'gpu-box' : 'mini', replace, expires: '2026-10-28T13:00:00.000Z', candidate: null, problem };
         renderSection(signing(ROOT, { enrolling }));
-        const at = await found(replace === null ? 'Enroll a machine' : 'mini');
+        const at = replace === null ? await findFoot('enroll') : await found('mini');
         expect(within(at).getByText(line)).toBeTruthy();
         expect(within(at).getByRole('button', { name: 'Show…' })).toBeTruthy();
         resetHarness();

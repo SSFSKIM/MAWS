@@ -105,6 +105,10 @@ describe('the keymap table', () => {
     expect(row('attention.next')).toMatchObject({ chord: 'Cmd+Shift+U', display: '⌘⇧U', overridden: true });
     expect(row('palette.open')).toMatchObject({ chord: null, display: 'Unbound', overridden: true });
     expect(row('tab.select')).toMatchObject({ display: '⌘1…9' });
+    // the word cut (G44): what differs from its default, which Reset to defaults would change
+    expect([row('settings.open').differs, row('attention.next').differs, row('palette.open').differs]).toEqual([false, true, true]);
+    const same = keymapGroups({ 'attention.next': 'Cmd+Shift+J' }).flatMap((g) => g.rows);
+    expect(same.find((r) => r.id === 'attention.next')).toMatchObject({ overridden: true, differs: false }); // saved, equal to its default
     expect(row('surface.terminal')).toMatchObject({ title: 'Terminal', chord: 'Cmd+J', display: '⌘J' });
     expect(groups.find((g) => g.label === 'View › Tabs')!.rows.map((r) => r.id)).toEqual(['tab.select', 'tab.next', 'tab.previous']); // renderer actions placed in a menu's submenu
     expect(groups.find((g) => g.label === 'In a pane')!.rows.map((r) => r.id)).toEqual(expect.arrayContaining(['request.accept', 'request.decline', 'request.allowOnce', 'request.allowLasting']));

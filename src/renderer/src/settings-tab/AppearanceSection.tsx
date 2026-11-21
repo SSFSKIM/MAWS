@@ -16,7 +16,6 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
     <>
       <Setting row="appearance.theme">
         <Segment label={APPEARANCE.theme} value={settings.theme} options={THEMES} onChange={(theme) => writeSettings({ theme })} />
-        <span className="text-ui-sm text-fg-muted">{APPEARANCE.themeHint}</span>
       </Setting>
       <Setting row="appearance.transcriptWidth">
         <Segment

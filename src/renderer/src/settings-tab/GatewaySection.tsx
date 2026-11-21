@@ -1,17 +1,20 @@
 // The Gateway section (C11 execution document, Interfaces "Settings tab" Gateway; D-19; mockup 06 vignette 04): the
 // route new sessions start on, what a first send does when ClaudeUsage's relay is unreachable, whether Session info (W2:
 // no status line) offers the per-session Direct switch, the engine's own login as a Direct session last reported it, and the relay.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): no address beside the routes (G101); the
+// Direct switch's row is its label and the switch (G106); an unknown login reads Unknown, its sign-in the command and its
+// Copy (G107, G108); the relay row reads the address, when it was checked its tooltip (G109).
 import { useEffect, useState } from 'react';
 import type { Route } from '@shared/engine/route';
 import type { Settings } from '@shared/ipc/schema';
-import { relayLine } from '../accounts/model';
+import { relayAddress } from '../accounts/model';
 import { useGateway } from '../gateway/store';
 import { runAction } from '../keymap/actions-runtime';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { toast } from '../stores/notices';
 import { GATEWAY } from './copy';
 import { chooseDefaultRoute, readDefaultRoute } from './default-route';
-import { INPUT, Segment, Setting, Switch, TEXT_ACTION, writeSettings } from './parts';
+import { INPUT, Segment, Setting, Switch, TEXT_ACTION, TipWord, WORD_OWNER, writeSettings } from './parts';
 
 const LEGACY_ROUTES = (['gateway', 'direct'] as const).map((value) => ({ value, label: GATEWAY.routes[value] }));
 const ROUTES = (['machine', 'gateway', 'direct'] as const).map((value) => ({ value, label: GATEWAY.routes[value] })); // P5 O7 M9
@@ -28,7 +31,6 @@ export function GatewaySection({ settings }: { settings: Settings }) {
         ) : (
           <Segment label={GATEWAY.defaultRoute} value={route.value} options={ROUTES} onChange={route.choose} />
         )}
-        <span className="text-ui-sm text-fg-muted">127.0.0.1:8641</span>
       </Setting>
       <Setting row="gateway.policy" state={relayUnreachable === 'direct' ? 'direct' : 'default'}>
         <select
@@ -46,7 +48,6 @@ export function GatewaySection({ settings }: { settings: Settings }) {
       </Setting>
       <Setting row="gateway.offerDirect">
         <Switch checked={offerDirect} label={GATEWAY.offerDirectLabel} onChange={(next) => void writeSettings({ gateway: { offerDirect: next } })} />
-        <span>{GATEWAY.offerDirectLabel}</span>
       </Setting>
       <DirectLogin />
       <Relay />
@@ -89,12 +90,12 @@ function DirectLogin() {
     }
   };
   return (
-    // U11a M9: the sign-in and its Copy stay on the row's line, after its sentence and before More
+    // the sign-in command and its Copy stand on the row's line at rest
     <Setting
       row="gateway.directLogin"
       lineEnd={
         <>
-          <span className="text-fg">{GATEWAY.signIn}</span>
+          <code className="font-mono text-fg">{GATEWAY.signInCommand}</code>
           <button type="button" className={`${TEXT_ACTION} ml-1`} onClick={() => void copy()}>
             {copied ? GATEWAY.copied : GATEWAY.copy}
           </button>
@@ -116,9 +117,14 @@ function Relay() {
       .refreshRelay(false)
       .catch((error: unknown) => console.warn('[settings] relay check failed', error));
   }, []);
+  const { line, checked } = relayAddress(relay, now);
   return (
     <Setting row="gateway.relay">
-      <span className={relay && !relay.ok ? 'text-warning' : ''}>{relayLine(relay, now)}</span>
+      <TipWord tip={checked}>
+        <span tabIndex={checked === null ? undefined : 0} className={`${relay && !relay.ok ? 'text-warning' : ''} ${WORD_OWNER}`}>
+          {line}
+        </span>
+      </TipWord>
       <button type="button" className={TEXT_ACTION} onClick={() => runAction('gateway.openClaudeUsage')}>
         {GATEWAY.openClaudeUsage}
       </button>

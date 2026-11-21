@@ -124,6 +124,7 @@ export interface KeymapRow {
   chord: string | null; // effective
   display: string; // the chord in symbols, `Unbound` when none
   overridden: boolean;
+  differs: boolean; // answers other than its default (the word cut, G44: what Reset to defaults would change)
   rebindable: boolean; // U6a: Settings › Keyboard offers Change only here
 }
 export interface KeymapGroup {
@@ -150,7 +151,8 @@ export function keymapGroups(overrides: KeymapOverrides, table: ActionTable = AC
   const row = (id: ActionId): KeymapRow => {
     const chord = effectiveChord(id, overrides, table);
     const rebindable = isRebindable(id, table);
-    return { id, title: table[id].title, chord, display: displayChord(id, chord), overridden: rebindable && overrides[id] !== undefined, rebindable };
+    const display = displayChord(id, chord);
+    return { id, title: table[id].title, chord, display, overridden: rebindable && overrides[id] !== undefined, differs: display !== displayChord(id, table[id].chord), rebindable };
   };
   const byScope = (rows: ActionId[]) => [...rows].sort((a, b) => SCOPE_ORDER.indexOf(table[a].scope) - SCOPE_ORDER.indexOf(table[b].scope));
   const placed = (menu: ActionSpec['menu'], label: string): KeymapGroup[] => {

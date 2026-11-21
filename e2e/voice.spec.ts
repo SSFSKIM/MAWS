@@ -487,8 +487,14 @@ test('Settings › Voice reads the status from main and writes the language to s
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Voice', exact: true }).click();
   const section = settings.getByRole('region', { name: 'Voice' });
   await expect(section).toBeVisible();
-  await expect(section).toContainText('scripted recognizer (test harness)');
-  await expect(section.getByRole('group', { name: 'Shortcut' })).toContainText('Unbound'); // M6: no default hold
+  // the word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G50, G56): the Helper and Recognition rows
+  // are drawn only on trouble, and the scripted recognizer reports a ready helper with an on-device model; the two
+  // permissions it grants are read below. Those rows' absence proves nothing unless the scripted recognizer is the one
+  // answering (a launch without MAWS_E2E_VOICE probes the real helper), so main's own status names its backend first.
+  expect(value(await invoke(page, 'voice.status', { locale: null }))).toMatchObject({ backend: 'scripted', helper: { state: 'ready' } });
+  await expect(section.getByRole('group', { name: 'Helper', exact: true })).toHaveCount(0);
+  await expect(section.getByRole('group', { name: 'Recognition', exact: true })).toHaveCount(0);
+  await expect(section.getByRole('group', { name: 'Shortcut' }).getByRole('img', { name: 'Unbound', exact: true })).toBeVisible(); // M6: no default hold; the word cut (G40): the empty key cap
   const language = section.getByRole('combobox', { name: 'Language' });
   await expect(language.locator('option').first()).toHaveText('System (en-US)');
   await expect(section.getByText('Allowed', { exact: true })).toHaveCount(2); // microphone and speech, as the script grants them

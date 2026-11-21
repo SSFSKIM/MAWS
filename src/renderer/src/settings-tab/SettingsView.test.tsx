@@ -48,7 +48,11 @@ const index = () => screen.getByRole('navigation', { name: 'Settings sections' }
 const region = (name: string) => screen.getByRole('region', { name });
 // U11a M9: a section's rows in the page's order, by their labels (the supervisor's group is named, not labelled, and holds rows)
 const labelsIn = (section: HTMLElement) => [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby')!)!.textContent);
-const more = (of: HTMLElement) => within(of).getByRole('button', { name: /^(More|Less)$/ });
+// the word cut: a row's note, hidden at rest, its words the row's description
+const noteOf = (of: HTMLElement) => of.querySelector<HTMLElement>('[data-row-note]')!;
+// a row's words as the accessibility tree reads them: its description, whether its note is open or not
+const describes = (label: string, words: string) => screen.getByRole('group', { name: label, description: (description) => description.includes(words) });
+const describedBy = (label: string, words: string) => screen.getByRole('group', { name: label, description: (d) => d.includes(words) });
 // the machine's settings answered (by a daemon before the machine route), so the Gateway section's read does not fail
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
 
@@ -75,11 +79,14 @@ describe('settings tab writes one field per row', () => {
   // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own.
   // UX wave U7b (O-47): Usage after Gateway.
   const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Usage', 'Engine', 'Supervisor', 'Org'];
-  it('groups the index under App and Sessions & engine, Org and Customize after them, the footer kept; the body in the same order', () => {
+  it('groups the index in two runs parted by a gap, Org and Customize after them, the footer kept; the body in the same order', () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     expect(within(index()).getAllByRole('button').map((x) => x.textContent)).toEqual([...ORDER, 'Customize ›']);
-    // the headings stand before their sections, and nothing heads Org
-    expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 11), 'Org', 'Customize ›']);
+    // the word cut (G1, G3): no title and no group headings, the Settings dialog naming the page; a gap parts the runs
+    const groups = [...index().querySelectorAll<HTMLElement>('[data-settings-group]')];
+    expect(groups.map((group) => [group.dataset.settingsGroup, [...group.querySelectorAll('button')].map((x) => x.textContent)])).toEqual([['app', ORDER.slice(0, 6)], ['sessions', ORDER.slice(6, 11)]]);
+    expect(groups.map((group) => group.classList.contains('pt-3'))).toEqual([false, true]);
+    for (const word of ['Settings', 'App', 'Sessions & engine']) expect(within(index()).queryByText(word)).toBeNull();
     expect(index().textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
     const sections = [...document.querySelectorAll('[data-settings-body] section[aria-labelledby^="settings-"]')].map((s) => s.getAttribute('aria-labelledby'));
     expect(sections).toEqual(SECTION_TABLE.map(({ section }) => `settings-${section}`));
@@ -95,20 +102,22 @@ describe('settings tab writes one field per row', () => {
   });
 
   // U11a M9 (A5): each section's rows, in the order of the child's table; Engine's three; no Plugins paragraph
-  it('each section holds the rows of the table, in its order; Engine holds Binary, Update and Config home, and the Plugins paragraph is gone', async () => {
+  it('each section holds the rows of the table, in its order; Engine holds Binary alone, and the Plugins paragraph is gone', async () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
-    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    await within(row('Binary')).findByText('2.1.287'); // the version read; its path is the chip's tooltip and in the note
     expect(labelsIn(region('Appearance'))).toEqual(['Theme', 'Transcript width', 'Monospace font']);
-    expect(labelsIn(region('Notifications'))).toEqual(['Messages to you', 'When a session finishes or needs you', 'For', 'Sound']);
+    expect(labelsIn(region('Notifications'))).toEqual(['Messages to you', 'Notify me', 'For', 'Sound']);
     expect(within(region('Keyboard')).getByRole('table', { name: 'Key bindings' })).toBeTruthy();
-    expect(within(region('Keyboard')).getByRole('button', { name: 'Reset to defaults' })).toBeTruthy();
-    expect(labelsIn(region('Voice'))).toEqual(['Shortcut', 'Language', 'Helper', 'Microphone', 'Speech recognition', 'Recognition']);
-    expect(labelsIn(region('Browser'))).toEqual(['Profile', 'Bookmarks bar', 'Search engine', 'Links that open a new window', 'Chrome profile']);
+    expect(within(region('Keyboard')).queryByRole('button', { name: 'Reset to defaults' })).toBeNull(); // the word cut (G44): nothing to reset
+    // the word cut (G50, G56): the helper ready and the language on this Mac, their rows are not drawn
+    await vi.waitFor(() => expect(labelsIn(region('Voice'))).toEqual(['Shortcut', 'Language', 'Microphone', 'Speech recognition']));
+    expect(labelsIn(region('Browser'))).toEqual(['Profile', 'Bookmarks bar', 'Search engine', 'New-window links', 'Chrome profile']);
     expect(labelsIn(region('Artifacts'))).toEqual(['Export author name', 'Default design system', 'By Space']);
-    expect(labelsIn(region('Sessions'))).toEqual(['Plugins in sessions', 'Hooks in sessions', 'MCP servers', 'Subagent model', 'When auto mode is unavailable', 'Archive sessions inactive for']);
-    expect(labelsIn(region('Gateway'))).toEqual(['Default route', 'Relay unreachable at launch', 'Per-session Direct', 'Direct login', 'Relay']);
-    expect(labelsIn(region('Engine'))).toEqual(['Binary', 'Update', 'Config home']);
-    expect(labelsIn(region('Supervisor'))).toEqual(['Status', 'Machine daemon', 'Exit when idle', 'Stop all', 'Memory budget', 'Limit', 'Stateful MCP servers']);
+    expect(labelsIn(region('Sessions'))).toEqual(['Plugins in sessions', 'Hooks in sessions', 'MCP servers', 'Subagent model', 'When auto mode is unavailable', 'Archive after']);
+    expect(labelsIn(region('Gateway'))).toEqual(['Default route', 'If the relay is down', 'Switch to Direct in Session info', 'Direct login', 'Relay']);
+    expect(labelsIn(region('Engine'))).toEqual(['Binary']);
+    // the word cut (G133, G136, G139): the daemon connected, its row is not drawn; Stop all's label is its name alone
+    expect(labelsIn(region('Supervisor'))).toEqual(['Status', 'Exit when idle', 'Stop all', 'Release idle sessions over a memory limit', 'Limit', 'Stateful MCP servers']);
     expect(within(region('Supervisor')).getByRole('group', { name: 'Background supervisor' })).toBeTruthy(); // its rows keep their group, named
     expect(within(region('Supervisor')).queryByRole('heading', { name: 'Background supervisor' })).toBeNull(); // the section's heading stands in its place
     expect(screen.queryByRole('group', { name: 'Plugins' })).toBeNull();
@@ -119,28 +128,25 @@ describe('settings tab writes one field per row', () => {
   it('says once under the Sessions heading what every one of its rows would otherwise repeat', () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     const sessions = region('Sessions');
-    const line = within(sessions).getByText('For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed.');
+    const line = within(sessions).getByText('For sessions MAWS runs.'); // the word cut (G85)
     expect(line.closest('h3')).toBeNull(); // under the heading, not in it
     expect(screen.getByRole('heading', { name: 'Sessions' })).toBeTruthy();
     for (const label of labelsIn(sessions)) expect(row(label!).textContent).not.toMatch(/terminal session|settings files are never changed/i);
   });
 
-  // U11a M9 (A6): a note is one line; More opens the rest in place, under it, and Less closes it again
-  it('a note is one line, and More opens the rest in place and closes it; a closed More is not in the page', async () => {
+  // the word cut (G13 to G15): a row's note waits in the row, whole, with no More and no Less; the row taking the
+  // keyboard (as a search's landing gives it) opens it, and it closes once the keyboard leaves
+  it('a note is hidden at rest, the row’s description, and opens whole in the row when the row takes the keyboard', async () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
-    const update = row('Update');
-    const button = more(update);
-    expect(button.textContent).toBe('More');
-    expect(button.getAttribute('aria-expanded')).toBe('false');
-    expect(update.querySelector('[data-settings-note]')!.textContent).toBe('Runs claude update in a terminal tab.More');
-    expect(update.textContent).not.toContain('New sessions start on the new version');
-    fireEvent.click(button);
-    expect(button.textContent).toBe('Less');
-    expect(button.getAttribute('aria-expanded')).toBe('true');
-    expect(within(update).getByText('New sessions start on the new version; running sessions keep theirs.').closest('[data-settings-note]')).toBe(update.querySelector('[data-settings-note]'));
-    fireEvent.click(button);
-    expect(button.textContent).toBe('More');
-    expect(update.textContent).not.toContain('New sessions start on the new version');
+    const archive = row('Archive after');
+    expect(noteOf(archive).hidden).toBe(true);
+    expect(describedBy('Archive after', 'Archived sessions can be restored from the sidebar. Pinned, live, waiting and background-running sessions stay, as do worktrees with uncommitted changes.')).toBe(archive);
+    act(() => archive.focus());
+    expect(noteOf(archive).hidden).toBe(false);
+    expect(noteOf(archive).textContent).toBe('Archived sessions can be restored from the sidebar. Pinned, live, waiting and background-running sessions stay, as do worktrees with uncommitted changes.');
+    expect(screen.queryByRole('button', { name: /^(More|Less)$/ })).toBeNull();
+    act(() => archive.blur());
+    await vi.waitFor(() => expect(noteOf(archive).hidden).toBe(true)); // after its close motion
     expect(b.sets).toEqual([]);
   });
 
@@ -152,13 +158,13 @@ describe('settings tab writes one field per row', () => {
     expect(within(status).queryByRole('button', { name: 'More' })).toBeNull();
   });
 
-  it('Direct login keeps its sign-in instruction and its Copy on the row’s line, before More', () => {
+  it('Direct login keeps the sign-in command and its Copy on the row’s line at rest, the token sentence in its note (G108)', () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
-    const note = row('Direct login').querySelector('[data-settings-note]')! as HTMLElement;
-    expect(note.textContent).toBe('Only Direct sessions use it. Sign in: run claude /login in a terminalCopyMore');
-    expect(within(note).getAllByRole('button').map((x) => x.textContent)).toEqual(['Copy', 'More']);
-    fireEvent.click(more(note));
-    expect(note.textContent).toContain("MAWS never stores a token; ClaudeUsage holds the relay's accounts.");
+    const line = row('Direct login').querySelector('[data-settings-note]')! as HTMLElement;
+    expect(line.textContent).toBe('claude /loginCopy');
+    expect(within(line).getAllByRole('button').map((x) => x.textContent)).toEqual(['Copy']);
+    expect(describedBy('Direct login', "MAWS never stores a token; ClaudeUsage holds the relay's accounts.")).toBe(row('Direct login'));
+    expect(row('Direct login').textContent).not.toContain('Only Direct sessions use it');
   });
 
   it('copy outside Settings names the MCP servers row where it now is', () => {
@@ -179,9 +185,9 @@ describe('settings tab writes one field per row', () => {
 
   it('Engine and Sessions: the binary, the config home, and the subagent model as one field', async () => {
     renderView();
-    expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy(); // W13: the installed binary, no pin
-    expect(await within(row('Config home')).findByText('~/.claude')).toBeTruthy();
-    expect(within(row('Config home')).getByText('read-only to MAWS')).toBeTruthy();
+    // W13: the installed binary, no pin; the word cut (G125, G128): its path and the config home in the Binary row's note
+    await vi.waitFor(() => expect(describes('Binary', '~/.local/share/claude/versions/2.1.287')).toBe(row('Binary')));
+    await vi.waitFor(() => expect(describes('Binary', 'Config home · ~/.claude · read-only to MAWS')).toBe(row('Binary')));
 
     const field = within(row('Subagent model')).getByRole('combobox') as HTMLInputElement;
     expect(field.placeholder).toBe('inherit'); // W3: the engine's word for no override
@@ -209,7 +215,7 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));
     expect(b.calls.find((c) => c.name === 'layout.pickFiles')!.input).toEqual({ kind: 'files', directory: null, multiple: false });
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
-    expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
+    await vi.waitFor(() => expect(describes('Binary', '/opt/claude/2.1.290/claude')).toBe(row('Binary')));
     expect(within(row('Binary')).queryByText(/re-pin|refuse/)).toBeNull(); // W13: a version never refuses
     // C12; P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write (P5 O7 M9: and Gateway its default route)
     const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name).filter((name) => name !== 'plugins.list' && name !== 'fs.state' && name !== 'machineSettings.get'); // P5 O7 M9: Gateway's default route, read again at each settings change
@@ -227,12 +233,12 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets).toEqual([{ gateway: { defaultRoute: 'direct' } }]));
     expect((within(row('Default route')).getByRole('radio', { name: 'Direct' }) as HTMLInputElement).checked).toBe(true);
 
-    const policy = within(row('Relay unreachable at launch')).getByRole('combobox') as HTMLSelectElement;
+    const policy = within(row('If the relay is down')).getByRole('combobox') as HTMLSelectElement;
     expect([...policy.options].map((o) => o.textContent)).toEqual(['Ask each time', 'Wait for the relay', 'Run direct']);
     fireEvent.change(policy, { target: { value: 'wait' } });
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ gateway: { relayUnreachable: 'wait' } }));
 
-    const offer = within(row('Per-session Direct')).getByRole('switch');
+    const offer = within(row('Switch to Direct in Session info')).getByRole('switch', { name: 'Offer "Switch to Direct…" in Session info' });
     expect(offer.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(offer);
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ gateway: { offerDirect: false } }));
@@ -256,8 +262,7 @@ describe('settings tab writes one field per row', () => {
     const radio = (name: string) => within(row('Default route')).getByRole<HTMLInputElement>('radio', { name });
     await vi.waitFor(() => expect(radio('Machine’s own').checked).toBe(true));
     expect(within(row('Default route')).getAllByRole('radio').map((r) => r.parentElement?.textContent)).toEqual(['Machine’s own', 'ClaudeUsage relay', 'Direct']);
-    fireEvent.click(more(row('Default route'))); // U11a M9: the machine route's sentence is behind More
-    expect(row('Default route').textContent).toContain('the machine’s own settings, environment and login decide');
+    expect(describedBy('Default route', 'the machine’s own settings, environment and login decide')).toBe(row('Default route')); // in its note
     fireEvent.click(radio('ClaudeUsage relay'));
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'machineSettings.set', input: { patch: {}, defaultRoute: 'gateway' } }));
     await vi.waitFor(() => expect(radio('ClaudeUsage relay').checked).toBe(true));
@@ -289,14 +294,17 @@ describe('settings tab writes one field per row', () => {
 
   it("Gateway: the direct login the engine last reported, the sign-in command to copy, and the relay's line", async () => {
     renderView();
-    expect(within(row('Direct login')).getByText('unknown until a Direct session runs')).toBeTruthy();
+    expect(within(row('Direct login')).getByText('Unknown')).toBeTruthy(); // the word cut (G107)
     act(() => useGateway.setState({ directLogin: new Map([['app-1' as never, { login: 'Claude Max', email: 'owner@example.test', organization: null }]]) }));
     expect(within(row('Direct login')).getByText("engine's own · Claude Max · owner@example.test")).toBeTruthy();
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     fireEvent.click(within(row('Direct login')).getByRole('button', { name: 'Copy' }));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('claude /login'));
-    await vi.waitFor(() => expect(within(row('Relay')).getByText(`Relay listening on 127.0.0.1:8641 · checked ${REL.now} · 2 ms`)).toBeTruthy());
+    // the word cut (G109): the address, when it was checked and how fast its tooltip and description
+    await vi.waitFor(() => expect(within(row('Relay')).getByText('127.0.0.1:8641', { selector: `[aria-describedby]` }).getAttribute('tabindex')).toBe('0'));
+    expect(within(row('Relay')).getByText('127.0.0.1:8641')).toBe(within(row('Relay')).getByText('127.0.0.1:8641', { selector: '[tabindex="0"]' }));
+    expect(document.getElementById(within(row('Relay')).getByText('127.0.0.1:8641').getAttribute('aria-describedby')!)!.textContent).toBe(`checked ${REL.now} · 2 ms`);
   });
 
   it('Appearance: the theme and the monospace font, with a preview line in that family', async () => {
@@ -320,7 +328,7 @@ describe('settings tab writes one field per row', () => {
 
   it('Sessions: automatic archiving is opt-in and saves the chosen interval', async () => {
     renderView();
-    const select = screen.getByRole('combobox', { name: 'Archive sessions inactive for' });
+    const select = screen.getByRole('combobox', { name: 'Archive after' }); // the word cut (G98)
     expect((select as HTMLSelectElement).value).toBe('never');
     await userEvent.selectOptions(select, '14');
     expect(settings().sessions.archiveInactiveDays).toBe(14);
@@ -328,12 +336,16 @@ describe('settings tab writes one field per row', () => {
     expect(settings().sessions.archiveInactiveDays).toBeNull();
   });
 
-  it('Notifications: enabled, one kind at a time, sound and no retired near-limit control; held peer messages never notify', async () => {
+  it('Notifications: enabled, one kind at a time, sound and no retired near-limit control; held peer messages are not drawn', async () => {
     renderView();
-    const when = row('When a session finishes or needs you');
+    const when = row('Notify me'); // the word cut (G28): the switch named by the sentence that stood beside it
+    expect(within(when).getByRole('switch', { name: 'Notify when I am not looking at that session' })).toBeTruthy();
     expect(within(when).queryByText(/^macOS:/)).toBeNull();
+    act(() => useAttention.setState({ notificationDelivery: 'os' }));
+    expect(within(when).getByText('macOS: allowed')).toBeTruthy(); // stays (G29)
     act(() => useAttention.setState({ notificationDelivery: 'fallback' }));
-    expect(within(when).getByText('macOS: not delivered · MAWS falls back to a dock bounce and a toast')).toBeTruthy();
+    const blocked = within(when).getByText('Blocked in macOS').closest<HTMLElement>('[tabindex="0"]')!; // the word cut (G30)
+    expect(document.getElementById(blocked.getAttribute('aria-describedby')!)!.textContent).toBe('MAWS falls back to a dock bounce and a toast');
     fireEvent.click(within(when).getByRole('switch'));
     await vi.waitFor(() => expect(b.sets).toEqual([{ notifications: { enabled: false } }]));
 
@@ -345,11 +357,12 @@ describe('settings tab writes one field per row', () => {
     fireEvent.click(within(kinds).getByRole('checkbox', { name: /^errors/ }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { errors: false } } }));
     expect(settings().notifications.kinds).toEqual({ turnFinished: false, approvals: true, questions: true, planReviews: true, errors: false, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ });
-    const held = within(kinds).getByRole('checkbox', { name: /^held peer messages/ }) as HTMLInputElement;
-    expect(held.disabled).toBe(true);
-    expect(kinds.textContent).toContain('Never notifies in this version');
-    expect(kinds.textContent).toContain('permission requests, dialogs and MCP elicitations');
+    // the word cut (G34): held peer messages, which never notify, are not drawn; (G33) approvals' caption is its description
+    expect(within(kinds).queryByRole('checkbox', { name: /^held peer messages/ })).toBeNull();
+    expect(kinds.textContent).not.toContain('Never notifies in this version');
+    expect(within(kinds).getByRole('checkbox', { name: 'approvals', description: 'permission requests, dialogs and MCP elicitations' })).toBeTruthy();
 
+    expect(row('Sound').textContent).toBe('Sound'); // the word cut (G35): no on/off word
     fireEvent.click(within(row('Sound')).getByRole('switch'));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { sound: true } }));
     expect(screen.queryByText('Near-limit banner')).toBeNull();
@@ -362,16 +375,12 @@ describe('settings tab writes one field per row', () => {
     const mod = row('Messages to you');
     const toggle = within(mod).getByRole('switch', { name: 'To-human' });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
-    expect(mod.textContent).toContain('Agents message you and ask questions you answer in place; a session reads as their report.');
-    fireEvent.click(more(mod)); // U11a M9: the rest is behind More
-    expect(mod.textContent).toContain('the next time each session starts');
+    expect(describedBy('Messages to you', 'Agents message you and ask questions you answer in place; a session reads as their report. The view follows at once; the instructions, the next time each session starts.')).toBe(mod); // G27: both in its note
     fireEvent.click(toggle);
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ mods: { toHuman: { enabled: false } } }));
 
     const kinds = row('For');
-    expect(within(kinds).getAllByRole('checkbox').map((box) => box.closest('label')!.textContent)).toEqual([
-      'Turn finished', 'approvals· permission requests, dialogs and MCP elicitations', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages', 'held peer messages· Never notifies in this version',
-    ]);
+    expect(within(kinds).getAllByRole('checkbox').map((box) => box.closest('label')!.textContent)).toEqual(['Turn finished', 'approvals', 'questions', 'plan reviews', 'errors', 'questions an agent left for you', 'must-read messages']);
     fireEvent.click(within(kinds).getByRole('checkbox', { name: 'must-read messages' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { kinds: { essential: false } } }));
     fireEvent.click(within(kinds).getByRole('checkbox', { name: 'questions an agent left for you' }));
@@ -488,7 +497,7 @@ describe('settings tab writes one field per row', () => {
   // U11a M9 (A6): the rows stack by the body's own width (its column is a container of its own) and the index by the view's.
   it('stacks in a narrow body: every fixed column gives way under the body’s container, and the index under the view’s', async () => {
     const { container } = renderView();
-    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    await within(row('Binary')).findByText('2.1.287'); // the version read; its path is the chip's tooltip and in the note
     const root = container.firstElementChild!;
     const classes = (el: Element) => [...el.classList];
     const fixedColumns = (el: Element) => classes(el).some((c) => /^grid-cols-\[.*\d+px/.test(c));
@@ -510,8 +519,8 @@ describe('settings tab writes one field per row', () => {
     // label, control, note in reading order, so one column reads label over control over note
     const binary = row('Binary');
     expect([...binary.children].map((c) => c.textContent)).toEqual(['Binary', expect.stringContaining('Change…'), expect.stringContaining('New sessions start on your installed Claude Code')]); // W13's note
-    // below the index's break its row of links drops the group headings and keeps the order
-    for (const heading of index().querySelectorAll('[data-settings-group]')) expect(heading.classList.contains('@max-lg/settings:hidden')).toBe(true);
+    // below the index's break its row of links drops the groups' gap and keeps the order
+    for (const group of index().querySelectorAll('[data-settings-group]')) expect(group.classList.contains('@max-lg/settings:contents')).toBe(true);
   });
 });
 
@@ -533,7 +542,7 @@ describe('settings tab: the memory budget rows', () => {
     const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement; // W7: the row is the limit's
     expect(field.value).toBe('');
     expect(field.placeholder).toBe('8');
-    expect(row('Limit').textContent).toContain('Default: 25% of physical memory (8 GB).');
+    expect(describedBy('Limit', 'Past it the least recently used idle session is released.')).toBe(row('Limit')); // the word cut (G142): the default's size is the placeholder
     fireEvent.change(field, { target: { value: '6.5' } });
     fireEvent.keyDown(field, { key: 'Enter' });
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { memoryBudgetMiB: 6656 } }]));
@@ -559,7 +568,7 @@ describe('settings tab: the memory budget rows', () => {
   // W7: the switch (settings version 7), on by default; off hides the limit and the stateful servers
   it('Memory budget: a switch, on by default, writes the switch whole; off hides the limit and the stateful servers and says what off means', async () => {
     renderView({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudgetMiB: 6144 } });
-    const toggle = within(row('Memory budget')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' });
+    const toggle = within(row('Release idle sessions over a memory limit')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' }); // the word cut (G139)
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(row('Limit')).toBeTruthy();
     expect(row('Stateful MCP servers')).toBeTruthy();
@@ -568,7 +577,8 @@ describe('settings tab: the memory budget rows', () => {
     await vi.waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'));
     expect(screen.queryByRole('group', { name: 'Limit' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Stateful MCP servers' })).toBeNull();
-    expect(row('Memory budget').textContent).toContain('Off: an engine process ends only on archive, quit or stop.');
+    expect(describedBy('Release idle sessions over a memory limit', 'Session info still shows the memory they use.')).toBeTruthy(); // the word cut (G140)
+    expect(row('Release idle sessions over a memory limit').textContent).not.toContain('Off: an engine process ends only');
     fireEvent.click(toggle);
     await vi.waitFor(() => expect(settings().engine.memoryBudget).toEqual({ enabled: true }));
     expect((within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement).value).toBe('6.0'); // the limit was kept while off
@@ -637,7 +647,9 @@ describe('settings view lists Voice', () => {
     });
     renderView({ ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.dictate': 'Cmd+D' } });
     expect(within(row('Shortcut')).getByText('⌘D')).toBeTruthy();
-    fireEvent.click(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' }));
+    const change = within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' }); // the word cut (G47): its name
+    expect(change.textContent).toBe('Change');
+    fireEvent.click(change);
     expect(scrolled.at(-1)).toBe('settings-keyboard');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
     expect(b.sets).toEqual([]); // the binding is edited where every binding is
@@ -646,9 +658,9 @@ describe('settings view lists Voice', () => {
   // The owner's ruling (2026-10-06): the toolbar's microphone is the primary control and the hold ships unbound.
   it('the shortcut is unbound by default and says so, points at the microphone, and still offers Change in Keyboard', () => {
     renderView();
-    expect(within(row('Shortcut')).getByText('Unbound')).toBeTruthy();
+    expect(within(row('Shortcut')).getByRole('img', { name: 'Unbound' }).textContent).toBe(''); // the word cut (G40)
     expect(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' })).toBeTruthy();
-    expect(row('Shortcut').textContent).toContain("Click the microphone in the composer's toolbar to start dictating, and again to stop.");
+    expect(describedBy('Shortcut', "Click the microphone in the composer's toolbar to start dictating, and again to stop.")).toBe(row('Shortcut'));
     cleanup();
     renderView({ ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.dictate': 'Alt+Space' } });
     expect(within(row('Shortcut')).getByText('⌥Space')).toBeTruthy();
@@ -658,9 +670,7 @@ describe('settings view lists Voice', () => {
     renderView();
     await vi.waitFor(() => expect(optionTexts()).toEqual(['System (ko-KR)', 'English (United States)', 'French (France)', 'Korean (South Korea)']));
     expect(language().value).toBe('');
-    expect(row('Language').textContent).toContain("Recognised on this Mac by Apple's speech recognition.");
-    fireEvent.click(more(row('Language')));
-    expect(row('Language').textContent).toContain('MAWS stores no audio and no transcript.');
+    expect(describedBy('Language', "Recognised on this Mac by Apple's speech recognition. MAWS stores no audio and no transcript.")).toBe(row('Language'));
     fireEvent.change(language(), { target: { value: 'en-US' } });
     await vi.waitFor(() => expect(b.sets).toEqual([{ voice: { locale: 'en-US' } }]));
     expect(language().value).toBe('en-US');
@@ -705,22 +715,36 @@ describe('settings view lists Voice', () => {
     });
   });
 
-  it('granted and not-yet-asked permissions read as such, with no button, and an on-device language says so', async () => {
+  it('granted and not-yet-asked permissions read as such, with no button; a ready helper and an on-device language draw no row', async () => {
     renderView(SETTINGS_DEFAULTS_V21, null, { 'voice.status': status({ permission: { microphone: 'authorized', speech: 'notDetermined' } }) });
-    await vi.waitFor(() => expect(row('Speech recognition').textContent).toContain('Not asked yet · macOS asks the first time you dictate'));
+    await vi.waitFor(() => expect(row('Speech recognition').textContent).toBe('Speech recognitionNot asked yet')); // the word cut (G53)
     expect(row('Microphone').textContent).toContain('Allowed');
     expect(screen.queryByRole('button', { name: 'Open System Settings' })).toBeNull();
-    expect(row('Recognition').textContent).toContain('On this Mac');
-    expect(row('Helper').textContent).toContain(VOICE_HELPER);
+    // the word cut (G50, G56): rows drawn only on trouble
+    expect(screen.queryByRole('group', { name: 'Recognition' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Helper' })).toBeNull();
+    expect(document.body.textContent).not.toContain(VOICE_HELPER);
   });
 
-  it('a missing helper shows its path and how to build it', async () => {
+  it('draws the Helper and Recognition rows while the probe reads, with their words of waiting, and not once it answers ready', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    expect(row('Helper').textContent).toContain('Reading…'); // before the probe's first answer
+    expect(row('Recognition').textContent).toContain('Reading…'); // stays (G58)
+    await vi.waitFor(() => expect(screen.queryByRole('group', { name: 'Helper' })).toBeNull());
+  });
+
+  it('a missing helper shows its path, the exact one its tooltip on a word the keyboard reaches, and how to build it', async () => {
+    const exact = '/Users/tester/build/voice-helper/maws-voice-helper';
     renderView(SETTINGS_DEFAULTS_V21, null, {
-      'voice.status': status({ helper: { state: 'missing', path: '/repo/build/voice-helper/maws-voice-helper' }, permission: null, supportsOnDevice: null }),
+      'voice.status': status({ helper: { state: 'missing', path: exact }, permission: null, supportsOnDevice: null }),
     });
-    await vi.waitFor(() => expect(row('Helper').textContent).toContain('/repo/build/voice-helper/maws-voice-helper'));
+    const shown = await within(await screen.findByRole('group', { name: 'Helper' })).findByText('~/build/voice-helper/maws-voice-helper');
+    expect(shown.tabIndex).toBe(0);
+    expect(shown.hasAttribute('title')).toBe(false);
+    expect(document.getElementById(shown.getAttribute('aria-describedby')!)!.textContent).toBe(exact);
     expect(row('Helper').textContent).toContain('pnpm build:helper'); // import.meta.env.DEV holds under vitest
-    expect(row('Microphone').textContent).toContain('Unknown until the helper answers');
+    expect(row('Microphone').textContent).toBe('MicrophoneUnknown'); // the word cut (G55)
+    expect(row('Recognition').textContent).toBe('RecognitionUnknown');
   });
 
   it('a language without an on-device model is marked in the select and refused in words', async () => {
@@ -781,9 +805,10 @@ describe('settings view lists Browser', () => {
 
   it('the link target writes its one field', async () => {
     renderView();
-    const links = within(row('Links that open a new window'));
+    const links = within(row('New-window links')); // the word cut (G67 to G69)
     expect((links.getByRole('radio', { name: 'In MAWS' }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(links.getByRole('radio', { name: 'In the system browser' }));
+    expect(row('New-window links').textContent).not.toContain('such a link opens as a new tab');
+    fireEvent.click(links.getByRole('radio', { name: 'System browser' }));
     await vi.waitFor(() => expect(b.sets).toEqual([{ browser: { linkTarget: 'external' } }]));
     expect(settings().browser.linkTarget).toBe('external');
   });

@@ -296,19 +296,41 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       for (const id of GROUPS) await expect(group(id).locator('h4')).toHaveText(ORG.groups[id]);
       for (const member of view.members) await expect(group('people').getByRole('group', { name: names.get(member.id)!, exact: true })).toBeVisible();
       await expect(group('you').getByRole('group', { name: ORG.refused, exact: true })).toBeVisible();
-      await expect(group('machines').getByRole('group', { name: 'ana-mbp', exact: true })).toContainText(ORG.machineState.up);
+      // the word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G171): Up is a dot named and tipped Up, any
+      // other state its word
+      await expect(group('machines').getByRole('group', { name: 'ana-mbp', exact: true }).getByRole('img', { name: ORG.machineState.up, exact: true })).toBeVisible();
       await expect(group('machines').getByRole('group', { name: 'studio-mini', exact: true })).toContainText(ORG.machineState.unknown);
-      // M4b: the Machines group's actions and rights, read from each machine's grants
+      // M4b: the Machines group's actions and rights, read from each machine's grants. The word cut (G173): a machine's
+      // actions are one menu, named by the machine, read here as a person opens it and closed again with Esc
       const machineRow = (name: string) => group('machines').getByRole('group', { name, exact: true });
+      const machineMenu = async (name: string): Promise<Locator> => {
+        await machineRow(name).getByRole('button', { name: ORG.machineActions(name), exact: true }).click();
+        const opened = page.getByRole('menu');
+        await expect(opened).toBeVisible();
+        return opened;
+      };
+      const closeMenu = async () => {
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('menu')).toHaveCount(0);
+        await expect(panel).toBeVisible();
+      };
       await expect(machineRow('studio-mini')).toContainText(ORG.notYetOn('studio-mini'));
       await expect(machineRow('studio-mini')).toContainText(ORG.notNewer);
-      await expect(machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true })).toBeVisible();
+      await expect((await machineMenu('studio-mini')).getByRole('menuitem', { name: ORG.grant, exact: true })).toBeVisible();
+      await closeMenu();
       await expect(machineRow('lab-mini-02')).toContainText(ORG.missingGrants(2, 'lab-mini-02'));
-      await expect(machineRow('render-farm-03.clinical-research-operations')).toContainText(ORG.noRightsYou);
+      // G175: a machine nobody was granted rights on says nothing of them; it is read, as of its last answer
+      const farm = machineRow('render-farm-03.clinical-research-operations');
+      await expect(farm).toContainText(ORG.rightsAsOf('render-farm-03.clinical-research-operations', '').trimEnd());
+      await expect(farm.locator('[data-org-grant]')).toHaveCount(0);
       await expect(machineRow('ci-runner-7')).toContainText(ORG.certifiedOwners(view.delegations[0]!.id));
-      await expect(machineRow('ana-mbp').getByRole('button', { name: ORG.drop, exact: true })).toHaveCount(0); // this Mac's own
+      const own = await machineMenu('ana-mbp');
+      await expect(own.getByRole('menuitem', { name: ORG.grant, exact: true })).toBeVisible();
+      await expect(own.getByRole('menuitem', { name: ORG.drop, exact: true })).toHaveCount(0); // this Mac's own
+      await closeMenu();
       await expect(machineRow('old-render-01')).toContainText(ORG.hubRowLeft('old-render-01'));
-      await expect(group('machines').getByRole('group', { name: ORG.enroll, exact: true })).toContainText('Enrolling gpu-box-02 until');
+      // G178: the group ends with one line, no label: the enrollment running, or Enroll a machine…
+      await expect(group('machines').locator('[data-org-enroll]')).toContainText('Enrolling gpu-box-02 until');
 
       const longRow = group('people').getByRole('group', { name: names.get(status.pairing!.member)!, exact: true });
       const show = longRow.getByRole('button', { name: ORG.pairingShow, exact: true });
@@ -327,8 +349,14 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await expect(delegationRow('devcloud-vm-').getByRole('button')).toHaveCount(0); // no slot holds it: nothing to act on
       await expect(delegationRow('old-render-')).toContainText(ORG.hubBehindRevoke);
       await expect(delegations.getByRole('group', { name: ORG.strayKeys, exact: true })).toContainText(ORG.justMinted);
+      // the word cut (G188, G187): a set destination waits behind its chevron beside the heading, opened here as a person
+      // does; New delegation… is the section's one unlabelled line
+      const destinationChevron = delegations.getByRole('button', { name: ORG.destination, exact: true });
+      await expect(destinationChevron).toHaveAttribute('aria-expanded', 'false');
+      await destinationChevron.click();
+      await expect(destinationChevron).toHaveAttribute('aria-expanded', 'true');
       await expect(delegations.getByRole('group', { name: ORG.destination, exact: true }).getByRole('textbox', { name: ORG.destinationFields.account })).toHaveValue(DESTINATION.account);
-      const create = delegations.getByRole('group', { name: ORG.newDelegation, exact: true }).getByRole('button', { name: ORG.createAction, exact: true });
+      const create = delegations.locator('[data-org-new-delegation]').getByRole('button', { name: ORG.createAction, exact: true });
       await expect(create).toBeEnabled();
 
       // A machine reads by its name wherever the page names one (Machines, Deliveries, Discarded), never by its ref.
@@ -381,7 +409,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       // the enrollment awaiting its key, taken up without its code
       await photographed(
         ORG.enrollTitle,
-        () => group('machines').getByRole('group', { name: ORG.enroll, exact: true }).getByRole('button', { name: ORG.enrollShow, exact: true }).click(),
+        () => group('machines').locator('[data-org-enroll]').getByRole('button', { name: ORG.enrollShow, exact: true }).click(),
         ORG.enrollWaiting('gpu-box-02'),
         'org-page-enroll-sheet',
       );
@@ -389,7 +417,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await photographed(
         ORG.grantTitle('studio-mini'),
         async (sheet) => {
-          await machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true }).click();
+          await (await machineMenu('studio-mini')).getByRole('menuitem', { name: ORG.grant, exact: true }).click();
           await sheet.getByRole('combobox', { name: ORG.grantPerson }).selectOption({ label: `${names.get(view.members[3]!.id)!} (${view.members[3]!.email})` });
         },
         ORG.rightLines.shell,
@@ -406,7 +434,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await photographed(
         ORG.grantTitle('studio-mini'),
         async (sheet) => {
-          await machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true }).click();
+          await (await machineMenu('studio-mini')).getByRole('menuitem', { name: ORG.grant, exact: true }).click();
           await sheet.getByRole('combobox', { name: ORG.grantPerson }).selectOption({ label: `${names.get(view.members[3]!.id)!} (${view.members[3]!.email})` });
           await sheet.getByRole('checkbox', { name: /^machine-admin / }).check();
           await sheet.getByRole('button', { name: ORG.grantSave, exact: true }).click();

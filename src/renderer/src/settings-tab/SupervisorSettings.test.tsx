@@ -2,6 +2,9 @@
 // Settings › Supervisor since U11a M9. The status line reads main's `host.status`; the idle time writes settings version 10's `supervisor`
 // section; Stop all asks inline, naming the live count, then calls `host.restart {stopSessions: true}`. P5 O15 M2: every
 // status is the daemon's (main reports no other transport), and the group has no shape switch and no quit default.
+// The word cut (G129, G130, G133, G136): the status reads its state and its sessions, the start, the pid, the exit rule
+// and the connected daemon's line its tooltip and description; what the process is for is the row's note; the daemon's
+// row is drawn while it is not connected; Stop all is its one button.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -47,6 +50,11 @@ async function renderGroup(initialStatus: HostStatus = status(), initial: Settin
 }
 const row = (label: string) => screen.getByRole('group', { name: label });
 const statusLine = async (text: string) => expect(await within(row('Status')).findByText(text)).toBeTruthy();
+// the running supervisor's line, and the facts its tooltip holds, as its description
+const running = async (sessions: string, exit: string) => {
+  const line = await within(row('Status')).findByText(`Running · ${sessions}`);
+  expect(within(row('Status')).getByRole('status', { description: (d) => d.startsWith(`Since ${CLOCK} · pid 48213 · ${exit}`) })).toBe(line);
+};
 const event = (next: HostStatus) => act(() => useHosts.setState({ supervisor: next })); // as main's host.status event lands
 const restarts = () => b.calls.filter((c) => c.name === 'host.restart').map((c) => c.input);
 const toasts = () => useNotices.getState().notices.map((n) => n.text);
@@ -63,17 +71,17 @@ afterEach(() => {
 describe('the status line, from host.status', () => {
   it('reads running since, the pid, the live count and the idle exit the supervisor holds', async () => {
     await renderGroup();
-    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
+    await running('3 sessions', 'exits 10 min after the last session ends');
     expect(b.calls.map((c) => c.name)).toContain('host.status');
   });
 
   it('says one session, never for no idle exit, and when it exits with its last session (exit-when-idle armed)', async () => {
     await renderGroup(status({ supervisor: supervisor({ liveSessions: 1, idleExitMs: null }) }));
-    await statusLine(`Running since ${CLOCK} · pid 48213 · 1 session · never exits on its own`);
+    await running('1 session', 'never exits on its own');
     event(status({ supervisor: supervisor({ liveSessions: 0, exitWhenIdle: true }) }));
-    await statusLine(`Running since ${CLOCK} · pid 48213 · no sessions · exits when its last session ends`);
+    await running('no sessions', 'exits when its last session ends');
     event(status({ supervisor: supervisor({ idleExitMs: 1_500 }) })); // the e2e seam pushes seconds
-    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 2 s after the last session ends`);
+    await running('3 sessions', 'exits 2 s after the last session ends');
   });
 
   it('reads Starting, Restarting and Not running', async () => {
@@ -105,7 +113,7 @@ describe('the status line, from host.status', () => {
     await statusLine('Not running · another supervisor holds its lock and does not answer');
     expect(within(row('Status')).getByRole('button', { name: 'Restart now' })).toBeTruthy();
     event(status());
-    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
+    await running('3 sessions', 'exits 10 min after the last session ends');
     expect(within(row('Status')).queryByRole('button')).toBeNull();
   });
 
@@ -156,11 +164,12 @@ describe('the status line, from host.status', () => {
     expect(document.activeElement).toBe(field);
   });
 
-  it('says what the background process is for once main answers, while starting too', async () => {
+  it('says what the background process is for in its note once main answers, while starting too (G130)', async () => {
     await renderGroup();
-    expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
+    const FOR = 'Sessions run in this background process, so they can keep running after MAWS quits.';
+    expect(screen.getByRole('group', { name: 'Status', description: FOR })).toBe(row('Status'));
     event(status({ state: 'starting', supervisor: null, matches: null }));
-    expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Status', description: FOR })).toBe(row('Status'));
   });
 });
 
@@ -178,7 +187,7 @@ describe('the idle time', () => {
     fireEvent.blur(field());
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ supervisor: { idleExitMinutes: null } }));
     expect(field().placeholder).toBe('never');
-    expect(within(row('Exit when idle')).getByText('Never · the supervisor keeps running after its last session ends, even with MAWS closed.')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Exit when idle', description: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.' })).toBe(row('Exit when idle'));
   });
 
   it('refuses anything but whole minutes from 1 to 1440 with a warning, writes nothing and shows the setting again', async () => {
@@ -197,24 +206,28 @@ describe('the idle time', () => {
 });
 
 // P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "Status"): the daemon line reads main's host.status:
-// the daemon's kind, pid and machine ref.
+// the daemon's kind, pid and machine ref. The word cut (G133): its row is drawn while it is not connected; once it is,
+// its line is in the status's tooltip.
 describe('the machine daemon', () => {
   const daemonLine = () => row('Machine daemon').querySelector('[data-daemon-line]')!;
+  const described = (words: string) => within(row('Status')).getByRole('status', { description: (d) => d.includes(`Machine daemon · ${words}`) });
 
-  it('reads the daemon at login, a private one and one not yet answering; the group’s one status stays the supervisor’s', async () => {
+  it('reads the daemon at login and a private one in the status’s tooltip, and one not yet answering in its own row; the group’s one status stays the supervisor’s', async () => {
     await renderGroup(status({ daemon: daemonStatus({ kind: 'unit' }) }));
-    expect(daemonLine().textContent).toBe('At login · pid 4100 · machine mRef0123456789abcdefAB');
+    expect(described('At login · pid 4100 · machine mRef0123456789abcdefAB')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Machine daemon' })).toBeNull();
     // the group's one status stays the supervisor's (its live line, which the e2e suites and the owner's reader read)
     expect(within(screen.getByRole('group', { name: 'Background supervisor' })).getAllByRole('status')).toHaveLength(1);
     event(status());
-    expect(daemonLine().textContent).toBe('This profile only · pid 4100 · machine mRef0123456789abcdefAB');
+    expect(described('This profile only · pid 4100 · machine mRef0123456789abcdefAB')).toBeTruthy();
     event(status({ daemon: null }));
     expect(daemonLine().textContent).toBe('Connecting');
+    expect(within(screen.getByRole('group', { name: 'Background supervisor' })).getAllByRole('status')).toHaveLength(1);
   });
 });
 
 describe('Stop all', () => {
-  const stopAll = () => within(row('Stop all')).getByRole('button', { name: 'Stop all sessions and the supervisor…' });
+  const stopAll = () => within(row('Stop all')).getByRole('button', { name: 'Stop all sessions…' });
 
   it('asks inline naming the live count; Cancel asks nothing of main', async () => {
     await renderGroup();
@@ -241,7 +254,7 @@ describe('Stop all', () => {
     fireEvent.click(stopAll());
     fireEvent.click(within(row('Stop all')).getByRole('button', { name: 'Stop all' }));
     await vi.waitFor(() => expect(restarts()).toEqual([{ stopSessions: true }]));
-    expect(await within(row('Stop all')).findByRole('button', { name: 'Stop all sessions and the supervisor…' })).toBeTruthy();
+    expect(await within(row('Stop all')).findByRole('button', { name: 'Stop all sessions…' })).toBeTruthy();
   });
 
   it('with no live session asks to stop the supervisor alone', async () => {
@@ -308,7 +321,7 @@ describe('Stop all', () => {
     expect(stopping.disabled).toBe(true);
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Supervisor' }));
     await act(async () => answer());
-    expect(await within(row('Stop all')).findByRole('button', { name: 'Stop all sessions and the supervisor…' })).toBeTruthy();
+    expect(await within(row('Stop all')).findByRole('button', { name: 'Stop all sessions…' })).toBeTruthy();
     expect(restarts()).toEqual([{ stopSessions: true }]);
   });
 });
@@ -319,11 +332,12 @@ describe('inside Settings › Supervisor', () => {
     const group = screen.getByRole('group', { name: 'Background supervisor' });
     expect(within(group).queryByRole('heading')).toBeNull();
     expect(screen.getAllByRole('heading').map((h) => h.getAttribute('aria-label'))).toEqual(['Supervisor']);
-    expect(group.compareDocumentPosition(row('Memory budget')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group.compareDocumentPosition(row('Release idle sessions over a memory limit')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // P5 O15 M2: its rows, in order; no shape switch and no quit default
-    expect(within(group).getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual(['Status', 'Machine daemon', 'Exit when idle', 'Stop all']); // each row's label
+    expect(within(group).getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual(['Status', 'Exit when idle', 'Stop all']); // each row's label; the daemon connected
+    expect(row('Stop all').firstElementChild!.className).toBe('sr-only'); // its button alone, the label its name (G136)
     expect(within(group).queryByRole('switch')).toBeNull();
     expect(within(group).queryByRole('radiogroup')).toBeNull();
-    await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
+    await running('3 sessions', 'exits 10 min after the last session ends');
   });
 });

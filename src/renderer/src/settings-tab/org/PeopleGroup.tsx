@@ -3,17 +3,21 @@
 // this Mac marked. While this Mac may sign (M3's `maySign`, the view's), it offers Add person, Remove person, a role
 // change, Change email, Remove device, Make a root and Pair a device, each through its sheet; never one the composers
 // refuse for yourself (your own removal or role, this Mac's own device). Make a root is offered on an admin's Mac that
-// isn't one; the checks judge the rest. A later device of another member is stated, not offered: one who signs pairs it
-// from their own Org page, and one who doesn't waits for the countersign flow. Read-only otherwise, with the roots' emails.
+// isn't one; the checks judge the rest. A later device of another member is not offered: one who signs pairs it from
+// their own Org page, and one who doesn't waits for the countersign flow. Read-only otherwise.
 // M4b: a removal refused because the person owns a machine offers the way to each such machine's row.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): a person's actions are one "…" menu on their
+// row, a device's one on its line (G162, G163); a later device of another member is neither offered nor stated (G165,
+// G166); the read-only rule is the page's one line at its top, not this group's foot (G170).
 import { useEffect, useRef, useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { OrgChange, OrgPairingStatus, OrgView } from '@shared/ipc/schema/org';
 import { ORG } from '../copy';
 import { Setting, TEXT_ACTION, Chip } from '../parts';
+import { RowMenu } from '../row-menu';
 import { ChangeSheet } from './ChangeSheet';
 import { PairSheet } from './PairSheet';
-import { DeviceLine, focusMachineRow, inWords, OutcomeLine, type Member, type Outcome } from './parts';
+import { DeviceLine, deviceShort, focusMachineRow, OutcomeLine, type Member, type Outcome } from './parts';
 
 type Asked = { title: string; change: OrgChange };
 /** The pairing sheet open on a member; `follow` the generation the sheet takes up when reopened on a running pairing. */
@@ -37,25 +41,21 @@ export function PeopleGroup({ view, pairing, signIn }: { view: OrgView; pairing:
     setOutcome(null);
     setAsked({ title, change });
   };
-  const roots = [...new Set(view.roots.flatMap((root) => ('unlisted' in root ? [] : (view.members.find((m) => m.id === root.member)?.email ?? []))))];
   return (
     <>
       {view.members.map((member) => (
         <MemberRow key={member.id} member={member} may={may} pairing={pairing?.member === member.id ? pairing : null} ask={ask} pair={(follow) => setPairOn({ member, follow })} />
       ))}
-      <div className="flex min-h-[34px] min-w-0 flex-wrap items-center gap-2 py-1 text-ui-sm [overflow-wrap:anywhere]">
-        {may ? (
-          <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['member.add'], { kind: 'member.add', email: '', role: 'member' })}>
-            {ORG.addPerson}
-          </button>
-        ) : (
-          <>
-            <span className="text-fg-muted">{ORG.readOnly}</span>
-            {roots.length > 0 && <span className="text-fg-muted">{ORG.rootsAre(inWords(roots))}</span>}
-          </>
-        )}
-        <OutcomeLine outcome={outcome} />
-      </div>
+      {(may || outcome !== null) && (
+        <div className="flex min-h-[34px] min-w-0 flex-wrap items-center gap-2 py-1 text-ui-sm [overflow-wrap:anywhere]">
+          {may && (
+            <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['member.add'], { kind: 'member.add', email: '', role: 'member' })}>
+              {ORG.addPerson}
+            </button>
+          )}
+          <OutcomeLine outcome={outcome} />
+        </div>
+      )}
       {asked !== null && (
         <ChangeSheet
           title={asked.title}
@@ -93,48 +93,39 @@ function MemberRow({ member, may, pairing, ask, pair }: RowProps) {
   const other = !member.you;
   const role = member.role === 'admin' ? 'member' : 'admin';
   const firstOrYours = member.you || member.devices.length === 0;
-  const signs = member.devices.some((d) => d.root);
   const running = pairing !== null && pairing.problem === null;
   return (
     <Setting label={member.name}>
       <span>{email}</span>
       <Chip>{ORG.roles[member.role]}</Chip>
       {member.you && <Chip>{ORG.youMark}</Chip>}
-      {may && other && (
-        <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['member.role'](email, role), { kind: 'member.role', member: id, role })}>
-          {role === 'admin' ? ORG.makeAdmin : ORG.makeMember}
-        </button>
-      )}
       {may && (
-        <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['member.email'](email), { kind: 'member.email', member: id, email: '' })}>
-          {ORG.changeEmail}
-        </button>
-      )}
-      {may && other && (
-        <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['member.remove'](email), { kind: 'member.remove', member: id })}>
-          {ORG.removePerson}
-        </button>
+        <RowMenu
+          label={ORG.personActions(member.name)}
+          actions={[
+            other && { label: role === 'admin' ? ORG.makeAdmin : ORG.makeMember, onSelect: () => ask(ORG.changeTitles['member.role'](email, role), { kind: 'member.role', member: id, role }) },
+            { label: ORG.changeEmail, onSelect: () => ask(ORG.changeTitles['member.email'](email), { kind: 'member.email', member: id, email: '' }) },
+            other && { label: ORG.removePerson, danger: true, onSelect: () => ask(ORG.changeTitles['member.remove'](email), { kind: 'member.remove', member: id }) },
+          ]}
+        />
       )}
       {member.devices.length === 0 && <span className="basis-full text-fg-muted">{ORG.noDevices}</span>}
       {member.devices.map((device) => (
         <DeviceLine key={device.id} device={device}>
-          {may && !device.thisMac && (
-            <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['device.remove'](email), { kind: 'device.remove', member: id, device: device.id })}>
-              {ORG.removeDevice}
-            </button>
-          )}
-          {may && member.role === 'admin' && device.class === 'native-mac' && !device.root && (
-            <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['root.add'](email), { kind: 'root.add', member: id, device: device.id })}>
-              {ORG.makeDeviceRoot}
-            </button>
+          {may && (
+            <RowMenu
+              label={ORG.deviceActions(ORG.classes[device.class], deviceShort(device))}
+              actions={[
+                member.role === 'admin' && device.class === 'native-mac' && !device.root && { label: ORG.makeDeviceRoot, onSelect: () => ask(ORG.changeTitles['root.add'](email), { kind: 'root.add', member: id, device: device.id }) },
+                !device.thisMac && { label: ORG.removeDevice, danger: true, onSelect: () => ask(ORG.changeTitles['device.remove'](email), { kind: 'device.remove', member: id, device: device.id }) },
+              ]}
+            />
           )}
         </DeviceLine>
       ))}
-      {may && (
+      {may && firstOrYours && (
         <div className="flex basis-full flex-wrap items-center gap-2">
-          {!firstOrYours ? (
-            <span className="text-fg-muted">{signs ? ORG.laterDeviceRoot : ORG.laterDevice}</span>
-          ) : running ? (
+          {running ? (
             <>
               <span className="text-fg-muted">{ORG.pairingUntil(formatClock(Date.parse(pairing.expires)))}</span>
               <button type="button" className={TEXT_ACTION} onClick={() => pair(pairing.generation)}>

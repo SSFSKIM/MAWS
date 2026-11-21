@@ -10,6 +10,9 @@
 // label column; its title reads "Claude accounts" beside "Codex accounts", "Usage" being the section's name. Each grid has
 // two columns from two accounts on where the panel is at least 640 px wide, and one account is one column whose limit
 // rows keep their own width; the panel decides that itself and no longer reads the model's `columns`.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): no sentence under Codex accounts (P485, G119);
+// the foot's relay line and its ten minutes are said only when the relay is down or the ten minutes had trouble, the
+// Gateway section's Relay row saying the healthy address (G121, P488).
 import { useEffect, useId, type ReactNode } from 'react';
 import { AccountCard } from '../accounts/AccountCard';
 import { ACCOUNTS, CLAUDE_USAGE_README_URL, USAGE } from '../accounts/copy';
@@ -143,7 +146,6 @@ export function UsagePanel() {
       {model?.codex && (
         <section aria-label={USAGE.codexTitle} data-codex className="mt-3 border-t border-border pt-3">
           <h4 className="m-0 text-ui font-semibold">{USAGE.codexTitle}</h4>
-          <p className="m-0 mt-0.5 text-ui-sm text-fg-muted">{USAGE.codexNote}</p>
           {model.codex.length === 0 ? (
             <p className="m-0 mt-2 text-ui-sm text-fg-muted">{USAGE.codexEmpty}</p>
           ) : (
@@ -163,16 +165,18 @@ export function UsagePanel() {
             {USAGE.routingToggle}
           </label>
         )}
-        <div className="flex items-center gap-2 text-fg-muted">
-          <span aria-hidden className={relay?.ok === false ? 'text-warning' : 'text-success'}>
-            ⇄
-          </span>
-          <span data-relay-line className="min-w-0 truncate">
-            {relayLine(relay, now)}
-          </span>
-        </div>
-        {model?.health && (
-          <p data-health={model.health.degraded ? 'degraded' : 'ok'} className={`m-0 ${model.health.degraded ? 'text-warning' : 'text-fg-muted'}`}>
+        {relay?.ok === false && (
+          <div className="flex items-center gap-2 text-fg-muted">
+            <span aria-hidden className="text-warning">
+              ⇄
+            </span>
+            <span data-relay-line className="min-w-0 truncate">
+              {relayLine(relay, now)}
+            </span>
+          </div>
+        )}
+        {model?.health?.degraded && (
+          <p data-health="degraded" className="m-0 text-warning">
             {model.health.line}
           </p>
         )}

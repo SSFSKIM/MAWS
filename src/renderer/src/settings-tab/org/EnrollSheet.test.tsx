@@ -7,7 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { formatClock } from '@shared/app/date-format';
 import { ENROLL_PROBLEMS, ENROLL_REFUSALS, type EnrollStartResult, type OrgEnrollingStatus, type SignResult } from '@shared/ipc/schema/org';
 import { observed, started as startedRun, type EnrollRun } from './EnrollSheet';
-import { MINI, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { MINI, ROOT, emit, found, group, renderSection, resetHarness, sent, signing, viewWith, foot, findFoot, choose, menuItems } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -36,7 +36,7 @@ function deferred<T>() {
 }
 async function openEnroll() {
   await group('machines');
-  fireEvent.click(await within(row('Enroll a machine')).findByRole('button', { name: 'Enroll a machine…' }));
+  fireEvent.click(await within(foot('enroll')).findByRole('button', { name: 'Enroll a machine…' }));
   return screen.findByRole('dialog', { name: 'Enroll a machine' });
 }
 const makeCode = (sheet: HTMLElement, name: string) => {
@@ -88,7 +88,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
 
   it('Re-enroll from a row starts as “Re-enroll <machine>”, naming the machine it replaces; a running one shows on its row', async () => {
     renderSection(signing(ROOT), { 'org.enroll.start': () => started });
-    fireEvent.click(await within(await found('mini')).findByRole('button', { name: 'Re-enroll…' }));
+    await choose(await found('mini'), 'Actions for mini', 'Re-enroll…'); // its row's "…" menu (the word cut, G173)
     const sheet = await screen.findByRole('dialog', { name: 'Re-enroll mini' });
     expect(within(sheet).queryByRole('textbox')).toBeNull();
     expect(within(sheet).getByText('mini keeps its ref and its owners. The key it posts replaces its old one, which is retired.')).toBeTruthy();
@@ -106,8 +106,8 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     renderSection(signing(ROOT, { enrolling: enrolling({ name: 'mini', replace: MINI, generation: 4 }) }));
     const mini = await found('mini');
     expect(within(mini).getByText(/^Re-enrolling until /)).toBeTruthy();
-    expect(within(mini).queryByRole('button', { name: 'Re-enroll…' })).toBeNull();
-    expect(within(row('Enroll a machine')).getByRole('button', { name: 'Enroll a machine…' })).toBeTruthy(); // the new-machine row is free
+    expect(await menuItems(mini, 'Actions for mini')).not.toContain('Re-enroll…');
+    expect(within(foot('enroll')).getByRole('button', { name: 'Enroll a machine…' })).toBeTruthy(); // the new-machine row is free
     fireEvent.click(within(mini).getByRole('button', { name: 'Show…' }));
     const taken = await screen.findByRole('dialog', { name: 'Re-enroll mini' });
     expect(within(taken).getByText('The code was shown once, when it was made. For a new one, cancel and enroll again.')).toBeTruthy();
@@ -265,7 +265,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     // an enrollment that ended, taken up from the row and closed: cleared, so the row is free again
     resetHarness();
     renderSection(signing(ROOT, { enrolling: enrolling({ generation: 6, problem: 'expired' }) }));
-    const enroll = await found('Enroll a machine');
+    const enroll = await findFoot('enroll');
     expect(within(enroll).getByText('The enrollment expired before it was approved. Start over.')).toBeTruthy();
     fireEvent.click(within(enroll).getByRole('button', { name: 'Show…' }));
     const taken = await screen.findByRole('dialog', { name: 'Enroll a machine' });
@@ -282,7 +282,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     resetHarness();
     renderSection(signing(ROOT, { enrolling: enrolling({ generation: 2, candidate: CANDIDATE }) }), { 'org.view': () => viewWith({ maySign: false }) });
     // without maySign the row offers nothing new, but a running enrollment can still be shown, and says why it can't approve
-    fireEvent.click(await within(await found('Enroll a machine')).findByRole('button', { name: 'Show…' }));
+    fireEvent.click(await within(await findFoot('enroll')).findByRole('button', { name: 'Show…' }));
     const taken = await screen.findByRole('dialog', { name: 'Enroll a machine' });
     expect(within(taken).queryByRole('button', { name: 'Approve…' })).toBeNull();
     expect(within(taken).getByText('This Mac can’t sign: enroll from an admin’s Mac that does.')).toBeTruthy();
@@ -293,7 +293,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
   it('a sheet following an enrollment that ended never adopts a later one, nor cancels it', async () => {
     const later = { name: 'other-box', ref: 'OtherBoxRef000000011', keyId: 'otherBoxKey0001', digest: 'otherDigest' };
     renderSection(signing(ROOT, { enrolling: enrolling({ generation: 7, name: 'first-box' }) }));
-    fireEvent.click(await within(await found('Enroll a machine')).findByRole('button', { name: 'Show…' }));
+    fireEvent.click(await within(await findFoot('enroll')).findByRole('button', { name: 'Show…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Enroll a machine' });
     emit(signing(ROOT, { enrolling: null }));
     expect(await within(sheet).findByText('This enrollment is no longer running.')).toBeTruthy();
@@ -342,7 +342,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
   // The re-review's ownership probe (fix wave 2): the sheet's sign-in latch outlives its run.
   it('a sheet whose run ended before the sign-out offers nothing under the next sign-in', async () => {
     renderSection(signing(ROOT, { enrolling: enrolling({ generation: 7, name: 'first-box' }) }));
-    fireEvent.click(await within(await found('Enroll a machine')).findByRole('button', { name: 'Show…' }));
+    fireEvent.click(await within(await findFoot('enroll')).findByRole('button', { name: 'Show…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Enroll a machine' });
     emit(signing(ROOT, { enrolling: null }));
     expect(await within(sheet).findByText('This enrollment is no longer running.')).toBeTruthy();
@@ -461,7 +461,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
 
   it('a reopened enrollment waiting for its key still shows when it ends', async () => {
     renderSection(signing(ROOT, { enrolling: enrolling({ generation: 7 }) }));
-    fireEvent.click(await within(await found('Enroll a machine')).findByRole('button', { name: 'Show…' }));
+    fireEvent.click(await within(await findFoot('enroll')).findByRole('button', { name: 'Show…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Enroll a machine' });
     expect(within(sheet).getByText(`The code works until ${formatClock(Date.parse(EXPIRES))}.`)).toBeTruthy();
     expect(within(sheet).getByText('The code was shown once, when it was made. For a new one, cancel and enroll again.')).toBeTruthy();

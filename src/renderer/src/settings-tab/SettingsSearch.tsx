@@ -115,7 +115,7 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
                 <div title={result.name} className="truncate text-fg">
                   {result.name}
                 </div>
-                <div className="truncate text-fg-muted">{result.under}</div>
+                {result.under !== null && <div className="truncate text-fg-muted">{result.under}</div>}
               </div>
             ))}
           </div>
@@ -138,10 +138,23 @@ export function landingOf(body: HTMLElement, target: string): HTMLElement | null
   return body.querySelector<HTMLElement>(`[data-settings-row="${name}"]`);
 }
 
+// What a landing must bring into view: the row and, once the landing's focus has opened it, the row's note (a note
+// still opening is measured at its full height, its content's own box, not the height its motion has reached).
+export function landedBox(landing: HTMLElement): { top: number; height: number } {
+  const box = landing.getBoundingClientRect();
+  const note = landing.querySelector<HTMLElement>('[data-row-note][data-open]');
+  const drawn = note?.firstElementChild ?? note;
+  const bottom = drawn instanceof HTMLElement ? Math.max(box.bottom, drawn.getBoundingClientRect().bottom) : box.bottom;
+  return { top: box.top, height: bottom - box.top };
+}
+
 // The body's scroll that lands a row: its section's heading at the body's top where the row is then in view, else the
-// row in the middle, since both cannot be. Offsets are in the body's scrolled content.
+// row in the middle, since both cannot be. A row taller than the view (the key bindings' table) lands at its top, under
+// its heading where the heading and the row's top fit, never at its middle. Offsets are in the body's scrolled content.
 export function scrollTopToLand({ sectionTop, rowTop, rowHeight, viewHeight }: { sectionTop: number; rowTop: number; rowHeight: number; viewHeight: number }): number {
-  return rowTop + rowHeight - sectionTop <= viewHeight ? sectionTop : rowTop - (viewHeight - rowHeight) / 2;
+  if (rowTop + rowHeight - sectionTop <= viewHeight) return sectionTop;
+  if (rowHeight > viewHeight) return rowTop - sectionTop < viewHeight ? sectionTop : rowTop;
+  return rowTop - (viewHeight - rowHeight) / 2;
 }
 
 const MARK_MS = 1_600;

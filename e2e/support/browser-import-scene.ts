@@ -36,6 +36,10 @@ export interface ImportScene extends BrowserScene {
   importLogFrom: number; // its length when this launch started
 }
 
+// What the Settings › Browser and sheet helpers below read of a scene: its launch and its window, so a launch that is no
+// import scene (the words rig's) drives them too.
+export type SettingsWindow = Pick<ImportScene, 'maws' | 'page'>;
+
 export interface ImportSeams {
   keychain: string; // MAWS_E2E_KEYCHAIN: `file:<path>`, `deny`, `missing` or `timeout`
 }
@@ -118,7 +122,7 @@ export async function expectNothingLogged(s: ImportScene): Promise<void> {
 
 // Settings (⌘,) at its Browser section: the section's region, in the Settings dialog (UX wave U7b; it was a main tab).
 // The application menu can still be building just after launch, so its item is awaited before it is clicked.
-export async function openSettingsBrowser(s: ImportScene): Promise<Locator> {
+export async function openSettingsBrowser(s: SettingsWindow): Promise<Locator> {
   await expect
     .poll(() => s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('settings.open')?.enabled ?? false), { message: 'the Settings menu item is ready' })
     .toBe(true);
@@ -131,11 +135,11 @@ export async function openSettingsBrowser(s: ImportScene): Promise<Locator> {
   return region;
 }
 
-export const sheetOf = (s: ImportScene): Locator => s.page.locator('[data-browser-import]');
+export const sheetOf = (s: SettingsWindow): Locator => s.page.locator('[data-browser-import]');
 export const recordIn = (region: Locator, profileDir: string): Locator => region.locator(`[data-imported-profile="${profileDir}"]`);
 
 // Import a Chrome profile… opened from Settings › Browser: the sheet in its pick state.
-export async function openImportSheet(s: ImportScene): Promise<Locator> {
+export async function openImportSheet(s: SettingsWindow): Promise<Locator> {
   const region = await openSettingsBrowser(s);
   await region.getByRole('button', { name: 'Import a Chrome profile…' }).click();
   const sheet = sheetOf(s);
@@ -155,7 +159,7 @@ export interface ImportChoices {
 
 // The picker → consent → Import, with the unverified-files acknowledgement checked whenever it is offered; then the
 // report. The sheet is left open on its report.
-export async function importThrough(s: ImportScene, choices: ImportChoices = {}): Promise<Locator> {
+export async function importThrough(s: SettingsWindow, choices: ImportChoices = {}): Promise<Locator> {
   const sheet = await openImportSheet(s);
   if (choices.profileDir !== undefined) await sheet.locator(`[data-chrome-profile="${choices.profileDir}"]`).getByRole('radio').check();
   await sheet.getByRole('button', { name: 'Continue' }).click();
@@ -177,7 +181,7 @@ export async function importThrough(s: ImportScene, choices: ImportChoices = {})
 }
 
 // The sheet in its report state (a run's end, or Show report).
-export async function report(s: ImportScene): Promise<Locator> {
+export async function report(s: SettingsWindow): Promise<Locator> {
   const sheet = sheetOf(s);
   await expect(sheet).toHaveAttribute('data-browser-import', 'report', { timeout: 30_000 });
   return sheet;
@@ -185,7 +189,7 @@ export async function report(s: ImportScene): Promise<Locator> {
 
 // The sheet is a layer over the Settings dialog (UX wave U7b, Interfaces §H row 2): its own close closes it alone, and
 // Settings stays open behind it.
-export async function closeSheet(s: ImportScene): Promise<void> {
+export async function closeSheet(s: SettingsWindow): Promise<void> {
   const sheet = sheetOf(s);
   await sheet.getByRole('button', { name: /^(Done|Close|Cancel)$/ }).first().click();
   await expect(sheet).toHaveCount(0);
@@ -194,7 +198,7 @@ export async function closeSheet(s: ImportScene): Promise<void> {
 
 // The Settings dialog closed by its Close button, when it is open. A click on the dimmed window outside it closes it
 // and goes nowhere (UX wave U7b), so a scene closes it before it clicks anything behind it, a session's row included.
-export async function closeSettings(s: ImportScene): Promise<void> {
+export async function closeSettings(s: SettingsWindow): Promise<void> {
   const dialog = settingsDialog(s.page);
   if (!(await dialog.count())) return;
   await dialog.locator('[data-settings-close]').click();

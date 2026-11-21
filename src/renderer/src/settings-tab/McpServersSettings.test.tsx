@@ -42,7 +42,7 @@ afterEach(() => {
 describe('Settings › Sessions › MCP servers', () => {
   it('starts empty, says where the servers load, and adds the owner\'s Notion entry by name and URL, trimmed', async () => {
     renderRow();
-    expect(within(row()).getByText(MCP_SERVERS.notes.default.line)).toBeTruthy(); // U11a M9: the note's line
+    expect(screen.getByRole('group', { name: MCP_SERVERS.label, description: MCP_SERVERS.notes.default.note })).toBe(row()); // the word cut: the row's note
     const add = within(row()).getByRole('button', { name: MCP_SERVERS.add }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     type(MCP_SERVERS.name, ' notion ');

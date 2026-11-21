@@ -10,16 +10,22 @@
 // it: the status's names its attempt (`refused.attempt`), and an attempt's own answer is the control's that sent it. A
 // refusal that names no attempt (the key file refused at load), or whose control isn't on the page, keeps a row of its
 // own, never dropped. Nothing the status carries is a code or a token; a pairing's code is the pairing sheet's alone.
+//
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the read is a quiet spinner, a failed read
+// keeps its words (G153); a Mac in no org reads "Not signed in" with Sign in…, which opens the pairing-code field, also
+// drawn while a sign-in is out or refused (G147 to G149); someone who may not sign reads one line at the page's top
+// (G170); the Org group's identifiers wait behind its Details chevron (G180).
 import { useEffect, useState } from 'react';
 import type { OrgAttempt, OrgRefusal, OrgStatus, OrgView } from '@shared/ipc/schema/org';
 import { formatClock } from '@shared/app/date-format';
 import { ipc } from '../../ipc/client';
+import { QuietSpinner } from '../../ui/spinner';
 import { ORG } from '../copy';
 import { Setting, TEXT_ACTION } from '../parts';
 import { MachinesGroup } from './MachinesGroup';
-import { OrgGroup } from './OrgGroup';
+import { OrgDetails, OrgGroup } from './OrgGroup';
 import { PeopleGroup } from './PeopleGroup';
-import { CodeField, failed, Fingerprint, Group, signInOf, UnplacedRefusal, type Attempt, type Invoked, type Registered } from './parts';
+import { CodeField, failed, Fingerprint, Group, rootEmails, signInOf, UnplacedRefusal, type Attempt, type Invoked, type Registered } from './parts';
 import { rekeyField, YouGroup } from './YouGroup';
 
 // The attempts whose control is on the page for `status`, as YouGroup and the code field draw them.
@@ -39,6 +45,8 @@ export function OrgSection() {
   const [pending, setPending] = useState(false);
   // An attempt's own refusal (its answer), with the attempt this page sent; the status's names its own.
   const [answered, setAnswered] = useState<OrgRefusal | null>(null);
+  // Sign in… was pressed: the pairing-code field is drawn, its own focus showing its note.
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
     let heard = false; // an event before the read's answer is newer than it
@@ -89,23 +97,38 @@ export function OrgSection() {
     });
   };
 
-  if (status === null) return <p className={`m-0 py-1 text-ui-sm ${readError === null ? 'text-fg-muted' : 'text-warning'}`}>{readError === null ? ORG.reading : ORG.readFailed(readError)}</p>;
+  if (status === null)
+    return readError === null ? (
+      <div className="flex min-h-[34px] items-center py-1">
+        <QuietSpinner label={ORG.reading} />
+      </div>
+    ) : (
+      <p className="m-0 py-1 text-ui-sm text-warning">{ORG.readFailed(readError)}</p>
+    );
   const shown = answered ?? (status.state === 'none' || status.state === 'registered' ? (status.refused ?? null) : null);
   const here = placed(status);
   const placedAt = (at: Attempt): OrgRefusal | null => (shown !== null && shown.attempt === at && here.has(at) ? shown : null);
   const unplaced = shown !== null && (shown.attempt === undefined || !here.has(shown.attempt)) ? shown : null;
 
   switch (status.state) {
-    case 'none':
+    case 'none': {
+      const refusal = placedAt('register');
+      const coding = asking || pending || refusal !== null;
       return (
         <>
           <Setting label={ORG.org}>
             <span className="text-fg-muted">{ORG.notSignedIn}</span>
+            {!coding && (
+              <button type="button" className={TEXT_ACTION} onClick={() => setAsking(true)}>
+                {ORG.signInOpen}
+              </button>
+            )}
           </Setting>
-          <CodeField action={ORG.signIn} note={ORG.codeNote} pending={pending} refusal={placedAt('register')} onSend={(code) => attempt(ipc.invoke('org.register', { code }), 'register')} />
+          {coding && <CodeField action={ORG.signIn} note={ORG.codeNote} pending={pending} refusal={refusal} focus={asking} onSend={(code) => attempt(ipc.invoke('org.register', { code }), 'register')} />}
           <UnplacedRefusal refusal={unplaced} />
         </>
       );
+    }
     case 'development':
       return (
         <Setting label={ORG.development} note={ORG.developmentNote}>
@@ -142,6 +165,7 @@ type PageProps = {
 function RegisteredPage({ status, view, pending, placedAt, unplaced, attempt, cancel }: PageProps) {
   return (
     <>
+      {view !== null && !view.maySign && <p className="m-0 py-1 text-ui-sm text-fg-muted">{ORG.viewOnly(rootEmails(view))}</p>}
       <Group id="you" title={ORG.groups.you}>
         <YouGroup
           status={status}
@@ -165,7 +189,7 @@ function RegisteredPage({ status, view, pending, placedAt, unplaced, attempt, ca
           </Group>
         </>
       )}
-      <Group id="org" title={ORG.groups.org}>
+      <Group id="org" title={ORG.groups.org} details={<OrgDetails status={status} view={view} />}>
         <OrgGroup status={status} view={view} />
       </Group>
     </>

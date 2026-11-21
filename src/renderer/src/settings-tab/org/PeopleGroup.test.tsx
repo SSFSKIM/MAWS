@@ -2,11 +2,14 @@
 // "The rule the page states" and "Read-only, and refusals"): each member with email, role and devices, the roots marked;
 // while this Mac may sign, the changes it offers, never one that refuses for yourself; read-only otherwise, with the
 // roots' emails; and the later-device rule in place of Pair a device. A sheet open when this Mac loses the right to sign
-// withdraws what would sign, and an operation already in flight keeps its answer in view.
+// withdraws what would sign, and an operation already in flight keeps its answer in view. The word cut (G160, G162,
+// G163, G165, G166, G170): a device's id is its kind's tooltip; a person's and a device's actions are each one "…" menu;
+// the later-device rule is not stated; the read-only rule is the page's one line at its top.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrgChange, OrgPairingStatus, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
-import { ANA_MAC, BEN, BEN_WEB, DEVICE, ME, MY_OTHER_MAC, ROOT, VIEW, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { accessibleText } from '../../test-support/accessible-text';
+import { ANA_MAC, BEN, BEN_WEB, DEVICE, ME, MY_OTHER_MAC, ROOT, VIEW, choose, emit, found, group, menuItems, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -17,8 +20,13 @@ afterAll(() => {
 });
 afterEach(resetHarness);
 
-const buttons = (label: string) => within(row(label)).queryAllByRole('button').map((b) => b.textContent);
-const device = (label: string, id: string) => within(row(label)).getByText(id.slice(0, 8)).closest('[data-org-device]') as HTMLElement;
+const buttons = (label: string) => within(row(label)).queryAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
+// A device's line by its id, which is its kind's accessible description (the word cut, G160): the kind word that takes
+// Tab, described by the id's first 8.
+const describedBy = (el: Element) => (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
+const device = (label: string, id: string) =>
+  [...row(label).querySelectorAll<HTMLElement>('[data-org-device] [tabindex="0"][aria-describedby]')].find((kind) => describedBy(kind) === id.slice(0, 8))!.closest('[data-org-device]') as HTMLElement;
+const deviceMenu = (id: string) => `Actions for Mac ${id.slice(0, 8)}`;
 
 describe('Settings › Org: People (M4a)', () => {
   it('each member draws its row: email, role and devices, the roots and this Mac marked', async () => {
@@ -36,54 +44,61 @@ describe('Settings › Org: People (M4a)', () => {
     expect(within(device('Ben', BEN_WEB)).getByText('browser')).toBeTruthy();
     expect(within(row('Cat')).getByText('No devices yet.')).toBeTruthy();
     expect(screen.queryByText(DEVICE)).toBeNull(); // ids by their first 8, as `show` does
+    expect(accessibleText(row('Owner'))).not.toContain(DEVICE.slice(0, 8)); // the kind's tooltip, not the line's words
   });
 
-  it('read-only without maySign: nothing offered, the rule in words with the roots’ emails', async () => {
+  it('read-only without maySign: nothing offered, the rule in words with the roots’ emails at the page’s top', async () => {
     renderSection(signing({ root: true, maySign: false }));
     const people = await group('people');
-    expect(await within(people).findByText('Only a root signs org changes.')).toBeTruthy();
-    expect(within(people).getByText('The roots are owner@example.com.')).toBeTruthy();
+    expect(await screen.findByText('View only: owner@example.com signs changes')).toBeTruthy(); // the word cut (G170)
+    expect(people.contains(screen.getByText('View only: owner@example.com signs changes'))).toBe(false);
+    expect(accessibleText(people)).not.toContain('Only a root signs org changes.');
     expect(within(people).queryAllByRole('button')).toEqual([]);
-    expect(within(people).queryByText(/Their next device/)).toBeNull(); // a rule about an action not on offer
 
     // signed in and able to sign: the changes come back
     emit(signing(ROOT));
     expect(await within(people).findByRole('button', { name: 'Add person…' })).toBeTruthy();
-    expect(within(people).queryByText('Only a root signs org changes.')).toBeNull();
+    expect(screen.queryByText(/^View only/)).toBeNull();
   });
 
   it('while this Mac signs: each member’s changes, none that would refuse for yourself or this Mac', async () => {
     renderSection(signing(ROOT));
     await group('people');
-    await within(row('Owner')).findByRole('button', { name: 'Change email…' });
+    await within(row('Owner')).findByRole('button', { name: 'Actions for Owner' });
+    // the word cut (G162, G163): each person's actions are one "…" menu, each device's one on its line
     // yourself: no Remove person or role change (another admin changes your role); this Mac's own device isn't removed
     // here, your other Mac is; your other Mac becomes a root (you're an admin, it's a Mac); you pair your own devices
-    expect(buttons('Owner')).toEqual(['Change email…', 'Remove device…', 'Make a root…', 'Pair a device…']);
+    expect(buttons('Owner')).toEqual(['Actions for Owner', deviceMenu(MY_OTHER_MAC), 'Pair a device…']);
+    expect(await menuItems(row('Owner'), 'Actions for Owner')).toEqual(['Change email…']);
+    expect(await menuItems(row('Owner'), deviceMenu(MY_OTHER_MAC))).toEqual(['Make a root…', 'Remove device…']);
     expect(within(device('Owner', DEVICE)).queryAllByRole('button')).toEqual([]);
     // an admin: demoted, an admin's Mac made a root
-    expect(buttons('Ana')).toEqual(['Make member…', 'Change email…', 'Remove person…', 'Remove device…', 'Make a root…']);
+    expect(await menuItems(row('Ana'), 'Actions for Ana')).toEqual(['Make member…', 'Change email…', 'Remove person…']);
+    expect(await menuItems(row('Ana'), deviceMenu(ANA_MAC))).toEqual(['Make a root…', 'Remove device…']);
     // a member: promoted; a member's device is never offered as a root
-    expect(buttons('Ben')).toEqual(['Make admin…', 'Change email…', 'Remove person…', 'Remove device…']);
+    expect(await menuItems(row('Ben'), 'Actions for Ben')).toEqual(['Make admin…', 'Change email…', 'Remove person…']);
+    expect(buttons('Ben')).toEqual(['Actions for Ben', 'Actions for browser BenWebQ9']);
+    expect(await menuItems(row('Ben'), 'Actions for browser BenWebQ9')).toEqual(['Remove device…']);
     // a member with no device: their first is paired from here
-    expect(buttons('Cat')).toEqual(['Make admin…', 'Change email…', 'Remove person…', 'Pair a device…']);
+    expect(buttons('Cat')).toEqual(['Actions for Cat', 'Pair a device…']);
     expect(within(await group('people')).getByRole('button', { name: 'Add person…' })).toBeTruthy();
-    expect(within(device('Ana', ANA_MAC)).getByRole('button', { name: 'Make a root…' })).toBeTruthy();
+    expect(within(device('Ana', ANA_MAC)).getByRole('button', { name: deviceMenu(ANA_MAC) })).toBeTruthy();
   });
 
-  it('the later-device rule is shown in place of the action', async () => {
+  it('a later device of another member is neither offered nor stated (the word cut, G165, G166)', async () => {
     renderSection(signing(ROOT));
-    await group('people');
-    // Ana and Ben have devices and sign nothing: their next device waits for the countersign flow
-    expect(await within(row('Ana')).findByText('Their next device is paired from one of their own devices, a flow not built yet.')).toBeTruthy();
-    expect(within(row('Ben')).getByText('Their next device is paired from one of their own devices, a flow not built yet.')).toBeTruthy();
-    expect(within(row('Cat')).queryByText(/Their next device/)).toBeNull();
-    expect(within(row('Owner')).queryByText(/Their next device/)).toBeNull();
+    await found('Ana');
+    // Ana and Ben have devices and sign nothing: their next device waits for the countersign flow, unsaid
+    expect(within(row('Ana')).queryByRole('button', { name: 'Pair a device…' })).toBeNull();
+    expect(within(row('Ben')).queryByRole('button', { name: 'Pair a device…' })).toBeNull();
+    expect(accessibleText(await group('people'))).not.toMatch(/Their next device|They pair their next device/);
+    expect(within(row('Cat')).getByRole('button', { name: 'Pair a device…' })).toBeTruthy();
 
-    // a member who signs pairs their own later device from their own app
+    // a member who signs pairs their own later device from their own app: not offered here either
     resetHarness();
     const anaRoot = viewWith({ members: VIEW.members.map((m) => (m.name === 'Ana' ? { ...m, devices: m.devices.map((d) => ({ ...d, root: true })) } : m)) });
     renderSection(signing(ROOT), { 'org.view': () => anaRoot });
-    expect(await within(await found('Ana')).findByText('They pair their next device from their own Org page.')).toBeTruthy();
+    expect(accessibleText(await found('Ana'))).not.toContain('They pair their next device');
     expect(within(row('Ana')).queryByRole('button', { name: 'Pair a device…' })).toBeNull();
   });
 });
@@ -105,7 +120,7 @@ describe('Settings › Org: People when this Mac stops being able to sign (M4a)'
     it(`an open change sheet withdraws Sign once this Mac is ${how}, and says why`, async () => {
       renderSection(signing(ROOT), { 'org.preview': previewed });
       await group('people');
-      fireEvent.click(await within(row('Ben')).findByRole('button', { name: 'Make admin…' }));
+      await choose(await found('Ben'), 'Actions for Ben', 'Make admin…');
       const sheet = await screen.findByRole('dialog', { name: 'Make ben@example.com an admin?' });
       await within(sheet).findByRole('button', { name: 'Sign' });
       emit(lost);
@@ -147,7 +162,7 @@ describe('Settings › Org: People when this Mac stops being able to sign (M4a)'
     let signed: (result: SignResult) => void = () => {};
     renderSection(signing(ROOT), { 'org.preview': previewed, 'org.change': () => new Promise<SignResult>((resolve) => (signed = resolve)) });
     await group('people');
-    fireEvent.click(await within(row('Ben')).findByRole('button', { name: 'Make admin…' }));
+    await choose(await found('Ben'), 'Actions for Ben', 'Make admin…');
     let sheet = await screen.findByRole('dialog', { name: 'Make ben@example.com an admin?' });
     fireEvent.click(await within(sheet).findByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.change')).toHaveLength(1));
