@@ -28,6 +28,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
 import { openSurface, unfoldSessionCard } from './support/shell';
+import { FINISHED_TURN_LINE } from './support/turn-line';
 import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
@@ -815,7 +816,7 @@ test('a run folds while its turn runs, opens onto its calls’ rows, and folds a
   // The turn closed: opened, its run reads what it did, folded, until a click opens it onto the three calls in order.
   await play(page, 0);
   const turn = await turnIdOf(page, 1);
-  await expect(page.locator(`${rowSelector(`divider:${turn}`)} button.transcript-disclosure`)).toHaveText(/^Worked for /);
+  await expect(page.locator(`${rowSelector(`divider:${turn}`)} button.transcript-disclosure`)).toHaveText(FINISHED_TURN_LINE); // the word cut (T1): its duration first, no "Worked for"
   await settle(page, 300);
   await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandTurn(1));
   const run = page.locator(`[data-kind="group"][data-turn-id="${turn}"]`);
@@ -898,7 +899,7 @@ test('a closed turn’s line says what the turn did, and a turn with no work has
   const divider = page.locator('[data-kind="divider"] button.transcript-disclosure').first();
   await expect(divider).toHaveText(/^Working(?: for \d+s)?\s*\+2\s*−1$/);
   await play(page, 0);
-  await expect(divider).toHaveText(/^Worked for 45s · Read and edited parser\.ts, ran a command, searched code\s*\+2\s*−1$/);
+  await expect(divider).toHaveText(/^45s · Read and edited parser\.ts, ran a command, searched code\s*\+2\s*−1$/); // the word cut (T1): the duration alone, then the caption
   await expect(divider).toHaveAttribute('aria-expanded', 'false');
   await page.getByRole('button', { name: 'Turn summary' }).click();
   const summary = page.locator('.transcript-popover');
@@ -1104,7 +1105,7 @@ test('an asynchronous question raised above and below a reader mid-transcript mo
   const pill = page.getByRole('button', { name: PILL });
   await expect(pill).toBeVisible();
   await expect(pill).toHaveAttribute('data-state', 'input');
-  await expect(pill).toHaveText(/Needs your input/);
+  await expect(pill).toHaveText(/^◐\s*Needs you$/); // the word cut (N109): its words; its name keeps the sentence
   await pill.click();
   await expect(form, 'the pill shows the oldest request out of view').toBeInViewport();
   await expect(rowOf(form), 'and puts the keyboard on its row').toBeFocused();
@@ -1127,7 +1128,7 @@ test('an asynchronous question raised above and below a reader mid-transcript mo
 // that waits in a row far above (the agent having gone on past it) makes the jump button the pill, though the reader is at the end; the pill scrolls to the question and puts
 // the keyboard on its row; once no request waits the pill is gone, and the reader, away from the end, has the round
 // button back.
-test('an asynchronous question waiting far above a reader at the end: the pill reads Needs your input, goes to it, and goes once it no longer waits', async ({ harness }) => {
+test('an asynchronous question waiting far above a reader at the end: the pill reads Needs you, goes to it, and goes once it no longer waits', async ({ harness }) => {
   test.setTimeout(90_000);
   const { page } = harness;
   await harnessReady(page);
@@ -1141,8 +1142,8 @@ test('an asynchronous question waiting far above a reader at the end: the pill r
   const pill = page.getByRole('button', { name: PILL });
   await expect(pill, 'at the end, the pill: the request is out of view').toBeVisible();
   await expect(pill).toHaveAttribute('data-state', 'input');
-  await expect(pill).toHaveAttribute('title', PILL);
-  await expect(pill).toHaveText(/Needs your input/);
+  await expect(pill, 'the word cut (N110): no tooltip; its name says where it goes').not.toHaveAttribute('title');
+  await expect(pill).toHaveText(/^◐\s*Needs you$/);
   expect((await metrics(page)).following, 'a request waiting above moves no follower').toBe(true);
   expect(await distanceFromEnd(page), 'the reader is still at the end').toBeLessThanOrEqual(80);
 
@@ -1187,7 +1188,7 @@ test('a dismissed question’s receipt shows each header whole beside Dismissed'
   expect(harness.consoleErrors()).toEqual([]);
 });
 
-// W8 (T1): a streaming thinking block's label in the CLI's words (tier, effort, time) and colour (the warning colour
+// W8 (T1): a streaming thinking block's label in the CLI's words (tier and time; the word cut's T37 took the effort out) and colour (the warning colour
 // from 20 s), under Codex's shimmer, static under reduced motion. UX wave U2 (O-27; the owner's answer "The label
 // only"): the label reads nothing else while the thought runs, and its summary is read by opening the line; a thought
 // streaming in a folded run has its line under the run's. With MAWS_W8_SHOTS=1 it also writes the screenshots the wave
@@ -1197,7 +1198,6 @@ test('a streaming thought reads its label under the shimmer, warm from 20 s, and
   await harnessReady(page);
   await blockHumanInput(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.setEffort('xhigh'));
   const cases = [
     // 50 s in at load, a thinking row of its own
     { fixture: 'events/thinking-live', shot: 'deep', thought: '[data-kind="thinking"] .transcript-thinking', tier: thinkingTier(50_000), text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true },
@@ -1207,7 +1207,7 @@ test('a streaming thought reads its label under the shimmer, warm from 20 s, and
   for (const { fixture, shot, thought, tier, text, warm } of cases) {
     await loadAll(page, fixture);
     const label = page.locator(`${thought} [data-shimmer]`);
-    await expect(label).toHaveText(new RegExp(`^${tier} with xhigh effort · [^·]+$`));
+    await expect(label).toHaveText(new RegExp(`^${tier} · [^·]+$`)); // the word cut (T37): the tier and the time, no effort
     await expect(label, 'the label reads nothing of the summary').not.toContainText(text.slice(0, 24));
     for (const theme of ['light', 'dark'] as const) {
       await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
@@ -1252,7 +1252,7 @@ test('a streaming thought reads its label under the shimmer, warm from 20 s, and
     await opener.click();
     await expect(opener).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator(`${thought} .transcript-thinking-text`)).toContainText(text);
-    await expect(label).toHaveText(new RegExp(`^${tier} with xhigh effort · [^·]+$`));
+    await expect(label).toHaveText(new RegExp(`^${tier} · [^·]+$`));
   }
   // Reduced motion: the same words and colour, no sweep.
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1274,7 +1274,7 @@ test('the denied count jumps to the standalone denied cell', async ({ harness })
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   // UX wave U2 (O-15): the line names what the turn did, never a count of tool calls; a refused call is no work done,
   // so a turn whose one call was refused reads its time and its denied count only
-  await expect(toggle).toHaveText(/^Worked for [^·]+$/);
+  await expect(toggle).toHaveText(/^\d+(?:s|m \d{2}s|h \d{2}m)$/); // the word cut (T1): its duration alone, no caption
   await expect(toggle).not.toContainText('tool call');
   const count = divider.getByRole('link', { name: '1 denied' });
   const cellId = await count.evaluate((link) => link.getAttribute('href')!.slice(1));
@@ -1354,7 +1354,7 @@ test('a jump into a long session\u2019s history loads the pages back to its text
   expect(await rowOfText(2)).toBeNull();
   await reach(2);
   await expect(bar).toHaveAttribute('data-phase', 'loading');
-  await expect(bar).toContainText('Loading earlier messages to reach the message');
+  await expect(bar).toContainText('Finding the message'); // the word cut (T114)
   await bar.getByRole('button', { name: 'Stop' }).click();
   await expect(bar).toBeHidden();
   expect(await rowOfText(2)).toBeNull();
@@ -1491,6 +1491,61 @@ const tokenValue = (page: Page, property: 'color' | 'fontFamily', value: string)
     [property, value] as const,
   );
 const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+
+// The word cut (T105, T106): a done browser call's time is its line's tooltip, shown on pointing anywhere along the line
+// (`Tip`'s `pointedWithin`: here the glyph at the line's start, outside the phrase) and on keyboard focus of the phrase,
+// which it describes at all times; the line's quiet actions are drawn on pointing or focus within the line, and always
+// where nothing points (`(hover: none)`). pass3/p1-maws-browser's first snapshot took 60 ms and carries text to show.
+test('a browser call’s time shows on pointing along its line and on its phrase’s focus; its quiet actions on pointing, focus, or always without hover', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'pass3/p1-maws-browser');
+  const call = page.locator('.transcript-browser-action[data-tool="browser_snapshot"][data-state="done"]').first();
+  await mounted(page, call);
+  const line = call.locator('.transcript-browser-action-line');
+  const phrase = call.locator('[data-browser-heading]');
+  const quiet = call.locator('.transcript-browser-action-actions[data-on-hover]');
+  const tooltip = page.getByRole('tooltip');
+  await expect(phrase).toHaveAttribute('tabindex', '0');
+  await expect(phrase).toHaveAccessibleDescription('60ms');
+  await expect(quiet.getByRole('button', { name: 'Show snapshot' })).toBeAttached();
+
+  await page.mouse.move(0, 0); // nothing on the line pointed at, nothing focused in it: the quiet actions are not drawn
+  await expect(tooltip).toHaveCount(0);
+  await expect(quiet).toHaveCSS('opacity', '0');
+
+  const box = (await line.boundingBox())!;
+  const glyph = (await call.locator('.transcript-browser-action-line > .transcript-icon').boundingBox())!;
+  const phraseBox = (await phrase.boundingBox())!;
+  expect(glyph.x + glyph.width, 'the glyph stands before the phrase, outside the tip’s owner').toBeLessThanOrEqual(phraseBox.x);
+  await page.mouse.move(glyph.x + glyph.width / 2, box.y + box.height / 2);
+  await expect(tooltip).toContainText('60ms');
+  await expect(quiet).toHaveCSS('opacity', '1');
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toHaveCount(0);
+  await expect(quiet).toHaveCSS('opacity', '0');
+
+  await phrase.focus(); // the keyboard reaches the same fact, at once
+  await expect(phrase).toBeFocused();
+  await expect(tooltip).toContainText('60ms');
+  await expect(quiet).toHaveCSS('opacity', '1');
+  await phrase.blur();
+  await expect(tooltip).toHaveCount(0);
+  await expect(quiet).toHaveCSS('opacity', '0');
+
+  // where nothing points: Chromium's touch emulation makes the primary pointer one that cannot hover
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  try {
+    const noHover = await page.evaluate(() => matchMedia('(hover: none)').matches);
+    if (noHover) await expect(quiet).toHaveCSS('opacity', '1');
+    else test.info().annotations.push({ type: 'not reached', description: 'touch emulation left (hover: none) unmatched; pointed-actions.test.ts reads the rule from the stylesheet' });
+  } finally {
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp.detach();
+  }
+});
 
 // Acceptance 1 (O-18; decision 4, R1 to R5, R19, R23): a slash command's output is a dim line led by `⎿` under its
 // command, in the line's own type (12 px at 1.5), with 16 px under it. A one-line output sits on the bubble's side as wide
@@ -2011,7 +2066,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
   for (const width of TRANSCRIPT_WIDTHS) {
     await transcriptWidth(page, width);
     await checkRow(short, `${width} px, a one-line message`, ['Copy', 'Edit'], null);
-    await checkRow(steer, `${width} px, a steer`, ['Copy', 'Edit'], 'Sent during this turn');
+    await checkRow(steer, `${width} px, a steer`, ['Copy', 'Edit'], null); // the word cut (T42): a steer the engine took has no caption
     await checkRow(long, `${width} px, a message of twenty lines`, ['Copy', 'Edit'], null);
   }
   await transcriptWidth(page, 768);
@@ -2070,7 +2125,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     await atRest();
     if (width === 280) {
       const rest = await measure(steer);
-      expect(rest.tail!.whole, '280 px, R20: at rest the caption is whole').toBe(true);
+      expect(rest.tail, '280 px: at rest the steer has no caption to cut (the word cut, T42)').toBeNull();
     }
     await mounted(page, short);
     await short.getByRole('button', { name: 'Copy' }).focus();
@@ -2086,8 +2141,9 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     expect(overlaps(copyBox, editBox), `${width} px, R21: Copy’s and Edit’s targets do not overlap`).toBe(false);
   }
 
-  // R14: where the line cannot fit, the caption alone shrinks, cut with an ellipsis, its sentence its title; the controls
-  // keep their width and nothing wraps or spills past the column
+  // R14: where the line cannot fit, the controls keep their width and nothing wraps or spills past the column. The word
+  // cut (T42) took the steer's caption, "Sent during this turn", the one this fixture cut with an ellipsis: the steer's
+  // line is now its time and its controls alone, at 200 px as at any width
   await paneWidth(page, 1280);
   await mounted(page, steer);
   await steer.getByRole('button', { name: 'Copy' }).focus();
@@ -2096,8 +2152,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
   await mounted(page, steer);
   await steer.getByRole('button', { name: 'Copy' }).focus();
   const narrow = await measure(steer);
-  expect(narrow.tail!.whole, '200 px, R14: the caption is cut').toBe(false);
-  expect(narrow.tail!.title, 'its whole sentence as its title').toBe('Sent during this turn');
+  expect(narrow.tail, '200 px: the steer has no caption (the word cut, T42)').toBeNull();
   expectNear(narrow.actions.width, wideControls, '200 px, R14: the controls keep their width');
   expect(narrow.line.height, 'nothing wraps').toBe(16);
   expect(narrow.lineScrolls, 'nothing spills').toBe(false);
@@ -2134,7 +2189,7 @@ test('the last answer before the owner’s next prompt offers Copy, Fork from he
   await expect(firstBlock.locator('.transcript-answer-actions'), 'the answer’s first block carries none').toHaveCount(0);
   const actions = secondBlock.locator('.transcript-answer-actions');
   await expect(actions.locator(':scope > *')).toHaveText(['Copy', 'Fork from here', /\d/]);
-  await expect(actions.getByRole('button', { name: 'Fork from here' })).toHaveAttribute('title', 'Starts a new session from this point. This one stays as it is.');
+  await expect(actions.getByRole('button', { name: 'Fork from here' }), 'the word cut (N119): no sentence on how a fork works').not.toHaveAttribute('title');
   await expect(actions.getByRole('button', { name: 'Fork from here' })).toBeEnabled();
 
   await page.mouse.move(0, 0);
@@ -2236,7 +2291,7 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
   // The parent reported the child finished, so the child's turn is closed: its divider has settled (not "Working for …")
   // and, like any closed turn, its work area opens from the divider.
   const childDivider = child.locator('[data-kind="divider"] button[aria-expanded]').first();
-  await expect(childDivider).toHaveText(/^Worked for /);
+  await expect(childDivider).toHaveText(FINISHED_TURN_LINE);
   await expect(childDivider).toHaveAttribute('aria-expanded', 'false');
   await childDivider.click();
   await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"]`)).toHaveCount(1);
@@ -2846,7 +2901,7 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await opened.scrollIntoViewIfNeeded();
     const turnLine = pane.locator('[data-kind="divider"]');
     await withPaneRows(pane, 'the pane’s rows with the first record open', () => expect(turnLine).toHaveCount(1));
-    await expect(turnLine).toContainText('Worked for');
+    await expect(turnLine.locator('.transcript-turn-line')).toHaveText(FINISHED_TURN_LINE); // the word cut (T1): its duration, no "Worked for"
     await expect(turnLine).toContainText('Ran a command'); // UX wave U2 (O-15): the turn's line names what it did
     await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
     // The tool summary appears immediately; the command remains on demand inside its own detail.

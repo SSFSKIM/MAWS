@@ -274,6 +274,23 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   await expect.poll(async () => (await serialized(page))?.content).toBe('@src/a.ts');
   await clearEditor(page);
 
+  // C54 (the word cut, M2): an agent's row is named by its name and described by its description (the handshake's
+  // `Explore` agent; test/fixtures/engine/replay-handshake.jsonl), which is drawn only while the row is highlighted; the
+  // focus stays in the message box, whose active descendant is the highlighted row, so the description is what is heard
+  await page.keyboard.type('@Explore');
+  const explore = mentions.getByRole('option', { name: 'Explore', exact: true });
+  await expect(mentions.getByRole('option', { name: 'Searching files…' })).toHaveCount(0); // no file matches: the agent's row is the first
+  await expect(explore).toHaveAttribute('aria-selected', 'true');
+  const exploreId = await explore.getAttribute('id');
+  expect(exploreId).not.toBeNull();
+  await expect(message(page)).toHaveAttribute('aria-activedescendant', exploreId!);
+  await expect(explore).toHaveAccessibleDescription(/^Fast read-only search agent for locating code\./);
+  await expect(explore.getByText(/^Fast read-only search agent/)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(mentions).toBeHidden();
+  await expect(message(page)).not.toHaveAttribute('aria-activedescendant', /./);
+  await clearEditor(page);
+
   // UX wave U4a (l3-input-06; charter §5.4 as amended): `/` lists names alone, an icon per kind and no headings, and the
   // highlighted row's description, hint and origin or reason stand in a popover beside the list. This page has no panel
   // registered yet, so the list opens on the engine's own entries; MAWS's window actions are ⌘K's and not listed here.
@@ -334,7 +351,7 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   await expect(commands.getByRole('option').nth(0)).toHaveAttribute('data-origin', 'widget');
   await expect(chosen).toHaveAccessibleName('/model');
   await expect(detail).toContainText('Choose the model for this session');
-  await expect(detail).toContainText('MAWS');
+  await expect(detail, 'the word cut (C58): a panel MAWS draws says nothing of where it is from').not.toContainText('MAWS');
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
     await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
@@ -1245,7 +1262,7 @@ test('U1c S2: a retry blocked again reads "Auto mode blocked again", offers the 
   const again = cellIn(page, 'toolu_01DFoKqdVo4KipfKh9bopZFU');
   await expect(labelOf(again)).toHaveText(`Auto mode blocked again: ${MARKER}`);
   await expect(again.getByRole('button', { name: APPROVE }), 'offered once more').toBeEnabled();
-  await expect(again.getByRole('status')).toHaveText('A rule that always denies this command blocks it every time. Change the rule or the mode to run it.');
+  await expect(again.getByRole('status')).toHaveText('A rule always denies this command. Change the rule or the mode to run it.'); // the word cut (N100)
   await testInfo.attach('u1c-s2-blocked-again', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
   await toTop(page);
   await expect(labelOf(first), 'the first row reads approved').toHaveText(`Auto mode blocked: ${MARKER} · approved`);

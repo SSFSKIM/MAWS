@@ -572,6 +572,16 @@ test.describe('interactive', () => {
     // P2-F wave S (S-chip; the sitting's A1.6): the chip names the model asked for at once, marked as the list marks its
     // checked row, while the engine's last init frame still names Sonnet
     await expect(chip).toHaveAttribute('aria-label', 'Model Opus 5.5 High, setting…');
+    // the word cut (P549): in the list the checked row says the change is on its way with a quiet spinner in its check's
+    // place, named "setting…", and no word; the menu closed and opened again comes back to the effort view
+    await selector.getByRole('button', { name: /Select model$/ }).click();
+    const asked = list.getByRole('menuitemradio', { name: /^Opus/ });
+    await expect(asked).toHaveAttribute('aria-checked', 'true');
+    await expect(asked.getByRole('progressbar', { name: 'setting…', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await chip.click();
+    await expect(selector).toHaveAttribute('data-model-selector', 'effort');
     // UX wave U4a (decision 20): no lightning; fast mode is a row with its switch and a muted line, where the model offers it
     const fastRow = selector.locator('[data-fast-row]');
     await expect(fastRow).toContainText('Fast mode');
@@ -594,7 +604,7 @@ test.describe('interactive', () => {
 
     await selector.getByRole('button', { name: /Select model$/ }).click();
     await list.getByRole('menuitemradio', { name: /^astra/ }).click(); // the session is in auto
-    await expect(selector.getByRole('note')).toContainText('Auto-mode reviews for this model run locally. A GPT route carries no Anthropic verdict');
+    await expect(selector.getByRole('note')).toContainText(/Auto-mode reviews run locally and count against \S[^.]*\./); // the word cut (P534): one sentence, with whose account
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused(); // the keyboard goes back to the editor
@@ -639,7 +649,7 @@ test.describe('interactive', () => {
     await typeCommand(page, '/model claude/astra'); // a gateway model in auto: the local-lane note first, proposed, not applied
     const model = widget(page, 'model');
     await expect(model.getByRole('menuitemradio', { name: /^astra/ })).toHaveAttribute('data-proposed', 'true');
-    await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.');
+    await expect(model.getByRole('note')).toContainText('Auto-mode reviews run locally and count against'); // the word cut (P534)
     await page.keyboard.press('Escape');
     expect(await inputsOf('session.setModel')).toHaveLength(1);
 
@@ -826,7 +836,10 @@ test.describe('interactive', () => {
     await expect(ring).toBeVisible();
     await ring.click();
     const popover = page.getByRole('dialog', { name: 'Context window' });
-    await expect(popover).toContainText('of 200k · autocompact at 167k');
+    // the word cut (C46): one figures line; the share used and what is left wait on it, its tooltip and its description
+    const figures = popover.getByText(/ of 200k · compacts at 167k$/);
+    await expect(figures).toBeVisible();
+    await expect(figures).toHaveAccessibleDescription(/^[\d.]+% used · \S+ until compaction$/);
     expect(await calls(backend)).toContainEqual({ subtype: 'get_context_usage', input: { appSessionId: READY, detail: 'full' } });
     await page.keyboard.press('Escape');
     await expect(popover).toBeHidden();
@@ -989,13 +1002,13 @@ test.describe('replay conformance', () => {
     await expect(model.getByRole('menuitemradio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
     await control('setPermissionMode', { mode: 'auto' }); // seq 164
     await expect(checkedMode).toContainText('Auto');
-    await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.'); // a gateway model in auto
+    await expect(model.getByRole('note')).toContainText('Auto-mode reviews run locally and count against'); // a gateway model in auto (the word cut, P534)
     await control('setPermissionMode', { mode: 'default' }); // seq 167
     await control('setModel', { model: 'opus' }); // seq 171
     await control('applyFlagSettings', { settings: { fastMode: true } }); // seq 175
     const fastRow = effort.locator('[data-fast-row]'); // UX wave U4a (decision 20): fast mode's row, its line the pending word
     await expect(fastRow.getByRole('switch', { name: 'Fast mode' })).toBeEnabled(); // opus has fast mode
-    await expect(fastRow.getByText('set · the next init frame confirms it', { exact: true })).toBeVisible();
+    await expect(fastRow.getByText('setting…', { exact: true })).toBeVisible(); // the word cut (C39)
     await read('session.getStatus'); // seq 177
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Disabled');
     await control('setPermissionMode', { mode: 'auto' }); // seq 179
@@ -1811,7 +1824,7 @@ test.describe('plugin management (E8)', () => {
     await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
     await expect(page.getByRole('menuitem').filter({ hasText: 'fx-docs' })).toContainText('project scope');
     await expect(page.getByRole('menuitem').filter({ hasText: 'fx-notes' })).toContainText('from fx-relay');
-    await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
+    await page.getByRole('menuitem', { name: /^In this chat…/ }).click(); // the word cut (C18): the Connectors submenu names it
     const connectors = widget(page, 'mcp');
     await expect(connectors.locator('[data-before-start]')).toHaveText(`Configured for ${name}. Connection state shows once the chat starts.`);
     await expect(connectors.locator('[data-mcp-server="fx-docs"] [data-connector-state]')).toHaveText('project scope');

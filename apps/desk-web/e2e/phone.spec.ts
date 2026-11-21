@@ -389,6 +389,26 @@ test("@layout a session's channel on the phone is its session view: its record l
   await fitsTheWidth(page);
   const copy = await detail.getByRole('button', { name: 'Copy command' }).boundingBox(); // the heading wraps the command, not the button
   expect(copy!.x + copy!.width).toBeLessThanOrEqual(320);
+  // The word cut (T18): the opened call's copy glyphs wait for the pointer, and where nothing points (a touch screen,
+  // `hover: none`) they are always drawn; the output's glyph, over its corner, never covers a word of its long first line.
+  expect(await page.evaluate(() => matchMedia('(hover: none)').matches), 'a touch screen: nothing points').toBe(true);
+  const copyOutput = detail.getByRole('button', { name: 'Copy output', exact: true });
+  await expect(detail.getByRole('button', { name: 'Copy command', exact: true })).toHaveCSS('opacity', '1');
+  await expect(copyOutput).toHaveCSS('opacity', '1');
+  const glyph = (await copyOutput.boundingBox())!;
+  const words = await detail.locator('.transcript-shell-output > .transcript-output').evaluate((output) => {
+    const rects: { x: number; y: number; width: number; height: number }[] = [];
+    const walker = document.createTreeWalker(output, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const { x, y, width, height } of Array.from(range.getClientRects())) if (width > 0) rects.push({ x, y, width, height });
+    }
+    return rects;
+  });
+  expect(words.length, 'the output’s words were read').toBeGreaterThan(0);
+  const covers = (a: { x: number; y: number; width: number; height: number }) => a.x < glyph.x + glyph.width && glyph.x < a.x + a.width && a.y < glyph.y + glyph.height && glyph.y < a.y + a.height;
+  expect(words.filter(covers), `the copy glyph (${JSON.stringify(glyph)}) covers none of the output’s words`).toEqual([]);
   await bash.click();
   await expect(bash).toHaveAttribute('aria-expanded', 'false');
 
