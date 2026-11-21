@@ -440,6 +440,9 @@ const CONNECTORS_LINE = {
   noneReported: { m2: 'No connectors', master: 'No connectors reported by this session' },
 };
 const byBuild = (words: { m2: string; master: string }) => (m2Cut() ? words.m2 : words.master);
+// The + submenus' two last items, each build's (C18): M2's composer/copy.ts PLUS_MENU (a module master lacks, so its
+// words are written here), master's composer/plus-menu/PlusMenu.tsx literals
+const SUBMENU_TAIL = (label: 'Connectors' | 'Plugins'): [string, string] => (m2Cut() ? ['In this chat…', 'Manage…'] : [`${label} in this chat…`, `Manage ${label.toLowerCase()}…`]);
 // The + menu's Connectors or Plugins submenu opened, as a person opens it (composer/plus-menu/PlusMenu.tsx: each a
 // submenu trigger named by its label, the same literal on both builds, whose menu Radix names by that trigger)
 const PLUS = '[data-composer] [role="toolbar"] button[aria-haspopup="menu"]';
@@ -450,14 +453,20 @@ async function plusSubmenu(page: Page, label: 'Connectors' | 'Plugins') {
   await page.getByRole('menu').first().getByRole('menuitem', { name: label, exact: true }).click();
   await expect(page.getByRole('menu', { name: label, exact: true })).toBeVisible({ timeout: 5_000 });
 }
-// The check that the submenu named `label` is open and holds `rows` (each by its name) or, with none, the line `empty`,
-// then its two last items (In this chat and Manage, worded per build)
+// The check that the submenu named `label` is open and holds `rows` or, with none, the line `empty`, then its two last
+// items in order, worded per build (SUBMENU_TAIL). On M2 a row is named by its
+// name alone (C17: master's "Loaded" beside each plugin is cut), so a row still carrying it fails there; master's rows
+// carry it and are found by their name within it.
 const submenuHolds = (page: Page, label: 'Connectors' | 'Plugins', rows: readonly string[], empty: (() => string) | null) => async () => {
   const sub = page.getByRole('menu', { name: label, exact: true });
+  const items = sub.getByRole('menuitem');
   await inView(sub, `the ${label} submenu`);
-  await expect(sub.getByRole('menuitem'), `the ${label} submenu’s items`).toHaveCount(rows.length + 2, { timeout: 3_000 });
-  for (const row of rows) await inView(sub.getByRole('menuitem').filter({ hasText: row }), `its row ${row}`);
+  await expect(items, `the ${label} submenu’s items`).toHaveCount(rows.length + 2, { timeout: 3_000 });
+  for (const row of rows) await inView(m2Cut() ? sub.getByRole('menuitem', { name: row, exact: true }) : items.filter({ hasText: row }), `its row ${row}`);
   if (empty !== null) await inView(sub.getByText(empty(), { exact: true }), `its line ${empty()}`);
+  const [inThisChat, manage] = SUBMENU_TAIL(label);
+  await expect(items.nth(rows.length).locator('span').first(), `its next-to-last item ${inThisChat}`).toHaveText(inThisChat, { timeout: 3_000 });
+  await expect(items.nth(rows.length + 1), `its last item ${manage}`).toHaveText(manage, { timeout: 3_000 });
 };
 // A row of the virtual transcript brought into view: the list mounts only the rows near its window, so it is read from
 // the top down, most of a window at a time, until the row is mounted, then the row is scrolled to.
@@ -1253,8 +1262,9 @@ async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'run
 
   // C10: the Memory chip's menu, opened onto the memory files under no heading (composer/modes/ModeChrome.tsx: the chip
   // is the mode's one menu trigger, inside the editor's `data-mode` element, on both builds). The files are the widget
-  // backend's get_memory_dialog answer (reads#69), so the menu settles: its items read and no loading line, which is the
-  // one child of the menu with no role.
+  // backend's get_memory_dialog answer (reads#69: User instructions and Project instructions), so the menu settles: no
+  // loading line ("Reading the memory files…", the same literal on both builds), both files listed, and master's heading
+  // "# appends to" (its DropdownMenu.Label) in view there and absent on M2.
   const memoryChip = () => pane(page).locator('[data-composer] [data-mode="memory"] button[aria-haspopup="menu"]').first();
   const memoryMenu = () => page.getByRole('menu').first();
   const clearBox = async () => {
@@ -1274,8 +1284,10 @@ async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     check: checks(
       () => expect(memoryChip(), 'the Memory chip open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 }),
       () => inView(memoryMenu(), 'its menu'),
-      () => expect(memoryMenu().locator(':scope > div:not([role])'), 'the files read: no loading line').toHaveCount(0, { timeout: 5_000 }),
-      () => inView(memoryMenu().getByRole('menuitem'), 'a memory file'),
+      () => expect(memoryMenu().getByText('Reading the memory files…', { exact: true }), 'the files read: no loading line').toHaveCount(0, { timeout: 5_000 }),
+      () => inView(memoryMenu().getByRole('menuitem').filter({ hasText: 'User instructions' }), 'the user’s memory file'),
+      () => inView(memoryMenu().getByRole('menuitem').filter({ hasText: 'Project instructions' }), 'the project’s memory file'),
+      () => (m2Cut() ? expect(memoryMenu().getByText('# appends to', { exact: true }), 'no heading (C10)').toHaveCount(0) : inView(memoryMenu().getByText('# appends to', { exact: true }), 'master’s heading')),
     ),
     after: clearBox,
   });
@@ -1507,7 +1519,8 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await copyCommand().focus();
     }, { check: checks(focusIn(copyCommand(), 'Copy command'), drawn(copyCommand(), 'Copy command drawn'), tipShown(page, copyCommand(), 'Copy command', copyCommand(), m2Cut)) });
     await letGo(page);
-    const copyOutput = () => call().locator('.transcript-shell-output > button').first();
+    // its name on both builds (transcript/model/copy.ts DETAIL.copyOutput): M2's glyph over the output, master's worded footer button
+    const copyOutput = () => call().locator('.transcript-shell-output').getByRole('button', { name: 'Copy output', exact: true }).first();
     await shot(page, m2({ id: 'm2-shell-output-copy', title: 'A command’s call opened, its output’s copy glyph holding the keyboard', how: 'The tool-heavy session’s turn and runs opened, click the pnpm test call, then Tab to its Copy output', state: 'The output’s copy glyph focused over the output’s corner, its word Copy output the tooltip (master words it in the footer)', folders: ['transcript/view', 'transcript/view/cells', 'ui'] }), async () => {
       await callOpen();
       if (!m2Cut()) return void (await call().locator('.transcript-shell-footer').scrollIntoViewIfNeeded());
@@ -1516,7 +1529,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await copyOutput().focus();
     }, {
       check: async () => {
-        if (!m2Cut()) return inView(call().locator('.transcript-shell-footer button'), 'master’s worded copy buttons in the footer');
+        if (!m2Cut()) return inView(call().locator('.transcript-shell-footer').getByRole('button', { name: 'Copy output', exact: true }), 'master’s worded Copy output in the footer');
         await checks(focusIn(copyOutput(), 'Copy output'), drawn(copyOutput(), 'Copy output drawn'), tipShown(page, copyOutput(), 'Copy output', copyOutput(), m2Cut))();
       },
     });
@@ -1827,7 +1840,8 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
     // M2 (T105, T106): a done browser action pointed at: its time and wait the tooltip of its phrase, opened by pointing
     // anywhere along its line, and its quiet actions drawn (transcript/view/rows/BrowserAction.tsx). The action is the
     // recording's first snapshot (p1-maws-browser: toolu_01Fych5jA99p8WVKoT575nt1, done in 60 ms, its page text the
-    // result), the first done row with both quiet actions, Show snapshot (the disclosure, `aria-expanded`) and Open tab;
+    // result), the first done row with both quiet actions, each found by its name (BROWSER_ACTION, the same on both builds):
+    // Show snapshot (the disclosure, `aria-expanded`) and Open tab;
     // on master's build its time stands on the line (`data-browser-took`)
     const action = () => pane(page).locator('.transcript-browser-action[data-tool="browser_snapshot"][data-state="done"]').first();
     const actionButtons = () => action().locator('.transcript-browser-action-actions button.transcript-quiet-button');
@@ -1845,9 +1859,10 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
         pointedAt(action().locator('.transcript-browser-action-line'), 'the snapshot’s line'),
         tipShown(page, action().locator('[data-browser-heading]'), 'the snapshot’s phrase', action().locator('[data-browser-took]'), m2Cut),
         () => expect(actionButtons(), 'its two quiet actions').toHaveCount(2, { timeout: 3_000 }),
-        () => expect(actionButtons().first(), 'Show snapshot, closed').toHaveAttribute('aria-expanded', 'false'),
+        () => expect(actionButtons().filter({ hasText: /^Show snapshot$/ }), 'Show snapshot, closed').toHaveAttribute('aria-expanded', 'false'),
         drawn(action().locator('.transcript-browser-action-actions'), 'its actions drawn'),
-        () => inView(actionButtons().nth(1), 'Open tab'),
+        () => inView(action().getByRole('button', { name: 'Show snapshot', exact: true }), 'Show snapshot'),
+        () => inView(action().getByRole('button', { name: 'Open tab', exact: true }), 'Open tab'),
       ),
     });
     await shot(page, r2({ id: 'r2-subagents-finished', title: 'Right column, Subagents, two finished agents', how: 'The agents session, Subagents in the right column, its sections open', state: 'Two agents read from disk (their sidecar files only, so filed under On disk)', folders: ['tools/agents', 'panel'] }), async () => {
