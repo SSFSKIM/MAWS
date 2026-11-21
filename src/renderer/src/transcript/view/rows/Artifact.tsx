@@ -10,8 +10,8 @@
 // UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.4): an `artifact_delete` call's row.
 // "Deleting <title>…" until the answer, then "Deleted <title>" with Undo, or "Could not delete <title>: <reason>" in the
 // person's words. While the library of the session's machine lists the artifact again it reads "Restored <title>", the
-// heading the press that opens it (T103): read, not remembered, so it holds after a relaunch, in a second window and after an Undo pressed elsewhere.
-// Until that read has answered, Undo is drawn disabled. Why Undo is disabled, or what an Undo that ended without its
+// heading the press that opens it (T103): read, not remembered, so it holds after a relaunch, in a second window and
+// after an Undo pressed elsewhere. Until that read has answered, Undo is drawn disabled. Why Undo is disabled, or what an Undo that ended without its
 // effect said, is a line of the row under the heading. A host with no Undo (the desk) draws the heading alone.
 import { useId, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
