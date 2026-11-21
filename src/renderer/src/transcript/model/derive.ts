@@ -24,7 +24,7 @@ import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */ } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, type WorkItem } from './groups';
-import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder, type SentOutcome } from './caption'; // UX wave U2
+import { caption, captionParts, finishedLines, stepsOfTurn, turnOrder, type Caption, type SentOutcome } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, runningTurn, taskEndArrived, type ReceiptUndo } from './reduce';
@@ -58,6 +58,8 @@ type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 
 const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {});
 const str = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
+// the turn line's caption and the count it ends in (the word cut, T2), the fold left out when there is none
+const captionFields = ({ text, fold }: Caption) => ({ caption: text, ...(fold > 0 && { fold }) });
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Public surface
@@ -1094,7 +1096,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && cause !== null && { cause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
       ...(opener !== undefined && { opener }), // UX wave U3
-      caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
+      ...captionFields(caption(parts, true)), parts: parts.map((part) => part.text), counts: finishedLines(cells),
     };
   }
   rows.push(...(expanded ? allRows : allRows.filter((row) => staysInView(row) || answerAlone))); // with no divider there is no work: every row is persistent

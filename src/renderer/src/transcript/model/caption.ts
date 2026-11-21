@@ -5,7 +5,8 @@
 // the cap at :137-138 and :247-302), with MAWS's three additions to its kinds (the shell's output, kill and monitor calls with the
 // commands, LS with the file searches, the Task tools with the todos) and the turn's own steps (agents, sent messages).
 import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
-import { isCuaJsTool, stoppedMember } from './classify';
+import { MAWS_SERVER_NAME } from '@shared/maws/tools';
+import { CUA_JS_TOOLS, MCP_TOOL, stoppedMember } from './classify';
 import { baseName, FOLD } from './copy';
 import type { Cell, ChangedLines, Row, SubagentRef, SubagentStatus } from './rows';
 
@@ -16,27 +17,35 @@ export type StepOutcome = 'succeeded' | 'failed' | 'stopped' | 'running';
 
 // One thing a caption counts: a call, an agent, a sent message. `key` is what a part of a kind counts it by (a file's
 // path, a recipient, an agent, else the call itself); `words` are a step of no kind's, its row's done label with the
-// first letter lowered ('' for a step of a kind); `path` is a file step's; `named` is a skill's or a connector's call's
-// name as a capped caption keeps it in view (`namedOf`), absent for any other step.
+// first letter lowered ('' for a step of a kind); `path` is a file step's; `connector` is the skill or connector the
+// call used, by identity (`connectorOf`), whatever its kind, absent for any other step.
 export interface CaptionStep {
   kind: CaptionKind | null;
   key: string;
   words: string;
   outcome: StepOutcome;
   path: string | null;
-  named?: string;
+  connector?: string;
 }
 
 // `count` is what the part counts (Desktop's): its keys for a part of a kind, its verbs for the one-file part, its calls
-// for a part of no kind; the cap's `+N` sums it over the parts left out. `named`: a part a capped caption names rather
-// than counts, and its words there.
+// for a part of no kind; the cap's `+N` sums it over the parts left out. `connectors`: the skills and connectors its
+// steps used, once each in order, which a capped caption names when it leaves the part out; `connected`: every one of
+// its steps used one, so a part left out whose connectors are all named there is not counted as well.
 export interface CaptionPart {
   text: string;
   calls: number;
   count: number;
   changed: boolean;
   agent: boolean;
-  named?: string;
+  connectors: string[];
+  connected: boolean;
+}
+
+// A caption's words and the count it ends in (`+N`, 0 for none), which a view sets apart from the lines that follow.
+export interface Caption {
+  text: string;
+  fold: number;
 }
 
 const counted = (one: string, several: (n: number) => string) => (n: number) => (n === 1 ? one : several(n));
@@ -126,25 +135,31 @@ function writesOf(cells: readonly Cell[]): Map<string, string> {
   return writes;
 }
 
-// The word cut (T2; the owner's call, twice): a call that names a skill or a connector the turn used, which a capped
-// caption keeps in view: a Skill call by its skill (`ran /dataviz`), an MCP server's call by its server (`used notion`),
-// the computer-use plugin's by that name. MAWS's own server is no connector: its calls are the app's own rows.
-function namedOf(cell: Cell): string | null {
+// The word cut (T2; the owner's call, twice): the skill or connector a call used, which a capped caption keeps in view,
+// by an identity read from the call's tool name alone, whatever caption kind or words the call has: a Skill call's skill
+// (`/dataviz`, read `ran /dataviz`), an MCP server's (`notion`, read `used notion`; the web plugin's fetch too), the
+// computer-use plugin's server, whichever of its tools (`computer use`). MAWS's own server is no connector: its calls are
+// the app's own rows. A skill's identity starts with `/` and the plugin's has a space, which no server name has.
+const COMPUTER_USE = 'computer use';
+const CUA_SERVERS = new Set(CUA_JS_TOOLS.map((name) => MCP_TOOL.exec(name)![1]));
+function connectorOf(cell: Cell): string | null {
   if (cell.toolName === 'Skill') {
     const input = cell.detail.kind === 'generic' ? cell.detail.input : null;
     const skill = typeof input === 'object' && input !== null ? (input as { skill?: unknown }).skill : undefined;
-    return typeof skill === 'string' && skill !== '' ? `ran /${skill.replace(/^\//, '')}` : null;
+    return typeof skill === 'string' && skill !== '' ? `/${skill.replace(/^\//, '')}` : null;
   }
-  if (isCuaJsTool(cell.toolName)) return 'used computer use';
-  return cell.detail.kind === 'mcp' && cell.detail.server !== 'maws' ? `used ${cell.detail.server}` : null;
+  const server = MCP_TOOL.exec(cell.toolName)?.[1];
+  if (server === undefined || server === MAWS_SERVER_NAME) return null;
+  return CUA_SERVERS.has(server) ? COMPUTER_USE : server;
 }
+const connectorWords = (connector: string) => (connector.startsWith('/') ? `ran ${connector}` : `used ${connector}`);
 
 function stepOf(cell: Cell, writes: ReadonlyMap<string, string>): CaptionStep {
   const kind = kindOf(cell, writes);
   const path = kind !== null && FILE_VERB[kind] !== undefined ? pathOf(cell) : null;
   const call = cell.toolUseId ?? cell.id;
-  const named = kind === null ? namedOf(cell) : null;
-  return { kind, key: path ?? call, words: kind === null ? lowerFirst(cell.doneLabel ?? cell.label) : '', outcome: outcomeOf(cell.status), path, ...(named !== null && { named }) };
+  const connector = connectorOf(cell);
+  return { kind, key: path ?? call, words: kind === null ? lowerFirst(cell.doneLabel ?? cell.label) : '', outcome: outcomeOf(cell.status), path, ...(connector !== null && { connector }) };
 }
 
 // A run's steps: its calls, in order; thoughts and refused calls that stand alone give none.
@@ -208,22 +223,24 @@ const countOf = (outcomes: Iterable<StepOutcome | undefined>, of: StepOutcome) =
 // no kind in the order each label first occurred. When every file step names the same one file, the file parts are one
 // part that names it, at the first file part's place.
 export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
-  const kinds = new Map<CaptionKind, { keys: Map<string, StepOutcome | undefined>; calls: number }>();
-  const unkinded = new Map<string, { calls: number; failed: number; stopped: number; named: string | undefined }>();
+  const kinds = new Map<CaptionKind, { keys: Map<string, StepOutcome | undefined>; calls: number; steps: CaptionStep[] }>();
+  const unkinded = new Map<string, { calls: number; failed: number; stopped: number; steps: CaptionStep[] }>();
   const fileSteps: CaptionStep[] = [];
   const paths = new Set<string>();
   let everyFileNamed = true;
   for (const step of steps) {
     if (step.kind === null) {
-      const part = unkinded.get(step.words) ?? { calls: 0, failed: 0, stopped: 0, named: step.named };
+      const part = unkinded.get(step.words) ?? { calls: 0, failed: 0, stopped: 0, steps: [] };
       part.calls += 1;
+      part.steps.push(step);
       if (step.outcome === 'failed') part.failed += 1;
       if (step.outcome === 'stopped') part.stopped += 1;
       unkinded.set(step.words, part);
       continue;
     }
-    const part = kinds.get(step.kind) ?? { keys: new Map(), calls: 0 };
+    const part = kinds.get(step.kind) ?? { keys: new Map(), calls: 0, steps: [] };
     part.calls += 1;
+    part.steps.push(step);
     part.keys.set(step.key, settle(part.keys.get(step.key), step.outcome));
     kinds.set(step.kind, part);
     if (FILE_VERB[step.kind] === undefined) continue;
@@ -236,23 +253,28 @@ export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
   let fileMerged = false;
   for (const [kind, part] of kinds) {
     if (oneFile !== null && FILE_VERB[kind] !== undefined) {
-      if (!fileMerged) parts.push(oneFilePart(fileSteps, oneFile));
+      if (!fileMerged) parts.push({ ...oneFilePart(fileSteps, oneFile), ...connectorsOf(fileSteps) });
       fileMerged = true;
       continue;
     }
     const outcomes = [...part.keys.values()];
-    parts.push({ text: KIND_WORDS[kind](part.keys.size) + marks(countOf(outcomes, 'failed'), countOf(outcomes, 'stopped')), calls: part.calls, count: part.keys.size, changed: CHANGED.has(kind), agent: kind === 'agent' });
+    parts.push({ text: KIND_WORDS[kind](part.keys.size) + marks(countOf(outcomes, 'failed'), countOf(outcomes, 'stopped')), calls: part.calls, count: part.keys.size, changed: CHANGED.has(kind), agent: kind === 'agent', ...connectorsOf(part.steps) });
   }
   for (const [words, part] of unkinded) {
     const text = (part.calls > 1 ? `${words} ${part.calls} times` : words) + marks(part.failed, part.stopped);
-    parts.push({ text, calls: part.calls, count: part.calls, changed: false, agent: false, ...(part.named !== undefined && { named: part.named }) });
+    parts.push({ text, calls: part.calls, count: part.calls, changed: false, agent: false, ...connectorsOf(part.steps) });
   }
   return parts;
 }
 
+function connectorsOf(steps: readonly CaptionStep[]): Pick<CaptionPart, 'connectors' | 'connected'> {
+  const connectors = [...new Set(steps.flatMap((step) => (step.connector === undefined ? [] : [step.connector])))];
+  return { connectors, connected: connectors.length > 0 && steps.every((step) => step.connector !== undefined) };
+}
+
 // The verbs of one file in the order they first occurred (an edit and a notebook edit are one verb), then its name; a
 // mark counts the verbs whose outcome for the file is failed or stopped (Desktop's `ne`).
-function oneFilePart(steps: readonly CaptionStep[], path: string): CaptionPart {
+function oneFilePart(steps: readonly CaptionStep[], path: string): Omit<CaptionPart, 'connectors' | 'connected'> {
   const verbs = new Map<string, StepOutcome | undefined>();
   for (const step of steps) {
     const verb = FILE_VERB[step.kind!]!;
@@ -269,21 +291,24 @@ export function turnOrder(parts: readonly CaptionPart[]): CaptionPart[] {
 }
 
 // The parts joined by `, `, the first letter raised (Desktop's `oe` and its joiner); capped, from four parts on, at the
-// first two, then the name of each skill and connector the left-out parts used, once each and not one a kept part
-// already names, then `+N`, N the sum of the other left-out parts' counts (the architect's ruling of 2026-11-13; the
+// first two, then each skill and connector the left-out parts used, once each and not one a kept part used, then
+// `+N`, N the sum of the counts of the left-out parts not wholly named so (the architect's ruling of 2026-11-13; the
 // word cut, T2), with no count when nothing else is left out. '' for no part.
-export function captionText(parts: readonly CaptionPart[], cap: boolean): string {
-  if (!(cap && parts.length >= CAP_FROM)) return raiseFirst(parts.map((part) => part.text).join(', '));
+export function caption(parts: readonly CaptionPart[], cap: boolean): Caption {
+  if (!(cap && parts.length >= CAP_FROM)) return { text: raiseFirst(parts.map((part) => part.text).join(', ')), fold: 0 };
   const kept = parts.slice(0, CAP_KEPT);
-  const keptNames = new Set(kept.flatMap((part) => (part.named === undefined ? [] : [part.named])));
+  const keptConnectors = new Set(kept.flatMap((part) => part.connectors));
   const named: string[] = [];
-  let folded = 0;
+  let fold = 0;
   for (const part of parts.slice(CAP_KEPT)) {
-    if (part.named === undefined || keptNames.has(part.named)) folded += part.count;
-    else if (!named.includes(part.named)) named.push(part.named);
+    const fresh = part.connectors.filter((connector) => !keptConnectors.has(connector));
+    for (const connector of fresh) if (!named.includes(connector)) named.push(connector);
+    if (!part.connected || fresh.length < part.connectors.length) fold += part.count;
   }
-  return raiseFirst([...kept.map((part) => part.text), ...named, ...(folded > 0 ? [FOLD.count(folded)] : [])].join(', '));
+  return { text: raiseFirst([...kept.map((part) => part.text), ...named.map(connectorWords), ...(fold > 0 ? [FOLD.count(fold)] : [])].join(', ')), fold };
 }
+
+export const captionText = (parts: readonly CaptionPart[], cap: boolean): string => caption(parts, cap).text;
 
 // The lines the finished edits among these cells added and removed: a failed, stopped or still running edit changed
 // nothing yet, and a call in the background holds nothing back.

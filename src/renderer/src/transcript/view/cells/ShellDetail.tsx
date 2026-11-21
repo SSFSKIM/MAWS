@@ -16,17 +16,16 @@ type Shell = Extract<CellDetail, { kind: 'shell' }>;
 
 const durationOf = (cell: Cell) => (cell.endedAt === null ? 0 : Date.parse(cell.endedAt) - Date.parse(cell.startedAt));
 
-// The call's own cwd when its input names one (the engine's Bash input does not). The word cut (T20): the session's own
-// folder is where a command runs by default, so it is not named; nor is a call with no folder of its own, which a live
-// row never names a folder its command may not have run in. UX wave U8c-2 (§K): a call read from rows carries the
-// folder its row records, and names it unless it is the folder the slot hands down (the launch folder, handed down only
-// while the session is in it) or the agent's folder, compared as Files compares a listed root with a record's folder.
+// The call's folder: its input's when that names one (the engine's Bash input does not), else, UX wave U8c-2 (§K), the
+// folder a call read from rows carries from its row; a live call with neither names none, never a folder its command
+// may not have run in. The word cut (T20): the session's own folder is where a command runs by default, so it is not
+// named: the folder the slot hands down (the launch folder, handed down only while the session is in it) or the agent's
+// folder, compared as Files compares a listed root with a record's folder.
 function folderLine(detail: Shell, directory: string | null, agentCwd: string | null): { label: string; path: string } | null {
-  if (detail.cwd) return { label: DETAIL.cwd, path: detail.cwd };
-  const row = detail.rowCwd;
-  if (row === undefined) return null;
-  const ranThere = directory !== null && (sameFile(row, directory) || (agentCwd !== null && sameFile(row, agentCwd)));
-  return ranThere ? null : { label: DETAIL.cwd, path: row };
+  const folder = detail.cwd || detail.rowCwd;
+  if (!folder) return null;
+  const ranThere = directory !== null && (sameFile(folder, directory) || (agentCwd !== null && sameFile(folder, agentCwd)));
+  return ranThere ? null : { label: DETAIL.cwd, path: folder };
 }
 
 export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {

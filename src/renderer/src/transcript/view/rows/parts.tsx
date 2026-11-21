@@ -2,7 +2,7 @@
 import { useEffect, useState, type ComponentPropsWithRef } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { NamedGlyph } from '../../../ui/glyph';
-import { endsInFold, FOLD } from '../../model/copy';
+import { FOLD } from '../../model/copy';
 import { CopyIcon } from './icons';
 
 // The disclosure chevron; rotates when its button's aria-expanded is true (transcript.css).
@@ -44,13 +44,13 @@ export function CodeText({ text }: { text: string }) {
   );
 }
 
-// Nonzero `+{added}` and `−{removed}` sides in the diff colours. `after`: the words they follow, which set them apart
-// when those end in a folded caption's count (the word cut, T2: `+6 · +4 −2`, FOLD in copy.ts).
-export function LineCounts({ added, removed, after = '' }: { added: number; removed: number; after?: string }) {
+// Nonzero `+{added}` and `−{removed}` sides in the diff colours. `apart`: the words they follow end in a folded
+// caption's count, from which they are set apart (the word cut, T2: `+6 · +4 −2`, FOLD in copy.ts).
+export function LineCounts({ added, removed, apart = false }: { added: number; removed: number; apart?: boolean }) {
   if (added === 0 && removed === 0) return null;
   return (
     <>
-    {endsInFold(after) && <span className="transcript-counts-apart">{FOLD.beforeLines}</span>}
+    {apart && <span className="transcript-counts-apart">{FOLD.beforeLines}</span>}
     <span className="transcript-counts">
       {added > 0 && <span className="transcript-add">+{added}</span>}
       {added > 0 && removed > 0 && ' '}

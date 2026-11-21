@@ -495,6 +495,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-shell-heading:hover > .transcript-copy-glyph, .transcript-shell-heading:focus-within > .transcript-copy-glyph,
 .transcript-shell-output:hover > .transcript-copy-glyph, .transcript-shell-output:focus-within > .transcript-copy-glyph { opacity: 1; }
 .transcript-shell-output { position: relative; }
+/* fix round 1: the output keeps the glyph's column clear (its 8px inset, its 22px, a gap), so no line runs under it */
+.transcript-shell-output > .transcript-output { padding-right: 38px; }
 .transcript-shell-output > .transcript-copy-glyph { position: absolute; top: 4px; right: 8px; background: var(--bg-raised); }
 .transcript-shell-output > .transcript-copy-glyph:hover { background: var(--bg-hover); }
 

@@ -39,6 +39,7 @@ export interface DividerCopyInput {
   opener?: { class: Arrival['class'] }; // UX wave U2 (l2-transcript-04): what opened a turn the person did not start
   durationMs: number;
   caption: string; // UX wave U2 (O-15): what the turn did (caption.ts), '' while it runs
+  fold?: number; // the word cut (T2): the count the capped caption ends in (`+6`), absent or 0 for none
   counts: { added: number; removed: number }; // the lines its finished edits added and removed
   denied: number;
   autoDenied: number;
@@ -49,16 +50,19 @@ export interface DividerCopyInput {
 const SHORTEST_FIGURE_MS = 1000;
 
 // UX wave U2 (l2-transcript-04): the verb follows the turn's origin, but a turn the answer to an asynchronous question
-// opened is the person's (U3's class `answer`), whatever origin the engine gave it. The word cut (T1, ruled): on the
-// turn's line a finished turn of the person's reads its duration alone ("3s · Ran an agent"); the summary popover keeps
-// "Worked for", and every other form keeps its words on both (who opened the turn, how it ended).
+// opened is the person's (U3's class `answer`), whatever origin the engine gave it. The word cut (T1, ruled; the
+// architect's narrowing): on the turn's line no finished turn says it worked: a person's reads its duration alone
+// ("3s · Ran an agent"), the engine's and a peer's keep who opened it ("Continued · 3s", "Peer session · 3s"), and how a
+// turn ended keeps its words; the summary popover keeps every form's words ("Worked for", "Continued for").
 function verb(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'durationMs' | 'cause'>, on: 'line' | 'summary'): string {
   const { state, durationMs, cause = null } = input;
   const origin = input.opener?.class === 'answer' ? 'human' : input.origin;
   const t = duration(durationMs);
   switch (state) {
     case 'working': return durationMs < SHORTEST_FIGURE_MS ? 'Working' : `Working for ${t}`;
-    case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : on === 'line' ? t : `Worked for ${t}`;
+    case 'completed':
+      if (on === 'line') return origin === 'engine' ? `Continued · ${t}` : origin === 'peer' ? `Peer session · ${t}` : t;
+      return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
     case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : cause === 'message' ? `Ended for your message after ${t}` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
@@ -76,15 +80,16 @@ export function dividerHead(input: Pick<DividerCopyInput, 'state' | 'origin' | '
 export const lineCountsCopy = (counts: { added: number; removed: number }) =>
   [counts.added > 0 ? `+${counts.added}` : null, counts.removed > 0 ? `−${counts.removed}` : null].filter((part) => part !== null).join(' ');
 
-// The word cut (T2): a caption whose rest is folded ends in its count (`+6`); the lines that follow it are set apart
-// (`+6 · +4 −2`), or the count would read as one of them ("Seen on the scratch build"). The run's line and the turn's.
+// The word cut (T2): a caption whose rest is folded ends in its count (`+6`, the caption's `fold`); the lines that
+// follow it are set apart (`+6 · +4 −2`), or the count would read as one of them ("Seen on the scratch build"). The
+// run's line and the turn's.
 export const FOLD = { count: (n: number) => `+${n}`, beforeLines: '· ' } as const;
-export const endsInFold = (caption: string) => /(^|, )\+\d+$/.test(caption);
 
 export function dividerCopy(input: DividerCopyInput): string {
   const counts = lineCountsCopy(input.counts);
   const head = dividerHead(input);
-  const parts = [counts === '' ? head : `${head} ${endsInFold(head) ? FOLD.beforeLines : ''}${counts}`];
+  const apart = input.state !== 'working' && (input.fold ?? 0) > 0;
+  const parts = [counts === '' ? head : `${head} ${apart ? FOLD.beforeLines : ''}${counts}`];
   if (input.denied > 0) parts.push(`${input.denied} denied`);
   if (input.autoDenied > 0) parts.push(`${input.autoDenied} auto-denied`);
   return parts.join(' · ');

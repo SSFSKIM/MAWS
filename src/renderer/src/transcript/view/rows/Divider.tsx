@@ -75,7 +75,7 @@ export function useDividerSummary(row: DividerRowData | undefined, open: boolean
   // DividerDetails)
   const words = row === undefined || spinner !== null ? null : dividerHead({ state: row.state, cause: row.cause, origin: row.origin, opener: row.opener, durationMs, caption: row.caption });
   const head = row === undefined ? null : spinner === null ? words : <span data-plugin-spinner="">{spinner}</span>;
-  const label = row === undefined ? null : row.counts.added > 0 || row.counts.removed > 0 ? <>{head} <LineCounts added={row.counts.added} removed={row.counts.removed} after={words ?? ''} /></> : head;
+  const label = row === undefined ? null : row.counts.added > 0 || row.counts.removed > 0 ? <>{head} <LineCounts added={row.counts.added} removed={row.counts.removed} apart={words !== null && row.state !== 'working' && (row.fold ?? 0) > 0} /></> : head;
   return { durationMs, controls, label };
 }
 
