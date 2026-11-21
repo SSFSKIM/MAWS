@@ -797,6 +797,8 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-browser-action { padding: 1px 0 6px; font-size: var(--text-ui-sm); }
 .transcript-browser-action-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 26px; color: var(--fg-muted); }
 .transcript-browser-action-heading { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.transcript-browser-action-time { display: none; }
+@media (hover: none) { .transcript-browser-action-time { display: inline; } } /* the touch rule: the tip's time, at rest where nothing points */
 .transcript-browser-action-heading[tabindex] { border-radius: var(--radius-sm); outline-color: var(--accent); } /* the word cut (T105): its time on pointing or focus */
 .transcript-browser-action-heading[tabindex]:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; }
 .transcript-browser-action[data-state="error"] .transcript-browser-action-heading, .transcript-browser-action[data-state="cancelled"] .transcript-browser-action-heading { color: var(--fg-muted); }

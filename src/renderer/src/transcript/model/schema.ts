@@ -91,7 +91,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
     added: z.number(), removed: z.number(), state: z.enum(['applied', 'undoing', 'undone', 'reapplying']), canUndo: z.boolean(), canReapply: z.boolean(),
   }),
-  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), phase: z.string().optional() /* the word cut, T87 */, exited: z.literal(true).optional() /* UX wave U3b */, overflow: z.number() }),
+  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), phases: z.record(z.string(), z.string()).optional() /* the word cut, T87 */, exited: z.literal(true).optional() /* UX wave U3b */, overflow: z.number() }),
   z.strictObject({
     ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(), flow: z.enum(['in', 'out']) /* the word cut, T73 */,
     peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7

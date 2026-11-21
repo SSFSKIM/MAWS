@@ -8,7 +8,7 @@
 // query found. The word cut (C54): an agent's or a skill's description shows on the highlighted row alone, by the arrow
 // keys or the pointer, and is the row's description at all times; the Skills group ends at its last skill (C55).
 import type { Editor, Range } from '@tiptap/core';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
@@ -145,8 +145,9 @@ export function AtMenu(props: PopupProps) {
   const others = useMemo(() => atItems(catalog, props.query), [catalog, props.query]);
   const rows = useMemo(() => (files === null ? [SEARCHING, ...others.slice(0, ROW_LIMIT - 1).map(rowOf)] : [...files, ...others].slice(0, ROW_LIMIT).map(rowOf)), [files, others]);
   const { active, setActive, choose } = useListKeys(props, rows);
+  const menuId = useId(); // one per open menu, so two message boxes' menus (split panes) never share an id
   if (rows.length === 0) return null;
-  const optionId = (i: number) => `composer-at-${i}`;
+  const optionId = (i: number) => `composer-at-${menuId}-${i}`;
   return (
     <Listbox label="Mention" activeId={optionId(active)} editor={props.editor} revealKey={rows}>
       {GROUPS.map(({ group, label }) => {

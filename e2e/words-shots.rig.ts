@@ -17,7 +17,7 @@
 // 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
 // scenes: the conversation's and the message box's states its cut changes). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
-// not). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
+// not), and each run's build (its commit and a digest of out/). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
 // pictures are the same command on the build's branch into another folder.
 //
 // The `m1-` and `m2-` scenes are this branch's alone, so their "before" is this rig run against master's build: in a
@@ -45,6 +45,7 @@ import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../src/renderer/src/tools/agent
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
+import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign } from './support/design';
@@ -414,16 +415,26 @@ async function closeMenu(page: Page) {
 // there. The m2 checks therefore find their targets by data attributes, roles and places; where one needs a word of a
 // renderer module this rig cannot import (one that loads the renderer), the word is written below with its source, as
 // each build has it, and read by the build.
+//
+// The build must be the checkout's (fix wave, scalpel-5#3): out/ restored from a cache keyed elsewhere could be the other
+// side's. The checkout says which side it is by a module M2 added (composer/copy.ts, absent from master's tree), and a
+// build that draws the other side is refused, every m2 scene then not reached with why.
 let cut2: boolean | null = null;
+let cut2Refused: string | null = null;
 const MIC = '[data-composer] [role="toolbar"] button[aria-label="Dictate"]';
+const M2_SOURCE = 'src/renderer/src/composer/copy.ts';
 async function m2Build(page: Page): Promise<boolean> {
-  if (cut2 === null) {
+  if (cut2 === null && cut2Refused === null) {
     const mic = page.locator(MIC).first();
     await expect(mic, 'a message box’s microphone, which says the build').toBeAttached({ timeout: 15_000 });
-    cut2 = (await mic.getAttribute('title')) === null;
-    console.log(`[words] this build ${cut2 ? 'draws' : 'does not draw'} the word cut's M2 (the microphone ${cut2 ? 'has no' : 'has its'} system title)`);
+    const drawn = (await mic.getAttribute('title')) === null;
+    const source = existsSync(join(REPO_ROOT, M2_SOURCE));
+    if (drawn === source) cut2 = drawn;
+    else cut2Refused = `out/ is not this checkout's build: it ${drawn ? 'draws' : 'does not draw'} the word cut's M2, and the checkout ${source ? 'has' : 'lacks'} ${M2_SOURCE}`;
+    console.log(`[words] ${cut2Refused ?? `this build ${drawn ? 'draws' : 'does not draw'} the word cut's M2 (the microphone ${drawn ? 'has no' : 'has its'} system title)`}`);
   }
-  return cut2;
+  if (cut2Refused !== null) throw new Error(cut2Refused);
+  return cut2!;
 }
 function m2Cut(): boolean {
   if (cut2 === null) throw new Error('the build is not known yet: no message box has drawn in this run');
@@ -622,10 +633,25 @@ test.beforeAll(() => {
   mkdirSync(OUT, { recursive: true });
 });
 test.afterAll(() => {
-  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[] };
+  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[]; runs?: Run[] };
   const keep = <T extends { id: string }>(old: T[], fresh: T[]) => [...old.filter((o) => !fresh.some((f) => f.id === o.id)), ...fresh];
-  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META) }, null, 2));
+  const run: Run = { at: new Date().toISOString(), ...buildIdentity(), m1: cut, m2: cut2, scenes: results.map((result) => result.id) };
+  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META), runs: [...(all.runs ?? []), run] }, null, 2));
 });
+// What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
+// build restored twice from scripts/e2e-build.sh's cache) show as one build: the checkout's commit, the tracked files
+// it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, and which cut each
+// build check read (null where no scene read it).
+type Run = { at: string; commit: string; changed: string[]; out: string; m1: boolean | null; m2: boolean | null; scenes: string[] };
+function buildIdentity(): Pick<Run, 'commit' | 'changed' | 'out'> {
+  const inRepo = (...args: string[]) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
+  const out = join(REPO_ROOT, 'out');
+  const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]));
+  const digest = createHash('sha256');
+  for (const file of files(out).sort()) digest.update(`${file.slice(out.length)}\0${createHash('sha256').update(readFileSync(file)).digest('hex')}\n`);
+  const changed = inRepo('status', '--porcelain', '--untracked-files=no').split('\n').filter((line) => line !== '').map((line) => line.slice(3));
+  return { commit: inRepo('rev-parse', 'HEAD').trim(), changed, out: digest.digest('hex') };
+}
 
 const BASE_ENV = (extra: Record<string, string>) => ({
   MAWS_HARNESS: '0',
@@ -1178,16 +1204,35 @@ async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   await letGo(page);
 
   // C46: the context popover's figures line owns the percentage and what is left until compaction (statusline/
-  // ContextPopover.tsx, Breakdown: the first line under the heading on both builds, where master draws them at rest)
+  // ContextPopover.tsx, Breakdown: the figures the first line under the heading on both builds; master draws the
+  // percentage at rest on the line after it, which M2 cut). The reading is the widget backend's get_context_usage
+  // (test/support/widget-backend.ts: reads.jsonl seq 57, 30,433 of 200,000 tokens, 15%, compaction at 167,000), as each
+  // build writes it (statusline/copy.ts CONTEXT_POPOVER on M2, master's Breakdown literals): the check reads the figures
+  // themselves, so a lost breakdown or another reading is not taken for them
   const context = () => page.locator('[role="dialog"][aria-label="Context window"]');
   const figures = () => context().locator('h3 + p');
+  const masterUsed = () => context().locator('h3 + p + p'); // master's second line
+  const FIGURES = { m2: '30k of 200k · compacts at 167k', master: '30k of 200k · autocompact at 167k' };
+  const USED = '15.0% used · 137k until compaction';
   await shot(page, m2({ id: 'm2-context-figures-tip', title: 'Context popover, its figures holding the keyboard', how: 'An idle session, the ring at the end of the row under the message box; Tab to its first line', state: 'The recorded context reading’s line focused: the percentage used and what is left until compaction its tooltip', folders: ['statusline', 'composer/frame', 'ui'] }), async () => {
     await openSession(page, SID.idle);
     await m2Build(page);
     await pane(page).locator('[data-composer] [data-context-ring]').first().click();
     await expect(context().locator('table'), 'the breakdown read').toBeVisible({ timeout: 10_000 });
-    await focusTip(page, figures(), figures(), m2Cut);
-  }, { check: tipShown(page, figures(), 'the context’s figures', figures(), m2Cut), after: () => closeOverlays(page) });
+    await focusTip(page, figures(), masterUsed(), m2Cut);
+  }, {
+    check: async () => {
+      await expect(figures(), 'the recorded figures').toHaveText(byBuild(FIGURES), { timeout: 3_000 });
+      if (!m2Cut()) {
+        await inView(masterUsed(), 'master’s line of the share used');
+        return void (await expect(masterUsed(), 'master’s recorded share used').toHaveText(USED, { timeout: 3_000 }));
+      }
+      await tipShown(page, figures(), 'the context’s figures', masterUsed(), m2Cut)();
+      await expect(page.getByRole('tooltip').first(), 'the recorded share used, its tooltip').toHaveText(USED, { timeout: 3_000 });
+      await expect(figures(), 'the recorded share used, its description').toHaveAccessibleDescription(USED, { timeout: 3_000 });
+    },
+    after: () => closeOverlays(page),
+  });
   await reset(page);
 
   // C128: the held line's pid waits on its words (session/HolderNotice.tsx); master's line names it at rest
@@ -1203,32 +1248,10 @@ async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   await letGo(page);
   await reset(page);
 
-  // P555: a new chat's model list has no line under it; the model view by the effort view's button that names the model
-  // (widgets/ModelSelector.tsx: `data-effort-title` inside it, `data-model-selector` the view shown, on both builds)
+  // the model view by the effort view's button that names the model (widgets/ModelSelector.tsx: `data-effort-title`
+  // inside it, `data-model-selector` the view shown, on both builds); P555's new chat is launch 10's (m2-new-chat-model-view)
   const selector = () => page.locator('[data-model-selector]').first();
   const modelView = () => page.locator('[data-model-selector="model"]').first();
-  await shot(page, m2({ id: 'm2-new-chat-model-view', title: 'New chat, the model menu’s list of models', how: 'File › New chat (⌘N), the model chip under the message box, then the model’s name at the menu’s top', state: 'The models of a chat not started yet, Default checked, with no line under the list', folders: ['widgets', 'composer/frame', 'composer'] }), async () => {
-    await openSession(page, SID.idle);
-    await m2Build(page);
-    await reset(page);
-    await menu(app, 'session.new');
-    await expect(box(page)).toBeVisible({ timeout: 10_000 });
-    await toolbar().locator('button[aria-haspopup="dialog"]:not([data-context-ring])').last().click();
-    await expect(selector()).toBeVisible({ timeout: 10_000 });
-    if ((await selector().getAttribute('data-model-selector')) !== 'model') await selector().locator('button:has([data-effort-title])').first().click();
-  }, {
-    check: async () => {
-      await expect(modelView(), 'the model view').toBeVisible({ timeout: 3_000 });
-      await expect(modelView().getByRole('menu').first(), 'its list').toBeVisible();
-      // Default, the list's first row, checked (ModelSelector.tsx: the menu's own first menuitemradio, on both builds)
-      await expect(modelView().locator('[role="menu"] > [role="menuitemradio"]').first(), 'Default checked').toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
-      const line = modelView().getByText(MASTER_MODEL_UNSTARTED, { exact: true });
-      if (m2Cut()) await expect(line, 'no line under a new chat’s list').toHaveCount(0);
-      else await inView(line, 'master’s line under a new chat’s list');
-    },
-    after: () => closeOverlays(page),
-  });
-  await reset(page);
 
   // P549: a model asked for that the engine has not confirmed: the widget backend accepts set_model and moves the
   // status's `requested` without the init frame that would confirm it (test/support/widget-backend.ts, control), so the
@@ -1842,8 +1865,10 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
     // recording's first snapshot (p1-maws-browser: toolu_01Fych5jA99p8WVKoT575nt1, done in 60 ms, its page text the
     // result), the first done row with both quiet actions, each found by its name (BROWSER_ACTION, the same on both builds):
     // Show snapshot (the disclosure, `aria-expanded`) and Open tab;
-    // on master's build its time stands on the line (`data-browser-took`)
-    const action = () => pane(page).locator('.transcript-browser-action[data-tool="browser_snapshot"][data-state="done"]').first();
+    // on master's build its time stands on the line (`data-browser-took`). The row is pinned by its id (the same on both
+    // builds, transcript/model/keys.ts `browserAction`): the recording's second snapshot reads the same, so any other
+    // match would pass every check below with the wrong row
+    const action = () => pane(page).locator('[data-row-id="browser:toolu_01Fych5jA99p8WVKoT575nt1"] .transcript-browser-action[data-tool="browser_snapshot"][data-state="done"]');
     const actionButtons = () => action().locator('.transcript-browser-action-actions button.transcript-quiet-button');
     await shot(page, m2({ id: 'm2-browser-action-pointed', title: 'A browser action, the pointer on its line', how: 'The session that drove the browser, its turns opened; hover the first snapshot’s line', state: 'The snapshot’s time its tooltip, Show snapshot and Open tab drawn', folders: ['transcript/view', 'tools/browser', 'ui'], hover: true }), async () => {
       await openSession(page, ids.browser!);
@@ -3034,7 +3059,8 @@ test('states: Settings › Usage, an account that served, an account to sign in 
 // Launch 10: the word cut's M2, recorded transcripts read from disk for the conversation's states no earlier launch holds,
 // in a launch of their own so launch 3's sessions and pictures stay as they were: a steer the engine took mid-turn, an
 // ask the interrupt withdrew, an agents listing with a message from another session, a scheduled job's fires, and the
-// sminos bridge's wake. Each scene opens every turn and run first, as launch 3's do.
+// sminos bridge's wake. Each scene opens every turn and run first, as launch 3's do. Last, a new chat's model menu,
+// which needs the index's New chat (a setup intent), not the scenario's.
 // ======================================================================================================================
 const M2_DISK: { key: string; file: string; title: string; state: string }[] = [
   // a `next` steer the engine took between the second and third Bash calls (transcript/model/disk.test.ts reads it so)
@@ -3186,6 +3212,47 @@ test('the word cut’s M2: recorded transcripts for the conversation’s states'
         await seek(page, notice());
       }, { check: () => inView(notice(), `the ${kind} notice`) });
     }
+    await reset(page);
+
+    // P555: a new chat's model list has no line under it. Here, not in the scenario's launch, whose New chat mints an id
+    // with no setup intent (app/scenario-session-creator.ts), so its model menu has no unstarted binding to show: this
+    // launch's New chat is `session.create`, which writes the intent (sessions/connect.ts). The new chat is the one intent
+    // New chat added, and the tab shown is its (the pane's message box names its session, `data-composer`, on both
+    // builds); the model view as launch 1's scenes find it (widgets/ModelSelector.tsx: `data-effort-title` inside the
+    // button that names the model, `data-model-selector` the view shown, on both builds). Last in the launch, so the
+    // empty chat it leaves open is in no other scene.
+    const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((intent) => intent.appSessionId as string);
+    const before = new Set(await intents()); // a retry's New chat reuses the empty chat the first attempt made (U13a)
+    let chat: string | null = null;
+    const newChat = () => pane(page).locator(`[data-composer="${chat}"]`);
+    const selector = () => page.locator('[data-model-selector]').first();
+    const modelView = () => page.locator('[data-model-selector="model"]').first();
+    await shot(page, m2({ id: 'm2-new-chat-model-view', title: 'New chat, the model menu’s list of models', how: 'A session in front, File › New chat (⌘N), the model chip under the message box, then the model’s name at the menu’s top', state: 'The models of a chat not started yet, Default checked, with no line under the list', folders: ['widgets', 'composer/frame', 'composer'] }), async () => {
+      await opened('steer');
+      await reset(page);
+      await menu(maws.app, 'session.new');
+      await expect.poll(async () => {
+        const made = (await intents()).find((id) => !before.has(id));
+        chat = made === undefined ? null : await addressed(page, made);
+        return chat;
+      }, { message: 'New chat’s setup intent', timeout: 10_000 }).not.toBeNull();
+      await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 10_000 });
+      await newChat().locator('[role="toolbar"] button[aria-haspopup="dialog"]:not([data-context-ring])').last().click();
+      await expect(selector()).toBeVisible({ timeout: 10_000 });
+      if ((await selector().getAttribute('data-model-selector')) !== 'model') await selector().locator('button:has([data-effort-title])').first().click();
+    }, {
+      check: async () => {
+        await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 3_000 });
+        await expect(modelView(), 'the model view').toBeVisible({ timeout: 3_000 });
+        await expect(modelView().getByRole('menu').first(), 'its list').toBeVisible();
+        // Default, the list's first row, checked (ModelSelector.tsx: the menu's own first menuitemradio, on both builds)
+        await expect(modelView().locator('[role="menu"] > [role="menuitemradio"]').first(), 'Default checked').toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
+        const line = modelView().getByText(MASTER_MODEL_UNSTARTED, { exact: true });
+        if (m2Cut()) await expect(line, 'no line under a new chat’s list').toHaveCount(0);
+        else await inView(line, 'master’s line under a new chat’s list');
+      },
+      after: () => closeOverlays(page),
+    });
     await reset(page);
   } finally {
     await maws.cleanup();

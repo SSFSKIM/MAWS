@@ -298,7 +298,7 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   await page.keyboard.type('/');
   const commands = page.getByRole('listbox', { name: 'Commands' });
   const chosen = commands.locator('[role="option"][aria-selected="true"]'); // the list opens on the best match
-  const detail = page.locator('#composer-slash-detail'); // the highlighted row's popover
+  const detail = page.locator('[data-slash-detail]'); // the highlighted row's popover
   await expect(commands.getByRole('option').first()).toHaveAttribute('data-origin', 'engine');
   await expect(commands.getByRole('group')).toHaveCount(0);
   await expect(commands.locator('[data-origin="maws"]')).toHaveCount(0);
@@ -392,7 +392,7 @@ test('/ opens on MAWS’s panels in their declared order before any pick, then t
   await expect(options.nth(1)).toHaveAttribute('data-origin', 'widget');
   await expect(options.nth(2)).toHaveAttribute('data-origin', 'engine');
   await expect(commands.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName('/model');
-  await expect(page.locator('#composer-slash-detail')).toContainText('Choose the model for this session');
+  await expect(page.locator('[data-slash-detail]')).toContainText('Choose the model for this session');
   await page.keyboard.press('Escape');
   await expect(commands).toBeHidden();
   expect(editor.consoleErrors()).toEqual([]);

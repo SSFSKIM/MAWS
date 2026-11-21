@@ -329,7 +329,7 @@ type Item =
 // UX wave U3: the questions of an ask call, by its tool-use id, for the words of an answer's line
 type CallQuestions = (call: string) => ReadonlyArray<{ question: string; header?: string }> | null;
 
-interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
+interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phases: Map<TaskId, string> /* a workflow's phase, by its own task */; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
 
 // E1 start: what a turn's events say about one `ask` call (its capsule) and one `send_file` call (its delivery row). The
@@ -562,7 +562,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const previous = items.at(-1);
     const last = previous?.kind === 'subagents' ? previous.group : null;
     if (last && apiMessageId !== null && last.apiMessageId === apiMessageId) return last;
-    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null, ended: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt };
+    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phases: new Map(), ended: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt };
     subagents.push(group);
     items.push({ kind: 'subagents', group });
     return group;
@@ -763,7 +763,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (!group) break;
         const phases = Array.isArray(event.progress) ? event.progress.map(record).filter((entry) => entry.type === 'workflow_phase') : [];
         const title = phases.at(-1)?.title;
-        group.phase = typeof title === 'string' && title.length > 0 ? title : group.phase;
+        if (typeof title === 'string' && title.length > 0) group.phases.set(event.taskId, title);
         group.statuses.set(event.taskId, 'working');
         break;
       }
@@ -1324,9 +1324,14 @@ function subagentRow(group: SubagentGroup, turnId: TurnId, exited: boolean): Row
     ? statuses.includes('finished_with_errors') ? 'finished_with_errors' : statuses.includes('stopped') ? 'stopped' : 'finished'
     : statuses.every((s) => s === 'started') ? 'started' : 'working';
   const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status);
-  // the word cut (T86, T87): a working workflow's phase is what it is doing now, which waits on its line
-  const phase = group.phase && !done ? { phase: group.phase } : {};
-  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...phase, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
+  // the word cut (T86, T87): a working workflow's phase is what it is doing now, which waits on its line; each its own
+  // call's (fix wave, scalpel-1#1), and gone with that call's end while another agent of the row still runs
+  const working = Object.fromEntries(group.refs.flatMap((ref, i) => {
+    const phase = group.phases.get(ref.taskId);
+    return phase !== undefined && !terminal(statuses[i]!) ? [[ref.taskId, phase]] : [];
+  }));
+  const phases = Object.keys(working).length > 0 ? { phases: working } : {};
+  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...phases, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
 }
 
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {

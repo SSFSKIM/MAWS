@@ -75,7 +75,7 @@ export function SubagentRow({ row }: { row: SubagentRowData }) {
     const elapsed = workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.at, now, live);
     for (const ref of row.agents) {
       const activity = subagentActivity(turn, ref);
-      if (!activity.finished) details.set(ref.taskId, subagentDetail(ref.name, row.phase ?? activity.lastTool, elapsed));
+      if (!activity.finished) details.set(ref.taskId, subagentDetail(ref.name, row.phases?.[ref.taskId] ?? activity.lastTool, elapsed));
     }
   }
   const single = open && row.agents.length === 1 ? row.agents[0] : null;

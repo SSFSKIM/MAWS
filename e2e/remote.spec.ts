@@ -4288,7 +4288,7 @@ test('U4b, Send now, a take-back and a Delete on B: each acts on B’s engine th
       const fork = page.getByRole('listbox', { name: 'Commands' }).getByRole('option').filter({ hasText: '/fork' });
       await expect(fork).toHaveAttribute('aria-disabled', 'true');
       await fork.hover();
-      await expect(page.locator('#composer-slash-detail')).toContainText('Wait for the turn to end, or stop it first');
+      await expect(page.locator('[data-slash-detail]')).toContainText('Wait for the turn to end, or stop it first');
       // the disabled row's detail lies over the box and would intercept a click, so the palette is closed the way a person does: Esc is safe here
       // because the open palette takes the key first (it closes the popup and returns), so it reaches nothing else and cannot stop B's turn
       await page.keyboard.press('Escape');

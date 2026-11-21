@@ -42,7 +42,7 @@ function partOf(row: Row): string | null {
     case 'group': return [`- ${row.summary}`, ...row.cells.flatMap((cell) => cellLines(cell, '  '))].join('\n');
     case 'cell': return cellLines(row, '').join('\n');
     case 'receipt': return [`**${plural(row.files.length, 'file')} changed · +${row.added} −${row.removed}**`, ...row.files.map((file) => `- ${file.path} (+${file.added} −${file.removed})`)].join('\n');
-    case 'subagent': return `- ${row.sentence}`;
+    case 'subagent': return subagentPart(row); // the word cut (T87): a working workflow's phase, which nothing points at here
     case 'agent_message': return messagePart(row); // E7: the body or report under the line when it shows more
     case 'thinking': return row.text.length > 0 ? `*${row.live ? 'Thinking' : 'Thought'}*\n${indent(row.text, '> ')}` : null;
     case 'plan': return `**Plan · ${planBadge(row.outcome, row.feedback)}**\n\n${row.plan}`;
@@ -67,6 +67,18 @@ function partOf(row: Row): string | null {
     case 'to_human': return `<message>${row.text}</message>`; // P4-R7: as the span it stands in for copies, verbatim
     case 'activity': return null; // UX wave U3b (decision 17): what the session does now, no part of what it said
   }
+}
+
+// A subagent row's line, with each working workflow's phase written out where the view keeps it for pointing (fix wave,
+// scalpel-1#2): beside the sentence for a row of one call, else one nested line per workflow, named.
+function subagentPart(row: Extract<Row, { kind: 'subagent' }>): string {
+  const phases = row.agents.flatMap((ref) => {
+    const phase = row.phases?.[ref.taskId];
+    return phase === undefined ? [] : [{ name: ref.name, phase }];
+  });
+  if (phases.length === 0) return `- ${row.sentence}`;
+  if (row.agents.length === 1) return `- ${row.sentence} · ${phases[0]!.phase}`;
+  return [`- ${row.sentence}`, ...phases.map(({ name, phase }) => `  - ${name} · ${phase}`)].join('\n');
 }
 
 // E1 (the word cut, T93, T94, T97): an ask's line as its capsule reads it, its title (else its count) first; the why

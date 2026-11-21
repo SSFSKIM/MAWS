@@ -29,7 +29,7 @@ describe('actions drawn on the pointed row', () => {
 describe('facts a tip shows on pointing', () => {
   it('.transcript-browser-action-time is drawn only where nothing points', () => {
     expect(rules.some((rule) => !rule.selectors.includes('@media') && rule.selectors.replace(/\/\*[\s\S]*?\*\//g, '').trim() === '.transcript-browser-action-time' && /display: none\b/.test(rule.body))).toBe(true);
-    expect(noHover).toMatch(/\.transcript-browser-action-time \{ display: inline; \}/);
+    expect(noHover).toMatch(/\.transcript-browser-action-time \{ display: inline;/);
   });
 });
 

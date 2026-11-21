@@ -5,8 +5,9 @@
 // tab (the Browser tool on the row's tab). Under the line, a refusal's reason, or a cancelled call's note. It stays in
 // view when its turn folds (isPersistentRow). The live waiting line main reported while a call ran left with the tools.
 // The word cut (T105, T106): the time a done call took, and its wait, are the line's tooltip, shown on pointing anywhere
-// along it, and the phrase's description (the phrase takes the keyboard for them); the quiet actions show on pointing or focus within the line, while the snapshot
-// is open, and always where nothing points.
+// along it, and the phrase's description (the phrase takes the keyboard for them), and stand on the line where nothing
+// points; the quiet actions show on pointing or focus within the line, while the snapshot is open, and always where
+// nothing points.
 import { useRef } from 'react';
 import { Tip } from '../../../ui/tip';
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from '../../model/copy';
@@ -37,6 +38,13 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
             {browserActionHeading(row)}
           </span>
         </Tip>
+        {/* the touch rule (fix wave, scalpel-3#1): where nothing points no tip opens, so the time stands on the line
+            there, drawn under `(hover: none)` alone; assistive technology hears it as the phrase's description */}
+        {time !== null && (
+          <span className="transcript-browser-action-time" aria-hidden="true">
+            {time}
+          </span>
+        )}
         {running && <RunningTime startedAt={row.at} />}
         {appSessionId !== null && (detail !== null || shot !== null || tab !== null) && (
           <span className="transcript-browser-action-actions" data-on-hover="">

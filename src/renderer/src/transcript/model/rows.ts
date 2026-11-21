@@ -110,7 +110,7 @@ export type Row = RowBase &
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; fold?: number /* the word cut (T2): the count `summary` ends in, absent for none */; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
-    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; phase?: string; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; phase (the word cut, T87): a working workflow's phase, for its line's pointing; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
+    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; phases?: Record<string, string>; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; phases (the word cut, T87): each working workflow's phase by its task id, for its glyph's or line's pointing; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
         // the word cut (T73): whether the message comes in from the party its line names or goes out to it, apart from its
