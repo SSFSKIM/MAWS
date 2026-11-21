@@ -526,13 +526,18 @@ test('settings: the regrouped page; each note one line where the body has its 76
     const waiting = await column.locator('[data-settings-row] [data-row-note]').evaluateAll((nodes) => nodes.map((node) => ({ open: node.hasAttribute('data-open'), height: node.getBoundingClientRect().height })));
     expect(waiting.length, 'the page keeps its notes').toBeGreaterThan(15);
     expect(waiting.filter((note) => note.open || note.height > 0), 'no note is drawn at rest').toEqual([]);
-    // pointing at a row opens its note in place, under the row; leaving it closes the note
+    // pointing at a row opens its note under the row, floating over what follows: the row keeps its height (no row
+    // moves); leaving it closes the note. The row stands mid-body, so the note has the room to open down.
     const binary = column.getByRole('group', { name: 'Binary', exact: true });
     const note = binary.locator('[data-row-note]');
+    await binary.evaluate((row) => row.scrollIntoView({ block: 'center' }));
+    const resting = (await binary.boundingBox())!;
     await binary.hover();
     await expect(note).toBeVisible();
     await expect(note).toContainText('Running sessions keep the binary they started on.');
     expect((await note.boundingBox())!.y, 'the note under the row’s control').toBeGreaterThanOrEqual((await binary.getByRole('button', { name: 'Change…' }).boundingBox())!.y);
+    const pointed = (await binary.boundingBox())!;
+    expect([pointed.y, pointed.height], 'the row neither moves nor grows: the note floats').toEqual([resting.y, resting.height]);
     await nav.hover();
     await expect(note).toBeHidden();
     // a short window: the dialog's box is shorter (85 percent of the window), and the index's list scrolls by itself
