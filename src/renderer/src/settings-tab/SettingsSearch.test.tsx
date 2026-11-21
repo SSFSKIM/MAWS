@@ -363,6 +363,28 @@ describe('Search settings: the row under its section’s heading', () => {
     expect(scrollTopToLand({ sectionTop: 400, rowTop: 1200, rowHeight: 40, viewHeight: 600 })).toBe(920); // 1200 - (600 - 40) / 2
   });
 
+  it('lands a row taller than the view at its top, under its heading, never at its middle (the key bindings, scalpel-2#3)', () => {
+    expect(scrollTopToLand({ sectionTop: 400, rowTop: 440, rowHeight: 1500, viewHeight: 600 })).toBe(400); // the heading, then the table's top
+    expect(scrollTopToLand({ sectionTop: 400, rowTop: 1100, rowHeight: 1500, viewHeight: 600 })).toBe(1100); // too far under its heading: its own top
+  });
+
+  it('a search for the reset at default bindings lands on the top of the key bindings, the Keyboard heading in view', () => {
+    renderView();
+    const body = document.querySelector<HTMLElement>('[data-settings-body]')!;
+    const at = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === body) return at(100, 600);
+      if (this.matches('section[aria-labelledby="settings-keyboard"]')) return at(1100, 1600);
+      if (this.matches('[data-settings-row="keyboard.bindings"]')) return at(1140, 1500); // taller than the body
+      return at(0, 0);
+    });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 600 });
+    type('reset to defaults');
+    expect(optionTexts()).toEqual(['Key bindings · Keyboard']); // Reset is not drawn at the defaults: the table that reveals it
+    press('Enter');
+    expect(body.scrollTop).toBe(1000); // the Keyboard heading at the body's top, the table under it
+  });
+
   it('scrolls the body by that rule when a result is chosen', () => {
     renderView();
     const body = document.querySelector<HTMLElement>('[data-settings-body]')!;

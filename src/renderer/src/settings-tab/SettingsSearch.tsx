@@ -149,9 +149,12 @@ export function landedBox(landing: HTMLElement): { top: number; height: number }
 }
 
 // The body's scroll that lands a row: its section's heading at the body's top where the row is then in view, else the
-// row in the middle, since both cannot be. Offsets are in the body's scrolled content.
+// row in the middle, since both cannot be. A row taller than the view (the key bindings' table) lands at its top, under
+// its heading where the heading and the row's top fit, never at its middle. Offsets are in the body's scrolled content.
 export function scrollTopToLand({ sectionTop, rowTop, rowHeight, viewHeight }: { sectionTop: number; rowTop: number; rowHeight: number; viewHeight: number }): number {
-  return rowTop + rowHeight - sectionTop <= viewHeight ? sectionTop : rowTop - (viewHeight - rowHeight) / 2;
+  if (rowTop + rowHeight - sectionTop <= viewHeight) return sectionTop;
+  if (rowHeight > viewHeight) return rowTop - sectionTop < viewHeight ? sectionTop : rowTop;
+  return rowTop - (viewHeight - rowHeight) / 2;
 }
 
 const MARK_MS = 1_600;
