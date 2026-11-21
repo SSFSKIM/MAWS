@@ -266,7 +266,7 @@ describe('Delegations (G187 to G189)', () => {
     expect(within(org).queryByRole('button', { name: 'Code destination' })).toBeNull();
   });
 
-  it('a set destination waits behind the chevron beside the heading, its note in its row', async () => {
+  it('a set destination waits behind the chevron beside the heading, its note in its row, open while focus is there', async () => {
     const user = userEvent.setup();
     renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => ({ project: 'acme-prod-01', secret: 'desk-code', account: 'ops@example.com' }) });
     const org = await group('org');
@@ -278,8 +278,12 @@ describe('Delegations (G187 to G189)', () => {
     await tabTo(user, chevron);
     await user.keyboard('{Enter}');
     const destination = within(org).getByRole('group', { name: 'Code destination' });
-    expect((within(destination).getByRole('textbox', { name: 'Project' }) as HTMLInputElement).value).toBe('acme-prod-01');
-    expect(accessibleText(destination)).not.toContain('Secret Manager');
+    const project = within(destination).getByRole('textbox', { name: 'Project' }) as HTMLInputElement;
+    expect(project.value).toBe('acme-prod-01');
+    expect(document.activeElement).toBe(project);
+    expect(noteOpen(destination)).toBe(true);
+    act(() => chevron.focus());
+    await vi.waitFor(() => expect(accessibleText(destination)).not.toContain('Secret Manager'));
     expect(within(org).getByRole('group', { name: 'Code destination', description: /^A new delegation’s provisioning code is stored there / })).toBe(destination);
   });
 });
