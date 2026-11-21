@@ -3,7 +3,8 @@
 // verified events and this pure projection folds them into §N's `ChannelEntry`, a renderer type).
 //
 // What draws, oldest first by offset:
-// - people's words (`human`): by their member as main named them (`author`), you as You;
+// - people's words (`human`): by their member as main named them (`author`), you as You; a machine's notice (X8,
+//   `noticeSender`) as words by `<program>@<machine>`, no member's and never yours;
 // - agent-to-agent traffic (`say`), folded: a run of says between the same two sessions (writer and its one recipient),
 //   each within ten minutes of the last (either way: the order is the log's), is one exchange; an audience stream's
 //   writer is its session's (main names the session, `ChannelEvent.session`); a session's broadcasts (`to: '*'`) in the window fold as
@@ -40,6 +41,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { ChannelEvent, ChannelHost, ChannelMachine, ChannelRecipients, ChannelSession, ChannelWord, OrgMember } from '@shared/ipc/schema/org';
+import { noticeSender } from 'org-protocol';
 import { waitsOnAnswer } from '@shared/attention/kinds';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
@@ -64,6 +66,8 @@ export type WordsEntry = Labelled & {
   text: string;
   at: string | null;
   state?: WordState;
+  /** X8: a machine's notice, `name` its `<program>@<machine>`: a program's words, never a person's. */
+  notice?: true;
 };
 export type SayEntry = Labelled & { kind: 'say'; offset: number; from: ChannelParty; to: '*' | ChannelParty[]; text: string; at: string; owners: OrgMember[] };
 export type ExchangeEntry = Labelled & {
@@ -170,6 +174,13 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
       }
       case 'human': {
         flush();
+        // X8: a machine's notice is never a person's words: nobody's, never yours, named `<program>@<machine>`
+        const notice = noticeSender({ ...event, writer: e.writer });
+        if (notice !== null) {
+          const to: ChannelRecipients = event.to === '*' ? '*' : recipients(event.to);
+          entries.push({ kind: 'words', key: `w:${e.offset}`, ...labelOf(e), offset: e.offset, member: null, name: notice, you: false, notice: true, to, text: str(event.text), at });
+          break;
+        }
         const member = str(event.member) || null;
         const you = member !== null && member === input.me;
         const name = you ? CHANNEL.you : (e.author?.name ?? (member === null ? CHANNEL.nobody : CHANNEL.someone(member)));

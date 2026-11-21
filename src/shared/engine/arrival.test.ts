@@ -245,6 +245,15 @@ describe('the reader, on deliveries written by hand', () => {
     expect(readArrivals(inbox('[sminos message from human id=0f0e0d0c]\nAlso run the linter.', { kind: 'peer', from: 'unknown' })).map(said)).toEqual(['own chat: Also run the linter.']);
   });
 
+  it('a machine’s notice (X8), its sender `<program>@<machine>` and no reply line, is a peer’s and never the owner’s own', () => {
+    for (const frame of ['[sminos chat MAWS dc-x/human:12 from devcloud@dc-x, owned by sm → @you | unread 3]', '[sminos chat MAWS dc-x/human:12 from devcloud@dc-x → @you]']) {
+      expect(readArrivals(inbox(`${frame}\nThe box is up.`, { kind: 'peer', from: 'unknown', name: 'devcloud@dc-x' })).map(said), frame).toEqual(['peer by inbox: devcloud@dc-x › The box is up.']);
+      // the inbox names its sender by the envelope's `from-name`, not the frame's alias: without one it is still a peer's
+      expect(readArrivals(inbox(`${frame}\nThe box is up.`, { kind: 'peer', from: 'unknown' })), frame).toMatchObject([{ class: 'peer', frame, body: 'The box is up.', replyTo: null }]);
+      expect(readArrivals(seatPrompt(`${frame}\nThe box is up.`)).map(said), frame).toEqual(['peer by prompt: devcloud@dc-x › The box is up.']);
+    }
+  });
+
   it('the owner’s words that alone read as the engine’s interrupt marker keep their frame line', () => {
     expect(readArrivals(inbox('[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]'))).toEqual([
       { class: 'own', via: 'chat', words: '[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]', frame: '[sminos message from human id=0f0e0d0c]', note: null },
