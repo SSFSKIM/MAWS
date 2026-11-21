@@ -882,8 +882,9 @@ describe('the empty box’s words under the word cut', () => {
     await waitFor(() => expect(handle.current).not.toBeNull());
     await waitFor(() => expect(shownIn(view.container)).toBe(''));
     act(() => useTranscriptStore.setState({ entries: { [APP]: { rows: [{ id: 'n-1', turnId: null, at: '2026-11-21T10:00:00.000Z', kind: 'notice', text: 'Resumed' }] } as never } }));
-    act(() => handle.current!.refreshPlaceholder());
-    await waitFor(() => expect(shownIn(view.container)).toBe('Ask a follow-up…'));
+    await waitFor(() => expect(shownIn(view.container)).toBe('Ask a follow-up…')); // the history arriving redraws it, no one asks
+    act(() => useTranscriptStore.setState({ entries: {} }));
+    await waitFor(() => expect(shownIn(view.container)).toBe(''));
     view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" suggestion="MODS_PROBE_SUGGEST" />);
     act(() => handle.current!.refreshPlaceholder());
     await waitFor(() => expect(shownIn(view.container)).toBe('MODS_PROBE_SUGGEST')); // a suggestion over the turn's words, over its own

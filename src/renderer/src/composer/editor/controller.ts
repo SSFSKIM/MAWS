@@ -299,7 +299,11 @@ export class EditorController {
 
   update(inputs: ControllerInputs): void {
     const before = this.inputs.uploadsTo ?? null;
+    const hadTranscript = this.inputs.hasTranscript;
     this.inputs = inputs;
+    // the word cut (C2): the empty box's words follow the transcript appearing (an existing session's history arriving
+    // after the editor mounted) or going, which nothing else redraws
+    if (hadTranscript !== inputs.hasTranscript && this.editor && !this.editor.isDestroyed) this.editor.view.dispatch(this.editor.state.tr.setMeta('placeholder', true));
     // P5 O7 M4 (fix wave 1): the chat is now to run on another machine: a local drop's mention becomes its upload
     const after = inputs.uploadsTo ?? null;
     if (before === null && after !== null && this.heldDrops.size > 0) {
