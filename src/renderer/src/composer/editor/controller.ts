@@ -1083,13 +1083,22 @@ export class EditorController {
     return {
       // Tiptap's command, in a frame of our own (its own defers a frame too): the frame yields to a menu, dialog or popover
       // opened since the call (⇧⌘M right after a chip's menu gave the keyboard back), which the late focus closed
+      // Focused already, or a view not mounted yet: Tiptap's command itself, which returns before its frame and dispatches
+      // its transaction as ever. Else its call-time part as it does it (the transaction, stored marks kept on a text
+      // selection), and the focus and scroll in our frame.
       focus: () => {
         const tiptap = editor();
+        let deferred = false;
         try {
-          if (tiptap.view.hasFocus()) return;
+          deferred = !tiptap.view.hasFocus();
         } catch {
-          return; // a view not mounted yet: nothing to focus
+          // not mounted: the command's own guard answers
         }
+        if (!deferred) return void tiptap.commands.focus();
+        tiptap.commands.command(({ tr }) => {
+          if (tr.selection instanceof TextSelection && tr.storedMarks) tr.setStoredMarks(tr.storedMarks);
+          return true;
+        });
         const asked = overlayHolding();
         requestAnimationFrame(() => {
           if (tiptap.isDestroyed) return;

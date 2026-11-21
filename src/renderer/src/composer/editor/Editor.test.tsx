@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import type { Transaction } from '@tiptap/pm/state';
 import { EditorView } from '@tiptap/pm/view';
+import type { Editor as TiptapEditor } from '@tiptap/react';
 import { createRef, type RefObject } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { consentMessage } from '@shared/engine/arrival';
@@ -1616,5 +1617,23 @@ describe('the handle’s focus at its frame', () => {
     handle.focus();
     expect(frames).toHaveLength(0);
     expect(document.activeElement).toBe(content);
+  });
+
+  // Tiptap's command dispatches its transaction at the call, focused or not (a stale suggestion is cleared by it)
+  it('dispatches a transaction at the call, with the editor focused and before the frame when it is not', async () => {
+    const { handle, content, button, frames } = await mounted();
+    const tiptap = (content as HTMLElement & { editor: TiptapEditor }).editor;
+    const seen = vi.fn();
+    tiptap.on('transaction', seen);
+    onTestFinished(() => void tiptap.off('transaction', seen));
+    act(() => content.focus());
+    seen.mockClear(); // the focus's own selection read
+    handle.focus();
+    expect(seen).toHaveBeenCalledTimes(1);
+    act(() => button('Asker').focus());
+    seen.mockClear();
+    handle.focus();
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(1); // the focus itself still to come
   });
 });
