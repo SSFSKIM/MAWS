@@ -15,7 +15,9 @@
 // cancelled before its handler (which skips a prevented event), and so is its focus while there is no content: a tip
 // with no content opens nothing and closes no other tooltip. One tip shows at a time. Content that arrives while its
 // owner is already pointed at or focused shows on the next pointing or focus; it is in the owner's description at
-// once. The content stays hoverable (WCAG 1.4.13): Radix keeps it open while the pointer crosses into it.
+// once. The content stays hoverable (WCAG 1.4.13): Radix keeps it open while the pointer crosses into it. Escape and a
+// press close it; a close Radix asks for while the owner still holds focus (its
+// close on an ancestor's scroll, which the focus itself causes when the owner was out of view) is not taken.
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
@@ -44,6 +46,8 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
   if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
   const showsNow = useRef(shows);
   const pointing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trigger = useRef<HTMLElement>(null);
+  const dismissed = useRef(false); // Escape or a press: the person's close, which focus on the owner does not hold off
   const stopPointing = () => {
     if (pointing.current !== null) clearTimeout(pointing.current);
     pointing.current = null;
@@ -84,8 +88,19 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
       : cloneElement(children, { 'aria-describedby': own });
   return (
     <Tooltip.Provider delayDuration={POINTING_DELAY_MS}>
-      <Tooltip.Root open={drawn} onOpenChange={(next) => setOpen(next && showsNow.current)}>
+      <Tooltip.Root
+        open={drawn}
+        onOpenChange={(next) => {
+          const dismissal = dismissed.current;
+          dismissed.current = false;
+          // A close while the owner still holds focus is Radix's own, not the person's (the scroll its own focus
+          // caused, which Radix reads as the owner moving away): the tip stays while its owner is focused.
+          if (!next && !dismissal && trigger.current !== null && trigger.current.contains(document.activeElement)) return;
+          setOpen(next && showsNow.current);
+        }}
+      >
         <Tooltip.Trigger
+          ref={trigger}
           asChild
           {...guard}
           onPointerMove={cancel}
@@ -98,13 +113,25 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
             }, POINTING_DELAY_MS);
           }}
           onPointerLeave={stopPointing}
-          onPointerDown={stopPointing}
+          onPointerDown={() => {
+            stopPointing();
+            dismissed.current = true;
+            queueMicrotask(() => (dismissed.current = false)); // a press that closes nothing holds nothing later
+          }}
         >
           {owner}
         </Tooltip.Trigger>
         {shows && (
           <Tooltip.Portal>
-            <Tooltip.Content side="top" sideOffset={4} collisionPadding={8} className={TIP}>
+            <Tooltip.Content
+              side="top"
+              sideOffset={4}
+              collisionPadding={8}
+              className={TIP}
+              onEscapeKeyDown={() => {
+                dismissed.current = true;
+              }}
+            >
               {content}
             </Tooltip.Content>
           </Tooltip.Portal>

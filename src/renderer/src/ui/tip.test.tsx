@@ -1,7 +1,7 @@
 // A word's or a glyph's tooltip that the keyboard reaches (the word cut, rule 5): shown on pointing after the short
 // delay and at once on keyboard focus, its words the owner's accessible description at rest; and a greyed control drawn
 // `aria-disabled`, still focusable, with its reason as that tooltip.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accessibleText } from '../test-support/accessible-text';
@@ -65,6 +65,20 @@ describe('Tip', () => {
     expect(tooltip()).toBe(FACT);
     await keys.tab();
     expect(tooltip()).toBeNull();
+  });
+});
+
+describe('Tip under the keyboard', () => {
+  it('stays open through the scroll its owner’s focus causes', async () => {
+    render(
+      <div data-testid="scroller">
+        <Chip />
+      </div>,
+    );
+    await user().tab();
+    expect(tooltip()).toBe(FACT);
+    fireEvent.scroll(screen.getByTestId('scroller')); // Chromium scrolls an offscreen owner into view as it takes focus
+    expect(tooltip()).toBe(FACT);
   });
 });
 
