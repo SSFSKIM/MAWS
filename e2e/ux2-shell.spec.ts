@@ -902,7 +902,12 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await menu(maws.app, 'region.focusNext');
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-region="cards"]') !== null)).toBe(true);
   await openSurface(page, 'Files');
-  await composer.focus();
+  // Showing a surface hands it the keyboard (SurfaceRow's focusShown: F6's stop two frames later, Files' tree once its
+  // listing answers), until the person's next key or pointer press. A focus() is neither, so a late hand-over could move
+  // the keyboard back into the column and F6 would go on from there to the sidebar (ticket 729's second red). A click on
+  // the composer is the person's press: it ends the hand-over, and the keyboard is where the person put it.
+  await composer.click();
+  await expect(composer, 'the keyboard in the composer').toBeFocused();
   await menu(maws.app, 'region.focusNext');
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-panel-content]') !== null)).toBe(true);
   // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, M4; L7): ten invented files kept
@@ -954,8 +959,16 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   // front, wholly in view, so neither the click nor keeping the tab in front in view moves the strip: after Back only the
   // restored offset puts it back where it was, since the clamp left it short of that. (The first Mac run: the strip's
   // last tab cannot be in view 40 px short of the strip's end, which its own last 40 px are.)
-  await openSurface(page, 'Background tasks');
   const list = page.locator('[data-chrome-tabs] [role="tablist"]');
+  const widthBefore = await list.evaluate((el) => el.clientWidth);
+  await openSurface(page, 'Background tasks');
+  // Ticket 729: the column narrows the strip once, and the strip's observer delivers that resize a frame or more later,
+  // scrolling the tab in front (Diagnostics, the strip's last) back into view: the one reveal still due once the column
+  // is open. Until it runs the narrowed strip keeps its old, smaller offset, a column's width short of its new end; after
+  // it the strip is at its end. Settle on that state before reading the overflow, so no reveal is left to undo the
+  // offset set below, and the polls after it still fail on anything else that moves the strip.
+  await expect.poll(() => list.evaluate((el, before) => el.clientWidth < before && el.scrollWidth - el.clientWidth - el.scrollLeft < 1, widthBefore),
+    { message: 'the narrowed strip shows the tab in front at its end' }).toBe(true);
   const overflow = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow, 'the strip overflows by more than the step short of its end').toBeGreaterThan(80);
   // the offset the scene sets is known, so every read below waits on that value, not on two reads agreeing
