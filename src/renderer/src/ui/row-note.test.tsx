@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOSE_MOTION } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
-import { RowNote, useRowNote, type RowNoteForm } from './row-note';
+import { RowNote, useRowNote } from './row-note';
 import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { UnavailableButton } from './tip';
@@ -23,13 +23,13 @@ afterEach(() => {
 const user = () => userEvent.setup({ delay: null });
 const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 
-function Row({ form, label = 'Archive', note = NOTE }: { form?: RowNoteForm; label?: string; note?: string }) {
+function Row({ label = 'Archive', note = NOTE }: { label?: string; note?: string }) {
   const rowNote = useRowNote();
   return (
     <div role="group" aria-label={label} {...rowNote.rowProps}>
       <span>{label}</span>
       <button type="button">Open {label}</button>
-      <RowNote note={rowNote} form={form}>
+      <RowNote note={rowNote}>
         {note}
       </RowNote>
     </div>
@@ -145,15 +145,15 @@ describe('the row note', () => {
   });
 
   it('moving down onto the next row closes the first row’s note and opens the next one’s after its delay', async () => {
-    // happy-dom does no hit-testing: under the overlay placement the floating note lets the pointer through
-    // (note-overlay:pointer-events-none), so the pointer moving down lands on the next row, as here.
+    // happy-dom does no hit-testing: the floating note lets the pointer through (pointer-events-none), so the pointer
+    // moving down lands on the next row, as here.
     render(
       <>
         <Row label="Archive" />
         <Row label="Restore" note="Restored sessions return to their project." />
       </>,
     );
-    expect(screen.getByText(NOTE).closest('[data-row-note]')!.className).toContain('note-overlay:pointer-events-none');
+    expect(screen.getByText(NOTE).closest('[data-row-note]')!.className).toContain('pointer-events-none');
     const pointer = user();
     await pointer.hover(row('Archive'));
     wait(POINTING_DELAY_MS);
@@ -210,26 +210,62 @@ describe('the row note', () => {
   });
 });
 
-describe('the pointed-row line', () => {
-  it('keeps its line’s place at rest without drawing it, and is the row’s description', () => {
-    render(<Row form="line" />);
-    expect(screen.getByText(NOTE).hasAttribute('hidden')).toBe(false); // its height stays in the row
-    expect(accessibleText(row())).toBe('ArchiveOpen Archive');
-    expect(screen.getByRole('group', { name: 'Archive', description: NOTE })).toBe(row());
+// The note floats over the rows that follow, so no row moves; it opens upward where opening down would pass the bottom
+// of the scroll area it sits in, and there is room above. happy-dom has no layout: the boxes and the note's height are
+// given.
+describe('where the floating note opens', () => {
+  const box = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const place = (row: DOMRect) => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 60 });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.testid === 'scroller') return box(0, 400);
+      if (this.getAttribute('role') === 'group') return row;
+      return box(0, 0);
+    });
+  };
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+  });
+  const inScroller = () => (
+    <div data-testid="scroller" style={{ overflowY: 'auto' }}>
+      <Row />
+    </div>
+  );
+  const side = () => screen.getByText(NOTE).closest('[data-row-note]')!.getAttribute('data-side');
+
+  it('opens down, under its row, where there is room below', async () => {
+    place(box(100, 34));
+    render(inScroller());
+    await user().tab();
+    expect(shown()).toBe(true);
+    expect(side()).toBe('down');
   });
 
-  it('shows on pointing after the short delay and at once on keyboard focus', async () => {
-    render(<Row form="line" />);
-    const keys = user();
-    await keys.hover(row());
-    wait(POINTING_DELAY_MS - 1);
-    expect(shown()).toBe(false);
-    wait(1);
+  it('opens upward near the bottom of its scroll area, over the row above, so it is not cut off', async () => {
+    place(box(340, 34)); // 374 + 60 passes 400; 340 - 60 has room
+    render(inScroller());
+    await user().tab();
     expect(shown()).toBe(true);
-    await keys.unhover(row());
-    expect(shown()).toBe(false); // a reserved line has no close motion
-    await keys.tab();
-    expect(shown()).toBe(true);
+    expect(side()).toBe('up');
+  });
+
+  it('opens down where there is room neither way, inside the scroll area', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 600 });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.testid === 'scroller') return box(0, 400);
+      if (this.getAttribute('role') === 'group') return box(200, 34);
+      return box(0, 0);
+    });
+    render(inScroller());
+    await user().tab();
+    expect(side()).toBe('down');
+  });
+
+  it('takes no room in its row at rest or open: it is placed out of the flow', async () => {
+    render(<Row />);
+    const note = screen.getByText(NOTE).closest('[data-row-note]')!;
+    expect(note.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'top-full', 'pointer-events-none']));
   });
 });
 

@@ -4,19 +4,18 @@
 // (G15). Its element stays mounted, hidden at rest, so the row's `aria-describedby` reads it at all times. No frame is
 // waited on: a hidden window draws none, and the reveal must hold without a repaint.
 //
-// Two forms. A `note` (a row's helper text) takes no height at rest and opens under the row with the shared disclosure
-// motion, pushing the rows below down (the placement the owner accepted on Settings). A `line` (a second line under a
-// row's name: a plugin's description) keeps its line's height at rest, undrawn, and is drawn in place (the placement the
-// owner accepted on plugin rows). The prototype placement: under `[data-note-placement="overlay"]` on the document root
-// (the `note-overlay` variant, styles/app.css), both float at the row's lower edge over what follows, so nothing under
-// the pointer moves and no height is spent at rest. The float lets the pointer through to the row it covers, so moving
-// down leaves the row the note belongs to; its words are then read, not pointed into. The row the note belongs to is
-// `relative` for it.
-import { useEffect, useId, useRef, useState, type FocusEvent as ReactFocusEvent, type PointerEvent, type ReactNode } from 'react';
+// It floats over the rows that follow (the owner's choice of 2026-11-20 between the two placements, shown as pictures):
+// nothing under the pointer moves and no height is spent at rest, open or closed. It is placed at its row's lower edge
+// (its parent, which is `relative`), above what follows, and lets the pointer through to the row it covers, so moving
+// down leaves the row it belongs to; its words are read, not pointed into. It opens with the shared disclosure motion.
+// Where opening down would pass the bottom of the scroll area it sits in (the nearest ancestor that clips, else the
+// window), and there is room above, it opens upward over the row above instead (`data-side="up"`); where there is room
+// neither way it opens down, inside the scroll area, which scrolls to it. The side is read when it opens, from layout
+// alone, and written to the element, not rendered. The pointed-row line (a plugin's description under its name) is
+// this same note: both float.
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { useDisclosureMotion } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
-
-export type RowNoteForm = 'note' | 'line';
 
 export interface RowNoteRowProps {
   'aria-describedby': string;
@@ -94,34 +93,41 @@ export function useRowNote(): RowNoteState {
   };
 }
 
-// A note's outer element is placed and moved, its inner one drawn: the outer carries no border, so the height the
-// motion opens to is the height it rests at. A line is one element, placed and drawn, whose words are text: it rests
-// `visibility: hidden`, which its descendants inherit, and a description is read through a hidden element's own text.
-const PLACE = 'flow-root note-overlay:pointer-events-none note-overlay:absolute note-overlay:inset-x-0 note-overlay:top-full note-overlay:z-10';
-const NOTE = 'mt-1 mb-1 w-fit max-w-[30rem] rounded-md border border-border-strong bg-bg-overlay px-2.5 py-1.5 text-ui-sm leading-normal text-fg-muted [overflow-wrap:anywhere] note-overlay:mt-0.5 note-overlay:shadow-float';
-const LINE = 'text-ui-sm leading-normal text-fg-muted [overflow-wrap:anywhere] note-overlay:mt-0.5 note-overlay:w-fit note-overlay:max-w-[30rem] note-overlay:rounded-md note-overlay:border note-overlay:border-border-strong note-overlay:bg-bg-overlay note-overlay:px-2.5 note-overlay:py-1.5 note-overlay:shadow-float';
+// The outer element is placed and moved, its inner one drawn: the outer carries no border, so the height the motion
+// opens to is the height it rests at; its padding keeps the card off the row's edge either way it opens.
+const PLACE = 'pointer-events-none absolute inset-x-0 top-full z-10 flow-root py-0.5 data-[side=up]:top-auto data-[side=up]:bottom-full';
+const NOTE = 'w-fit max-w-[30rem] rounded-md border border-border-strong bg-bg-overlay px-2.5 py-1.5 text-ui-sm leading-normal text-fg-muted shadow-float [overflow-wrap:anywhere]';
 
-// `className` places the note in its row (a grid column, an indent); the note draws itself. A line's children are text.
-export function RowNote({ note, form = 'note', className = '', children }: { note: RowNoteState; form?: RowNoteForm; className?: string; children: ReactNode }) {
-  if (form === 'line')
-    return (
-      <div id={note.id} data-row-note="line" data-open={note.open || undefined} style={note.open ? undefined : RESERVED} className={`${PLACE} ${LINE} ${className}`}>
-        {children}
-      </div>
-    );
-  return (
-    <FoldingNote note={note} className={className}>
-      {children}
-    </FoldingNote>
-  );
-}
-const RESERVED = { visibility: 'hidden' } as const;
-
-function FoldingNote({ note, className, children }: { note: RowNoteState; className: string; children: ReactNode }) {
+// `className` places the note in its row (a grid column, an indent); the note draws itself.
+export function RowNote({ note, className = '', children }: { note: RowNoteState; className?: string; children: ReactNode }) {
   const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(note.open);
+  useOpeningSide(note.open, ref);
   return (
-    <div ref={ref} id={note.id} data-row-note="note" data-open={note.open || undefined} hidden={!mounted} className={`${PLACE} ${className}`}>
+    <div ref={ref} id={note.id} data-row-note="" data-side="down" data-open={note.open || undefined} hidden={!mounted} className={`${PLACE} ${className}`}>
       <div className={NOTE}>{children}</div>
     </div>
   );
+}
+
+function useOpeningSide(open: boolean, ref: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const row = element?.parentElement;
+    if (!open || !element || !row) return;
+    const below = row.getBoundingClientRect();
+    const height = element.scrollHeight;
+    const clip = clipOf(row);
+    element.dataset.side = below.bottom + height > clip.bottom && below.top - height >= clip.top ? 'up' : 'down';
+  }, [open, ref]);
+}
+
+// The box that cuts the note off: the nearest ancestor whose overflow clips, else the window.
+function clipOf(from: HTMLElement): { top: number; bottom: number } {
+  for (let node = from.parentElement; node !== null; node = node.parentElement) {
+    if (getComputedStyle(node).overflowY !== 'visible') {
+      const box = node.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom };
+    }
+  }
+  return { top: 0, bottom: window.innerHeight };
 }
