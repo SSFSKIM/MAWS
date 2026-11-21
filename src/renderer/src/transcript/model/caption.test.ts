@@ -349,7 +349,7 @@ describe('the parts, by hand', () => {
     expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), named('used notion · search', 'used notion'), named('used notion · create_page', 'used notion'), named('ran /dataviz', 'ran /dataviz')]), true))
       .toBe('Ran a command, used notion · search, ran /dataviz, +1');
     // uncapped, every part reads its own words
-    expect(captionText(parts, false)).toBe('Edited a, ran a command, searched code, ran /dataviz 2 times, used notion · search, used notion · create_page, updated todos');
+    expect(captionText(parts, false)).toBe('Edited a, ran a command, searched code, updated todos, ran /dataviz 2 times, used notion · search, used notion · create_page');
   });
 });
 
