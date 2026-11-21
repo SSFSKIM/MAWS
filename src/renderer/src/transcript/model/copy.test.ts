@@ -263,8 +263,8 @@ describe('subagent and boundary copy', () => {
     expect(BLOCKED.always.call).toBe('A rule always denies this call. Change the rule or the mode to run it.');
     expect(compactingLine('')).toBe('Compacting…');
     expect(compactingLine('12s')).toBe('Compacting… 12s');
-    expect(ARTIFACT_CELL.screenshot({ title: 'Q3 plan', version: 3, width: 1280, height: 800 }, 'a1')).toBe('Screenshot of Q3 plan');
-    expect(ARTIFACT_CELL.screenshot({ title: 'Q3 plan', revision: 2, width: 1280, height: 800 }, 'a1')).toBe('Screenshot of Q3 plan');
+    const shots = [{ title: 'Q3 plan', version: 3, width: 1280, height: 800 }, { title: 'Q3 plan', revision: 2, width: 1280, height: 800 }]; // as the call's result reads
+    for (const shot of shots) expect(ARTIFACT_CELL.screenshot(shot, 'a1')).toBe('Screenshot of Q3 plan');
     expect(ARTIFACT_CELL.screenshot(null, 'a1')).toBe('Screenshot of a1');
   });
 
