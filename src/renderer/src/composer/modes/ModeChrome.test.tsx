@@ -7,6 +7,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
+import { createRef } from 'react';
+import { Editor, type DraftPort, type EditorHandle } from '../editor/Editor';
 import { ModeChrome } from './ModeChrome';
 
 const APP = at('app-1' as AppSessionId);
@@ -26,9 +28,14 @@ afterEach(() => {
 });
 
 describe('the mode decoration', () => {
-  it('draws the Bash chip alone in bash mode', () => {
-    const view = render(<ModeChrome appSessionId={APP} mode="bash" />);
-    expect(view.container.textContent).toBe('Bash');
+  it('draws the Bash chip alone once a leading ! puts the real message box in bash mode, the command still empty', async () => {
+    const handle = createRef<EditorHandle>();
+    const drafts: DraftPort = { load: async () => null, save: async () => true };
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={drafts} client={fake.client} handle={handle} />);
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    act(() => handle.current!.insertText('!'));
+    const chip = await screen.findByText('Bash');
+    expect(chip.parentElement!.textContent).toBe('Bash'); // no line beside it on where the command runs
   });
 
   it('opens the Memory chip’s menu onto the memory files, under no heading', async () => {

@@ -21,15 +21,11 @@ import { useSessions } from '../../stores/sessions';
 import { openCustomize } from '../../customize/open';
 import { useConnectorMenu } from '../../widgets/connector-menu'; // UX wave U11a: the Connectors submenu's rows and line
 import { QuietSpinner } from '../../ui/spinner';
+import { PLUS_MENU } from '../copy';
 import { Tip } from '../../ui/tip';
 
 const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none select-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
 const NO_DIRECTORIES: ChipBinding<string[]> = { value: [], options: [], disabled: 'No session to add a directory to', set: async () => ({ ok: false, error: 'No session to add a directory to' }) };
-export const PLUS_MENU = {
-  noPlugins: 'No plugins',
-  inThisChat: 'In this chat…',
-  manage: 'Manage…',
-};
 
 export interface PlusMenuProps {
   appSessionId?: AppSessionId;

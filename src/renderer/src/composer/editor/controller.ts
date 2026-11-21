@@ -31,6 +31,7 @@ import { UNREAD, type Unread } from './unread'; // UX wave U6b-5a
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { FOLLOW_UP_PLACEHOLDER } from '../copy'; // the word cut (C2)
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -119,7 +120,7 @@ export interface ControllerInputs {
   disabled: string | null;
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
-  followUp: boolean;
+  hasTranscript: boolean; // the session's transcript draws rows: its empty box asks for a follow-up
   onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
@@ -151,8 +152,6 @@ export interface ControllerView {
 }
 
 const HISTORY_LIMIT = 200;
-// The empty box's words once the session has a message of yours; a new chat's box says nothing (the word cut, C2)
-const FOLLOW_UP_PLACEHOLDER = 'Ask a follow-up…';
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
 
 // E3 start: the composer's refusals of a `/btw` draft it will not ask (submit below)
@@ -316,7 +315,7 @@ export class EditorController {
   }
 
   env(): EditorEnv {
-    const { appSessionId, cwd, additionalDirectories, catalog, widgets, followUp } = this.inputs;
+    const { appSessionId, cwd, additionalDirectories, catalog, widgets, hasTranscript } = this.inputs;
     return {
       appSessionId,
       cwd,
@@ -324,7 +323,7 @@ export class EditorController {
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
       searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
-      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? FOLLOW_UP_PLACEHOLDER : ''), // R2: a plugin's suggestion; UX wave U4a: the turn's; the word cut (C2): a new chat's empty box says nothing
+      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (hasTranscript ? FOLLOW_UP_PLACEHOLDER : ''), // R2: a plugin's suggestion; UX wave U4a: the turn's; the word cut (C2): an empty new chat's box says nothing
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => void this.openWidget(name, args),

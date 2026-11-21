@@ -142,7 +142,7 @@ export function SlashPalette(props: PopupProps) {
   const detail = hasDetail(highlighted);
   return (
     <>
-      <Listbox label="Commands" activeId={optionId(active)} size="slash" revealKey={rows}>
+      <Listbox label="Commands" activeId={optionId(active)} editor={props.editor} size="slash" revealKey={rows}>
         {rows.map((row, index) => (
           <div
             key={row.key}

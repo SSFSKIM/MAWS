@@ -7,12 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { HolderActions } from '../sessions/HolderActions'; // C10
 import { Tip } from '../ui/tip';
-
-export const HOLDER_NOTICE = {
-  terminal: 'Live in Terminal · read-only',
-  backgroundJob: 'Live as background job · read-only',
-  pid: (pid: number) => `pid ${pid}`, // the line's tooltip and description
-};
+import { HOLDER_NOTICE } from './copy';
 
 export function HolderNotice({ appSessionId, holder, reason = null }: { appSessionId: AppSessionId; holder: Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>; reason?: string | null }) {
   const pid = holder.pid === null ? null : HOLDER_NOTICE.pid(holder.pid);

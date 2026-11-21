@@ -10,7 +10,7 @@ import type { Editor, Range } from '@tiptap/core';
 import type { PluginKey } from '@tiptap/pm/state';
 import { ReactRenderer } from '@tiptap/react';
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionOptions, type SuggestionProps } from '@tiptap/suggestion';
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { EditorEnv, PopupContext } from '../editor/env';
 
 // A row of either list: what it shows and what choosing it does to the document.
@@ -159,9 +159,34 @@ const SIZE = {
   slash: 'max-h-[min(24rem,var(--popup-available-height,24rem))] w-max max-w-[min(32rem,80vw)] min-w-60',
 } as const;
 
-// `revealKey` changes with the rows, so a filtered list reveals its active row even when its id is unchanged.
-export function Listbox({ label, activeId, size = 'at', revealKey, children }: { label: string; activeId: string | undefined; size?: keyof typeof SIZE; revealKey?: unknown; children: ReactNode }) {
+// The message box the list belongs to: the editor's element, once the editor has one (a test's stand-in has none).
+const boxOf = (editor: Editor | undefined): HTMLElement | null => {
+  const dom = (editor as { view?: { dom?: unknown } } | undefined)?.view?.dom;
+  return dom instanceof HTMLElement ? dom : null;
+};
+
+// `revealKey` changes with the rows, so a filtered list reveals its active row even when its id is unchanged. The focus
+// stays in the message box, so the box names the list it controls and its active row (`aria-controls`,
+// `aria-activedescendant`, which a textbox takes) while the list is open: assistive technology hears the row the arrows
+// reach and its description (the word cut, C54). Both leave the box with the list.
+export function Listbox({ label, activeId, editor, size = 'at', revealKey, children }: { label: string; activeId: string | undefined; editor?: Editor; size?: keyof typeof SIZE; revealKey?: unknown; children: ReactNode }) {
   const list = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  useLayoutEffect(() => {
+    const box = boxOf(editor);
+    if (box === null) return;
+    box.setAttribute('aria-controls', listId);
+    return () => {
+      box.removeAttribute('aria-controls');
+      box.removeAttribute('aria-activedescendant');
+    };
+  }, [editor, listId]);
+  useLayoutEffect(() => {
+    const box = boxOf(editor);
+    if (box === null) return;
+    if (activeId) box.setAttribute('aria-activedescendant', activeId);
+    else box.removeAttribute('aria-activedescendant');
+  }, [editor, activeId]);
   useLayoutEffect(() => {
     const row = activeId ? list.current?.querySelector<HTMLElement>(`#${CSS.escape(activeId)}`) : null;
     if (list.current && row) revealInList(list.current, row);
@@ -169,6 +194,7 @@ export function Listbox({ label, activeId, size = 'at', revealKey, children }: {
   return (
     <div
       ref={list}
+      id={listId}
       role="listbox"
       aria-label={label}
       aria-activedescendant={activeId}

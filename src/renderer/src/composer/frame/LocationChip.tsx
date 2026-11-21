@@ -9,6 +9,7 @@
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { NamedGlyph } from '../../ui/glyph';
+import { LOCATION_COPY } from '../copy';
 import type { LocationView } from './bindings';
 import { CHIP, focusPopoverItself, NOTE, POPOVER } from './chip-style';
 import { useOpenWhileShown } from './draft-shown';
@@ -26,7 +27,6 @@ export const formatCwd = (directory: string): string => directory.replace(/^\/Us
 // The last segment of the home-abbreviated path: `~` for the home directory itself.
 export const directoryName = (path: string): string => formatCwd(path).split('/').filter(Boolean).at(-1) ?? path;
 
-export const LOCATION_COPY = { copy: 'Copy', copied: 'Copied' };
 const GLYPH = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 
 // Two sheets, the copy glyph; a tick once copied

@@ -19,15 +19,10 @@ import { useSessions } from '../stores/sessions';
 import { FRAME } from '../widgets/copy'; // P2-A
 import { DormantGesture } from '../widgets/DormantGesture'; // P2-A
 import { Tip } from '../ui/tip';
+import { CONTEXT_POPOVER } from './copy';
 import { tokens } from './format';
 
 const SEGMENT = ['bg-fg', 'bg-fg-muted', 'bg-accent', 'bg-fg-faint', 'bg-info'];
-export const CONTEXT_POPOVER = {
-  figures: (used: string, max: string, threshold: string | null) => `${used} of ${max}${threshold === null ? '' : ` · compacts at ${threshold}`}`,
-  // the figures line's tooltip and description
-  usedOnPointing: (percentage: string, left: string | null) => `${percentage}% used${left === null ? '' : ` · ${left} until compaction`}`,
-  compact: 'Compact',
-};
 
 function Breakdown({ usage }: { usage: GetContextUsageResponse }) {
   const threshold = usage.isAutoCompactEnabled ? (usage.autoCompactThreshold ?? null) : null;

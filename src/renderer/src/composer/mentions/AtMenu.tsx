@@ -19,6 +19,7 @@ import { MENTION_BREAKS, slashText } from '../editor/mention-text'; // ticket 73
 import { pathRefusal } from '../editor/paste'; // ticket 733a
 import { mentionLabel } from '../editor/recall';
 import { QuietSpinner } from '../../ui/spinner';
+import { SEARCHING_FILES_NAME } from '../copy';
 import { atItems, type AtItem } from './items';
 import { GroupLabel, Listbox, useDebounced, useListKeys, type PopupItem, type PopupProps } from './popup';
 
@@ -26,7 +27,6 @@ const FILE_LIMIT = 30;
 const ROW_LIMIT = 40;
 type Row = PopupItem & { item: AtItem | null }; // null: the searching row
 const SEARCHING: Row = { key: 'files:searching', disabled: true, item: null, apply: () => {} };
-const SEARCHING_FILES = 'Searching files…'; // the searching row's name and its spinner's, not drawn
 
 function insertMention(editor: Editor, range: Range, id: string, kind: 'file' | 'agent') {
   editor
@@ -148,7 +148,7 @@ export function AtMenu(props: PopupProps) {
   if (rows.length === 0) return null;
   const optionId = (i: number) => `composer-at-${i}`;
   return (
-    <Listbox label="Mention" activeId={optionId(active)} revealKey={rows}>
+    <Listbox label="Mention" activeId={optionId(active)} editor={props.editor} revealKey={rows}>
       {GROUPS.map(({ group, label }) => {
         const inGroup = rows.map((row, index) => ({ row, index })).filter(({ row }) => (row.item?.group ?? 'files') === group);
         if (inGroup.length === 0) return null;
@@ -157,8 +157,8 @@ export function AtMenu(props: PopupProps) {
             <GroupLabel>{label}</GroupLabel>
             {inGroup.map(({ row, index }) =>
               row.item === null ? (
-                <div key={row.key} id={optionId(index)} role="option" aria-label={SEARCHING_FILES} aria-selected={index === active} aria-disabled aria-busy className={`flex h-7 items-center rounded-sm px-2 ${index === active ? 'bg-bg-active' : ''}`}>
-                  <QuietSpinner label={SEARCHING_FILES} />
+                <div key={row.key} id={optionId(index)} role="option" aria-label={SEARCHING_FILES_NAME} aria-selected={index === active} aria-disabled aria-busy className={`flex h-7 items-center rounded-sm px-2 ${index === active ? 'bg-bg-active' : ''}`}>
+                  <QuietSpinner label={SEARCHING_FILES_NAME} />
                 </div>
               ) : (
                 <AtRow key={row.key} id={optionId(index)} item={row.item} active={index === active} onPoint={() => setActive(index)} onChoose={() => choose(row)} />

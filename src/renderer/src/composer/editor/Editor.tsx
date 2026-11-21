@@ -89,7 +89,7 @@ export function Editor(props: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- holder, laneA and laneACatalog are what the port reads
     [appSessionId, client, engineCatalog, registered, holder, laneA, laneACatalog],
   );
-  const followUp = useTranscriptStore((s) => (s.entries[appSessionId]?.rows ?? []).some((r) => r.kind === 'user'));
+  const hasTranscript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ?? 0) > 0); // the word cut (C2): an empty new chat's box says nothing
   const [mode, setMode] = useState<Serialized['mode']>('send');
   const [busy, setBusy] = useState(false);
   const [historyLine, setHistory] = useState<string | null>(null); // UX wave U4a M6
@@ -103,7 +103,7 @@ export function Editor(props: EditorProps) {
     disabled,
     catalog,
     widgets,
-    followUp,
+    hasTranscript,
     onSubmit: props.onSubmit,
     onPrefill: props.onPrefill,
     onDocChange: props.onDocChange,
