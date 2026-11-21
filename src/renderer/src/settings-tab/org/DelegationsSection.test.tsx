@@ -11,7 +11,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DelegationResult, DiscardResult, HubHalfResult, HubKeysRead, OrgDelegationRow, OrgView, ProvisioningSecret, ProvisioningSecretReading, ProvisioningSecretWrite } from '@shared/ipc/schema/org';
-import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer, foot, disclose } from './test-support';
+import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer, foot, disclose, found } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -446,7 +446,7 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
       },
     });
     await delegationsGroup();
-    const destination = row('Code destination');
+    const destination = await found('Code destination'); // in view once read damaged (the word cut, G188)
     expect(await within(destination).findByText('The destination’s file is damaged (version 2 is not this build’s): Reset it, then enter the destination again.')).toBeTruthy();
     expect(within(destination).queryByRole('textbox')).toBeNull(); // never edited over
     expect(within(foot('new-delegation')).getByText('Reset the code destination below first.')).toBeTruthy();
