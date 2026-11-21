@@ -130,6 +130,34 @@ describe('words?', () => {
     expect(await decide(head, event, [A], { access: 'private', shares: [{ member: B, grade: 'converse' }] })).toBe('words');
   });
 
+  // X8: a machine's notice (a `human` event under the machine's human writer whose `notice` names a program) is never a
+  // person's words; the operator path answers `peer` where it would answer `words`.
+  describe('a machine’s notice (X8)', () => {
+    const machineHuman = (extra: Record<string, unknown> = {}, writer = `${NAME}/human`) =>
+      ({ kind: 'human', from: 'human', writer, seq: 1, ts: new Date().toISOString(), to: [{ session: S, alias: 'bob' }], text: 'the box is up', ...extra }) as Record<string, unknown> & { writer: string; seq: number };
+
+    it('is peer on the operator path, where the same event without `notice` is words', async () => {
+      const { A, head } = await org();
+      expect(await decide(head, machineHuman(), [A], {})).toBe('words');
+      expect(await decide(head, machineHuman({ notice: 'devcloud' }), [A], {})).toBe('peer');
+      expect(await decide(head, machineHuman({ notice: 'Not A Program' }), [A], {})).toBe('peer');
+    });
+
+    it('is peer in the machine human writer’s audience stream too', async () => {
+      const { A, B, head } = await org();
+      const writer = streamWriter(`${NAME}/human`, [A, B].sort());
+      expect(await decide(head, machineHuman({}, writer), [A], {})).toBe('words');
+      expect(await decide(head, machineHuman({ notice: 'devcloud' }, writer), [A], {})).toBe('peer');
+    });
+
+    it('marks nothing on another kind or as an empty string: the verdict is today’s', async () => {
+      const { A, head } = await org();
+      expect(await decide(head, machineHuman({ notice: '' }), [A], {})).toBe('words');
+      expect(await decide(head, machineHuman({ kind: 'say', notice: 'devcloud' }), [A], {})).toBe('words');
+      expect(await decide(head, machineHuman({ notice: 'devcloud' }), [memberId()], {})).toBe('peer'); // no machine owner: peer as before
+    });
+  });
+
   it('answers no remote words past the head’s 30-day backstop (finding 2)', async () => {
     const issued = iso(Date.now() - 31 * 86_400_000);
     const { b1, A, B, head } = await org({ issued });

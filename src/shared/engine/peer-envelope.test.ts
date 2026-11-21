@@ -2,7 +2,7 @@
 // C8b's recorded hand-back (test/fixtures/engine/handback-pointer.jsonl) and SPEC 38 §38.23's literals.
 import { describe, expect, it } from 'vitest';
 import { loadEngineJournal, loadJournal, loadTranscript } from '../../../test/support/fixtures';
-import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
+import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
 import { sendMessageOutcome } from './peer-envelope'; // E7 M2
 
 const frameOf = (rows: ReturnType<typeof loadJournal>, seq: number) => rows.find((row) => row.seq === seq)!.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
@@ -269,6 +269,28 @@ describe('sminosFrameOwners', () => {
     expect(sminosFrameSender('[sminos chat MAWS 0a1b2c3d:4 from a → b → @you]')).toBe('a → b');
     expect(sminosFrameSender('[sminos message from my agent (b) id=5e551e17]')).toBe('my agent (b)');
     expect(sminosFrameOwners('[sminos message from my agent (b) id=5e551e17]')).toBeNull();
+  });
+});
+
+// X8: sminos delivers a machine's notice as a peer's frame whose sender is `<program>@<machine>`, with no reply line.
+// No product change: these pin that the reader takes it whole, as that sender's, never `human`.
+describe('a machine’s notice as sminos delivers it (X8)', () => {
+  const LABELLED = '[sminos chat MAWS dc-x/human:12 from devcloud@dc-x, owned by sm → @you | unread 3]';
+  const BARE = '[sminos chat MAWS dc-x/human:12 from devcloud@dc-x → @you]';
+
+  it('is a whole frame whose alias is the notice’s sender, with or without the label and the unread count', () => {
+    expect(sminosFrameSender(LABELLED)).toBe('devcloud@dc-x, owned by sm');
+    expect(sminosFrameAlias(LABELLED)).toBe('devcloud@dc-x');
+    expect(sminosFrameOwners(LABELLED)).toEqual({ alias: 'devcloud@dc-x', owners: ['sm'] });
+    expect(sminosFrameSender(BARE)).toBe('devcloud@dc-x');
+    expect(sminosFrameAlias(BARE)).toBe('devcloud@dc-x');
+  });
+
+  it('reads its text with no reply line after it, and inside the envelope that names it', () => {
+    for (const frame of [LABELLED, BARE]) {
+      expect(sminosParts(`${frame}\nThe box is up.`), frame).toEqual({ frame, body: 'The box is up.', note: null });
+      expect(parsePeerMessage(ENVELOPE('from="unknown" from-name="devcloud@dc-x"', `${frame}\nThe box is up.`)), frame).toMatchObject({ kind: 'cross-session', fromName: 'devcloud@dc-x', frame, body: 'The box is up.' });
+    }
   });
 });
 

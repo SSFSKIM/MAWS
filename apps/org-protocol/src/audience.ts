@@ -1,7 +1,8 @@
 // Message reach (P5 O18, docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md, Interfaces §A): what an event
-// names of sessions, the `unlisted` transition notice, and the hub's tombstone of a position it withheld. The stream
+// names of sessions, the `unlisted` transition notice, and the hub's tombstone of a position it withheld; and X8's
+// machine's notice (`noticeOf`, `noticeSender`), which the endpoint's `words?` and the app's channel read alike. The stream
 // names themselves (`audienceDigest`, `streamOf`, `isAudience`) are in names.ts, beside the writer grammar.
-import { isAudience, isLogSeq, streamOf, writerMachine } from './names.ts';
+import { isAudience, isLogSeq, isMachineName, streamOf, writerMachine } from './names.ts';
 
 /** A session an event names (D4): `addressing` joins its audience's intersection; `provenance` never widens what a
  * session's id reaches, and is redacted when that session's audience does not contain the event's. `path` names the
@@ -28,6 +29,36 @@ export function writerSession(writer: unknown): string | null {
   if (machine === null) return null;
   const session = base.slice(machine.length + 1);
   return session === '' || session === 'human' ? null : session;
+}
+
+/** A machine's notice's program name as sminos shows it; one that doesn't fit is shown as `notice`. */
+export const NOTICE_PROGRAM = /^[a-z][a-z0-9-]{0,31}$/;
+
+/**
+ * The program a machine's notice names (X8), or null for any event that is no notice. A notice is a `human` event under
+ * a machine's human writer (`<machine>/human`, or its audience stream `<machine>/human~<digest>`), never `hub/<member>`,
+ * whose `notice` is a non-empty string. It is never a person's words: every reader of what a person said reads it as
+ * the machine's notice. The field on any other kind or under any other writer marks nothing.
+ */
+export function noticeOf(event: unknown): string | null {
+  if (!isObject(event) || event.kind !== 'human' || typeof event.notice !== 'string' || event.notice === '') return null;
+  return humanWriterMachine(event.writer) === null ? null : event.notice;
+}
+
+/** Who a machine's notice says spoke: `<program>@<machine>`, `notice@<machine>` for a program outside the grammar; null for no notice. */
+export function noticeSender(event: unknown): string | null {
+  const program = noticeOf(event);
+  if (program === null) return null;
+  return `${NOTICE_PROGRAM.test(program) ? program : 'notice'}@${humanWriterMachine((event as { writer: string }).writer)}`;
+}
+
+/** The machine a machine's human writer (`<machine>/human` or its stream) names; null for any other writer, one whose
+ * machine is outside the machine-name grammar (`Legacy/human`, a name with a space) included. */
+function humanWriterMachine(writer: unknown): string | null {
+  if (typeof writer !== 'string') return null;
+  const { base } = streamOf(writer);
+  const machine = writerMachine(base);
+  return machine !== null && isMachineName(machine) && base === `${machine}/human` ? machine : null;
 }
 
 /**

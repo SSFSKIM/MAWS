@@ -19,10 +19,15 @@
 //     granting nothing.
 //   - anything else (unsigned, v1): `peer`.
 //
+// A machine's notice (X8: a `human` event under the machine's human writer, `<machine>/human` or its audience stream,
+// whose `notice` names the program that speaks; `noticeOf`) is never a person's words: wherever the rules above answer
+// `words`, it is `peer`, and `refuse` stays `refuse`. Today that is the operator path's (a `hub/` writer is never a
+// notice), but the rule is applied to the verdict, not to one path.
+//
 // `words?` names the project whose log holds the event (`project`, required): sminos's `say` copies one message into
 // two projects' logs, so the session's member's project is no stand-in. One without a project is `refuse`.
 import { createHash } from 'node:crypto';
-import { eventSigningInput, HUB_WRITER_PREFIX, isHubWriter, isIsoMillis, isLogSeq, isSig, machineNameKey, streamOf, verifyEvent, writerMachine, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
+import { eventSigningInput, HUB_WRITER_PREFIX, isHubWriter, isIsoMillis, isLogSeq, isSig, machineNameKey, noticeOf, streamOf, verifyEvent, writerMachine, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
 import { rankAtLeast, sessionRank } from '../grades';
 import { BACKSTOP_MS } from '../org-sync';
 import { resolveOwners } from '../listings';
@@ -48,6 +53,11 @@ export type WordsContext = {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export async function decideWords(ctx: WordsContext, frame: Record<string, unknown>): Promise<Verdict> {
+  const verdict = await decide(ctx, frame);
+  return verdict === 'words' && noticeOf(frame.event) !== null ? 'peer' : verdict;
+}
+
+async function decide(ctx: WordsContext, frame: Record<string, unknown>): Promise<Verdict> {
   const project = frame.project;
   if (typeof project !== 'string' || project === '') return 'refuse';
   const member = typeof frame.session === 'string' ? ctx.members.get(frame.session) : null;
