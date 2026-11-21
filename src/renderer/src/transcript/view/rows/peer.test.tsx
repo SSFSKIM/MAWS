@@ -441,6 +441,36 @@ describe('a ListAgents listing', () => {
     delete (window as { maws?: unknown }).maws;
   });
 
+  // Fix wave (scalpel-2#1): a send that returns after the fold remounted the box reaches the box now shown, which opens
+  // again, empty, rather than staying closed over the sent draft
+  it('lets a send that answers after the listing folded and opened again clear and open the box now shown', async () => {
+    live();
+    const row = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.result('l1', 'Peer sessions (1):\n  repo-b [61303a]  ·  idle');
+    }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
+    let answer!: () => void;
+    const actions: TranscriptActions = { ...spyActions(), replyToPeer: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) };
+    const disclosures = new Disclosures();
+    renderRow(row, { storeKey: A, actions, disclosures });
+    const fold = screen.getByRole('button', { name: 'Listed 1 agent' });
+    fireEvent.click(fold);
+    fireEvent.click(screen.getByRole('button', { name: 'Message repo-b' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'ping' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    expect(actions.replyToPeer).toHaveBeenCalledOnce();
+    fireEvent.click(fold);
+    await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull()); // the box unmounts with the fold
+    fireEvent.click(fold);
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true); // still sending
+    expect(box.value).toBe('ping');
+    await act(async () => answer());
+    expect(box.disabled).toBe(false);
+    expect(box.value).toBe('');
+  });
+
   it('keeps two rows of one name apart: each its own Message disclosure', () => {
     const row = derived((b) => {
       b.turn('u1');

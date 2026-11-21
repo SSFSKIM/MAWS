@@ -219,6 +219,22 @@ describe('grouped subagent rows', () => {
       act(() => vi.advanceTimersByTime(3000));
       expect(seconds()).toBe(before + 3);
     });
+
+    // Fix wave (scalpel-1#1): a workflow and an agent of one message share the row; the phase is the workflow's alone
+    it('a workflow’s phase waits on the workflow’s glyph alone; the agent beside it shows its own last tool', async () => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('w0', 'Workflow', { description: 'Echo twice' }, 'm1', 0);
+      b.toolUse('a1', 'Agent', { description: 'Reviewer', prompt: 'p' }, 'm1', 1);
+      b.emit('task.started', { taskId: task('wf'), toolUseId: tool('w0'), taskType: 'local_workflow', description: 'Echo twice', isBackground: true, workflowName: 'echo' });
+      b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Reviewer', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      b.emit('workflow.progress', { taskId: task('wf'), workflowName: 'echo', progress: [{ type: 'workflow_phase', index: 0, title: 'Echo', status: 'running' }] });
+      b.emit('subagent.progress', { taskId: task('k1'), description: 'Reviewer', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
+      const store = await storeWith(b.events);
+      renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
+      expect(described(screen.getByRole('button', { name: 'Open Echo twice' }))).toMatch(/^Echo twice · Echo · \d+s$/);
+      expect(described(screen.getByRole('button', { name: 'Open Reviewer' }))).toMatch(/^Reviewer · Read · \d+s$/);
+    });
   });
 
   it('with five agents the overflow reveals the rest, and the fifth opens through openSubagent', async () => {

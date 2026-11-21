@@ -24,6 +24,15 @@ describe('actions drawn on the pointed row', () => {
   });
 });
 
+// Fix wave (scalpel-3#1; the touch rule, Decision Log): what a tooltip shows on pointing is drawn at rest where nothing
+// points, as the actions above are. A browser action's time is its phrase's tip; there it stands on the line.
+describe('facts a tip shows on pointing', () => {
+  it('.transcript-browser-action-time is drawn only where nothing points', () => {
+    expect(rules.some((rule) => !rule.selectors.includes('@media') && rule.selectors.replace(/\/\*[\s\S]*?\*\//g, '').trim() === '.transcript-browser-action-time' && /display: none\b/.test(rule.body))).toBe(true);
+    expect(noHover).toMatch(/\.transcript-browser-action-time \{ display: inline; \}/);
+  });
+});
+
 // The word cut (T18, fix round 1): the output's copy glyph sits over the output's top right corner, opaque; the output
 // keeps that column clear, so no line of it, the first one included, is drawn under the glyph.
 describe('the output’s copy glyph', () => {

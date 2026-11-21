@@ -293,3 +293,23 @@ describe('what the slash palette puts in the draft', () => {
     editor.destroy();
   });
 });
+
+// Fix wave (sweep#1): two message boxes (split panes) can each hold an open palette; every id is the palette's own, so a
+// box's active option and its popover never name the other pane's.
+describe('two slash palettes at once', () => {
+  it('give every option and popover an id of their own, each row described by its own palette’s popover', () => {
+    open('');
+    open('');
+    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id);
+    expect(ids.length).toBeGreaterThan(4);
+    expect(new Set(ids).size).toBe(ids.length);
+    const lists = screen.getAllByRole('listbox');
+    expect(lists).toHaveLength(2);
+    for (const list of lists) {
+      const active = list.querySelector<HTMLElement>(`#${CSS.escape(list.getAttribute('aria-activedescendant')!)}`)!;
+      expect(active).not.toBeNull();
+      const described = active.getAttribute('aria-describedby');
+      if (described !== null) expect(list.parentElement!.querySelector(`#${CSS.escape(described)}`)).not.toBeNull();
+    }
+  });
+});

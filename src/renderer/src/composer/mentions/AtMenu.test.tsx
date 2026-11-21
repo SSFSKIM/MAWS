@@ -209,3 +209,22 @@ describe('the @ menu’s rows under the word cut', () => {
     expect(searching.getAttribute('aria-disabled')).toBe('true');
   });
 });
+
+// Fix wave (sweep#1): two message boxes (split panes) can each hold an open @ menu; every id is the menu's own, so a
+// box's active option and a row's description never name the other pane's.
+describe('two @ menus at once', () => {
+  it('give every option and description an id of their own, each list’s active option inside it', () => {
+    const catalog = { ...EMPTY_CATALOG, agents: [{ name: 'reviewer', description: 'Reviews a change' }], skills: ['release'], commands: [{ name: 'release', description: 'Cuts a release', argumentHint: null }] } as unknown as SessionCatalog;
+    const menu = (): PopupProps => ({ ...props('', ''), editor: { state: {} } as unknown as Editor, ctx: { ...props('', '').ctx, catalog } });
+    render(
+      <>
+        <AtMenu {...menu()} />
+        <AtMenu {...menu()} />
+      </>,
+    );
+    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id);
+    expect(ids.length).toBeGreaterThan(4);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const list of screen.getAllByRole('listbox')) expect(list.querySelector(`#${CSS.escape(list.getAttribute('aria-activedescendant')!)}`)).not.toBeNull();
+  });
+});

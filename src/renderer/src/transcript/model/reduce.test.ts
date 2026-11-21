@@ -1211,7 +1211,31 @@ describe('orchestration facts (E7)', () => {
     expect(row.id).toBe(rowId.subagent(task('toolu_wf')));
     expect(row.agents[0]).toMatchObject({ taskId: 'wayue3on6', runId: 'wf_7cacbb2d-902' });
     // the word cut (T86, T87): the phase a working workflow is in waits on its line, out of its sentence
-    expect(row).toMatchObject({ sentence: 'Two echo agents in one phase', phase: 'Echo' });
+    expect(row).toMatchObject({ sentence: 'Two echo agents in one phase', phases: { wayue3on6: 'Echo' } });
+    // the Markdown export has no line to point at: the phase is written beside the sentence (fix wave, scalpel-1#2)
+    expect(serializeRows([row])).toBe('- Two echo agents in one phase · Echo');
+  });
+
+  // Fix wave (scalpel-1#1): a Workflow and an Agent called from one assistant message share a row; the phase is the
+  // workflow's own, never the agent's, and it leaves with the workflow's end while the agent still runs.
+  it('keeps a workflow’s phase to its own call on a row it shares with an agent', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_wf', 'Workflow', { description: 'Two echo agents in one phase' }, 'm1', 0);
+    b.toolUse('toolu_ag', 'Agent', { description: 'Survey notes', subagent_type: 'general-purpose' }, 'm1', 1);
+    b.emit('task.started', { taskId: task('wayue3on6'), toolUseId: tool('toolu_wf'), taskType: 'local_workflow', description: 'Two echo agents in one phase', isBackground: true, workflowName: 'maws-probe' });
+    b.emit('subagent.started', { taskId: task('a1'), toolUseId: tool('toolu_ag'), description: 'Survey notes', subagentType: 'general-purpose', isBackground: true, spawnDepth: 1, prompt: 'go' });
+    b.emit('workflow.progress', { taskId: task('wayue3on6'), workflowName: 'maws-probe', progress: [{ type: 'workflow_phase', index: 0, title: 'Echo', status: 'running' }] });
+    b.emit('subagent.progress', { taskId: task('a1'), description: 'Survey notes', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
+    const row = find(rowsOf(withAllExpanded(reduce(b.events))), 'subagent');
+    expect(row.agents.map((ref) => ref.taskId)).toEqual(['wayue3on6', 'a1']);
+    expect(row.phases).toEqual({ wayue3on6: 'Echo' });
+    expect(serializeRows([row])).toBe('- Two echo agents in one phase and Survey notes\n  - Two echo agents in one phase · Echo');
+
+    b.emit('task.notification', { taskId: task('wayue3on6'), toolUseId: tool('toolu_wf'), status: 'completed', summary: 'Echoed.', outputFile: null, reason: null });
+    const after = find(rowsOf(withAllExpanded(reduce(b.events))), 'subagent');
+    expect(after.status).toBe('working'); // the agent still runs
+    expect(after.phases).toBeUndefined();
   });
 
   it('adds the run id to a live Workflow ref its task.started already renamed', () => {
