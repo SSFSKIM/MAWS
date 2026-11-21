@@ -5,7 +5,7 @@
 // controls: a waiting plan is C7's request card in this row's place (UX wave U1b), never this body. W8: opening and
 // closing run the shared disclosure motion between the 144 px preview and the whole plan. UX wave U1b (decision 8b):
 // while the transcript has no outcome for it, the badge reads the call's lasting receipt (a settlement's words, or
-// "Already answered elsewhere") in the place of Pending; the transcript's own outcome wins once it has one.
+// "Answered elsewhere") in the place of Pending; the transcript's own outcome wins once it has one.
 import { useLayoutEffect, useState } from 'react';
 import { useDisclosureMotion } from '../../../ui/disclosure';
 import type { Row } from '../../model/rows';
