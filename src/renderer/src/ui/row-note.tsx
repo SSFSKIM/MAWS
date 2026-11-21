@@ -14,7 +14,7 @@
 // written to the element, not rendered: when it opens and again while it is open, at any scroll (a search's landing
 // scrolls after its focus has opened the note) and any resize. The pointed-row line (a plugin's description under its
 // name) is this same note: both float.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { useDisclosureMotion } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
 
@@ -59,6 +59,12 @@ export function useRowNote(): RowNoteState {
     },
     [],
   );
+  const cutNow = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+    setCut(true);
+    setOpen(false);
+  }, []);
   useEffect(() => {
     if (!open) return;
     const focusMoved = (event: FocusEvent) => {
@@ -69,7 +75,7 @@ export function useRowNote(): RowNoteState {
     };
     document.addEventListener('focusin', focusMoved, true);
     return () => document.removeEventListener('focusin', focusMoved, true);
-  }, [open]);
+  }, [open, cutNow]);
   const settle = () => {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
@@ -78,11 +84,6 @@ export function useRowNote(): RowNoteState {
     setCut(false);
     setOpen(true);
   };
-  function cutNow() {
-    settle();
-    setCut(true);
-    setOpen(false);
-  }
   return {
     id,
     open,
