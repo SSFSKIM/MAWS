@@ -14,6 +14,7 @@ import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { drainComposerAttachments, memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type AttachOptions, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
+import { overlayHolding } from '../frame/close-focus';
 import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
@@ -1080,7 +1081,24 @@ export class EditorController {
   handle(): EditorHandle {
     const editor = () => this.editor!;
     return {
-      focus: () => void editor().commands.focus(),
+      // Tiptap's command, in a frame of our own (its own defers a frame too): the frame yields to a menu, dialog or popover
+      // opened since the call (⇧⌘M right after a chip's menu gave the keyboard back), which the late focus closed
+      focus: () => {
+        const tiptap = editor();
+        try {
+          if (tiptap.view.hasFocus()) return;
+        } catch {
+          return; // a view not mounted yet: nothing to focus
+        }
+        const asked = overlayHolding();
+        requestAnimationFrame(() => {
+          if (tiptap.isDestroyed) return;
+          const holder = overlayHolding();
+          if (holder !== null && holder !== asked) return;
+          tiptap.view.focus();
+          tiptap.commands.scrollIntoView();
+        });
+      },
       submit: (when) => void this.submit(when),
       insertText: (text, options) => {
         if (this.busy) return;

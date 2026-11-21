@@ -1539,3 +1539,82 @@ describe('the box’s helpers: the history line, its search and the paste', () =
     for (const bounded of [wrapper, button]) expect(bounded.classList.contains('max-w-full')).toBe(true);
   });
 });
+
+// The handle's focus lands a frame after the call, as Tiptap's command did, and at that frame yields only to a menu,
+// dialog or popover that took the keyboard since the call: a trigger a closing menu gave the focus back to does not.
+describe('the handle’s focus at its frame', () => {
+  async function mounted() {
+    const handle = createRef<EditorHandle>();
+    const { container } = render(
+      <>
+        <Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={drafts(null).port} client={client} handle={handle} />
+        <button type="button">Asker</button>
+        <button type="button">Trigger</button>
+        <div role="menu" data-state="open">
+          <button type="button">Item</button>
+        </div>
+      </>,
+    );
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    const frames: FrameRequestCallback[] = [];
+    const held = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((frame) => frames.push(frame));
+    onTestFinished(() => held.mockRestore());
+    const button = (name: string) => screen.getByRole('button', { name });
+    const frame = () => act(() => frames.splice(0).forEach((run) => run(performance.now())));
+    return { handle: handle.current!, content: contentOf(container), button, frames, frame };
+  }
+
+  it('lands when the focus stayed on the element that asked', async () => {
+    const { handle, content, button, frame } = await mounted();
+    button('Asker').focus();
+    handle.focus();
+    expect(document.activeElement).toBe(button('Asker')); // a frame later, not at once
+    frame();
+    expect(document.activeElement).toBe(content);
+  });
+
+  it('lands when the focus fell to the body before the frame', async () => {
+    const { handle, content, button, frame } = await mounted();
+    button('Asker').focus();
+    handle.focus();
+    button('Asker').blur();
+    expect(document.activeElement).toBe(document.body);
+    frame();
+    expect(document.activeElement).toBe(content);
+  });
+
+  it('lands when the focus moved to an element outside any open overlay (a trigger given the focus back)', async () => {
+    const { handle, content, button, frame } = await mounted();
+    button('Item').focus(); // a menu item asks, then its menu closes and puts the focus back on its trigger
+    handle.focus();
+    button('Trigger').focus();
+    frame();
+    expect(document.activeElement).toBe(content);
+  });
+
+  it('lands when asked from inside an open overlay that still holds the focus', async () => {
+    const { handle, content, button, frame } = await mounted();
+    button('Item').focus();
+    handle.focus();
+    frame();
+    expect(document.activeElement).toBe(content);
+  });
+
+  it('yields when an open overlay took the focus before the frame', async () => {
+    const { handle, button, frame } = await mounted();
+    button('Asker').focus();
+    handle.focus();
+    button('Item').focus(); // a menu opened in that frame
+    frame();
+    expect(document.activeElement).toBe(button('Item'));
+  });
+
+  it('does nothing when the editor already has the focus', async () => {
+    const { handle, content, frames } = await mounted();
+    act(() => content.focus());
+    expect(document.activeElement).toBe(content);
+    handle.focus();
+    expect(frames).toHaveLength(0);
+    expect(document.activeElement).toBe(content);
+  });
+});
