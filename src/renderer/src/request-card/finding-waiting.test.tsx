@@ -395,7 +395,8 @@ describe('a way to a request from outside its transcript', () => {
     expect(line.textContent).toBe('Waiting for you 2');
     expect(line.getAttribute('aria-describedby')).toBeNull(); // the meaning is in the name: no description repeats it
     act(() => line.focus());
-    expect(compact.getByRole('tooltip').textContent).toBe('2 requests');
+    expect(compact.getByRole('tooltip').textContent).toBe('2 requests'); // the keyboard reaches the tooltip
+    expect(line.getAttribute('aria-describedby')).toBeNull(); // and the open tooltip does not repeat the name as a description
     fireEvent.click(line);
     expect(useFloatingCard.getState().closed).toBe(false);
     compact.unmount();
