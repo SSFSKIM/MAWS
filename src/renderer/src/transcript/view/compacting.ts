@@ -1,6 +1,6 @@
 // The compaction's row (UX wave U3b, M4; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md,
 // decisions 16 and 17, Interfaces §E): while the session compacts, one `activity` row at the end of the drawn list reads
-// "Compacting session…" with the time so far. The view places it after every other projection of its rows; it is never
+// "Compacting…" with the time so far. The view places it after every other projection of its rows; it is never
 // derived, never in the store's rows, and no turn line's words change for it. The time comes from the mount (the app's
 // compacting store, through the slots); this module imports nothing of the app.
 import { END_ROW } from '../model/keys';

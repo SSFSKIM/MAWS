@@ -6,8 +6,6 @@
 // W1: a session's transcript also shows the messages held in MAWS's queue at its tail, dimmed with "Sends when this
 // turn ends", and hides the bubble of a steer held back into that queue. It attaches C7's queue store itself, as the
 // composer does, so a session transcript shown without its composer reads the live queue.
-// W8: a session's transcript names the effort the session runs at in its live thinking label, the effort the model
-// selector shows (W3's `useShownEffort`); a child's names none.
 // P2-E1: three additive options for a mount that shows a session in a smaller place (the comment card's thread): the
 // first row to show (`startAt`), actions overriding the registered ones for this mount, and the presentation forced
 // local (`Transcript`'s). Absent, the slot draws as before.
@@ -26,7 +24,6 @@ import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useWorkingFolder } from '../../sessions/working-folder';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useShownEffort } from '../../composer/effective-effort';
 import { isAddress, machineOf } from '@shared/machine/address'; // UX wave U2b
 import type { OwnerChannelState } from '@shared/owner/state'; // UX wave U2b
 import type { StoredRun } from '@shared/owner/folds'; // UX wave U2b (M7)
@@ -168,7 +165,6 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const streaming = useLaneAStreaming(agentId === undefined ? appSessionId : null, storeKey);
   const tail = useMemo(() => [...streaming.tail, ...(waiting === 'stacked' ? [] : held.filter((_, i) => !answered[i]).map(heldRow))], [streaming.tail, held, answered, waiting]); // UX wave U4a: a stack draws the held ones
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
-  const effort = useShownEffort(appSessionId);
   const ownerLane = useViewLane(agentId === undefined ? appSessionId : null); // P2-C: a session's, never a child's; UX wave U2b: its three sources
   const modDraws = useModDraws(agentId === undefined ? appSessionId : null); // UX wave U2b (M5): a session's, never a child's
   const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board 525: another member's session names its prompts' authors
@@ -186,7 +182,6 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       sessionCwd={sessionCwd}
       tail={tail}
       withdrawn={withdrawn}
-      effort={agentId === undefined ? effort : null}
       startAt={startAt}
       presentation={presentation}
       ownerLane={agentId === undefined ? ownerLane : undefined}

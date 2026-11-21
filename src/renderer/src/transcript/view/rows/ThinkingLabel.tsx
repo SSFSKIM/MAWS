@@ -1,6 +1,6 @@
 // The live thinking label (W8, T1; the owner: "copy claude cli's style … with yellow color change when the thinking
-// gets longer", and Codex's light sweep over "Thinking"). While a thinking block streams its label reads the CLI's tier,
-// the session's effort and the time it has run (copy.ts, `liveThinkingLabel`), ticking once a second, and turns toward
+// gets longer", and Codex's light sweep over "Thinking"). While a thinking block streams its label reads the CLI's tier
+// and the time it has run (copy.ts, `liveThinkingLabel`; the word cut, T37: no effort), ticking once a second, and turns toward
 // the warning colour between 10 and 20 s as the CLI's does (`thinkingWarmth`); Codex's shimmer sweeps the text while it
 // is live, static under reduced motion (transcript.css, `.transcript-shimmer`). UX wave U2 (O-27; the owner's answer
 // "The label only"): it reads the label and nothing else for as long as the thought runs; the summary's text is read by
@@ -21,7 +21,7 @@ export function Shimmer({ children, warmth = 0 }: { children: ReactNode; warmth?
 }
 
 export function LiveThinkingLabel({ startedAt, clock = 'events' }: { startedAt: string; clock?: 'events' | 'wall' }) {
-  const { storeKey, effort } = useTranscriptContext();
+  const { storeKey } = useTranscriptContext();
   const elapsedMs = useWorkingMs(storeKey, startedAt, clock);
-  return <span className="transcript-thinking-summary"><Shimmer warmth={thinkingWarmth(elapsedMs)}>{liveThinkingLabel(elapsedMs, effort ?? null)}</Shimmer></span>;
+  return <span className="transcript-thinking-summary"><Shimmer warmth={thinkingWarmth(elapsedMs)}>{liveThinkingLabel(elapsedMs)}</Shimmer></span>;
 }

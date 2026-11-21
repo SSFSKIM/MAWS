@@ -3,7 +3,7 @@
 // lines, and copy and edit affordances (residues *Images and attachments*, *Bounded surfaces and truncation*, *Copy and
 // export*; *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`, or why it never ran when its
 // mount knows (`droppedRowMark`). W1: a message waiting for the engine (a `next` steer, or one held in MAWS's queue) is
-// dimmed with what it waits for, and a steer the engine took says it was sent during the turn it sits in. W2 (B2,
+// dimmed with what it waits for; a steer the engine took sits in the turn with no caption (the word cut, T42). W2 (B2,
 // Codex's bubble): the collapse follows the rendered height (a long paragraph folds as a long list does), measured
 // while folded and again whenever the content's size changes. UX wave U3b (O-02, amending W2's B2): the time, Copy and
 // Edit sit on one line under the bubble, in the 16 px the message already has there, with the caption last. W3 (B6):
@@ -17,7 +17,7 @@
 // order made, and after them the attachments no comment claimed.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
-import { CONSENT, NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
+import { CONSENT, NOT_SENT, PENDING_CAPTION } from '../../model/copy';
 import type { Attachment, Row, UserComment } from '../../model/rows';
 import { copiedUserText, placeholdersOf } from '../../model/user-text';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
@@ -80,7 +80,8 @@ function UserBubble({ row }: { row: UserRowData }) {
   const claimed = new Set(row.comments?.flatMap((comment) => (comment.attachment === undefined ? [] : [comment.attachment]))); // UX wave U5a
   const files = row.attachments.filter((a, i) => a.kind !== 'text' && !claimed.has(i));
   // P2-F L121: the mount's own mark (the card's "Sent to Claude") stands where no caption already says the row's state
-  const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : row.dropped ? null : (actions.userRowMark?.(row) ?? null);
+  // the word cut (T42): a steer the engine took has no caption of its own, so the mount's mark may stand for it
+  const caption = row.pending ? PENDING_CAPTION[row.pending] : row.dropped ? null : (actions.userRowMark?.(row) ?? null);
   const notSent = row.dropped ? (actions.droppedRowMark?.(row) ?? NOT_SENT) : null;
 
   // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the

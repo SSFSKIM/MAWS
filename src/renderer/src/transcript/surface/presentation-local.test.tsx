@@ -38,7 +38,7 @@ async function sessionStoreWith(events: SessionEvent[]) {
 function Transcript({ storeKey, presentation }: { storeKey: string; presentation?: 'local' }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
   return (
-    <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null, presentation }}>
+    <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, presentation }}>
       {rows.map((row) => (
         <RowView key={row.id} row={row} />
       ))}
@@ -154,7 +154,7 @@ function followerOf(store: Awaited<ReturnType<typeof sessionStoreWith>>) {
 }
 function One({ storeKey, row, presentation }: { storeKey: string; row: Row; presentation?: 'local' }) {
   return (
-    <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null, presentation }}>
+    <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, presentation }}>
       <RowView row={row} />
     </TranscriptProvider>
   );

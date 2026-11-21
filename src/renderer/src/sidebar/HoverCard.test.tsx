@@ -173,14 +173,14 @@ describe('a session row’s hover card', () => {
 
   // UX wave U3b (M4; acceptance 10): while the session compacts its activity line says so, and then goes back to what
   // it said
-  it('a compacting session: its activity line reads “Compacting session…” for as long as it compacts', async () => {
+  it('a compacting session: its activity line reads “Compacting…” (the word cut, N117) for as long as it compacts', async () => {
     withMain();
     useLayout.getState().setSidebar({ expandedProjects: [at('proj-claude-usage-menubar' as ProjectId)] });
     const id = idOf('Usage reset countdown');
     act(() => noteCompacting(id, { kind: 'engine' }, true));
     render(<Sidebar />);
     const card = await open('Usage reset countdown');
-    expect(within(card).getByTestId('hover-activity').textContent).toBe('Compacting session…');
+    expect(within(card).getByTestId('hover-activity').textContent).toBe('Compacting…');
     act(() => noteCompacting(id, { kind: 'engine' }, false));
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
   });

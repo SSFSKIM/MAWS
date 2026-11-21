@@ -840,15 +840,15 @@ describe('the compaction’s row', () => {
     view.rerender(<Transcript source={source} variant="session" browserActivity={false} compacting={T0} />);
     expect(lastRow().dataset.rowId).toBe('activity:compacting');
     const line = within(lastRow()).getByRole('status');
-    expect(line.textContent).toBe('Compacting session…');
+    expect(line.textContent).toBe('Compacting…');
     act(() => void vi.advanceTimersByTime(1_000));
-    expect(line.textContent).toBe('Compacting session… 1s');
+    expect(line.textContent).toBe('Compacting… 1s');
     expect(within(line).getByRole('timer').textContent).toBe('1s');
     act(() => void vi.advanceTimersByTime(61_000));
-    expect(line.textContent).toBe('Compacting session… 1m 02s');
+    expect(line.textContent).toBe('Compacting… 1m 02s');
     view.rerender(<Transcript source={source} variant="session" browserActivity={false} compacting={null} />);
     expect(document.querySelector('[data-row-id="activity:compacting"]')).toBeNull();
-    expect(screen.queryByText(/Compacting session/)).toBeNull();
+    expect(screen.queryByText(/Compacting…/)).toBeNull();
   });
 
   it('is guessed at the turn line’s height before it is measured', () => {

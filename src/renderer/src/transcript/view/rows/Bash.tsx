@@ -1,4 +1,5 @@
-// A `!` command replayed from the engine's bash tags (Derivation, *Bash rows*): `! {command}`, its output, `exit {code}`.
+// A `!` command replayed from the engine's bash tags (Derivation, *Bash rows*): `! {command}`, its output, `exit {code}`
+// for a non-zero exit.
 // A replayed row, never a user bubble.
 import { bashFooter, bashHeader } from '../../model/copy';
 import type { Row } from '../../model/rows';
@@ -21,7 +22,7 @@ export function BashRow({ row }: { row: Extract<Row, { kind: 'bash' }> }) {
           )}
         </pre>
       )}
-      {row.exitCode !== null && <div className="transcript-replayed-footer">{bashFooter(row.exitCode)}</div>}
+      {bashFooter(row.exitCode) !== '' && <div className="transcript-replayed-footer">{bashFooter(row.exitCode)}</div> /* the word cut (T66): none for exit 0 */}
     </div>
   );
 }

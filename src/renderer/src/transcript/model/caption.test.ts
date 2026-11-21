@@ -56,7 +56,8 @@ describe('a run’s caption (acceptance 2)', () => {
       grep(t, 't7', 'TODO');
     });
     const group = runOf(b);
-    expect(group.summary).toBe('Read 2 files, edited a file, ran 3 commands (1 failed), searched code');
+    expect(group.summary).toBe('Read 2 files, edited a file, +4'); // the word cut (T2): four parts are capped
+    expect(captionText(captionParts(stepsOfCells(group.cells)), false)).toBe('Read 2 files, edited a file, ran 3 commands (1 failed), searched code');
     expect(group.counts).toEqual({ added: 2, removed: 1 });
   });
 
@@ -248,8 +249,9 @@ describe('a run’s caption (acceptance 2)', () => {
       t.toolUse('t8', 'Skill', {});
       t.result('t8', 'loaded');
     });
-    expect(runOf(b).summary).toBe('Edited a file, ran a command, ran /dataviz, used notion, used computer use, +2');
-    expect(stepsOfCells(runOf(b).cells).map((step) => step.named ?? null)).toEqual([null, null, null, 'ran /dataviz', 'used notion', 'used notion', 'used computer use', null]);
+    expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, ran /dataviz, used notion, used computer use, +2');
+    const cells = drawn(b.events).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+    expect(stepsOfCells(cells).map((step) => step.named ?? null)).toEqual([null, null, null, 'ran /dataviz', 'used notion', 'used notion', 'used computer use', null]);
   });
 
   it('a stopped call of no kind is counted under its done words', () => {
@@ -339,15 +341,15 @@ describe('the parts, by hand', () => {
       named('ran /dataviz', 'ran /dataviz'), named('used notion · search', 'used notion'), named('used notion · create_page', 'used notion'),
       step({ kind: 'todos', key: 'd1' }), named('ran /dataviz', 'ran /dataviz', 'again'),
     ]);
-    expect(captionText(parts, true)).toBe('Edited a file, ran a command, ran /dataviz, used notion, +2');
+    expect(captionText(parts, true)).toBe('Edited a, ran a command, ran /dataviz, used notion, +2');
     // nothing but named parts left out: no count
     expect(captionText(captionParts([step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), named('ran /dataviz', 'ran /dataviz'), named('used notion · search', 'used notion')]), true))
-      .toBe('Edited a file, ran a command, ran /dataviz, used notion');
+      .toBe('Edited a, ran a command, ran /dataviz, used notion');
     // a connector a kept part already names is not named again: its other part is counted
     expect(captionText(captionParts([named('used notion · search', 'used notion'), step({ kind: 'command', key: 'c1' }), named('used notion · create_page', 'used notion'), step({ kind: 'grep', key: 'g1' })]), true))
       .toBe('Used notion · search, ran a command, +2');
     // uncapped, every part reads its own words
-    expect(captionText(parts, false)).toBe('Edited a file, ran a command, searched code, ran /dataviz 2 times, used notion · search, used notion · create_page, updated todos');
+    expect(captionText(parts, false)).toBe('Edited a, ran a command, searched code, ran /dataviz 2 times, used notion · search, used notion · create_page, updated todos');
   });
 });
 

@@ -147,7 +147,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // folds, O-12; UX wave U1b: an answer's notice folds too where its turn did other work, its question's row saying the
 // answer), and a plan whose request
 // waits (UX wave U1b: its form is in the row). The divider folds everything else, so a turn of a local command
-// alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
+// alone (`/compact`: its boundary and its output) has no work and no "0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))

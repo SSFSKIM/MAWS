@@ -66,14 +66,14 @@ function CardOrChip({ parent, placement, folded }: { parent: AppSessionId; place
   return folded ? <FoldedChip parent={parent} placement={placement} /> : <OpenCard parent={parent} placement={placement} />;
 }
 
-// The waiting line, in the transcript's words without the effort (`liveThinkingLabel`, which ends with the time), counting
+// The waiting line, in the transcript's words (`liveThinkingLabel`, which ends with the time), counting
 // once a second on this window's clock. A polite status whose time is a `role="timer"` span, as the transcript's ticking
 // lines are (`TickingStatus`), so the tier's change is announced and each second's tick is not; a span, since the chip
 // is a button.
 function WaitingLine({ parent, exchange, className }: { parent: AppSessionId; exchange: SideExchange; className: string }) {
   const now = useTicker(true);
   const elapsed = Math.max(0, now - waitingSince(parent, exchange));
-  const label = liveThinkingLabel(elapsed, null);
+  const label = liveThinkingLabel(elapsed);
   const time = duration(elapsed);
   return (
     <span role="status" data-btw-waiting="" className={className}>

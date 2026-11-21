@@ -10,6 +10,7 @@ import type { Cell, Spill } from '../../model/rows';
 import { SPILL_READ_BYTES, spillWasTruncated } from '../../source/ipc';
 import { useTranscriptContext, useRowSession } from '../context';
 import { Omitted } from './Truncated';
+import { QuietSpinner } from '../../../ui/spinner';
 
 // Whether the reader loaded the spill, all of it or its head.
 export const isRead = (spill: Spill | null): spill is Spill & { content: string } => (spill?.state === 'loaded' || spill?.state === 'partial') && spill.content !== null;
@@ -42,10 +43,10 @@ export function SpillLoader({ cell, spill }: { cell: Cell; spill: Spill }) {
           </button>
         </div>
       );
-    case 'loading':
+    case 'loading': // the word cut (T26): a quiet spinner where Load was, the wait's words its name
       return (
-        <div className="transcript-spill" role="status">
-          {SPILL.loading}
+        <div className="transcript-spill">
+          <QuietSpinner label={SPILL.loading} />
         </div>
       );
     case 'failed':

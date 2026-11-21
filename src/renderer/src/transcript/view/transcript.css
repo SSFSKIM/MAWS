@@ -359,8 +359,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 0; }
 .transcript-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; text-align: left; font-size: var(--text-ui-sm); }
 .transcript-button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-raised); color: var(--fg); font-size: var(--text-ui-sm); }
-.transcript-button:hover:not(:disabled) { background: var(--bg-hover); }
-.transcript-button:disabled { color: var(--fg-muted); opacity: 0.6; }
+.transcript-button:hover:not(:disabled, [aria-disabled="true"]) { background: var(--bg-hover); }
+.transcript-button:disabled, .transcript-button[aria-disabled="true"] { color: var(--fg-muted); opacity: 0.6; } /* the word cut (N102): a greyed button that keeps the keyboard */
+.transcript-button[aria-disabled="true"] { cursor: default; }
 .transcript-tooltip-trigger { display: inline-flex; }
 .transcript-tooltip { max-width: 280px; padding: 6px 9px; font-size: var(--text-ui-sm); }
 @keyframes transcript-spin { to { transform: rotate(360deg); } }
@@ -447,6 +448,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-standalone { padding: 1px 0 6px; }
 .transcript-cell-detail { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px 19px; font-size: var(--text-ui-sm); }
 .transcript-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--fg-muted); }
+.transcript-mcp > .transcript-detail-heading { justify-content: flex-end; } /* the word cut (T31): Raw alone, where it stood */
 .transcript-detail-heading button { padding: 2px 6px; border-radius: var(--radius-sm); color: var(--fg-muted); }
 .transcript-detail-heading button[aria-pressed="true"] { background: var(--bg-active); color: var(--fg); }
 .transcript-detail-label { color: var(--fg-muted); }
@@ -483,6 +485,16 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-shell .transcript-output { margin-top: 6px; padding: 5px 11px 18px; border: none; border-radius: 0; background: none; }
 .transcript-output-faded { mask-image: linear-gradient(to bottom, var(--fg) calc(100% - 18px), transparent); }
 .transcript-shell-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 11px; border-top: 1px solid var(--border); color: var(--fg-muted); }
+/* The word cut (T18): the copy glyph; beside the command and over the output's corner it shows while its part is
+   pointed at or holds focus, and stays in the Tab order */
+.transcript-shell .transcript-copy-glyph { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; }
+.transcript-copy-glyph .transcript-icon { width: 13px; height: 13px; }
+.transcript-copy-glyph[data-on-hover] { opacity: 0; }
+.transcript-shell-heading:hover > .transcript-copy-glyph, .transcript-shell-heading:focus-within > .transcript-copy-glyph,
+.transcript-shell-output:hover > .transcript-copy-glyph, .transcript-shell-output:focus-within > .transcript-copy-glyph { opacity: 1; }
+.transcript-shell-output { position: relative; }
+.transcript-shell-output > .transcript-copy-glyph { position: absolute; top: 4px; right: 8px; background: var(--bg-raised); }
+.transcript-shell-output > .transcript-copy-glyph:hover { background: var(--bg-hover); }
 
 /* Edit detail: inline diff */
 .transcript-edit { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -562,7 +574,8 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-boundary { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-boundary-rule { flex: 1; height: 1px; background: var(--border); }
 .transcript-boundary-text { flex: none; max-width: 70%; overflow-wrap: anywhere; text-align: center; }
-.transcript-boundary-secondary { display: block; margin-top: var(--space); font-size: var(--text-ui-sm); }
+.transcript-boundary-words { border-radius: var(--radius-sm); outline-color: var(--accent); }
+.transcript-boundary-words:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; } /* the word cut (T50): its sentence's owner */
 .transcript-boundary .transcript-quiet-button { margin-top: 0; }
 .transcript-row[data-muted] { opacity: 0.55; }
 .transcript-not-in-context { padding-top: 6px; color: var(--fg-faint); font-size: var(--text-ui-sm); }

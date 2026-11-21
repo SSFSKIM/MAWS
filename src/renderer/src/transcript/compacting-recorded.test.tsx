@@ -116,10 +116,10 @@ describe('a compaction in a session MAWS runs, from the recordings', () => {
     expect(s.compaction()).toBeNull();
     s.to(150);
     expect(s.last()).toBe(s.compaction());
-    expect(s.line()).toBe('Compacting session…');
+    expect(s.line()).toBe('Compacting…');
     expect(useTranscriptStore.getState().entries[s.id]!.rows.some((row) => row.kind === 'activity')).toBe(false); // the view's, never the store's
     s.wait(1_000);
-    expect(s.line()).toBe('Compacting session… 1s');
+    expect(s.line()).toBe('Compacting… 1s');
     s.to(151);
     expect(s.compaction()).toBeNull();
     s.to(159);
@@ -134,7 +134,7 @@ describe('a compaction in a session MAWS runs, from the recordings', () => {
       s.wait(30_000);
       s.to(seq);
     }
-    expect(s.line()).toBe('Compacting session… 1m 30s');
+    expect(s.line()).toBe('Compacting… 1m 30s');
     s.to(337);
     expect(s.compaction()).toBeNull();
   });
@@ -164,7 +164,7 @@ describe('a compaction in a session MAWS runs, from the recordings', () => {
     expect(s.compaction()).toBeNull();
     s.to(97);
     expect(s.last()).toBe(s.compaction());
-    expect(s.line()).toBe('Compacting session…');
+    expect(s.line()).toBe('Compacting…');
     expect(s.texts('divider')).toContainEqual(expect.stringMatching(/^Working/)); // the running turn's line, unchanged
     s.to(98);
     expect(s.compaction()).toBeNull();

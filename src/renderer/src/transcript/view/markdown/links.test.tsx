@@ -193,7 +193,7 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
       const link = screen.getByRole('button', { name: 'the plan' });
       expect([link.tagName, link.className, link.getAttribute('tabindex'), link.getAttribute('title'), link.getAttribute('aria-label')]).toEqual(['SPAN', 'transcript-inline-link', '0', ARTIFACT_LINK_TITLE, null]);
       expect(link.dataset).toMatchObject({ chip: 'artifact', artifactId: ARTIFACT, artifactAt: '#block=b7' });
-      expect(ARTIFACT_LINK_TITLE).toBe('Opens the artifact · ⌘-click opens it in a tab');
+      expect(ARTIFACT_LINK_TITLE).toBe('⌘-click opens it in a tab'); // the word cut (N125): the shortcut alone
     });
 
     // decision 8: Enter and Space are a click on the link, so whatever handles the click handles the key; a held key opens

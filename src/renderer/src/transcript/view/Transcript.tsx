@@ -15,7 +15,7 @@ import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION, OLDER, REACH } from '../model/copy';
-import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
+import { QuietSpinner } from '../../ui/spinner'; // the word cut (T111)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
 import { compactingRow } from './compacting'; // UX wave U3b (M4)
@@ -554,7 +554,6 @@ export interface TranscriptProps {
   // prompts whose waiting or dropped bubble is not shown (held back into that queue)
   tail?: readonly Row[];
   withdrawn?: ReadonlySet<string>;
-  effort?: string | null; // W8, additive: the effort the session runs at, which the live thinking label names
   // P2-E1, additive: the index of the first row shown, told whether the history is loaded (null: none yet); and the
   // presentation the rows' context carries ('local': the owner channel through MAWS's presenter)
   startAt?: (rows: readonly Row[], loaded: boolean) => number | null;
@@ -591,7 +590,6 @@ export interface TranscriptProps {
 
 const NO_ROWS: Row[] = [];
 const NO_TURNS: readonly TurnId[] = []; // UX wave U3b: no rewound branch
-export const LOADING_AFTER_MS = 300; // the UX wave, U9 (A3): how long a read with nothing to draw is out before the pane says so
 const CHILD = 'child' as AgentId; // a child transcript's state treats its events as top-level (Derivation, *Child traffic*)
 // UX wave U1b (§D): the jump button while a waiting request is out of view. Its mark is the owner's card 4 of the U1b
 // document's "The look" (closed 2026-11-15: "Waiting glyph ◐"), the waiting glyph, here and nowhere else.
@@ -634,7 +632,7 @@ const queuedRows = (rows: Row[], { activity, withdrawn, tail, waiting }: Omit<Co
 const outsideMessages = new Map<string, Map<symbol, boolean>>();
 const outsideHolds = (key: string) => [...(outsideMessages.get(key)?.values() ?? [])].some(Boolean);
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null, modDraws, summaries }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null, modDraws, summaries }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -748,9 +746,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const estimate = useCallback((row: Row) => estimateRow(row, placement.has(row.id)), [placement]);
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
-  // The UX wave, U9 (O-39, A3): a read with nothing to draw says so once it has been out 300 ms, on every route
+  // The UX wave, U9 (O-39, A3): a read with nothing to draw says so, on every route; the word cut (T111): by the quiet
+  // spinner, which shows nothing for its first half second
   const reading = useTranscriptStore((state) => state.entries[storeKey] === undefined || state.entries[storeKey].phase === 'hydrating');
-  const loading = useAfter(reading && rows.length === 0, LOADING_AFTER_MS);
+  const waitingForHistory = reading && rows.length === 0;
   const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
@@ -882,13 +881,13 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const merged: TranscriptActions = { ...DEFAULT_ACTIONS, ...actions };
     const acts: TranscriptActions =
       childAgent === null ? merged : { ...merged, openFile: (path, line, appSessionId, options) => merged.openFile(path, line, appSessionId, { ...options, agent: childAgent, ...(childConversation !== null && { conversation: childConversation }) }) };
-    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, keepInPlace: keepRow, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
-  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor, keepRow]);
+    return { storeKey, variant, actions: acts, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, motion, answerActions, keepInPlace: keepRow, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) };
+  }, [storeKey, variant, actions, childAgent, childConversation, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, motion, answerActions, presentation, promptAuthor, keepRow]);
 
   return (
     <TranscriptProvider value={context}>
       <WaitingViewProvider view={requests.view} settling={requests.settling}>
-      {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the word's 300 ms */}
+      {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the spinner's half second */}
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} data-hydration={failed !== null ? 'failed' : reading ? 'loading' : 'ready'} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={requests.rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} estimate={estimate} onMounted={mountedChanged} />
         {reach !== null ? (
@@ -915,10 +914,11 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
             </button>
           </div>
         )}
-        {loading && (
-          <p role="status" className="pointer-events-none absolute inset-0 m-0 flex items-center justify-center text-ui text-fg-muted">
-            {HYDRATION.loading}
-          </p>
+        {waitingForHistory && (
+          // the word cut (T111): the quiet spinner, from half a second of the read on, its name the wait's words
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <QuietSpinner label={HYDRATION.loading} />
+          </div>
         )}
         {failed !== null && (
           <div className="transcript-failed" role="alert" title={failed}>

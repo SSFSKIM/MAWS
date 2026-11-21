@@ -28,7 +28,6 @@ export interface HarnessApi {
   expandTurn(n: number): Promise<void>;
   scrollToTurn(n: number): Promise<void>;
   metrics(): HarnessMetrics;
-  setEffort(effort: string | null): void; // W8: the session effort the live thinking label names (none by default)
   // The long-transcript window: the fixture as a long session's disk history, opened on its newest window, each older
   // page `delayMs` away (paged.ts); `turns` how many of its `total` turns the open drew
   loadPaged(fixture: string, delayMs: number): Promise<HarnessLoad & { turns: number; total: number }>;

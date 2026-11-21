@@ -1,6 +1,9 @@
 // Small pieces the row components share.
 import { useEffect, useState, type HTMLAttributes } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { NamedGlyph } from '../../../ui/glyph';
+import { endsInFold, FOLD } from '../../model/copy';
+import { CopyIcon } from './icons';
 
 // The disclosure chevron; rotates when its button's aria-expanded is true (transcript.css).
 export function Chevron() {
@@ -14,6 +17,17 @@ export function Chevron() {
 // Per-row copy (residue *Copy and export*): the sandboxed renderer may use the clipboard on a user gesture.
 export function copyText(text: string): void {
   void navigator.clipboard?.writeText(text);
+}
+
+// The word cut (T18): a copy control drawn as the copy glyph, its words its accessible name and its tooltip (the named
+// glyph). `onHover`: drawn only while its part is pointed at or holds focus (transcript.css), and in the Tab order
+// throughout, so the keyboard reaches it.
+export function CopyGlyph({ label, text, onHover = false }: { label: string; text: string; onHover?: boolean }) {
+  return (
+    <NamedGlyph label={label} className="transcript-copy-glyph" data-on-hover={onHover ? '' : undefined} onClick={() => copyText(text)}>
+      <CopyIcon />
+    </NamedGlyph>
+  );
 }
 
 // A line of copy whose backtick spans are code (`Ran \`pnpm test\` in 3s`); an unmatched backtick stays literal.
@@ -30,15 +44,19 @@ export function CodeText({ text }: { text: string }) {
   );
 }
 
-// Nonzero `+{added}` and `−{removed}` sides in the diff colours.
-export function LineCounts({ added, removed }: { added: number; removed: number }) {
+// Nonzero `+{added}` and `−{removed}` sides in the diff colours. `after`: the words they follow, which set them apart
+// when those end in a folded caption's count (the word cut, T2: `+6 · +4 −2`, FOLD in copy.ts).
+export function LineCounts({ added, removed, after = '' }: { added: number; removed: number; after?: string }) {
   if (added === 0 && removed === 0) return null;
   return (
+    <>
+    {endsInFold(after) && <span className="transcript-counts-apart">{FOLD.beforeLines}</span>}
     <span className="transcript-counts">
       {added > 0 && <span className="transcript-add">+{added}</span>}
       {added > 0 && removed > 0 && ' '}
       {removed > 0 && <span className="transcript-del">−{removed}</span>}
     </span>
+    </>
   );
 }
 
