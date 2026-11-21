@@ -105,7 +105,7 @@ describe('Search settings', () => {
 
   it('finds Update by its words and lands on the Binary row it is drawn on, and the config home as the Binary row', () => {
     expect(search('claude update terminal')).toEqual([{ id: 'engine.update', name: 'Update', under: 'Engine', target: 'engine.binary' }]);
-    expect(search('config home')).toEqual([{ id: 'engine.binary', name: 'Binary', under: 'Engine', target: 'engine.binary' }]);
+    expect(search('config home')).toEqual([{ id: 'engine.binary', name: 'Binary', under: 'Engine', target: 'engine.binary', via: 'engine.configHome' }]); // in the note: no word shows it, so the row lands
     expect(ids('transcripts trust')).toEqual(['engine.binary']);
   });
 
