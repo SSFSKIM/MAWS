@@ -554,12 +554,15 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       // the rows (G4, G5): persistent, so in view with the turn folded
       const artifactRows = s.pane.locator('section.transcript-artifact');
       await expect(artifactRows.locator('[data-artifact-heading]')).toHaveText(['Artifact Dashboard · v1', 'Updated artifact Dashboard · v2', 'Could not register artifact nope: no artifact "nope" in this session']);
-      await expect(artifactRows.nth(2).getByRole('button', { name: 'Open' })).toHaveCount(0);
+      // the word cut (T103): a row's heading is the press that opens its version, described "Open"; the refused row has none
+      await expect(artifactRows.nth(2).locator('button.transcript-artifact-open')).toHaveCount(0);
 
       // v1 from its row: the viewer in the panel draws it, the frame throws once, and the chip counts it on the row and in
       // the viewer, once however many captures ran (the capture's console went into its result alone, Design §8)
       const v1Row = artifactRows.nth(0);
-      await v1Row.getByRole('button', { name: 'Open' }).click();
+      const v1Open = v1Row.getByRole('button', { name: 'Artifact Dashboard · v1', exact: true });
+      await expect(v1Open).toHaveAccessibleDescription('Open');
+      await v1Open.click();
       const viewer = viewerOf(s.panel);
       await expect(viewer).toHaveAttribute('data-artifact-viewer', deliverableId);
       await expect(viewer).toHaveAttribute('data-version', '1');
@@ -590,7 +593,7 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       // the cells, from the engine's recorded tool_result (the recording's synthetic 64-pixel answer)
       await unfoldWork(s.pane);
       await expect(s.pane.getByText('Listed 1 artifact', { exact: true })).toBeVisible();
-      await expect(s.pane.getByText('Screenshot of Dashboard v1 (64 × 64)', { exact: true })).toBeVisible();
+      await expect(s.pane.getByText('Screenshot of Dashboard', { exact: true })).toBeVisible(); // the word cut (T17): no version, no size
     });
   } finally {
     if (!existed) rmSync(repo, { recursive: true, force: true });

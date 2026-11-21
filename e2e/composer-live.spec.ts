@@ -636,7 +636,9 @@ test('bash, memory, paste, history recall, the palette, the status line and Add 
       await page.waitForTimeout(3_000);
       const after = value(await invoke(page, 'session.listPermissionRules', { appSessionId: m.id as never }));
       const flag = framesOf(rowsOf(m.journalPath), 'out').filter(({ frame }) => frame.type === 'control_request' && frame.request?.subtype === 'apply_flag_settings').map(({ seq, frame }) => ({ seq, request: frame.request }));
-      const notices = await page.locator('[role="status"], [role="alert"]').allInnerTexts();
+      // the word cut (C20): the wait beside the "+" is a quiet spinner named by its words, no status
+      const waits = await page.locator('[role="progressbar"][aria-label]').evaluateAll((bars) => bars.map((bar) => bar.getAttribute('aria-label')!));
+      const notices = [...(await page.locator('[role="status"], [role="alert"]').allInnerTexts()), ...waits];
       observe('misc.add-dir', { extra, before: (before as { state?: { workspaceDirectories?: unknown } }).state?.workspaceDirectories, after: (after as { state?: { workspaceDirectories?: unknown } }).state?.workspaceDirectories, flag, notices });
     });
   });

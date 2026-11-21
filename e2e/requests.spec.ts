@@ -427,7 +427,7 @@ test('a Read request flagged requires_user_interaction offers no quick approval 
   ]);
   // pane 0 holds the session's transcript, the prompt at its end; the hover card in pane 1 is a group named for the kind too ("Approval needed: Read", or the kind alone while unread)
   const frame = page.getByRole('region', { name: 'pane 0' }).getByRole('group', { name: 'Approval needed', exact: true });
-  await expect(frame.getByText(/Read needs its own approval surface, which MAWS does not have/)).toBeVisible();
+  await expect(frame.getByText('MAWS can’t show this prompt · answer it in a terminal, or deny')).toBeVisible(); // the word cut (C93)
   await expect(frame.getByRole('button', { name: /^Allow/ })).toHaveCount(0);
   const hover = page.getByRole('dialog', { name: 'hover c7-flagged' });
   // U1a §H: a flagged request can be denied from outside its pane, never allowed
@@ -537,7 +537,7 @@ test('an undeclared dialog kind is a card at the transcript’s end, pending and
   await show(page, [{ appSessionId: 'c7-undeclared', placement: 'docked' }, null]);
   const pane = page.getByRole('region', { name: 'pane 0' });
   await expect(pane.getByRole('heading', { name: 'cost_threshold' })).toBeVisible();
-  await expect(pane.getByText(/MAWS did not declare this dialog kind and cannot answer it/)).toBeVisible();
+  await expect(pane.getByText('MAWS can’t answer this prompt; it will time out')).toBeVisible(); // the word cut (C114)
   const card = pane.locator('[data-request-end]').getByRole('group', { name: 'Dialog' });
   await expect(card, 'the card stands at the transcript’s end').toBeVisible();
   await expect(card.getByRole('button'), 'with no control that answers').toHaveCount(0);
@@ -1168,7 +1168,8 @@ test('a prompt’s keys: Esc from no focus, ⌘Enter from the empty composer, �
   expect(cards.consoleErrors()).toEqual([]);
 });
 
-// Acceptance 6 and 7 in the shell: the card column's first card, "Waiting for you · 3", lists the session's waiting
+// Acceptance 6 and 7 in the shell: the card column's first card, "Waiting for you 3" (the word cut, N111: a bare count
+// named "3 requests"), lists the session's waiting
 // requests oldest first (the question, then the two prompts). Its line for the younger prompt opens it at the end and
 // puts the keyboard on the end row, so ⌘Enter answers the younger; the count follows each answer, and once nothing
 // waits the card is absent.
@@ -1198,7 +1199,8 @@ test('the column’s card lists what waits, oldest first; a line opens its reque
     await expect(open.getByTestId('request-input')).toHaveText('ls docs');
 
     const card = sessionCards(page).getByRole('region', { name: 'Waiting for you', exact: true });
-    await expect(card.getByRole('heading'), 'the card counts what waits').toHaveText('Waiting for you · 3');
+    await expect(card.getByRole('heading'), 'the card counts what waits').toHaveText('Waiting for you 3');
+    await expect(card.getByRole('heading'), 'the count named by what it counts').toHaveAccessibleName('Waiting for you 3 requests');
     const itemOf = async (requestId: string) => {
       let item: string | undefined;
       await expect.poll(async () => (item = value(await invoke(page, 'attention.list', undefined)).find((i) => i.request.requestId === requestId)?.id)).toBeDefined();
@@ -1216,7 +1218,8 @@ test('the column’s card lists what waits, oldest first; a line opens its reque
     await expect(left.locator(END_ROW), 'the keyboard is on the end row').toBeFocused();
     await answerByKey(page, { focus: rowOf(open), control: open.getByRole('button', { name: 'Allow once', exact: true }), key: ALLOW_ONCE_KEY, answered: async () => (await resolvedPermissions(page, id)).length > 0, what: 'the younger, from the column' });
     await expect.poll(() => resolvedPermissions(page, id), { message: 'the answer is the younger’s' }).toEqual([[younger, 'allow']]);
-    await expect(card.getByRole('heading')).toHaveText('Waiting for you · 2');
+    await expect(card.getByRole('heading')).toHaveText('Waiting for you 2');
+    await expect(card.getByRole('heading')).toHaveAccessibleName('Waiting for you 2 requests');
 
     await open.getByRole('button', { name: 'Deny', exact: true }).click();
     await expect.poll(() => resolvedPermissions(page, id)).toEqual([[younger, 'allow'], [older, 'deny']]);

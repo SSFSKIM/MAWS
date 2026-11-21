@@ -132,7 +132,6 @@ export function Harness() {
           following: listRef.current?.following ?? true,
         };
       },
-      setEffort: () => {}, // the word cut (T37): the label names no effort; api.ts says why it stays
       loadPaged: async (name, delayMs) => {
         const loaded = await load(name, { delayMs });
         await current().attached;

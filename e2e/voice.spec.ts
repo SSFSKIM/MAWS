@@ -129,11 +129,11 @@ function intentAt(path: string): HarnessIntent {
 }
 
 // Binds the dictation hold to ⌥Space through the app's settings, and waits until the page's settings store has it (the
-// toolbar microphone's tooltip names the chord).
+// toolbar microphone's tooltip names the chord; the word cut, C32: so does its description, "hold ⌥Space").
 async function bindDictate(page: Page): Promise<void> {
   const result = await page.evaluate(() => window.maws.invoke('settings.set', { keymap: { 'composer.dictate': 'Alt+Space' } }));
   expect(result.ok, JSON.stringify(result)).toBe(true);
-  await expect(pane(page, 0).getByRole('button', { name: 'Dictate' })).toHaveAttribute('title', /⌥Space/);
+  await expect(pane(page, 0).getByRole('button', { name: 'Dictate' })).toHaveAccessibleDescription('hold ⌥Space');
 }
 
 // The `#composer` page with unstarted sessions' composers (C10's intent stubbed), the dictation hold bound, focus in the
@@ -172,7 +172,8 @@ test('a hold shows Listening…, draws the partials greyed in place, settles the
 
   await holdDown(page);
   await page.keyboard.down('Space'); // the key's repeat: still one capture
-  await expect(statusIn(page, 0)).toHaveText('Listening…');
+  await expect(statusIn(page, 0)).toHaveText('Listening…'); // the word cut (C33): for a screen reader; drawn, the pulsing dot
+  await expect(statusIn(page, 0).locator('[data-dictation-dot="listening"]')).toBeVisible();
   await expect(interimIn(page, 0)).toHaveText('hello');
   await expect(interimIn(page, 0)).toHaveText('hello world');
   await expect(interimIn(page, 0)).toHaveCount(1);
@@ -302,11 +303,14 @@ test('the toolbar microphone toggles: a click starts listening, a second settles
   await showComposers(page, ['e9-click']);
   await script(app, { partials: ['hello world'], partialDelayMs: 100, final: 'Hello world.' });
   const mic = pane(page, 0).getByRole('button', { name: 'Dictate' });
-  await expect(mic).toHaveAttribute('title', 'Click to dictate · on this Mac · or hold ⌥Space');
+  // the word cut (C32): the action alone, its chord the hold that does the same, in its tooltip and its description
+  await expect(mic).not.toHaveAttribute('title');
+  await expect(mic).toHaveAccessibleDescription('hold ⌥Space');
   await expect(mic).toHaveAttribute('aria-pressed', 'false');
 
   await mic.click();
   await expect(statusIn(page, 0)).toHaveText('Listening…');
+  await expect(statusIn(page, 0).locator('[data-dictation-dot="listening"]'), 'the word cut (C33): the pulsing dot drawn, no word').toBeVisible();
   await expect(mic).toHaveAttribute('aria-pressed', 'true');
   await expect(interimIn(page, 0)).toHaveText('hello world');
   await expect(messageIn(page, 0)).toBeFocused(); // the words go to the caret; the button does not take focus

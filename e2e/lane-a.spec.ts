@@ -31,6 +31,7 @@ import { stopRecord } from './support/stop-record';
 import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2
 import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { sidebarOf, sidebarRow } from './support/sidebar';
+import { FINISHED_TURN_LINE } from './support/turn-line'; // the word cut (T1)
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
@@ -201,7 +202,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     c.terminal = await terminalSession({ store: c.store, sminosHome: c.maws.sminosHome, sessionId: c.sid, cwd: c.repo.root, bridged: false });
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('terminal');
     await (await sidebarRow(page, { appSessionId: c.appId })).click();
-    await expect(notice(page)).toContainText(`Live in Terminal · pid ${c.terminal.pid} · read-only`);
+    // the word cut (C128): the line reads who holds the session and read-only; its pid waits on the line, its description
+    const heldLine = notice(page).getByText('Live in Terminal · read-only', { exact: true });
+    await expect(heldLine).toBeVisible();
+    await expect(heldLine).toHaveAccessibleDescription(`pid ${c.terminal.pid}`);
     await expect(notice(page).getByRole('button', { name: 'Take over here' })).toBeVisible();
     await expect(editor(page)).toHaveCount(0);
     expect(value(await invoke(page, 'laneA.list', undefined)).states, 'no answering bridge, no state').toEqual([]);
@@ -216,7 +220,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // the owner's Q1: its tab marks it Terminal, titled with the hover card's line
     const marker = page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]');
     await expect(marker).toHaveText('Terminal');
-    await expect(marker).toHaveAttribute('title', 'Running in Terminal · driven through sminos’s bridge');
+    await expect(marker).toHaveAttribute('title', 'Running in Terminal'); // the word cut (C130): who holds it, not how
     // acceptance 2: each gap in place with its reason, the bridge's words from the capability fixture
     const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
     // the O9 sitting: no mode is reported, so the chip names none, only why
@@ -395,7 +399,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const heldKey = bodies(bridge, 'deliver').at(-1)!.key;
     bridge.emit({ type: 'delivered', key: heldKey, outcome: 'refused', reason: 'the prompt was cleared in the terminal' });
     await expect(held).toHaveAttribute('data-pending-send', 'refused', { timeout: 10_000 });
-    await expect(held).toContainText('Not entered: the prompt was cleared in the terminal');
+    await expect(held).toContainText('Not sent: the prompt was cleared in the terminal'); // the word cut (C79)
     await expect(held.getByRole('button', { name: 'Send again' })).toBeVisible();
     await expect(editor(page), 'the draft typed since is untouched').toHaveText('a new draft');
 
@@ -678,7 +682,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).locator('.transcript-prose-live')).toHaveCount(0, { timeout: 10_000 });
     const cut = main(page).locator('[data-cut]');
     await expect(cut.getByText('Half a story and more', { exact: true })).toBeVisible();
-    await expect(cut.getByText('Cut off by the interrupt: the session didn’t keep it')).toBeVisible();
+    await expect(cut.getByText('Cut off · not kept by the session')).toBeVisible(); // the word cut (T65)
     await expect(main(page).locator('.transcript-answer').getByText('Half a story and more', { exact: true }), 'never drawn as the reply').toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
@@ -700,7 +704,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const row = main(page).locator('.transcript-subagent', { hasText: 'Sleep a while' });
     await expect(main(page).getByText('It is working in the background.')).toBeVisible({ timeout: 15_000 });
     await expect(row, 'the turn ended while its agent works: the call stays in view').toBeVisible();
-    await expect(row).toContainText('Sleep a while started working');
+    // the word cut (T86): a working agent's line is the running ring, named Working, and the description its parent gave
+    await expect(row.getByRole('img', { name: 'Working', exact: true })).toBeVisible();
+    await expect(row.locator('.transcript-subagent-sentence')).toHaveText('Sleep a while');
     await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, toolUseId: `toolu_${agent.agentId}`, status: 'completed', summary: 'Slept.', at: '2026-10-28T10:00:09.000Z' }))]);
     await expect(row, 'the agent ended: its row folds with the turn').toHaveCount(0, { timeout: 10_000 });
     expect(c.maws.consoleErrors()).toEqual([]);
@@ -824,7 +830,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
       return done;
     };
     const terminal = await drive(c);
-    await expect(rowOf(first), 'the turn ended while its agent works: the call stays in view').toContainText(`${first.description} started working`, { timeout: 15_000 });
+    // the word cut (T86): the running ring, named Working, and the description alone
+    await expect(rowOf(first).locator('.transcript-subagent-sentence'), 'the turn ended while its agent works: the call stays in view').toHaveText(first.description, { timeout: 15_000 });
+    await expect(rowOf(first).getByRole('img', { name: 'Working', exact: true })).toBeVisible();
     await showSessionCards(page);
     await expect(onCard(first), 'the agent on the Subagents card').toContainText(first.description, { timeout: 15_000 });
     await expect(card.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
@@ -847,7 +855,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const turn = backgroundAgentRecords(c.sid, c.repo.root, ask, second);
     await backgroundAgentSidecars(c.store, c.sid, c.repo.root, second);
     await c.store.appendLines(c.transcript, [userRecord(c.sid, c.repo.root, ask, orphan.at(-1)!.uuid as string, 'Now tidy them in the background.', '2026-10-28T10:01:03.000Z'), ...turn, ...turnEndRecords(c.sid, c.repo.root, turn.at(-1)!.uuid as string, '2026-10-28T10:01:04.000Z')].map((r) => JSON.stringify(r)));
-    await expect(rowOf(second), 'the resumed session’s agent works: its call stays in view').toContainText(`${second.description} started working`, { timeout: 15_000 });
+    await expect(rowOf(second).locator('.transcript-subagent-sentence'), 'the resumed session’s agent works: its call stays in view').toHaveText(second.description, { timeout: 15_000 });
+    await expect(rowOf(second).getByRole('img', { name: 'Working', exact: true })).toBeVisible();
     await expect(rowOf(first), 'the first stays ended').toHaveCount(0);
     await showSessionCards(page);
     await expect(onCard(second), 'the second agent on the card').toContainText(second.description, { timeout: 15_000 });
@@ -1330,8 +1339,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // reply), so its "answered: …" lines (U3a's notice, still derived) fold with it: folded, none stands outside the fold,
     // and the questions' rows above still read their answers; opened, the lines are there
     const answerLines = main(page).locator('.transcript-row[data-kind="notice"]').filter({ hasText: /answered: / });
-    const turnLine = main(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').filter({ hasText: /^Worked for / }).last();
-    await expect(turnLine, 'the delivery’s turn reads Worked for: it has other work').toBeVisible({ timeout: 15_000 });
+    const turnLine = main(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').filter({ hasText: FINISHED_TURN_LINE }).last();
+    await expect(turnLine, 'the delivery’s turn reads its duration and its work (the word cut, T1): it has other work').toBeVisible({ timeout: 15_000 });
     if ((await turnLine.getAttribute('aria-expanded')) === 'true') await turnLine.click();
     await expect(turnLine).toHaveAttribute('aria-expanded', 'false');
     await expect(answerLines, 'folded, no answer line stands outside the fold').toHaveCount(0);
@@ -1350,12 +1359,12 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   // UX wave U1b, decision 8a (the architect's ruling of 2026-11-15): a question MAWS answers that was answered elsewhere
   // first. The bridge refuses the answer with 404 and names no settlement (no request pending under that id: its own
   // record of the request has gone ahead of its stream), so the driver says not pending with no winner and lane A's
-  // controls inject no settlement; the card says "Already answered elsewhere" for its two seconds and closes, while the
+  // controls inject no settlement; the card says "Answered elsewhere" (the word cut, N107) for its two seconds and closes, while the
   // bridge still lists the request. Through that gap the row draws no form and no control, and each line reads the
   // existing sentence, past the two seconds and through a remount, until the row carries its own answers. The column's
   // card still lists the item; its line goes to a request that is closed, so it says the request is gone and moves the
   // keyboard nowhere that answers (decision 19).
-  test('a question answered elsewhere while its row waits: Already answered elsewhere on each line, no form and no control, past two seconds and a remount; the column’s line says it is gone; then the row’s own answers', async () => {
+  test('a question answered elsewhere while its row waits: Answered elsewhere on each line, no form and no control, past two seconds and a remount; the column’s line says it is gone; then the row’s own answers', async () => {
     test.setTimeout(150_000);
     const week = 'Which day should the printed week start on?';
     const cover = 'Which colour for the cover?';
@@ -1369,7 +1378,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { bridge } = await drive(c);
     const row = questionRow(page, ask.call);
     const form = row.locator('[data-request-card]');
-    const elsewhere = ['Week start→Already answered elsewhere', 'Cover→Already answered elsewhere'];
+    const elsewhere = ['Week start→Answered elsewhere', 'Cover→Answered elsewhere']; // the word cut (N107)
     await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'its row before any request' }).toEqual(['Week start→Not answered', 'Cover→Not answered']);
 
     // the bridge takes no answer for it: 404, no settlement named
@@ -1548,7 +1557,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   // (`laneA.state`), and, when no turn runs, whether the newest turn's line reads stopped.
   async function recognisedAs(page: Page, appId: string, state: 'idle' | 'running' | 'stopped'): Promise<void> {
     await expect.poll(async () => value(await invoke(page, 'laneA.state', { appSessionId: appId }))?.turn, { timeout: 10_000 }).toEqual({ running: state === 'running', unknown: false });
-    if (state !== 'running') await expect(main(page).locator('.transcript-divider .transcript-disclosure').last(), `the newest turn's line reads ${state === 'stopped' ? 'stopped' : 'not stopped'}`).toHaveText(state === 'stopped' ? /^You stopped after/ : /^Worked for/);
+    if (state !== 'running') await expect(main(page).locator('.transcript-divider .transcript-disclosure').last(), `the newest turn's line reads ${state === 'stopped' ? 'stopped' : 'not stopped'}`).toHaveText(state === 'stopped' ? /^You stopped after/ : FINISHED_TURN_LINE);
   }
   // The newest line the session's follower has read, as the window hears it: each `fs.followState` names its chain's
   // leaf, reported whenever the chain grows. A positive sign of a read where the lines read draw nothing.

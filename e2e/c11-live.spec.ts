@@ -419,11 +419,12 @@ test('every widget opens with live engine data; controls take effect and are rea
       await idle(page, id);
       const statusText = await settled(await openWidget(live, 'status'));
       w = await openWidget(live, 'fast');
-      // UX wave U4a (decision 20): fast mode's row, "Fast mode" over its muted line (the pending word, a reason, On or Off)
+      // UX wave U4a (decision 20): fast mode's row, "Fast mode" over its muted line (the pending word or a reason; the word
+      // cut, P541: no line when there is nothing else to say, so no caption at all once settled)
       const caption = (await w.locator('[data-fast-row]').innerText()).match(/Fast mode\n([^\n]+)/)?.[1] ?? null;
       const s = await status(page, id);
       observe('fast', { warning, inits: inits(maws, id).slice(-2), fastMode: s.fastMode, autoModeServer: statusText.match(/Auto mode server\n[^\n]+/)?.[0], caption });
-      expect(caption).not.toContain('the next init frame confirms it');
+      expect(caption ?? '', 'settled: the change is no longer on its way (the word cut, C39: its word is "setting…")').not.toContain('setting…');
       value(await invoke(page, 'session.applyFlagSettings', { appSessionId: id as AppSessionId, settings: { fastMode: false } }));
     });
 

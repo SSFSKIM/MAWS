@@ -5132,7 +5132,7 @@ const XB_TITLE = 'Harbour notes';
 const XB_READ = { status: 'read', artifactId: XB_ARTIFACT, kind: 'document', title: XB_TITLE, revision: 3, markdown: '# Harbour notes\n\nThe lamps are amber.\n' };
 const XB_WORDS = `Tighten the opening of [${XB_TITLE}](maws-artifact:${XB_ARTIFACT}).`;
 const XB_WORDS_DRAWN = `Tighten the opening of ${XB_TITLE}.`; // the link drawn as its words
-const XB_READ_CHIP = `${XB_TITLE}, read at revision 3`; // the file chip this build draws for the read (transcript/model/user-text.ts)
+const XB_READ_CHIP = `${XB_TITLE} · rev 3`; // the file chip this build draws for the read (transcript/model/user-text.ts; the word cut, T45)
 
 test('(composed forms, to the peer) a promotion and a message with an attached read, written by this build into a session’s transcript, are drawn by the peer with each segment as a pasted chip that opens to it, never the tags, its bubble’s text recorded whole; this build draws them in place and as the read’s chip', async () => {
   const { here, peer } = builds();

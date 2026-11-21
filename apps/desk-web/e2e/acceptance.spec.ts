@@ -306,9 +306,11 @@ async function acrossTheCompaction(view: Locator): Promise<void> {
   await toTheTop(view);
   const firstRow = await indexOf(view, { text: FIRST_ROW });
   expect(firstRow).not.toBeNull();
-  const divider = view.locator('[data-row-id]').filter({ hasText: 'Compacted earlier' });
+  // the compaction's row by its kind (the renderer's rows/Boundary.tsx), not its words, which the word cut (T48) changed
+  const COMPACTION = '[data-boundary-kind="compaction"]';
+  const divider = view.locator(`[data-row-id]:has(${COMPACTION})`);
   await scrollUntil(view, divider, 1);
-  const boundary = await indexOf(view, { text: 'Compacted earlier' });
+  const boundary = await indexOf(view, { selector: COMPACTION });
   const before = await indexOf(view, { text: 'Read notes part 06 and tell me what it says.' });
   await scrollUntil(view, view.getByText('Read notes part 07 and tell me what it says.'), 1);
   const after = await indexOf(view, { text: 'Read notes part 07 and tell me what it says.' });

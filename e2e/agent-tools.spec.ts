@@ -24,6 +24,7 @@ import { REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { otherThemeColours } from './support/panel-support';
 import { hideSurfaces, openSurface, sessionCard, sessionCards, showSessionCards, sideColumn, surface } from './support/shell';
+import { FINISHED_TURN_LINE } from './support/turn-line'; // the word cut (T1)
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const HARNESS_ENV = { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' };
@@ -187,7 +188,7 @@ test.describe('the #panel harness: the agent tools', () => {
     const body = h.region.locator('[data-view="agent"]');
     await expect(body.getByText('ONE', { exact: true }), 'its answer').toBeVisible();
     // The child's finished turn folds its work, as C6's transcript does anywhere: opened, its Read cell.
-    await body.getByRole('button', { name: /^Worked for / }).click();
+    await body.getByRole('button', { name: FINISHED_TURN_LINE }).click(); // the word cut (T1): the turn's line reads its duration first
     await expect(body.locator('.transcript-cell-line').filter({ hasText: 'one.txt' }).first(), 'the child’s Read cell').toBeVisible();
     await expect.poll(async () => (await h.agents('childTranscript', FIRST.agentId)).keys, 'one store key for the child').toHaveLength(1);
     h.expectQuietConsole();
@@ -1033,7 +1034,8 @@ test.describe('E7: the orchestration views', () => {
     const { address, name, text } = E7_PEER_A;
     const peerRows = () => h.agents('peerRows');
     const expandAll = () => h.page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness!.panel!.transcript('A').expandAll());
-    // UX wave U3 (O-12): one line, `Message from @<name>: <preview>` or `Sent to @<name>: <preview>`; the sender reads `@name`
+    // UX wave U3 (O-12): one line, `@<name>: <preview>`, its lead an arrow (the word cut, T73: "Message from" and "Sent to"
+    // are its accessible lead alone); the sender reads `@name`
     const inbound = (preview: string) => ({ kind: 'message', direction: 'inbound', who: `@${name}`, owners: null, address, preview, result: null, resultText: null });
     const outbound = (to: string, preview: string, result: string) => ({ kind: 'message', direction: 'outbound', who: `@${name}`, address: to, preview, result });
     await h.load('A', 'pass3/e7-peer-a', { releaseTo: E7_PEER_A.replyFrom });
@@ -1045,29 +1047,34 @@ test.describe('E7: the orchestration views', () => {
       await expect.poll(peerRows, 'folded: no message line in view').toEqual([]);
       await expandAll();
       await expect.poll(async () => (await peerRows()).length, 'the folded rows shown').toBe(3);
+      // the word cut (T81, T82): the listing is one counted line with no self line, folded; opened in place, its sections
+      expect((await peerRows())[0]).toEqual({ kind: 'listing', summary: 'Listed 1 agent', open: false, sections: [], notes: [] });
+      expect(await h.agents('openListings'), 'one listing opened').toBe(1);
       const rows = await peerRows();
-      expect(rows[0]).toMatchObject({ kind: 'listing', self: expect.stringMatching(/^This session is \S+ \[[0-9a-f]+\]$/), sections: [{ heading: 'Peer sessions · 1', rows: [{ name, ref: expect.stringMatching(/^[0-9a-f]+$/), extras: expect.stringMatching(/^interactive · idle · started \d+s ago$/) }] }] });
+      expect(rows[0]).toMatchObject({ kind: 'listing', summary: 'Listed 1 agent', open: true, sections: [{ heading: 'Peer sessions · 1', rows: [{ name, ref: expect.stringMatching(/^[0-9a-f]+$/), extras: expect.stringMatching(/^interactive · idle · started \d+s ago$/) }] }] });
       expect(rows.slice(1)).toEqual([
-        { ...inbound('E7 probe: hello from B'), reply: true, line: null },
+        { ...inbound('E7 probe: hello from B'), reply: true, line: null, why: null },
         expect.objectContaining({ ...outbound(name, 'Hello from A — received your probe message.', 'sent'), reply: false, line: null }), // the agent's unasked reply, by B's name
       ]);
       const texts = await h.agents('columnTexts');
       expect(texts.some((line) => line.includes('<cross-session-message')), 'no raw envelope bubble').toBe(false);
     });
 
-    await test.step('Reply sends the peer relay text as a next steer; the line walks asked, replying, replied', async () => {
+    // the word cut (T79): the line is the state, Sending with its time while asked, then Sending, then Sent; what it
+    // waits for and how it went are its tooltip and its description
+    await test.step('Reply sends the peer relay text as a next steer; the line walks sending, sending, sent, its description asked, replying, replied', async () => {
       await h.agents('reply', 1, text);
       expect((await h.agents('calls')).steer).toEqual([{ appSessionId: 'A', content: relayText({ kind: 'peer', address, name, mode: 'reply' }, text), priority: 'next' }]);
-      const line = async () => (await peerRows()).flatMap((row) => (row.kind === 'message' && row.line !== null ? [row.line] : []))[0];
-      await expect.poll(line).toMatch(new RegExp(`^Asked ${SESSION} to reply · \\d+s$`));
+      const line = async () => (await peerRows()).flatMap((row) => (row.kind === 'message' && row.line !== null ? [{ line: row.line, why: row.why }] : []))[0];
+      await expect.poll(line).toEqual({ line: expect.stringMatching(/^Sending · \d+s$/), why: `Asked ${SESSION} to reply` });
       await h.agents('releaseThrough', 'A', E7_PEER_A.replySend);
-      await expect.poll(line).toBe(`${SESSION} is replying with SendMessage`);
+      await expect.poll(line).toEqual({ line: 'Sending', why: `${SESSION} is replying with SendMessage` });
       await h.agents('releaseThrough', 'A', E7_PEER_A.replyResult);
-      await expect.poll(line).toBe(`${SESSION} replied with SendMessage`);
+      await expect.poll(line).toEqual({ line: 'Sent', why: `${SESSION} replied with SendMessage` });
       // the evidence: the listing, the message with its Reply walked to replied, and the sends after it
       await expandAll();
       const width = await h.agents('setColumnWidth', 480); // the strip's widest, nearer a session column's width
-      await h.agents('scrollColumnTo', 'This session is');
+      await h.agents('scrollColumnTo', 'Listed 1 agent'); // the listing's line (the word cut, T81, T82: no self line)
       await bothThemes(h, 'g3-rows', h.page.locator('[data-agents-harness-transcript]'));
       await h.agents('setColumnWidth', width);
     });
@@ -1090,6 +1097,7 @@ test.describe('E7: the orchestration views', () => {
       await h.load('A', 'events/agents-peer'); // P2-A §5.6: backfilled Reply tries to start; the stub's A has no main index record, so refusal keeps the text.
       await h.agents('clearStatus', 'A');
       await expandAll();
+      await h.agents('openListings'); // the word cut (T81): the listing opened in place onto its sections
       await expect.poll(async () => (await peerRows()).map((row) => (row.kind === 'message' ? [row.direction, row.preview, row.result, row.reply] : [row.kind, row.sections.map((s) => s.heading)]))).toEqual([
         ['listing', ['Peer sessions · 1']],
         ['inbound', 'E7 probe: hello from B', null, true],

@@ -1243,7 +1243,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect.poll(() => pinnedUnder(hero, card), { message: 'the card 4 px under the v2 heading, at its left', timeout: 10_000 }).toBe(true);
     await expect(card.getByText(CARD_UPDATED)).toBeVisible({ timeout: 20_000 });
 
-    // the thread's row names v2; with the viewer switched back to v1 (the card re-pinned in that frame), the row's Open
+    // the thread's row names v2; with the viewer switched back to v1 (the card re-pinned in that frame), the row's heading
     // shows v2 in the same viewer
     const row = card.locator('section.transcript-artifact');
     await expect(row.locator('[data-artifact-heading]')).toHaveText('Updated artifact Dashboard · v2');
@@ -1251,7 +1251,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(viewer).toHaveAttribute('data-version', '1');
     await expect(hero).toHaveText('Sales overview');
     await expect.poll(() => pinnedUnder(hero, card), { message: 'pinned under the v1 heading', timeout: 10_000 }).toBe(true);
-    await row.getByRole('button', { name: 'Open', exact: true }).click();
+    // the word cut (T103): the row's heading is its press, described "Open"
+    const opens = row.getByRole('button', { name: 'Updated artifact Dashboard · v2', exact: true });
+    await expect(opens).toHaveAccessibleDescription('Open');
+    await opens.click();
     await expect(viewer).toHaveAttribute('data-version', '2');
     await expect(hero).toHaveText(HERO_V2);
     await expect(card).toHaveAttribute('data-card-phase', 'thread');

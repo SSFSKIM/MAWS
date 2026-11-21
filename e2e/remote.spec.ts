@@ -102,6 +102,7 @@ import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5
 import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
 import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
 import { sendNowJournal, steerStopJournal } from './support/c7-replay'; // the UX wave, U4b: U4a's journals, run on B
+import { FINISHED_TURN_LINE } from './support/turn-line'; // the word cut (T1)
 import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
@@ -2904,7 +2905,7 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
 
     await test.step('once the agent ends, its work folds behind its last reply, from the stream: nothing on B follows its transcript', async () => {
       await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets the agent end
-      await quoting(expect(drillIn.getByRole('button', { name: /^Worked for / }), 'its work folded, as a finished local agent’s').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      await quoting(expect(drillIn.getByRole('button', { name: FINISHED_TURN_LINE }) /* the word cut (T1): its duration first */, 'its work folded, as a finished local agent’s').toBeVisible({ timeout: 60_000 }), drillInSaid);
       await expect(drillIn.getByText(SUB_SECOND, { exact: true }), 'behind its last reply').toBeVisible();
       await expect(drillIn.getByTestId('subagent-rows-gap')).toHaveCount(0);
       // B's engine host's lines about a follow of the agent's transcript, from every log of B's (M8's way of reading them)
