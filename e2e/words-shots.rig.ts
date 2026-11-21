@@ -959,7 +959,10 @@ async function settingsM1(app: ElectronApplication, page: Page, usage: string) {
   const code = section('org').getByRole('textbox', { name: ORG.code, exact: true });
   await noteShots(page, m1({ id: 'm1-settings-org-signin', title: 'Settings, Org, Sign in… pressed', how: 'Settings, Org (not signed in); press Sign in…', state: 'The pairing-code field holding the keyboard, its note on where a code comes from open', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
     await settingsAt(app, page, 'org');
-    if (CUT_ORG.signInOpen !== undefined) await section('org').getByRole('button', { name: CUT_ORG.signInOpen, exact: true }).click();
+    // the status read first; the twin finds the field Sign in… drew still there
+    const signIn = CUT_ORG.signInOpen === undefined ? null : section('org').getByRole('button', { name: CUT_ORG.signInOpen, exact: true });
+    await expect(signIn === null ? code : signIn.or(code).first()).toBeVisible({ timeout: 10_000 });
+    if (signIn !== null && (await signIn.count())) await signIn.click();
     else await code.focus();
   }, { check: checks(() => expect(code, 'the pairing-code field').toBeFocused({ timeout: 3_000 }), noteShown(section('org').getByRole('group', { name: ORG.code, exact: true }), 'the pairing-code row')) });
 }
@@ -2301,7 +2304,9 @@ test('states: Settings › Org with a pairing code refused, Gateway with the rel
     await shot(page, m1({ id: 'm1-settings-org-code-refused', title: 'Settings, Org, a pairing code refused', how: 'Settings (⌘,), Org (not signed in); Sign in…, type a pairing code, Enter', state: 'The refusal under the pairing-code field that sent it (the fixture’s main answers busy)', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
       if (!harnessBuilt) throw new Error('the Org page fixture needs the harness build’s main (scripts/e2e-build.sh harness)');
       await settingsAt(app, page, 'org');
-      if (CUT_ORG.signInOpen !== undefined && (await code().count()) === 0) await org().getByRole('button', { name: CUT_ORG.signInOpen, exact: true }).click();
+      const signIn = CUT_ORG.signInOpen === undefined ? null : org().getByRole('button', { name: CUT_ORG.signInOpen, exact: true });
+      await expect(signIn === null ? code() : signIn.or(code()).first()).toBeVisible({ timeout: 10_000 });
+      if (signIn !== null && (await signIn.count())) await signIn.click();
       await code().fill('QX7K-4MPL-92TD');
       await code().press('Enter');
       await expect(refusal()).toBeVisible({ timeout: 10_000 });
