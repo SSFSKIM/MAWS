@@ -429,7 +429,9 @@ async function m2Build(page: Page): Promise<boolean> {
     await expect(mic, 'a message box’s microphone, which says the build').toBeAttached({ timeout: 15_000 });
     const drawn = (await mic.getAttribute('title')) === null;
     const source = existsSync(join(REPO_ROOT, M2_SOURCE));
-    if (drawn === source) cut2 = drawn;
+    const head = headCommit();
+    if (CACHE_KEY !== null && !head.startsWith(CACHE_KEY)) cut2Refused = `out/ came from the build cache under key ${CACHE_KEY}, not this checkout's commit ${head}`;
+    else if (drawn === source) cut2 = drawn;
     else cut2Refused = `out/ is not this checkout's build: it ${drawn ? 'draws' : 'does not draw'} the word cut's M2, and the checkout ${source ? 'has' : 'lacks'} ${M2_SOURCE}`;
     console.log(`[words] ${cut2Refused ?? `this build ${drawn ? 'draws' : 'does not draw'} the word cut's M2 (the microphone ${drawn ? 'has no' : 'has its'} system title)`}`);
   }
@@ -640,17 +642,22 @@ test.afterAll(() => {
 });
 // What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
 // build restored twice from scripts/e2e-build.sh's cache) show as one build: the checkout's commit, the tracked files
-// it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, and which cut each
-// build check read (null where no scene read it).
-type Run = { at: string; commit: string; changed: string[]; out: string; m1: boolean | null; m2: boolean | null; scenes: string[] };
-function buildIdentity(): Pick<Run, 'commit' | 'changed' | 'out'> {
+// it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, the cache key out/
+// came under, and which cut each build check read (null where no scene read it). An m2 scene refuses a cached out/
+// whose key is not the checkout's commit (m2Build).
+type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; scenes: string[] };
+// The key out/ was restored or stored under when scripts/e2e-build.sh's cache was on (the commit that built it), else
+// null: out/ was built from this checkout
+const CACHE_KEY = process.env.MAWS_E2E_BUILD_CACHE && process.env.MAWS_E2E_BUILD_KEY ? process.env.MAWS_E2E_BUILD_KEY : null;
+const headCommit = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+function buildIdentity(): Pick<Run, 'commit' | 'changed' | 'out' | 'cacheKey'> {
   const inRepo = (...args: string[]) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
   const out = join(REPO_ROOT, 'out');
   const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]));
   const digest = createHash('sha256');
   for (const file of files(out).sort()) digest.update(`${file.slice(out.length)}\0${createHash('sha256').update(readFileSync(file)).digest('hex')}\n`);
   const changed = inRepo('status', '--porcelain', '--untracked-files=no').split('\n').filter((line) => line !== '').map((line) => line.slice(3));
-  return { commit: inRepo('rev-parse', 'HEAD').trim(), changed, out: digest.digest('hex') };
+  return { commit: headCommit(), changed, out: digest.digest('hex'), cacheKey: CACHE_KEY };
 }
 
 const BASE_ENV = (extra: Record<string, string>) => ({
@@ -1186,6 +1193,8 @@ async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   // P537: /model with a name the catalogue lacks; its line in the effort view's warning (widgets/ModelSelector.tsx,
   // `unknown`, the same element on both builds)
   await shot(page, m2({ id: 'm2-model-unknown-name', title: 'Model menu (/model) with a name it does not know', how: 'Type /model nonesuch in an idle session and press Enter', state: 'The menu’s line saying no model has that name', folders: ['widgets', 'composer'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page); // the line is the same element on both builds: the build is checked against the checkout first
     await open('model', 'nonesuch');
   }, { check: () => inView(dialogOf(page, 'model').locator('p.text-warning'), 'the line for the unknown name') });
   await reset(page);
@@ -3222,7 +3231,7 @@ test('the word cut’s M2: recorded transcripts for the conversation’s states'
     // button that names the model, `data-model-selector` the view shown, on both builds). Last in the launch, so the
     // empty chat it leaves open is in no other scene.
     const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((intent) => intent.appSessionId as string);
-    const before = new Set(await intents()); // a retry's New chat reuses the empty chat the first attempt made (U13a)
+    let before: Set<string> | null = null; // read once, by the first attempt: a retry's New chat reuses its empty chat (U13a)
     let chat: string | null = null;
     const newChat = () => pane(page).locator(`[data-composer="${chat}"]`);
     const selector = () => page.locator('[data-model-selector]').first();
@@ -3230,9 +3239,10 @@ test('the word cut’s M2: recorded transcripts for the conversation’s states'
     await shot(page, m2({ id: 'm2-new-chat-model-view', title: 'New chat, the model menu’s list of models', how: 'A session in front, File › New chat (⌘N), the model chip under the message box, then the model’s name at the menu’s top', state: 'The models of a chat not started yet, Default checked, with no line under the list', folders: ['widgets', 'composer/frame', 'composer'] }), async () => {
       await opened('steer');
       await reset(page);
+      const known = (before ??= new Set(await intents()));
       await menu(maws.app, 'session.new');
       await expect.poll(async () => {
-        const made = (await intents()).find((id) => !before.has(id));
+        const made = (await intents()).find((id) => !known.has(id));
         chat = made === undefined ? null : await addressed(page, made);
         return chat;
       }, { message: 'New chat’s setup intent', timeout: 10_000 }).not.toBeNull();
