@@ -44,7 +44,7 @@ async function scene(first: (b: Builder) => void) {
   // expanded until the reader collapses it: the first toggle collapses it, the second records it as expanded)
   const open = useTranscriptStore.getState().entries[store.key]!.state.turns.get(turn)!.state === 'open';
   for (let i = 0; i < (open ? 2 : 1); i += 1) useTranscriptStore.getState().toggleTurn(store.key, turn);
-  const value = { storeKey: store.key, variant: 'session' as const, actions: spyActions(), rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't', effort: 'high' };
+  const value = { storeKey: store.key, variant: 'session' as const, actions: spyActions(), rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't' };
   const view = render(<TranscriptProvider value={value}><Rows storeKey={store.key} /></TranscriptProvider>);
   let sent = b.events.length;
   const step = (add: (b: Builder) => void) => {
@@ -198,7 +198,7 @@ describe('a thought after a run, by prefixes of one turn’s events', () => {
     s.step((b) => delta(b, 'm3', 0, ''));
     expect(s.run()).toBe(row);
     expect(s.order()).toEqual(['group group:cell:t1']);
-    expect(row.querySelector(':scope > .transcript-thinking [data-shimmer]')?.textContent).toMatch(/^Thinking with high effort · /);
+    expect(row.querySelector(':scope > .transcript-thinking [data-shimmer]')?.textContent).toMatch(/^Thinking · /);
     s.step((b) => delta(b, 'm3', 0, 'Comparing the'));
     act(() => { fireEvent.click(row.querySelector<HTMLButtonElement>(':scope > .transcript-thinking button')!); });
     const derived = turnDerivations.count;
@@ -260,7 +260,7 @@ describe('a run folded while its thought streams', () => {
     act(() => vi.runOnlyPendingTimers()); // the opening motion ends
     expect(thoughts()).toHaveLength(1);
     expect(folded()).toHaveLength(0);
-    expect(s.blocks()).toEqual(['calls cell:t1,cell:t2', expect.stringMatching(/^thought Thinking with high effort · /)]);
+    expect(s.blocks()).toEqual(['calls cell:t1,cell:t2', expect.stringMatching(/^thought Thinking · /)]);
     s.toggle();
     expect(s.line().getAttribute('aria-expanded')).toBe('false');
     expect(body()).not.toBeNull(); // the body is still leaving

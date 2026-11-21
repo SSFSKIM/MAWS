@@ -835,7 +835,7 @@ describe('revisable log', () => {
     const state = applyEvents(createState(null, null), b.events);
     const folded = rowsOf(state);
     const boundary = find(folded, 'boundary');
-    expect(boundary).toMatchObject({ text: 'Conversation continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history', detail: 'transcript_branch · m1-u0' });
+    expect(boundary).toMatchObject({ text: 'Continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history', detail: 'transcript_branch · m1-u0' });
     expect(find(rowsOf(withAllExpanded(state)), 'boundary')).toEqual(boundary);
     expect(folded.some((row) => row.kind === 'assistant_text' && row.markdown === 'Previous path')).toBe(false);
     expect(folded.some((row) => row.kind === 'error')).toBe(false);
@@ -896,7 +896,7 @@ describe('revisable log', () => {
     b.end(['u2']);
     const list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'cell', 'boundary', 'assistant_text', 'divider']);
-    expect(find(list, 'boundary', 0)).toMatchObject({ boundaryKind: 'compaction', turnId: null, text: 'Context compacted · 160k → 24k tokens · auto' });
+    expect(find(list, 'boundary', 0)).toMatchObject({ boundaryKind: 'compaction', turnId: null, text: 'Compacted · 160k → 24k' });
     expect(find(list, 'boundary', 1)).toMatchObject({ boundaryKind: 'reset', turnId: turnId.ofMessage(uuid('u2')) });
   });
 
@@ -919,7 +919,7 @@ describe('revisable log', () => {
     const list = rowsOf(state);
     expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'assistant_text']);
     const boundary = find(list, 'boundary');
-    expect(boundary).toMatchObject({ boundaryKind: 'rewind', hiddenRows: 2, revealed: false, text: 'Rewound to here · 2 messages hidden · Show' });
+    expect(boundary).toMatchObject({ boundaryKind: 'rewind', hiddenRows: 2, revealed: false, text: 'Rewound · 2 hidden · Show' });
     const revealed = { ...state, ui: { ...state.ui, revealedBoundaries: new Set([boundary.id]), version: state.ui.version + 1 } };
     expect(kinds(rowsOf(revealed))).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'assistant_text', 'user', 'assistant_text']);
     expect(find(rowsOf(revealed), 'user', 1)).toMatchObject({ messageUuid: 'u2' }); // the hidden branch follows the boundary, then the live one
@@ -1066,7 +1066,8 @@ describe('determinism and sharing', () => {
 });
 
 // C12 start: the memory budget's release and its resume in quiet words (C12 execution document, Interfaces "Surfaces of
-// the budget", Transcript): a release is a notice, not an error, and the resume after it stays as one line.
+// the budget", Transcript): a release is a notice, not an error. The word cut (T56, T58): the resume after it draws no
+// line, running nor done (the session's running mark says it); one that failed says why.
 describe('a release and the resume after it', () => {
   const texts = (rows: Row[]) => rows.filter((row) => row.kind === 'error').map((row) => [(row as Extract<Row, { kind: 'error' }>).severity, (row as Extract<Row, { kind: 'error' }>).text]);
 
@@ -1075,25 +1076,23 @@ describe('a release and the resume after it', () => {
     b.turn('u1');
     b.text('m1', 0, 'Done.');
     b.emit('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Released to stay under the memory budget · sending resumes it']]);
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Paused to save memory · send to resume']]);
   });
 
   it('an idle exit (the supervisor idle clock) reads as a release too, in its own words (E10)', () => {
     const b = builder();
     b.emit('process.exited', { code: 0, signal: null, reason: 'idle', lostAttentionCount: 0, budget: null });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Stopped while idle · sending resumes it']]);
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Paused while idle · send to resume']]);
   });
 
-  it('a process_exit reconnect reads Resuming… and then stays as Resumed; a user reconnect still leaves no row', () => {
+  it('a process_exit reconnect draws no row while it runs nor once it succeeded; a user reconnect still leaves no row', () => {
     const b = builder();
     b.emit('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } });
+    const released = [['notice', 'Paused to save memory · send to resume']];
     b.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
-    expect(texts(rowsOf(reduce(b.events))).at(-1)).toEqual(['transient', 'Resuming…']);
+    expect(texts(rowsOf(reduce(b.events))), 'resuming').toEqual(released);
     b.emit('session.reconnect', { phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([
-      ['notice', 'Released to stay under the memory budget · sending resumes it'],
-      ['notice', 'Resumed'],
-    ]);
+    expect(texts(rowsOf(reduce(b.events))), 'resumed').toEqual(released);
     const user = builder();
     user.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
     user.emit('session.reconnect', { phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });

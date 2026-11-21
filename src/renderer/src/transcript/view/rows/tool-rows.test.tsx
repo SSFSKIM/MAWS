@@ -48,7 +48,7 @@ it('bounds a long multiline command behind Show more without losing the command'
   useTranscriptStore.getState().expandAll(store.key);
   useTranscriptStore.getState().toggleCell(store.key, cellId.tool(tool('shell')));
   const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
-  const more = screen.getByRole('button', { name: 'Show more command' });
+  const more = screen.getByRole('button', { name: 'Show more' }); // the word cut (T19)
   expect(more.getAttribute('aria-expanded')).toBe('false');
   expect(view.container.querySelector('.transcript-shell-command')?.textContent).toBe(`$ ${command}`);
   fireEvent.click(more);

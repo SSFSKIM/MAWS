@@ -52,7 +52,7 @@ describe('divider row', () => {
     b.end(['u1']);
     const store = await storeWith(b.events);
     renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
-    const line = screen.getByRole('button', { expanded: false });
+    const line = screen.getByRole('button', { name: /^\d+s · /, expanded: false });
     expect(line.textContent).toMatch(/^\d+s · Edited a file, ran 2 commands, \+2 · \+\d+( −\d+)?$/);
     expect(line.querySelector('.transcript-counts')?.textContent).toMatch(/^\+\d+/);
   });

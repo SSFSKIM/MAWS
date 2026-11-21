@@ -35,7 +35,7 @@ describe('serializeRows', () => {
       ['- Read and edited a.ts, ran a command', '  - Thought', '    > Look first.', '  - Read a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
       '- Denied: `rm -rf x` · Denied by rule',
       'Done: **one** edit.\n\n```ts\nconst y = 1;\n```',
-      '*Worked for 2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15), last since board ticket 789
+      '*2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15), last since board ticket 789
     ].join('\n\n'));
   });
 
@@ -46,7 +46,7 @@ describe('serializeRows', () => {
     b.emit('boundary.compaction', { trigger: 'auto', preTokens: 100_000, postTokens: 20_000, logicalParentUuid: null, historical: false });
     b.emit('notice.posted', { level: 'info', text: 'Heads up', key: null });
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind !== 'time'));
-    expect(markdown).toBe(['```\n! ls\na\nb\nexit 0\n```', '---\n*Context compacted · 100k → 20k tokens · auto*', '*Heads up*'].join('\n\n'));
+    expect(markdown).toBe(['```\n! ls\na\nb\n```', '---\n*Compacted · 100k → 20k*', '*Heads up*'].join('\n\n')); // the word cut (T66): no footer for exit 0
   });
 
   it('copies a withdrawn ask with its interrupt wording, an ask cancelled by the session ending with that (scale-review C scalpel-1#2)', () => {
@@ -101,7 +101,7 @@ describe('serializeRows', () => {
     expect(serializeRows(rows(b.events).filter((row) => row.kind === 'notice' || row.kind === 'user'))).toBe([
       '*Agent "Survey notes" finished · 1m 05s*\n> Found three notes.\n> Two are stale.',
       '*You approved `` echo `date` ``*', // a fence longer than the subject's own backticks
-      '*sminos bridge woke the session to read a message it had not read*',
+      '*Woken to read a message*',
     ].join('\n\n'));
   });
 

@@ -346,7 +346,7 @@ describe('what a row reads is the same by every route (M3)', () => {
     });
     const live = read(routes.live);
     expect(live.calls).toEqual([
-      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard v1 (64 × 64)', null],
+      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard', null],
       ['mcp__maws__artifact_list', 'done', 'Listed 1 artifact', null],
     ]);
     expect(read(routes.file), 'the file').toEqual(live);

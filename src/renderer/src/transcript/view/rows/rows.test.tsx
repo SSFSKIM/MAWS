@@ -116,27 +116,28 @@ describe('live thinking label', () => {
     b.turn('u1');
     const delta = (text: string) =>
       b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: text, inputJsonDelta: null, userMessageUuid: null });
-    delta(''); // With no readable text, the generic label still owns the clock, effort and warmth.
+    delta(''); // With no readable text, the generic label still owns the clock and warmth.
     return { b, delta };
   };
   const shimmer = () => document.querySelector<HTMLElement>('[data-shimmer]')!;
 
-  it('reads the tier, the session’s effort and the time the block has run, ticking once a second, and warms from 10 s', async () => {
+  // the word cut (T37): no effort, the model chip's
+  it('reads the tier and the time the block has run, ticking once a second, and warms from 10 s', async () => {
     const store = await storeWith(streaming().b.events);
-    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key, effort: 'xhigh' });
-    expect(shimmer().textContent).toBe('Thinking with xhigh effort · 0s');
+    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key });
+    expect(shimmer().textContent).toBe('Thinking · 0s');
     expect(screen.queryByRole('button')).toBeNull();
     expect(shimmer().dataset.warmth).toBe('0');
     act(() => vi.advanceTimersByTime(12_000));
-    expect(shimmer().textContent).toBe('Still thinking with xhigh effort · 12s');
+    expect(shimmer().textContent).toBe('Still thinking · 12s');
     expect(shimmer().dataset.warmth).toBe('0.25');
     expect(shimmer().style.getPropertyValue('--thinking-warmth')).toBe('25%');
     act(() => vi.advanceTimersByTime(36_000));
-    expect(shimmer().textContent).toBe('Deep in thought with xhigh effort · 48s');
+    expect(shimmer().textContent).toBe('Deep in thought · 48s');
     expect(shimmer().dataset.warmth).toBe('1');
   });
 
-  it('names no effort when the session’s is unknown, and without a live process follows the events, not the clock', async () => {
+  it('without a live process follows the events, not the clock', async () => {
     const { b, delta } = streaming();
     const store = await storeWith(b.events);
     useTranscriptStore.getState().setLive(store.key, false);
@@ -153,7 +154,7 @@ describe('live thinking label', () => {
     b.tick(8000);
     b.thinking('m1', 0, 'Checking the path.');
     const store = await storeWith(b.events);
-    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key, effort: 'high' });
+    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key });
     expect(screen.getByRole('button').textContent).toBe('Thought for 8s');
     expect(shimmer()).toBeNull();
   });
@@ -168,7 +169,7 @@ describe('live thinking label', () => {
     const group = rowOf(store.rows(), 'group');
     expect(group.state).toBe('active');
     expect(rowOf(store.rows(), 'divider').state).toBe('working');
-    renderRow(group, { storeKey: store.key, effort: 'high' });
+    renderRow(group, { storeKey: store.key });
     expect(screen.getByRole('button', { name: 'Ran a command', expanded: false })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Ran ls' })).toBeNull(); // folded: the call's row is not mounted
     expect(shimmer()).toBeNull();

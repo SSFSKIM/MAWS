@@ -1926,7 +1926,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
     const placedAfter = after === null ? undefined : state.turns.get(after);
     return placedAfter !== undefined && turnCommandLine(placedAfter) !== null && lastDrawnIsBubble(state, placedAfter);
   };
-  let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
+  let episode: { index: number | null; id: RowId } | null = null; // the open reconnect episode: its row (none while a resume runs) updates in place until it ends
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   for (const event of events) {
     switch (event.kind) {
@@ -1986,17 +1986,15 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);
         const row: RowOf<'error'> = { id, turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
-        // C12 start: the resume of a session released under the memory budget draws no line while it runs nor once it
-        // succeeded (the word cut, T56 and T58): the session's own running mark says it; a resume that failed keeps its row
-        if (event.trigger === 'process_exit' && event.phase !== 'failed') {
-          if (episode) rows.splice(episode.index, 1);
-          episode = null;
-          break;
-        }
+        // C12 start: the resume of a session released under the memory budget draws no row while it runs nor once it
+        // succeeded (the word cut, T56 and T58): the session's own running mark says it; one that failed says why, under
+        // the episode's id
+        const resuming = event.trigger === 'process_exit' && event.phase === 'attempting';
         // C12 end
         if (event.phase === 'reconnected') {
-          if (episode) rows.splice(episode.index, 1); // a reconnect that succeeded leaves no row
-        } else if (episode) rows[episode.index] = row;
+          if (episode?.index != null) rows.splice(episode.index, 1); // a reconnect or a resume that succeeded leaves no row
+        } else if (resuming) episode ??= { index: null, id };
+        else if (episode?.index != null) rows[episode.index] = row;
         else {
           rows.push(row);
           episode = { index: rows.length - 1, id };
@@ -2012,7 +2010,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
         // keyed on the cause alone, in place of the adoption's reconnect still open, never a red end
         if (event.cause !== undefined) {
           const notice: RowOf<'error'> = { id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: 'notice', text: HANDOVER_REINIT_COPY, attempt: null, scope: 'exit', lostAttentionCount: null };
-          if (episode) rows[episode.index] = notice;
+          if (episode?.index != null) rows[episode.index] = notice;
           else rows.push(notice);
           episode = null;
           break;

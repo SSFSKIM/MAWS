@@ -225,7 +225,7 @@ describe('the artifact_list and artifact_screenshot cells', () => {
     expect(cells(b)).toEqual([
       ['toolu_l1', 'done', 'Listed no artifacts', 'other', true],
       ['toolu_l2', 'done', 'Listed 2 artifacts', 'other', true],
-      ['toolu_s1', 'done', 'Screenshot of Dashboard v2 (1280 × 800)', 'other', false],
+      ['toolu_s1', 'done', 'Screenshot of Dashboard', 'other', false],
       ['toolu_s2', 'error', 'Could not screenshot ‹gone›', 'other', false], // UX wave U2: its reason is the row's (`error`)
       ['toolu_s3', 'running', 'Taking a screenshot of dash', 'other', false],
       ['toolu_l3', 'running', 'Listing artifacts', 'other', true],
@@ -257,9 +257,9 @@ describe('p1-maws-artifacts, recorded', () => {
     ]);
   });
 
-  it('the list cell and the screenshot cell with the recording’s title and size', () => {
+  it('the list cell and the screenshot cell with the recording’s title', () => {
     const labels = ofKind(rows(), 'cell').filter((cell) => cell.toolName === LIST || cell.toolName === SCREENSHOT).map((cell) => cell.label);
-    expect(labels).toEqual(['Screenshot of Dashboard v1 (64 × 64)', 'Listed 1 artifact']);
+    expect(labels).toEqual(['Screenshot of Dashboard', 'Listed 1 artifact']);
   });
 });
 

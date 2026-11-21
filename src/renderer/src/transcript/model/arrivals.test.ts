@@ -184,8 +184,8 @@ describe('what stays through a fold (Interfaces D)', () => {
   });
 
   // UX wave U1b (decision 9): the notice stays the head row a turn's `opener` is read from, so a turn the answer opened
-  // still reads as the person's, "Worked for"
-  it('an answer that opened a turn of work folds with it, and the turn still reads Worked for', () => {
+  // still reads as the person's: its duration alone (the word cut, T1), never "Continued for"
+  it('an answer that opened a turn of work folds with it, and the turn still reads as the person’s', () => {
     const b = builder();
     engineTurn(b);
     carry(b, 'a1', [{ class: 'answer', tool: 'sminos', call: 'tu-ask', summary: 'The user answered: "Pick one?"="the first"', answers: null, dismissed: false }]);
@@ -198,7 +198,7 @@ describe('what stays through a fold (Interfaces D)', () => {
     expect(of(shown(expanded(b.events)), 'notice').map((row) => row.class)).toEqual(['answer']);
     const line = divider(folded);
     expect(line.opener?.class).toBe('answer');
-    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toMatch(/^Worked for /);
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toMatch(/^\d+s · /);
   });
 
   it('leaves a subagent’s started and finished rows as they were (l2-transcript-14)', () => {
@@ -617,8 +617,8 @@ describe('the words of the lines (Interfaces D)', () => {
     endEngine(b);
     expect(of(expanded(b.events), 'notice').map((row) => [row.class, row.text, row.durationMs, row.detail])).toEqual([
       ['task', 'Agent "Survey notes" finished', 65_000, 'Found three notes.'],
-      ['schedule', 'Running scheduled task · tidy the notes folder', null, 'tidy the notes folder\nand report'],
-      ['schedule', 'Running scheduled task', null, null],
+      ['schedule', 'Scheduled · tidy the notes folder', null, 'tidy the notes folder\nand report'],
+      ['schedule', 'Scheduled', null, null],
       ['answer', 'answered: Branch → main', null, null],
       ['answer', 'answered: dismissed', null, null],
       ['wake', NOTICE.wake, null, null],

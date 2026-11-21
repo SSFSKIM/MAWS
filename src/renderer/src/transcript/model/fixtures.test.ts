@@ -74,7 +74,7 @@ describe('synthetic journals', () => {
     expect(plans[0].plan.startsWith('# Plan 1')).toBe(true);
     const boundaries = ofKind(rows, 'boundary');
     expect(boundaries).toHaveLength(1);
-    expect(boundaries[0]).toMatchObject({ boundaryKind: 'reset', text: 'Conversation reset · after plan approval' });
+    expect(boundaries[0]).toMatchObject({ boundaryKind: 'reset', text: 'Reset after plan approval' });
     expect(ofKind(rows, 'request_slot')).toHaveLength(0);
   });
 
@@ -93,14 +93,14 @@ describe('synthetic journals', () => {
     expect(retries).toHaveLength(1);
     expect(retries[0]).toMatchObject({ id: rowId.retry(state.order[1]), attempt: { n: 2, max: 10 }, text: 'Retrying (2/10) · 529 Overloaded' });
     const compaction = ofKind(rows, 'boundary').find((b) => b.boundaryKind === 'compaction')!;
-    expect(compaction).toMatchObject({ turnId: null, text: 'Context compacted · 164k → 24k tokens · auto' });
+    expect(compaction).toMatchObject({ turnId: null, text: 'Compacted · 164k → 24k' });
     expect(ofKind(rows, 'error').find((e) => e.scope === 'notice')).toMatchObject({ text: 'Context is 82% full; compaction will run before the next turn.', turnId: null });
     // Loose rows sit after the turn they followed, before the next one.
     const kinds = rows.map((r) => r.kind);
     expect(kinds.indexOf('boundary', kinds.indexOf('boundary') + 1)).toBeLessThan(kinds.lastIndexOf('user'));
   });
 
-  it('transcript/mockup-turn: Worked for {t} · 12 tool calls · 1 denied, the denied cell outside its group, three files on the divider', () => {
+  it('transcript/mockup-turn: {t} · 12 tool calls · 1 denied, the denied cell outside its group, three files on the divider', () => {
     const rows = rowsFor(journal('mockup-turn'));
     const divider = ofKind(rows, 'divider')[0];
     expect(divider).toMatchObject({ state: 'completed', origin: 'human', toolCalls: 12, denied: 1, autoDenied: 0, firstDeniedCell: 'cell:toolu_synth_mock_7' });
@@ -155,10 +155,11 @@ describe('synthetic journals', () => {
       id: `cell:toolu_synth_x_read${index + 1}`, toolUseId: `toolu_synth_x_read${index + 1}`, paths: [paths[index]], label: `Read ${paths[index].split('/').at(-1)}`,
       detail: { kind: 'read', files: [{ path: paths[index], range: index === 1 ? [10, 49] : null }] },
     }));
-    // UX wave U2 (Interfaces §B): the kinds in the order each first occurred, then the parts of no kind; five parts are capped
+    // UX wave U2 (Interfaces §B): the kinds in the order each first occurred, then the parts of no kind; the word cut
+    // (T2): four parts and more are capped at two, the skill and the connector left out named, then the rest counted
     expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual([
       'Searched code, searched for files, read 6 files',
-      'Searched the web, fetched a page, ran /test-driven-development, and 2 more actions',
+      'Searched the web, fetched a page, ran /test-driven-development, used docs, +1',
     ]);
     expect(cells.find((c) => c.toolName === 'mcp__docs__search')?.detail).toMatchObject({ kind: 'mcp', server: 'docs', tool: 'search' });
     expect(ofKind(rows, 'divider')[0].toolCalls).toBe(13); // Grep, Glob, six Reads, WebSearch, WebFetch, Skill, ToolSearch, one MCP call
@@ -445,7 +446,7 @@ describe('FX8 disk conversation history', () => {
     const rows = rowsOf(state);
     const boundaries = ofKind(rows, 'boundary');
     expect(boundaries).toHaveLength(1);
-    expect(boundaries[0]).toMatchObject({ text: 'Conversation continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history' });
+    expect(boundaries[0]).toMatchObject({ text: 'Continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history' });
     expect(ofKind(rows, 'error')).toEqual([]);
     expect(ofKind(rowsOf(withAllExpanded(state)), 'boundary')).toEqual(boundaries);
     await expect(JSON.stringify(rows, null, 2) + '\n').toMatchFileSnapshot(join(TEST_FIXTURE_DIR, '../snapshots/transcript/fx8/fork.rows.json'));

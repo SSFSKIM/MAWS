@@ -132,7 +132,7 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
     expect(linesOf(drawing)[0]).toMatchObject({ state: 'completed', denied: 1 });
   });
 
-  it('on the wire, at rest: the call reads denied and the turn’s line `Worked for … · 1 denied`', () => {
+  it('on the wire, at rest: the call reads denied and the turn’s line `… · 1 denied`', () => {
     const first = linesOf(drawn(events))[0]!;
     expect(first).toMatchObject({ state: 'completed', denied: 1 });
   });

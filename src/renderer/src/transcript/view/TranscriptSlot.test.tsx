@@ -149,12 +149,18 @@ describe('TranscriptSlot', () => {
     expect(openFile).toHaveBeenCalledTimes(2);
   });
 
-  it('tells the Transcript where the session runs, from its record: a shell call with no cwd shows the worktree’s checkout', async () => {
+  // The word cut (T20): the session's own folder is not named, so a call that ran in the record's worktree checkout names
+  // no folder, and one that ran elsewhere names its own: the record's folder reached the transcript
+  it('tells the Transcript where the session runs, from its record: a shell call that ran in the worktree’s checkout names no folder', async () => {
     const id = at('app-slot-shell' as AppSessionId);
     const b = builder();
     b.turn('u1', 'List it');
     b.toolUse('t1', 'Bash', { command: 'ls' });
+    Object.assign(b.events.at(-1)!, { cwd: '/w/project-wt' }); // read from rows: the worktree's checkout
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.toolUse('t2', 'Bash', { command: 'pwd' });
+    Object.assign(b.events.at(-1)!, { cwd: '/w/project' }); // read from rows: another folder
+    b.result('t2', 'b', { structured: BASH_RESULT('b') });
     b.end(['u1']);
     const records = useSessions.getState().records;
     act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project-wt', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
@@ -166,12 +172,12 @@ describe('TranscriptSlot', () => {
     expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
     act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
     await settle();
-    expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt');
+    expect([...document.querySelectorAll('.transcript-shell')].map((shell) => shell.querySelector('.transcript-shell-meta')?.textContent ?? null)).toEqual([null, 'cwd /w/project']);
   });
 
   // UX wave U8c-2 (M5, §K): the slot hands down the selector's launch folder and the agent's folder while the session is
-  // in its launch folder, and neither while it reads moved. A call whose event carries no folder (live) then names the
-  // launch folder, or no folder; a call read from rows names its own unless it ran in one of the two. Invented folders.
+  // in its launch folder, and neither while it reads moved. A call whose event carries no folder (live) names none; a call
+  // read from rows names its own unless it ran in one of the two (the word cut, T20). Invented folders.
   it('hands down the launch folder and the agent’s folder while the session is there, and neither while it reads moved', async () => {
     const shells = () => {
       const b = builder();
@@ -206,7 +212,7 @@ describe('TranscriptSlot', () => {
     };
     // in the launch folder, the agent in a sub-folder of its checkout (not a move)
     const there = { agentFolder: { checkout: '/repo', cwd: '/repo/packages/app', branch: 'main', linked: false } };
-    expect(await lines('app-slot-shell-there', there)).toEqual(['Session directory /repo', 'Session directory /repo', 'Session directory /repo']);
+    expect(await lines('app-slot-shell-there', there)).toEqual([null, null, null]);
     // moved by `cd` into a worktree: the live call names no folder, each row its own
     const moved = { agentFolder: { checkout: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', branch: 'w1', linked: true } };
     expect(await lines('app-slot-shell-moved', moved)).toEqual([null, 'cwd /repo/packages/app', 'cwd /repo']);
@@ -441,13 +447,14 @@ describe('TranscriptSlot', () => {
       today.unmount();
     });
 
-    it('u4p2-two-1-1: after 51 neither message is drawn; after 55 both, the second as a steer at its place reading “Sent during this turn”; at 60 one bubble with both texts', async () => {
+    it('u4p2-two-1-1: after 51 neither message is drawn; after 55 both, the second as a steer at its place with no caption (the word cut, T42); at 60 one bubble with both texts', async () => {
       const ended = await mount(through('u4p2-two-1-1', 51), 'stacked');
       expect([saying('PINEAPPLE'), saying('MANGO')]).toEqual([[], []]);
       ended.unmount();
       const started = await mount(through('u4p2-two-1-1', 55), 'stacked');
       expect(saying('PINEAPPLE')).toHaveLength(1);
-      expect(saying('MANGO')).toEqual([{ text: expect.stringContaining('MANGO'), caption: 'Sent during this turn' }]);
+      expect(saying('MANGO')).toEqual([{ text: expect.stringContaining('MANGO'), caption: null }]);
+      expect(document.querySelector('section.transcript-user[data-steer]')?.textContent).toContain('MANGO');
       const order = bubbles().map((bubble) => bubble.text);
       expect(order.findIndex((text) => text.includes('PINEAPPLE'))).toBeLessThan(order.findIndex((text) => text.includes('MANGO')));
       started.unmount();
@@ -458,7 +465,7 @@ describe('TranscriptSlot', () => {
       expect(saying('MANGO')).toHaveLength(1);
     });
 
-    it('a steer the engine took into the running turn draws at its place reading “Sent during this turn”, never before it started', async () => {
+    it('a steer the engine took into the running turn draws at its place, a steer with no caption (the word cut, T42), never before it started', async () => {
       const b = builder();
       b.turn('u1', 'Count slowly');
       b.text('m1', 0, 'One, two.');
@@ -469,7 +476,8 @@ describe('TranscriptSlot', () => {
       b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'started' });
       b.text('m2', 0, 'Three, and b.');
       await mount(b.events, 'stacked');
-      expect(saying('Look at b too')).toEqual([{ text: 'Look at b too', caption: 'Sent during this turn' }]);
+      expect(saying('Look at b too')).toEqual([{ text: 'Look at b too', caption: null }]);
+      expect(document.querySelector('section.transcript-user[data-steer]')?.textContent).toContain('Look at b too');
       const texts = [...document.querySelectorAll('[data-kind]')].map((row) => row.textContent ?? '');
       const where = (text: string) => texts.findIndex((row) => row.includes(text));
       expect([where('One, two.') < where('Look at b too'), where('Look at b too') < where('Three, and b.')]).toEqual([true, true]); // where the engine took it

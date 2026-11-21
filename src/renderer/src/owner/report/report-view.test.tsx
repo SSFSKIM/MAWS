@@ -112,7 +112,7 @@ describe('the report view', () => {
     expect(turnLines()).toEqual([]); // a closed turn's line shows only with a record of it open
     fireEvent.click(records()[0]);
     await waitFor(() => expect(turnLines()).toHaveLength(1));
-    expect(turnLines()[0].textContent).toMatch(/^Worked for/);
+    expect(turnLines()[0].textContent).toMatch(/^\d+s · /); // the word cut (T1): a finished turn's duration alone, not Working
     expect(document.querySelector('[data-plugin-spinner]')).toBeNull();
   });
 
@@ -125,7 +125,7 @@ describe('the report view', () => {
     fireEvent.click(document.querySelector('[data-row-id="record-fold:closed:toolu_01P2cM5Bash01"] button')!);
     await waitFor(() => expect(folds()).toHaveLength(1));
     expect(document.querySelectorAll('[data-kind="divider"]')).toHaveLength(1);
-    expect(turnLines()[0].textContent).toMatch(/Worked for .* · Ran a command/);
+    expect(turnLines()[0].textContent).toMatch(/^\d+s · Ran a command/);
     expect(dividers()).toEqual([]);
   });
 
@@ -143,7 +143,7 @@ describe('the report view', () => {
     expect(folds()).toHaveLength(1);
     expect(folds()[0].getAttribute('aria-expanded')).toBe('true');
     expect(turnLines()).toHaveLength(1); // the opened record's turn: its line, with no chevron
-    expect(turnLines()[0].textContent).toMatch(/Worked for .* · Ran a command/); // UX wave U2 (O-15): the turn's line
+    expect(turnLines()[0].textContent).toMatch(/^\d+s · Ran a command/); // UX wave U2 (O-15): the turn's line
     expect(document.querySelector('[data-kind="divider"] [aria-label="Turn summary"]')).not.toBeNull();
     expect(dividers()).toEqual([]);
     expect(document.querySelectorAll('[data-kind="group"], [data-kind="cell"]').length).toBeGreaterThan(0);

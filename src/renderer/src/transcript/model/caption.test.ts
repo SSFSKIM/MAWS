@@ -346,8 +346,8 @@ describe('the parts, by hand', () => {
     expect(captionText(captionParts([step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), named('ran /dataviz', 'ran /dataviz'), named('used notion · search', 'used notion')]), true))
       .toBe('Edited a, ran a command, ran /dataviz, used notion');
     // a connector a kept part already names is not named again: its other part is counted
-    expect(captionText(captionParts([named('used notion · search', 'used notion'), step({ kind: 'command', key: 'c1' }), named('used notion · create_page', 'used notion'), step({ kind: 'grep', key: 'g1' })]), true))
-      .toBe('Used notion · search, ran a command, +2');
+    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), named('used notion · search', 'used notion'), named('used notion · create_page', 'used notion'), named('ran /dataviz', 'ran /dataviz')]), true))
+      .toBe('Ran a command, used notion · search, ran /dataviz, +1');
     // uncapped, every part reads its own words
     expect(captionText(parts, false)).toBe('Edited a, ran a command, searched code, ran /dataviz 2 times, used notion · search, used notion · create_page, updated todos');
   });

@@ -285,7 +285,7 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
       const rows = arrivalRows(drawn(stateOf(await fromFile(recorded(name)))));
       const fires = rows.filter((row) => row.startsWith('● schedule'));
       expect(fires.length, name).toBeGreaterThanOrEqual(3);
-      for (const fire of new Set(fires)) expect(fire, name).toBe('● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.');
+      for (const fire of new Set(fires)) expect(fire, name).toBe('● schedule: Scheduled · UXW tick: reply with only the word TOCK.');
       expect(rows.filter((row) => row.startsWith('turn engine, opened by schedule')), name).toEqual([]);
     }
   });
@@ -309,14 +309,14 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
     expect(fired(remote), 'remote').toEqual({ state: 'open', accepted: true, line: 'working' });
     for (const [route, state] of [['file', file], ['remote', remote]] as const) {
       const rows = arrivalRows(drawn(state));
-      expect(rows.filter((row) => row.startsWith('● schedule')), route).toEqual(['● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.']);
+      expect(rows.filter((row) => row.startsWith('● schedule')), route).toEqual(['● schedule: Scheduled · UXW tick: reply with only the word TOCK.']);
     }
   });
 
   // M3's second fix round: nothing is held for the meta row, so a fire is placed wherever the rows it is read with end:
   // written after the backfill, at a reload's end, and before a meta row the follower reads after its exit
-  const TICK = '● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.';
-  const OPENED = 'turn engine, opened by schedule: Running scheduled task · UXW tick: reply with only the word TOCK.';
+  const TICK = '● schedule: Scheduled · UXW tick: reply with only the word TOCK.';
+  const OPENED = 'turn engine, opened by schedule: Scheduled · UXW tick: reply with only the word TOCK.';
   const cronLines = (from: number, to: number) => `${recorded('u3-terminal-cron-r1').split('\n').slice(from, to).join('\n')}\n`;
   const fireTurn = (state: TranscriptState) => turnsOf(state).find((turn) => turn.events.some((event) => event.kind === 'user.message' && event.arrival?.[0]?.class === 'schedule'));
   const answerTurn = (state: TranscriptState) => turnsOf(state).find((turn) => turn.events.some((event) => event.kind === 'assistant.block.complete' && event.block.type === 'text' && event.block.text === 'TOCK'));
@@ -499,7 +499,7 @@ function asTheLiveWireCarries(name: string, rows: string[]): string[] {
     if (opened !== undefined) return [row.slice(0, row.length - `, opened by ${opened.class}: ${opened.text}`.length)];
     const typed = TYPED[name]?.find(([file]) => file === row);
     if (typed !== undefined) return [typed[1]];
-    return [row.endsWith(FIRE_PROMPT) && row.includes('Running scheduled task') ? row.slice(0, -FIRE_PROMPT.length) : row];
+    return [row.endsWith(FIRE_PROMPT) && row.includes('Scheduled') ? row.slice(0, -FIRE_PROMPT.length) : row];
   });
 }
 const noticeRow = (notice: Notice) => `● ${notice.class}${notice.outcome === null ? '' : ` ${notice.outcome}`}: ${notice.text}`;

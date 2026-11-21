@@ -1355,7 +1355,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     b.end(['u1'], { durationMs: 72_000 });
     const after = rowsOf(reduce(b.events));
     expect(find(after, 'divider')).toMatchObject({ state: 'completed', caption: 'Edited 2 files, ran a command', parts: ['edited 2 files', 'ran a command'], counts: { added: 5, removed: 3 } });
-    expect(line(after)).toBe('Worked for 1m 12s · Edited 2 files, ran a command +5 −3');
+    expect(line(after)).toBe('1m 12s · Edited 2 files, ran a command +5 −3');
   });
 
   it('a stopped turn keeps its verb and gains the caption; denied and auto-denied counts follow it', () => {
@@ -1577,7 +1577,8 @@ describe('`background` over a recorded MCP call moved to the background (uxwave/
   });
 });
 
-// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
+// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads as the person's (the word cut, T1: its duration
+// alone) where it did work, and has no line
 // where it only answers. UX wave U1b (decision 9 and the architect's ruling of 2026-11-15 on M1's D-7): with other work
 // the notice folds with it, its question's row saying the answer; as the turn's only work it stays in view
 describe('the line of a turn an answer opened', () => {
@@ -1599,12 +1600,12 @@ describe('the line of a turn an answer opened', () => {
     expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
   });
 
-  it('with one call reads `Worked for …` and folds its notice with the call', () => {
+  it('with one call reads its duration alone, as the person’s turn, and folds its notice with the call', () => {
     const list = opened(true);
     expect(kinds(list)).toEqual(['assistant_text', 'divider']);
     const line = find(list, 'divider');
     expect(line.opener).toMatchObject({ class: 'answer' });
-    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('1s · Ran a command');
   });
 });
 

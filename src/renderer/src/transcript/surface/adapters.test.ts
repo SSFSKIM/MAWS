@@ -293,7 +293,7 @@ describe('transcript surface adapters', () => {
     } else {
       expect(drawn.detail).toMatchObject({ spill: { state: loadState } });
       if (loadState === 'loaded') expect(container.querySelector('pre')?.textContent).toBe('complete loaded output');
-      else expect(queryByRole('status')).not.toBeNull();
+      else expect(container.querySelector('.transcript-spill')).not.toBeNull(); // the word cut (T26): the quiet spinner's place
       if (rewrite === 'input') expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(/^Stopped: make shown/); // UX wave U2 (R2): the stopped form
       else expect(drawn).toBe(row);
     }

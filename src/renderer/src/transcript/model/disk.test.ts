@@ -247,7 +247,7 @@ describe('a /compact turn from disk', () => {
     const rows = rowsOf(stateOf(disk));
     const shape = rows.filter((row) => row.kind !== 'time').map((row) => (row.kind === 'user' ? `user:${row.text}` : row.kind === 'assistant_text' ? `answer:${row.markdown}` : row.kind === 'boundary' ? `boundary:${row.boundaryKind}` : row.kind === 'local_command' ? `local:${row.text.split(' ')[0]}` : row.kind));
     expect(shape).toEqual(['user:Reply ONE', 'answer:ONE', 'boundary:compaction', 'user:/compact', 'local:Compacted', 'user:Reply TWO', 'answer:TWO']);
-    expect(ofKind(rows, 'boundary')[0].text).toBe('Compacted earlier · 29k → 1k'); // the post-compaction size is on disk too
+    expect(ofKind(rows, 'boundary')[0].text).toBe('Compacted · 29k → 1k'); // the post-compaction size is on disk too
     expect(ofKind(rows, 'user').some((row) => row.text.startsWith('This session is being continued'))).toBe(false);
     expect(ofKind(rows, 'local_command').some((row) => row.text.startsWith('Caveat'))).toBe(false); // the engine's caveat for the model
     expect(ofKind(rows, 'divider')).toEqual([]);
@@ -322,7 +322,7 @@ describe('maws artifacts read from disk', () => {
     expect(artifacts(rows)).toHaveLength(3);
     expect(artifacts(rows)).toEqual(artifacts(journal));
     expect(mawsCells(rows)).toEqual([
-      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard v1 (64 × 64)'],
+      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard'],
       ['mcp__maws__artifact_list', 'done', 'Listed 1 artifact'],
     ]);
     expect(mawsCells(rows)).toEqual(mawsCells(journal));
