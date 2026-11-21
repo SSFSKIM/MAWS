@@ -230,7 +230,7 @@ export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
   let everyFileNamed = true;
   for (const step of steps) {
     if (step.kind === null) {
-      const part = unkinded.get(step.words) ?? { calls: 0, failed: 0, stopped: 0, steps: [] };
+      const part = unkinded.get(step.words) ?? { calls: 0, failed: 0, stopped: 0, steps: [] as CaptionStep[] };
       part.calls += 1;
       part.steps.push(step);
       if (step.outcome === 'failed') part.failed += 1;
@@ -238,7 +238,7 @@ export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
       unkinded.set(step.words, part);
       continue;
     }
-    const part = kinds.get(step.kind) ?? { keys: new Map(), calls: 0, steps: [] };
+    const part = kinds.get(step.kind) ?? { keys: new Map<string, StepOutcome | undefined>(), calls: 0, steps: [] as CaptionStep[] };
     part.calls += 1;
     part.steps.push(step);
     part.keys.set(step.key, settle(part.keys.get(step.key), step.outcome));
