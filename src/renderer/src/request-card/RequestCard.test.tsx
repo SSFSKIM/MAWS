@@ -1650,11 +1650,25 @@ describe('the word cut: the card’s words', () => {
   });
 
   // C116: a required field's label ends in an asterisk; a screen reader hears "(required)"
-  it('marks a required field with an asterisk, its word kept for a screen reader', () => {
-    mount(elicitation, 'end');
-    const input = screen.getByRole('textbox', { name: 'Color (required)' });
-    const label = input.closest('label')!;
-    expect(label.querySelector('[aria-hidden="true"]')!.textContent).toBe(' *');
-    expect(label.querySelector('.sr-only')!.textContent).toBe(' (required)');
+  // the label's words, the asterisk and the screen reader's word are one inline run, so the asterisk ends the label's
+  // line in the column layout (a text field) and in the row layout (a checkbox), never a flex item of its own
+  it.each([
+    ['a text field', elicitation, () => screen.getByRole('textbox', { name: 'Color (required)' }), 'Color'],
+    [
+      'a checkbox',
+      { ...elicitation, payload: { ...((elicitation as ElicitationEvent).payload as object), requested_schema: { type: 'object', properties: { agree: { type: 'boolean', title: 'Agree' } }, required: ['agree'] } } } as RequestEvent,
+      () => screen.getByRole('checkbox', { name: 'Agree (required)' }),
+      'Agree',
+    ],
+  ] as const)('marks a required field (%s) with an asterisk at the end of its label, its word kept for a screen reader', (_kind, event, control, words) => {
+    mount(event, 'end');
+    const label = control().closest('label')!;
+    const run = label.querySelector<HTMLElement>('[data-field-label]')!;
+    expect(run.tagName).toBe('SPAN');
+    expect(run.parentElement).toBe(label);
+    expect(run.firstChild!.textContent).toBe(words);
+    expect(run.querySelector('[aria-hidden="true"]')!.textContent).toBe(' *');
+    expect(run.querySelector('.sr-only')!.textContent).toBe(' (required)');
+    expect(run.textContent).toBe(`${words} * (required)`);
   });
 });

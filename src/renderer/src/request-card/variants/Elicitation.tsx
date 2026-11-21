@@ -12,9 +12,11 @@ import type { VariantProps } from './types';
 const INPUT = 'w-full rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
 
 // The word cut (C116): a required field's label ends in an asterisk, and a screen reader hears "(required)" in its place.
+// The words, the asterisk and "(required)" are one inline run, so the asterisk ends the label's own line in either
+// layout (the label is a flex column for a field, a flex row for a checkbox) and is never a flex item of its own.
 function Field({ field, value, onChange, disabled }: { field: FormField; value: string | boolean | undefined; onChange(value: string | boolean): void; disabled: boolean }) {
   const label = (
-    <>
+    <span data-field-label="">
       {field.label}
       {field.required && (
         <>
@@ -22,7 +24,7 @@ function Field({ field, value, onChange, disabled }: { field: FormField; value: 
           <span className="sr-only">{CARD_WORDS.requiredName}</span>
         </>
       )}
-    </>
+    </span>
   );
   if (field.kind === 'boolean') {
     return (
