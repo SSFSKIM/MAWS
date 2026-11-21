@@ -30,7 +30,7 @@ describe('fixture gates through the model', () => {
     const subagent = ofKind(rows, 'subagent');
     expect(subagent).toHaveLength(1);
     expect(subagent[0].agents.map((a) => a.taskId)).toEqual(['ad286defbc77bc090', 'ae75ba6ce5d866acc']);
-    expect(subagent[0].sentence).toBe('Read and report one.txt content and Read and report two.txt content finished');
+    expect(subagent[0].sentence).toBe('Read and report one.txt content and Read and report two.txt content'); // the word cut (T86)
     expect(subagent[0].status).toBe('finished');
     expect(cellsOf(rows).some((cell) => cell.toolName === 'Agent')).toBe(false);
     expect(ofKind(rows, 'user')).toHaveLength(1);

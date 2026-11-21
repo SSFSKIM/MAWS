@@ -291,10 +291,10 @@ describe('the artifact row of an agent’s delete', () => {
 
   it('reads each refusal by its `why` in the person’s words, with neither the tool’s name nor "the user"', () => {
     const cases: [string, Record<string, unknown>, string][] = [
-      ['artifact_delete: "Budget" was created by the user; ask them to delete it in the Library', { reason: 'invalid', why: 'byUser' }, 'Could not delete draft-plan: you made it. Delete it from the Library if you no longer need it.'],
-      ['artifact_delete: the user has edited "Budget"; ask them to delete it in the Library', { reason: 'invalid', why: 'edited' }, 'Could not delete draft-plan: you have edited it. Delete it from the Library if you no longer need it.'],
-      ['artifact_delete: "Budget" was created by another session; ask the user to delete it in the Library', { reason: 'invalid', why: 'otherSession' }, 'Could not delete draft-plan: another session made it. Delete it from the Library if you no longer need it.'],
-      ['artifact_delete: MAWS cannot tell that only agents have written to "Budget"; ask the user to delete it in the Library', { reason: 'invalid', why: 'unknown' }, 'Could not delete draft-plan: MAWS cannot tell that only agents have written to it. Delete it from the Library if you no longer need it.'],
+      ['artifact_delete: "Budget" was created by the user; ask them to delete it in the Library', { reason: 'invalid', why: 'byUser' }, 'Could not delete draft-plan: you made it. Delete it from the Library.'],
+      ['artifact_delete: the user has edited "Budget"; ask them to delete it in the Library', { reason: 'invalid', why: 'edited' }, 'Could not delete draft-plan: you have edited it. Delete it from the Library.'],
+      ['artifact_delete: "Budget" was created by another session; ask the user to delete it in the Library', { reason: 'invalid', why: 'otherSession' }, 'Could not delete draft-plan: another session made it. Delete it from the Library.'],
+      ['artifact_delete: MAWS cannot tell that only agents have written to "Budget"; ask the user to delete it in the Library', { reason: 'invalid', why: 'unknown' }, 'Could not delete draft-plan: MAWS cannot tell that only agents have written to it. Delete it from the Library.'],
       ['artifact_delete: the design system governs 2 artifact(s)', { reason: 'designSystemInUse', artifactIds: ['a', 'b'], why: 'designSystemInUse' }, 'Could not delete draft-plan: it still styles other artifacts. Move them to another design system first.'],
     ];
     for (const [sentence, refusal, heading] of cases) {
@@ -315,10 +315,10 @@ describe('the artifact row of an agent’s delete', () => {
   });
 
   // Fix wave 1 (review item 1): the artifact family's E11 form, a delete whose turn closed before its answer
-  it('a delete whose turn closed with no answer reads "Deleting <title> was never answered"', () => {
+  it('a delete whose turn closed with no answer reads "No answer to deleting <title>" (the word cut, N122)', () => {
     const [closed] = deleteRows((b) => b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null }));
     expect(closed).toMatchObject({ action: 'delete', error: null, answered: false, neverAnswered: true });
-    expect(artifactHeading(closed)).toBe('Deleting draft-plan was never answered');
+    expect(artifactHeading(closed)).toBe('No answer to deleting draft-plan');
   });
 
   const REJECTED = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file).";

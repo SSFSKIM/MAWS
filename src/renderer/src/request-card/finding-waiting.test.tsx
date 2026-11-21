@@ -1,6 +1,6 @@
 // UX wave U1b M5 (the U1b document, Interfaces §D "The jump button", §E `WaitingCard` and `showWaiting`; decision 19;
 // acceptance 6, 7 and 10): finding what waits. The card column's card lists the session's waiting requests and each line
-// goes to its request; the jump button reads "Needs your input" while a request is out of view and goes to the oldest
+// goes to its request; the jump button reads "Needs you" while a request is out of view and goes to the oldest
 // of them; a notification's open and ⇧⌘J go to a request once the session is in front; a request asked for before its
 // transcript mounts is shown at the mount; a closed floating card's compact composer says how many wait. Every way goes
 // through the transcript's one operation, so the request chosen is the one an answer then carries (asserted on the
@@ -494,8 +494,8 @@ describe('the jump button', () => {
     see(() => false); // the reader at the end, the end card scrolled out of the scroller
     await waitFor(() => expect(jump()?.dataset.state).toBe('input'));
     expect(jump()!.getAttribute('aria-label')).toBe(PILL);
-    expect(jump()!.title).toBe(PILL);
-    expect(jump()!.textContent).toBe('◐Needs your input');
+    expect(jump()!.hasAttribute('title')).toBe(false); // the word cut (N110): its name keeps the sentence, no tooltip
+    expect(jump()!.textContent).toBe('◐Needs you'); // N109: the sidebar's words
     fireEvent.wheel(scroller(), { deltaY: -100 }); // the reader turns back: no longer following
     expect(jump()?.dataset.state).toBe('input');
     see(atEnd);

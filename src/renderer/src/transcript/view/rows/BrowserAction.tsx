@@ -4,6 +4,10 @@
 // snapshot or Show value when the result carries text to read, a screenshot's Open (its File artifact, P3-L M6b), and Open
 // tab (the Browser tool on the row's tab). Under the line, a refusal's reason, or a cancelled call's note. It stays in
 // view when its turn folds (isPersistentRow). The live waiting line main reported while a call ran left with the tools.
+// The word cut (T105, T106): the time a done call took, and its wait, are the phrase's tooltip and description (the
+// phrase takes the keyboard for them); the quiet actions show on pointing or focus within the line, while the snapshot
+// is open, and always where nothing points.
+import { Tip } from '../../../ui/tip';
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { Output } from '../cells/Truncated';
@@ -21,22 +25,19 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
   const shot = row.state === 'done' && row.deliverableId !== null ? row.deliverableId : null;
   const tab = row.tabId !== null && row.state !== 'error' && !(row.tool === 'browser_tabs' && row.action === 'close') ? row.tabId : null;
   const detail = row.state === 'done' ? row.detail : null;
+  const time = row.state === 'done' && row.ms !== null ? [took(row.ms), ...(row.waitedFor !== null && row.waitedMs !== null ? [BROWSER_ACTION.waited(row.waitedFor, row.waitedMs)] : [])].join(' · ') : null;
   return (
-    <section className="transcript-browser-action" data-tool={row.tool} data-state={row.state}>
+    <section className="transcript-browser-action" data-tool={row.tool} data-state={row.state} data-open={open && detail !== null ? '' : undefined}>
       <div className="transcript-browser-action-line">
         <BrowserIcon />
-        <span className="transcript-browser-action-heading" data-browser-heading="">
-          {browserActionHeading(row)}
-        </span>
-        {row.state === 'done' && row.ms !== null && (
-          <span className="text-fg-muted" data-browser-took="">
-            {took(row.ms)}
-            {row.waitedFor !== null && row.waitedMs !== null && ` · ${BROWSER_ACTION.waited(row.waitedFor, row.waitedMs)}`}
+        <Tip content={time} description={time}>
+          <span className="transcript-browser-action-heading" data-browser-heading="" tabIndex={time === null ? undefined : 0}>
+            {browserActionHeading(row)}
           </span>
-        )}
+        </Tip>
         {running && <RunningTime startedAt={row.at} />}
         {appSessionId !== null && (detail !== null || shot !== null || tab !== null) && (
-          <span className="transcript-browser-action-actions">
+          <span className="transcript-browser-action-actions" data-on-hover="">
             {detail !== null && (
               <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
                 {open ? BROWSER_ACTION.hide(row.tool) : BROWSER_ACTION.show(row.tool)}

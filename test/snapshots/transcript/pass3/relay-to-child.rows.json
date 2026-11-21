@@ -36,7 +36,7 @@
     "id": "subagent:a7aea42f9bed9b3ea",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Loop rounds until stop.txt finished",
+    "sentence": "Loop rounds until stop.txt",
     "status": "finished",
     "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
   },
@@ -177,7 +177,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:196:1",
     "kind": "agent_message",
-    "text": "Sent to Loop rounds until stop.txt: Say PING in your next inbox line",
+    "text": "Loop rounds until stop.txt: Say PING in your next inbox line",
     "to": {
       "agentId": "a7aea42f9bed9b3ea",
       "glyph": 3,
@@ -331,7 +331,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:315:1",
     "kind": "agent_message",
-    "text": "Sent to Loop rounds until stop.txt: Say PONG in your next inbox line",
+    "text": "Loop rounds until stop.txt: Say PONG in your next inbox line",
     "to": {
       "agentId": "a7aea42f9bed9b3ea",
       "glyph": 3,
@@ -441,7 +441,7 @@
     "id": "subagent:accea5ba03e220b64",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Read file after sleep finished",
+    "sentence": "Read file after sleep",
     "status": "finished",
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
@@ -466,7 +466,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:543:1",
     "kind": "agent_message",
-    "text": "Sent to Read file after sleep: Say PANG in your next inbox line",
+    "text": "Read file after sleep: Say PANG in your next inbox line",
     "to": {
       "agentId": "accea5ba03e220b64",
       "glyph": 5,
@@ -494,7 +494,7 @@
     "id": "subagent:accea5ba03e220b64",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Read file after sleep finished",
+    "sentence": "Read file after sleep",
     "status": "finished",
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },

@@ -394,7 +394,10 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   land(userRow('[sminos chat MAWS 5e0c1f2a:2 from fakepeer → @you]\nI read recorded.txt: blue, as you chose.', BRIDGE));
   const peer = view.locator('[data-kind="agent_message"]').filter({ hasText: 'I read recorded.txt: blue, as you chose.' });
   await expect(peer).toHaveCount(1);
-  await expect(peer).toContainText('Message from @fakepeer: I read recorded.txt: blue, as you chose.');
+  // the word cut (T73, ruled): the line leads with its direction's arrow; "Message from" is its accessible lead alone
+  await expect(peer.locator('.transcript-line-mark')).toHaveText('←');
+  await expect(peer.locator('.transcript-line-text')).toHaveText('@fakepeer: I read recorded.txt: blue, as you chose.');
+  await expect(peer.getByRole('button', { name: /^Message from @fakepeer ?: I read recorded\.txt: blue, as you chose\.$/ })).toHaveCount(1);
   await expect(peer).not.toContainText('[sminos');
   await expect(bubbles('I read recorded.txt: blue, as you chose.')).toHaveCount(0);
   await expect(view.getByText('From fakepeer')).toHaveCount(0);

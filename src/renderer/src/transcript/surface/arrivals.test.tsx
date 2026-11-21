@@ -67,7 +67,7 @@ describe('the arrival rows with a mods surface attached', () => {
     expect(asks('UserMessage')).toHaveLength(1);
     expect(asks('UserMessage')[0]).toMatchObject({ instanceId: 'p1', props: { text: 'the index is stale', origin: { kind: 'peer' }, isExpanded: false, from: { name: 'docs' } } });
     await act(() => fake.reply('session.ui.render', given ?? answer(asks('UserMessage')[0]!.props)));
-    expect(line(view.container)).toBe('Message from @docs: the index is stale');
+    expect(line(view.container)).toBe('@docs: the index is stale');
     expect(concealed(view.container, '.transcript-peer')).toBe(false);
   });
 
@@ -128,7 +128,7 @@ describe('the arrival rows with a mods surface attached', () => {
     expect(useTranscriptStore.getState().entries[store.key]!.state.ui.revealed).toBe(row.id);
     const view = renderRow(of(store.rows(), 'agent_message'), { storeKey: store.key });
     expect(asks('UserMessage')).toHaveLength(0);
-    expect(line(view.container)).toBe('Message from @docs: the index is stale');
+    expect(line(view.container)).toBe('@docs: the index is stale');
   });
 });
 

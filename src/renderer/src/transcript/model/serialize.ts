@@ -2,8 +2,8 @@
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
 import { bashFooter, bashHeader, COMMAND_LINE, commandLead, dividerCopy, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
-import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy, deliveryHeading } from './copy'; // E1
-import { agentListCopy } from './copy'; // E7
+import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy, askStateWhy, deliveryHeading } from './copy'; // E1
+import { agentListCopy, messageArrow } from './copy'; // E7
 import { messageMore } from './rows'; // E7; UX wave U3
 import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
@@ -55,7 +55,7 @@ function partOf(row: Row): string | null {
     case 'notice': return row.detail === null ? `*${noticeLine(row)}*` : `*${noticeLine(row)}*\n${indent(row.detail, '> ')}`; // UX wave U3: its line, then what opens under it
     case 'local_command': return `${COMMAND_LINE.mark} ${row.lone && row.run ? commandLead(row.run) : ''}${row.text}`; // UX wave U3b: its line
     // E1 start
-    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${askQuestionTitle(q)}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
+    case 'ask': return [askLine(row), ...(row.answers === null ? [] : row.questions.map((q) => `- ${askQuestionTitle(q)}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
     case 'delivery': return [`**${deliveryHeading(row)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
     // E1 end
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
@@ -69,11 +69,23 @@ function partOf(row: Row): string | null {
   }
 }
 
+// E1 (the word cut, T93, T94, T97): an ask's line as its capsule reads it, its title (else its count) first; the why
+// its chip keeps for the pointer is written out, where nothing points
+function askLine(row: Extract<Row, { kind: 'ask' }>): string {
+  const count = ASK.count(row.questions.length);
+  const why = askStateWhy(row);
+  const state = why === null ? askStateCopy(row) : `${askStateCopy(row)}, ${why.charAt(0).toLowerCase()}${why.slice(1)}`;
+  return [row.title === null ? `**${count}**` : `**${row.title}** · ${count}`, state].join(' · ');
+}
+
 // E7 start: a message's line, then its whole body (a message whose line shows only its first line) or a hand-back's
-// report, quoted; a listing as its counts, a pending one as such, one the parser did not read as its notes
+// report, quoted; a listing as its counts, a pending one as such, one the parser did not read as its notes. The word cut
+// (T73): a message leads with the arrow of its direction, as its line does.
 function messagePart(row: Extract<Row, { kind: 'agent_message' }>): string {
   const more = messageMore(row);
-  return more === null ? `- ${row.text}` : `- ${row.text}\n${indent(more, '  > ')}`;
+  const arrow = messageArrow(row);
+  const line = arrow === null ? row.text : `${arrow} ${row.text}`;
+  return more === null ? `- ${line}` : `- ${line}\n${indent(more, '  > ')}`;
 }
 
 function listPart(row: Extract<Row, { kind: 'agent_list' }>): string {

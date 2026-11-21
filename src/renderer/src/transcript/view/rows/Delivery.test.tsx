@@ -58,6 +58,13 @@ describe('the delivery row’s file names', () => {
     expect(refused.container.querySelectorAll('button')).toHaveLength(0);
   });
 
+  it('draws Open externally and Reveal in Finder on pointing or focus within the file’s line, the name the press (the word cut, T101)', () => {
+    const { container } = renderRow(ROW, { storeKey: APP });
+    const lines = [...container.querySelectorAll('.transcript-delivery-file')];
+    expect(lines.map((line) => line.querySelector('.transcript-delivery-actions')?.hasAttribute('data-on-hover'))).toEqual([true, true]);
+    expect(screen.getByRole('button', { name: 'Reveal in Finder: a.txt' }).closest('.transcript-delivery-file')).toBe(lines[0]);
+  });
+
   it('outside a mounted transcript the name is disabled', () => {
     const { actions } = renderRow(ROW);
     const name = screen.getByRole<HTMLButtonElement>('button', { name: 'a.txt' });

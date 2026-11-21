@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
   ARTIFACT_CELL, bashFooter, BLOCKED, boundaryCopy, cellLabel, compactingLine, dividerCopy, dividerHead, endsInFold, HANDOVER_REINIT_COPY, lineCountsCopy, liveThinkingLabel, NOTICE, plural,
-  commandLead, PENDING_CAPTION, processExitCopy, REACH, rewindLabel, SAFEGUARD_LINE, shellFooter, stoppedLabel, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, waitingLabel,
+  commandLead, PENDING_CAPTION, processExitCopy, REACH, rewindLabel, SAFEGUARD_LINE, shellFooter, stoppedLabel, subagentDetail, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, waitingLabel,
 } from './copy';
 import { rowsOf } from './derive';
 import { applyEvents, createState } from './reduce';
 import { builder } from './test-events';
 import { browserActivityLine } from './copy'; // E13
+import { agentListCopy, agentMessageCopy, ASK, askStateCopy, askStateWhy, BROWSER_ACTION, MESSAGE_LINE, peerMessageCopy, planBadge } from './copy'; // the word cut, M2 task 2
 
 const cell = (id: string) => id as CellId;
 const NONE = { added: 0, removed: 0 };
@@ -217,18 +218,23 @@ describe('the waiting label', () => {
 });
 
 describe('subagent and boundary copy', () => {
-  it('grouped sentences', () => {
-    expect(subagentSentence(['A'], 'started')).toBe('A started working');
-    expect(subagentSentence(['A', 'B'], 'started')).toBe('A and B started working');
-    expect(subagentSentence(['A', 'B', 'C'], 'started')).toBe('A, B and C started working');
-    expect(subagentSentence(['A', 'B', 'C', 'D', 'E'], 'started')).toBe('A, B and 3 more started working');
-    expect(subagentSentence(['A'], 'finished')).toBe('A finished');
-    expect(subagentSentence(['A', 'B'], 'finished_with_errors')).toBe('A and B finished with errors');
-    expect(subagentSentence(['A'], 'stopped')).toBe('A was stopped');
+  it('grouped sentences: the names with no verb while they work and once finished; errors, a stop and an exit keep their words (the word cut, T86, N104)', () => {
+    expect(subagentSentence(['A'], 'started')).toBe('A');
+    expect(subagentSentence(['A', 'B'], 'started')).toBe('A and B');
+    expect(subagentSentence(['A', 'B', 'C'], 'started')).toBe('A, B and C');
+    expect(subagentSentence(['A', 'B', 'C', 'D', 'E'], 'started')).toBe('A, B and 3 more');
+    expect(subagentSentence(['A'], 'working')).toBe('A');
+    expect(subagentSentence(['A'], 'finished')).toBe('A');
+    expect(subagentSentence(['A', 'B'], 'finished_with_errors')).toBe('A and B · with errors');
+    expect(subagentSentence(['A'], 'stopped')).toBe('A · stopped');
     // UX wave U3b, M5 (decision 19): agents that ended with their session's process, in U8's words for the same fact
     expect(subagentSentence(['A'], 'exited')).toBe('A ended with the session');
     expect(subagentSentence(['A', 'B', 'C', 'D', 'E'], 'exited')).toBe('A, B and 3 more ended with the session');
-    expect(subagentSentence(['A'], 'working')).toBe('A started working');
+  });
+
+  it('what a working agent is doing, and for how long, for its pointing (T87)', () => {
+    expect(subagentDetail('Explore', 'Grep', 72_000)).toBe('Explore · Grep · 1m 12s');
+    expect(subagentDetail('Explore', null, 3_000)).toBe('Explore · 3s');
   });
 
   it('boundaries', () => {
@@ -321,5 +327,50 @@ describe('browser activity lines', () => {
   it('cuts a long label', () => {
     expect(browserActivityLine({ kind: 'clicked', x: 0, y: 0, label: `link ${'y'.repeat(35)}` })).toBe(`Clicked link ${'y'.repeat(35)}`);
     expect(browserActivityLine({ kind: 'dialog', type: 'alert', excerpt: 'z'.repeat(200), answered: 'accepted' })).toBe(`Alert "${'z'.repeat(59)}…" closed`);
+  });
+});
+
+// The word cut, M2 task 2: the agents' lines and listings, the plan's badge, the question capsule and a browser action.
+describe('the agents’ and the requests’ words', () => {
+  it('a message line is the party and the preview; its direction is the arrow its view leads with, and its old words are its accessible lead (T73)', () => {
+    expect(agentMessageCopy('from_child', 'reviewer', 'The migration is safe to run')).toBe('reviewer: The migration is safe to run');
+    expect(agentMessageCopy('to_child', 'reviewer', 'go')).toBe('reviewer: go');
+    expect(agentMessageCopy('between', null, 'hi')).toBe('parent: hi');
+    expect(peerMessageCopy.inbound('reviewer', 'hi')).toBe('@reviewer: hi');
+    expect(peerMessageCopy.outbound('reviewer', 'hi')).toBe('@reviewer: hi');
+    expect(peerMessageCopy.report('Explore', 'all done')).toBe('Report from Explore: all done'); // keeps its words and the › mark
+    expect(MESSAGE_LINE).toMatchObject({ from: '←', to: '→', mark: '›', named: { from: 'Message from', to: 'Sent to' } });
+  });
+
+  it('a listing still out reads Listing agents…; one never answered keeps its words; a read one is counted (T81, T85)', () => {
+    expect(agentListCopy.pending).toBe('Listing agents…');
+    expect(agentListCopy.neverAnswered).toBe('Listing the agents was never answered');
+    expect(agentListCopy.listed(9)).toBe('Listed 9 agents');
+    expect(agentListCopy.listed(1)).toBe('Listed 1 agent');
+  });
+
+  it('a decided plan’s badge (T90)', () => {
+    expect(planBadge('implement', null)).toBe('Approved');
+    expect(planBadge('clear_and_implement', null)).toBe('Approved, context cleared');
+    expect(planBadge('keep_planning', 'tighten step 2')).toBe('Kept planning: tighten step 2');
+    expect(planBadge('keep_planning', null)).toBe('Kept planning');
+  });
+
+  it('the capsule’s count, its heading with no title, and a cancelled one’s word with its why apart (T93, T94, T97)', () => {
+    expect(ASK.count(3)).toBe('3 questions');
+    expect(ASK.count(1)).toBe('1 question');
+    const cancelled = { state: 'cancelled' as const, error: null, cancelReason: 'withdrawn' };
+    expect(askStateCopy(cancelled)).toBe('Cancelled');
+    expect(askStateWhy(cancelled)).toBe('The turn was interrupted');
+    expect(askStateCopy({ ...cancelled, cancelReason: null })).toBe('Cancelled');
+    expect(askStateWhy({ ...cancelled, cancelReason: null })).toBe('The session ended');
+    expect(askStateWhy({ state: 'answered', error: null, cancelReason: null })).toBeNull();
+    expect(askStateCopy({ state: 'answered', error: null, cancelReason: null })).toBe('Answered'); // T96 stays
+    expect(askStateCopy({ state: 'pending', error: null, cancelReason: null })).toBe('Waiting for you');
+    expect(askStateCopy({ state: 'asked', error: null, cancelReason: null })).toBe('Asked, answer when ready'); // T95 stays
+  });
+
+  it('a browser action the interrupt stopped reads Cancelled (T107)', () => {
+    expect(BROWSER_ACTION.cancelled).toBe('Cancelled');
   });
 });

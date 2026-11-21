@@ -8,7 +8,7 @@
 // ready process Send starts it first (`acquireSession(id, 'peer')`, the line reading Starting…) and then asks it by
 // the same steer; a refused start says why on the line and keeps the text; a terminal or job holding it, or an
 // archive, closes the box with the reason. Opening the box starts nothing.
-import { useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
 import { RELAY_LONG_WAIT_MS } from '../../../relay-wait'; // after this long asked, the long-wait clause (the drill-in relay's too)
@@ -18,29 +18,30 @@ import { displayTitle } from '../../../sessions/title';
 import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
 import { duration } from '../../model/time';
+import { Tip } from '../../../ui/tip';
 import { useActions, type PeerAddress, type PeerReply } from '../context';
 import { TickingStatus, useTicker } from './parts';
 
-
-
 // The line over the box, or null when nothing was asked of this address yet: its copy with the time it has waited as
-// the argument, and that time while it ticks (an ask not yet forwarded), else null.
-export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): { line: (elapsed: string) => string; elapsed: string | null } | null {
+// the argument, and that time while it ticks (an ask not yet forwarded), else null. The word cut (T79): the line is the
+// state, "Sending · 48s", "Sent", "Sent, reworded"; `why` (why it waits, how it was sent) is its tooltip and its
+// description; a failure keeps its words and has none.
+export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): { line: (elapsed: string) => string; elapsed: string | null; why: string | null } | null {
   const state = reply?.state;
   if (!state) return null;
-  const fixed = (text: string) => ({ line: () => text, elapsed: null });
+  const fixed = (text: string, why: string | null) => ({ line: () => text, elapsed: null, why });
   switch (state.kind) {
     case 'asked': {
       const waited = now - Date.parse(state.sentAt);
-      const copy = !state.parentTurnOpenAtSend ? peerMessageCopy.asked : waited >= RELAY_LONG_WAIT_MS ? peerMessageCopy.askedLongWait : peerMessageCopy.askedTurnOpen;
-      return { line: (elapsed) => copy(mode, session, elapsed), elapsed: duration(waited) };
+      const why = !state.parentTurnOpenAtSend ? peerMessageCopy.asked : waited >= RELAY_LONG_WAIT_MS ? peerMessageCopy.askedLongWait : peerMessageCopy.askedTurnOpen;
+      return { line: peerMessageCopy.line.sending, elapsed: duration(waited), why: why(mode, session) };
     }
     case 'forwarded':
-      return fixed(peerMessageCopy.forwarded(mode, session));
+      return fixed(peerMessageCopy.line.sending(''), peerMessageCopy.forwarded(mode, session));
     case 'sent':
-      return fixed(state.reworded ? peerMessageCopy.sentReworded(mode, session) : peerMessageCopy.sent(mode, session));
+      return state.reworded ? fixed(peerMessageCopy.line.sentReworded, peerMessageCopy.sentReworded(mode, session)) : fixed(peerMessageCopy.line.sent, peerMessageCopy.sent(mode, session));
     case 'failed':
-      return fixed(peerMessageCopy.failed(mode, state.message));
+      return fixed(peerMessageCopy.failed(mode, state.message), null);
   }
 }
 
@@ -107,7 +108,6 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
 
   const root = useRef<HTMLDivElement>(null);
   useKeyChord('composer.send', () => void send(), { within: root });
-  const id = useId();
 
   return (
     <div ref={root} data-key-sink="composer" className="transcript-peer-composer" data-part="peer-composer">
@@ -117,17 +117,20 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
           {start.kind === 'starting' ? STARTING_SESSION : start.words}
         </p>
       ) : (
-        line !== null && <TickingStatus line={line.line} elapsed={line.elapsed} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
+        line !== null && (
+          // the word cut (T79): why it waits, or how it went, waits on the line, which takes the keyboard for it
+          <Tip content={line.why} description={line.why}>
+            <TickingStatus line={line.line} elapsed={line.elapsed} tabIndex={line.why === null ? undefined : 0} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
+          </Tip>
+        )
       )}
-      <label htmlFor={id} className="transcript-peer-label">
-        {peerMessageCopy.label(target.mode, session)}
-      </label>
+      {/* the word cut (T76): no label over the box; its words are the box's name, the session in its placeholder */}
       <textarea
-        id={id}
         rows={2}
         value={draft}
+        aria-label={peerMessageCopy.label(target.mode, session)}
         disabled={reason !== null || sending}
-        placeholder={reason ?? peerMessageCopy.placeholder(target.mode, label)}
+        placeholder={reason ?? peerMessageCopy.placeholder(target.mode, label, session)}
         onChange={(e) => edit(e.target.value)}
         className="transcript-peer-input"
       />

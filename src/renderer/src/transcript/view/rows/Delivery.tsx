@@ -1,6 +1,7 @@
 // E1 (M3): a `send_file` call's delivery row (E1 execution document, M3's decisions; X12: the record and the viewer are
 // E2's). A file glyph, "Delivered hello.txt" (or "Delivered N files") with the agent's caption, then a line per file:
-// its name (the full path as its title) and two quiet buttons, Open externally and Reveal in Finder, which go through
+// its name (the full path as its title) and two quiet buttons, Open externally and Reveal in Finder (on pointing or focus
+// within the file's line, and always where nothing points: the word cut, T101), which go through
 // `files.openExternal` and `files.reveal` with the row's session; a refusal shows inline for a moment. Open externally
 // is offered only for a file `files.openExternal` hands to the OS (`opensExternally`, as the viewer's row does).
 // `urgency: 'high'` takes the accent border. It stays in view when its turn folds (isPersistentRow). E2 (M5): once the
@@ -57,7 +58,7 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
         </span>
       )}
       {actionable && (
-        <span className="transcript-delivery-actions">
+        <span className="transcript-delivery-actions" data-on-hover="">
           {opensExternally(file.name) && (
             <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.openExternally, file.name)} {...opens} onClick={() => void run(actions.openDelivered)()}>
               {DELIVERY.openExternally}

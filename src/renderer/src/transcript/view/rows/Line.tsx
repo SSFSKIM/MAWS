@@ -2,15 +2,17 @@
 // lead mark and the words in one line, cut with an ellipsis at the column's edge. Since a narrower column cuts any line
 // and no word may be out of reach, the line itself is always the control that opens what it stands for (a click, or
 // Enter or Space with focus; the architect's ruling of 2026-11-13). What stands at the line's end (a send's state,
-// Reply) is the caller's, after it, so it stays in view however the words are cut.
+// Reply) is the caller's, after it, so it stays in view however the words are cut. `markWords`, where the mark stands
+// for words (the word cut, T73: a message's arrow for "Message from"), are read in its place and not drawn.
 import type { ReactNode } from 'react';
 
-export function ArrivalLine({ mark, open, onToggle, children }: { mark: string; open: boolean; onToggle: () => void; children: ReactNode }) {
+export function ArrivalLine({ mark, markWords, open, onToggle, children }: { mark: string; markWords?: string; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
     <button type="button" className="transcript-line-words" aria-expanded={open} onClick={onToggle}>
       <span className="transcript-line-mark" aria-hidden="true">
         {mark}
       </span>
+      {markWords !== undefined && <span className="sr-only">{`${markWords} `}</span>}
       <span className="transcript-line-text">{children}</span>
     </button>
   );

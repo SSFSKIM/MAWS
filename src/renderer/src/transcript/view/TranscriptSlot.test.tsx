@@ -278,9 +278,9 @@ describe('TranscriptSlot', () => {
       act(() => useTranscriptStore.getState().expandAll(key));
       return useTranscriptStore.getState().rows(key).find((row) => row.kind === 'agent_message')?.text;
     };
-    expect(sent()).toBe('Sent to @a912e224: ready?'); // no graph yet; UX wave U3 (O-12): the message line's words
+    expect(sent()).toBe('@a912e224: ready?'); // no graph yet; UX wave U3 (O-12): the message line's words
     put(graph());
-    expect(sent()).toBe('Sent to Survey src: ready?');
+    expect(sent()).toBe('Survey src: ready?');
     const lookup = useTranscriptStore.getState().entries[key]!.state.agents;
     g.emit('subagent.progress', { taskId: task('a912e224'), description: 'Reading one.txt', usage: { totalTokens: 10, toolUses: 1, durationMs: 5 }, lastToolName: 'Read', summary: null });
     put(graph()); // the graph changed, the agents it names did not
@@ -792,7 +792,7 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     for (let i = 0; i < 10 && invoke.mock.calls.length === 0; i++) await settle();
     expect(invoke).toHaveBeenCalledWith('laneA.watch', { appSessionId: SESSION, agentId: 'a1' }, OTHER_MACHINE);
     await settle();
-    expect(screen.getByTestId('subagent-rows-status').textContent).toBe('Reading this agent’s transcript from mini…');
+    expect(screen.getByTestId('subagent-rows-status').textContent).toBe('Reading from mini…');
     const c = new Chain('c4a1f200', 'sminos');
     c.prompt('Survey the checkout.');
     c.answer('One file.');
@@ -818,13 +818,13 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     await settle();
     const status = () => screen.getByTestId('subagent-rows-status').textContent;
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'offline' }, OTHER_MACHINE));
-    expect(status()).toBe('mini isn’t reachable: this agent’s transcript shows once it is');
+    expect(status()).toBe('mini isn’t reachable'); // the word cut (C133): three states in a person's words
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'unavailable' }, OTHER_MACHINE));
-    expect(status()).toBe('mini isn’t giving this agent’s transcript now; asking again');
+    expect(status()).toBe('Reading from mini…'); // asked again: a read under way
     const empty = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-a', n: 0, body: { rows: [], more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', messages: [empty] }, OTHER_MACHINE));
     await settle();
-    expect(status()).toBe('mini holds no rows of this agent’s transcript yet');
+    expect(status()).toBe('Nothing from this agent yet');
   });
 
   // The desk track's note (their 578): sminos serves an agent it doesn't know as an empty stream, so where the agent's
@@ -857,13 +857,13 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
       return { plane, statuses };
     };
 
-    it('says what is loaded where the agent’s snapshot came empty and the live tree here doesn’t name it', async () => {
+    it('says nothing came where the agent’s snapshot came empty, whether or not the live tree here names it', async () => {
       const { plane, statuses } = await scene();
       plane({ watch: 'w1', messages: [snapshot([meta])] });
       for (const agent of ['a1', 'a9']) plane({ watch: `w-${agent}`, messages: [snapshot([])] });
       await settle();
       await settle();
-      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'mini holds no rows of this agent’s transcript, and the session’s tree here doesn’t name it']);
+      expect(statuses()).toEqual(['Nothing from this agent yet', 'Nothing from this agent yet']);
     });
 
     it('claims no absence while the session’s own transcript reconnects: its tree is stale until the fresh snapshot', async () => {
@@ -874,7 +874,7 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
       plane({ watch: 'w1', reset: true });
       await settle();
       await settle();
-      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'mini holds no rows of this agent’s transcript yet']);
+      expect(statuses()).toEqual(['Nothing from this agent yet', 'Nothing from this agent yet']);
     });
 
     it('reads an agent whose own snapshot hasn’t come as still being read, though the tree here doesn’t name it', async () => {
@@ -883,7 +883,7 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
       plane({ watch: 'w-a1', messages: [snapshot([])] });
       await settle();
       await settle();
-      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'Reading this agent’s transcript from mini…']);
+      expect(statuses()).toEqual(['Nothing from this agent yet', 'Reading from mini…']);
     });
   });
 });

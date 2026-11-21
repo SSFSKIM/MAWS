@@ -36,7 +36,7 @@
     "id": "subagent:a38d4aebfaea9f6b1",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Outer agent dispatching inner finished",
+    "sentence": "Outer agent dispatching inner",
     "status": "finished",
     "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
   },
@@ -56,7 +56,7 @@
     "id": "subagent:a425e926e506edeb1",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Inner reads one.txt finished",
+    "sentence": "Inner reads one.txt",
     "status": "finished",
     "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
   },

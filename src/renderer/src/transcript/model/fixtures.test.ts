@@ -138,8 +138,8 @@ describe('synthetic journals', () => {
     const subagents = ofKind(rows, 'subagent');
     expect(subagents).toHaveLength(1);
     expect(subagents[0].agents.map((a) => [a.taskId, a.name, a.agentId])).toEqual([['ad1synthagent0001', 'Survey src for TODOs', 'ad1synthagent0001'], ['ad2synthagent0002', 'List the tests', 'ad2synthagent0002']]);
-    expect(subagents[0]).toMatchObject({ status: 'finished', sentence: 'Survey src for TODOs and List the tests finished' });
-    expect(ofKind(rows, 'agent_message')[0]).toMatchObject({ direction: 'to_child', text: 'Sent to Survey src for TODOs: Skip node_modules entirely.' }); // P3-F L260: by the ref's name; U3 (O-12): the message line's words
+    expect(subagents[0]).toMatchObject({ status: 'finished', sentence: 'Survey src for TODOs and List the tests' }); // the word cut (T86)
+    expect(ofKind(rows, 'agent_message')[0]).toMatchObject({ direction: 'to_child', text: 'Survey src for TODOs: Skip node_modules entirely.' }); // P3-F L260: by the ref's name; U3 (O-12): the message line's words
     expect(cellsOf(rows).some((c) => c.toolName === 'Agent' || c.toolName === 'Grep')).toBe(false); // the child's Grep is never a parent cell
     expect(state.turns.get(state.order[0])!.children.get('toolu_synth_agent_1' as never)?.length).toBeGreaterThan(0);
     expect(ofKind(rows, 'user')).toHaveLength(1);
@@ -616,11 +616,11 @@ describe('cross-session rows (E7)', () => {
     direction, text, sender: peer?.sender ?? null, recipient: peer?.recipient ?? null, replyTo: peer?.replyTo ?? null, result: peer?.result ?? null, resultText: peer?.resultText ?? null,
   }));
   const EXPECTED = [
-    { direction: 'between', text: 'Message from @repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
-    { direction: 'between', text: 'Sent to @repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
-    { direction: 'between', text: 'Sent to @repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
-    { direction: 'between', text: 'Message from @repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
-    { direction: 'between', text: 'Sent to @nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
+    { direction: 'between', text: '@repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: '@repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: '@repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: '@repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: '@nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
   ];
   const LISTING = { self: 'repo-h6xooi-51 [804260]', sections: [{ title: 'Peer sessions', count: 1, rows: [{ name: 'repo-b-gen1il-79', ref: '61303a', extras: ['interactive', 'idle', 'started 2s ago'] }] }], notes: [], pending: false };
 
@@ -657,7 +657,7 @@ describe('cross-session rows (E7)', () => {
     follower.stop();
     const rows = rowsFor(events);
     expect(messages(rows)).toEqual([
-      { direction: 'between', text: 'Message from @scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null, owners: null }, recipient: null, replyTo: null, result: null, resultText: null },
+      { direction: 'between', text: '@scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null, owners: null }, recipient: null, replyTo: null, result: null, resultText: null },
     ]);
     expect(ofKind(rows, 'user').map((row) => row.text)).toEqual([expect.stringMatching(/^Spawn a general-purpose Agent named "scout"/)]);
     expect(ofKind(rows, 'divider').map((row) => row.origin)).toEqual(['human', 'peer']);

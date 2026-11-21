@@ -47,7 +47,7 @@
     "id": "subagent:toolu_disk_agent",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Read and report one.txt content started working",
+    "sentence": "Read and report one.txt content",
     "status": "started",
     "turnId": "turn:u-disk-1"
   },

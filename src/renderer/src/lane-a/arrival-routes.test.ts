@@ -104,7 +104,7 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
       '● task failed: Background command "uxw fail" failed with exit code 1',
       '● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session',
       '› Report from uxw agent: PONG',
-      '› Sent to uxw agent: Reply with only the word PONG2. Use no tool.', // the send's own line (UC-2, "The rows"), in the person's turn
+      '› uxw agent: Reply with only the word PONG2. Use no tool.', // the send's own line (UC-2, "The rows"), in the person's turn
       '● task completed: Agent "uxw agent" finished',
       '● task failed: Background command "uxw busy fail" failed with exit code 1',
       '● task completed: Background command "uxw busy ok" completed (exit code 0)',
@@ -157,8 +157,8 @@ describe('sminos’s deliveries, from the file and another machine’s rows (Acc
       const rows = arrivalRows(drawn(state));
       expect(rows).toContain('prompt: UXW owner idle: reply with only the word ONE.');
       expect(rows).toContain('steer: UXW owner busy: also say THREE.');
-      expect(rows.filter((row) => row.startsWith('›'))).toEqual(['› Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.', '› Message from @session:7ef6ac00: UXW peer busy: also say FOUR.']);
-      expect(rows[rows.indexOf('› Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.') + 1]).toBe('turn peer, opened by peer: Message from @session:7ef6ac00: UXW peer idle: reply with only the word TWO.');
+      expect(rows.filter((row) => row.startsWith('›'))).toEqual(['› @session:7ef6ac00: UXW peer idle: reply with only the word TWO.', '› @session:7ef6ac00: UXW peer busy: also say FOUR.']);
+      expect(rows[rows.indexOf('› @session:7ef6ac00: UXW peer idle: reply with only the word TWO.') + 1]).toBe('turn peer, opened by peer: @session:7ef6ac00: UXW peer idle: reply with only the word TWO.');
       expect(rows[rows.indexOf('prompt: UXW owner idle: reply with only the word ONE.') + 1]).toBe('turn human');
       expect(rows.join('\n')).not.toMatch(/\[sminos message from|From /);
     }
@@ -241,13 +241,13 @@ async function both(text: string) {
 describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
   it('a peer’s row the bridge submitted is one turn, a peer’s, holding the line: no bubble, no second turn of the person’s waiting beside it', async () => {
     const drawing = await both(transcript(submitted(`${PEER_FRAME}\nCould you rerun the lint?`), said('Rerunning it.'), ended()));
-    expect(drawing).toEqual({ rows: ['› Message from @session:5b2c9e10: Could you rerun the lint?', 'turn peer, opened by peer: Message from @session:5b2c9e10: Could you rerun the lint?'], pending: 0, users: [] });
+    expect(drawing).toEqual({ rows: ['› @session:5b2c9e10: Could you rerun the lint?', 'turn peer, opened by peer: @session:5b2c9e10: Could you rerun the lint?'], pending: 0, users: [] });
   });
 
   it('a peer’s row the bridge appended into a running turn is its line there, its mirror line nothing', async () => {
     const text = `${PEER_FRAME}\nThe fixtures are ready.`;
     const drawing = await both(transcript(typed('Run the slow job.'), call('toolu_demo1'), appended(text), mirror(text), result('toolu_demo1'), said('Done.'), ended()));
-    expect(drawing.rows).toEqual(['prompt: Run the slow job.', '› Message from @session:5b2c9e10: The fixtures are ready.', 'turn human']);
+    expect(drawing.rows).toEqual(['prompt: Run the slow job.', '› @session:5b2c9e10: The fixtures are ready.', 'turn human']);
     expect(drawing.users).toEqual(['Run the slow job.']);
   });
 
@@ -267,7 +267,7 @@ describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
 
   it('a background session’s prompt that opens with a peer’s frame is the peer’s line in a peer’s turn; with a frame from `human`, the owner’s bubble without it (decision 19)', async () => {
     const peer = await both(transcript(typed(`${OWNED}\nThe migration is merged.`, { sessionKind: 'bg' }), said('Thanks, picking it up.'), ended()));
-    expect(peer).toEqual({ rows: ['› Message from @river: The migration is merged.', 'turn peer, opened by peer: Message from @river: The migration is merged.'], pending: 0, users: [] });
+    expect(peer).toEqual({ rows: ['› @river: The migration is merged.', 'turn peer, opened by peer: @river: The migration is merged.'], pending: 0, users: [] });
     const queued = await both(transcript(typed(`${OWNED}\nThe migration is merged.`, { sessionKind: 'bg', promptSource: 'queued' }), said('Thanks.'), ended()));
     expect(queued.rows).toEqual(peer.rows);
     const own = await both(transcript(typed('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.', { sessionKind: 'bg' }), said('Going on.'), ended()));
@@ -532,7 +532,7 @@ describe('a background task’s end, from the journal (Acceptance 4)', () => {
       '● task failed: Background command "uxw fail" failed with exit code 1',
       '● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session',
       '› Report from uxw agent: PONG',
-      '› Sent to uxw agent: Reply with only the word PONG2. Use no tool.',
+      '› uxw agent: Reply with only the word PONG2. Use no tool.',
       '● task failed: Background command "uxw busy fail" failed with exit code 1',
       '● task completed: Background command "uxw busy ok" completed (exit code 0)',
       '› Report from uxw busy agent: PONG3',

@@ -322,7 +322,7 @@ describe('a waiting plan its terminal settled before its result arrived', () => 
     b.emit('plan.resolved', { requestId: request(CALL), toolUseId: tool(CALL), outcome: 'implement', feedback: null });
     events = b.events;
     await remount(view);
-    await waitFor(() => expect(badge()).toBe('Implemented'));
+    await waitFor(() => expect(badge()).toBe('Approved')); // the word cut (T90)
   });
 
   it('reads Pending with no receipt and no outcome, and after its session left and came back', async () => {

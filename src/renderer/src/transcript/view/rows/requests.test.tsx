@@ -37,7 +37,7 @@ describe('plan row', () => {
       view.unmount();
       return badge;
     });
-    expect(badges).toEqual(['Implemented', 'Cleared context and implemented', 'Kept planning: Add the delta-batch measurement before I approve.']);
+    expect(badges).toEqual(['Approved', 'Approved, context cleared', 'Kept planning: Add the delta-batch measurement before I approve.']);
 
     renderRow(plans[0], { storeKey: store.key });
     const region = screen.getByRole('region', { name: 'Plan' });

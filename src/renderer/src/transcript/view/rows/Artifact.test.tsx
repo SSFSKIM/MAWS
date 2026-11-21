@@ -40,9 +40,11 @@ const BASE: ArtifactRow = {
 };
 const placed = (...seqs: number[]) => seqs.map((seq) => ({ seq, kind: 'auto' as const }));
 const heading = (container: HTMLElement) => container.querySelector('[data-artifact-heading]')!.textContent;
+// The word cut (T103): no worded Open; the artifact's name is the press, described by what it does
+const opener = () => screen.getByRole<HTMLButtonElement>('button', { description: 'Open' });
 
 describe('the artifact row', () => {
-  it('p1-maws-artifacts: the create and the update read their headings, the refused update its error, and only a registered version offers Open', async () => {
+  it('p1-maws-artifacts: the create and the update read their headings, the refused update its error, and only a registered version’s name opens it', async () => {
     const store = await storeWith(journalToEvents(loadJournal('pass3', 'p1-maws-artifacts')));
     useTranscriptStore.getState().expandAll(store.key);
     const rows = store.rows().filter((row): row is ArtifactRow => row.kind === 'artifact');
@@ -53,8 +55,8 @@ describe('the artifact row', () => {
       return shown;
     });
     expect(read).toEqual([
-      ['Artifact Dashboard · v1', ['Open']],
-      ['Updated artifact Dashboard · v2', ['Open']],
+      ['Artifact Dashboard · v1', ['Artifact Dashboard · v1']], // the word cut (T103): the name is the press, no Open
+      ['Updated artifact Dashboard · v2', ['Updated artifact Dashboard · v2']],
       ['Could not register artifact nope: no artifact "nope" in this session', []],
     ]);
   });
@@ -89,13 +91,19 @@ describe('the artifact row', () => {
     expect(refused('create', 'artifact_create: x.html is not a file')).toBe('Could not register artifact x: x.html is not a file');
   });
 
-  it('Open hands the row’s session, artifact id and version to openArtifact; a child transcript’s row opens in its parent session', () => {
+  it('its name is the press, Open its description, with no Open button (the word cut, T103)', () => {
+    renderRow(BASE, { storeKey: APP });
+    expect(screen.getByRole('button', { name: 'Artifact Dashboard · v1', description: 'Open' })).toBe(opener());
+    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
+  });
+
+  it('its name hands the row’s session, artifact id and version to openArtifact; a child transcript’s row opens in its parent session', () => {
     const { actions } = renderRow({ ...BASE, action: 'update', version: 2 }, { storeKey: APP });
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.click(opener());
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, { version: 2 });
     cleanup();
     const child = renderRow(BASE, { storeKey: `${APP}:agent-1` });
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.click(opener());
     expect(child.actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, { version: 1 });
   });
 
@@ -104,7 +112,7 @@ describe('the artifact row', () => {
   it("a row naming the artifact's owner opens it in the owner's session and reads the artifact's console", () => {
     const PARENT = 'app-parent' as AppSessionId;
     const { actions, container } = renderRow({ ...BASE, action: 'update', version: 2, ownerAppSessionId: PARENT }, { storeKey: APP });
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.click(opener());
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(PARENT, ID, { version: 2 });
     act(() => {
       noteArtifactVersions(ID, placed(3, 8));
@@ -117,7 +125,7 @@ describe('the artifact row', () => {
   // revision's console, whatever place thinning has moved it to
   it('opens by the revision its call wrote when the row has one, and reads that revision’s console', () => {
     const { actions, container } = renderRow({ ...BASE, version: 2, revision: 9 }, { storeKey: APP });
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.click(opener());
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, { revision: 9 });
     act(() => {
       noteArtifactVersions(ID, placed(9)); // thinned: v1 gone, the publish now the first place
@@ -126,9 +134,9 @@ describe('the artifact row', () => {
     expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
   });
 
-  it('outside a mounted transcript Open is disabled', () => {
+  it('outside a mounted transcript its name opens nothing', () => {
     const { actions } = renderRow(BASE);
-    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open' });
+    const open = opener();
     expect(open.disabled).toBe(true);
     fireEvent.click(open);
     expect(actions.openArtifact).not.toHaveBeenCalled();
@@ -233,7 +241,7 @@ describe('the row of an agent’s delete', () => {
     await libraryChanged();
     await waitFor(() => expect(heading(container)).toBe('Restored Draft plan'));
     expect(container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('restored');
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.click(opener());
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, DRAFT);
     listed = false; // deleted again elsewhere: read, not remembered
     await libraryChanged();
@@ -278,7 +286,7 @@ describe('the row of an agent’s delete', () => {
     await act(async () => {});
     expect(heading(view.container)).toBe('Deleted Draft plan');
     expect(view.container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('deleted');
-    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
+    expect(screen.queryByRole('button', { description: 'Open' })).toBeNull();
     expect(undoButton().disabled).toBe(true);
     expect(line(view.container)).toBe('Only mini’s owners can restore an artifact there.');
   });
@@ -299,7 +307,7 @@ describe('the row of an agent’s delete', () => {
     await waitFor(() => expect(reads.length).toBe(3));
     await act(async () => {});
     expect(heading(view.container)).toBe('Deleted Draft plan');
-    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
+    expect(screen.queryByRole('button', { description: 'Open' })).toBeNull();
     expect(undoButton().disabled).toBe(true);
   });
 
@@ -326,7 +334,7 @@ describe('the row of an agent’s delete', () => {
 
   it('a refusal reads in the person’s words, with neither the tool’s name nor "the user", and no control', () => {
     const { container } = renderRow({ ...DELETED, title: null, artifactId: 'budget', error: 'artifact_delete: the user has edited "Budget"; ask them to delete it in the Library {"reason":"invalid","why":"edited"}', why: 'edited' }, { storeKey: APP, actions: withUndo(async () => null) });
-    expect(heading(container)).toBe('Could not delete budget: you have edited it. Delete it from the Library if you no longer need it.');
+    expect(heading(container)).toBe('Could not delete budget: you have edited it. Delete it from the Library.');
     expect(container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('error');
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
@@ -338,7 +346,7 @@ describe('the row of an agent’s delete', () => {
       listed = shown;
       const { container, unmount } = renderRow({ ...DELETED, answered: false, neverAnswered: true }, { storeKey: APP, actions: withUndo(async () => null) });
       await act(async () => {});
-      expect(heading(container)).toBe('Deleting Draft plan was never answered');
+      expect(heading(container)).toBe('No answer to deleting Draft plan');
       expect(container.querySelectorAll('button')).toHaveLength(0);
       expect(container.querySelector('[data-artifact-line]')).toBeNull();
       unmount();

@@ -1321,8 +1321,10 @@ function subagentRow(group: SubagentGroup, turnId: TurnId, exited: boolean): Row
   const status: SubagentStatus = done
     ? statuses.includes('finished_with_errors') ? 'finished_with_errors' : statuses.includes('stopped') ? 'stopped' : 'finished'
     : statuses.every((s) => s === 'started') ? 'started' : 'working';
-  const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status) + (group.phase && !done ? ` · ${group.phase}` : '');
-  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
+  const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status);
+  // the word cut (T86, T87): a working workflow's phase is what it is doing now, which waits on its line
+  const phase = group.phase && !done ? { phase: group.phase } : {};
+  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...phase, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
 }
 
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {

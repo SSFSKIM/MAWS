@@ -28,7 +28,7 @@ async function fixtureRows(name: string) {
 const APP = 'app-maws' as AppSessionId;
 
 describe('the ask capsule', () => {
-  it('p1-maws-ask-blocking at its opened event: "Questions", "Asked 5 questions", Waiting for you, and Open hands the row’s own data to openAsk', async () => {
+  it('p1-maws-ask-blocking at its opened event: its count as its heading ("5 questions", the word cut, T93), Waiting for you, and Open hands the row’s own data to openAsk', async () => {
     const events = journalToEvents(loadJournal('pass3', 'p1-maws-ask-blocking'));
     const store = await storeWith(events.slice(0, events.findIndex((event) => event.kind === 'maws.ask.opened') + 1));
     const ask = rowOf(store.rows(), 'ask');
@@ -36,15 +36,16 @@ describe('the ask capsule', () => {
     const capsule = container.querySelector<HTMLElement>('[data-ask-id]')!;
     expect(capsule.dataset.askId).toBe('toolu_012dCG4TE89gS8BSqhFFZnjS');
     expect(capsule.dataset.askState).toBe('pending');
-    expect(capsule.textContent).toContain('Questions');
-    expect(capsule.textContent).toContain('Asked 5 questions');
+    expect(capsule.querySelector('.transcript-ask-title')!.textContent).toBe('5 questions');
+    expect(capsule.querySelector('.transcript-ask-count')).toBeNull(); // the count said once, as the heading
+    expect(capsule.textContent).not.toContain('Questions');
     expect(capsule.textContent).toContain('Waiting for you');
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     const data = Object.fromEntries(Object.entries(ask).filter(([key]) => !['id', 'turnId', 'at', 'kind'].includes(key)));
     expect(actions.openAsk).toHaveBeenCalledExactlyOnceWith(APP, data);
   });
 
-  it('answered: Answered, a line per question reading header (or question) → answer, and View answers', async () => {
+  it('answered: Answered, a line per question reading header (or question) → answer, and its top row the press that opens them (T98)', async () => {
     const store = await fixtureRows('p1-maws-ask-blocking');
     const ask = rowOf(store.rows(), 'ask');
     const { actions, container } = renderRow(ask, { storeKey: APP });
@@ -57,7 +58,10 @@ describe('the ask capsule', () => {
       'Which folder holds the assets?→/private/tmp/maws-e1-repo-ogdPFU/assets',
       'Which repository is this for?→Decide for me',
     ]);
-    fireEvent.click(screen.getByRole('button', { name: 'View answers' }));
+    expect(screen.queryByRole('button', { name: 'View answers' })).toBeNull();
+    const top = screen.getByRole('button', { name: '5 questions Answered', description: 'View answers' });
+    expect(top.classList.contains('transcript-ask-top')).toBe(true);
+    fireEvent.click(top);
     expect(actions.openAsk).toHaveBeenCalledWith(APP, expect.objectContaining({ askId: 'toolu_012dCG4TE89gS8BSqhFFZnjS', state: 'answered' }));
   });
 
@@ -88,15 +92,32 @@ describe('the ask capsule', () => {
       return text;
     };
     expect(chip(base)).toBe('Asked, answer when ready');
-    expect(chip({ ...base, state: 'cancelled' })).toBe('Cancelled, the session ended'); // the disk path: no reason known
-    expect(chip({ ...base, state: 'cancelled', cancelReason: 'exit' })).toBe('Cancelled, the session ended');
-    expect(chip({ ...base, state: 'cancelled', cancelReason: 'withdrawn' })).toBe('Cancelled, the turn was interrupted');
+    // the word cut (T97): Cancelled, its why waiting for the pointer or focus on the chip
+    expect(chip({ ...base, state: 'cancelled' })).toBe('Cancelled'); // the disk path: no reason known
+    expect(chip({ ...base, state: 'cancelled', cancelReason: 'exit' })).toBe('Cancelled');
+    expect(chip({ ...base, state: 'cancelled', cancelReason: 'withdrawn' })).toBe('Cancelled');
     expect(chip({ ...base, state: 'error', error: 'ask: invalid arguments: questions: Too small' })).toBe('ask: invalid arguments: questions: Too small');
     const { actions } = renderRow(base, { storeKey: `${APP}:agent-1` });
     expect(screen.getByText('Setup')).toBeTruthy();
-    expect(screen.getByText('Asked 1 question')).toBeTruthy();
+    expect(screen.getByText('1 question')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(actions.openAsk).toHaveBeenCalledWith(APP, expect.objectContaining({ askId: 't1' }));
+  });
+
+  it('a cancelled capsule’s why is its chip’s, on pointing or keyboard focus, and its description at rest (T97)', () => {
+    const base: RowOf<'ask'> = {
+      id: 'ask:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'ask', toolUseId: 't1' as never, askId: 't1', title: 'Setup', context: null, blocking: false,
+      questions: [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }], state: 'cancelled', answers: null, error: null, cancelReason: 'withdrawn',
+    };
+    const { container } = renderRow(base, { storeKey: APP });
+    const chip = container.querySelector<HTMLElement>('[data-ask-chip]')!;
+    expect(document.getElementById(chip.getAttribute('aria-describedby')!)!.textContent).toBe('The turn was interrupted');
+    act(() => chip.focus());
+    expect(document.activeElement).toBe(chip);
+    expect(screen.getByRole('tooltip').textContent).toBe('The turn was interrupted');
+    cleanup();
+    const asked = renderRow({ ...base, state: 'asked', cancelReason: null }, { storeKey: APP }).container.querySelector('[data-ask-chip]')!;
+    expect(asked.hasAttribute('tabindex')).toBe(false); // a chip with nothing waiting takes no stop
   });
 });
 

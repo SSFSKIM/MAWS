@@ -628,7 +628,7 @@ describe('the main transcript through the session plane', () => {
     // a closed turn folds its work, the message line among it, which its divider then names: read it unfolded
     const unfolded = drawnRows(withAllExpanded(entry.state));
     const lines = unfolded.flatMap((row) => (row.kind === 'agent_message' ? [row.text] : []));
-    expect(lines.filter((text) => text === 'Message from @river: The migration is merged.')).toHaveLength(2);
+    expect(lines.filter((text) => text === '@river: The migration is merged.')).toHaveLength(2);
     expect(unfolded.filter((row) => row.kind === 'user' && row.text === framed)).toHaveLength(1); // the one without the kind
     expect(entry.rows).toEqual(await freshRows(rows));
   });

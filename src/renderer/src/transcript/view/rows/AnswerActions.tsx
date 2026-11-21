@@ -2,12 +2,15 @@
 // and §D; ruled R15, R16 and R22): under the answer its mount placed it on, Copy, "Fork from here" and the answer's time,
 // always laid out and shown on hover or focus within. Copy reads the store's whole turn at the press. Fork is the mount's
 // act (`forkFrom`), drawn only where the entry allows it and the mount gives one, for a session's own transcript: while
-// it is out the button is disabled and busy, and the act opens the fork's tab or shows its refusal itself.
+// it is out the button is disabled and busy, and the act opens the fork's tab or shows its refusal itself. The word cut
+// (N119, N120): Fork carries no sentence about how a fork works; greyed, it is `aria-disabled` and keeps the keyboard,
+// its reason its tooltip and its description.
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { answerMarkdownOf, type AnswerAction } from '../../model/answer-actions';
+import { UnavailableButton } from '../../../ui/tip';
 import { ANSWER_ACTIONS } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useRowSession, useTranscriptContext, type TranscriptActions } from '../context';
@@ -55,15 +58,10 @@ function ForkButton({ forkFrom, appSessionId, entry }: { forkFrom: NonNullable<T
     }
   };
   return (
-    <button
-      type="button"
-      disabled={busy || unavailable !== null}
-      aria-busy={busy || undefined}
-      title={unavailable ?? ANSWER_ACTIONS.forkTitle}
-      aria-description={unavailable ?? undefined}
-      onClick={() => void fork()}
-    >
-      {ANSWER_ACTIONS.fork}
-    </button>
+    <UnavailableButton reason={unavailable}>
+      <button type="button" disabled={busy} aria-busy={busy || undefined} onClick={() => void fork()}>
+        {ANSWER_ACTIONS.fork}
+      </button>
+    </UnavailableButton>
   );
 }

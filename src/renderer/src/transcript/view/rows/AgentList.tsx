@@ -1,7 +1,11 @@
-// E7 (M2): a `ListAgents` result as the lists it names (E7 execution document, Design §4). The self line, then each
-// section (`Subagents`, `Teammates`, `Peer sessions` with the engine's count) as a compact list: the name, its short ref
-// in a chip, its extras muted, and a Message button that opens the composer under that row, addressed to the name (the
-// listing's own advice: the name is what other sessions message it by). What the parser did not read stays as notes.
+// E7 (M2): a `ListAgents` result as the lists it names (E7 execution document, Design §4): each section (`Subagents`,
+// `Teammates`, `Peer sessions` with the engine's count) as a compact list: the name, its short ref in a chip, its extras
+// muted, and a Message button that opens the composer under that row, addressed to the name (the listing's own advice:
+// the name is what other sessions message it by). What the parser did not read stays as notes. The word cut (T81, T82,
+// T84): a read listing is one counted line, "Listed 9 agents", that opens in place to its sections and notes; it draws
+// no self line; each row's Message shows on pointing or focus within the row, and while its box is open. A listing
+// still out, never answered, or read as notes alone keeps its one line, with nothing to fold.
+import { CountedFold } from '../../../ui/counted-fold';
 import { agentListCopy } from '../../model/copy';
 import type { ListingRow } from '../../model/agent-listing';
 import type { Row } from '../../model/rows';
@@ -24,7 +28,7 @@ function ListingLine({ rowId, entryId, entry }: { rowId: string; entryId: string
         <strong className="transcript-listing-name">{entry.name}</strong>
         {entry.ref !== null && <code className="transcript-listing-ref">{entry.ref}</code>}
         {entry.extras.length > 0 && <span className="transcript-listing-extras">{entry.extras.join(' · ')}</span>}
-        <button type="button" className="transcript-quiet-button transcript-peer-toggle" aria-expanded={messaging} aria-label={agentListCopy.messageLabel(entry.name)} onClick={toggle}>
+        <button type="button" className="transcript-quiet-button transcript-peer-toggle" data-on-hover="" aria-expanded={messaging} aria-label={agentListCopy.messageLabel(entry.name)} onClick={toggle}>
           {agentListCopy.message}
         </button>
       </div>
@@ -34,12 +38,25 @@ function ListingLine({ rowId, entryId, entry }: { rowId: string; entryId: string
 }
 
 export function AgentListRow({ row }: { row: AgentListData }) {
+  const [open, toggle] = useDisclosure(`listing:${row.id}`);
+  if (row.pending || row.neverAnswered || row.sections.length === 0) {
+    return (
+      <section className="transcript-listing" aria-busy={row.pending || undefined}>
+        <div className="transcript-lifecycle">
+          <MessageIcon />
+          <span>{row.pending ? agentListCopy.pending : row.neverAnswered ? agentListCopy.neverAnswered : (row.notes[0] ?? '')}</span>
+        </div>
+        {!row.pending && !row.neverAnswered && row.notes.slice(1).map((note, i) => (
+          <p key={i} className="transcript-listing-note">
+            {note}
+          </p>
+        ))}
+      </section>
+    );
+  }
+  const listed = row.sections.reduce((sum, section) => sum + section.count, 0);
   return (
-    <section className="transcript-listing" aria-busy={row.pending || undefined}>
-      <div className="transcript-lifecycle">
-        <MessageIcon />
-        <span>{row.pending ? agentListCopy.pending : row.neverAnswered ? agentListCopy.neverAnswered : row.self !== null ? agentListCopy.self(row.self) : row.notes[0] ?? ''}</span>
-      </div>
+    <CountedFold summary={agentListCopy.listed(listed)} lead={<MessageIcon />} open={open} onOpenChange={toggle} className="transcript-listing">
       {row.sections.map((section) => (
         <div key={section.title} className="transcript-listing-section" data-section={section.title}>
           <div className="transcript-listing-heading">{agentListCopy.section(section.title, section.count)}</div>
@@ -51,11 +68,11 @@ export function AgentListRow({ row }: { row: AgentListData }) {
           </ul>
         </div>
       ))}
-      {(row.self !== null ? row.notes : row.notes.slice(1)).map((note, i) => (
+      {row.notes.map((note, i) => (
         <p key={i} className="transcript-listing-note">
           {note}
         </p>
       ))}
-    </section>
+    </CountedFold>
   );
 }

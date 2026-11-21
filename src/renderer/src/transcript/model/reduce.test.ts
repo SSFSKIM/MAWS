@@ -804,7 +804,7 @@ describe('child traffic', () => {
     expect(turn.children.get(tool('agent1'))).toHaveLength(2);
     const list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'user', 'subagent', 'assistant_text', 'divider']);
-    expect(find(list, 'subagent')).toMatchObject({ sentence: 'Survey finished', status: 'finished' });
+    expect(find(list, 'subagent')).toMatchObject({ sentence: 'Survey', status: 'finished' }); // the word cut (T86)
     expect(find(list, 'subagent').agents[0]).toMatchObject({ taskId: 'task1', toolUseId: 'agent1', name: 'Survey', kind: 'agent' });
   });
 
@@ -1210,6 +1210,8 @@ describe('orchestration facts (E7)', () => {
     const row = find(rowsOf(withAllExpanded(state)), 'subagent');
     expect(row.id).toBe(rowId.subagent(task('toolu_wf')));
     expect(row.agents[0]).toMatchObject({ taskId: 'wayue3on6', runId: 'wf_7cacbb2d-902' });
+    // the word cut (T86, T87): the phase a working workflow is in waits on its line, out of its sentence
+    expect(row).toMatchObject({ sentence: 'Two echo agents in one phase', phase: 'Echo' });
   });
 
   it('adds the run id to a live Workflow ref its task.started already renamed', () => {

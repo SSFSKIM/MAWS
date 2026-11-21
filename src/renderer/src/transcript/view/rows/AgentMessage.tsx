@@ -1,15 +1,15 @@
-// A message between the parent and a subagent, between agents, or between sessions: one dim line led by `›` (UX wave U3,
-// O-12; UC-2 "The rows"): `Message from @<name>: <first line>`, `Report from <agent>: <first line of the report>`,
-// `Sent to @<name>: <first line>` with the send's state at its end. The line never wraps; it is cut with an ellipsis at
+// A message between the parent and a subagent, between agents, or between sessions: one dim line (UX wave U3, O-12; UC-2
+// "The rows"): `← @<name>: <first line>`, `› Report from <agent>: <first line of the report>`, `→ @<name>: <first line>`
+// with the send's state at its end (the word cut, T73: the arrow of its direction, its old words its accessible lead). The line never wraps; it is cut with an ellipsis at
 // the column's edge, so the line is always the control that shows the whole message under it (a click, Enter or Space)
 // and hides it again: a narrower column cuts any line, and no word of a message may be out of reach (the architect's
 // ruling of 2026-11-13). A peer's name has its address as its tooltip and, after it, the owners
 // its sminos frame names, by the sidebar's rule (P5 O15 M2b, §J: a display of the frame, not a verification). A message
-// from another session that can be answered offers Reply at the line's end, on hover or focus, and keeps it while the
-// composer it opens is open (E7). The root keeps the class `transcript-peer` and, for a message between sessions, its
+// from another session that can be answered offers Reply at the line's end, on hover or focus (always where nothing
+// points, T75), and keeps it while the composer it opens is open (E7). The root keeps the class `transcript-peer` and, for a message between sessions, its
 // `data-peer`, which the live e2e specs and the agents harness select by.
 import { peerLabel } from '@shared/engine/peer-envelope'; // E7
-import { MESSAGE_LINE, peerMessageCopy } from '../../model/copy'; // E7
+import { MESSAGE_LINE, messageArrow, messageArrowWords, peerMessageCopy } from '../../model/copy'; // E7
 import type { PeerMessage, Row } from '../../model/rows';
 import { useSessions } from '../../../stores/sessions'; // P5 O15 M2b
 import { ownerEntries, ownerIdsOf, ownersLabel } from '../../../sidebar/owners'; // P5 O15 M2b
@@ -31,6 +31,7 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
   const [replying, toggleReply] = useDisclosure(`peer-reply:${row.id}`);
   const peer = row.peer ?? null;
   const who = peer === null ? '' : peerLabel(partyOf(peer).address, partyOf(peer).name);
+  const arrow = messageArrow(row);
   return (
     <div
       className="transcript-peer"
@@ -40,7 +41,7 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
       data-replying={replying ? '' : undefined}
     >
       <div className="transcript-line">
-        <ArrivalLine mark={MESSAGE_LINE.mark} open={open} onToggle={toggle}>
+        <ArrivalLine mark={arrow ?? MESSAGE_LINE.mark} markWords={arrow === null ? undefined : messageArrowWords(arrow)} open={open} onToggle={toggle}>
           {peer === null ? row.text : <PeerWords peer={peer} who={who} />}
         </ArrivalLine>
         {peer !== null && peer.result !== null && (
@@ -49,7 +50,7 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
           </span>
         )}
         {peer !== null && peer.replyTo !== null && (
-          <button type="button" className="transcript-quiet-button transcript-peer-reply" aria-expanded={replying} onClick={toggleReply}>
+          <button type="button" className="transcript-quiet-button transcript-peer-reply" data-on-hover="" aria-expanded={replying} onClick={toggleReply}>
             {peerMessageCopy.reply}
           </button>
         )}
@@ -63,13 +64,12 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
   );
 }
 
-// A message between sessions on its line: the lead words, the peer by name (its address the tooltip), the sender's
-// owners, then the preview as one text node.
+// A message between sessions on its line: the peer by name (its address the tooltip), the sender's owners, then the
+// preview as one text node (the arrow before them says which way it went).
 function PeerWords({ peer, who }: { peer: PeerMessage; who: string }) {
   const owners = useSenderOwners(peer.sender?.owners ?? null); // P5 O15 M2b
   return (
     <>
-      {peer.sender !== null ? MESSAGE_LINE.from : MESSAGE_LINE.to}{' '}
       <span className="transcript-peer-who" title={partyOf(peer).address}>
         {peerMessageCopy.who(who)}
       </span>

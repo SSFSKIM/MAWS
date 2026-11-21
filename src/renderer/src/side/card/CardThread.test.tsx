@@ -604,7 +604,7 @@ describe('the thread’s artifact row', () => {
     await intoThread();
     withRecord();
     await waitFor(() => expect(card()!.querySelectorAll('[data-artifact]')).toHaveLength(3));
-    const open = (n: number) => fireEvent.click(within(card()!.querySelectorAll<HTMLElement>('[data-artifact]')[n]!).getByRole('button', { name: 'Open' }));
+    const open = (n: number) => fireEvent.click(within(card()!.querySelectorAll<HTMLElement>('[data-artifact]')[n]!).getByRole('button', { description: 'Open' }) /* the word cut (T103): the artifact's name is the press */);
     open(0);
     expect(showVersion).toHaveBeenLastCalledWith({ version: 3 }); // an E2 answer names no revision: its ordinal
     open(1);

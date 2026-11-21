@@ -26,13 +26,13 @@ export const BUSY_REASON = 'Wait for the turn to end, or stop it first';
 export const NOT_STARTABLE = 'The session is not running'; // P2-A: a session with no record cannot be started from here
 
 // What the resubmit's line says in each state; `warn` states read in the warning tone; null at rest.
-// P2-A: `starting` while the session the edit resubmits to is started first
+// P2-A: `starting` while the session the edit resubmits to is started first. The word cut (C122): the waits in a word.
 function lineCopy({ state, exited, sendFailed, sending }: Resubmit, starting = false): { text: string; warn: boolean } | null {
-  if (sending && starting) return { text: 'Starting this session…', warn: false };
-  if (sending) return { text: state === 'rewound_awaiting_send' ? 'Rewound · sending your edited message…' : 'Sending your edited message…', warn: false };
+  if (sending && starting) return { text: 'Starting…', warn: false };
+  if (sending) return { text: 'Sending…', warn: false };
   switch (state) {
     case 'rewinding':
-      return { text: 'Rewinding this session to that message…', warn: false };
+      return { text: 'Rewinding…', warn: false };
     case 'rewind_uncertain':
       return { text: 'Rewind unconfirmed · checking the transcript…', warn: true };
     case 'rewind_unresolved':

@@ -4513,7 +4513,7 @@
     "id": "subagent:task_10_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/view/List.tsx for each and Survey README.md for token finished",
+    "sentence": "Survey src/view/List.tsx for each and Survey README.md for token",
     "status": "finished",
     "turnId": "turn:u10"
   },
@@ -9111,7 +9111,7 @@
     "id": "subagent:task_20_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/app.ts for and and Survey src/store.ts for receipt finished",
+    "sentence": "Survey src/app.ts for and and Survey src/store.ts for receipt",
     "status": "finished",
     "turnId": "turn:u20"
   },
@@ -13056,7 +13056,7 @@
     "id": "subagent:task_30_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/app.ts for arrives and Survey src/view/List.tsx for detail finished",
+    "sentence": "Survey src/app.ts for arrives and Survey src/view/List.tsx for detail",
     "status": "finished",
     "turnId": "turn:u30"
   },
@@ -16886,7 +16886,7 @@
     "id": "subagent:task_40_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for stream and Survey src/util/time.ts for arrives finished",
+    "sentence": "Survey README.md for stream and Survey src/util/time.ts for arrives",
     "status": "finished",
     "turnId": "turn:u40"
   },
@@ -21689,7 +21689,7 @@
     "id": "subagent:task_50_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for layout and Survey package.json for keeps finished",
+    "sentence": "Survey package.json for layout and Survey package.json for keeps",
     "status": "finished",
     "turnId": "turn:u50"
   },
@@ -26324,7 +26324,7 @@
     "id": "subagent:task_60_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for cell and Survey src/app.ts for scroll finished",
+    "sentence": "Survey package.json for cell and Survey src/app.ts for scroll",
     "status": "finished",
     "turnId": "turn:u60"
   },
@@ -28715,7 +28715,7 @@
     "id": "subagent:task_70_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/view/List.tsx for measure and Survey src/model/derive.ts for arrives finished",
+    "sentence": "Survey src/view/List.tsx for measure and Survey src/model/derive.ts for arrives",
     "status": "finished",
     "turnId": "turn:u70"
   },
@@ -32194,7 +32194,7 @@
     "id": "subagent:task_80_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/model/derive.ts for rows and Survey src/model/derive.ts for session finished",
+    "sentence": "Survey src/model/derive.ts for rows and Survey src/model/derive.ts for session",
     "status": "finished",
     "turnId": "turn:u80"
   },
@@ -38114,7 +38114,7 @@
     "id": "subagent:task_90_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/model/derive.ts for budget and Survey src/store.ts for block finished",
+    "sentence": "Survey src/model/derive.ts for budget and Survey src/store.ts for block",
     "status": "finished",
     "turnId": "turn:u90"
   },
@@ -42895,7 +42895,7 @@
     "id": "subagent:task_100_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for turn and Survey src/view/List.tsx for test finished",
+    "sentence": "Survey package.json for turn and Survey src/view/List.tsx for test",
     "status": "finished",
     "turnId": "turn:u100"
   },
@@ -45573,7 +45573,7 @@
     "id": "subagent:task_110_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/app.ts for stable and Survey README.md for anchor finished",
+    "sentence": "Survey src/app.ts for stable and Survey README.md for anchor",
     "status": "finished",
     "turnId": "turn:u110"
   },
@@ -49750,7 +49750,7 @@
     "id": "subagent:task_120_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/app.ts for layout and Survey src/view/List.tsx for offset finished",
+    "sentence": "Survey src/app.ts for layout and Survey src/view/List.tsx for offset",
     "status": "finished",
     "turnId": "turn:u120"
   },
@@ -53698,7 +53698,7 @@
     "id": "subagent:task_130_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/store.ts for receipt and Survey src/app.ts for frame finished",
+    "sentence": "Survey src/store.ts for receipt and Survey src/app.ts for frame",
     "status": "finished",
     "turnId": "turn:u130"
   },
@@ -57415,7 +57415,7 @@
     "id": "subagent:task_140_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for each and Survey src/app.ts for budget finished",
+    "sentence": "Survey src/util/time.ts for each and Survey src/app.ts for budget",
     "status": "finished",
     "turnId": "turn:u140"
   },
@@ -60735,7 +60735,7 @@
     "id": "subagent:task_150_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for stable and Survey src/store.ts for rows finished",
+    "sentence": "Survey package.json for stable and Survey src/store.ts for rows",
     "status": "finished",
     "turnId": "turn:u150"
   },
@@ -65117,7 +65117,7 @@
     "id": "subagent:task_160_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for a and Survey src/store.ts for receipt finished",
+    "sentence": "Survey README.md for a and Survey src/store.ts for receipt",
     "status": "finished",
     "turnId": "turn:u160"
   },
@@ -68447,7 +68447,7 @@
     "id": "subagent:task_170_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for rows and Survey README.md for a finished",
+    "sentence": "Survey README.md for rows and Survey README.md for a",
     "status": "finished",
     "turnId": "turn:u170"
   },
@@ -72949,7 +72949,7 @@
     "id": "subagent:task_180_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey test/derive.test.ts for while and Survey src/model/derive.ts for group finished",
+    "sentence": "Survey test/derive.test.ts for while and Survey src/model/derive.ts for group",
     "status": "finished",
     "turnId": "turn:u180"
   },
@@ -75662,7 +75662,7 @@
     "id": "subagent:task_190_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for theme and Survey src/util/time.ts for fixture finished",
+    "sentence": "Survey src/util/time.ts for theme and Survey src/util/time.ts for fixture",
     "status": "finished",
     "turnId": "turn:u190"
   },
@@ -79774,7 +79774,7 @@
     "id": "subagent:task_200_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for from and Survey src/store.ts for engine finished",
+    "sentence": "Survey package.json for from and Survey src/store.ts for engine",
     "status": "finished",
     "turnId": "turn:u200"
   },
@@ -85074,7 +85074,7 @@
     "id": "subagent:task_210_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for frame and Survey src/store.ts for budget finished",
+    "sentence": "Survey README.md for frame and Survey src/store.ts for budget",
     "status": "finished",
     "turnId": "turn:u210"
   },
@@ -90002,7 +90002,7 @@
     "id": "subagent:task_220_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for and and Survey src/model/derive.ts for receipt finished",
+    "sentence": "Survey src/util/time.ts for and and Survey src/model/derive.ts for receipt",
     "status": "finished",
     "turnId": "turn:u220"
   },
@@ -94510,7 +94510,7 @@
     "id": "subagent:task_230_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey test/derive.test.ts for from and Survey src/model/derive.ts for test finished",
+    "sentence": "Survey test/derive.test.ts for from and Survey src/model/derive.ts for test",
     "status": "finished",
     "turnId": "turn:u230"
   },
@@ -98496,7 +98496,7 @@
     "id": "subagent:task_240_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey test/derive.test.ts for fixture and Survey package.json for offset finished",
+    "sentence": "Survey test/derive.test.ts for fixture and Survey package.json for offset",
     "status": "finished",
     "turnId": "turn:u240"
   },
@@ -101983,7 +101983,7 @@
     "id": "subagent:task_250_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/model/derive.ts for events and Survey src/store.ts for detail finished",
+    "sentence": "Survey src/model/derive.ts for events and Survey src/store.ts for detail",
     "status": "finished",
     "turnId": "turn:u250"
   },
@@ -106338,7 +106338,7 @@
     "id": "subagent:task_260_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for group and Survey README.md for block finished",
+    "sentence": "Survey README.md for group and Survey README.md for block",
     "status": "finished",
     "turnId": "turn:u260"
   },
@@ -110342,7 +110342,7 @@
     "id": "subagent:task_270_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for scroll and Survey package.json for group finished",
+    "sentence": "Survey README.md for scroll and Survey package.json for group",
     "status": "finished",
     "turnId": "turn:u270"
   },
@@ -114073,7 +114073,7 @@
     "id": "subagent:task_280_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/view/List.tsx for test and Survey src/app.ts for events finished",
+    "sentence": "Survey src/view/List.tsx for test and Survey src/app.ts for events",
     "status": "finished",
     "turnId": "turn:u280"
   },
@@ -118099,7 +118099,7 @@
     "id": "subagent:task_290_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for the and Survey package.json for and finished",
+    "sentence": "Survey package.json for the and Survey package.json for and",
     "status": "finished",
     "turnId": "turn:u290"
   },
@@ -123057,7 +123057,7 @@
     "id": "subagent:task_300_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey test/derive.test.ts for frame and Survey src/app.ts for list finished",
+    "sentence": "Survey test/derive.test.ts for frame and Survey src/app.ts for list",
     "status": "finished",
     "turnId": "turn:u300"
   },
@@ -128676,7 +128676,7 @@
     "id": "subagent:task_310_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for arrives and Survey src/app.ts for engine finished",
+    "sentence": "Survey package.json for arrives and Survey src/app.ts for engine",
     "status": "finished",
     "turnId": "turn:u310"
   },
@@ -132766,7 +132766,7 @@
     "id": "subagent:task_320_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for while and Survey src/model/derive.ts for receipt finished",
+    "sentence": "Survey README.md for while and Survey src/model/derive.ts for receipt",
     "status": "finished",
     "turnId": "turn:u320"
   },
@@ -136245,7 +136245,7 @@
     "id": "subagent:task_330_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/model/derive.ts for fixture and Survey test/derive.test.ts for turn finished",
+    "sentence": "Survey src/model/derive.ts for fixture and Survey test/derive.test.ts for turn",
     "status": "finished",
     "turnId": "turn:u330"
   },
@@ -140236,7 +140236,7 @@
     "id": "subagent:task_340_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/model/derive.ts for session and Survey test/derive.test.ts for keeps finished",
+    "sentence": "Survey src/model/derive.ts for session and Survey test/derive.test.ts for keeps",
     "status": "finished",
     "turnId": "turn:u340"
   },
@@ -144828,7 +144828,7 @@
     "id": "subagent:task_350_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for group and Survey package.json for theme finished",
+    "sentence": "Survey src/util/time.ts for group and Survey package.json for theme",
     "status": "finished",
     "turnId": "turn:u350"
   },
@@ -149025,7 +149025,7 @@
     "id": "subagent:task_360_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey test/derive.test.ts for reader and Survey src/store.ts for stable finished",
+    "sentence": "Survey test/derive.test.ts for reader and Survey src/store.ts for stable",
     "status": "finished",
     "turnId": "turn:u360"
   },
@@ -152497,7 +152497,7 @@
     "id": "subagent:task_370_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for while and Survey src/app.ts for frame finished",
+    "sentence": "Survey README.md for while and Survey src/app.ts for frame",
     "status": "finished",
     "turnId": "turn:u370"
   },
@@ -157012,7 +157012,7 @@
     "id": "subagent:task_380_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/model/derive.ts for block and Survey package.json for keeps finished",
+    "sentence": "Survey src/model/derive.ts for block and Survey package.json for keeps",
     "status": "finished",
     "turnId": "turn:u380"
   },
@@ -161417,7 +161417,7 @@
     "id": "subagent:task_390_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/store.ts for wire and Survey src/model/derive.ts for block finished",
+    "sentence": "Survey src/store.ts for wire and Survey src/model/derive.ts for block",
     "status": "finished",
     "turnId": "turn:u390"
   },
@@ -164478,7 +164478,7 @@
     "id": "subagent:task_400_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for token and Survey src/app.ts for layout finished",
+    "sentence": "Survey src/util/time.ts for token and Survey src/app.ts for layout",
     "status": "finished",
     "turnId": "turn:u400"
   },
@@ -168165,7 +168165,7 @@
     "id": "subagent:task_410_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for stream and Survey src/app.ts for measure finished",
+    "sentence": "Survey package.json for stream and Survey src/app.ts for measure",
     "status": "finished",
     "turnId": "turn:u410"
   },
@@ -171946,7 +171946,7 @@
     "id": "subagent:task_420_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/store.ts for from and Survey src/util/time.ts for keeps finished",
+    "sentence": "Survey src/store.ts for from and Survey src/util/time.ts for keeps",
     "status": "finished",
     "turnId": "turn:u420"
   },
@@ -175310,7 +175310,7 @@
     "id": "subagent:task_430_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/store.ts for renderer and Survey src/util/time.ts for store finished",
+    "sentence": "Survey src/store.ts for renderer and Survey src/util/time.ts for store",
     "status": "finished",
     "turnId": "turn:u430"
   },
@@ -179850,7 +179850,7 @@
     "id": "subagent:task_440_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for scroll and Survey src/view/List.tsx for store finished",
+    "sentence": "Survey package.json for scroll and Survey src/view/List.tsx for store",
     "status": "finished",
     "turnId": "turn:u440"
   },
@@ -183607,7 +183607,7 @@
     "id": "subagent:task_450_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for cell and Survey src/app.ts for anchor finished",
+    "sentence": "Survey src/util/time.ts for cell and Survey src/app.ts for anchor",
     "status": "finished",
     "turnId": "turn:u450"
   },
@@ -188534,7 +188534,7 @@
     "id": "subagent:task_460_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/util/time.ts for anchor and Survey src/util/time.ts for the finished",
+    "sentence": "Survey src/util/time.ts for anchor and Survey src/util/time.ts for the",
     "status": "finished",
     "turnId": "turn:u460"
   },
@@ -192277,7 +192277,7 @@
     "id": "subagent:task_470_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/view/List.tsx for offset and Survey src/model/derive.ts for test finished",
+    "sentence": "Survey src/view/List.tsx for offset and Survey src/model/derive.ts for test",
     "status": "finished",
     "turnId": "turn:u470"
   },
@@ -196226,7 +196226,7 @@
     "id": "subagent:task_480_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src/app.ts for the and Survey test/derive.test.ts for token finished",
+    "sentence": "Survey src/app.ts for the and Survey test/derive.test.ts for token",
     "status": "finished",
     "turnId": "turn:u480"
   },
@@ -200014,7 +200014,7 @@
     "id": "subagent:task_490_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey README.md for session and Survey src/view/List.tsx for while finished",
+    "sentence": "Survey README.md for session and Survey src/view/List.tsx for while",
     "status": "finished",
     "turnId": "turn:u490"
   },
@@ -205391,7 +205391,7 @@
     "id": "subagent:task_500_0",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey package.json for theme and Survey src/view/List.tsx for events finished",
+    "sentence": "Survey package.json for theme and Survey src/view/List.tsx for events",
     "status": "finished",
     "turnId": "turn:u500"
   },

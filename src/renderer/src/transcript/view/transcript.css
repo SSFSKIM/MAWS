@@ -159,8 +159,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    16 px taller. Its controls' focus rings sit on their boxes, clear of the answer's last line and the next bubble. */
 .transcript-answer-actions { display: flex; align-items: center; gap: 8px; height: 20px; margin: -12px 0 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 20px; white-space: nowrap; opacity: 0; transition: opacity 0.12s; }
 .transcript-row:hover > .transcript-answer-actions, .transcript-row:focus-within > .transcript-answer-actions { opacity: 1; }
-.transcript-answer-actions button:hover:not(:disabled) { color: var(--fg); }
-.transcript-answer-actions button:disabled { color: var(--fg-faint); }
+.transcript-answer-actions button:hover:not(:disabled, [aria-disabled="true"]) { color: var(--fg); }
+.transcript-answer-actions button:disabled, .transcript-answer-actions button[aria-disabled="true"] { color: var(--fg-faint); } /* the word cut (N120): a greyed Fork keeps the keyboard */
 .transcript .transcript-answer-actions button:focus-visible { outline-offset: 0; }
 /* P5 O9: a terminal session's reply an interrupt cut before the engine kept it: muted, under its note */
 .transcript-cut { padding: 2px 0 6px; color: var(--fg-muted); line-height: var(--lh-prose); overflow-wrap: anywhere; }
@@ -431,7 +431,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    while it reads a running call (UX wave U2). */
 .transcript-cell[data-status="running"] > .transcript-cell-line::before,
 .transcript-browser-action[data-state="running"] .transcript-browser-action-line::before,
-.transcript-run-line[data-line="running"]::before {
+.transcript-run-line[data-line="running"]::before,
+.transcript-subagent-ring {
   content: '';
   width: 9px;
   height: 9px;
@@ -533,6 +534,11 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* Subagent and agent-message rows */
 .transcript-subagent { padding: 4px 0 8px; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; }
 .transcript-subagent-line { display: flex; align-items: baseline; gap: 8px; text-align: left; }
+/* The word cut (T86, T87): the running ring before the glyphs while an agent works; the words take the keyboard for
+   what waits on them where nothing opens an agent */
+.transcript-subagent-ring { flex: none; align-self: center; }
+.transcript-subagent-sentence[tabindex] { border-radius: var(--radius-sm); outline-color: var(--accent); }
+.transcript-subagent-sentence[tabindex]:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; }
 button.transcript-subagent-line:hover { color: var(--fg); }
 .transcript-subagent[data-status="finished_with_errors"] .transcript-subagent-line { color: var(--danger); }
 .transcript-glyphs { display: inline-flex; align-items: center; gap: 5px; color: var(--fg); font-size: calc(var(--text-ui) * 1.2); }
@@ -541,7 +547,6 @@ button.transcript-subagent-line:hover { color: var(--fg); }
 .transcript-glyph-overflow { color: var(--fg-muted); font-size: var(--text-ui-sm); }
 button.transcript-glyph-overflow { padding: 0 3px; border-radius: var(--radius-sm); }
 button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-hover); }
-.transcript-subagent-detail { padding-left: 26px; font-size: var(--text-ui-sm); }
 .transcript-lifecycle { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 8px; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; overflow-wrap: anywhere; }
 .transcript-lifecycle .transcript-icon { align-self: center; }
 
@@ -652,6 +657,12 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-ask-chip { padding: 1px 8px; border-radius: 999px; background: var(--bg-hover); color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 .transcript-ask[data-ask-state="pending"] .transcript-ask-chip, .transcript-ask[data-ask-state="asked"] .transcript-ask-chip { background: var(--accent-soft); color: var(--accent); }
 .transcript-ask[data-ask-state="error"] .transcript-ask-chip { color: var(--danger); }
+/* The word cut (T97, T98): a cancelled chip takes the keyboard for its why; an answered capsule's top row is its press */
+.transcript-ask-chip[tabindex] { outline-color: var(--accent); }
+.transcript-ask-chip[tabindex]:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; }
+button.transcript-ask-top { width: 100%; border-radius: var(--radius) var(--radius) 0 0; text-align: left; outline-color: var(--accent); }
+button.transcript-ask-top:hover:not(:disabled) { background: var(--bg-hover); }
+button.transcript-ask-top:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: -2px; }
 .transcript-ask-open { margin-left: auto; padding: 2px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--text-ui-sm); }
 .transcript-ask-open:hover:not(:disabled) { background: var(--bg-hover); }
 .transcript-ask .transcript-question-lines { border-top: 1px solid var(--border); }
@@ -714,14 +725,14 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-peer-state[data-result="failed"] { color: var(--danger); }
 .transcript-peer-toggle { margin-top: 0; font-size: var(--text-ui-sm); }
 /* Reply at the line's end on hover or focus, and while its composer is open (U3, O-12) */
-.transcript-peer-reply { flex: none; margin-top: 0; font-size: var(--text-ui-sm); opacity: 0; }
-.transcript-peer:hover .transcript-peer-reply, .transcript-peer:focus-within .transcript-peer-reply, .transcript-peer[data-replying] .transcript-peer-reply { opacity: 1; }
+.transcript-peer-reply { flex: none; margin-top: 0; font-size: var(--text-ui-sm); } /* on pointing or focus: the word cut's rules below */
 .transcript-peer-error { margin: 0 0 4px 24px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; white-space: pre-wrap; }
 .transcript-peer-body { margin: 0 0 6px 24px; padding: 6px 10px; border-left: 2px solid var(--border); color: var(--fg); font-size: var(--text-ui); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .transcript-peer-composer { display: flex; flex-direction: column; gap: 6px; max-width: min(560px, 100%); margin: 2px 0 10px 24px; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); }
 .transcript-peer-line { margin: 0; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 .transcript-peer-line[data-failed] { color: var(--danger); }
-.transcript-peer-label { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-peer-line[tabindex] { width: fit-content; border-radius: var(--radius-sm); outline-color: var(--accent); } /* the word cut (T79): why it waits, on pointing or focus */
+.transcript-peer-line[tabindex]:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; }
 .transcript-peer-input { display: block; width: 100%; resize: none; background: transparent; color: var(--fg); font-size: var(--text-ui); outline-color: var(--accent); }
 .transcript-peer-input::placeholder { color: var(--fg-muted); }
 .transcript-peer-input:focus-visible { outline-width: 2px; outline-style: solid; }
@@ -732,6 +743,8 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-peer-send:disabled { color: var(--fg-faint); }
 .transcript-listing { padding-bottom: 6px; }
 .transcript-listing > .transcript-lifecycle { padding-bottom: 4px; }
+/* The word cut (T81): a read listing's counted fold, its line set as the lifecycle line it replaces */
+.transcript-listing[data-counted-fold] > button { padding: 4px 0; font-size: var(--text-ui); line-height: 1.5; }
 .transcript-listing-section { margin-left: 24px; }
 .transcript-listing-heading { color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-listing-rows { margin: 2px 0 6px; padding: 0; list-style: none; }
@@ -741,6 +754,14 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-listing-extras { color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-listing-note { margin: 0 0 4px 24px; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 /* E7 end */
+/* The word cut (T75, T84, T101, T106): an action every row repeats shows on the pointed row, at once on keyboard focus
+   within it (it stays in the Tab order), while what it opened is open, and always where nothing can point. */
+.transcript-peer-reply[data-on-hover], .transcript-listing-entry [data-on-hover], .transcript-delivery-file [data-on-hover], .transcript-browser-action [data-on-hover] { opacity: 0; }
+.transcript-peer:hover .transcript-peer-reply[data-on-hover], .transcript-peer:focus-within .transcript-peer-reply[data-on-hover], .transcript-peer[data-replying] .transcript-peer-reply[data-on-hover],
+.transcript-listing-entry:hover [data-on-hover], .transcript-listing-entry:focus-within [data-on-hover], .transcript-listing-entry [data-on-hover][aria-expanded="true"],
+.transcript-delivery-file:hover [data-on-hover], .transcript-delivery-file:focus-within [data-on-hover],
+.transcript-browser-action:hover [data-on-hover], .transcript-browser-action:focus-within [data-on-hover], .transcript-browser-action[data-open] [data-on-hover] { opacity: 1; }
+@media (hover: none) { .transcript-peer-reply[data-on-hover], .transcript-listing-entry [data-on-hover], .transcript-delivery-file [data-on-hover], .transcript-browser-action [data-on-hover] { opacity: 1; } }
 
 /* E2 start: the artifact row (a bordered widget like the delivery row) and a delivered file's name as the viewer's
    button: the name's own colour, underlined on hover. */
@@ -761,9 +782,11 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-artifact[data-artifact-action="delete"] .transcript-artifact-actions .transcript-quiet-button:disabled { color: var(--fg-faint); cursor: default; }
 .transcript-artifact-line { margin: -4px 12px 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 .transcript-artifact-line[data-tone="danger"] { color: var(--danger); }
-.transcript-delivery-open { padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
-.transcript-delivery-open:hover:not(:disabled) { text-decoration: underline; }
-.transcript-delivery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.transcript-delivery-open, .transcript-artifact-open { padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.transcript-delivery-open:hover:not(:disabled), .transcript-artifact-open:hover:not(:disabled) { text-decoration: underline; }
+.transcript-delivery-open:focus-visible, .transcript-artifact-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.transcript-artifact-open { min-width: 0; } /* the word cut (T103): the artifact's name is its press */
+.transcript-artifact-open:disabled { cursor: default; }
 /* E2 end */
 
 /* E4c start: a browser tool call's row: one compact line like a standalone cell's, the glyph giving way to the running
@@ -771,6 +794,8 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-browser-action { padding: 1px 0 6px; font-size: var(--text-ui-sm); }
 .transcript-browser-action-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 26px; color: var(--fg-muted); }
 .transcript-browser-action-heading { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.transcript-browser-action-heading[tabindex] { border-radius: var(--radius-sm); outline-color: var(--accent); } /* the word cut (T105): its time on pointing or focus */
+.transcript-browser-action-heading[tabindex]:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; }
 .transcript-browser-action[data-state="error"] .transcript-browser-action-heading, .transcript-browser-action[data-state="cancelled"] .transcript-browser-action-heading { color: var(--fg-muted); }
 .transcript-browser-action[data-state="running"] .transcript-browser-action-line > .transcript-icon { display: none; }
 .transcript-browser-action[data-state="running"] .transcript-browser-action-line::before { flex: none; margin: 0 1.5px; }

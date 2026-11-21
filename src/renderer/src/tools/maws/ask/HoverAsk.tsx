@@ -11,6 +11,7 @@ import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
 import { CardButton } from '../../../request-card/controls';
 import { selectProjectOrder, useSessions } from '../../../stores/sessions';
 import { TranscriptActionsProvider } from '../../../transcript/view/context';
+import { QuietSpinner } from '../../../ui/spinner';
 import { openFile } from '../../code/open-file';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
@@ -29,7 +30,9 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
       <span>{SHEET.readFailed}</span>
       <CardButton disabled={state.reading} onClick={() => void loadAsks(appSessionId, ipc)}>{SHEET.retry}</CardButton>
     </div>;
-    return <p role="status" className="m-0 text-fg-muted">{state.loaded ? (state.notice ?? 'No longer waiting for an answer') : 'Loading the question…'}</p>;
+    // the word cut (T299): the read behind the app's quiet spinner, never a blank card
+    if (!state.loaded) return <QuietSpinner label={SHEET.loading} />;
+    return <p role="status" className="m-0 text-fg-muted">{state.notice ?? 'No longer waiting for an answer'}</p>;
   }
   if (ask.state !== 'pending') return <p role="status" className="m-0 text-fg-muted">{SHEET.cancelled(ask.cancelReason)}</p>;
 

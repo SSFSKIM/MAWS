@@ -64,7 +64,7 @@ describe('C4 backfill through the transcript model', () => {
     expect(rows.some((row) => row.kind === 'user' && row.text.includes('<task-notification>'))).toBe(false);
     const subagents = ofKind(rows, 'subagent');
     expect(subagents).toHaveLength(1);
-    expect(subagents[0]).toMatchObject({ turnId: turns[0].id, status: 'finished', sentence: 'Read and report one.txt content and Read and report two.txt content finished' });
+    expect(subagents[0]).toMatchObject({ turnId: turns[0].id, status: 'finished', sentence: 'Read and report one.txt content and Read and report two.txt content' }); // the word cut (T86)
     expect(subagents[0].agents.map((agent) => [agent.agentId, agent.kind])).toEqual([['ad286defbc77bc090', 'agent'], ['ae75ba6ce5d866acc', 'agent']]);
     const cells = rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
     expect(cells.some((cell) => cell.toolName === 'Agent')).toBe(false);

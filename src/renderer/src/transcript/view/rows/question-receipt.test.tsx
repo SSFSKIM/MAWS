@@ -90,6 +90,6 @@ describe('MAWS’s ask dismissed whole', () => {
   it('reads Dismissed on its capsule with its lines Skipped; an ask with one answer given reads Answered', () => {
     expect(chip(ask([{ id: 'q1', question: 'Which colour?', status: 'skipped' }, { id: 'q2', question: 'What title?', status: 'skipped' }]))).toEqual({ chip: 'Dismissed', lines: ['Which colour?→Skipped', 'Title→Skipped'] });
     expect(chip(ask([{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Red'] }, { id: 'q2', question: 'What title?', status: 'skipped' }]))).toEqual({ chip: 'Answered', lines: ['Which colour?→Red', 'Title→Skipped'] });
-    expect(serializeRows([ask([{ id: 'q1', question: 'Which colour?', status: 'skipped' }, { id: 'q2', question: 'What title?', status: 'skipped' }])]).split('\n')[0]).toBe('**Setup** · Asked 2 questions · Dismissed');
+    expect(serializeRows([ask([{ id: 'q1', question: 'Which colour?', status: 'skipped' }, { id: 'q2', question: 'What title?', status: 'skipped' }])]).split('\n')[0]).toBe('**Setup** · 2 questions · Dismissed'); // the word cut (T94)
   });
 });

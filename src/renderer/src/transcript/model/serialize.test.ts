@@ -57,7 +57,8 @@ describe('serializeRows', () => {
     b.toolUse('a2', 'mcp__maws__ask', { title: 'Later', questions: [{ id: 'q1', question: 'Which size?', modality: 'text' }] });
     b.emit('maws.ask.cancelled', { askId: 'a2', toolUseId: 'a2' as never, reason: 'exit' });
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'ask'));
-    expect(markdown).toBe(['**Setup** · Asked 1 question · Cancelled, the turn was interrupted', '**Later** · Asked 1 question · Cancelled, the session ended'].join('\n\n'));
+    // the word cut (T94, T97): the count's short form; the why the chip keeps for the pointer is written out
+    expect(markdown).toBe(['**Setup** · 1 question · Cancelled, the turn was interrupted', '**Later** · 1 question · Cancelled, the session ended'].join('\n\n'));
   });
 
   // E7: a listing as its counts (a pending one says so, an unparsed one its notes); a message's whole body under its
@@ -80,10 +81,10 @@ describe('serializeRows', () => {
       '- Agents: 2 subagents, 0 teammates, 1 peer session',
       '- Agents: Messaging is off.',
       '- Listing the agents was never answered', // its turn ended with no result (scale-review C scalpel-1#1)
-      '- Sent to @peer-b: first\n  > first\n  > second', // U3 (O-12): the message line's words, a peer as @name
+      '- → @peer-b: first\n  > first\n  > second', // U3 (O-12): the message line's words, a peer as @name; the word cut (T73): its arrow
       '- Report from a1: done\n  > done\n  > all of it', // U3 (O-12): a hand-back's line carries the report's first line
-      '- Sent to @peer-c: padded',
-      '- Message from a1: note\n  > note\n  > more',
+      '- → @peer-c: padded',
+      '- ← a1: note\n  > note\n  > more',
     ].join('\n\n'));
   });
 
@@ -133,7 +134,7 @@ describe('serializeRows', () => {
     expect(serializeRows(rows(b.events).filter((row) => row.kind === 'browser_action'))).toBe([
       '- Opened example.com · 120ms',
       '- Could not fill e2\n  *Ref "e2" is stale or missing in the current snapshot; call browser_snapshot again and use a ref from it*',
-      '- Clicking e3 · Cancelled, the turn was interrupted',
+      '- Clicking e3 · Cancelled', // the word cut (T107)
     ].join('\n\n'));
   });
   // E4c end
