@@ -1,11 +1,13 @@
 // A permission request's input, bounded per tool class (C7 execution document, Request card, permission row): a
-// command in a mono block (Expand past six lines) with its description as `Why:`; a file edit as the file and a
+// command in a mono block (Show all past six lines) with its description as a muted line under it (the word cut, C92
+// and C99: no "Why:" label, and the card's one wording for a long preview); a file edit as the file and a
 // bounded before and after; reads and searches as paths and patterns; a fetch or search as its URL or query; an MCP or
 // unknown tool as pretty JSON, eight lines then scroll. The primary value carries `data-testid="request-input"` in
 // every placement (C5's smoke reads it).
 import { useState } from 'react';
 import type { SessionEvent } from '@shared/graph/events';
 import { pretty } from '../controls';
+import { SHOW } from '../copy';
 import { field, filePath, filePaths, mcpParts, toolClass } from '../tools';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
@@ -23,10 +25,10 @@ function Command({ command, description }: { command: string; description: strin
       </pre>
       {long && (
         <button type="button" onClick={() => setExpanded((e) => !e)} className="self-start text-ui-sm text-fg-muted underline outline-accent focus-visible:outline-2">
-          {expanded ? 'Collapse' : 'Expand'}
+          {expanded ? SHOW.less : SHOW.all}
         </button>
       )}
-      {description && <p className="m-0 text-ui-sm text-fg-muted">Why: {description}</p>}
+      {description && <p className="m-0 text-ui-sm text-fg-muted">{description}</p>}
     </div>
   );
 }

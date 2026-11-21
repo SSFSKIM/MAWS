@@ -4,14 +4,26 @@
 import { useLayoutEffect, useState } from 'react';
 import { ipc } from '../../ipc/client';
 import { toAnswer } from '../answers';
-import { CardButton, Controls, Muted } from '../controls';
+import { CardButton, Controls } from '../controls';
+import { CARD_WORDS } from '../copy';
 import { elicitationForm, formContent, type FormField, type FormValues } from './elicitation-form';
 import type { VariantProps } from './types';
 
 const INPUT = 'w-full rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
 
+// The word cut (C116): a required field's label ends in an asterisk, and a screen reader hears "(required)" in its place.
 function Field({ field, value, onChange, disabled }: { field: FormField; value: string | boolean | undefined; onChange(value: string | boolean): void; disabled: boolean }) {
-  const label = `${field.label}${field.required ? ' (required)' : ''}`;
+  const label = (
+    <>
+      {field.label}
+      {field.required && (
+        <>
+          <span aria-hidden="true"> *</span>
+          <span className="sr-only">{CARD_WORDS.requiredName}</span>
+        </>
+      )}
+    </>
+  );
   if (field.kind === 'boolean') {
     return (
       <label className="flex items-center gap-2 text-fg">
@@ -98,8 +110,8 @@ export function ElicitationBody({ request, busy, submit, bindKeys }: VariantProp
           {problem}
         </p>
       )}
+      {/* the word cut (C115): the server is named once, on the card's first line */}
       <Controls>
-        <Muted className="mr-auto">{request.mcpServerName}</Muted>
         <CardButton disabled={busy || !form.ok} onClick={cancel}>
           Cancel
         </CardButton>

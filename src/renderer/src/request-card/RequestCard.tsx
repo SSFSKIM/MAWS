@@ -49,7 +49,8 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import { toAnswer } from './answers';
-import { ASK_CARD } from './copy'; // E1 M4b
+import { ASK_CARD, CARD_WORDS } from './copy'; // E1 M4b; the word cut (M2 task 3)
+import { QuietSpinner } from '../ui/spinner';
 import { AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted, TONE_CLASS } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
@@ -371,8 +372,6 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const requester = requesterName(rows ?? [], request?.agentId ?? item.request.agentId);
   const { title, subtitle } = titleOf(request, requester);
   const hover = placement === 'hover';
-  // U1a §D: a permission prompt's first line, outside the hover placement, in place of the kind line and the title
-  const asked = request?.kind === 'permission.requested' && !hover ? askedLine(request, proposed) : null;
   const from = request?.agentId && requester !== 'Main session' ? requester : null;
   // U1a §H: what the one rule for answers from outside a pane admits on the hover card, each button by the session's port
   // on its own answer (P5 O9 M6: a session held elsewhere has a port only while its bridge drives it)
@@ -388,17 +387,19 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const settled = sent ? null : race.settled; // M6: a settlement after our own delivered answer is ours: nothing to say
   // U1b: a question's form in a transcript draws its own header, in the variant (`variants/Question.tsx`, `FormHeader`)
   const rowHeader = region !== undefined && request?.kind === 'question.requested' && !loading && settled === null && phase !== 'not_pending';
+  // U1a §D: a permission prompt's first line, outside the hover placement, in place of the kind line and the title. The
+  // word cut (C83): every kind with a title of its own opens on one line the same way, the kind's mark and its title
+  // ("◇ Plan", "? 2 questions", "◐ <server>"), with no kind word above it and no "<requester> asks" line under it; the
+  // kind word stays the card's group name. The hover placement keeps its kind line, title and subtitle; a notice, with no
+  // title, keeps its kind line.
+  const firstLine = hover || rowHeader ? null : request?.kind === 'permission.requested' ? askedLine(request, proposed) : title;
   // U1a §G: a dismissal this app made of an asynchronous question says nothing: its card leaves at once
   const settledText = settled === null ? null : settledWords(settled, { asyncQuestion: item.kind === 'async_input' });
   if (settled !== null && settledText === null) return null;
 
   let body: ReactNode;
   if (loading) {
-    body = (
-      <p aria-busy className="m-0 text-fg-faint">
-        Loading the request…
-      </p>
-    );
+    body = <QuietSpinner label={CARD_WORDS.loadingName} />; // the word cut (C86)
   } else if (settled !== null) {
     body = (
       <p role="status" className="m-0 text-fg-muted">
@@ -451,31 +452,31 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const questionCard = placement === 'inline' && region !== 'end' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
   return (
     <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'} ${questionCard}`}>
-      {asked !== null && (
+      {firstLine !== null && (
         <div className="flex flex-col gap-1">
           <h3 className="m-0 flex items-baseline gap-1.5 text-ui font-semibold">
             <span aria-hidden className={TONE[heading.tone]}>
               {heading.char}
             </span>
-            <span>{asked}</span>
+            <span>{firstLine}</span>
             {from !== null && <span className="font-normal text-fg-muted"> · from {from}</span>}
           </h3>
           {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
         </div>
       )}
-      {asked === null && !rowHeader && (
+      {firstLine === null && !rowHeader && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
           <span>{heading.text}</span>
           {from !== null && <span className="text-fg-muted">from {from}</span>}
         </div>
       )}
-      {title !== null && asked === null && !rowHeader && (
+      {title !== null && hover && (
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
           {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
-          {hover && <Muted>{[project, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ')}</Muted>}
+          <Muted>{[project, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ')}</Muted>
         </div>
       )}
       {failed && (

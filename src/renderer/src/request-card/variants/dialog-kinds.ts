@@ -4,6 +4,7 @@
 // validate is treated like one: pending, visible and never answered by MAWS, rather than guessed. The objects are
 // loose so a key a newer binary adds passes through untouched. Pure.
 import * as z from 'zod';
+import { CARD_WORDS } from '../copy';
 
 export const RefusalFallbackPayloadSchema = z.looseObject({
   originalModel: z.string(),
@@ -45,9 +46,10 @@ export function declaredDialog(kind: string, payload: unknown): { ok: true; dial
   return { ok: true, dialog: { kind, payload: parsed.data } as DeclaredDialog };
 }
 
-// The title a card shows for a dialog: the kind's own title, or the undeclared kind verbatim.
+// The title a card shows for a dialog: the kind's own title, or the undeclared kind verbatim. The word cut (C112): the
+// declined card's one title names the model and the category, which a muted line under the guidance used to repeat.
 export function dialogTitle(kind: string, payload: unknown): string {
   const read = declaredDialog(kind, payload);
   if (!read.ok) return kind;
-  return read.dialog.kind === 'refusal_fallback_prompt' ? 'The model declined to continue' : read.dialog.payload.title;
+  return read.dialog.kind === 'refusal_fallback_prompt' ? CARD_WORDS.declined(read.dialog.payload.originalModel, read.dialog.payload.apiRefusalCategory ?? null) : read.dialog.payload.title;
 }

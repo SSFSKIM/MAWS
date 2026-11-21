@@ -158,7 +158,7 @@ describe('the floating card in the Shell', () => {
     expect(composers()).toEqual([A]);
   });
 
-  // UX wave U1b (acceptance 10): the compact composer's "Waiting for you · N" opens the card for its request, whose row then
+  // UX wave U1b (acceptance 10): the compact composer's "Waiting for you N" opens the card for its request, whose row then
   // takes the keyboard; the card's composer is not marked to take it as it mounts (its focus would land after the row's).
   // The bar's Open conversation still hands the keyboard to the card's composer (UX wave U10b: the bar's names).
   it('the compact composer’s Waiting for you line opens the card without handing its composer the keyboard; the pill still does', async () => {
@@ -169,7 +169,7 @@ describe('the floating card in the Shell', () => {
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     const compact = screen.getByRole('region', { name: 'Chat' });
     focused.splice(0);
-    await user.click(within(compact).getByRole('button', { name: 'Waiting for you · 1' }));
+    await user.click(within(compact).getByRole('button', { name: 'Waiting for you 1 request' }));
     expect(card()).not.toBeNull();
     expect(composers()).toEqual([A]);
     expect(focused).toEqual([]);

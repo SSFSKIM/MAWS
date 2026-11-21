@@ -135,7 +135,7 @@ describe('a terminal session’s permission card', () => {
     await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Allow once' }));
     await waitFor(() => expect(screen.getByText('Answer this in the terminal')).toBeTruthy());
     await act(async () => void vi.advanceTimersByTime(5_000)); // past the not-pending card's close
-    expect(screen.queryByText('Already answered elsewhere')).toBeNull();
+    expect(screen.queryByText('Answered elsewhere')).toBeNull();
     for (const name of ['Allow once', 'Allow for this session', 'Deny']) expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
     act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] }));
     expect(screen.getByRole('status').textContent).toBe('Answered in the terminal: Allowed');

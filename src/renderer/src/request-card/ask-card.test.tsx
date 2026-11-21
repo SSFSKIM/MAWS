@@ -40,15 +40,16 @@ function mount(placement: Placement, event = askOpened()) {
 }
 
 describe('the request card for a blocking ask', () => {
-  it.each<Placement>(['docked', 'card'])('reads the title and the count, and opens the Question sheet (%s)', async (placement) => {
+  // the word cut (C108): the card reads "2 questions · Answer…", its one action named for what it is for
+  it.each<Placement>(['docked', 'card'])('reads the title and the count, and Answer… opens the Question sheet (%s)', async (placement) => {
     mount(placement);
     expect(screen.getByRole('heading', { name: 'Release setup' })).toBeTruthy();
     expect(screen.getByText('2 questions')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'Open the Question sheet' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Answer…' }));
     expect(openAsk).toHaveBeenCalledWith(APP, {
       askId: 'toolu_ask', toolUseId: 'toolu_ask', title: 'Release setup', context: null, blocking: true, questions: askOpened().questions, state: 'pending', answers: null, error: null, cancelReason: null,
     });
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Open the Question sheet']); // no Open session, nothing that answers
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Answer…']); // no Open session, nothing that answers
     expect(fake.invoked('session.answer')).toEqual([]);
   });
 

@@ -19,6 +19,7 @@ import { toast } from '../../stores/notices';
 import { ipcSource, useTranscriptStore } from '../../transcript';
 import { toAnswer } from '../answers';
 import { CardButton, Controls, Muted, pretty } from '../controls';
+import { CARD_WORDS } from '../copy';
 import { initiatingPrompt, opensWithoutPrompt } from '../initiating-prompt';
 import { declaredDialog, type AutoModeServerFallbackPayload, type RefusalFallbackPayload } from './dialog-kinds';
 import type { VariantProps } from './types';
@@ -72,9 +73,6 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
   return (
     <div className="flex flex-col gap-3">
       {payload.guidanceText && <p className="m-0 text-fg">{payload.guidanceText}</p>}
-      <Muted>
-        {payload.originalModel} declined{payload.apiRefusalCategory ? ` · ${payload.apiRefusalCategory}` : ''}
-      </Muted>
       <Controls>
         <CardButton disabled={busy} onClick={cancel} className="mr-auto">
           Cancel
@@ -127,7 +125,7 @@ function Unanswerable({ request, problem, bindKeys }: DialogProps & { problem: s
     <div className="flex flex-col gap-2">
       <pre className="m-0 max-h-[8lh] overflow-auto rounded-sm border border-border bg-bg px-2.5 py-2 font-mono text-ui-sm whitespace-pre-wrap">{pretty(request.payload)}</pre>
       {problem !== null && <p className="m-0 text-ui-sm text-warning">The payload does not match the declared schema: {problem}</p>}
-      <Muted>MAWS did not declare this dialog kind and cannot answer it · it expires by the engine's dialog timeout</Muted>
+      <Muted>{CARD_WORDS.cannotAnswer}</Muted>
     </div>
   );
 }

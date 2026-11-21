@@ -37,6 +37,7 @@ import { useWaitingView } from '../transcript/view/waiting-view';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard } from './index';
 import { itemFor, type RequestEvent } from './test-requests';
+import { accessibleText } from '../test-support/accessible-text';
 
 const APP = at('app-finding' as AppSessionId);
 const QUESTIONS = [
@@ -146,7 +147,10 @@ describe('the card column’s card, Waiting for you', () => {
     const unanswerable = { ...prompt, id: at('att-error' as AttentionId), kind: 'error' as const, request: { ...prompt.request, requestId: null } };
     act(() => useAttention.getState().applySnapshot([fromAgent, unanswerable, prompt, question], TEST_MACHINE));
     const view = render(<WaitingCard appSessionId={APP} />);
-    expect(card()!.querySelector('h3')!.textContent).toBe('Waiting for you · 3');
+    // the word cut (N111): the heading and a bare count, named by what it counts
+    const heading = within(card()!).getByRole('heading', { name: 'Waiting for you 3 requests' });
+    expect(accessibleText(heading)).toBe('Waiting for you 3');
+    expect(within(heading).getByRole('img', { name: '3 requests' }).tabIndex).toBe(0);
     const lines = [...card()!.querySelectorAll<HTMLElement>('[data-waiting-card-line]')];
     expect(lines.map((line) => line.dataset.waitingCardLine)).toEqual([question.id, prompt.id, second.id]);
     expect(lines.map((line) => line.tagName)).toEqual(['BUTTON', 'BUTTON', 'BUTTON']);
@@ -377,15 +381,21 @@ describe('a way to a request from outside its transcript', () => {
     expect(toasts()).toEqual([]);
   });
 
-  it('a closed floating card’s compact composer reads Waiting for you · N while N wait; its click opens the card and goes to the oldest', async () => {
+  // the word cut (N113): "Waiting for you 3", a bare count whose meaning is the line's name and its tooltip; the line stays
+  // a worded button, the count's one focusable owner
+  it('a closed floating card’s compact composer reads Waiting for you N while N wait; its click opens the card and goes to the oldest', async () => {
     const { question, prompt, second } = scene();
     act(() => useSessions.setState({ records: new Map([[APP, record(APP)]]) }));
     act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
     act(() => useFloatingCard.setState({ closed: true }));
     const compact = render(<SessionPane appSessionId={APP} paneIndex={0} compact />);
-    const line = compact.getByRole('button', { name: 'Waiting for you · 3' });
+    const line = compact.getByRole('button', { name: 'Waiting for you 3 requests' });
+    expect(line.textContent).toBe('Waiting for you 3');
     list([prompt, second]);
-    expect(line.textContent).toBe('Waiting for you · 2');
+    expect(line.textContent).toBe('Waiting for you 2');
+    expect(line.getAttribute('aria-describedby')).toBeNull(); // the meaning is in the name: no description repeats it
+    act(() => line.focus());
+    expect(compact.getByRole('tooltip').textContent).toBe('2 requests');
     fireEvent.click(line);
     expect(useFloatingCard.getState().closed).toBe(false);
     compact.unmount();
@@ -430,7 +440,7 @@ describe('a way to a request from outside its transcript', () => {
     open.unmount();
     act(() => useFloatingCard.setState({ closed: true }));
     const compact = render(<SessionPane appSessionId={APP} paneIndex={0} compact />);
-    fireEvent.click(compact.getByRole('button', { name: 'Waiting for you · 2' }));
+    fireEvent.click(compact.getByRole('button', { name: 'Waiting for you 2 requests' }));
     expect(useFloatingCard.getState().closed).toBe(false);
     compact.unmount();
     render(cardPane());

@@ -10,6 +10,7 @@ import { useWorkingFolder } from '../../sessions/working-folder';
 import { partsTruncationOf } from '../../transcript/model/cells';
 import type { Hunk } from '../../transcript/model/rows';
 import { Muted } from '../controls';
+import { SHOW } from '../copy';
 import { filePaths, pathIn } from '../tools';
 import type { Proposed } from './proposed';
 import { FileEdits } from './ToolPreview';
@@ -47,7 +48,7 @@ function Diff({ request, hunks, change }: { request: PermissionEvent; hunks: Hun
       </div>
       {capped && (
         <button type="button" onClick={() => setWhole((w) => !w)} className="self-start text-ui-sm text-fg-muted underline outline-accent focus-visible:outline-2">
-          {whole ? 'Show less' : 'Show all'}
+          {whole ? SHOW.less : SHOW.all}
         </button>
       )}
     </div>

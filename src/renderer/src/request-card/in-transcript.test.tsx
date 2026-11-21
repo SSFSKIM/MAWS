@@ -437,7 +437,7 @@ describe('the call that waits, on its own row', () => {
 
 // Decision 8a: a delivery that ends as answered elsewhere while its item is still listed
 describe('a request answered elsewhere while its row still waits', () => {
-  it('reads Already answered elsewhere on each line with no form and no control, across a remount and after the item leaves; its prompt’s row reads as its tool row; a closed card is not the end’s open one', async () => {
+  it('reads Answered elsewhere on each line with no form and no control, across a remount and after the item leaves; its prompt’s row reads as its tool row; a closed card is not the end’s open one', async () => {
     const { question, prompt, second } = scene();
     const first = await mount([question, prompt, second]);
     await waitFor(() => expect(within(questionRow()).queryByRole('radio', { name: 'Red' })).not.toBeNull());
@@ -454,7 +454,7 @@ describe('a request answered elsewhere while its row still waits', () => {
     act(() => void vi.advanceTimersByTime(NOT_PENDING_MS));
     await waitFor(() => expect(questionRow().querySelector('[data-request-card]')).toBeNull());
     const quiet = () => {
-      expect(lines(questionRow())).toEqual(['Colour→Already answered elsewhere', 'Size→Already answered elsewhere']);
+      expect(lines(questionRow())).toEqual(['Colour→Answered elsewhere', 'Size→Answered elsewhere']);
       expect(questionRow().querySelectorAll('button, [role="radio"]')).toHaveLength(0);
     };
     quiet();

@@ -185,7 +185,7 @@ describe('floating session cards', () => {
     setAttention([waiting(A), second]);
     mount();
     expect(cardNames()).toEqual(['Waiting for you', 'Environment', 'Context', 'Connectors']);
-    expect(within(region('Waiting for you')).getByRole('heading').textContent).toBe('Waiting for you · 2');
+    expect(within(region('Waiting for you')).getByRole('heading', { name: 'Waiting for you 2 requests' }).textContent).toBe('Waiting for you 2'); // the word cut (N111)
     setAttention([]);
     expect(screen.queryByRole('region', { name: 'Waiting for you' })).toBeNull();
   });
