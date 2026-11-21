@@ -149,8 +149,11 @@ describe('every row drawn from the table', () => {
 
   it('with the page empty, every declared row not drawn is revealed by one that is', async () => {
     await renderPage({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudget: { enabled: false } } }, false);
-    const ids = expectEveryRowDeclaredAndEveryDeclarationDrawn().map((row) => row.id);
-    for (const hidden of ['supervisor.limit', 'supervisor.stateful', 'browser.importedProfile', 'browser.extension', 'keyboard.reset', 'voice.helper', 'voice.recognition', 'supervisor.daemon', 'engine.configHome']) expect(ids, hidden).not.toContain(hidden);
+    // read once the probes have answered: the Helper and Recognition rows stand while `voice.status` is read (G58)
+    await vi.waitFor(() => {
+      const ids = expectEveryRowDeclaredAndEveryDeclarationDrawn().map((row) => row.id);
+      for (const hidden of ['supervisor.limit', 'supervisor.stateful', 'browser.importedProfile', 'browser.extension', 'keyboard.reset', 'voice.helper', 'voice.recognition', 'supervisor.daemon', 'engine.configHome']) expect(ids, hidden).not.toContain(hidden);
+    });
   });
 });
 
