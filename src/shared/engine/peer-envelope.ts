@@ -12,8 +12,10 @@
 // the lead's transcript line 35), which names its sender by name and no address.
 //
 // A message sminos sends through the engine's messaging socket opens its body with sminos's frame line, naming the
-// event, and ends it with a reply line; both are for the model. The body drawn cuts them (the agent_message row already
-// names the sender), and `frame` keeps the frame line, by which the desk knows a delivery of its own sends.
+// event, and ends it with a reply line; both are for the model. From sminos's wake release (T2), the first text sminos
+// pushes to a session it woke carries one line of its own after the words, its note (`SMINOS_NOTE`), before the reply
+// line. The body drawn cuts all three (the agent_message row already names the sender), `frame` keeps the frame line,
+// by which the desk knows a delivery of its own sends, and `note` keeps the note's words.
 import type { ContentBlock, EventPayload } from '../graph/events';
 import type { AgentId, MessageUuid } from '../graph/ids';
 
@@ -25,8 +27,9 @@ export interface PeerEnvelope {
   fromMode: string | null;
   fromPlugin: string | null;
   hopChain: string[];
-  body: string; // what lies inside the tags, as drawn: sminos's frame line and reply line, when it carries them, dropped
+  body: string; // what lies inside the tags, as drawn: sminos's frame line, note and reply line, when it carries them, dropped
   frame: string | null; // sminos's frame line the body opened with, naming the event it delivers; null for any other
+  note: string | null; // the words of sminos's own note after the sender's (`sminosParts`); null when it carries none
   midTurn: boolean; // the header says "while you were working", or there is none (the bare envelope)
   lineage: 'peer' | 'descendant'; // descendant: the trailer says the sender is an agent inside this same session
   replyable: boolean; // false when the suffix says SendMessage cannot reach the sender (the host-injected lane)
@@ -37,6 +40,7 @@ export interface AgentMessage {
   fromAgentId: string;
   body: string;
   handback: boolean; // the body is a `[Subagent hand-back]` frame (handbackReport reads its report)
+  note: null; // an agent's message carries no sminos frame, so no note
 }
 
 type PeerMessagePayload = Extract<EventPayload, { kind: 'peer.message' }>;
@@ -56,6 +60,12 @@ const UNKNOWN_SENDER = 'unknown';
 // the sending machine's path and the address. It tells a model with no sminos context how to answer; no reader is shown
 // it, so the body drawn ends before it. Matched whole, as the body's last line only.
 const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos say "@[^\s"/]+\/[^\s"/]+ <your reply>"\]$/;
+// sminos's note, from its wake release (T2): one line of sminos's own that it appends to the first text it pushes to a
+// session it woke, saying so (today `A note from sminos on this machine, not from the sender above: …`). It is the
+// text's last paragraph, after exactly one blank line, before the inbox's reply line; it opens at a line's start with
+// the literal `[sminos] `, and its words after that may change. sminos writes a sender's line that opens with the
+// literal with a space before it, so a line that opens so at its start is sminos's alone.
+const SMINOS_NOTE = /\n\n\[sminos\] ([^\n]*)$/;
 // sminos's frame line, the first line of every event it pushes, followed by the event's text (doperpowers `sminos.py`:
 // `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <target>[ |
 // unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`. The target is
@@ -167,11 +177,19 @@ function senderParts(frame: string): { alias: string; label: string } | null {
   return end < 0 ? { alias: sender, label: '' } : { alias: sender.slice(0, end), label: sender.slice(end) };
 }
 
-/** A sminos message's text as drawn: its frame line (whole, the first, with the text after it) and its reply line cut. */
-export function sminosParts(body: string): { frame: string | null; body: string } {
+/**
+ * A sminos message's text as drawn: its frame line (whole, the first, with the text after it), its reply line and its
+ * note cut. The note is read only in a text that opens with a frame line: after the reply line is cut, the last
+ * paragraph when it is one line opening with `[sminos] ` (`SMINOS_NOTE`), with the sender's words before its blank line;
+ * `note` is its words after the marker. One text may hold several frames, each a paragraph: the first is the frame, the
+ * rest stay in the words, and the note, written once at the end, is cut the same.
+ */
+export function sminosParts(body: string): { frame: string | null; body: string; note: string | null } {
   const first = body.split('\n', 1)[0]!;
   const frame = body.includes('\n') && sminosFrameSender(first) !== null ? first : null;
-  return { frame, body: (frame === null ? body : body.slice(frame.length + 1)).replace(SMINOS_REPLY_LINE, '') };
+  const words = (frame === null ? body : body.slice(frame.length + 1)).replace(SMINOS_REPLY_LINE, '');
+  const note = frame === null ? null : SMINOS_NOTE.exec(words);
+  return note === null || note.index === 0 ? { frame, body: words, note: null } : { frame, body: words.slice(0, note.index), note: note[1]! };
 }
 
 export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | null {
@@ -191,7 +209,7 @@ export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | nu
   const attributes = new Map([...opening[2]!.matchAll(ATTRIBUTE)].map((match) => [match[1]!, match[2]!] as const));
   if (tag === 'agent-message') {
     const from = attributes.get('from');
-    return from ? { kind: 'agent', fromAgentId: from, body, handback: HANDBACK_FRAME.test(body) } : null;
+    return from ? { kind: 'agent', fromAgentId: from, body, handback: HANDBACK_FRAME.test(body), note: null } : null;
   }
   const delivery = {
     midTurn: header === null || header[0].includes('while you were working'),
@@ -199,7 +217,7 @@ export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | nu
     replyable: !trailer.includes(HOST_INJECTED),
   } as const;
   if (tag === 'teammate-message') {
-    return { kind: 'teammate', from: '', fromSession: null, fromName: attributes.get('teammate_id') ?? null, fromMode: null, fromPlugin: null, hopChain: [], body, frame: null, ...delivery };
+    return { kind: 'teammate', from: '', fromSession: null, fromName: attributes.get('teammate_id') ?? null, fromMode: null, fromPlugin: null, hopChain: [], body, frame: null, note: null, ...delivery };
   }
   return {
     kind: 'cross-session', from: attributes.get('from') ?? '', fromSession: attributes.get('from-session') ?? null, fromName: attributes.get('from-name') ?? null,

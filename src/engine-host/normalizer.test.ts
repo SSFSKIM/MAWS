@@ -3,6 +3,7 @@ import type { AppSessionId, SessionId, ToolUseId } from '@shared/graph/ids';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadEngineJournal, loadJournal } from '../../test/support/fixtures';
+import { askSteerText } from '@shared/maws/ask';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { spillPathOf } from './normalizer-support';
 
@@ -484,6 +485,20 @@ describe('normaliser: requests, responses and boundaries', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: 'boundary.rewind', seq: 4, id: 'app-1:LAUNCH01:4:0', targetMessageUuid: 'u-2', precedingAssistantUuid: 'a-1', prefillText: 'Also BANANA' });
     expect(n.state.outbound.size).toBe(0);
+  });
+
+  it('boundary.rewind’s prefill is the owner’s words: a delivered prompt’s frame line and sminos’s note cut, MAWS’s answer envelope alone none', () => {
+    const request = (request_id: string) => outRow({ type: 'control_request', request_id, request: { subtype: 'rewind_conversation', target_message_uuid: 'u-2' } });
+    const response = (request_id: string, prefillText: string) => inRow({ type: 'control_response', response: { subtype: 'success', request_id, response: { rewound: true, targetMessageUuid: 'u-2', prefillText, precedingAssistantUuid: 'a-1' } } });
+    const lone = askSteerText('toolu_ask_lone', [{ id: 'q1', question: 'Which fruit?', header: 'Fruit', modality: 'choice', options: [{ label: 'Pear' }, { label: 'Plum' }] }], [{ id: 'q1', question: 'Which fruit?', status: 'answered', value: ['Pear'] }]);
+    const prefills = [
+      '[sminos message from human id=14411ef3]\nAlso BANANA',
+      '[sminos message from human id=14411ef3]\nAlso BANANA\n\n[sminos] A note from sminos on this machine, not from the sender above: it woke this session.',
+      'Also BANANA',
+      lone,
+    ];
+    const events = feed(make(), prefills.flatMap((text, i) => [request(`L-${i}`), response(`L-${i}`, text)]));
+    expect(events.map((event) => (event.kind === 'boundary.rewind' ? event.prefillText : event.kind))).toEqual(['Also BANANA', 'Also BANANA', 'Also BANANA', null]);
   });
 });
 

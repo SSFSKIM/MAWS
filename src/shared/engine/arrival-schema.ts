@@ -9,9 +9,10 @@ export type Arrival =
   // a message from another session: by the engine's inbox, by the sminos bridge, from a teammate, or typed in as a background session's prompt
   | { class: 'peer'; via: 'inbox' | 'bridge' | 'team' | 'prompt';
       sender: { name: string | null; address: string; session: string | null; owners: string[] | null };
-      body: string;            // as drawn: sminos's frame line and reply line cut
+      body: string;            // as drawn: sminos's frame line, note and reply line cut
       frame: string | null;    // sminos's frame line, kept whole for the reader that matches a send to its delivery
-      midTurn: boolean; lineage: 'peer' | 'descendant'; replyTo: string | null }
+      midTurn: boolean; lineage: 'peer' | 'descendant'; replyTo: string | null;
+      note: string | null }    // sminos's own note after the words, from its wake release (T2), its words after `[sminos] `; carried, not drawn
   // a message from one of this session's subagents to its main conversation; `report` when it is a hand-back
   | { class: 'subagent'; agentId: string; body: string; report: string | null;
       taskId: string | null }  // a hand-back's `senderTaskId`: the task whose end it is
@@ -36,7 +37,8 @@ export type Arrival =
   // such escapes (a terminal's text, not markdown: UX wave U3b, decision 2)
   | { class: 'command'; run: { command: string; args: string } | null; stdout: string; stderr: string; plain: boolean }
   // the person's own words that sminos delivered (a send or a steer, through the inbox or by the bridge): theirs, never a peer's
-  | { class: 'own'; via: 'chat' | 'steer'; words: string; frame: string }
+  | { class: 'own'; via: 'chat' | 'steer'; words: string; frame: string;
+      note: string | null }    // sminos's own note after the words, as on `peer`; null for a steer
   // the sminos bridge's own prompt, which wakes a session to read what it has not read
   | { class: 'wake' }
   // MAWS's own "Approve and retry" message for a call auto mode blocked (U1, l4-approvals-12): the person's act, not their prose
