@@ -13,9 +13,8 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the nine launches, about 35 minutes (M1 added launches 6 to
-// 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes, and the note placement prototype's
-// twins, `m1-<scene>-overlay`). The pictures are
+// window here is the product's, MAWS_HARNESS=0) and runs the nine launches, about 33 minutes (M1 added launches 6 to
+// 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
 // not). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
 // pictures are the same command on the build's branch into another folder.
@@ -24,7 +23,7 @@
 // checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above. Every
 // launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 scene checks
 // its named state right before its capture, on master's build in master's terms (`cutBuild`), and is not reached when it
-// cannot; the overlay twins are not reached there.
+// cannot.
 //
 // Locators avoid the app's words (data attributes, menu ids, IPC, positions), because the words are what the other
 // build changes; where only a word reaches a target it comes from the app's own copy module, or is marked. A step that
@@ -287,8 +286,7 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
 // row notes, no tooltips on words, no "…" menus and no chevrons: what this branch keeps behind them is drawn at rest
 // there. So each scene proves its named state on either build before its capture: on the cut's, the reveal itself (the
 // owner's own tooltip, the row's own note, the row's own menu with its items, the chevron open); on master's, the words
-// that reveal holds here, drawn at rest and in view. A scene that cannot prove it is not reached. An overlay twin, which
-// only the cut's build draws, is not reached on master's.
+// that reveal holds here, drawn at rest and in view. A scene that cannot prove it is not reached.
 //
 // Whether the build draws the cut's parts, read once, the first time Settings opens (settingsAt): a Settings row's note
 // stays mounted at rest, so the open dialog holds one on this branch's build and none on master's. Every m1 capture
@@ -313,35 +311,6 @@ async function letGo(page: Page) {
   await page.mouse.move(W - 2, H - 2);
   await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
   await page.waitForTimeout(400);
-}
-// The note placement prototype (M1 task 1's switch, the `note-overlay` variant of styles/app.css): under
-// `data-note-placement="overlay"` on the document root an open note floats over the rows below instead of pushing them.
-async function notePlacement(page: Page, overlay: boolean) {
-  await page.evaluate((on) => {
-    if (on) document.documentElement.dataset.notePlacement = 'overlay';
-    else delete document.documentElement.dataset.notePlacement;
-  }, overlay);
-}
-// A scene with a row's note open, then its twin with the switch set before the note opens (`m1-<scene>-overlay`), so the
-// owner sees the baseline placement and the prototype side by side. The twin asks the latched build first, so on
-// master's it is not reached before any step runs (and, in a run that opened no Settings before it, once its step has).
-async function noteShots(page: Page, meta: Meta, prepare: () => Promise<void>, options: ShotOptions = {}) {
-  await shot(page, meta, prepare, options);
-  const id = `${meta.id.startsWith('m1-') ? '' : 'm1-'}${meta.id}-overlay`;
-  const twin: Meta = { ...meta, id, title: `${meta.title}, the note over the rows below`, state: `${meta.state}; the note placement prototype: the open note floats over the rows below`, round: 'm1' };
-  const overlaid = async () => {
-    const absent = () => new Error('no row note on this build: the overlay twin is the cut’s alone');
-    if (cut === false) throw absent();
-    await letGo(page);
-    await notePlacement(page, true);
-    await prepare();
-    if (!cutBuild()) throw absent();
-  };
-  const after = async () => {
-    await notePlacement(page, false);
-    await options.after?.();
-  };
-  await shot(page, twin, overlaid, { ...options, after });
 }
 // What a check requires on master's build: `rest`, the words drawn at rest, inside the viewport (its first drawn match:
 // the same words can also stand in a hidden description).
@@ -762,11 +731,11 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
         await settingsAt(app, page, section);
       });
     }
-    // rows whose helper words wait for the pointer: the first row of a section, hovered (M1: each with its twin under the
-    // note placement prototype)
+    // rows whose helper words wait for the pointer: the first row of a section, hovered (M1: its note open over the rows
+    // that follow)
     for (const [section, title] of [['notifications', 'Notifications'], ['sessions', 'Sessions']] as const) {
       const first = page.locator(`section[aria-labelledby="settings-${section}"] [data-settings-row]`).first();
-      await noteShots(page, { id: `settings-${section}-hover`, title: `Settings, ${title}, pointer on its first row`, how: `Settings, ${title}; hover its first row`, state: 'The first row of the section under the pointer', folders: ['settings-tab'], hover: true }, async () => {
+      await shot(page, { id: `settings-${section}-hover`, title: `Settings, ${title}, pointer on its first row`, how: `Settings, ${title}; hover its first row`, state: 'The first row of the section under the pointer', folders: ['settings-tab'], hover: true }, async () => {
         await settingsAt(app, page, section);
         await first.hover();
         await page.waitForTimeout(1200);
@@ -876,15 +845,15 @@ async function settingsM1(app: ElectronApplication, page: Page) {
 
   // a note opened by the keyboard: Tab from the section's heading into its first row (G13 to G15)
   const firstSessions = section('sessions').locator('[data-settings-row]').first();
-  await noteShots(page, m1({ id: 'm1-settings-sessions-focus', title: 'Settings, Sessions, keyboard focus in its first row', how: 'Settings, Sessions; Tab from the section’s heading', state: 'The first row of the section holding the keyboard, its note open at once', folders: ['settings-tab', 'ui'] }), async () => {
+  await shot(page, m1({ id: 'm1-settings-sessions-focus', title: 'Settings, Sessions, keyboard focus in its first row', how: 'Settings, Sessions; Tab from the section’s heading', state: 'The first row of the section holding the keyboard, its note open at once', folders: ['settings-tab', 'ui'] }), async () => {
     await settingsAt(app, page, 'sessions');
     await letGo(page);
     await page.locator('#settings-sessions').focus();
     await page.keyboard.press('Tab');
   }, { check: checks(focusIn(firstSessions, 'the first Sessions row'), noteShown(firstSessions, 'the first Sessions row')) });
-  // the longest note, the Binary row's, opened by pointing: it pushes Supervisor down (G125, G127, G128)
+  // the longest note, the Binary row’s, opened by pointing: it floats over the rows that follow (G125, G127, G128)
   const binary = row('engine.binary');
-  await noteShots(page, m1({ id: 'm1-settings-engine-hover', title: 'Settings, Engine, pointer on the Binary row', how: 'Settings, Engine; hover the Binary row', state: 'The Binary row under the pointer: its note with the binary’s path, the config home and the tested version', folders: ['settings-tab', 'ui'], hover: true }), async () => {
+  await shot(page, m1({ id: 'm1-settings-engine-hover', title: 'Settings, Engine, pointer on the Binary row', how: 'Settings, Engine; hover the Binary row', state: 'The Binary row under the pointer: its note with the binary’s path, the config home and the tested version', folders: ['settings-tab', 'ui'], hover: true }), async () => {
     await settingsAt(app, page, 'engine');
     await binary.hover();
     await page.waitForTimeout(1200);
@@ -913,7 +882,7 @@ async function settingsM1(app: ElectronApplication, page: Page) {
     const shown = cutBuild() ? binary.locator('[data-row-note][data-open]') : binary.locator('[data-settings-note]:has([data-settings-more][aria-expanded="true"])');
     await inView(shown.getByText(/\bPATH\b/), 'PATH, the words found');
   };
-  await noteShots(page, m1({ id: 'm1-settings-search-landed', title: 'Settings, a search result landed on', how: 'Settings (⌘,), type “PATH” in Search settings, Enter', state: 'The Binary row holding the keyboard, its note open with the words found', folders: ['settings-tab'] }), async () => {
+  await shot(page, m1({ id: 'm1-settings-search-landed', title: 'Settings, a search result landed on', how: 'Settings (⌘,), type “PATH” in Search settings, Enter', state: 'The Binary row holding the keyboard, its note open with the words found', folders: ['settings-tab'] }), async () => {
     await settingsAt(app, page, 'appearance');
     await searchField().fill('PATH');
     await page.waitForTimeout(500);
@@ -998,15 +967,15 @@ async function settingsM1(app: ElectronApplication, page: Page) {
     await budgetIs(on);
   };
   const status = row('supervisor.status').locator('[role="status"]');
-  await noteShots(page, m1({ id: 'm1-settings-supervisor-status-tip', title: 'Settings, Supervisor, the status’s tooltip', how: 'Settings, Supervisor; Tab to the status', state: 'The status holding the keyboard: its tooltip with the start, the pid, the exit rule and the machine daemon, and the row’s note', folders: ['settings-tab', 'ui'] }), async () => {
+  await shot(page, m1({ id: 'm1-settings-supervisor-status-tip', title: 'Settings, Supervisor, the status’s tooltip', how: 'Settings, Supervisor; Tab to the status', state: 'The status holding the keyboard: its tooltip with the start, the pid, the exit rule and the machine daemon, and the row’s note', folders: ['settings-tab', 'ui'] }), async () => {
     await settingsAt(app, page, 'supervisor');
     await focusTip(page, status, row('supervisor.daemon'));
   }, { check: checks(tipShown(page, status, 'the supervisor’s status', row('supervisor.daemon')), runningShown, noteShown(row('supervisor.status'), 'the status row')) });
-  await noteShots(page, m1({ id: 'm1-settings-supervisor-budget-off', title: 'Settings, Supervisor, the memory budget off', how: 'Settings, Supervisor; turn the memory budget’s switch off', state: 'The budget off, its limit and stateful rows gone, the switch holding the keyboard with the off note open', folders: ['settings-tab', 'budget'] }), async () => {
+  await shot(page, m1({ id: 'm1-settings-supervisor-budget-off', title: 'Settings, Supervisor, the memory budget off', how: 'Settings, Supervisor; turn the memory budget’s switch off', state: 'The budget off, its limit and stateful rows gone, the switch holding the keyboard with the off note open', folders: ['settings-tab', 'budget'] }), async () => {
     await settingsAt(app, page, 'supervisor');
     await turnBudget(false);
   }, { check: checks(() => budgetIs(false), focusIn(row('supervisor.memoryBudget'), 'the memory budget row'), noteShown(row('supervisor.memoryBudget'), 'the memory budget row')), after: () => turnBudget(true) });
-  await noteShots(page, m1({ id: 'm1-settings-supervisor-limit-hover', title: 'Settings, Supervisor, pointer on the memory limit', how: 'Settings, Supervisor, the budget on; hover its Limit row', state: 'The limit at its default (the default’s size in the field), its note on pointing', folders: ['settings-tab', 'budget'], hover: true }), async () => {
+  await shot(page, m1({ id: 'm1-settings-supervisor-limit-hover', title: 'Settings, Supervisor, pointer on the memory limit', how: 'Settings, Supervisor, the budget on; hover its Limit row', state: 'The limit at its default (the default’s size in the field), its note on pointing', folders: ['settings-tab', 'budget'], hover: true }), async () => {
     await settingsAt(app, page, 'supervisor');
     await turnBudget(true);
     await row('supervisor.limit').scrollIntoViewIfNeeded();
@@ -1017,9 +986,9 @@ async function settingsM1(app: ElectronApplication, page: Page) {
   // Org, not signed in: Sign in… draws the pairing-code field, focused, its note open (G147 to G149); master draws the
   // field at rest, which takes the focus there
   const code = section('org').getByRole('textbox', { name: ORG.code, exact: true });
-  await noteShots(page, m1({ id: 'm1-settings-org-signin', title: 'Settings, Org, Sign in… pressed', how: 'Settings, Org (not signed in); press Sign in…', state: 'The pairing-code field holding the keyboard, its note on where a code comes from open', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
+  await shot(page, m1({ id: 'm1-settings-org-signin', title: 'Settings, Org, Sign in… pressed', how: 'Settings, Org (not signed in); press Sign in…', state: 'The pairing-code field holding the keyboard, its note on where a code comes from open', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
     await settingsAt(app, page, 'org');
-    // the status read first; the twin finds the field Sign in… drew still there
+    // the status read first; a retry finds the field Sign in… drew still there
     const signIn = CUT_ORG.signInOpen === undefined ? null : section('org').getByRole('button', { name: CUT_ORG.signInOpen, exact: true });
     await expect(signIn === null ? code : signIn.or(code).first()).toBeVisible({ timeout: 10_000 });
     if (signIn !== null && (await signIn.count())) await signIn.click();
@@ -2188,7 +2157,7 @@ async function orgM1(app: ElectronApplication, page: Page, harnessBuilt: boolean
   }, { check: unfolded(details, group('org'), [seed.status.org, seed.view.recoveryKid], 'the org’s id and recovery key'), after: fold(details) });
   const delegations = () => org().locator('[data-org-section="delegations"]');
   const stray = delegations().getByRole('group', { name: ORG.strayKeys, exact: true });
-  await noteShots(page, m1({ id: 'm1-org-stray-hover', title: 'Settings, Org, pointer on Stray hub keys', how: 'Settings, Org, Delegations; hover Stray hub keys', state: 'The stray keys’ row under the pointer, its note open', folders: ['settings-tab/org', 'ui'], hover: true }), async () => {
+  await shot(page, m1({ id: 'm1-org-stray-hover', title: 'Settings, Org, pointer on Stray hub keys', how: 'Settings, Org, Delegations; hover Stray hub keys', state: 'The stray keys’ row under the pointer, its note open', folders: ['settings-tab/org', 'ui'], hover: true }), async () => {
     await at('org');
     await delegations().first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await stray.hover();
@@ -2337,7 +2306,7 @@ test('states: Settings › Org read-only, an imported Chrome profile, Voice in t
       await browserAt();
       await focusTip(page, popupLimit(), popupLimit().filter({ hasText: BROWSER.popupLimit }));
     }, { check: tipShown(page, popupLimit(), 'the ⓘ', popupLimit().filter({ hasText: BROWSER.popupLimit })) });
-    await noteShots(page, m1({ id: 'm1-settings-browser-profile-hover', title: 'Settings, Browser, pointer on the imported profile', how: 'Settings, Browser; hover the imported profile’s row', state: 'The profile’s row under the pointer, its note with when its bookmarks were last read', folders: ['settings-tab', 'tools/browser/import'], hover: true }), async () => {
+    await shot(page, m1({ id: 'm1-settings-browser-profile-hover', title: 'Settings, Browser, pointer on the imported profile', how: 'Settings, Browser; hover the imported profile’s row', state: 'The profile’s row under the pointer, its note with when its bookmarks were last read', folders: ['settings-tab', 'tools/browser/import'], hover: true }), async () => {
       await browserAt();
       await profileRow().first().hover();
       await page.waitForTimeout(1200);
@@ -2415,7 +2384,7 @@ test('states: Settings › Org with no delegation, the code destination set', as
     await shot(page, m1({ id: 'm1-org-no-delegations', title: 'Settings, Org, no delegation yet', how: 'Settings, Org, scrolled to Delegations', state: 'No delegation: New delegation… alone, and the set code destination behind its chevron', folders: ['settings-tab/org'] }), async () => {
       await orgAt(delegations);
     }, { check: none });
-    await noteShots(page, m1({ id: 'm1-org-destination-open', title: 'Settings, Org, the code destination open', how: 'Settings, Org, Delegations; Tab to the Code destination chevron, Enter (the form’s first field takes the keyboard)', state: 'The set destination’s project, secret and account, the first field holding the keyboard with the row’s note open', folders: ['settings-tab/org', 'ui'] }), async () => {
+    await shot(page, m1({ id: 'm1-org-destination-open', title: 'Settings, Org, the code destination open', how: 'Settings, Org, Delegations; Tab to the Code destination chevron, Enter (the form’s first field takes the keyboard)', state: 'The set destination’s project, secret and account, the first field holding the keyboard with the row’s note open', folders: ['settings-tab/org', 'ui'] }), async () => {
       await orgAt(delegations);
       // master's build draws the destination's form at rest, under no chevron: its first field is focused by hand. On the
       // cut's, the chevron is pressed by the keyboard from folded, and opening it hands the keyboard to the first field
@@ -2424,7 +2393,7 @@ test('states: Settings › Org with no delegation, the code destination set', as
         return project().focus();
       }
       const open = delegations().getByRole('button', { name: ORG.destination, exact: true });
-      if ((await open.getAttribute('aria-expanded')) === 'true') await open.click(); // the twin finds it open
+      if ((await open.getAttribute('aria-expanded')) === 'true') await open.click(); // a retry finds it open
       await expect(open).toHaveAttribute('aria-expanded', 'false');
       await open.focus();
       await page.keyboard.press('Enter');
