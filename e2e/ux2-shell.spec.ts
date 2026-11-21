@@ -902,7 +902,12 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await menu(maws.app, 'region.focusNext');
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-region="cards"]') !== null)).toBe(true);
   await openSurface(page, 'Files');
-  await composer.focus();
+  // Showing a surface hands it the keyboard (SurfaceRow's focusShown: F6's stop two frames later, Files' tree once its
+  // listing answers), until the person's next key or pointer press. A focus() is neither, so a late hand-over could move
+  // the keyboard back into the column and F6 would go on from there to the sidebar (ticket 729's second red). A click on
+  // the composer is the person's press: it ends the hand-over, and the keyboard is where the person put it.
+  await composer.click();
+  await expect(composer, 'the keyboard in the composer').toBeFocused();
   await menu(maws.app, 'region.focusNext');
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-panel-content]') !== null)).toBe(true);
   // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, M4; L7): ten invented files kept
