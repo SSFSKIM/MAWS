@@ -281,9 +281,9 @@ export const MODEL = {
   oneM: '1M',
   cannotHoldAuto: 'Cannot hold auto mode', // L99: the mode it runs in is the chip's (and the setup note's), which the launch's fallback decides
   current: 'current',
-  pending: 'set · the next init frame confirms it',
-  none: 'The engine listed no models',
-  unknownArg: (name: string) => `No model named ${name} in the engine's catalogue`,
+  pending: 'setting…', // the word cut (C39): a change on its way, under the effort slider and on the fast-mode row
+  none: 'No models', // the word cut (P551)
+  unknownArg: (name: string) => `No model named ${name}`, // the word cut (P537)
   // set_model's refusal codes (SPEC 45 §45.16:3860–3880) in words; `error` follows as the caption
   code: {
     catalog_unknown: "Not in the engine's catalogue",
@@ -300,21 +300,16 @@ export const MODEL = {
   routingAccount: 'the routing account', // the gateway note's account when ClaudeUsage names none
   // an unstarted session's route (the architect's ruling of 2026-09-29, the D-19 surface on an unstarted tab)
   route: 'Route',
-  directCannotServe: 'The direct route cannot serve these; choosing one starts the session on the relay',
   relayAskTitle: 'Start on the relay?',
   relayAsk: (name: string) => `${name} runs through ClaudeUsage’s relay · this session would start routed instead of direct`,
   keepDirect: 'Keep Direct',
   useRelay: 'Use the relay',
   // A gateway model's auto-mode note as the widget words it (§19; mockup 06 vignette 03): C10's `GATEWAY_AUTO_NOTE`
-  // is its chip's one line; the widget's form names the account the local reviews are counted against.
-  gatewayNote: {
-    lead: 'Auto-mode reviews for this model run locally.',
-    body: (account: string) => `A GPT route carries no Anthropic verdict, so the engine reviews each tool call itself on Sonnet 5 through ${account}. Those requests count against usage.`,
-  },
+  // is its chip's one line; the widget's form names the account the local reviews are counted against (the word cut,
+  // P534: one sentence, the consequence).
+  gatewayNote: (account: string) => `Auto-mode reviews run locally and count against ${account}.`,
   effort: 'Effort',
-  unstarted: 'Applies when the session starts',
   fast: 'Fast mode',
-  fastState: { on: 'On', off: 'Off' } as const, // UX wave U4a (decision 20): the fast-mode row's line with nothing else to say
   fastForOpus: 'Fast mode is for Opus',
   cooldown: 'on · cooling down',
   fastWarning: 'Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage',
@@ -322,9 +317,9 @@ export const MODEL = {
   cancel: 'Cancel',
   turnOn: 'Turn on fast mode',
   turnOff: 'Turn off fast mode',
-  // fast_mode_disabled_reason in words (SPEC 06 §18.1:5030's table); `sdk_opt_in_required` is what the switch sends
+  // fast_mode_disabled_reason in words (SPEC 06 §18.1:5030's table); `sdk_opt_in_required` is what the switch sends,
+  // and has no words: an off switch says it (the word cut, P541)
   fastReason: {
-    sdk_opt_in_required: 'Off until turned on here',
     not_first_party: 'Fast mode is only available when using the Anthropic API directly',
     disabled_by_env: 'Fast mode is not available',
     model_not_allowed: "This model is not in your organization's allowed models",
@@ -357,8 +352,7 @@ export const REWIND = {
 // W3: the model selector's own words (Codex's two-view menu, r1-codex §5; Claude Desktop's slider ends).
 export const SELECTOR = {
   effortView: 'Effort',
-  modelView: 'Select model',
-  selectModel: 'Select model',
+  modelView: 'Select model', // the model view's group name; its heading is `model` (the word cut, P544)
   models: 'Models',
   effort: 'Effort',
   effortUnknown: 'Not known yet',
@@ -368,24 +362,27 @@ export const SELECTOR = {
   smarter: 'Smarter',
   openModels: (model: string) => `${model} · Select model`,
   back: 'Back to effort',
-  reset: "Reset effort to the model's default",
+  reset: "Reset effort to the model's default", // the reset's name; its tooltip is `resetTip` (the word cut, P531)
+  resetTip: 'Reset effort',
   default: 'Default',
   recommended: 'Recommended set of models',
   model: 'Model',
-  setting: 'setting…',
-  reading: 'Reading the models…',
+  setting: 'setting…', // the chip's word (C38), and the accessible name of the checked row's spinner (the word cut, P549)
+  reading: 'Reading the models…', // the accessible name of the read's spinner (the word cut, P535)
   sessionOnly: 'For this session only',
   // P5 O9 M5 (the owner's Q1, as recommended): what a model or effort set on a terminal session through its bridge does
-  terminalOnly: "For this session's own requests from now on; the terminal's status line keeps showing its own",
+  terminalOnly: "The terminal's status line won't show this change", // the word cut (C41): the consequence alone
   unknownEffort: (word: string) => `No effort level named ${word}`,
 };
 
 // A typed `/<widget> <args>` applied at Enter (the architect's correction of 2026-09-29): the toast after the control
-// answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead.
+// answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead. Its
+// pending words are its own: the word cut's P558 (M4) rewords this toast, the model menu's (C39) changed first.
+const TYPED_PENDING = 'set · the next init frame confirms it';
 export const TYPED = {
-  model: (name: string, cannotHoldAuto = false) => `Model · ${name} · ${MODEL.pending}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
-  effort: (level: string | null) => `Effort · ${level ?? "the model's default"} · ${MODEL.pending}`,
-  fastOff: `Fast mode · off · ${MODEL.pending}`,
+  model: (name: string, cannotHoldAuto = false) => `Model · ${name} · ${TYPED_PENDING}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
+  effort: (level: string | null) => `Effort · ${level ?? "the model's default"} · ${TYPED_PENDING}`,
+  fastOff: `Fast mode · off · ${TYPED_PENDING}`,
   mode: (mode: PermissionMode) => `Permission mode · ${PERMISSION_MODE_LABELS[mode]}`,
   // the permissions widget opened with an argument it did not apply
   modeAsks: (mode: PermissionMode) => `${PERMISSION_MODE_LABELS[mode]} asks first · choose it below`,

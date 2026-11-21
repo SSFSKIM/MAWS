@@ -45,8 +45,8 @@ export const BUDGET = {
   review: 'Review…',
   // The blocked sessions sheet
   blockedTitle: 'Sessions holding work',
-  blockedBody: (totalKiB: number, limitKiB: number) =>
-    `MAWS is using ${gb(totalKiB)} of its ${gb(limitKiB)} memory budget, and every live session holds something stopping it would lose. Nothing is stopped unless you stop it.`,
+  // the word cut (C142): the figures and the reassurance
+  blockedBody: (totalKiB: number, limitKiB: number) => `${gb(totalKiB)} of ${gb(limitKiB)} in use. Nothing is stopped unless you stop it.`,
   noneBlocked: 'No session holds work now.',
   stop: 'Stop…',
   close: 'Close',

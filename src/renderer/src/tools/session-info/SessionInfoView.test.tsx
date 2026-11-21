@@ -151,13 +151,13 @@ describe('session info renders the six sections', () => {
     const status = pageStatus();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Main')).toMatch(/^astra( [A-Z][a-z]+( high)?)? · set · the next init frame confirms it$/);
+    expect(valueOf('Main')).toMatch(/^astra( [A-Z][a-z]+( high)?)? · setting…$/); // the word cut (C39): the model menu's pending word
     expect(titleOf('Main')).toBe('claude/astra');
     expect(valueOf('Auto-mode lane')).toMatch(/^Local \(expected\)/);
     cleanup();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Main')).not.toContain('set · the next init frame confirms it'); // the alias resolved: confirmed
+    expect(valueOf('Main')).not.toContain('setting…'); // the alias resolved: confirmed
     expect(valueOf('Main')).toMatch(/^Sonnet 5/);
     expect(titleOf('Main')).toBe('claude-sonnet-5[1m]');
     useComposerStore.setState({ models: new Map() });
@@ -167,7 +167,7 @@ describe('session info renders the six sections', () => {
   // request this renderer holds, so it sees an explicit Default and a choice the session is still starting for, and it
   // reads pending exactly when the composer's chip does.
   describe('the Main row over the request this renderer holds, as the composer’s chip reads it', () => {
-    const PENDING = 'set · the next init frame confirms it';
+    const PENDING = 'setting…';
     const chipText = (status: EngineSessionStatus) => {
       const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
       return liveBindings(status, record, { models: catalogue, effort: status.effort, asked: heldModel(useModelRequests.getState(), READY, status) ?? null }).model.label;

@@ -28,6 +28,7 @@ import { useMachines } from '../stores/machines';
 import { machineName, rowName, selectOrgIndex } from '../stores/org-projects';
 import { usePeople } from '../stores/people'; // P5 O7 M8
 import { useSessions } from '../stores/sessions';
+import { Tip } from '../ui/tip';
 import { RESUME_COPY as COPY } from './copy';
 import {
   chooserGroups,
@@ -201,8 +202,8 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
 
   return (
     <div data-resume-chooser className="flex min-h-0 min-w-0 flex-1 flex-col text-ui" onKeyDown={onKeyDown}>
+      {/* the word cut (C155): the scope alone; "Resume session" is the dialog's title, which its host gives it */}
       <header className="flex items-center gap-2 px-1 pb-2">
-        <h2 className="m-0 shrink-0 text-ui font-semibold text-fg">{COPY.title}</h2>
         <span data-testid="resume-scope" className="min-w-0 truncate text-ui-sm text-fg-muted">
           {scopeLabel}
         </span>
@@ -220,7 +221,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
             aria-controls={listId}
             aria-activedescendant={selectedId === null ? undefined : optionId(selectedId)}
             aria-label={COPY.search}
-            placeholder={COPY.search}
+            placeholder={COPY.placeholder}
             autoComplete="off"
             spellCheck={false}
             data-escape-clears
@@ -242,17 +243,18 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
             className="h-9 w-full shrink-0 rounded-sm border border-border bg-transparent px-2.5 text-ui text-fg outline-none placeholder:text-fg-faint focus:border-accent"
           />
           <div role="group" aria-label={COPY.filters} className="mt-2 flex shrink-0 flex-wrap gap-1.5">
+            {/* the word cut (C158): a chip is its name; its key is its tip and its description */}
             {TOGGLES.map(({ key, chord }) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={toggles[key]}
-                onClick={() => flip(key)}
-                className="inline-flex h-6 items-center gap-1.5 rounded-sm border border-border px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:border-accent aria-pressed:text-fg"
-              >
-                {COPY.toggles[key]}
-                {chord && <kbd className="font-ui text-fg-faint">{chord}</kbd>}
-              </button>
+              <Tip key={key} content={chord} description={chord}>
+                <button
+                  type="button"
+                  aria-pressed={toggles[key]}
+                  onClick={() => flip(key)}
+                  className="inline-flex h-6 items-center rounded-sm border border-border px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:border-accent aria-pressed:text-fg"
+                >
+                  {COPY.toggles[key]}
+                </button>
+              </Tip>
             ))}
           </div>
           {/* the list keeps the keyboard in the search field: a press selects without taking focus */}

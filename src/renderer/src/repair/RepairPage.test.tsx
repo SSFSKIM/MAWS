@@ -28,10 +28,12 @@ const shown = async (s: RepairState) => {
 const actions = () => screen.getAllByRole('button').map((button) => button.textContent);
 
 describe('the repair page', () => {
+  // the word cut (C166): each body gives the cause and the fix, no word about the background process mawsd
   it('no-unit: names pnpm dev:scratch; Quit MAWS first, then Try Again', async () => {
     await shown(state('no-unit', { packaged: false }));
     expect(screen.getByRole('heading').textContent).toBe('This development build has no machine daemon for your main profile');
-    expect(document.body.textContent).toContain('MAWS runs its sessions, terminals and index in a background process, mawsd, which only an installed MAWS.app sets up for the main profile. Run this build on a profile of its own with pnpm dev:scratch, or install MAWS.app and open this build again.');
+    expect(document.body.textContent).toContain('Only an installed MAWS.app sets it up for the main profile. Run this build on a profile of its own with pnpm dev:scratch, or install MAWS.app and open this build again.');
+    expect(document.body.textContent).not.toContain('mawsd');
     expect(screen.getByText('pnpm dev:scratch').tagName).toBe('CODE');
     expect(actions()).toEqual(['Quit MAWS', 'Try Again']);
   });
@@ -39,7 +41,8 @@ describe('the repair page', () => {
   it('not-loaded: says where to turn MAWS on; Open Login Items… first', async () => {
     await shown(state('not-loaded', { packaged: false }));
     expect(screen.getByRole('heading').textContent).toBe("MAWS's machine daemon is turned off");
-    expect(document.body.textContent).toContain('mawsd is installed, but macOS has not loaded it. In System Settings › General › Login Items & Extensions, under Allow in the Background, turn MAWS on, then come back to this window.');
+    expect(document.body.textContent).toContain('macOS has not loaded it. In System Settings › General › Login Items & Extensions, turn MAWS on and come back.');
+    expect(document.body.textContent).not.toContain('mawsd');
     expect(actions()).toEqual(['Open Login Items…', 'Try Again', 'Quit MAWS']);
   });
 
@@ -47,7 +50,7 @@ describe('the repair page', () => {
     await shown(state('install-refused'));
     expect(screen.getByRole('heading').textContent).toBe('macOS did not let MAWS set up or start its machine daemon');
     expect(document.body.textContent).toContain(
-      'MAWS runs its sessions, terminals and index in a background process, mawsd, and could not load or start it: launchctl kickstart failed (1): Operation not permitted. If MAWS is turned off in System Settings › General › Login Items & Extensions, under Allow in the Background, turn it on, then come back to this window.',
+      'launchctl kickstart failed (1): Operation not permitted. If MAWS is off in System Settings › General › Login Items & Extensions, turn it on and come back.',
     );
     expect(actions()).toEqual(['Open Login Items…', 'Reinstall and Start', 'Quit MAWS']);
   });
@@ -62,7 +65,7 @@ describe('the repair page', () => {
     const log = { path: '/p/mawsd/mawsd.log', lines: ['[mawsd] starting', '[mawsd] the lock is held by pid 4100'] };
     await shown(state('not-started', { why: 'no mawsd welcomed a hello on machine.sock within 10 s', log }));
     expect(screen.getByRole('heading').textContent).toBe("MAWS's machine daemon did not start");
-    expect(document.body.textContent).toContain('macOS loaded mawsd, but it did not answer within 10 seconds: no mawsd welcomed a hello on machine.sock within 10 s. Its last log lines are below.');
+    expect(screen.getByRole('heading').nextElementSibling?.textContent).toBe('It did not answer within 10 seconds: no mawsd welcomed a hello on machine.sock within 10 s.');
     expect(actions()).toEqual(['Reinstall and Start', 'Show Log in Finder', 'Quit MAWS']);
     const lines = screen.getByLabelText('/p/mawsd/mawsd.log');
     expect(lines.textContent).toBe('[mawsd] starting\n[mawsd] the lock is held by pid 4100');
@@ -78,14 +81,14 @@ describe('the repair page', () => {
     expect(b.acted).toEqual(['open-login-items', 'retry', 'quit']);
   });
 
-  it('while an attempt runs: says Starting mawsd… and disables every action; each change of state is drawn', async () => {
+  it('while an attempt runs: says Starting… and disables every action; each change of state is drawn', async () => {
     const b = await shown(state('not-loaded', { packaged: false }));
     b.push(state('not-loaded', { packaged: false, attempting: true }));
-    expect(screen.getByRole('status').textContent).toBe('Starting mawsd…');
+    expect(screen.getByRole('status').textContent).toBe('Starting…'); // the word cut (C168)
     expect(screen.getAllByRole('button').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     b.push(state('not-started', { packaged: false, why: 'no welcome' }));
     expect(screen.getByRole('heading').textContent).toBe("MAWS's machine daemon did not start");
-    expect(screen.queryByText('Starting mawsd…')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
     expect(screen.getAllByRole('button').some((button) => (button as HTMLButtonElement).disabled)).toBe(false);
   });
 

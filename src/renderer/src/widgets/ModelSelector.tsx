@@ -5,7 +5,7 @@
 // that model and a reset that clears the effort override; UX wave U4a (O-32, decision 20): the slider's whole 28 px
 // track takes a press and a drag, and fast mode is a row at the view's foot with a switch (its auto-lane warning first,
 // inline), drawn only where the model offers it or it is on; (decision 21) in the model view a digit 1 to 9 picks the
-// row drawn at that place, and ⇧⌘E's request puts the keyboard on the slider. The model view reads "Select model": a
+// row drawn at that place, and ⇧⌘E's request puts the keyboard on the slider. The model view, headed "Model": a
 // Default entry (Recommended set of models, no badge), then the catalogue with the current
 // row checked, gateway aliases with their "From gateway" description. A choice applies at once and returns to the
 // effort view; the engine's answer (C3's status, the next init frame) is what shows afterwards. A live session is C3's
@@ -44,6 +44,8 @@ import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
+import { QuietSpinner } from '../ui/spinner';
+import { Tip, UnavailableButton } from '../ui/tip';
 import { FRAME, MODEL, SELECTOR } from './copy';
 import {
   applyFlagSettings,
@@ -379,16 +381,22 @@ function Check({ on }: { on: boolean }) {
   );
 }
 
-// One menu item of the model list.
+// One menu item of the model list. The word cut (P549): the checked row's change on its way is a quiet spinner in its
+// check's place, named by the word it replaced.
 function ModelItem({ entry, checked, proposed, pending, locked, greyed, choose }: { entry: ModelEntryView; checked: boolean; proposed: boolean; pending: boolean; locked: boolean; greyed: boolean; choose(): void }) {
   return (
     <button type="button" role="menuitemradio" aria-checked={checked} data-proposed={proposed || undefined} disabled={locked} onClick={choose} className={`${ROW} ${greyed ? 'text-fg-faint' : ''} ${proposed ? 'bg-bg-active' : ''}`}>
-      <Check on={checked} />
+      {checked && pending ? (
+        <span className="mt-1 flex w-3 shrink-0 justify-center">
+          <QuietSpinner label={SELECTOR.setting} />
+        </span>
+      ) : (
+        <Check on={checked} />
+      )}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-1.5">
           <span className="truncate">{entry.displayName}</span>
           {entry.oneM && <span className="shrink-0 rounded-sm border border-border px-1 text-ui-sm text-fg-muted">{MODEL.oneM}</span>}
-          {checked && pending && <span className="ml-auto shrink-0 text-ui-sm text-fg-muted">{SELECTOR.setting}</span>}
         </span>
         {entry.description && <span className="truncate text-ui-sm text-fg-muted">{entry.description}</span>}
         {entry.cannotHoldAuto && <span className="text-ui-sm text-fg-faint">{MODEL.cannotHoldAuto}</span>}
@@ -473,13 +481,10 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   const modelName = shownRow?.displayName ?? aliasOf(binding.shown, binding.models) ?? SELECTOR.model;
 
   // UX wave U4a (decision 20): the fast-mode row, where the model offers it, it is on or a change is on its way; its line
-  // the pending word, then why this route has no switch (before the engine's own reason, which can say "turned on here"),
-  // today's reason or cooling down, else On or Off
+  // the pending word, then why this route has no switch (before the engine's own reason), today's reason or cooling
+  // down, else none (the word cut, P541: the switch shows on or off)
   const fast = binding.fast;
-  const fastRow =
-    fast && (fast.offered || fast.view.checked || fast.pending)
-      ? { view: fast.view, line: fast.pending ? MODEL.pending : (fast.closed ?? fast.view.caption ?? (fast.view.checked ? MODEL.fastState.on : MODEL.fastState.off)) }
-      : null;
+  const fastRow = fast && (fast.offered || fast.view.checked || fast.pending) ? { view: fast.view, line: fast.pending ? MODEL.pending : (fast.closed ?? fast.view.caption) } : null;
 
   const choose = async (model: string | null) => {
     setProposed(null);
@@ -515,7 +520,7 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   const noteFor = binding.shown !== null && showsGatewayNote(proposed ?? binding.current ?? binding.shown, binding.mode);
   const gatewayNote = noteFor && (
     <p role="note" className="m-0 border-l-2 border-info px-2 text-ui-sm">
-      <strong className="font-semibold">{MODEL.gatewayNote.lead}</strong> {MODEL.gatewayNote.body(account)}
+      {MODEL.gatewayNote(account)}
     </p>
   );
   const alert = failure && (
@@ -525,8 +530,9 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
     </p>
   );
   // P2-A: a dormant session's selector reads nothing of the engine (its options are the catalogue's); it says only why a
-  // choice cannot start it
-  const status = state === 'unavailable' ? error : state === 'starting' ? FRAME.starting : state === 'loading' ? SELECTOR.reading : state === 'error' ? error : null;
+  // choice cannot start it. The word cut (P535): a start or a read under way is a quiet spinner named by its words
+  const status = state === 'unavailable' || state === 'error' ? error : null;
+  const wait = state === 'starting' ? FRAME.starting : state === 'loading' ? SELECTOR.reading : null;
   const observedName = binding.observed ? (rowFor(binding.models, binding.observed.model)?.displayName ?? binding.observed.model) : null;
 
   const effortView = (
@@ -542,9 +548,11 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
             <span aria-hidden>›</span>
           </span>
         </button>
-        <button type="button" aria-label={SELECTOR.reset} title={SELECTOR.reset} disabled={locked || !binding.overridden} onClick={() => void run(() => binding.setEffort(null))} className={ICON_BUTTON}>
-          <span aria-hidden>↺</span>
-        </button>
+        <Tip content={SELECTOR.resetTip}>
+          <button type="button" aria-label={SELECTOR.reset} disabled={locked || !binding.overridden} onClick={() => void run(() => binding.setEffort(null))} className={ICON_BUTTON}>
+            <span aria-hidden>↺</span>
+          </button>
+        </Tip>
       </div>
       {levels.length > 0 && <EffortSlider levels={levels} value={binding.effort !== null && levels.includes(binding.effort) ? binding.effort : null} disabled={locked} focusOnMount={focusSlider} onChange={(level) => void run(() => binding.setEffort(level))} />}
       {unknown && view === 'effort' && <p className="m-0 px-2 text-ui-sm text-warning">{unknown}</p>}
@@ -556,6 +564,11 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
       )}
       {view === 'effort' && gatewayNote}
       {status && <p className="m-0 px-2 text-ui-sm text-fg-muted">{status}</p>}
+      {wait && (
+        <div className="flex px-2">
+          <QuietSpinner label={wait} />
+        </div>
+      )}
       {view === 'effort' && alert}
       {fastRow && fastAsk === 'on' && (
         <div role="group" aria-label={MODEL.fast} className="flex flex-col gap-1 border-l-2 border-warning px-2 text-ui-sm">
@@ -574,20 +587,22 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
         <div data-fast-row className="flex min-w-0 items-center gap-2 border-t border-border px-2 pt-1.5">
           <span className="flex min-w-0 flex-1 flex-col">
             <span>{MODEL.fast}</span>
-            <span className="truncate text-ui-sm text-fg-muted">{fastRow.line}</span>
+            {fastRow.line && <span className="truncate text-ui-sm text-fg-muted">{fastRow.line}</span>}
           </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={fastRow.view.checked}
-            aria-label={MODEL.fast}
-            title={fastRow.view.disabled ?? MODEL.fast}
-            disabled={locked || fastRow.view.disabled !== null}
-            onClick={() => (fastRow.view.checked ? setFast(false) : setFastAsk('on'))}
-            className={`${SWITCH} ${fastRow.view.checked ? 'bg-accent' : 'bg-bg-active'}`}
-          >
-            <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${fastRow.view.checked ? 'right-0.5' : 'left-0.5'}`} />
-          </button>
+          {/* the word cut (P543): no tooltip repeating the label; a greyed switch keeps the keyboard and owns its reason */}
+          <UnavailableButton reason={fastRow.view.disabled}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={fastRow.view.checked}
+              aria-label={MODEL.fast}
+              disabled={locked && fastRow.view.disabled === null}
+              onClick={() => (fastRow.view.checked ? setFast(false) : setFastAsk('on'))}
+              className={`${SWITCH} ${fastRow.view.checked ? 'bg-accent' : 'bg-bg-active'} aria-disabled:opacity-50`}
+            >
+              <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${fastRow.view.checked ? 'right-0.5' : 'left-0.5'}`} />
+            </button>
+          </UnavailableButton>
         </div>
       )}
     </div>
@@ -596,7 +611,6 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   const greyedGroup = (label: string, entries: ModelEntryView[], greyed: boolean) =>
     entries.length > 0 && (
       <div role="group" aria-label={MODEL.list(label)} className="flex flex-col border-t border-border pt-1">
-        {greyed && <p className="m-0 px-2 pb-1 text-ui-sm text-fg-muted">{MODEL.directCannotServe}</p>}
         {entries.map((entry) => (
           <ModelItem
             key={entry.value}
@@ -625,13 +639,16 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
       </div>
     );
 
+  // the model view's last line: the driven session's own, else a started session's scope; a new chat's has none (the
+  // word cut, P555)
+  const footnote = binding.note ?? (binding.unstarted ? null : SELECTOR.sessionOnly);
   const modelView = (
     <div role="group" aria-label={SELECTOR.modelView} className="flex flex-col gap-1 p-1.5">
       <div className="flex min-h-8 items-center gap-1">
         <button type="button" aria-label={SELECTOR.back} onClick={() => setView('effort')} className={ICON_BUTTON}>
           <span aria-hidden>‹</span>
         </button>
-        <h3 className="m-0 text-ui font-medium">{SELECTOR.selectModel}</h3>
+        <h3 className="m-0 text-ui font-medium">{SELECTOR.model}</h3>
       </div>
       {route && route.choices.length > 1 && (
         <div role="radiogroup" aria-label={MODEL.route} className="flex gap-1 px-2 pb-1">
@@ -660,13 +677,18 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
             <span className="text-ui-sm text-fg-muted">{SELECTOR.recommended}</span>
           </span>
         </button>
-        {binding.models.length === 0 && status === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{MODEL.none}</p>}
+        {binding.models.length === 0 && status === null && wait === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{MODEL.none}</p>}
+        {binding.models.length === 0 && wait && (
+          <div className="flex px-2 py-1">
+            <QuietSpinner label={wait} />
+          </div>
+        )}
         {greyedGroup(MODEL.group.claude, claude, false)}
         {greyedGroup(MODEL.group.gateway, gateway, direct)}
       </div>
       {view === 'model' && gatewayNote}
       {view === 'model' && alert}
-      <p className="m-0 px-2 pt-0.5 text-ui-sm text-fg-faint">{binding.note ?? (binding.unstarted ? MODEL.unstarted : SELECTOR.sessionOnly)}</p>
+      {footnote && <p className="m-0 px-2 pt-0.5 text-ui-sm text-fg-faint">{footnote}</p>}
     </div>
   );
 

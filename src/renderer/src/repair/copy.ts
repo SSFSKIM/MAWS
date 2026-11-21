@@ -3,7 +3,7 @@
 import type { RepairAction, RepairKind } from '@shared/repair';
 
 export const REPAIR = {
-  attempting: 'Starting mawsd…',
+  attempting: 'Starting…', // the word cut (C168)
   logLabel: 'Its last log lines',
 } as const;
 
@@ -17,22 +17,20 @@ export const HEADLINE: Record<RepairKind, string> = {
   'not-started': "MAWS's machine daemon did not start",
 };
 
-const LOGIN_ITEMS = 'System Settings › General › Login Items & Extensions, under Allow in the Background';
+const LOGIN_ITEMS = 'System Settings › General › Login Items & Extensions';
 
+// The word cut (C166): each body is the cause and the fix; the headline names the machine daemon, so no body explains
+// it or names the process
 export function body(kind: RepairKind, why: string): BodyPart[] {
   switch (kind) {
     case 'no-unit':
-      return [
-        { text: 'MAWS runs its sessions, terminals and index in a background process, mawsd, which only an installed MAWS.app sets up for the main profile. Run this build on a profile of its own with ' },
-        { code: 'pnpm dev:scratch' },
-        { text: ', or install MAWS.app and open this build again.' },
-      ];
+      return [{ text: 'Only an installed MAWS.app sets it up for the main profile. Run this build on a profile of its own with ' }, { code: 'pnpm dev:scratch' }, { text: ', or install MAWS.app and open this build again.' }];
     case 'not-loaded':
-      return [{ text: `mawsd is installed, but macOS has not loaded it. In ${LOGIN_ITEMS}, turn MAWS on, then come back to this window.` }];
+      return [{ text: `macOS has not loaded it. In ${LOGIN_ITEMS}, turn MAWS on and come back.` }];
     case 'install-refused':
-      return [{ text: `MAWS runs its sessions, terminals and index in a background process, mawsd, and could not load or start it: ${why}. If MAWS is turned off in ${LOGIN_ITEMS}, turn it on, then come back to this window.` }];
+      return [{ text: `${why}. If MAWS is off in ${LOGIN_ITEMS}, turn it on and come back.` }];
     case 'not-started':
-      return [{ text: `macOS loaded mawsd, but it did not answer within 10 seconds: ${why}. Its last log lines are below.` }];
+      return [{ text: `It did not answer within 10 seconds: ${why}.` }];
   }
 }
 

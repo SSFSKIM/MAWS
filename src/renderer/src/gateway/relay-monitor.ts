@@ -1,8 +1,9 @@
 // The relay monitor (C11 execution document, Interfaces "Gateway", *Relay monitor*): while any session runs routed
 // through ClaudeUsage's relay, check the relay every 30 s and say so, app-wide, when it stops answering. One banner per
-// outage through C5's notices (a fixed id, so the store keeps one), dismissed with a toast when the relay answers again;
-// a banner the user dismissed is not posted again for the same outage. Live processes are left alone: the engine
-// reports its failed requests itself, and MAWS never relaunches on its own initiative (D-16).
+// outage through C5's notices (a fixed id, so the store keeps one), dismissed when the relay answers again (with no
+// toast: the banner leaving says so, the word cut's C154); a banner the user dismissed is not posted again for the same
+// outage. Live processes are left alone: the engine reports its failed requests itself, and MAWS never relaunches on
+// its own initiative (D-16).
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { ActionId } from '@shared/keymap/actions';
 import { formatAgo } from '@shared/app/date-format';
@@ -16,10 +17,7 @@ export const RELAY_POLL_MS = 30_000;
 export const RELAY_BANNER_ID = 'relay:down';
 
 const LIVE = new Set(['starting', 'initializing', 'ready']);
-const liveGatewaySessions = (state: SessionsState): number =>
-  [...state.engine.values()].filter((s) => throughClaudeUsage(s, null) === true && LIVE.has(s.process)).length; // P5 O7 M9: what it was observed reaching
-
-export const hasLiveGatewaySession = (state: SessionsState): boolean => liveGatewaySessions(state) > 0;
+export const hasLiveGatewaySession = (state: SessionsState): boolean => [...state.engine.values()].some((s) => throughClaudeUsage(s, null) === true && LIVE.has(s.process)); // P5 O7 M9: what it was observed reaching
 
 export interface RelayMonitorDeps {
   gateway: GatewayStore;
@@ -32,10 +30,8 @@ export interface RelayMonitorDeps {
 // In the display locale (`@shared/app/date-format`): "now", "30 seconds ago", "1 minute ago".
 const since = (fromIso: string, toIso: string): string => formatAgo(Math.max(0, Date.parse(toIso) - Date.parse(fromIso)), { seconds: true });
 
-function bannerText(live: number, outageSince: string, checkedAt: string): string {
-  const sessions = live === 1 ? '1 live session keeps its process; its next request fails' : `${live} live sessions keep their process; their next request fails`;
-  return `ClaudeUsage's relay stopped answering ${since(outageSince, checkedAt)} · ${sessions} until it is back · new sessions will offer Direct`;
-}
+// The word cut (C153): how long, and the consequence
+const bannerText = (outageSince: string, checkedAt: string): string => `ClaudeUsage's relay stopped answering ${since(outageSince, checkedAt)} · requests fail until it is back`;
 
 export function startRelayMonitor(
   deps: RelayMonitorDeps = { gateway: useGateway, sessions: useSessions, notices: useNotices, runAction: (id) => runShellAction(id) },
@@ -52,17 +48,16 @@ export function startRelayMonitor(
       if (outage === null) return;
       outage = null;
       if (bannerShown()) notices.getState().dismiss(RELAY_BANNER_ID);
-      notices.getState().toast({ level: 'info', text: 'Relay is back', actions: [], dismissible: true });
       return;
     }
-    // One banner per outage: posted at its first failed check, then kept current in place (how long, how many live
-    // sessions) while it is shown; once dismissed it stays dismissed until the relay answers again.
+    // One banner per outage: posted at its first failed check, then kept current in place (how long) while it is shown;
+    // once dismissed it stays dismissed until the relay answers again.
     if (outage !== null && !bannerShown()) return;
     outage ??= { since: health.checkedAt };
     notices.getState().banner({
       id: RELAY_BANNER_ID,
       level: 'warning',
-      text: bannerText(liveGatewaySessions(sessions.getState()), outage.since, health.checkedAt),
+      text: bannerText(outage.since, health.checkedAt),
       actions: [
         { label: 'Open ClaudeUsage', run: () => deps.runAction('gateway.openClaudeUsage') },
         { label: 'Retry', run: check },

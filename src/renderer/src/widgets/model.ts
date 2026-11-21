@@ -84,7 +84,8 @@ export function rowNamed(models: readonly ModelRow[], name: string): ModelRow | 
 }
 
 // Fast mode from the init frame (`fastMode.state`): `on` checked, `cooldown` checked and marked, `off` unchecked, and
-// the reason in words when one is reported.
+// the reason in words when one is reported, but for `sdk_opt_in_required`, the off switch's own state (the word cut,
+// P541: an off session's line said only "Off until turned on here").
 export interface FastView {
   checked: boolean;
   caption: string | null;
@@ -92,7 +93,7 @@ export interface FastView {
 }
 export function fastView(fast: EngineSessionStatus['fastMode'], row: ModelRow | undefined): FastView {
   const checked = fast.state === 'on' || fast.state === 'cooldown';
-  const reason = fast.disabledReason === null ? null : (MODEL.fastReason[fast.disabledReason] ?? fast.disabledReason);
+  const reason = fast.disabledReason === null || fast.disabledReason === 'sdk_opt_in_required' ? null : (MODEL.fastReason[fast.disabledReason] ?? fast.disabledReason);
   return { checked, caption: fast.state === 'cooldown' ? MODEL.cooldown : checked ? null : reason, disabled: row?.supportsFastMode === true ? null : MODEL.fastForOpus };
 }
 

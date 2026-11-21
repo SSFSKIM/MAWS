@@ -28,6 +28,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
 import { GATEWAY } from '../settings-tab/copy';
 import { REL } from '../test-support/relative-time';
+import { accessibleText } from '../test-support/accessible-text';
 
 const SELECTOR_BACK = 'Back to effort';
 
@@ -78,6 +79,8 @@ const calls = (subtype: string) => backend.calls.filter((c) => c.subtype === sub
 const view = () => document.querySelector('[data-model-selector]')?.getAttribute('data-model-selector');
 const item = (name: RegExp) => screen.getByRole('menuitemradio', { name });
 const names = (group: HTMLElement) => within(group).getAllByRole('menuitemradio').map((r) => r.querySelector('.truncate')?.textContent);
+const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
+const describedBy = (element: Element) => (element.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
 
 describe('the effort view: the effort in words over the model, a slider over its levels, a reset', () => {
   it('names the effort get_settings applied and the model, and slides to set the effort for this session', async () => {
@@ -93,6 +96,7 @@ describe('the effort view: the effort in words over the model, a slider over its
     expect(calls('apply_flag_settings')[0].input).toEqual({ appSessionId: BARE, effort: 'xhigh' });
   });
 
+  // the word cut (P531): its tooltip is the short "Reset effort", on a tip focus reaches; its name keeps the long form
   it('Reset clears an effort set explicitly, and is off while none is', async () => {
     knowEffort('high');
     mount('effort');
@@ -100,6 +104,10 @@ describe('the effort view: the effort in words over the model, a slider over its
     expect(reset.disabled).toBe(true); // nothing requested: the effort is the engine's own
     setStatus({ effort: 'max' });
     await waitFor(() => expect(reset.disabled).toBe(false));
+    expect(reset.hasAttribute('title')).toBe(false);
+    act(() => reset.focus());
+    expect(tooltip()).toBe('Reset effort');
+    act(() => reset.blur());
     fireEvent.click(reset);
     await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, effort: null }]));
   });
@@ -126,22 +134,29 @@ describe('the effort view: the effort in words over the model, a slider over its
     await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, settings: { fastMode: true } }]));
   });
 
-  it('draws no lightning; the row sits at the foot with its state in words, and is absent for a model without fast mode', async () => {
+  // the word cut (P541, P543): with nothing else to say the row has no line (the switch shows on or off, and "Off until
+  // turned on here" says no more), and the switch has no tooltip repeating its label
+  it('draws no lightning; the row sits at the foot with a line only where there is something to say, and is absent for a model without fast mode', async () => {
     setStatus({ model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, fastMode: { state: 'off', disabledReason: null } });
     mount('effort');
     const fast = await screen.findByRole('switch', { name: 'Fast mode' });
     expect(document.body.textContent).not.toContain('⚡');
     const row = fast.closest('[data-fast-row]') as HTMLElement;
-    expect(row.textContent).toBe('Fast modeOff');
+    expect(row.textContent).toBe('Fast mode');
+    expect(fast.hasAttribute('title')).toBe(false);
+    act(() => fast.focus());
+    expect(tooltip()).toBeNull();
+    act(() => fast.blur());
     const view = screen.getByRole('group', { name: 'Effort' });
     expect(view.lastElementChild).toBe(row); // the foot of the effort view
     setStatus({ fastMode: { state: 'on', disabledReason: null } });
-    await waitFor(() => expect(row.textContent).toBe('Fast modeOn'));
-    expect(fast.getAttribute('aria-checked')).toBe('true');
+    await waitFor(() => expect(fast.getAttribute('aria-checked')).toBe('true'));
+    expect(row.textContent).toBe('Fast mode');
     setStatus({ fastMode: { state: 'cooldown', disabledReason: null } });
     await waitFor(() => expect(row.textContent).toBe('Fast modeon · cooling down'));
     setStatus({ fastMode: { state: 'off', disabledReason: 'sdk_opt_in_required' } });
-    await waitFor(() => expect(row.textContent).toBe('Fast modeOff until turned on here'));
+    await waitFor(() => expect(fast.getAttribute('aria-checked')).toBe('false'));
+    expect(row.textContent).toBe('Fast mode');
     fireEvent.click(fast);
     expect(screen.getByRole('button', { name: 'Turn on fast mode' })).toBeTruthy(); // the switch still asks first
     cleanup();
@@ -153,16 +168,24 @@ describe('the effort view: the effort in words over the model, a slider over its
   });
 
   // P5 O7 M8: `session.applyFlagSettings` is declared not offered on another machine (REMOTE_UNAVAILABLE): the row's
-  // switch is closed with the declared words, which its line says too, and `/fast on` opens no warning
+  // switch is closed with the declared words, which its line says too, and `/fast on` opens no warning. The word cut
+  // (P543): the greyed switch keeps the keyboard and owns its reason, as its tooltip and its description
   it('closes the fast-mode row for a session on another machine, with the declared reason', async () => {
     const remote = addressOf(OTHER_MACHINE, BARE);
     useSessions.setState({ engine: new Map([[remote, { ...backend.status(BARE), model: { ...backend.status(BARE).model, requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, appSessionId: remote }]]), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
     try {
       mount('fast', 'on', remote);
       const fast = await screen.findByRole('switch', { name: 'Fast mode' });
-      expect(fast).toHaveProperty('disabled', true);
-      expect(fast.title).toBe(REMOTE_UNAVAILABLE['session.applyFlagSettings']);
-      expect(fast.closest('[data-fast-row]')?.textContent).toBe(`Fast mode${REMOTE_UNAVAILABLE['session.applyFlagSettings']}`);
+      const reason = REMOTE_UNAVAILABLE['session.applyFlagSettings']!;
+      expect(fast).toHaveProperty('disabled', false);
+      expect(fast.getAttribute('aria-disabled')).toBe('true');
+      expect(fast.hasAttribute('title')).toBe(false);
+      expect(describedBy(fast)).toBe(reason);
+      act(() => fast.focus());
+      expect(tooltip()).toBe(reason);
+      fireEvent.click(fast);
+      expect(screen.queryByRole('group', { name: 'Fast mode' })).toBeNull(); // the click is swallowed: no warning
+      expect(accessibleText(fast.closest('[data-fast-row]')!)).toBe(`Fast mode${reason}`);
       expect(screen.queryByRole('button', { name: 'Turn on fast mode' })).toBeNull();
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
@@ -266,11 +289,13 @@ describe('the digits in the model list', () => {
   });
 });
 
-describe('the model view: Select model, Default with its recommendation, the catalogue with the current row checked', () => {
+describe('the model view: Model, Default with its recommendation, the catalogue with the current row checked', () => {
+  // the word cut (P544): the heading reads "Model", the view's group keeps "Select model"
   it('lists Default as a recommended set, then the catalogue without `default`, gateway aliases from the gateway', async () => {
     mount('model');
     expect(view()).toBe('model');
-    expect(screen.getByRole('heading', { name: 'Select model' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Model' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Select model' })).toBeTruthy();
     const claude = await screen.findByRole('group', { name: 'Claude models' });
     expect(names(claude)).toEqual(['Opus 5.5 (1M context)', 'Fable 5.1', 'Sonnet 5', 'Haiku']); // `default` is the entry above, not a row
     expect(within(screen.getByRole('group', { name: 'Gateway models' })).getAllByRole('menuitemradio')).toHaveLength(7);
@@ -292,10 +317,13 @@ describe('the model view: Select model, Default with its recommendation, the cat
     fireEvent.click(item(/^Opus/));
     await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }]));
     await waitFor(() => expect(view()).toBe('effort'));
-    expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // until an init frame reports it
+    expect(screen.getByText('setting…')).toBeTruthy(); // the word cut (C39): until an init frame reports it
     fireEvent.click(screen.getByRole('button', { name: 'Opus 5.5 (1M context) · Select model' }));
     expect(view()).toBe('model');
     expect(item(/^Opus/).getAttribute('aria-checked')).toBe('true');
+    // the word cut (P549): the checked row's change on its way is a quiet spinner in place of its check, no word
+    expect(await within(item(/^Opus/)).findByRole('progressbar', { name: 'setting…' })).toBeTruthy();
+    expect(item(/^Opus/).textContent).not.toMatch(/✓|setting…/);
     fireEvent.click(item(/Default/));
     await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }, { appSessionId: BARE, model: null }]));
     await waitFor(() => expect(view()).toBe('effort'));
@@ -306,11 +334,28 @@ describe('the model view: Select model, Default with its recommendation, the cat
   it('`/model claude/astra` in auto proposes it with the local-lane note and applies nothing until chosen', async () => {
     mount('model', 'claude/astra');
     await waitFor(() => expect(item(/^astra/).getAttribute('data-proposed')).toBe('true'));
-    expect(screen.getByRole('note').textContent).toContain('Auto-mode reviews for this model run locally.');
+    // the word cut (P534): the note is one sentence, naming the account the reviews count against
+    expect(screen.getByRole('note').textContent).toBe('Auto-mode reviews run locally and count against the routing account.');
     expect(calls('set_model')).toHaveLength(0);
     cleanup();
     mount('model', 'nonesuch');
-    await waitFor(() => expect(screen.getByText("No model named nonesuch in the engine's catalogue")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('No model named nonesuch')).toBeTruthy()); // the word cut (P537)
+  });
+
+  // the word cut (P535, P551): the read in flight is a quiet spinner named by its words, in the list's place and on the
+  // effort view's status line; an empty list says "No models"
+  it('shows a spinner named Reading the models… while the list is read, and No models for an empty one', async () => {
+    let answer: (value: unknown) => void = () => {};
+    backend.script('session.listModels', () => new Promise((resolve) => (answer = resolve)));
+    mount('model');
+    const list = screen.getByRole('menu', { name: 'Models' });
+    expect(await within(list).findByRole('progressbar', { name: 'Reading the models…' })).toBeTruthy();
+    expect(screen.queryByText('Reading the models…')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: SELECTOR_BACK }));
+    expect(within(screen.getByRole('group', { name: 'Effort' })).getByRole('progressbar', { name: 'Reading the models…' })).toBeTruthy();
+    await act(async () => answer({ models: [] }));
+    await waitFor(() => expect(screen.queryAllByRole('progressbar', { hidden: true })).toEqual([]));
+    expect(within(list).getByText('No models')).toBeTruthy();
   });
 
   it('a refused set_model keeps the current row and says why in words', async () => {
@@ -347,12 +392,12 @@ describe('a session with a record and no ready process', () => {
     await waitFor(() => expect(document.querySelector('[data-model-observed]')?.textContent).toMatch(new RegExp(`· Last observed ${REL.ago(2, 'day')}$`)));
     fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
     fireEvent.click(item(/^Opus/));
-    expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // pending from the choice
+    expect(screen.getByText('setting…')).toBeTruthy(); // pending from the choice
     await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }]));
     expect(acquires()).toEqual([{ appSessionId: BARE, reason: 'chip' }]);
     expect(useSessions.getState().engine.get(ID)?.process).toBe('ready');
     await waitFor(() => expect(view()).toBe('effort'));
-    expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // the live binding keeps it until an init confirms
+    expect(screen.getByText('setting…')).toBeTruthy(); // the live binding keeps it until an init confirms
   });
 
   it('a start that fails clears the pending mark, applies nothing and says why', async () => {
@@ -362,7 +407,7 @@ describe('a session with a record and no ready process', () => {
     await screen.findByRole('group', { name: 'Claude models' });
     fireEvent.click(item(/^Opus/));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The session did not become ready.'));
-    expect(screen.queryByText('set · the next init frame confirms it')).toBeNull();
+    expect(screen.queryByText('setting…')).toBeNull();
     expect(calls('set_model')).toHaveLength(0);
     expect(item(/^Sonnet/).getAttribute('aria-checked')).toBe('true'); // the record's requested model, still
   });
@@ -428,7 +473,21 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     expect(screen.getByRole('radiogroup', { name: 'Route' })).toBeTruthy();
     fireEvent.click(item(/^Haiku/));
     await waitFor(() => expect(patches).toEqual([{ model: 'haiku', effort: null }]));
-    expect(screen.getByText('Applies when the session starts')).toBeTruthy();
+    // the word cut (P555): a new chat's list has no last line; C40's "For this session only" is a started session's
+    expect(screen.queryByText('Applies when the session starts')).toBeNull();
+    expect(screen.queryByText('For this session only')).toBeNull();
+  });
+
+  // the word cut (P552): on Direct the greyed gateway models have no sentence above them; picking one still asks
+  it('on Direct greys the gateway models with no sentence above them, and picking one asks to start on the relay', async () => {
+    stub();
+    useSetup.setState({ intents: new Map([[INTENT, intent({ appSessionId: INTENT, gateway: 'direct' })]]) });
+    mount('model', '', INTENT);
+    const gateway = screen.getByRole('group', { name: 'Gateway models' });
+    expect(gateway.querySelector('p')).toBeNull();
+    expect(gateway.textContent).not.toContain('cannot serve');
+    fireEvent.click(within(gateway).getByRole('menuitemradio', { name: /^sol/ }));
+    expect(within(gateway).getByRole('group', { name: 'Start on the relay?' })).toBeTruthy();
   });
 
   // P5 O7 M9: the machine's own route is the intent's `route`, offered beside Gateway and Direct, and always one to go back to
