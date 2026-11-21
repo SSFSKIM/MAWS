@@ -2,7 +2,9 @@
 // B4; Decision Log 18): scenes of the in-app browser that read main's focused contents, which exist only while the
 // app's window is the key window. They run in the foreground: this file is claimed by no group of its own, so the bare
 // `pnpm e2e` runs it, under its MAWS_E2E_FOREGROUND=1 (gate-offload Decision Log 76: the foreground is opt-in per group,
-// and e2e:browser, where G6's page-level reads stay, runs quiet). The product app over the replay, as e2e:browser's
+// and e2e:browser, where G6's page-level reads stay, runs quiet). `pnpm e2e:packaged` runs the same whole suite on the
+// packaged app and sets the flag too (board ticket 825): without it `activateForScene` does nothing, the window is
+// never made key, and both scenes stop at their first expectation. The product app over the replay, as e2e:browser's
 // scenes (support/browser-scene.ts); its launch passes MAWS_HARNESS=0, so either build serves it.
 import { expect, test } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
