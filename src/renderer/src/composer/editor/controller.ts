@@ -14,6 +14,7 @@ import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { drainComposerAttachments, memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type AttachOptions, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
+import { overlayHolding } from '../frame/close-focus';
 import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
@@ -1080,7 +1081,33 @@ export class EditorController {
   handle(): EditorHandle {
     const editor = () => this.editor!;
     return {
-      focus: () => void editor().commands.focus(),
+      // Tiptap's command, in a frame of our own (its own defers a frame too): the frame yields to a menu, dialog or popover
+      // opened since the call (⇧⌘M right after a chip's menu gave the keyboard back), which the late focus closed
+      // Focused already, or a view not mounted yet: Tiptap's command itself, which returns before its frame and dispatches
+      // its transaction as ever. Else its call-time part as it does it (the transaction, stored marks kept on a text
+      // selection), and the focus and scroll in our frame.
+      focus: () => {
+        const tiptap = editor();
+        let deferred = false;
+        try {
+          deferred = !tiptap.view.hasFocus();
+        } catch {
+          // not mounted: the command's own guard answers
+        }
+        if (!deferred) return void tiptap.commands.focus();
+        tiptap.commands.command(({ tr }) => {
+          if (tr.selection instanceof TextSelection && tr.storedMarks) tr.setStoredMarks(tr.storedMarks);
+          return true;
+        });
+        const asked = overlayHolding();
+        requestAnimationFrame(() => {
+          if (tiptap.isDestroyed) return;
+          const holder = overlayHolding();
+          if (holder !== null && holder !== asked) return;
+          tiptap.view.focus();
+          tiptap.commands.scrollIntoView();
+        });
+      },
       submit: (when) => void this.submit(when),
       insertText: (text, options) => {
         if (this.busy) return;

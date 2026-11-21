@@ -1226,6 +1226,30 @@ describe('the three menu chords', () => {
     expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
   });
 
+  // The closing menu's timer gives the keyboard back with nothing holding it, and the editor's focus lands a frame later.
+  // With ⇧⌘M pressed in that frame (the case above's order under load), Tiptap's late focus pulled the focus out of the
+  // mode menu, which closed; the frame now yields to a menu opened since the call.
+  it('a chord pressed in the frame before a closed menu’s keyboard reaches the editor keeps its menu', async () => {
+    live(A);
+    live(B);
+    tabs(1);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <ComposerAppKeys />);
+    act(() => editorOf(1).focus());
+    await chord(...EFFORT);
+    expect(await screen.findByText('effort view')).toBeTruthy();
+    const frames: FrameRequestCallback[] = [];
+    const held = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((frame) => frames.push(frame));
+    onTestFinished(() => held.mockRestore());
+    await chord(...EFFORT); // closed with the keyboard in it: it is left on the body
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10))); // Radix's unmount timer: the close gives the keyboard back
+    expect(frames).toHaveLength(1); // the return asked for, its frame still to come
+    act(() => editorOf(1).focus()); // as the case above
+    await chord(...MODE); // in the frame after the close
+    act(() => frames.splice(0).forEach((frame) => frame(performance.now()))); // the frame comes
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
+    expect(within(document.body).getByRole('menu', { name: 'Permission mode' })).toBeTruthy();
+  });
+
   // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on
   // screen, not the request that opened the menu
   describe('beside the real selector', () => {
