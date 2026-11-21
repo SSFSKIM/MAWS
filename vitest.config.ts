@@ -155,11 +155,14 @@ class LongFirst extends BaseSequencer {
     return [...sorted.filter(long), ...sorted.filter((spec) => !long(spec))];
   }
 }
+// A run that asks for shuffled files (`--sequence.shuffle`, `--sequence.shuffle.files`) keeps vitest's own sequencer:
+// vitest picks its random one only when none is configured, so naming LongFirst would turn that shuffle off silently.
+const shuffled = process.argv.some((arg) => arg.startsWith('--sequence.shuffle'));
 
 // Two projects: shared, main, preload and the hosts run under Node; the renderer runs under happy-dom.
 export default defineConfig({
   test: {
-    sequence: { sequencer: LongFirst },
+    ...(shuffled ? {} : { sequence: { sequencer: LongFirst } }),
     ...(reporters ? { reporters } : {}),
     projects: [
       {
