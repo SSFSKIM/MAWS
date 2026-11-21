@@ -223,6 +223,7 @@ describe('the 64 KB DOM cap on every output branch', () => {
       const store = await storeWith(b.events);
       const view = renderRow(rowOf(store.rows(), 'bash'));
       capped(view.container);
+      expect(view.container.querySelector('.transcript-replayed-footer')?.textContent).toBe('exit 1'); // a non-zero exit keeps its footer
       view.unmount();
     }
   });
@@ -236,14 +237,16 @@ describe('agent message and bash rows', () => {
     expect(container.textContent).toContain('Skip node_modules entirely.');
   });
 
-  it('pass1/queue-and-interrupt: one replayed bash row with its command, output and exit code', async () => {
+  // The word cut (T66): exit 0 is the normal state, so the replayed row draws no footer for it
+  it('pass1/queue-and-interrupt: one replayed bash row with its command and output, and no footer for exit 0', async () => {
     const store = await storeWith(journalToEvents(loadJournal('pass1', 'queue-and-interrupt')));
     const bash = ofKind(store.rows(), 'bash');
     expect(bash).toHaveLength(1);
     const { container } = renderRow(bash[0]);
     expect(container.textContent).toContain('! printf BASH_MODE_OK');
     expect(container.querySelector('pre')?.textContent).toBe('BASH_MODE_OK');
-    expect(container.textContent).toContain('exit 0');
+    expect(container.textContent).not.toContain('exit 0');
+    expect(container.querySelector('.transcript-replayed-footer')).toBeNull();
     expect(container.querySelector('[data-bubble]')).toBeNull();
   });
 });

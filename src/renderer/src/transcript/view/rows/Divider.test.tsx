@@ -27,19 +27,42 @@ describe('divider row', () => {
     const divider = rowOf(store.rows(), 'divider');
     const jumpTo = vi.spyOn(useTranscriptStore.getState(), 'jumpTo');
     renderRow(divider, { storeKey: store.key });
-    const toggle = screen.getByRole('button', { name: /Worked for 2m 14s · Ran a command/ }); // UX wave U2 (O-15): the denied call is no part
+    const toggle = screen.getByRole('button', { name: /^2m 14s · Ran a command/ }); // UX wave U2 (O-15): the denied call is no part; the word cut (T1): no "Worked for"
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(screen.getByRole('link', { name: '1 denied' }));
     expect(jumpTo).toHaveBeenCalledWith(store.key, cellId.tool(tool('t1')), { turnId: divider.turnId });
     jumpTo.mockRestore();
   });
 
+  // The word cut (T2): a caption folded to `+N` sets the turn's lines apart, so the count is not read as one of them
+  it('sets a folded caption’s count apart from the turn’s lines', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('e1', 'Edit', { file_path: '/p/a.ts', old_string: 'a', new_string: 'b\nc\nd\ne' });
+    b.result('e1', 'done');
+    for (const [id, command] of [['c1', 'ls'], ['c2', 'pwd']]) {
+      b.toolUse(id, 'Bash', { command });
+      b.result(id, 'ok', { structured: BASH_RESULT('ok') });
+    }
+    b.toolUse('g1', 'Grep', { pattern: 'TODO' });
+    b.result('g1', 'a.ts:1: match');
+    b.toolUse('w1', 'WebSearch', { query: 'x' });
+    b.result('w1', 'found');
+    b.tick(3_000);
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    const line = screen.getByRole('button', { expanded: false });
+    expect(line.textContent).toMatch(/^\d+s · Edited a file, ran 2 commands, \+2 · \+\d+( −\d+)?$/);
+    expect(line.querySelector('.transcript-counts')?.textContent).toMatch(/^\+\d+/);
+  });
+
   it('toggles the work area: its rows join and leave the list, and aria-controls names the work area’s rows while open', async () => {
     const store = await storeWith(deniedTurn().events);
     const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
-    expect(screen.getByRole('button', { name: /Worked for/ }).hasAttribute('aria-controls')).toBe(false);
+    expect(screen.getByRole('button', { name: /^2m 14s/ }).hasAttribute('aria-controls')).toBe(false);
     const before = store.rows().length;
-    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^2m 14s/ }));
     const expanded = store.rows();
     expect(expanded.length).toBeGreaterThan(before);
     const divider = rowOf(expanded, 'divider');
@@ -49,11 +72,11 @@ describe('divider row', () => {
     // the answer after them; the turn's line ends the turn, under them (board ticket 789).
     const work = expanded.slice(expanded.findIndex((row) => row.kind === 'user') + 1, expanded.indexOf(divider)).filter((row) => row.kind !== 'time');
     expect(work.map((row) => row.kind)).toEqual(['cell', 'cell', 'assistant_text']);
-    expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe(work.slice(0, 2).map((row) => `t-${row.id}`).join(' '));
+    expect(screen.getByRole('button', { name: /^2m 14s/ }).getAttribute('aria-controls')).toBe(work.slice(0, 2).map((row) => `t-${row.id}`).join(' '));
     // W8: a fold reads closed at once and leaves the list once its rows have closed (the 150 ms close).
-    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
-    expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-expanded')).toBe('false');
-    expect(screen.getByRole('button', { name: /Worked for/ }).hasAttribute('aria-controls')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /^2m 14s/ }));
+    expect(screen.getByRole('button', { name: /^2m 14s/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: /^2m 14s/ }).hasAttribute('aria-controls')).toBe(false);
     await waitFor(() => expect(store.rows()).toHaveLength(before));
   });
 
@@ -65,7 +88,7 @@ describe('divider row', () => {
     const keepInPlace = vi.fn();
     const line = rowOf(store.rows(), 'divider');
     renderRow(line, { storeKey: store.key, keepInPlace });
-    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^2m 14s/ }));
     expect(keepInPlace).toHaveBeenCalledOnce();
     expect(keepInPlace).toHaveBeenCalledWith(line.id, expect.any(Number));
     // the row tests share one motion (context.tsx, NO_MOTION): the fold this click started runs out here, not in the next case
@@ -75,7 +98,7 @@ describe('divider row', () => {
   it('a second click while a fold runs takes it back, and the turn stays open (W8)', async () => {
     const store = await storeWith(deniedTurn().events);
     const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
-    const toggle = () => screen.getByRole('button', { name: /Worked for/ });
+    const toggle = () => screen.getByRole('button', { name: /^2m 14s/ });
     fireEvent.click(toggle());
     view.rerenderRow(rowOf(store.rows(), 'divider'));
     const open = store.rows().length;
@@ -90,7 +113,7 @@ describe('divider row', () => {
   it('a fold whose turn the store folded meanwhile leaves it folded (W8)', async () => {
     const store = await storeWith(deniedTurn().events);
     const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
-    const toggle = () => screen.getByRole('button', { name: /Worked for/ });
+    const toggle = () => screen.getByRole('button', { name: /^2m 14s/ });
     const before = store.rows().length;
     fireEvent.click(toggle());
     view.rerenderRow(rowOf(store.rows(), 'divider'));

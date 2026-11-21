@@ -49,14 +49,16 @@ export interface DividerCopyInput {
 const SHORTEST_FIGURE_MS = 1000;
 
 // UX wave U2 (l2-transcript-04): the verb follows the turn's origin, but a turn the answer to an asynchronous question
-// opened is the person's (U3's class `answer`), whatever origin the engine gave it.
-function verb(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'durationMs' | 'cause'>): string {
+// opened is the person's (U3's class `answer`), whatever origin the engine gave it. The word cut (T1, ruled): on the
+// turn's line a finished turn of the person's reads its duration alone ("3s · Ran an agent"); the summary popover keeps
+// "Worked for", and every other form keeps its words on both (who opened the turn, how it ended).
+function verb(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'durationMs' | 'cause'>, on: 'line' | 'summary'): string {
   const { state, durationMs, cause = null } = input;
   const origin = input.opener?.class === 'answer' ? 'human' : input.origin;
   const t = duration(durationMs);
   switch (state) {
     case 'working': return durationMs < SHORTEST_FIGURE_MS ? 'Working' : `Working for ${t}`;
-    case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
+    case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : on === 'line' ? t : `Worked for ${t}`;
     case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : cause === 'message' ? `Ended for your message after ${t}` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
@@ -66,7 +68,7 @@ function verb(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'dur
 // turn runs it reads its verb and then its counts so far, with no caption (its runs carry theirs); a part is left out
 // when it is empty. `dividerHead` is the line up to its counts, which a view draws in the diff colours.
 export function dividerHead(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'durationMs' | 'cause' | 'caption'>): string {
-  const head = verb(input);
+  const head = verb(input, 'line');
   return input.state !== 'working' && input.caption !== '' ? `${head} · ${input.caption}` : head;
 }
 
@@ -74,9 +76,15 @@ export function dividerHead(input: Pick<DividerCopyInput, 'state' | 'origin' | '
 export const lineCountsCopy = (counts: { added: number; removed: number }) =>
   [counts.added > 0 ? `+${counts.added}` : null, counts.removed > 0 ? `−${counts.removed}` : null].filter((part) => part !== null).join(' ');
 
+// The word cut (T2): a caption whose rest is folded ends in its count (`+6`); the lines that follow it are set apart
+// (`+6 · +4 −2`), or the count would read as one of them ("Seen on the scratch build"). The run's line and the turn's.
+export const FOLD = { count: (n: number) => `+${n}`, beforeLines: '· ' } as const;
+export const endsInFold = (caption: string) => /(^|, )\+\d+$/.test(caption);
+
 export function dividerCopy(input: DividerCopyInput): string {
   const counts = lineCountsCopy(input.counts);
-  const parts = [counts === '' ? dividerHead(input) : `${dividerHead(input)} ${counts}`];
+  const head = dividerHead(input);
+  const parts = [counts === '' ? head : `${head} ${endsInFold(head) ? FOLD.beforeLines : ''}${counts}`];
   if (input.denied > 0) parts.push(`${input.denied} denied`);
   if (input.autoDenied > 0) parts.push(`${input.autoDenied} auto-denied`);
   return parts.join(' · ');
@@ -94,7 +102,7 @@ export interface TurnSummaryCopyInput extends Pick<DividerCopyInput, 'state' | '
 // The turn summary popover: the verb on its model, every part of what the turn did, the denied kinds, the auto mode
 // line, the cost and the tokens.
 export function turnSummaryCopy(input: TurnSummaryCopyInput): string {
-  const head = verb(input) + (input.model ? ` on ${input.model}` : '');
+  const head = verb(input, 'summary') + (input.model ? ` on ${input.model}` : '');
   const parts = [head];
   if (input.parts.length > 0) parts.push(capitalise(input.parts.join(', ')));
   if (input.denied.length > 0) parts.push(`${input.denied.length} denied (${[...new Set(input.denied.map((d) => d.kind))].join(', ')})`);
@@ -172,8 +180,8 @@ export function cellLabel(input: CellLabelInput): string {
 export const BLOCKED = {
   approve: 'Approve and retry',
   always: {
-    command: 'A rule that always denies this command blocks it every time. Change the rule or the mode to run it.',
-    call: 'A rule that always denies this call blocks it every time. Change the rule or the mode to run it.',
+    command: 'A rule always denies this command. Change the rule or the mode to run it.', // the word cut (N100)
+    call: 'A rule always denies this call. Change the rule or the mode to run it.', // the word cut (N101)
   },
 } as const;
 
@@ -195,8 +203,9 @@ export const SHELL_CELL = {
 export const shellFooter = (status: 'done' | 'error' | 'stopped', exitCode: number | null, durationMs: number) => {
   const t = duration(durationMs);
   if (status === 'stopped') return `Stopped after ${t}`;
-  if (exitCode === null) return status === 'error' ? `Failed · ${t}` : `✓ Exit code 0 · ${t}`;
-  return exitCode === 0 ? `✓ Exit code 0 · ${t}` : `✕ Exit code ${exitCode} · ${t}`;
+  // the word cut (T22): exit 0 is the normal state, so a success reads its time alone
+  if (exitCode === null) return status === 'error' ? `Failed · ${t}` : t;
+  return exitCode === 0 ? t : `✕ Exit code ${exitCode} · ${t}`;
 };
 
 // A block that never streamed (disk history) has no duration: `Thought`, never a live-looking `Thinking`; nor does one
@@ -205,11 +214,10 @@ export const thinkingLabel = (live: boolean, durationMs: number | null) => (live
 
 // W8 (T1): a streaming block's label in the CLI's words (Claude Code 2.1.283, `cli.pretty.js`): the tier by how long the
 // block has run, from 10, 20, 30 and 45 s (`Mo`, `Co`, `Io`, `_o` at :521212, chosen by `Lo` at :521223-521233), then
-// ` with {effort} effort` when the session's effort is known (the spinner's `effortSuffix`, built by `xMt` at
-// :477207-477214), then the elapsed time.
+// the elapsed time. The word cut (T37): the CLI's ` with {effort} effort` is left out, the model chip's and menu's.
 const THINKING_TIERS: readonly (readonly [number, string])[] = [[45_000, 'Deep in thought'], [30_000, 'Thinking some more'], [20_000, 'Thinking more'], [10_000, 'Still thinking']];
 export const thinkingTier = (elapsedMs: number) => THINKING_TIERS.find(([from]) => elapsedMs >= from)?.[1] ?? 'Thinking';
-export const liveThinkingLabel = (elapsedMs: number, effort: string | null) => `${thinkingTier(elapsedMs)}${effort ? ` with ${effort} effort` : ''} · ${duration(elapsedMs)}`;
+export const liveThinkingLabel = (elapsedMs: number) => `${thinkingTier(elapsedMs)} · ${duration(elapsedMs)}`;
 // How far the label has turned to the warning colour: not before 10 s, wholly from 20 s, in eighths (the spinner's
 // thinking intensity, `Tn` at :521172-521179, which colours its thinking text toward the theme's warning by `pC`'s
 // eighths, :655065-655068, through `Do` at :521347 and the colour at :521357).
@@ -262,10 +270,10 @@ export const agentMessageCopy = (direction: 'to_child' | 'from_child' | 'between
 // (the view's), and the consent line on the person's own "Approve and retry".
 export const NOTICE = {
   mark: '●',
-  schedule: (firstLine: string | null) => (firstLine === null ? 'Running scheduled task' : `Running scheduled task · ${firstLine}`),
+  schedule: (firstLine: string | null) => (firstLine === null ? 'Scheduled' : `Scheduled · ${firstLine}`), // the word cut (T68)
   answered: (words: string) => `answered: ${words}`,
   dismissed: 'dismissed', // the bridge's dismissal of a question (decision 18)
-  wake: 'sminos bridge woke the session to read a message it had not read',
+  wake: 'Woken to read a message', // the word cut (T70)
   openOutput: 'Open output',
 } as const;
 // A notice's line as copied: its text and, where the engine gave one, its duration in the turn line's words.
@@ -289,18 +297,19 @@ export type BoundaryCopyInput =
   | { kind: 'retraction'; reason: string; fallbackModel: string | null }
   | { kind: 'rewind'; hiddenRows: number; revealed: boolean };
 
-const RESET_TRIGGERS: Record<string, string> = { plan_approved: 'after plan approval', plan_approval: 'after plan approval', clear: 'cleared', cleared: 'cleared' };
+// The word cut (T49): a reset reads what reset it, a clear reads Cleared; a trigger MAWS does not know follows the word
+const RESET_TRIGGERS: Record<string, string> = { plan_approved: 'Reset after plan approval', plan_approval: 'Reset after plan approval', clear: 'Cleared', cleared: 'Cleared' };
 
+// The word cut (T48, T49, T50, T52): the figures and the count stay, the words around them shorten; a compaction reads
+// the same live and from history. A continued branch's sentence waits on its line (BRANCH_HISTORY_DETAIL).
 export function boundaryCopy(input: BoundaryCopyInput): string {
   switch (input.kind) {
-    case 'compaction': {
-      const range = `${kilo(input.preTokens)} → ${input.postTokens === null ? '?' : kilo(input.postTokens)}`;
-      return input.historical ? `Compacted earlier · ${range}` : `Context compacted · ${range} tokens · ${input.trigger}`;
-    }
+    case 'compaction':
+      return `Compacted · ${kilo(input.preTokens)} → ${input.postTokens === null ? '?' : kilo(input.postTokens)}`;
     case 'reset':
-      return input.trigger === null ? 'Conversation reset' : `Conversation reset · ${RESET_TRIGGERS[input.trigger] ?? input.trigger}`;
+      return input.trigger === null ? 'Reset' : (RESET_TRIGGERS[input.trigger] ?? `Reset · ${input.trigger}`);
     case 'retraction':
-      if (input.reason === 'transcript_branch') return 'Conversation continued from an earlier point';
+      if (input.reason === 'transcript_branch') return 'Continued from an earlier point';
       return `Response retracted · ${input.reason}${input.fallbackModel ? ` · switched to ${input.fallbackModel}` : ''}`;
     case 'rewind':
       return `${rewindLabel(input.hiddenRows)} · ${REWIND_TOGGLE[input.revealed ? 'hide' : 'show']}`;
@@ -310,7 +319,7 @@ export function boundaryCopy(input: BoundaryCopyInput): string {
 export const BRANCH_HISTORY_DETAIL = 'Later messages from the previous path are no longer part of the current conversation history';
 
 // The rewind boundary's line without its toggle, and the toggle (the row renders the toggle as a button).
-export const rewindLabel = (hiddenRows: number) => `Rewound to here · ${plural(hiddenRows, 'message')} hidden`;
+export const rewindLabel = (hiddenRows: number) => `Rewound · ${hiddenRows} hidden`;
 export const REWIND_TOGGLE = { show: 'Show', hide: 'Hide' } as const;
 export const NOT_IN_CONTEXT = 'Not in context'; // a revealed rewound branch: the model no longer has it
 
@@ -318,13 +327,14 @@ export const retryCopy = (attempt: number, max: number | null, status: number | 
   `Retrying (${attempt}/${max ?? '?'}) · ${status === null ? '' : `${status} `}${error}`;
 export const reconnectCopy = (phase: 'attempting' | 'reconnected' | 'failed', attempt: number, max: number | null, reason: string | null) =>
   phase === 'attempting' ? `Reconnecting (${attempt}/${max ?? '?'})…` : phase === 'reconnected' ? 'Reconnected' : `Could not reconnect${reason ? ` · ${reason}` : ''}`;
-// C12 start: the memory budget's release and the resume after it (C12 execution document, "Surfaces of the budget")
-export const RELEASED_COPY = 'Released to stay under the memory budget · sending resumes it';
-export const IDLE_RELEASED_COPY = 'Stopped while idle · sending resumes it'; // E10: the supervisor's idle release (neutral: it also runs with MAWS open after an update)
-export const RESUMING_COPY = 'Resuming…';
-export const RESUMED_COPY = 'Resumed';
-// P5 O16 M3b (D58a): the end of an adopted engine whose re-initialize after the handover failed, resumed at once
-export const HANDOVER_REINIT_COPY = 'The engine could not be re-attached after the update; the session was resumed.';
+// C12 start: the memory budget's release (C12 execution document, "Surfaces of the budget"); the word cut (T57): in a
+// person's words, the way out kept. The resume after it draws no line, running nor done (T56, T58): the session's own
+// running mark says it (derive.ts).
+export const RELEASED_COPY = 'Paused to save memory · send to resume';
+export const IDLE_RELEASED_COPY = 'Paused while idle · send to resume'; // E10: the supervisor's idle release (neutral: it also runs with MAWS open after an update)
+// P5 O16 M3b (D58a): the end of an adopted engine whose re-initialize after the handover failed, resumed at once (the
+// word cut, T59)
+export const HANDOVER_REINIT_COPY = 'Resumed after the update';
 // C12 end
 // E1: `lostAskCount` of the lost were blocking `maws` asks, named questions; the rest stay approvals.
 const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {
@@ -342,15 +352,16 @@ export const commandLead = (run: { command: string }) => `/${run.command} · `;
 export const ANSWER_ACTIONS = { copy: 'Copy', fork: 'Fork from here', forkTitle: 'Starts a new session from this point. This one stays as it is.' } as const;
 
 // UX wave U3b (decision 16, Interfaces §L): while a session compacts, the row at the transcript's end, with the time so
-// far in the turn line's format once it reaches a second ('' before), and the sidebar's hover card
-export const COMPACTING_SESSION = 'Compacting session…';
+// far in the turn line's format once it reaches a second ('' before), and the sidebar's hover card (the word cut, N117:
+// the session is the place it is read in)
+export const COMPACTING_SESSION = 'Compacting…';
 export const compactingLine = (elapsed: string) => (elapsed === '' ? COMPACTING_SESSION : `${COMPACTING_SESSION} ${elapsed}`);
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
-// W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
-// and a steer the engine took, inside the turn at the step where it arrived.
+// W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it.
+// A steer the engine took sits inside the turn at the step where it arrived, with no caption (the word cut, T42).
 export const PENDING_CAPTION = { next: 'Sends at the next step', held: 'Sends when this turn ends' } as const;
-export const STEERED_CAPTION = 'Sent during this turn';
-export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' : `exit ${exitCode}`);
+// the word cut (T66): a `!` command that exited 0 draws no footer
+export const bashFooter = (exitCode: number | null) => (exitCode === null || exitCode === 0 ? '' : `exit ${exitCode}`);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Cell detail and receipts
@@ -358,14 +369,17 @@ export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' :
 // A mermaid fence whose diagram mermaid rejected (MermaidFence.tsx).
 export const DIAGRAM = { failed: 'Diagram could not be drawn' } as const;
 
+// The word cut (T18): the three copy controls are glyphs, these words their names and tooltips; T19: the long command's
+// toggle; T20: the session's own folder is not named
 export const DETAIL = {
   copyCommand: 'Copy command',
   copyOutput: 'Copy output',
   copyAll: 'Copy all',
+  showMore: 'Show more',
+  showLess: 'Show less',
   openFullLog: 'Open full log',
   raw: 'Raw',
   cwd: 'cwd',
-  sessionDirectory: 'Session directory',
   input: 'Input',
   result: 'Result',
   noDiff: 'No diff recorded',
@@ -403,7 +417,7 @@ export const PLUGIN = {
 const sizeCopy = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`);
 export const SPILL = {
   load: (bytes: number | null) => (bytes === null ? 'Load full result' : `Load full result (${sizeCopy(bytes)})`),
-  loading: 'Loading the full result…',
+  loading: 'Loading the full result…', // the word cut (T26): a quiet spinner's name, in the Load button's place
   head: (shownBytes: number) => `Showing the first ${sizeCopy(shownBytes)}`,
   failed: (reason: string) => `Could not load the full result · ${reason}`,
   retry: 'Retry',
@@ -412,14 +426,14 @@ export const SPILL = {
 // A transcript whose history could not be loaded (the store's failed hydration phase): the UX wave, U9 (O-11b), one line,
 // its reason in the line's hover title, off the screen; and (O-39, A3) what a pane with nothing to draw says once its
 // history read has been out for 300 ms.
-export const HYDRATION = { failed: 'Couldn’t load this conversation', retry: 'Retry', loading: 'Loading…' } as const;
+export const HYDRATION = { failed: 'Couldn’t load this conversation', retry: 'Retry', loading: 'Loading…' /* the word cut (T111): a quiet spinner's name */ } as const;
 // The long-transcript window: an older page that did not load (lane A's words, session/controls/lane-a.ts)
 export const OLDER = { failed: (reason: string) => `Older messages didn’t load: ${reason}`, retry: 'Retry' } as const;
 
 // A jump to a message older than what is loaded (the store's `reach`): the pages back to it on their way, and how it ended
 // when it did not land.
 export const REACH = {
-  loading: (progress: number | null) => `Loading earlier messages to reach the message${progress === null ? '…' : ` · ${Math.round(progress * 100)}%`}`,
+  loading: (progress: number | null) => `Finding the message${progress === null ? '…' : ` · ${Math.round(progress * 100)}%`}`, // the word cut (T114)
   missing: 'That message is no longer in this transcript.',
   failed: (reason: string) => `Earlier messages didn’t load: ${reason}`,
   stop: 'Stop',
@@ -640,8 +654,7 @@ export const ARTIFACT_CELL = {
   listed: (n: number | null) => (n === null ? 'Listed artifacts' : n === 0 ? 'Listed no artifacts' : `Listed ${plural(n, 'artifact')}`),
   listFailed: 'Could not list artifacts', // UX wave U2: the reason is the row's
   screenshotting: (id: string) => `Taking a screenshot of ${id}`,
-  screenshot: (shot: { title: string; version?: number; revision?: number; width: number; height: number } | null, id: string) =>
-    shot === null ? `Screenshot of ${id}` : `Screenshot of ${shot.title}${shot.version === undefined ? ` · revision ${shot.revision ?? 0}` : ` v${shot.version}`} (${shot.width} × ${shot.height})`,
+  screenshot: (shot: { title: string } | null, id: string) => `Screenshot of ${shot === null ? id : shot.title}`, // the word cut (T17): no version, no size
   screenshotFailed: (title: string) => `Could not screenshot ${title}`, // UX wave U2: the artifact's title in its marks; the reason is the row's
   calls: ARTIFACT_CALL_WORDS, // UX wave U2
 } as const;

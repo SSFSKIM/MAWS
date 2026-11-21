@@ -31,8 +31,9 @@ export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'ass
 // opens with an ellipsis. UX wave U2b: a message in it is drawn as every message is (`MarkedText`), and where it heads
 // a closed stretch of the to-human view (the mirror's `reportOnly`, read from the row's context) only its messages,
 // under the same note.
-export const CUT_NOTE = 'Cut off by the interrupt: the session didn’t keep it';
-export const PARTWAY_NOTE = 'Only its end was kept, so it starts partway through';
+// The word cut (T65): the fact in short, and the partway mark after it
+export const CUT_NOTE = 'Cut off · not kept by the session';
+export const PARTWAY_NOTE = 'starts partway';
 
 // The ellipsis of a text kept partway is drawn beside its words, not written into them: the words are read and drawn as
 // the mirror classed them (an ellipsis before a fence glued to its tag would hide the fence from the one reading).
@@ -40,7 +41,7 @@ export function CutTextRow({ row }: { row: Extract<Row, { kind: 'assistant_text'
   const { markdown } = row;
   return (
     <div className="transcript-cut" data-cut="" data-partway={row.partway ? '' : undefined}>
-      <div className="transcript-cut-note">{row.partway ? `${CUT_NOTE}. ${PARTWAY_NOTE}` : CUT_NOTE}</div>
+      <div className="transcript-cut-note">{row.partway ? `${CUT_NOTE} · ${PARTWAY_NOTE}` : CUT_NOTE}</div>
       {row.partway && <span className="transcript-cut-partway" aria-hidden="true">…</span>}
       {hasMessages(markdown) ? <MarkedText text={markdown} live={false} /> : <Markdown markdown={markdown} live={false} />}
     </div>

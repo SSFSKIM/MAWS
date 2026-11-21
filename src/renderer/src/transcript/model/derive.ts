@@ -21,7 +21,7 @@ import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { artifactTitlesOf, type ArtifactTitles } from './cells'; // UX wave U2
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
-import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
+import { HANDOVER_REINIT_COPY /* P5 O16 M3b */ } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, type WorkItem } from './groups';
 import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder, type SentOutcome } from './caption'; // UX wave U2
@@ -1813,6 +1813,7 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
     case 'boundary.reset':
       return { ...base, boundaryKind: 'reset', text: boundaryCopy({ kind: 'reset', trigger: event.trigger }), detail: event.newConversationId };
     case 'boundary.retraction':
+      // the word cut (T50): a continued branch's second sentence is `secondary`, which waits on its line (Boundary.tsx)
       return { ...base, boundaryKind: 'retraction', text: boundaryCopy({ kind: 'retraction', reason: event.reason, fallbackModel: event.fallbackModel }), ...(event.reason === 'transcript_branch' ? { secondary: BRANCH_HISTORY_DETAIL, detail: [event.reason, ...event.retractedMessageUuids].join(' · ') } : { detail: event.retractedMessageUuids.join(', ') || null }) };
   }
 }
@@ -1985,13 +1986,15 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);
         const row: RowOf<'error'> = { id, turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
-        // C12 start: the resume of a session released under the memory budget reads Resuming… and stays as Resumed, the
-        // line that closes the release's own
-        const resumed = event.trigger === 'process_exit' && event.phase === 'reconnected';
-        if (event.trigger === 'process_exit' && event.phase === 'attempting') row.text = RESUMING_COPY;
-        if (resumed) Object.assign(row, { severity: 'notice', text: RESUMED_COPY, attempt: null });
+        // C12 start: the resume of a session released under the memory budget draws no line while it runs nor once it
+        // succeeded (the word cut, T56 and T58): the session's own running mark says it; a resume that failed keeps its row
+        if (event.trigger === 'process_exit' && event.phase !== 'failed') {
+          if (episode) rows.splice(episode.index, 1);
+          episode = null;
+          break;
+        }
         // C12 end
-        if (event.phase === 'reconnected' && !resumed /* C12 */) {
+        if (event.phase === 'reconnected') {
           if (episode) rows.splice(episode.index, 1); // a reconnect that succeeded leaves no row
         } else if (episode) rows[episode.index] = row;
         else {

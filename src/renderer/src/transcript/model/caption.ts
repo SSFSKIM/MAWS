@@ -5,8 +5,8 @@
 // the cap at :137-138 and :247-302), with MAWS's three additions to its kinds (the shell's output, kill and monitor calls with the
 // commands, LS with the file searches, the Task tools with the todos) and the turn's own steps (agents, sent messages).
 import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
-import { stoppedMember } from './classify';
-import { baseName } from './copy';
+import { isCuaJsTool, stoppedMember } from './classify';
+import { baseName, FOLD } from './copy';
 import type { Cell, ChangedLines, Row, SubagentRef, SubagentStatus } from './rows';
 
 export type CaptionKind =
@@ -16,23 +16,27 @@ export type StepOutcome = 'succeeded' | 'failed' | 'stopped' | 'running';
 
 // One thing a caption counts: a call, an agent, a sent message. `key` is what a part of a kind counts it by (a file's
 // path, a recipient, an agent, else the call itself); `words` are a step of no kind's, its row's done label with the
-// first letter lowered ('' for a step of a kind); `path` is a file step's.
+// first letter lowered ('' for a step of a kind); `path` is a file step's; `named` is a skill's or a connector's call's
+// name as a capped caption keeps it in view (`namedOf`), absent for any other step.
 export interface CaptionStep {
   kind: CaptionKind | null;
   key: string;
   words: string;
   outcome: StepOutcome;
   path: string | null;
+  named?: string;
 }
 
 // `count` is what the part counts (Desktop's): its keys for a part of a kind, its verbs for the one-file part, its calls
-// for a part of no kind; the cap's `N more actions` sums it over the parts left out.
+// for a part of no kind; the cap's `+N` sums it over the parts left out. `named`: a part a capped caption names rather
+// than counts, and its words there.
 export interface CaptionPart {
   text: string;
   calls: number;
   count: number;
   changed: boolean;
   agent: boolean;
+  named?: string;
 }
 
 const counted = (one: string, several: (n: number) => string) => (n: number) => (n === 1 ? one : several(n));
@@ -56,8 +60,8 @@ const KIND_WORDS: Record<CaptionKind, (n: number) => string> = {
 // The kinds that name a file, and each one's verb when the steps of a run or a turn all name one file
 const FILE_VERB: Partial<Record<CaptionKind, string>> = { read: 'read', create: 'created', edit: 'edited', notebook: 'edited' };
 const CHANGED = new Set<CaptionKind>(['create', 'edit', 'notebook']);
-const moreActions = (n: number) => (n === 1 ? 'and 1 more action' : `and ${n} more actions`);
-const CAP_KEPT = 3; // Desktop's `ce`: from five parts on, the first three and the rest counted
+// Desktop's `ce` keeps three parts from five on; the word cut (T2) keeps two from four on, the rest a bare count
+const CAP_KEPT = 2;
 const CAP_FROM = CAP_KEPT + 2;
 
 const lowerFirst = (text: string) => (text.length === 0 ? text : text[0].toLowerCase() + text.slice(1));
@@ -122,11 +126,25 @@ function writesOf(cells: readonly Cell[]): Map<string, string> {
   return writes;
 }
 
+// The word cut (T2; the owner's call, twice): a call that names a skill or a connector the turn used, which a capped
+// caption keeps in view: a Skill call by its skill (`ran /dataviz`), an MCP server's call by its server (`used notion`),
+// the computer-use plugin's by that name. MAWS's own server is no connector: its calls are the app's own rows.
+function namedOf(cell: Cell): string | null {
+  if (cell.toolName === 'Skill') {
+    const input = cell.detail.kind === 'generic' ? cell.detail.input : null;
+    const skill = typeof input === 'object' && input !== null ? (input as { skill?: unknown }).skill : undefined;
+    return typeof skill === 'string' && skill !== '' ? `ran /${skill.replace(/^\//, '')}` : null;
+  }
+  if (isCuaJsTool(cell.toolName)) return 'used computer use';
+  return cell.detail.kind === 'mcp' && cell.detail.server !== 'maws' ? `used ${cell.detail.server}` : null;
+}
+
 function stepOf(cell: Cell, writes: ReadonlyMap<string, string>): CaptionStep {
   const kind = kindOf(cell, writes);
   const path = kind !== null && FILE_VERB[kind] !== undefined ? pathOf(cell) : null;
   const call = cell.toolUseId ?? cell.id;
-  return { kind, key: path ?? call, words: kind === null ? lowerFirst(cell.doneLabel ?? cell.label) : '', outcome: outcomeOf(cell.status), path };
+  const named = kind === null ? namedOf(cell) : null;
+  return { kind, key: path ?? call, words: kind === null ? lowerFirst(cell.doneLabel ?? cell.label) : '', outcome: outcomeOf(cell.status), path, ...(named !== null && { named }) };
 }
 
 // A run's steps: its calls, in order; thoughts and refused calls that stand alone give none.
@@ -191,13 +209,13 @@ const countOf = (outcomes: Iterable<StepOutcome | undefined>, of: StepOutcome) =
 // part that names it, at the first file part's place.
 export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
   const kinds = new Map<CaptionKind, { keys: Map<string, StepOutcome | undefined>; calls: number }>();
-  const unkinded = new Map<string, { calls: number; failed: number; stopped: number }>();
+  const unkinded = new Map<string, { calls: number; failed: number; stopped: number; named: string | undefined }>();
   const fileSteps: CaptionStep[] = [];
   const paths = new Set<string>();
   let everyFileNamed = true;
   for (const step of steps) {
     if (step.kind === null) {
-      const part = unkinded.get(step.words) ?? { calls: 0, failed: 0, stopped: 0 };
+      const part = unkinded.get(step.words) ?? { calls: 0, failed: 0, stopped: 0, named: step.named };
       part.calls += 1;
       if (step.outcome === 'failed') part.failed += 1;
       if (step.outcome === 'stopped') part.stopped += 1;
@@ -226,7 +244,8 @@ export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
     parts.push({ text: KIND_WORDS[kind](part.keys.size) + marks(countOf(outcomes, 'failed'), countOf(outcomes, 'stopped')), calls: part.calls, count: part.keys.size, changed: CHANGED.has(kind), agent: kind === 'agent' });
   }
   for (const [words, part] of unkinded) {
-    parts.push({ text: (part.calls > 1 ? `${words} ${part.calls} times` : words) + marks(part.failed, part.stopped), calls: part.calls, count: part.calls, changed: false, agent: false });
+    const text = (part.calls > 1 ? `${words} ${part.calls} times` : words) + marks(part.failed, part.stopped);
+    parts.push({ text, calls: part.calls, count: part.calls, changed: false, agent: false, ...(part.named !== undefined && { named: part.named }) });
   }
   return parts;
 }
@@ -249,14 +268,21 @@ export function turnOrder(parts: readonly CaptionPart[]): CaptionPart[] {
   return [...parts.filter((part) => part.changed), ...parts.filter((part) => !part.changed && part.agent), ...parts.filter((part) => !part.changed && !part.agent)];
 }
 
-// The parts joined by `, `, the first letter raised; capped, from five parts on, at the first three and one more item,
-// `and N more actions`, N the sum of the left-out parts' counts (Desktop's `oe` and its joiner; the architect's ruling of
-// 2026-11-13). '' for no part.
+// The parts joined by `, `, the first letter raised (Desktop's `oe` and its joiner); capped, from four parts on, at the
+// first two, then the name of each skill and connector the left-out parts used, once each and not one a kept part
+// already names, then `+N`, N the sum of the other left-out parts' counts (the architect's ruling of 2026-11-13; the
+// word cut, T2), with no count when nothing else is left out. '' for no part.
 export function captionText(parts: readonly CaptionPart[], cap: boolean): string {
-  if (parts.length === 0) return '';
-  const capped = cap && parts.length >= CAP_FROM;
-  const items = capped ? [...parts.slice(0, CAP_KEPT).map((part) => part.text), moreActions(parts.slice(CAP_KEPT).reduce((n, part) => n + part.count, 0))] : parts.map((part) => part.text);
-  return raiseFirst(items.join(', '));
+  if (!(cap && parts.length >= CAP_FROM)) return raiseFirst(parts.map((part) => part.text).join(', '));
+  const kept = parts.slice(0, CAP_KEPT);
+  const keptNames = new Set(kept.flatMap((part) => (part.named === undefined ? [] : [part.named])));
+  const named: string[] = [];
+  let folded = 0;
+  for (const part of parts.slice(CAP_KEPT)) {
+    if (part.named === undefined || keptNames.has(part.named)) folded += part.count;
+    else if (!named.includes(part.named)) named.push(part.named);
+  }
+  return raiseFirst([...kept.map((part) => part.text), ...named, ...(folded > 0 ? [FOLD.count(folded)] : [])].join(', '));
 }
 
 // The lines the finished edits among these cells added and removed: a failed, stopped or still running edit changed

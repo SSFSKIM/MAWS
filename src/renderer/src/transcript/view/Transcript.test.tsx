@@ -399,30 +399,32 @@ describe('Transcript', () => {
     expect(document.querySelectorAll('[data-kind="user"]')).toHaveLength(2);
   });
 
-  // The UX wave, U9 (O-39, A3): a pane with nothing to draw says "Loading…" once its history read has been out 300 ms, and
-  // nothing before; rows already drawn (a staged restart) show no word.
-  it('says “Loading…” once a read with nothing to draw has been out 300 ms, and not before', async () => {
+  // The UX wave, U9 (O-39, A3): a pane with nothing to draw says it is loading, and nothing before; rows already drawn (a
+  // staged restart) show nothing. The word cut (T111): what it shows is the quiet spinner, named "Loading…", from half a
+  // second of the read on
+  it('shows a quiet spinner named Loading… once a read with nothing to draw has been out half a second, and not before', async () => {
     let answer: (events: SessionEvent[]) => void = () => {};
     const source: TranscriptSource = { key: `transcript-test-${++keys}`, subscribe: () => () => {}, snapshot: () => new Promise((resolve) => (answer = resolve)) };
     render(<Transcript source={source} variant="session" />);
-    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
-    expect(screen.queryByText('Loading…'), 'nothing in the first 300 ms').toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    expect(screen.queryByRole('progressbar'), 'nothing in the first half second').toBeNull();
     const root = document.querySelector('.transcript')!;
-    expect(root.getAttribute('data-hydration'), 'the read is out before the word shows').toBe('loading');
-    expect(await screen.findByText('Loading…', undefined, { timeout: 1_000 })).toBeTruthy();
+    expect(root.getAttribute('data-hydration'), 'the read is out before the spinner shows').toBe('loading');
+    expect(await screen.findByRole('progressbar', { name: 'Loading…' }, { timeout: 1_000 })).toBeTruthy();
+    expect(root.textContent).not.toContain('Loading…');
     await act(async () => answer(deniedThenAnswer()));
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
-    expect(screen.queryByText('Loading…')).toBeNull();
+    expect(screen.queryByRole('progressbar')).toBeNull();
     expect(root.getAttribute('data-hydration')).toBe('ready');
   });
 
-  it('says nothing for a read that answers within 300 ms, nor while rows it already drew stay on screen through a restart', async () => {
+  it('shows nothing for a read that answers within half a second, nor while rows it already drew stay on screen through a restart', async () => {
     const key = await mounted(deniedThenAnswer());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
-    expect(screen.queryByText('Loading…')).toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(screen.queryByRole('progressbar')).toBeNull();
     act(() => useTranscriptStore.setState((s) => ({ entries: { ...s.entries, [key]: { ...s.entries[key]!, phase: 'hydrating' } } })));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
-    expect(screen.queryByText('Loading…'), 'the rows are the content').toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(screen.queryByRole('progressbar'), 'the rows are the content').toBeNull();
   });
 
   // UX wave U1b (§C, §D): a pending question has its own row; while the session's list names its call the row draws the
@@ -745,7 +747,7 @@ describe('a jump to a message older than what is loaded', () => {
     let reaching!: Promise<unknown>;
     act(() => void (reaching = useTranscriptStore.getState().reachMessage(source.key!, anchor)));
     const bar = await screen.findByTestId('reach');
-    expect(bar.textContent).toContain('Loading earlier messages to reach the message…');
+    expect(bar.textContent).toContain('Finding the message…'); // the word cut (T114)
     expect(walks.map((walk) => walk.target)).toEqual([anchor.messageUuid]);
     act(() => walks[0]!.progress?.(0.4));
     expect(screen.getByTestId('reach').textContent).toContain('40%');
