@@ -490,6 +490,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-shell .transcript-copy-glyph { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; }
 .transcript-copy-glyph .transcript-icon { width: 13px; height: 13px; }
 .transcript-copy-glyph[data-on-hover] { opacity: 0; }
+@media (hover: none) { .transcript-copy-glyph[data-on-hover] { opacity: 1; } } /* a pointer that cannot point: always drawn */
 .transcript-shell-heading:hover > .transcript-copy-glyph, .transcript-shell-heading:focus-within > .transcript-copy-glyph,
 .transcript-shell-output:hover > .transcript-copy-glyph, .transcript-shell-output:focus-within > .transcript-copy-glyph { opacity: 1; }
 .transcript-shell-output { position: relative; }

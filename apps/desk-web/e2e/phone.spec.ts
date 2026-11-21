@@ -349,7 +349,7 @@ test("@layout a session's channel on the phone is its session view: its record l
   await expect(opened).toHaveText('‹ fold to report');
   await expect(opened).toHaveAttribute('aria-expanded', 'true');
   const turnLine = view.locator(`[data-row-id="divider:${turn}"]`);
-  await expect(turnLine).toContainText('Worked for');
+  await expect(turnLine).toHaveText(/^\d+(?:m \d+)?s · /); // a finished turn's duration alone (the word cut, T1)
   await expect(turnLine).toContainText('Ran a command');
   await expect(turnLine).toContainText('searched code');
   await expect(turnLine).not.toContainText('tool call');

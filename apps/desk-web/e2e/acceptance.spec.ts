@@ -428,7 +428,8 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   const appendedBubble = view.locator(`[data-row-id="user:${appendedUuid}"]`);
   await expect(appendedBubble).toHaveCount(1);
   await expect(appendedBubble).toContainText('Count the markdown files too.');
-  await expect(appendedBubble).toContainText('Sent during this turn');
+  await expect(appendedBubble.locator('section.transcript-user[data-steer]')).toHaveCount(1); // a steer in the turn, with no caption (the word cut, T42)
+  await expect(appendedBubble).not.toContainText('Sent during this turn');
   await expect(appendedBubble).not.toContainText('[sminos');
   await expect(appendedBubble.locator('em')).toHaveCount(0); // the owner's own: no label
 
@@ -498,7 +499,8 @@ test("a desk Steer waits at the tail until the row its result names, then is the
   const bubble = view.locator(`[data-row-id="user:${steered}"]`);
   await expect(bubble).toHaveCount(1);
   await expect(bubble).toContainText('Use the split store.');
-  await expect(bubble).toContainText('Sent during this turn');
+  await expect(bubble.locator('section.transcript-user[data-steer]')).toHaveCount(1); // a steer in the turn, with no caption (the word cut, T42)
+  await expect(bubble).not.toContainText('Sent during this turn');
   await expect(view.locator('[data-kind="user"]').filter({ hasText: 'Use the split store.' })).toHaveCount(1);
 });
 
