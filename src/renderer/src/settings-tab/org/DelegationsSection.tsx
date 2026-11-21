@@ -16,7 +16,7 @@
 // - The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): New delegation… is one button with no label,
 //   and stands for the empty list's line where it is offered (G187); the code destination waits behind a chevron beside
 //   the heading, in view while it is unset or damaged and once it has been, kept mounted while folded so an edit or a
-//   Save in flight survives the fold (G188, G189); New delegation… greyed is still focusable, its reason its tooltip
+//   Save in flight survives the fold, and opening it moves the keyboard into it (G188, G189); New delegation… greyed is still focusable, its reason its tooltip
 //   and description, and while the destination's first read is out it is a quiet spinner, a failed read its own line
 //   with Retry; someone who may not sign reads the page's top line, not this section's (G170).
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -99,7 +99,8 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
   const needed = creates && (reading === null || (reading !== undefined && 'damaged' in reading));
   const disclosed = useDisclosed(needed);
   // The form stays mounted while folded, so an edit or a Save in flight survives a fold; opened from its chevron, it is
-  // brought into view (it sits at the section's end, past the delegations).
+  // brought into view (it sits at the section's end, past the delegations) and the keyboard moves into it, on its first
+  // control, so the next Tab does not pass the delegations between.
   const body = useRef<HTMLDivElement>(null);
   const reveal = useRef(false);
   const chevron = {
@@ -113,6 +114,7 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
     if (!disclosed.open || !reveal.current) return;
     reveal.current = false;
     body.current?.scrollIntoView?.({ block: 'nearest' });
+    body.current?.querySelector<HTMLElement>('input, button:not([disabled])')?.focus({ preventScroll: true });
   }, [disclosed.open]);
   return (
     <div data-org-section="delegations" className="mt-2">

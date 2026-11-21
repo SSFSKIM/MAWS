@@ -363,6 +363,16 @@ describe('the code destination across a fold (G188)', () => {
     await vi.waitFor(() => expect(field('Secret').value).toBe(NEXT.secret));
   });
 
+  it('opened from its chevron by the keyboard, focus moves into the form, on its first field', async () => {
+    const user = userEvent.setup();
+    renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => SET });
+    const chevron = await within(await group('org')).findByRole('button', { name: 'Code destination' });
+    await vi.waitFor(() => expect(field('Project').value).toBe(SET.project));
+    act(() => chevron.focus());
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(field('Project'));
+  });
+
   it('opened from its chevron, the form is brought into view', async () => {
     const user = userEvent.setup();
     const seen = vi.fn();
