@@ -11,7 +11,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgView, ProvisioningSecret, ProvisioningSecretWrite } from '@shared/ipc/schema/org';
 import { useMachines } from '../../stores/machines';
 import { accessibleText } from '../../test-support/accessible-text';
-import { ANA, ANA_MAC, BEN, DEVICE, FINGERPRINT, MINI, ROOT, VIEW, found, grantsOf, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { ANA, ANA_MAC, BEN, DEVICE, FINGERPRINT, MINI, findFoot, ROOT, VIEW, found, grantsOf, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -384,7 +384,7 @@ describe('New delegation… while it waits (G187)', () => {
   it('greyed, it takes Tab and says why on focus, its reason also at rest; Enter opens nothing', async () => {
     const user = userEvent.setup();
     renderSection(signing(ROOT)); // no destination set
-    const foot = await vi.waitFor(() => document.querySelector<HTMLElement>('[data-org-new-delegation]')!);
+    const foot = await findFoot('new-delegation');
     const create = await within(foot).findByRole('button', { name: 'New delegation…', description: 'Set the code destination below first.' });
     expect(create.getAttribute('aria-disabled')).toBe('true');
     expect(accessibleText(foot)).toContain('Set the code destination below first.');

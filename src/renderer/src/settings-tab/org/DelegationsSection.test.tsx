@@ -11,6 +11,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DelegationResult, DiscardResult, HubHalfResult, HubKeysRead, OrgDelegationRow, OrgView, ProvisioningSecret, ProvisioningSecretReading, ProvisioningSecretWrite } from '@shared/ipc/schema/org';
+import { accessibleText } from '../../test-support/accessible-text';
 import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer, foot, disclose, found } from './test-support';
 
 vi.hoisted(() => {
@@ -101,7 +102,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     renderSection(signing(ROOT), withDelegations({ delegations: [] }));
     // the word cut (G187): New delegation… stands in the empty line's place where it is offered
     expect((await delegationsGroup()).queryByText('No delegations yet.')).toBeNull();
-    expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' })).toBeTruthy();
+    expect(await within(foot('new-delegation')).findByRole('button', { name: 'New delegation…' })).toBeTruthy(); // once the destination is read
     resetHarness();
     renderSection(signing(notSigning), withDelegations({ delegations: [], maySign: false }));
     expect((await delegationsGroup()).getByText('No delegations yet.')).toBeTruthy(); // nothing stands in its place here
@@ -119,7 +120,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(within(ci).getByText('no use cap')).toBeTruthy(); // the hub's count is an admin's read
     expect(within(ci).queryByText(/hub/i)).toBeNull();
     expect(screen.queryByRole('group', { name: 'Hub keys' })).toBeNull(); // the key list is an admin's read
-    expect(within(foot('new-delegation')).getByText('An admin creates delegations from their Org page.')).toBeTruthy();
+    expect(accessibleText(foot('new-delegation'))).toContain('An admin creates delegations from their Org page.');
     expect(sent('org.provisioningSecret.get')).toEqual([]); // the destination is an admin's who signs
   });
 
@@ -392,7 +393,7 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     });
     await delegationsGroup();
     const create = await within(foot('new-delegation')).findByRole('button', { name: 'New delegation…' });
-    await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('Set the code destination below first.')).toBeTruthy());
+    await vi.waitFor(() => expect(accessibleText(foot('new-delegation'))).toContain('Set the code destination below first.'));
     expect(create.getAttribute('aria-disabled')).toBe('true'); // greyed and still focusable (the word cut)
 
     const destination = row('Code destination');
@@ -410,7 +411,7 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     await vi.waitFor(() => expect(sent('org.provisioningSecret.set')).toEqual([{ value: DEST }]));
     expect(await within(row('Code destination')).findByText('Saved.')).toBeTruthy();
     await vi.waitFor(() => expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }).getAttribute('aria-disabled')).toBeNull());
-    expect(within(foot('new-delegation')).queryByText('Set the code destination below first.')).toBeNull();
+    expect(accessibleText(foot('new-delegation'))).not.toContain('Set the code destination below first.');
     fireEvent.click(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }));
     expect(await screen.findByRole('dialog', { name: 'Create a delegation' })).toBeTruthy();
   });
@@ -449,23 +450,23 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     const destination = await found('Code destination'); // in view once read damaged (the word cut, G188)
     expect(await within(destination).findByText('The destination’s file is damaged (version 2 is not this build’s): Reset it, then enter the destination again.')).toBeTruthy();
     expect(within(destination).queryByRole('textbox')).toBeNull(); // never edited over
-    expect(within(foot('new-delegation')).getByText('Reset the code destination below first.')).toBeTruthy();
+    expect(accessibleText(foot('new-delegation'))).toContain('Reset the code destination below first.');
     fireEvent.click(within(destination).getByRole('button', { name: 'Reset…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Reset the code destination?' });
     expect(sent('org.provisioningSecret.reset')).toEqual([]);
     fireEvent.click(within(sheet).getByRole('button', { name: 'Reset' }));
     await vi.waitFor(() => expect(sent('org.provisioningSecret.reset')).toEqual([{ confirmed: true }]));
     expect(await within(row('Code destination')).findByRole('textbox', { name: 'Project' })).toBeTruthy(); // read again: unset
-    expect(within(foot('new-delegation')).getByText('Set the code destination below first.')).toBeTruthy();
+    expect(accessibleText(foot('new-delegation'))).toContain('Set the code destination below first.');
   });
 
   it('Create waits while a delegation is being created, and while a signed state is pending, saying why', async () => {
     renderSection(signing(ROOT, { delegations: { creating: true, rev: 0 } }), { 'org.provisioningSecret.get': () => DEST });
     await delegationsGroup();
-    await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('A delegation is being created, in this window or another: Create once it’s done.')).toBeTruthy());
+    await vi.waitFor(() => expect(accessibleText(foot('new-delegation'))).toContain('A delegation is being created, in this window or another: Create once it’s done.'));
     expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }).getAttribute('aria-disabled')).toBe('true');
     emit(signing(PENDING));
-    await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('A signed state is pending: publish or discard it (Org › Pending) first.')).toBeTruthy());
+    await vi.waitFor(() => expect(accessibleText(foot('new-delegation'))).toContain('A signed state is pending: publish or discard it (Org › Pending) first.'));
     emit(signing(ROOT));
     await vi.waitFor(() => expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }).getAttribute('aria-disabled')).toBeNull());
     await act(async () => {});
