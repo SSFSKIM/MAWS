@@ -3,7 +3,7 @@
 // device's line as People and You draw it, and a sign's outcome in one line. Tokens only, at the Settings rows' weight.
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): identifiers wait behind a disclosure chevron
 // named by what it shows (G156, G171, G180, G188), and a device's id is its kind's tooltip (G160).
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
 import type { DiscardResult, OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
 import { ChevronDownIcon } from '../../app/IconButton';
@@ -198,14 +198,24 @@ export function Fingerprint({ value }: { value: string }) {
 
 // The pairing-code field: typed here, sent trimmed on the button or Enter, and cleared once sent. `focus`: it takes the
 // keyboard as it is drawn (opened by Sign in…), which opens its row's note. Where to get a code is the row's `note`;
-// what the code's act changes in this Mac's trust (Re-anchor's) is a `line`, at rest.
+// what the code's act changes in this Mac's trust (Re-anchor's) is a `line`, at rest. A refusal that answers a code sent
+// here is brought into view under the field: the field can sit at the scroll area's lower edge (the Org section is
+// Settings' last), where its answer would draw out of sight. A refusal standing as the page draws scrolls nothing.
 type CodeWords = { note: string; line?: undefined } | { line: string; note?: undefined };
 export function CodeField({ action, note, line, pending, refusal, focus = false, onSend }: CodeWords & { action: string; pending: boolean; refusal: OrgRefusal | null; focus?: boolean; onSend(code: string): void }) {
   const [draft, setDraft] = useState('');
+  const sent = useRef(false);
+  const answer = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (refusal === null || !sent.current) return;
+    sent.current = false;
+    answer.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [refusal]);
   const send = () => {
     const code = draft.trim();
     if (code === '' || pending) return;
     setDraft('');
+    sent.current = true;
     onSend(code);
   };
   const keys = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -218,15 +228,15 @@ export function CodeField({ action, note, line, pending, refusal, focus = false,
       <button type="button" className={TEXT_ACTION} disabled={pending || draft.trim() === ''} onClick={send}>
         {action}
       </button>
-      <Refusal refusal={refusal} />
+      <Refusal refusal={refusal} ref={answer} />
     </Setting>
   );
 }
 
-export function Refusal({ refusal }: { refusal: OrgRefusal | null }) {
+export function Refusal({ refusal, ref }: { refusal: OrgRefusal | null; ref?: Ref<HTMLSpanElement> }) {
   if (refusal === null) return null;
   return (
-    <span role="alert" className="min-w-0 basis-full text-ui-sm text-warning [overflow-wrap:anywhere]">
+    <span ref={ref} role="alert" className="min-w-0 basis-full text-ui-sm text-warning [overflow-wrap:anywhere]">
       {refusalText(refusal)}
     </span>
   );

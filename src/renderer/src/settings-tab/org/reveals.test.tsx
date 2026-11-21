@@ -55,6 +55,29 @@ describe('a Mac in no org (G147 to G149, G153)', () => {
     expect(within(row('Org')).queryByRole('button')).toBeNull();
   });
 
+  it('a refusal that answers a sent code is brought into view under the field; one standing as the page draws is not', async () => {
+    const user = userEvent.setup();
+    const seen = vi.fn();
+    const scroll = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = seen;
+    try {
+      // the Org section is Settings' last: sitting low, the field opens at the scroll area's edge and its answer under it
+      renderSection({ state: 'none' }, { 'org.register': () => ({ ok: false, reason: { code: 'busy', detail: 'another attempt' } }) });
+      await user.click(within(await found('Org')).getByRole('button', { name: 'Sign in…' }));
+      await user.type(within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }), 'QX7K-4MPL-92TD{Enter}');
+      const refusal = await within(row('Pairing code')).findByRole('alert');
+      expect(seen).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(seen.mock.contexts.at(-1)).toBe(refusal);
+      resetHarness();
+      seen.mockClear();
+      renderSection({ state: 'none', refused: { code: 'expired', attempt: 'register' } });
+      await within(await found('Pairing code')).findByRole('alert');
+      expect(seen).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = scroll;
+    }
+  });
+
   it('the read is a quiet spinner named by its words, which are not drawn; a failed read keeps its words', async () => {
     renderSection({ state: 'none' }, { 'org.status': () => new Promise(() => {}) });
     expect(screen.queryByRole('progressbar')).toBeNull();
