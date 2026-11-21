@@ -551,6 +551,7 @@ button.transcript-glyph-overflow { padding: 0 3px; border-radius: var(--radius-s
 button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-hover); }
 .transcript-lifecycle { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 8px; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; overflow-wrap: anywhere; }
 .transcript-lifecycle .transcript-icon { align-self: center; }
+.transcript-lifecycle-wait { display: inline-flex; align-items: center; justify-content: center; } /* the glyph's place, the quiet spinner in it (the word cut, Acceptance 5) */
 
 /* Requests in history: plan and question (no controls; a pending request is C7's card in the slot) */
 .transcript-badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); font-size: var(--text-ui-sm); font-weight: 500; }

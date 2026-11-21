@@ -15,6 +15,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { LANE_A_WORDS } from '../../session/controls/lane-a';
+import { QuietSpinner } from '../../ui/spinner';
 import { useTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
 import type { TranscriptActions } from '../../transcript/view/context';
@@ -37,10 +38,13 @@ interface Props {
   className?: string;
 }
 
-/** Why the machine gives nothing of the agent's transcript now, in words. */
-function unservedWords(why: Unserved, machine: string): string {
-  if (why.kind === 'refused') return why.reason;
-  return why.reason === 'offline' ? LANE_A_WORDS.agentOffline(machine) : LANE_A_WORDS.agentReading(machine); // the word cut (C133): main asks again
+// What the pane says where nothing of the agent's is held, and whether a read is under way: the first, or main asking
+// again after a pause other than the link going down (the word cut, C133), which has the quiet spinner (Acceptance 5).
+function emptyWords(why: Unserved | null, live: boolean, machine: string): { words: string; reading: boolean } {
+  const reading = { words: LANE_A_WORDS.agentReading(machine), reading: true };
+  if (why === null) return live ? { words: LANE_A_WORDS.agentNoRows, reading: false } : reading;
+  if (why.kind === 'refused') return { words: why.reason, reading: false };
+  return why.reason === 'offline' ? { words: LANE_A_WORDS.agentOffline(machine), reading: false } : reading;
 }
 
 /** When this pane first drew each streaming block, on its clock: a live thinking label ticks from it. */
@@ -74,13 +78,7 @@ export function RemoteAgentTranscript({ appSessionId, agentId, actions, renderRe
   useOlderPages(transcript, list, state);
   // Words only where nothing of the agent's transcript is held: what was drawn stays drawn through a pause or a reset.
   const empty = state.held.length === 0 && state.streaming.length === 0;
-  const words = !empty
-    ? null
-    : why !== null
-      ? unservedWords(why, machine)
-      : state.phase !== 'live'
-        ? LANE_A_WORDS.agentReading(machine)
-        : LANE_A_WORDS.agentNoRows;
+  const shown = empty ? emptyWords(why, state.phase === 'live', machine) : null;
   return (
     <>
       {state.olderFailed !== null && (
@@ -91,9 +89,15 @@ export function RemoteAgentTranscript({ appSessionId, agentId, actions, renderRe
           </button>
         </div>
       )}
-      {words !== null && (
-        <p role="status" data-testid="subagent-rows-status" className="m-0 shrink-0 px-4 py-3 text-ui-sm text-fg-muted">
-          {words}
+      {shown !== null && (
+        <p role="status" data-testid="subagent-rows-status" className="m-0 flex shrink-0 items-center gap-2 px-4 py-3 text-ui-sm text-fg-muted">
+          {/* the word cut (Acceptance 5): a read under way has the app's quiet spinner beside its words, in a place kept for it */}
+          {shown.reading && (
+            <span className="inline-flex size-3 shrink-0">
+              <QuietSpinner label={shown.words} />
+            </span>
+          )}
+          {shown.words}
         </p>
       )}
       <Transcript source={state.source} variant="child" actions={actions} renderRequest={renderRequest} className={className} handle={list} tail={tail} />

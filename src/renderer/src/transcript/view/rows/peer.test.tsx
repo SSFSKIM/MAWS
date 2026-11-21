@@ -467,14 +467,17 @@ describe('a ListAgents listing', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('says it is listing until the result arrives', () => {
+  it('says it is listing until the result arrives, with the quiet spinner beside its words', async () => {
     const row = derived((b) => {
       b.turn('u1');
       b.toolUse('l1', 'ListAgents', {});
     }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
-    renderRow(row, { storeKey: A });
+    const { container } = renderRow(row, { storeKey: A });
     expect(screen.getByText('Listing agents…')).toBeTruthy(); // the word cut (T85)
     expect(screen.queryByRole('button')).toBeNull(); // nothing to open yet
+    // the word cut (Acceptance 5; task 2 fix round 1): the app's quiet spinner where the static glyph stood, the words its name
+    expect(await screen.findByRole('progressbar', { name: 'Listing agents…' })).toBeTruthy();
+    expect(container.querySelector('svg')).toBeNull();
   });
 
   it('a listing and a send whose turn closed with no result say they were never answered, not busy (scale-review C scalpel-1#1)', () => {

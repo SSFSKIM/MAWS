@@ -793,6 +793,8 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     expect(invoke).toHaveBeenCalledWith('laneA.watch', { appSessionId: SESSION, agentId: 'a1' }, OTHER_MACHINE);
     await settle();
     expect(screen.getByTestId('subagent-rows-status').textContent).toBe('Reading from mini…');
+    // the word cut (Acceptance 5; task 2 fix round 1): the app's quiet spinner beside the words, the words its name
+    expect(screen.getByTestId('subagent-rows-status').contains(await screen.findByRole('progressbar', { name: 'Reading from mini…' }))).toBe(true);
     const c = new Chain('c4a1f200', 'sminos');
     c.prompt('Survey the checkout.');
     c.answer('One file.');
@@ -819,8 +821,10 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     const status = () => screen.getByTestId('subagent-rows-status').textContent;
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'offline' }, OTHER_MACHINE));
     expect(status()).toBe('mini isn’t reachable'); // the word cut (C133): three states in a person's words
+    expect(screen.queryByRole('progressbar')).toBeNull(); // nothing under way
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'unavailable' }, OTHER_MACHINE));
     expect(status()).toBe('Reading from mini…'); // asked again: a read under way
+    expect(await screen.findByRole('progressbar', { name: 'Reading from mini…' })).toBeTruthy(); // with the quiet spinner (Acceptance 5)
     const empty = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-a', n: 0, body: { rows: [], more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', messages: [empty] }, OTHER_MACHINE));
     await settle();

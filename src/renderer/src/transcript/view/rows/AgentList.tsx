@@ -4,8 +4,10 @@
 // the name is what other sessions message it by). What the parser did not read stays as notes. The word cut (T81, T82,
 // T84): a read listing is one counted line, "Listed 9 agents", that opens in place to its sections and notes; it draws
 // no self line; each row's Message shows on pointing or focus within the row, and while its box is open. A listing
-// still out, never answered, or read as notes alone keeps its one line, with nothing to fold.
+// still out, never answered, or read as notes alone keeps its one line, with nothing to fold; one still out leads with
+// the app's quiet spinner where the glyph stands (Acceptance 5), its words kept.
 import { CountedFold } from '../../../ui/counted-fold';
+import { QuietSpinner } from '../../../ui/spinner';
 import { agentListCopy } from '../../model/copy';
 import type { ListingRow } from '../../model/agent-listing';
 import type { Row } from '../../model/rows';
@@ -43,7 +45,13 @@ export function AgentListRow({ row }: { row: AgentListData }) {
     return (
       <section className="transcript-listing" aria-busy={row.pending || undefined}>
         <div className="transcript-lifecycle">
-          <MessageIcon />
+          {row.pending ? (
+            <span className="transcript-icon transcript-lifecycle-wait">
+              <QuietSpinner label={agentListCopy.pending} />
+            </span>
+          ) : (
+            <MessageIcon />
+          )}
           <span>{row.pending ? agentListCopy.pending : row.neverAnswered ? agentListCopy.neverAnswered : (row.notes[0] ?? '')}</span>
         </div>
         {!row.pending && !row.neverAnswered && row.notes.slice(1).map((note, i) => (
