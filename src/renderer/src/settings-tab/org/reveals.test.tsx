@@ -373,6 +373,31 @@ describe('the code destination across a fold (G188)', () => {
     expect(document.activeElement).toBe(field('Project'));
   });
 
+  it('a Save refused while folded unfolds the form: the refusal and its retry are in view, the draft kept', async () => {
+    const user = userEvent.setup();
+    let answer: (write: ProvisioningSecretWrite) => void = () => {};
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => SET,
+      'org.provisioningSecret.set': () =>
+        new Promise<ProvisioningSecretWrite>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const chevron = await within(await group('org')).findByRole('button', { name: 'Code destination' });
+    await vi.waitFor(() => expect(field('Secret').value).toBe(SET.secret));
+    await user.click(chevron);
+    fireEvent.change(field('Secret'), { target: { value: NEXT.secret } });
+    await user.click(within(destination()).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.set')).toEqual([{ value: NEXT }]));
+    await user.click(chevron); // fold while the write is out
+    await act(async () => answer({ ok: false, reason: 'io', detail: 'disk full' }));
+    expect(chevron.getAttribute('aria-expanded')).toBe('true');
+    const shown = screen.getByRole('group', { name: 'Code destination' });
+    expect(accessibleText(shown)).toContain('Not saved · The destination couldn’t be written: Save again. · disk full');
+    expect(field('Secret').value).toBe(NEXT.secret);
+    expect(within(shown).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(false);
+  });
+
   it('opened from its chevron, the form is brought into view', async () => {
     const user = userEvent.setup();
     const seen = vi.fn();

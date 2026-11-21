@@ -31,12 +31,13 @@ export function failed(error: IpcError) {
   toast({ level: 'warning', text: ORG.failed(error.message), actions: [], dismissible: true });
 }
 
-/** A disclosure's state: open or not, and the id of the body it controls. While `held`, it opens and stays open. */
-export type Disclosed = { open: boolean; id: string; toggle(): void };
+/** A disclosure's state: open or not, and the id of the body it controls. While `held`, it opens and stays open; `show`
+ * opens it for what its body must not hide (a refusal that answers while it is folded). */
+export type Disclosed = { open: boolean; id: string; toggle(): void; show(): void };
 export function useDisclosed(held = false): Disclosed {
   const [open, setOpen] = useState(held);
   if (held && !open) setOpen(true);
-  return { open, id: useId(), toggle: () => setOpen((was) => !was) };
+  return { open, id: useId(), toggle: () => setOpen((was) => !was), show: () => setOpen(true) };
 }
 
 /** The chevron that opens what waits behind it: a glyph named, and tipped, by what it shows. */

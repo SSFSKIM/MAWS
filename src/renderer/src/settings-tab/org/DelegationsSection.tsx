@@ -16,9 +16,10 @@
 // - The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): New delegation… is one button with no label,
 //   and stands for the empty list's line where it is offered (G187); the code destination waits behind a chevron beside
 //   the heading, in view while it is unset or damaged and once it has been, kept mounted while folded so an edit or a
-//   Save in flight survives the fold, and opening it moves the keyboard into it (G188, G189); New delegation… greyed is still focusable, its reason its tooltip
-//   and description, and while the destination's first read is out it is a quiet spinner, a failed read its own line
-//   with Retry; someone who may not sign reads the page's top line, not this section's (G170).
+//   Save in flight survives the fold, a refusal opening it again, and opening it moves the keyboard into it (G188,
+//   G189); New delegation… greyed is still focusable, its reason its tooltip and description, and while the
+//   destination's first read is out it is a quiet spinner, a failed read its own line with Retry; someone who may not
+//   sign reads the page's top line, not this section's (G170).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDayTime } from '@shared/app/date-format';
 import { ProvisioningSecretSchema, type OrgChange, type OrgView, type ProvisioningSecret, type ProvisioningSecretReading } from '@shared/ipc/schema/org';
@@ -163,7 +164,7 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
       )}
       {creates && (
         <div ref={body} id={disclosed.id} hidden={!disclosed.open} inert={!disclosed.open}>
-          <DestinationField reading={reading} reload={destination.reload} />
+          <DestinationField reading={reading} reload={destination.reload} refused={disclosed.show} />
         </div>
       )}
       {asked !== null && (
@@ -206,10 +207,15 @@ function HubKeysUnread({ at, signedIn }: { at: string | null; signedIn: boolean 
 const FIELDS = ['project', 'secret', 'account'] as const;
 type Field = (typeof FIELDS)[number];
 
-// The code's destination: the three values with Save, or a damaged file's reason with Reset.
-function DestinationField({ reading, reload }: { reading: ProvisioningSecretReading | undefined; reload(): void }) {
+// The code's destination: the three values with Save, or a damaged file's reason with Reset. A refusal is never left
+// folded away: it opens the disclosure, so the refusal and its way out (Save again, Reset) are in view.
+function DestinationField({ reading, reload, refused: unfold }: { reading: ProvisioningSecretReading | undefined; reload(): void; refused(): void }) {
   const open = useOpen();
-  const [outcome, setOutcome] = useState<Outcome>(null);
+  const [outcome, setShown] = useState<Outcome>(null);
+  const setOutcome = (next: Outcome) => {
+    setShown(next);
+    if (next?.refused) unfold();
+  };
   const [confirming, setConfirming] = useState(false);
   const reset = () => {
     setConfirming(false);
