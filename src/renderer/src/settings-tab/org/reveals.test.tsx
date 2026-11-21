@@ -4,11 +4,11 @@
 // named by what it shows; a row's actions are one "…" menu named by what they act on; a fact sent to a tooltip has an
 // owner the keyboard reaches; a non-signer reads one view-only line at the page's top; and every reveal works from the
 // keyboard alone.
-import { act, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineState } from '@shared/ipc/schema/machines';
-import type { OrgView } from '@shared/ipc/schema/org';
+import type { OrgView, ProvisioningSecret, ProvisioningSecretWrite } from '@shared/ipc/schema/org';
 import { useMachines } from '../../stores/machines';
 import { accessibleText } from '../../test-support/accessible-text';
 import { ANA, ANA_MAC, BEN, DEVICE, FINGERPRINT, MINI, ROOT, VIEW, found, grantsOf, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
@@ -90,12 +90,11 @@ describe('a registered Mac (G156, G160, G170, G180, G183)', () => {
     expect(screen.queryByRole('group', { name: 'Signer' })).toBeNull();
   });
 
-  it('the Signer row stands for a Mac that is not a root, with its note, and for the weekly re-sign; no “signs” chip there', async () => {
+  it('the Signer row stands for a Mac that is not a root, its compare-the-fingerprints line at rest, and for the weekly re-sign; no “signs” chip there', async () => {
     renderSection(signing({ maySign: false }));
     const signer = await found('Signer');
     expect(within(row('This Mac')).queryByText('signs')).toBeNull();
-    expect(screen.getByRole('group', { name: 'Signer', description: `Its confirmation names this Mac’s fingerprint, ${FINGERPRINT}. Compare the two before you confirm.` })).toBe(signer);
-    expect(accessibleText(signer)).not.toContain('Compare the two');
+    expect(accessibleText(signer)).toContain(`Its confirmation names this Mac’s fingerprint, ${FINGERPRINT}. Compare the two before you confirm.`);
 
     resetHarness();
     renderSection(signing({ ...ROOT, due: true, ageDays: 8 }));
@@ -311,3 +310,130 @@ describe('the Org page’s notes (Settings’ rows, G13 to G15)', () => {
   });
 });
 
+
+// Review fix round 1: what a fold or a menu must not lose, and the greyed New delegation…'s reason from the keyboard.
+describe('the code destination across a fold (G188)', () => {
+  const SET: ProvisioningSecret = { project: 'acme-prod-01', secret: 'desk-code', account: 'ops@example.com' };
+  const NEXT: ProvisioningSecret = { ...SET, secret: 'desk-code-v2' };
+  const destination = () => screen.getByRole('group', { name: 'Code destination', hidden: true });
+  const field = (name: string) => within(destination()).getByRole('textbox', { name, hidden: true }) as HTMLInputElement;
+
+  it('a fold and a reopen keep an edit in progress; the folded form is out of the accessibility tree and inert', async () => {
+    const user = userEvent.setup();
+    renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => SET });
+    const chevron = await within(await group('org')).findByRole('button', { name: 'Code destination' });
+    await vi.waitFor(() => expect(field('Secret').value).toBe(SET.secret));
+    await user.click(chevron);
+    await user.clear(field('Secret'));
+    await user.type(field('Secret'), 'half-typed');
+    await user.click(chevron); // fold
+    const body = destination().closest<HTMLElement>('[inert]')!;
+    expect(body.hidden).toBe(true);
+    expect(screen.queryByRole('group', { name: 'Code destination' })).toBeNull();
+    await user.click(chevron); // reopen
+    expect(field('Secret').value).toBe('half-typed');
+  });
+
+  it('a Save answered while folded lands: its line shows on reopening, and the destination is read again', async () => {
+    const user = userEvent.setup();
+    let reading: ProvisioningSecret = SET;
+    let answer: (write: ProvisioningSecretWrite) => void = () => {};
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => reading,
+      'org.provisioningSecret.set': (input: { value: ProvisioningSecret }) =>
+        new Promise<ProvisioningSecretWrite>((resolve) => {
+          answer = (write) => {
+            reading = input.value;
+            resolve(write);
+          };
+        }),
+    });
+    const chevron = await within(await group('org')).findByRole('button', { name: 'Code destination' });
+    await vi.waitFor(() => expect(field('Secret').value).toBe(SET.secret));
+    await user.click(chevron);
+    fireEvent.change(field('Secret'), { target: { value: NEXT.secret } });
+    await user.click(within(destination()).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.set')).toEqual([{ value: NEXT }]));
+    const reads = sent('org.provisioningSecret.get').length;
+    await user.click(chevron); // fold while the write is out
+    await act(async () => answer({ ok: true }));
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.get').length).toBe(reads + 1));
+    await user.click(chevron);
+    expect(within(destination()).getByText('Saved.')).toBeTruthy();
+    await vi.waitFor(() => expect(field('Secret').value).toBe(NEXT.secret));
+  });
+
+  it('opened from its chevron, the form is brought into view', async () => {
+    const user = userEvent.setup();
+    const seen = vi.fn();
+    const scroll = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = seen;
+    try {
+      renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => SET });
+      const chevron = await within(await group('org')).findByRole('button', { name: 'Code destination' });
+      await user.click(chevron);
+      expect(seen).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(seen.mock.contexts[0]).toBe(document.getElementById(chevron.getAttribute('aria-controls')!));
+    } finally {
+      Element.prototype.scrollIntoView = scroll;
+    }
+  });
+});
+
+describe('New delegation… while it waits (G187)', () => {
+  it('greyed, it takes Tab and says why on focus, its reason also at rest; Enter opens nothing', async () => {
+    const user = userEvent.setup();
+    renderSection(signing(ROOT)); // no destination set
+    const foot = await vi.waitFor(() => document.querySelector<HTMLElement>('[data-org-new-delegation]')!);
+    const create = await within(foot).findByRole('button', { name: 'New delegation…', description: 'Set the code destination below first.' });
+    expect(create.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleText(foot)).toContain('Set the code destination below first.');
+    await tabTo(user, create);
+    expect(tooltip()).toBe('Set the code destination below first.');
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog', { name: 'Create a delegation' })).toBeNull();
+  });
+
+  it('while the destination’s first read is out: a quiet spinner named for it; a failed read says so with Retry, which reads again', async () => {
+    let read: () => void = () => {};
+    renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => new Promise((resolve) => (read = () => resolve(null))) });
+    expect(await screen.findByRole('progressbar', { name: 'Reading the code destination…' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'New delegation…' })).toBeNull();
+    await act(async () => read());
+    expect(await screen.findByRole('button', { name: 'New delegation…' })).toBeTruthy();
+
+    // main answers no destination: the read fails, which is not a wait that goes on
+    resetHarness();
+    renderSection(signing(ROOT), { 'org.provisioningSecret.get': undefined });
+    expect(await screen.findByText('The code destination couldn’t be read · no answer for org.provisioningSecret.get')).toBeTruthy();
+    expect(screen.queryByRole('progressbar', { name: 'Reading the code destination…' })).toBeNull();
+    const reads = sent('org.provisioningSecret.get').length;
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.get').length).toBe(reads + 1));
+  });
+});
+
+describe('a sheet opened from a row’s menu gives the keyboard back to the menu (G162, G173)', () => {
+  it('Tab to the menu, choose an action, Escape: focus is on the same “…” again; Cancel too', async () => {
+    const user = userEvent.setup();
+    renderSection(signing(ROOT));
+    const ana = within(await group('people')).getByRole('group', { name: 'Ana' });
+    const trigger = within(ana).getByRole('button', { name: 'Actions for Ana' });
+    await tabTo(user, trigger);
+    await user.keyboard('{Enter}');
+    await screen.findByRole('menuitem', { name: 'Make member…' });
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}'); // Remove person…
+    expect(await screen.findByRole('dialog', { name: 'Remove ana@example.com?' })).toBeTruthy();
+    await user.keyboard('{Escape}');
+    await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove ana@example.com?' })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+
+    await user.keyboard('{Enter}');
+    await screen.findByRole('menuitem', { name: 'Make member…' });
+    await user.keyboard('{Enter}'); // Make member…
+    const sheet = await screen.findByRole('dialog', { name: 'Make ana@example.com a member?' });
+    await user.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Make ana@example.com a member?' })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+});

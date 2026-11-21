@@ -99,7 +99,7 @@ function Held({ status, pending, refusalFor, signIn, reanchor, rekey, cancel }: 
         <Setting label={ORG.problem}>
           <span className="text-warning">{ORG.problems['held-chain']}</span>
         </Setting>
-        <CodeField action={ORG.reanchor} note={ORG.reanchorNote} pending={pending} refusal={refusalFor('reanchor')} onSend={reanchor} />
+        <CodeField action={ORG.reanchor} line={ORG.reanchorNote} pending={pending} refusal={refusalFor('reanchor')} onSend={reanchor} />
       </>
     );
   }

@@ -58,7 +58,8 @@ describe('Settings › Org', () => {
   it('held-chain: the problem in words, a code field and Re-anchor sending org.reanchor', async () => {
     renderSection({ ...REGISTERED, problem: 'held-chain', head: null });
     expect(within(await found('Problem')).getByText(/stays closed here until you re-anchor/)).toBeTruthy();
-    expect(screen.getByRole('group', { name: 'Pairing code', description: /replaces the org state this Mac trusted/ })).toBeTruthy(); // its note (the word cut)
+    expect(within(row('Pairing code')).getByText(/replaces the org state this Mac trusted/)).toBeTruthy();
+    expect(accessibleText(row('Pairing code'))).toContain('replaces the org state this Mac trusted'); // at rest: a trust change (the word cut)
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     const field = within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }) as HTMLInputElement;
     fireEvent.change(field, { target: { value: ` ${CODE} ` } });

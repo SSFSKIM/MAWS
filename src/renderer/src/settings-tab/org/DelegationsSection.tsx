@@ -15,14 +15,17 @@
 //   damaged file shows its reason and Reset behind a confirmation, and is never edited over.
 // - The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): New delegation… is one button with no label,
 //   and stands for the empty list's line where it is offered (G187); the code destination waits behind a chevron beside
-//   the heading, in view while it is unset or damaged and once it has been (G188, G189); someone who may not sign reads
-//   the page's top line, not this section's (G170).
+//   the heading, in view while it is unset or damaged and once it has been, kept mounted while folded so an edit or a
+//   Save in flight survives the fold (G188, G189); New delegation… greyed is still focusable, its reason its tooltip
+//   and description, and while the destination's first read is out it is a quiet spinner, a failed read its own line
+//   with Retry; someone who may not sign reads the page's top line, not this section's (G170).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDayTime } from '@shared/app/date-format';
 import { ProvisioningSecretSchema, type OrgChange, type OrgView, type ProvisioningSecret, type ProvisioningSecretReading } from '@shared/ipc/schema/org';
 import { GatewaySheet } from '../../gateway/GatewaySheet';
 import { ipc } from '../../ipc/client';
-import { DisclosureBody } from '../../ui/disclosure';
+import { QuietSpinner } from '../../ui/spinner';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
 import { ORG } from '../copy';
 import { INPUT, Setting, TEXT_ACTION } from '../parts';
 import { ChangeSheet } from './ChangeSheet';
@@ -35,23 +38,34 @@ type Asked = { title: string; change: OrgChange };
 /** A destination reading that names one (not unset, not damaged), else null. */
 export const destinationOf = (reading: ProvisioningSecretReading | undefined): ProvisioningSecret | null => (reading === undefined || reading === null || 'damaged' in reading ? null : reading);
 
-/** Main's destination file, read while `shown`, again on `reload`; undefined until the first answer. */
+/** Main's destination file, read while `shown`, again on `reload`; undefined until the first answer. `unread`: why the
+ * last read failed as a command, until one answers (a failed read is not a wait that goes on); `retry` reads again. */
 function useDestination(shown: boolean) {
   const open = useOpen();
   const latest = useRef(0);
   const [reading, setReading] = useState<ProvisioningSecretReading | undefined>(undefined);
+  const [unread, setUnread] = useState<string | null>(null);
   const reload = useCallback(() => {
     const mine = ++latest.current;
     void ipc.invoke('org.provisioningSecret.get', undefined).then((result) => {
       if (!open.current || latest.current !== mine) return;
-      if (result.ok) setReading(result.value);
-      else failed(result.error);
+      if (result.ok) {
+        setReading(result.value);
+        setUnread(null);
+      } else {
+        failed(result.error);
+        setUnread(result.error.message);
+      }
     });
   }, [open]);
   useEffect(() => {
     if (shown) reload();
   }, [shown, reload]);
-  return { reading, reload };
+  const retry = () => {
+    setUnread(null);
+    reload();
+  };
+  return { reading, unread, reload, retry };
 }
 
 export function DelegationsSection({ status, view }: { status: Registered; view: OrgView }) {
@@ -84,11 +98,27 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
   // is not folded away with it.
   const needed = creates && (reading === null || (reading !== undefined && 'damaged' in reading));
   const disclosed = useDisclosed(needed);
+  // The form stays mounted while folded, so an edit or a Save in flight survives a fold; opened from its chevron, it is
+  // brought into view (it sits at the section's end, past the delegations).
+  const body = useRef<HTMLDivElement>(null);
+  const reveal = useRef(false);
+  const chevron = {
+    ...disclosed,
+    toggle: () => {
+      reveal.current = !disclosed.open;
+      disclosed.toggle();
+    },
+  };
+  useEffect(() => {
+    if (!disclosed.open || !reveal.current) return;
+    reveal.current = false;
+    body.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [disclosed.open]);
   return (
     <div data-org-section="delegations" className="mt-2">
       <div className="mt-1 mb-0.5 flex items-center gap-1">
         <h5 className="m-0 text-ui-sm font-medium text-fg">{ORG.delegations}</h5>
-        {creates && !needed && <DisclosureChevron label={ORG.destination} disclosed={disclosed} />}
+        {creates && !needed && <DisclosureChevron label={ORG.destination} disclosed={chevron} />}
       </div>
       {view.delegations.length === 0 && !creates && <p className="m-0 py-1 text-ui-sm text-fg-muted">{ORG.noDelegations}</p>}
       {view.delegations.map((delegation) => (
@@ -106,11 +136,23 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
         <div data-org-new-delegation className="flex min-h-[34px] min-w-0 flex-wrap items-center gap-2 py-1 text-ui-sm [overflow-wrap:anywhere]">
           {!may ? null : !admin ? (
             <span className="text-fg-muted">{ORG.delegationsAdmins}</span>
+          ) : reading === undefined && destination.unread !== null ? (
+            <>
+              <span className="text-warning">{ORG.destinationUnread(destination.unread)}</span>
+              <button type="button" className={TEXT_ACTION} onClick={destination.retry}>
+                {ORG.retry}
+              </button>
+            </>
+          ) : reading === undefined ? (
+            <QuietSpinner label={ORG.destinationWait} />
           ) : (
             <>
-              <button type="button" className={TEXT_ACTION} disabled={reading === undefined || blocked !== null} onClick={openCreate}>
-                {ORG.createAction}
-              </button>
+              {/* greyed, still focusable: its reason is its tooltip and description, and stays at rest beside it */}
+              <UnavailableButton reason={blocked}>
+                <button type="button" className={`${TEXT_ACTION} ${UNAVAILABLE_LOOK}`} onClick={openCreate}>
+                  {ORG.createAction}
+                </button>
+              </UnavailableButton>
               {blocked !== null && <span className="text-fg-muted">{blocked}</span>}
             </>
           )}
@@ -118,9 +160,9 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
         </div>
       )}
       {creates && (
-        <DisclosureBody open={disclosed.open} id={disclosed.id}>
+        <div ref={body} id={disclosed.id} hidden={!disclosed.open} inert={!disclosed.open}>
           <DestinationField reading={reading} reload={destination.reload} />
-        </DisclosureBody>
+        </div>
       )}
       {asked !== null && (
         <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} signIn={signIn} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />

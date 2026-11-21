@@ -911,6 +911,8 @@ export const ORG = {
   destinationNote: 'A new delegation’s provisioning code is stored there as a new version of the Secret Manager secret, through this Mac’s gcloud signed in as the account. Devcloud’s next VM reads the latest version.',
   destinationFields: { project: 'Project', secret: 'Secret', account: 'Account' },
   destinationReading: 'Reading…',
+  destinationWait: 'Reading the code destination…', // the quiet spinner's name while New delegation… waits on the read
+  destinationUnread: (why: string) => `The code destination couldn’t be read · ${why}`,
   destinationInvalid: {
     project: 'A project id is 6 to 30 lowercase letters, digits and hyphens, from a letter: correct it, then Save.',
     secret: 'A secret id is up to 255 letters, digits, _ and -, not from a -: correct it, then Save.',

@@ -164,7 +164,7 @@ function SignerLines({ signer, status, view }: { signer: Signer; status: Registe
   return (
     <>
       {signerRow && (
-        <Setting label={ORG.signer} note={guide ? ORG.rootNote(signer.fingerprint) : undefined}>
+        <Setting label={ORG.signer} line={guide ? ORG.rootNote(signer.fingerprint) : undefined}>
           {unmarked ? (
             <span className="text-fg-muted">{ORG.unmarked}</span>
           ) : signer.root ? null : (

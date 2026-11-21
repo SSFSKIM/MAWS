@@ -4,7 +4,7 @@
 // the removed profile. The word cut (G70, G73, G74, G76, G77): Import… named in full; a record's row is its date and a
 // "…" menu holding Show report, Sync bookmarks now and Remove, its summary in the report; each extension a switch.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -170,6 +170,20 @@ describe('an imported profile', () => {
     expect(dialog().dataset.browserImport).toBe('report');
     expect(within(dialog()).getByText('Imported from Person 1')).toBeTruthy();
     expect(dialog().textContent).toContain('4 cookies, 4 history entries, 3 extensions · 3 skipped');
+  });
+
+  it('a sheet opened from the menu by the keyboard gives the keyboard back to the record’s “…” on Escape (the word cut)', async () => {
+    renderBlock(withRecord);
+    const user = userEvent.setup();
+    const trigger = within(await screen.findByRole('region', { name: 'Person 1' })).getByRole('button', { name: 'Actions for Person 1' });
+    act(() => trigger.focus());
+    await user.keyboard('{Enter}');
+    await screen.findByRole('menuitem', { name: 'Show report' });
+    await user.keyboard('{Enter}');
+    expect(dialog().dataset.browserImport).toBe('report');
+    await user.keyboard('{Escape}');
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(trigger);
   });
 
   // cua #90: beside Show report, for a profile whose bookmarks were imported

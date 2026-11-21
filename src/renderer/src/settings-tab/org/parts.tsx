@@ -196,8 +196,10 @@ export function Fingerprint({ value }: { value: string }) {
 }
 
 // The pairing-code field: typed here, sent trimmed on the button or Enter, and cleared once sent. `focus`: it takes the
-// keyboard as it is drawn (opened by Sign in…), which opens its row's note.
-export function CodeField({ action, note, pending, refusal, focus = false, onSend }: { action: string; note: string; pending: boolean; refusal: OrgRefusal | null; focus?: boolean; onSend(code: string): void }) {
+// keyboard as it is drawn (opened by Sign in…), which opens its row's note. Where to get a code is the row's `note`;
+// what the code's act changes in this Mac's trust (Re-anchor's) is a `line`, at rest.
+type CodeWords = { note: string; line?: undefined } | { line: string; note?: undefined };
+export function CodeField({ action, note, line, pending, refusal, focus = false, onSend }: CodeWords & { action: string; pending: boolean; refusal: OrgRefusal | null; focus?: boolean; onSend(code: string): void }) {
   const [draft, setDraft] = useState('');
   const send = () => {
     const code = draft.trim();
@@ -210,7 +212,7 @@ export function CodeField({ action, note, pending, refusal, focus = false, onSen
     if (e.key === 'Escape') setDraft('');
   };
   return (
-    <Setting label={ORG.code} note={note}>
+    <Setting label={ORG.code} note={note} line={line}>
       <input aria-label={ORG.code} autoFocus={focus} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys} spellCheck={false} autoComplete="off" className={`${INPUT} max-w-[320px] flex-1 font-mono`} />
       <button type="button" className={TEXT_ACTION} disabled={pending || draft.trim() === ''} onClick={send}>
         {action}

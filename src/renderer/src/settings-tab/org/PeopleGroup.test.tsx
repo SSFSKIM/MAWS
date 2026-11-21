@@ -21,8 +21,11 @@ afterAll(() => {
 afterEach(resetHarness);
 
 const buttons = (label: string) => within(row(label)).queryAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
-// A device's line by its id, which is its kind's description (the word cut, G160), held in the line.
-const device = (label: string, id: string) => within(row(label)).getByText(id.slice(0, 8)).closest('[data-org-device]') as HTMLElement;
+// A device's line by its id, which is its kind's accessible description (the word cut, G160): the kind word that takes
+// Tab, described by the id's first 8.
+const describedBy = (el: Element) => (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
+const device = (label: string, id: string) =>
+  [...row(label).querySelectorAll<HTMLElement>('[data-org-device] [tabindex="0"][aria-describedby]')].find((kind) => describedBy(kind) === id.slice(0, 8))!.closest('[data-org-device]') as HTMLElement;
 const deviceMenu = (id: string) => `Actions for Mac ${id.slice(0, 8)}`;
 
 describe('Settings › Org: People (M4a)', () => {

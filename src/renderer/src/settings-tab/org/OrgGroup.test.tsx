@@ -8,6 +8,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import type { SignResult } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
+import { accessibleText } from '../../test-support/accessible-text';
 import { DAY, DEVICE, FINGERPRINT, ME, MINI, REGISTERED, ROOT, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, type Signer, disclose } from './test-support';
 
 // The file's own clock (see YouGroup.test.tsx). Only Date is faked; timers stay real for the waits.
@@ -49,7 +50,8 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     expect(within(signer).getByText('Make this Mac a root: run')).toBeTruthy();
     // The id after `--`: a base64url id may start with '-', which the admin's option parser would take for an option.
     expect(within(signer).getByText(`deployment admin root add -- ${DEVICE}`).className).toContain('font-mono');
-    expect(screen.getByRole('group', { name: 'Signer', description: new RegExp(FINGERPRINT) })).toBe(signer); // its note (the word cut)
+    expect(within(signer).getByText(new RegExp(FINGERPRINT))).toBeTruthy();
+    expect(accessibleText(signer)).toContain(FINGERPRINT); // at rest: what to verify before a trust change (the word cut)
     expect(within(signer).queryByRole('button')).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull(); // a marked, listed device is offered no new keys
 
@@ -336,7 +338,6 @@ describe('Settings › Org: Org (M4a)', () => {
   it('the root add guidance stays in the Org group, the fingerprint in its note', async () => {
     renderSection(signing({}));
     const org = await group('org');
-    const signer = within(org).getByRole('group', { name: 'Signer' });
-    expect(screen.getByRole('group', { name: 'Signer', description: new RegExp(FINGERPRINT) })).toBe(signer); // its note (the word cut)
+    expect(within(within(org).getByRole('group', { name: 'Signer' })).getByText(new RegExp(FINGERPRINT))).toBeTruthy();
   });
 });

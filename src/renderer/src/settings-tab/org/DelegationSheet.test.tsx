@@ -62,7 +62,7 @@ function deferred<T>() {
 async function openSheet() {
   await group('org');
   const create = await within(await findFoot('new-delegation')).findByRole('button', { name: 'New delegation…' });
-  await vi.waitFor(() => expect((create as HTMLButtonElement).disabled).toBe(false));
+  await vi.waitFor(() => expect(create.getAttribute('aria-disabled')).toBeNull());
   fireEvent.click(create);
   return screen.findByRole('dialog', { name: 'Create a delegation' });
 }

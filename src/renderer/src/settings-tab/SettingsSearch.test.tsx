@@ -310,7 +310,7 @@ describe('Search settings: choosing a result', () => {
 
   it('lists no Org group while this Mac is not in an org', async () => {
     renderView();
-    await screen.findByText('Not signed in'); // the word cut (G147)
+    await screen.findByRole('button', { name: 'Sign in…' }); // the Org page has read its status (the word cut, G147)
     type('people');
     expect(options()).toEqual([]);
   });

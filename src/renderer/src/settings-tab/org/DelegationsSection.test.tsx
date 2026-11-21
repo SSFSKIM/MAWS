@@ -393,7 +393,7 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     await delegationsGroup();
     const create = await within(foot('new-delegation')).findByRole('button', { name: 'New delegation…' });
     await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('Set the code destination below first.')).toBeTruthy());
-    expect((create as HTMLButtonElement).disabled).toBe(true);
+    expect(create.getAttribute('aria-disabled')).toBe('true'); // greyed and still focusable (the word cut)
 
     const destination = row('Code destination');
     const save = within(destination).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
@@ -409,7 +409,7 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     fireEvent.click(save);
     await vi.waitFor(() => expect(sent('org.provisioningSecret.set')).toEqual([{ value: DEST }]));
     expect(await within(row('Code destination')).findByText('Saved.')).toBeTruthy();
-    await vi.waitFor(() => expect((within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }) as HTMLButtonElement).disabled).toBe(false));
+    await vi.waitFor(() => expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }).getAttribute('aria-disabled')).toBeNull());
     expect(within(foot('new-delegation')).queryByText('Set the code destination below first.')).toBeNull();
     fireEvent.click(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }));
     expect(await screen.findByRole('dialog', { name: 'Create a delegation' })).toBeTruthy();
@@ -463,11 +463,11 @@ describe('Settings › Org: Delegations’ code destination and Create (M4c)', (
     renderSection(signing(ROOT, { delegations: { creating: true, rev: 0 } }), { 'org.provisioningSecret.get': () => DEST });
     await delegationsGroup();
     await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('A delegation is being created, in this window or another: Create once it’s done.')).toBeTruthy());
-    expect((within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }).getAttribute('aria-disabled')).toBe('true');
     emit(signing(PENDING));
     await vi.waitFor(() => expect(within(foot('new-delegation')).getByText('A signed state is pending: publish or discard it (Org › Pending) first.')).toBeTruthy());
     emit(signing(ROOT));
-    await vi.waitFor(() => expect((within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }) as HTMLButtonElement).disabled).toBe(false));
+    await vi.waitFor(() => expect(within(foot('new-delegation')).getByRole('button', { name: 'New delegation…' }).getAttribute('aria-disabled')).toBeNull());
     await act(async () => {});
   });
 });
