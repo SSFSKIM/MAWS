@@ -277,17 +277,25 @@ test('extension toggles load and unload at once; Remove closes the profile’s t
       const record = recordIn(region, 'Default');
       const row = (name: string) => record.getByRole('group', { name, exact: true });
       const status = (name: string) => row(name).locator('[data-extension-status]');
+      // the word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G77): each extension's On/Off is one
+      // switch, named by the extension
+      const toggle = (name: string) => row(name).getByRole('switch', { name, exact: true });
       await expect(status(fails.name)).toHaveText(FAILS_STATUS);
-      await row(fails.name).getByRole('radio', { name: 'Off' }).check();
+      await expect(toggle(fails.name)).toHaveAttribute('aria-checked', 'true');
+      await toggle(fails.name).click();
       await expect(status(fails.name)).toHaveText('Off');
-      await row(fails.name).getByRole('radio', { name: 'On' }).check();
+      await expect(toggle(fails.name)).toHaveAttribute('aria-checked', 'false');
+      await toggle(fails.name).click();
       await expect(status(fails.name)).toHaveText(FAILS_STATUS);
       await expect(status(wallet.name)).toHaveText('Off (wallet)');
-      await row(wallet.name).getByRole('radio', { name: 'On' }).check();
+      await expect(toggle(wallet.name)).toHaveAttribute('aria-checked', 'false');
+      await toggle(wallet.name).click();
       await expect(status(wallet.name)).toHaveText('Loaded · no background');
       expect((await recordOf(s, 'Default'))!.extensions.find((e) => e.id === wallet.id)).toMatchObject({ enabled: true, status: 'loaded' });
 
-      await record.getByRole('button', { name: 'Remove imported profile' }).click();
+      // the word cut (G73): the profile's actions are one menu, named by the profile
+      await record.getByRole('button', { name: 'Actions for Person 1', exact: true }).click();
+      await s.page.getByRole('menu').getByRole('menuitem', { name: 'Remove imported profile', exact: true }).click();
       const confirm = s.page.locator('[data-browser-import-remove="Default"]');
       await expect(confirm).toContainText('1 open tab');
       const remove = confirm.getByRole('button', { name: 'Remove', exact: true });

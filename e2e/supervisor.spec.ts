@@ -583,10 +583,15 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
     await menu(run.maws, 'settings.open');
     // UX wave U7b: Settings is a dialog over the window, not a main tab
     const group = settingsDialog(run.page).getByRole('group', { name: 'Background supervisor' });
-    await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since ${CLOCK} · pid ${old} · 1 session · exits 10 min after the last session ends$`));
+    // the word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G129, G136): the status reads its state and
+    // its sessions, the start, the pid and the exit rule its tooltip and description (then the machine daemon's line);
+    // Stop all is its one button
+    const status = group.getByRole('status');
+    await expect(status).toHaveText('Running · 1 session');
+    await expect(status).toHaveAccessibleDescription(new RegExp(`^Since ${CLOCK} · pid ${old} · exits 10 min after the last session ends(; |$)`));
     await shots(run.maws, 'settings-supervisor', () => group);
 
-    await group.getByRole('button', { name: 'Stop all sessions and the supervisor…' }).click();
+    await group.getByRole('button', { name: 'Stop all sessions…', exact: true }).click();
     await expect(group).toContainText('Stop 1 session and the supervisor?');
     await group.getByRole('button', { name: 'Stop all', exact: true }).click();
     await expect.poll(() => isAlive(old), { timeout: 15_000 }).toBe(false);
@@ -597,7 +602,8 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
     expect(log).toContain('stop all asked');
     expect(log).toContain('exiting (stopAll)');
     expect(s.lock()?.pid).toBe(fresh);
-    await expect(group.getByRole('status')).toContainText(`pid ${fresh} · no sessions`);
+    await expect(status).toHaveAccessibleDescription(new RegExp(` · pid ${fresh} · `));
+    await expect(status).toHaveText('Running · no sessions');
     expect(value(await invoke(run.page, 'engine.sessions', undefined)).filter((st) => st.process !== 'exited')).toEqual([]);
 
     // the fresh supervisor admits a launch (a stopped one never could: the shutdown latch)

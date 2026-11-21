@@ -782,9 +782,10 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       await importThrough(s, { history: false, cookies: false, bookmarks: false });
       await closeSheet(s);
       await expect.poll(() => settingsFile(s.maws.userData).browser.profile).toBe('Default');
-      // Settings says what a popup cannot see here
+      // Settings says what a popup cannot see here (the word cut, docs/doperpowers/specs/2026-11-16-word-cut-design.md,
+      // M1; G76: an ⓘ beside the Extensions heading, named and tipped by the sentence)
       const region = await openSettingsBrowser(s);
-      await expect(region.locator('[data-imported-profile="Default"] [data-extension-popup-limit]')).toHaveText(
+      await expect(region.locator('[data-imported-profile="Default"] [data-extension-popup-limit]')).toHaveAccessibleName(
         'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.',
       );
 

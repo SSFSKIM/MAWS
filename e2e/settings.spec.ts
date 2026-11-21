@@ -41,6 +41,8 @@ const tabCount = (page: Page) => mountedTabs(page).count(); // under the dialog 
 const keyRow = (page: Page, title: string) => panel(page).getByRole('table', { name: 'Key bindings' }).getByRole('row', { name: title, exact: true });
 // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): the client's file and the machine's, each its owner's fields
 const readSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as Record<string, unknown> & { version: number; keymap: object };
+// A description or a name that holds these words (the word cut: a note's words are its row's description at all times)
+const containing = (words: string) => new RegExp(words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 const readMachineSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'machine-settings.json'), 'utf8')) as Record<string, unknown> & { version: number; engine: object; gateway: object; permissions: object };
 
 test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, refused, unbound and reset; the route and policy persist', async () => {
@@ -136,11 +138,13 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await page.keyboard.press('Meta+KeyK');
       await expect(next.getByRole('alert')).toHaveText('Already bound to Command palette · unbind it first');
       await page.keyboard.press('Backspace');
-      await expect(next.locator('kbd')).toHaveText('Unbound');
+      // the word cut (G40): an unbound action's key cap is empty, named and tipped Unbound
+      await expect(next.getByRole('img', { name: 'Unbound', exact: true })).toBeVisible();
       await expect.poll(() => accelerator(app, 'attention.next')).toBe(null);
       expect(readSettings(userData).keymap).toEqual({ 'attention.next': null });
 
-      // Reset to defaults, after its confirm.
+      // Reset to defaults, after its confirm (the word cut, G44: drawn while a binding differs from its default, as the
+      // unbound Next Needs-you does).
       await panel(page).getByRole('button', { name: 'Reset to defaults' }).click();
       await page.getByRole('dialog', { name: 'Reset every key binding?' }).getByRole('button', { name: 'Reset', exact: true }).click();
       await expect(next.locator('kbd')).toHaveText('⌘⇧J');
@@ -160,16 +164,19 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       // UX wave U6b-5b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, §I; B14): Zoom In, Zoom Out and Actual
       // Size, the same way (Actual Size has no chord), with the same control above; settings.json was read for their ids
       // after View's zoom items were used, above.
-      for (const [title, chord] of [['Zoom In', formatChord('Cmd+=')], ['Zoom Out', formatChord('Cmd+-')], ['Actual Size', 'Unbound']] as const) {
+      // The word cut (G40): Actual Size's cap is the empty one named Unbound.
+      for (const [title, chord] of [['Zoom In', formatChord('Cmd+=')], ['Zoom Out', formatChord('Cmd+-')], ['Actual Size', null]] as const) {
         const row = keyRow(page, title);
-        await expect(row.locator('kbd'), title).toHaveText(chord);
+        if (chord === null) await expect(row.getByRole('img', { name: 'Unbound', exact: true }), title).toBeVisible();
+        else await expect(row.locator('kbd'), title).toHaveText(chord);
         await expect(row.getByRole('button'), `${title} has no control`).toHaveCount(0);
       }
 
-      // The default route and the relay-unreachable policy, one field each.
+      // The default route and the relay-unreachable policy, one field each (the word cut, G104: the policy's row and
+      // field read "If the relay is down").
       const gateway = panel(page).getByRole('region', { name: 'Gateway' });
       await gateway.getByRole('radio', { name: 'Direct' }).check();
-      await gateway.getByRole('combobox', { name: 'Relay unreachable at launch' }).selectOption('wait');
+      await gateway.getByRole('combobox', { name: 'If the relay is down' }).selectOption('wait');
       await expect.poll(() => readMachineSettings(userData).gateway).toEqual({ defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: true });
       expect(readMachineSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
       expect(readSettings(userData).keymap).toEqual({});
@@ -185,7 +192,7 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await menu(app, 'settings.open');
       const gateway = panel(page).getByRole('region', { name: 'Gateway' });
       await expect(gateway.getByRole('radio', { name: 'Direct' })).toBeChecked();
-      await expect(gateway.getByRole('combobox', { name: 'Relay unreachable at launch' })).toHaveValue('wait');
+      await expect(gateway.getByRole('combobox', { name: 'If the relay is down' })).toHaveValue('wait');
       await expect(keyRow(page, 'Next Needs-you').locator('kbd')).toHaveText('⌘⇧J');
       await expect(panel(page).getByRole('region', { name: 'Appearance' }).getByRole('radio', { name: 'System' })).toBeChecked();
       await expect(panel(page).getByRole('region', { name: 'Notifications' }).getByRole('switch', { name: 'Notify when I am not looking at that session' })).toHaveAttribute('aria-checked', 'false');
@@ -290,6 +297,9 @@ test('settings: the transcript width applies to the root --measure, and Narrow r
 // W13 (charter D-1 as amended 2026-10-01): the Binary row is the binary this run resolves (MAWS_E2E_ENGINE_BIN here, a
 // stand-in a version ahead of the fixtures), by its real path, with its probed version and the tested version as
 // information, never a refusal; Update is offered and never clicked, since it would update this Mac's Claude Code.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; G125 to G128): the row is the version, Change…
+// and Update…; the real path is the version's tooltip and description, and with the tested version in the row's note,
+// which pointing at the row opens; Update… stands on the Binary row, its words its tooltip and description.
 test('settings: Engine shows the resolved binary, its version and the tested one, and offers the update', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'maws-w13-engine-'));
   const stub = join(dir, 'claude');
@@ -300,16 +310,23 @@ test('settings: Engine shows the resolved binary, its version and the tested one
     const { app, page } = maws;
     await menu(app, 'settings.open');
     const binary = panel(page).getByRole('group', { name: 'Binary' });
-    await expect(binary).toContainText(realpathSync(stub));
-    await expect(binary).toContainText('2.1.290');
-    await binary.getByRole('button', { name: 'More' }).click(); // U11a M9: the tested version is information, behind More
-    await expect(binary).toContainText(`MAWS was verified against Claude Code ${TESTED_ENGINE_VERSION}.`); // E11 2.8: the verified release, not the fixtures' pin
+    // the version is the focusable word whose tooltip and description are the binary's real path
+    const version = binary.locator('[aria-describedby]', { hasText: '2.1.290' });
+    await expect(version).toBeVisible();
+    await expect(version).toHaveAccessibleDescription(realpathSync(stub));
+    // the note waits, out of view and in the row's description; pointing at the row opens it in the row
+    const note = binary.locator('[data-row-note]');
+    await expect(note).toBeHidden();
+    await expect(binary).toHaveAccessibleDescription(containing(`MAWS was verified against Claude Code ${TESTED_ENGINE_VERSION}.`)); // E11 2.8: the verified release, not the fixtures' pin
+    await binary.hover();
+    await expect(note).toBeVisible();
+    await expect(note).toContainText(`MAWS was verified against Claude Code ${TESTED_ENGINE_VERSION}.`);
+    await expect(note).toContainText(realpathSync(stub));
     await expect(binary.locator('.text-warning')).toHaveCount(0);
     await expect(binary.getByRole('button', { name: 'Use installed' })).toHaveCount(0);
-    const update = panel(page).getByRole('group', { name: 'Update' });
-    await expect(update.getByRole('button', { name: 'Update Claude Code…' })).toBeVisible();
-    await update.getByRole('button', { name: 'More' }).click();
-    await expect(update).toContainText('New sessions start on the new version; running sessions keep theirs.');
+    const update = binary.getByRole('button', { name: 'Update Claude Code…' });
+    await expect(update).toBeVisible();
+    await expect(update).toHaveAccessibleDescription(containing('New sessions start on the new version; running sessions keep theirs.'));
     await expect(panel(page).getByRole('group', { name: 'Plugins', exact: true })).toHaveCount(0); // U11a M9: R1's paragraph row is gone
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
@@ -416,14 +433,19 @@ test('settings: the dialog keeps its columns at the default window, and at the s
 
 // U11a M9 (l8-settings-06, A5 and A6; the execution document's Interfaces §G, "The measure"): the regrouped page, and
 // each note at two widths. Where the body has its full 760 px every note is one line: 18 px, or 22 px where it ends in
-// More or carries a button; a state line is not measured. A view about 550 px wide keeps its index a column and stacks
+// More or carries a button; a state line is not measured. The word cut (docs/doperpowers/specs/2026-11-16-word-cut-
+// design.md, M1; G3, G13 to G15): the index's two runs have no headings; a row is its label and its control, its note
+// waiting out of view until the row is pointed at or focused, and the lines that stand at rest (a consent, a command)
+// are measured as the notes were. A view about 550 px wide keeps its index a column and stacks
 // every row. The index's list scrolls by itself and its footer stays. UX wave U7b: the view is the Settings dialog's
 // (960 px wide at the default window: 148 for the index, 20, the body's 760, and the 30 px the dialog keeps clear of
 // Close), and about 550 px wide at the window's smallest, 600 px. The index as a row of links, under 512 px, was reached
 // through a split; no window reaches it in the dialog, and `SettingsView.test.tsx` keeps it. O-47: Usage after Gateway.
 const SECTION_ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Usage', 'Engine', 'Supervisor', 'Org'];
 const NOTE_LINE = 18; // 12 px type at the normal leading
-const NOTE_LINE_WITH_BUTTON = 22; // the box of More, or of a button on the line
+const NOTE_LINE_WITH_BUTTON = 22; // the box of a button on the line
+// Rows whose line stands at rest on a fresh profile (the word cut keeps them: a consent, the sign-in command and Copy)
+const LINED_ROWS = ['browser.chromeProfile', 'sessions.hooks', 'gateway.directLogin', 'supervisor.stopAll', 'supervisor.stateful'];
 
 // How far the body scrolls sideways, and each element that reaches past its content box unclipped (by tag, test id and
 // class, with its width and how far it reaches, in px): what a failure names. No text and no other attribute is read, as a row may
@@ -447,13 +469,14 @@ function sidewaysOverflow(body: Element): { overflow: number; content: number; p
 }
 
 type Stacking = { row: string; controlUnderLabel: boolean; noteUnderControl: boolean };
-// Each drawn row of the table: whether its control starts under its label and its note under its control.
+// Each drawn row of the table: whether its control starts under its label and its note under its control. A note that
+// waits (the word cut) is not drawn and takes no box: what stands under the control is its line, when it has one.
 const stackingOf = (column: Locator): Promise<Stacking[]> =>
   column.locator('[data-settings-row][role="group"]').evaluateAll((rows) =>
     rows
       .filter((row) => row.getBoundingClientRect().height > 0)
       .map((row) => {
-        const [label, control, note] = Array.from(row.children, (child) => child.getBoundingClientRect());
+        const [label, control, note] = Array.from(row.children, (child) => child.getBoundingClientRect()).filter((box) => box.height > 0);
         return { row: row.getAttribute('data-settings-row')!, controlUnderLabel: control!.top >= label!.bottom - 1, noteUnderControl: note === undefined || note.top >= control!.bottom - 1 };
       }),
   );
@@ -473,28 +496,36 @@ test('settings: the regrouped page; each note one line where the body has its 76
     const nav = view.getByRole('navigation', { name: 'Settings sections' });
     const column = view.locator('[data-settings-column]');
 
-    // the regrouped index: App, then Sessions & engine, then Org with no heading, and Customize; it opens at Appearance
+    // the regrouped index: the App run, then the Sessions & engine run, then Org under the rule, and Customize; it opens at
+    // Appearance. The word cut (G3): the two runs have no heading, a gap parts them.
     await expect(nav.getByRole('button')).toHaveText([...SECTION_ORDER, 'Customize ›']);
-    await expect(nav.locator('[data-settings-group]')).toHaveText(['App', 'Sessions & engine']);
+    await expect(nav.locator('[data-settings-group="app"]')).toHaveText(SECTION_ORDER.slice(0, 6).join(''));
+    await expect(nav.locator('[data-settings-group="sessions"]')).toHaveText(SECTION_ORDER.slice(6, 11).join(''));
     await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'true');
     await expect(view.locator('section[aria-labelledby^="settings-"] > h3')).toHaveText(SECTION_ORDER.map((name) => new RegExp(`^${name}`)));
-    await expect(view.getByRole('region', { name: 'Engine', exact: true }).locator('[data-settings-row]')).toHaveCount(3);
+    await expect(view.getByRole('region', { name: 'Engine', exact: true }).locator('[data-settings-row]')).toHaveCount(1); // the word cut (G126 to G128): Update… and the config home are the Binary row's
 
-    // 1. the body at 760 px in the dialog at the default window (M5, decision 9): every note one line
+    // 1. the body at 760 px in the dialog at the default window (M5, decision 9): every line at rest one line, and every
+    // note waiting, none drawn
     expect((await column.boundingBox())!.width, 'the body has its full 760 px').toBe(760);
     await page.screenshot({ path: test.info().outputPath('settings-760.png') });
     const notes = await column.locator('[data-settings-row] [data-settings-note="line"]').evaluateAll((nodes) =>
       nodes.map((node) => ({ row: node.closest('[data-settings-row]')!.getAttribute('data-settings-row')!, text: node.textContent ?? '', height: node.getBoundingClientRect().height, button: node.querySelector('button') !== null })),
     );
-    expect(notes.length, 'the page draws its notes').toBeGreaterThan(20);
+    expect(notes.map((note) => note.row), 'the lines that stand at rest').toEqual(expect.arrayContaining(LINED_ROWS));
     for (const note of notes) expect(note.height, `${note.row}: ${note.text}`).toBeLessThanOrEqual((note.button ? NOTE_LINE_WITH_BUTTON : NOTE_LINE) + 0.5);
-    // More opens the rest in place, under the line, and Less closes it
-    const update = column.getByRole('group', { name: 'Update', exact: true });
-    await update.getByRole('button', { name: 'More', exact: true }).click();
-    await expect(update.getByRole('button', { name: 'Less', exact: true })).toHaveAttribute('aria-expanded', 'true');
-    await expect(update.locator('[data-settings-note]')).toContainText('New sessions start on the new version; running sessions keep theirs.');
-    await update.getByRole('button', { name: 'Less', exact: true }).click();
-    await expect(update).not.toContainText('New sessions start on the new version');
+    const waiting = await column.locator('[data-settings-row] [data-row-note]').evaluateAll((nodes) => nodes.map((node) => ({ open: node.hasAttribute('data-open'), height: node.getBoundingClientRect().height })));
+    expect(waiting.length, 'the page keeps its notes').toBeGreaterThan(15);
+    expect(waiting.filter((note) => note.open || note.height > 0), 'no note is drawn at rest').toEqual([]);
+    // pointing at a row opens its note in place, under the row; leaving it closes the note
+    const binary = column.getByRole('group', { name: 'Binary', exact: true });
+    const note = binary.locator('[data-row-note]');
+    await binary.hover();
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('Running sessions keep the binary they started on.');
+    expect((await note.boundingBox())!.y, 'the note under the row’s control').toBeGreaterThanOrEqual((await binary.getByRole('button', { name: 'Change…' }).boundingBox())!.y);
+    await nav.hover();
+    await expect(note).toBeHidden();
     // a short window: the dialog's box is shorter (85 percent of the window), and the index's list scrolls by itself
     // inside it, its footer in place at the bottom
     await resize(1440, 600);
@@ -530,7 +561,8 @@ test('settings: the regrouped page; each note one line where the body has its 76
 // U11a M10 (l8-settings-06, A7; the execution document's Interfaces §G, "Search"): "Search settings" at the index's top.
 // ⌘F inside Settings focuses it; A7's four queries list their rows, each the row's name over its section; a row chosen
 // far down a short section lands with its section's heading in view, holds the keyboard and is marked for a moment; a
-// word behind a row's More opens it; the results scroll as the index's list does, the field and the footer staying; Esc
+// word of a row's note opens it (the word cut: the landing's focus opens the note, which has no More); the results
+// scroll as the index's list does, the field and the footer staying; Esc
 // clears the field. UX wave U7b: in the Settings dialog (§H, rows 4 to 6) Esc with text in the field clears it and the
 // dialog stays, and the next Esc, in the empty field, closes the dialog (the wave architect's ruling on the first Mac run). "usage" finds Usage's row
 // (O-47); it also finds Gateway's "Direct login", whose line holds the word, so the step asks that Usage's result is
@@ -569,12 +601,14 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     await expect(option('Customize', 'Plugins, skills and connectors')).toHaveCount(1);
     await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveCount(0); // the results in the sections' place
     await field.fill('zebra crossing');
-    await expect(nav.getByText('No matching settings')).toBeVisible();
+    await expect(nav.getByRole('status')).toHaveText('No matches'); // the word cut (G8)
 
-    // a row far down a short section: Voice's last, Recognition, lands with Voice's heading at the body's top
+    // a row far down a short section: Speech recognition, the last row Voice draws on every Mac (the word cut, G56: the
+    // Recognition row after it is drawn only while the language has trouble), lands with Voice's heading at the body's
+    // top
     await field.fill('recognition');
-    await option('Recognition', 'Voice').click();
-    const recognition = view.getByRole('region', { name: 'Voice', exact: true }).getByRole('group', { name: 'Recognition', exact: true });
+    await option('Speech recognition', 'Voice').click();
+    const recognition = view.getByRole('region', { name: 'Voice', exact: true }).getByRole('group', { name: 'Speech recognition', exact: true });
     await expect(recognition).toBeFocused();
     await expect(recognition).toHaveAttribute('data-settings-mark', 'on');
     const bodyBox = (await body.boundingBox())!;
@@ -587,11 +621,12 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     await expect(recognition).not.toHaveAttribute('data-settings-mark', /./, { timeout: 4_000 }); // the mark goes after its moment
     await page.screenshot({ path: test.info().outputPath('settings-search-landed.png') });
 
-    // a word behind the More a row shows now opens that More
+    // a word of the note a row shows now: the landing's focus opens that note, the words in view
     await field.fill('PATH');
     await option('Binary', 'Engine').click();
     const binary = view.getByRole('region', { name: 'Engine', exact: true }).getByRole('group', { name: 'Binary', exact: true });
-    await expect(binary.getByRole('button', { name: 'Less', exact: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(binary.locator('[data-row-note]')).toBeVisible();
+    await expect(binary.locator('[data-row-note]')).toContainText("claude on your shell's PATH");
     await expect(binary).toBeFocused();
 
     // a short window: the results scroll as the index's list does; the field and the footer stay
