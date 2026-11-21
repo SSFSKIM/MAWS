@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { configDefaults, defineConfig, type TestUserConfig } from 'vitest/config';
+import { BaseSequencer, type TestSpecification } from 'vitest/node';
 // C8a start
 import react from '@vitejs/plugin-react';
 // C8a end
@@ -141,9 +142,24 @@ const reporters: TestUserConfig['reporters'] = junit
     ]
   : undefined;
 
+// Files queued ahead of every other: a file whose time is one long wall-clock wait, which would otherwise end its
+// shard alone. vitest queues files by project name and then by size, so `acceptance-local.test.ts` (one case, about
+// 320 s, most of it the direct dials' pacing) started some two minutes into unit 3/4 and ran alone for the last two
+// and a half: 7.7 min for that shard against 4.3 to 5.0 for the other three (100 runs of bf4ea8007, 2026-11-21).
+// Queued first, it runs beside the rest. Which shard holds a file is `shard()`'s, inherited and unchanged.
+const LONG_FIRST = ['test/endpoint/acceptance-local.test.ts'];
+class LongFirst extends BaseSequencer {
+  override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
+    const sorted = await super.sort(files);
+    const long = (spec: TestSpecification): boolean => LONG_FIRST.some((path) => spec.moduleId.endsWith(`/${path}`));
+    return [...sorted.filter(long), ...sorted.filter((spec) => !long(spec))];
+  }
+}
+
 // Two projects: shared, main, preload and the hosts run under Node; the renderer runs under happy-dom.
 export default defineConfig({
   test: {
+    sequence: { sequencer: LongFirst },
     ...(reporters ? { reporters } : {}),
     projects: [
       {
