@@ -28,6 +28,9 @@ export interface HarnessApi {
   expandTurn(n: number): Promise<void>;
   scrollToTurn(n: number): Promise<void>;
   metrics(): HarnessMetrics;
+  // W8: the session effort the live thinking label named. The word cut (T37) took the effort out of the label, so this
+  // sets nothing; it stays until the e2e that calls it (e2e/transcript.spec.ts, the streaming thought) moves (M2 task 6)
+  setEffort(effort: string | null): void;
   // The long-transcript window: the fixture as a long session's disk history, opened on its newest window, each older
   // page `delayMs` away (paged.ts); `turns` how many of its `total` turns the open drew
   loadPaged(fixture: string, delayMs: number): Promise<HarnessLoad & { turns: number; total: number }>;
