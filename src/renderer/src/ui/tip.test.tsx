@@ -80,6 +80,19 @@ describe('Tip under the keyboard', () => {
     fireEvent.scroll(screen.getByTestId('scroller')); // Chromium scrolls an offscreen owner into view as it takes focus
     expect(tooltip()).toBe(FACT);
   });
+
+  it('is not reopened by a pointing still in its delay once Escape has dismissed it', async () => {
+    render(<Chip />);
+    const keys = user();
+    await keys.hover(screen.getByText('Blocked in macOS'));
+    wait(POINTING_DELAY_MS / 3);
+    await keys.tab(); // focus opens it before the pointing's delay has run
+    expect(tooltip()).toBe(FACT);
+    await keys.keyboard('{Escape}');
+    expect(tooltip()).toBeNull();
+    wait(POINTING_DELAY_MS * 2);
+    expect(tooltip()).toBeNull();
+  });
 });
 
 describe('Tip without a description of its own', () => {

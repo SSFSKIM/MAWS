@@ -16,7 +16,7 @@
 // with no content opens nothing and closes no other tooltip. One tip shows at a time. Content that arrives while its
 // owner is already pointed at or focused shows on the next pointing or focus; it is in the owner's description at
 // once. The content stays hoverable (WCAG 1.4.13): Radix keeps it open while the pointer crosses into it. Escape and a
-// press close it; a close Radix asks for while the owner still holds focus (its
+// press close it and drop a pointing still in its delay; a close Radix asks for while the owner still holds focus (its
 // close on an ancestor's scroll, which the focus itself causes when the owner was out of view) is not taken.
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
@@ -129,6 +129,7 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
               collisionPadding={8}
               className={TIP}
               onEscapeKeyDown={() => {
+                stopPointing(); // a dismissed tip is not reopened by a pointing still in its delay
                 dismissed.current = true;
               }}
             >
