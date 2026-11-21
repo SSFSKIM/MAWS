@@ -46,7 +46,7 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
   if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
   const showsNow = useRef(shows);
   const pointing = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const trigger = useRef<HTMLElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null); // the owner, typed as Radix types its default element
   const dismissed = useRef(false); // Escape or a press: the person's close, which focus on the owner does not hold off
   const stopPointing = () => {
     if (pointing.current !== null) clearTimeout(pointing.current);
