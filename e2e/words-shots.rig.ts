@@ -324,16 +324,18 @@ async function notePlacement(page: Page, overlay: boolean) {
 }
 // A scene with a row's note open, then its twin with the switch set before the note opens (`m1-<scene>-overlay`), so the
 // owner sees the baseline placement and the prototype side by side. The twin asks the latched build first, so on
-// master's it is not reached before any step runs.
+// master's it is not reached before any step runs (and, in a run that opened no Settings before it, once its step has).
 async function noteShots(page: Page, meta: Meta, prepare: () => Promise<void>, options: ShotOptions = {}) {
   await shot(page, meta, prepare, options);
   const id = `${meta.id.startsWith('m1-') ? '' : 'm1-'}${meta.id}-overlay`;
   const twin: Meta = { ...meta, id, title: `${meta.title}, the note over the rows below`, state: `${meta.state}; the note placement prototype: the open note floats over the rows below`, round: 'm1' };
   const overlaid = async () => {
-    if (!cutBuild()) throw new Error('no row note on this build: the overlay twin is the cut’s alone');
+    const absent = () => new Error('no row note on this build: the overlay twin is the cut’s alone');
+    if (cut === false) throw absent();
     await letGo(page);
     await notePlacement(page, true);
     await prepare();
+    if (!cutBuild()) throw absent();
   };
   const after = async () => {
     await notePlacement(page, false);
@@ -2196,7 +2198,7 @@ test('states: Settings › Org read-only, an imported Chrome profile, Voice in t
     // What may not sign shows: on the cut's build the one view-only line and neither Enroll's nor New delegation's line;
     // on master's, Enroll's and New delegation's rows each saying admins do it (this member is no admin), and no
     // button that would act
-    const viewOnly = () => org().getByText(new RegExp(`^${CUT_ORG.viewOnly?.([]) ?? 'View only'}`));
+    const viewOnly = () => org().getByText(new RegExp(`^${CUT_ORG.viewOnly?.([]) ?? 'View only'}`)).first();
     const enrollRest = () => group('machines').getByRole('group', { name: MASTER_ORG.enroll ?? '', exact: true });
     const createRest = () => delegations().getByRole('group', { name: MASTER_ORG.newDelegation ?? '', exact: true });
     const mayNotSign = async () => {
