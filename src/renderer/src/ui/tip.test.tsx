@@ -150,9 +150,12 @@ describe('Tip pointed within a region', () => {
     wait(1);
     expect(tooltip()).toBe(FACT);
     await keys.hover(screen.getByText('Blocked in macOS'));
+    expect(tooltip()).toBe(FACT); // crossing the region's children keeps it, at once
     await keys.hover(action());
-    wait(POINTING_DELAY_MS * 2);
     expect(tooltip()).toBe(FACT);
+    await keys.hover(screen.getByRole('tooltip')); // the tip stays hoverable (WCAG 1.4.13)
+    expect(tooltip()).toBe(FACT);
+    await keys.hover(action());
     await keys.hover(screen.getByRole('button', { name: 'After' }));
     expect(tooltip()).toBeNull();
   });

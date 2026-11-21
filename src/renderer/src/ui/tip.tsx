@@ -23,7 +23,8 @@
 // `pointedWithin` widens the pointing to a region around the owner (a fact about a whole line, owned by its phrase):
 // pointing anywhere in it arms the delay and leaving it closes the tip, while the keyboard owner stays the one child and
 // the region's other controls stay outside the tip's trigger. A press within the region closes it as a press on the
-// owner does; a close Radix asks for while the pointer is still within the region (its leave of the owner) is not taken.
+// owner does; a close Radix asks for while the pointer is still within the region (its leave of the owner) is not taken,
+// and a leave of the region into the tip keeps it open, as a leave of the owner into it does.
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
@@ -34,7 +35,7 @@
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
 import { Tooltip } from 'radix-ui';
-import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
+import { cloneElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -54,10 +55,10 @@ export function Tip({ content, description, pointedWithin, children, ...guard }:
   const pointing = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trigger = useRef<HTMLButtonElement>(null); // the owner, typed as Radix types its default element
   const dismissed = useRef(false); // Escape or a press: the person's close, which focus on the owner does not hold off
-  const stopPointing = () => {
+  const stopPointing = useCallback(() => {
     if (pointing.current !== null) clearTimeout(pointing.current);
     pointing.current = null;
-  };
+  }, []);
   // A press or an activation of the owner: the person's close, which Radix asks for next (its own trigger handlers run
   // after these), and which a press that closes nothing does not carry later.
   const dismissByOwner = () => {
@@ -79,43 +80,52 @@ export function Tip({ content, description, pointedWithin, children, ...guard }:
     [],
   );
   // Pointing at the owner, or anywhere in the region that stands for it: the delay armed on entering, dropped on leaving
-  const point = () => {
+  const point = useCallback(() => {
     stopPointing();
     pointing.current = setTimeout(() => {
       pointing.current = null;
       if (showsNow.current) setOpen(true);
     }, POINTING_DELAY_MS);
-  };
+  }, [stopPointing]);
   const inRegion = useRef(false);
+  const tip = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const region = pointedWithin?.current;
     if (!region) return;
-    // over and out with the element the pointer came from or went to, so crossing the region's children is no leave
-    const within = (event: PointerEvent) => event.relatedTarget instanceof Node && region.contains(event.relatedTarget);
-    const enter = (event: PointerEvent) => {
-      if (within(event)) return;
-      inRegion.current = true;
-      point();
-    };
-    const leave = (event: PointerEvent) => {
-      if (within(event)) return;
+    // the region or the tip itself, which stays hoverable while the pointer crosses into it (WCAG 1.4.13)
+    const inside = (node: EventTarget | null) => node instanceof Node && (region.contains(node) || tip.current?.contains(node) === true);
+    // While within, each element the pointer comes over says whether it still is: a crossing of the region's own
+    // children is no leave, whatever the element the pointer left names.
+    function watch(event: PointerEvent) {
+      if (!inside(event.target)) leave();
+    }
+    function leave() {
       inRegion.current = false;
+      document.removeEventListener('pointerover', watch, true);
+      document.documentElement.removeEventListener('pointerleave', leave);
       stopPointing();
       if (!trigger.current?.contains(document.activeElement)) setOpen(false);
+    }
+    const enter = () => {
+      if (inRegion.current) return;
+      inRegion.current = true;
+      document.addEventListener('pointerover', watch, true);
+      document.documentElement.addEventListener('pointerleave', leave); // out of the window, where nothing is come over
+      point();
     };
     const press = () => {
       stopPointing();
       setOpen(false);
     };
     region.addEventListener('pointerover', enter);
-    region.addEventListener('pointerout', leave);
     region.addEventListener('pointerdown', press);
     return () => {
       region.removeEventListener('pointerover', enter);
-      region.removeEventListener('pointerout', leave);
       region.removeEventListener('pointerdown', press);
+      document.removeEventListener('pointerover', watch, true);
+      document.documentElement.removeEventListener('pointerleave', leave);
     };
-  }, [pointedWithin]);
+  }, [pointedWithin, point, stopPointing]);
   const drawn = open && shows;
   useEffect(() => {
     if (!drawn) return;
@@ -147,7 +157,7 @@ export function Tip({ content, description, pointedWithin, children, ...guard }:
           // A close while the owner still holds focus is Radix's own, not the person's (the scroll its own focus
           // caused, which Radix reads as the owner moving away): the tip stays while its owner is focused.
           if (!next && !dismissal && trigger.current !== null && trigger.current.contains(document.activeElement)) return;
-          if (!next && !dismissal && inRegion.current) return; // the pointer left the owner for the rest of its region
+          if (!next && !dismissal && inRegion.current) return; // the pointer left the owner for the rest of its region, or the tip
           setOpen(next && showsNow.current);
         }}
       >
@@ -167,6 +177,7 @@ export function Tip({ content, description, pointedWithin, children, ...guard }:
         {shows && (
           <Tooltip.Portal>
             <Tooltip.Content
+              ref={tip}
               side="top"
               sideOffset={4}
               collisionPadding={8}
