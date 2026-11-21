@@ -5,3 +5,10 @@ export const POPOVER = 'z-50 max-h-[var(--radix-popover-content-available-height
 export const ITEM =
   'flex w-full cursor-default flex-col items-start rounded-sm px-2 py-1 text-left outline-none select-none hover:bg-bg-hover focus-visible:bg-bg-hover data-highlighted:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent data-disabled:text-fg-faint aria-checked:bg-bg-active';
 export const NOTE = 'px-2 py-1 text-ui-sm text-fg-muted';
+
+// A popover whose first control carries a tooltip (a named glyph, a fact on a word) takes the focus itself on opening, so
+// that tooltip waits for the person's own pointing or Tab rather than showing at once (the word cut's tips open on focus).
+export const focusPopoverItself = (event: Event): void => {
+  event.preventDefault();
+  (event.currentTarget as HTMLElement).focus();
+};

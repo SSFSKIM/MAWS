@@ -29,6 +29,8 @@ describe('the location chip', () => {
     const user = userEvent.setup();
     render(<LocationChip location={{ path: '/work/app', branch: null, note: null }} directories={['/work/extra']} dirty={false} />);
     await user.click(screen.getByRole('button', { name: 'Location /work/app' }));
+    expect(screen.getByRole('dialog', { name: 'Location' })).toBe(document.activeElement); // opened, the glyph's tip waits
+    expect(tooltip()).toBeNull();
     const list = screen.getByRole('list', { name: 'Additional directories' });
     const copy = within(list).getByRole('button', { name: 'Copy' });
     expect(copy.textContent).toBe(''); // a glyph, no word drawn

@@ -97,6 +97,14 @@ describe('the context ring', () => {
     expect(document.activeElement).toBe(figures);
     expect(screen.getByRole('tooltip').textContent).toBe('23.4% used · 120k until compaction');
     expect(within(popover).queryByRole('button', { name: 'Compact' })).toBeNull();
+    // opened again on the cached reading, the popover takes the focus itself, so the figures' tip waits for the person
+    fireEvent.click(ring());
+    await settle();
+    expect(screen.queryByRole('dialog', { name: 'Context window' })).toBeNull();
+    fireEvent.click(ring());
+    await settle();
+    expect(screen.getByRole('dialog', { name: 'Context window' })).toBe(document.activeElement);
+    expect(screen.queryByRole('tooltip')).toBeNull();
     expect(fake.invoked('session.getContextUsage')).toEqual([{ appSessionId: A_ID, detail: 'full' }]);
   });
 

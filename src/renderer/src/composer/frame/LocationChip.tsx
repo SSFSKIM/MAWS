@@ -10,7 +10,7 @@ import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { NamedGlyph } from '../../ui/glyph';
 import type { LocationView } from './bindings';
-import { CHIP, NOTE, POPOVER } from './chip-style';
+import { CHIP, focusPopoverItself, NOTE, POPOVER } from './chip-style';
 import { useOpenWhileShown } from './draft-shown';
 
 export interface LocationChipProps {
@@ -63,7 +63,7 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content aria-label="Location" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} flex w-80 flex-col gap-1`}>
+        <Popover.Content aria-label="Location" side="top" align="start" sideOffset={6} collisionPadding={8} onOpenAutoFocus={focusPopoverItself} className={`${POPOVER} flex w-80 flex-col gap-1`}>
           <p className="px-2 pt-1 font-mono text-ui-sm break-all">{path}</p>
           {note !== null && <p className={NOTE}>{note}</p>}
           {directories.length > 0 && (
