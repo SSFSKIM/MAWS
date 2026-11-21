@@ -196,6 +196,35 @@ describe('the row note', () => {
     expect(shown('Binary')).toBe(false);
   });
 
+  it('keyboard focus landing in another row closes this row’s note at once, pointer or not; only a new pointing reopens it', async () => {
+    render(
+      <>
+        <Row label="Archive" />
+        <Row label="Restore" note="Restored sessions return to their project." />
+      </>,
+    );
+    const note = () => screen.getByText(NOTE).closest<HTMLElement>('[data-row-note]')!;
+    const keys = user();
+    await keys.hover(row('Archive'));
+    wait(POINTING_DELAY_MS);
+    await keys.tab(); // Archive's button
+    await keys.tab(); // on to Restore's: the pointer still rests on Archive
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Restore' }));
+    expect(note().hasAttribute('data-open')).toBe(false);
+    expect(note().hidden).toBe(true); // no exit motion drawn over the row that took the keyboard
+    wait(POINTING_DELAY_MS * 3);
+    expect(shown('Archive')).toBe(false); // the resting pointer does not bring it back
+    await keys.unhover(row('Archive'));
+    await keys.hover(row('Archive'));
+    wait(POINTING_DELAY_MS);
+    expect(shown('Archive')).toBe(true);
+    await keys.unhover(row('Archive'));
+    await keys.tab({ shift: true }); // the keyboard alone, no pointer: Tab on into Restore again
+    expect(shown('Archive')).toBe(true);
+    await keys.tab();
+    expect(note().hidden).toBe(true); // its close draws no exit motion over Restore either
+  });
+
   it('gives each row its own note', async () => {
     render(
       <>

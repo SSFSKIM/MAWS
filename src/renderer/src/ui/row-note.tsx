@@ -18,7 +18,12 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent as
 import { useDisclosureMotion } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
 
+// What marks a row that carries a note, so a note can tell the keyboard landing in another one.
+const NOTE_ROW = 'data-note-row';
+const inAnotherRow = (to: Element | null) => to?.closest(`[${NOTE_ROW}]`) != null;
+
 export interface RowNoteRowProps {
+  [NOTE_ROW]: '';
   'aria-describedby': string;
   onPointerEnter(event: PointerEvent<HTMLElement>): void;
   onPointerLeave(event: PointerEvent<HTMLElement>): void;
@@ -29,6 +34,7 @@ export interface RowNoteRowProps {
 export interface RowNoteState {
   id: string; // the note's element id, for a control inside the row that should carry the description too
   open: boolean;
+  cut: boolean; // closed by the keyboard moving to another row: gone at once, with no exit motion over that row
   rowProps: RowNoteRowProps; // spread onto the row
 }
 
@@ -39,7 +45,10 @@ export function useRowNote(): RowNoteState {
   // closed note, and an open one stays open while either is in the row (focus handed to a pointer still inside, or
   // back, never closes it). Focus is read from the document, not from the row's blur: a focused control the row
   // removes takes the focus with it and no blur reaches the row, so while the note is open the next focus anywhere
-  // outside the row closes it, as does the pointer leaving.
+  // outside the row closes it, as does the pointer leaving. Focus landing in another row closes it at once, with no
+  // exit motion, and even with the pointer still resting here: the card floats over that row and what took the
+  // keyboard there. The resting pointer does not reopen it; only a new pointing does.
+  const [cut, setCut] = useState(false);
   const row = useRef<HTMLElement | null>(null);
   const pointerInside = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,7 +62,10 @@ export function useRowNote(): RowNoteState {
   useEffect(() => {
     if (!open) return;
     const focusMoved = (event: FocusEvent) => {
-      if (row.current !== null && !row.current.contains(event.target as Node | null) && !pointerInside.current) setOpen(false);
+      const at = event.target instanceof Element ? event.target : null;
+      if (row.current === null || row.current.contains(at)) return;
+      if (inAnotherRow(at)) cutNow();
+      else if (!pointerInside.current) setOpen(false);
     };
     document.addEventListener('focusin', focusMoved, true);
     return () => document.removeEventListener('focusin', focusMoved, true);
@@ -62,10 +74,21 @@ export function useRowNote(): RowNoteState {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
   };
+  const show = () => {
+    setCut(false);
+    setOpen(true);
+  };
+  function cutNow() {
+    settle();
+    setCut(true);
+    setOpen(false);
+  }
   return {
     id,
     open,
+    cut,
     rowProps: {
+      [NOTE_ROW]: '',
       'aria-describedby': id,
       onPointerEnter: (event) => {
         row.current = event.currentTarget;
@@ -73,7 +96,7 @@ export function useRowNote(): RowNoteState {
         settle();
         timer.current = setTimeout(() => {
           timer.current = null;
-          if (pointerInside.current) setOpen(true);
+          if (pointerInside.current) show();
         }, POINTING_DELAY_MS);
       },
       onPointerLeave: (event) => {
@@ -84,11 +107,13 @@ export function useRowNote(): RowNoteState {
       },
       onFocus: (event) => {
         row.current = event.currentTarget;
-        setOpen(true);
+        show();
       },
       onBlur: (event) => {
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-        if (!pointerInside.current) setOpen(false);
+        const to = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+        if (event.currentTarget.contains(to)) return;
+        if (inAnotherRow(to)) cutNow();
+        else if (!pointerInside.current) setOpen(false);
       },
     },
   };
@@ -104,7 +129,7 @@ export function RowNote({ note, className = '', children }: { note: RowNoteState
   const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(note.open);
   useOpeningSide(note.open, ref);
   return (
-    <div ref={ref} id={note.id} data-row-note="" data-side="down" data-open={note.open || undefined} hidden={!mounted} className={`${PLACE} ${className}`}>
+    <div ref={ref} id={note.id} data-row-note="" data-side="down" data-open={note.open || undefined} hidden={!mounted || (!note.open && note.cut)} className={`${PLACE} ${className}`}>
       <div className={NOTE}>{children}</div>
     </div>
   );
