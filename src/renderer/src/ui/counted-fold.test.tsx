@@ -57,6 +57,29 @@ describe('CountedFold', () => {
     expect(body()).toBeNull();
   });
 
+  // Task 2 fix round 1: what a closing fold still draws is out of reach, and the line names no body that is gone
+  it('puts its body out of reach the moment it folds, while the close still runs, and names a body only while it is open', async () => {
+    render(
+      <CountedFold summary="Listed 9 agents">
+        <button type="button">Message repo-b</button>
+      </CountedFold>,
+    );
+    const keys = user();
+    expect(line().hasAttribute('aria-controls')).toBe(false);
+    await keys.click(line());
+    const message = screen.getByRole('button', { name: 'Message repo-b' });
+    expect(document.getElementById(line().getAttribute('aria-controls')!)?.contains(message)).toBe(true);
+    expect(message.closest('[inert]')).toBeNull();
+    await keys.click(line());
+    expect(message.isConnected).toBe(true); // the close is still running
+    expect(message.closest('[inert]')).not.toBeNull();
+    expect(line().hasAttribute('aria-controls')).toBe(false);
+    await keys.tab();
+    expect(document.activeElement).not.toBe(message);
+    wait(CLOSE_MOTION.ms);
+    expect(message.isConnected).toBe(false);
+  });
+
   it('follows an open state its caller keeps, asking the caller to change it', async () => {
     const asked: boolean[] = [];
     function Kept() {

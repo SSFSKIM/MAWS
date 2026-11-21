@@ -3,7 +3,9 @@
 // count, so the count stays in view folded and open; a chevron after the words says which. Opened, the block shows under
 // the line with the shared disclosure motion and the line stays as it was. `lead` stands before the words (a row's
 // glyph), outside the name. The open state is the caller's when it passes `open` (a virtualised transcript keeps it in
-// its store across remounts), else the fold's own. It reads no store, so the editor bundles can draw it.
+// its store across remounts), else the fold's own. Folding puts the body out of reach at once (inert while its close
+// runs), and the line names its body only while it is open, so it never names one that is gone. It reads no store, so
+// the editor bundles can draw it.
 import { useId, useState, type ReactNode } from 'react';
 import { DisclosureBody } from './disclosure';
 
@@ -30,14 +32,14 @@ export function CountedFold({ summary, lead = null, open: kept, onOpenChange, cl
   };
   return (
     <div className={className} data-counted-fold="">
-      <button type="button" className={LINE} aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+      <button type="button" className={LINE} aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={toggle}>
         {lead}
         <span className="min-w-0 truncate">{summary}</span>
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={CHEVRON}>
           <path d="M6 3.5 10.5 8 6 12.5" />
         </svg>
       </button>
-      <DisclosureBody open={open} id={bodyId}>
+      <DisclosureBody open={open} id={bodyId} inert={!open || undefined}>
         {children}
       </DisclosureBody>
     </div>
