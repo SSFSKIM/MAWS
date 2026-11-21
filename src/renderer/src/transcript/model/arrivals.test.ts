@@ -184,7 +184,7 @@ describe('what stays through a fold (Interfaces D)', () => {
   });
 
   // UX wave U1b (decision 9): the notice stays the head row a turn's `opener` is read from, so a turn the answer opened
-  // still reads as the person's: its duration alone (the word cut, T1), never "Continued for"
+  // still reads as the person's: its duration alone (the word cut, T1), never "Continued ·"
   it('an answer that opened a turn of work folds with it, and the turn still reads as the person’s', () => {
     const b = builder();
     engineTurn(b);

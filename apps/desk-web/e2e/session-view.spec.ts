@@ -246,7 +246,7 @@ test('a turn no row ended draws at rest while its machine reports the session id
     await expect(workingLine(view)).toHaveCount(working ? 1 : 0);
     await expect(view.locator('[data-kind="divider"]')).toHaveCount(working ? 1 : 0);
     await toggle(page, 'Transcript').click();
-    await expect(divider).toHaveText(working ? /^Working( for \d+s)?$/ : 'Continued for 2s'); // MAWS's words for the engine's turn, closed at its last row
+    await expect(divider).toHaveText(working ? /^Working( for \d+s)?$/ : 'Continued · 2s'); // MAWS's words for the engine's turn, closed at its last row
     await toggle(page, 'Report').click();
   };
 

@@ -1,5 +1,5 @@
-import { cleanup } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseTranscriptProps } from '@shared/engine/surface-rows';
 import { renderRow } from '../view/rows/test-support';
 import { rowsOf, turnRows, withAllExpanded } from '../model/derive';
@@ -9,9 +9,14 @@ import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
 import { commandEntry, type ArrivalEntry } from '@shared/engine/arrival-schema';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
+import { fakeTimeouts, realTimeouts } from '../../test-support/fake-timeouts';
+import { QUIET_MS } from '../../ui/spinner';
 import { arrivalInput, assistantInput, callInput, commandInput, groupInput, noticeFollows, noticeIndexBuilds, questionInput, sentInput, thinkingInput, toolInputs, turnLineInput, userInput, withToolProps } from './adapters';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  realTimeouts();
+});
 
 const setup = (b: ReturnType<typeof builder>) => {
   const state = withAllExpanded(applyEvents(createState(null, null), b.events));
@@ -285,7 +290,9 @@ describe('transcript surface adapters', () => {
     const props = rewrite === 'input' ? { ...wireProps, input: { command: 'make shown' }, isInterrupted: true }
       : rewrite === 'output' ? { ...wireProps, output: 'replacement' } : wireProps;
     const drawn = withToolProps(input, props);
+    fakeTimeouts();
     const { container, queryByRole } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    act(() => vi.advanceTimersByTime(QUIET_MS));
     expect(queryByRole('button', { name: /Load full result/ })).toBeNull();
     if (rewrite === 'output') {
       expect(container.querySelector('pre')?.textContent).toBe('replacement');
@@ -293,7 +300,7 @@ describe('transcript surface adapters', () => {
     } else {
       expect(drawn.detail).toMatchObject({ spill: { state: loadState } });
       if (loadState === 'loaded') expect(container.querySelector('pre')?.textContent).toBe('complete loaded output');
-      else expect(container.querySelector('.transcript-spill')).not.toBeNull(); // the word cut (T26): the quiet spinner's place
+      else expect(queryByRole('progressbar', { name: 'Loading the full result…' })).not.toBeNull(); // the word cut (T26): the quiet spinner, past its quiet half second
       if (rewrite === 'input') expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(/^Stopped: make shown/); // UX wave U2 (R2): the stopped form
       else expect(drawn).toBe(row);
     }

@@ -55,6 +55,22 @@ describe('divider row', () => {
     const line = screen.getByRole('button', { name: /^\d+s · /, expanded: false });
     expect(line.textContent).toMatch(/^\d+s · Edited a\.ts, ran 2 commands, \+2 · \+\d+( −\d+)?$/);
     expect(line.querySelector('.transcript-counts')?.textContent).toMatch(/^\+\d+/);
+    expect(line.querySelector('.transcript-counts-apart')).not.toBeNull();
+  });
+
+  // fix round 1: the fold is the caption's data, so a file whose name ends like a count keeps its lines beside it
+  it('keeps the lines beside a caption that only ends like a fold', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('e1', 'Edit', { file_path: '/p/notes, +6', old_string: 'a', new_string: 'b\nc' });
+    b.result('e1', 'done');
+    b.tick(3_000);
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    const line = screen.getByRole('button', { name: /^\d+s · /, expanded: false });
+    expect(line.textContent).toMatch(/^\d+s · Edited notes, \+6 \+\d+( −\d+)?$/);
+    expect(line.querySelector('.transcript-counts-apart')).toBeNull();
   });
 
   it('toggles the work area: its rows join and leave the list, and aria-controls names the work area’s rows while open', async () => {

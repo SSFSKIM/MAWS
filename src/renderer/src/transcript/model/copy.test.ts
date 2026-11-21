@@ -2,7 +2,7 @@ import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
-  ARTIFACT_CELL, bashFooter, BLOCKED, boundaryCopy, cellLabel, compactingLine, dividerCopy, dividerHead, endsInFold, HANDOVER_REINIT_COPY, lineCountsCopy, liveThinkingLabel, NOTICE, plural,
+  ARTIFACT_CELL, bashFooter, BLOCKED, boundaryCopy, cellLabel, compactingLine, dividerCopy, dividerHead, HANDOVER_REINIT_COPY, lineCountsCopy, liveThinkingLabel, NOTICE, plural,
   commandLead, PENDING_CAPTION, processExitCopy, REACH, rewindLabel, SAFEGUARD_LINE, shellFooter, stoppedLabel, subagentDetail, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, waitingLabel,
 } from './copy';
 import { rowsOf } from './derive';
@@ -24,15 +24,16 @@ describe('divider and summary copy', () => {
   });
 
   // UX wave U2 (O-15; acceptance 7): the turn's line says what the turn did, in the caption's words; no count of calls
-  // The word cut (T1, ruled): a finished turn of the person's reads its duration alone, then what it did; Continued,
-  // Peer session, You stopped and Failed keep their words
-  it('reads the duration alone, Continued, You stopped and Failed with what the turn did, omitted when it did nothing', () => {
+  // The word cut (T1, ruled; the architect's narrowing): no finished turn says it worked; a person's reads its duration
+  // alone, the engine's and a peer's say who opened it (`Continued · 5s`, `Peer session · 5s`), and You stopped, Ended
+  // for your message and Failed keep their words
+  it('reads the duration alone, Continued ·, Peer session ·, You stopped and Failed with what the turn did, omitted when it did nothing', () => {
     expect(line({ state: 'completed', durationMs: 192_000, caption: 'Edited 2 files, ran 2 agents, ran 5 commands', counts: { added: 33, removed: 5 } })).toBe('3m 12s · Edited 2 files, ran 2 agents, ran 5 commands +33 −5');
     expect(line({ state: 'completed', durationMs: 5_000, caption: 'Ran a command' })).toBe('5s · Ran a command');
     expect(line({ state: 'completed', durationMs: 5_000 })).toBe('5s');
     expect(line({ state: 'completed', durationMs: 3_000, caption: 'Ran an agent' })).not.toContain('Worked for');
-    expect(line({ state: 'completed', origin: 'engine', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Continued for 5s · Read 2 files');
-    expect(line({ state: 'completed', origin: 'peer', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Peer session worked for 5s · Read 2 files');
+    expect(line({ state: 'completed', origin: 'engine', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Continued · 5s · Read 2 files');
+    expect(line({ state: 'completed', origin: 'peer', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Peer session · 5s · Read 2 files');
     expect(line({ state: 'stopped', durationMs: 5_000, caption: 'Ran 3 commands (2 stopped)' })).toBe('You stopped after 5s · Ran 3 commands (2 stopped)');
     expect(line({ state: 'failed', durationMs: 5_000, caption: 'Ran a command (1 failed)' })).toBe('Failed after 5s · Ran a command (1 failed)');
     for (const text of [line({ state: 'completed', durationMs: 5_000, caption: 'Ran a command' }), line({ state: 'working', durationMs: 5_000 })]) expect(text).not.toContain('tool call');
@@ -50,19 +51,18 @@ describe('divider and summary copy', () => {
   // The word cut (T2, "Seen on the scratch build"): a caption folded to `+N` is kept apart from the lines that follow it,
   // so the fold's count does not read as one of them
   it('separates a folded caption’s `+N` from the turn’s lines; an unfolded caption keeps its lines beside it', () => {
-    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited 3 files, ran 2 commands, +6', counts: { added: 4, removed: 2 } })).toBe('3s · Edited 3 files, ran 2 commands, +6 · +4 −2');
-    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited 3 files, ran 2 commands, +6' })).toBe('3s · Edited 3 files, ran 2 commands, +6');
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited 3 files, ran 2 commands, +6', fold: 6, counts: { added: 4, removed: 2 } })).toBe('3s · Edited 3 files, ran 2 commands, +6 · +4 −2');
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited 3 files, ran 2 commands, +6', fold: 6 })).toBe('3s · Edited 3 files, ran 2 commands, +6');
     expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited a file, ran a command', counts: { added: 4, removed: 2 } })).toBe('3s · Edited a file, ran a command +4 −2');
-    expect(endsInFold('Edited 3 files, ran 2 commands, +6')).toBe(true);
-    expect(endsInFold('Edited a file, ran /dataviz')).toBe(false);
-    expect(endsInFold('')).toBe(false);
+    // the fold is the caption's data: a file whose name ends like a count is no fold (fix round 1)
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited notes, +6', counts: { added: 4, removed: 2 } })).toBe('3s · Edited notes, +6 +4 −2');
   });
 
   // UX wave U2 (l2-transcript-04; C2): a turn the answer to an asynchronous question opened is the person's
-  it('reads a turn an answer opened as the person’s, its duration alone, whatever its origin; every other opener keeps the origin’s verb', () => {
+  it('reads a turn an answer opened as the person’s, its duration alone, whatever its origin; every other opener keeps who opened it', () => {
     expect(line({ state: 'completed', origin: 'engine', opener: { class: 'answer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('5s · Ran a command');
-    expect(line({ state: 'completed', origin: 'engine', opener: { class: 'subagent' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Continued for 5s · Ran a command');
-    expect(line({ state: 'completed', origin: 'peer', opener: { class: 'peer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Peer session worked for 5s · Ran a command');
+    expect(line({ state: 'completed', origin: 'engine', opener: { class: 'subagent' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Continued · 5s · Ran a command');
+    expect(line({ state: 'completed', origin: 'peer', opener: { class: 'peer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Peer session · 5s · Ran a command');
   });
 
   // E11 (W-C): a turn its engine process ended (a crash, or a supervisor's death) is not the reader's stop

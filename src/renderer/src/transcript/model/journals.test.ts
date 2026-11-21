@@ -36,7 +36,7 @@ describe('fixture gates through the model', () => {
     expect(ofKind(rows, 'user')).toHaveLength(1);
     const dividers = ofKind(rows, 'divider');
     expect(dividers.map((d) => [d.origin, d.state])).toEqual([['human', 'completed'], ['engine', 'completed'], ['engine', 'completed']]); // each engine turn thinks, then answers
-    expect(dividers.slice(1).map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }).startsWith('Continued for '))).toEqual([true, true]);
+    expect(dividers.slice(1).map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }).startsWith('Continued · '))).toEqual([true, true]);
     expect(ofKind(rows, 'assistant_text').filter((r) => r.turnId !== state.order[0])).toHaveLength(2);
     expect(dividers[0].summary.childAgents).toBe(2);
   });

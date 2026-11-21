@@ -23,3 +23,19 @@ describe('actions drawn on the pointed row', () => {
     expect(noHover).toContain(selector);
   });
 });
+
+// The word cut (T18, fix round 1): the output's copy glyph sits over the output's top right corner, opaque; the output
+// keeps that column clear, so no line of it, the first one included, is drawn under the glyph.
+describe('the output’s copy glyph', () => {
+  const px = (selector: string, property: string) => {
+    const rule = rules.find((candidate) => candidate.selectors.split(',').some((one) => one.trim() === selector) && new RegExp(`(^|;)\\s*${property}:`).test(candidate.body));
+    const value = rule?.body.match(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`))?.[1].trim();
+    return value === undefined ? NaN : Number(value.replace(/px$/, ''));
+  };
+
+  it('keeps a column of the output clear for it', () => {
+    const glyph = px('.transcript-shell .transcript-copy-glyph', 'width') + px('.transcript-shell-output > .transcript-copy-glyph', 'right');
+    expect(glyph).toBeGreaterThan(0);
+    expect(px('.transcript-shell-output > .transcript-output', 'padding-right')).toBeGreaterThanOrEqual(glyph);
+  });
+});

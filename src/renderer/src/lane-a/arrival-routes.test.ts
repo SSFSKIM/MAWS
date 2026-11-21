@@ -124,7 +124,7 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
     // UX wave U2 (O-15; the U2a document's C5): the turn the failed one opened only answers, so it has no line
     expect(rows).not.toContain('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
     expect(rows[at('● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session') + 1]).toMatch(/^prompt: Use the Agent tool/);
-    // A hand-back's turn is the engine's ("Continued for"), opened by its report, which names the agent by its title;
+    // A hand-back's turn is the engine's ("Continued · …"), opened by its report, which names the agent by its title;
     // the turn's line ends the turn (board ticket 789)
     expect(rows[at('› Report from uxw agent: PONG') + 1]).toBe('turn engine, opened by subagent: Report from uxw agent: PONG');
   });

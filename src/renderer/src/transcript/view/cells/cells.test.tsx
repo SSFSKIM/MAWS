@@ -292,6 +292,14 @@ describe('shell detail', () => {
       expect(await meta(call('/repo', { command: 'ls', cwd: '/w/elsewhere' }), here)).toBe('cwd /w/elsewhere');
     });
 
+    // fix round 1: the input's folder is the call's folder, and the session's own is not named, by input or by row
+    it('an input folder that is the session’s own names none, as a row folder there names none', async () => {
+      expect(await meta(call(undefined, { command: 'ls', cwd: '/repo' }), here)).toBeNull();
+      expect(await meta(call(worktree, { command: 'ls', cwd: '/repo/packages/app' }), here)).toBeNull();
+      expect(await meta(call(undefined, { command: 'ls', cwd: '/private/repo' }), { sessionDirectory: '/repo' })).toBeNull();
+      expect(await meta(call(undefined, { command: 'ls', cwd: '/repo' }), {})).toBe('cwd /repo');
+    });
+
     it('a call with no folder: no line, whether or not a folder is handed down', async () => {
       expect(await meta(call(undefined), here)).toBeNull();
       expect(await meta(call(undefined), {})).toBeNull();

@@ -1373,7 +1373,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     expect(line(list)).toBe('You stopped after 9s · Searched code (1 stopped) · 1 denied · 1 auto-denied');
   });
 
-  it('an engine’s turn with one answer and no work has no line; with one call it reads `Continued for …` and the call', () => {
+  it('an engine’s turn with one answer and no work has no line; with one call it reads `Continued · …` and the call', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
     b.text('m1', 0, 'All quiet.');
@@ -1386,7 +1386,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     b.end([], { origin: 'task-notification' });
     const list = rows(b.events);
     expect(list.filter((row) => row.kind === 'divider')).toHaveLength(1);
-    expect(line(list)).toBe('Continued for 1s · Ran a command');
+    expect(line(list)).toBe('Continued · 1s · Ran a command');
   });
 
   it('a toggle of one run derives one turn, and the turn’s line is data: no reader derives the turn again to word it', () => {

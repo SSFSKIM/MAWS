@@ -3,7 +3,7 @@
 // draws them. Invented content.
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { captionParts, captionText, stepsOfCells, turnOrder, type CaptionStep } from './caption';
+import { caption, captionParts, captionText, stepsOfCells, turnOrder, type CaptionStep } from './caption';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
@@ -232,7 +232,8 @@ describe('a run’s caption (acceptance 2)', () => {
   });
 
   // The word cut (T2): which calls a capped caption names when it leaves them out: a skill by its name, a connector by
-  // its server, computer use by that name; MAWS's own server is no connector
+  // its server, the computer-use plugin's server by that name; MAWS's own server is no connector. A step carries the
+  // connector it used whatever its caption kind
   it('names a left-out skill by its name, a connector by its server and computer use by that name, but not MAWS’s own calls', () => {
     const b = turnOf((t) => {
       edit(t, 't1', '/w/a.ts');
@@ -251,7 +252,36 @@ describe('a run’s caption (acceptance 2)', () => {
     });
     expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, ran /dataviz, used notion, used computer use, +2');
     const cells = drawn(b.events).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
-    expect(stepsOfCells(cells).map((step) => step.named ?? null)).toEqual([null, null, null, 'ran /dataviz', 'used notion', 'used notion', 'used computer use', null]);
+    expect(stepsOfCells(cells).map((step) => step.connector ?? null)).toEqual([null, null, null, '/dataviz', 'notion', 'notion', 'computer use', null]);
+  });
+
+  // The word cut (T2, fix round 1): a connector's call of a caption kind (the web plugin's fetch reads `fetched a page`)
+  // is named as any other when it is left out, and is not counted again
+  it('names a left-out connector whose call has a caption kind, and counts it no more', () => {
+    const b = turnOf((t) => {
+      edit(t, 't1', '/w/a.ts');
+      run(t, 't2', 'pnpm test');
+      grep(t, 't3', 'TODO');
+      t.toolUse('t4', 'mcp__web__fetch', { url: 'https://example.com' });
+      t.result('t4', 'page');
+    });
+    expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, used web, +1');
+    expect(lineOf(b).parts).toContain('fetched a page');
+  });
+
+  // The word cut (T2, fix round 1): computer use is its plugin's server, whichever of its tools a call used, named once
+  it('names the computer-use server once, whichever of its tools the left-out calls used', () => {
+    const b = turnOf((t) => {
+      edit(t, 't1', '/w/a.ts');
+      run(t, 't2', 'pnpm test');
+      grep(t, 't3', 'TODO');
+      t.toolUse('t4', 'mcp__plugin_cua_cua_repl__js', { code: '1' });
+      t.result('t4', 'ok');
+      t.toolUse('t5', 'mcp__plugin_cua_cua_repl__end_task', {});
+      t.result('t5', 'ok');
+    });
+    expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, used computer use, +1');
+    expect(lineOf(b).caption).not.toContain('plugin_cua');
   });
 
   it('a stopped call of no kind is counted under its done words', () => {
@@ -335,19 +365,24 @@ describe('the parts, by hand', () => {
   // The word cut (T2, the owner's call): a capped caption names each skill and connector its left-out parts used, once
   // each, before the count of the rest; no count when nothing else is left out
   it('a capped caption names the skills and connectors it leaves out, once each, then `+N` for the rest', () => {
-    const named = (words: string, name: string, key = words) => step({ kind: null, key, words, named: name });
+    const named = (words: string, connector: string, key = words) => step({ kind: null, key, words, connector });
     const parts = captionParts([
       step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }),
-      named('ran /dataviz', 'ran /dataviz'), named('used notion · search', 'used notion'), named('used notion · create_page', 'used notion'),
-      step({ kind: 'todos', key: 'd1' }), named('ran /dataviz', 'ran /dataviz', 'again'),
+      named('ran /dataviz', '/dataviz'), named('used notion · search', 'notion'), named('used notion · create_page', 'notion'),
+      step({ kind: 'todos', key: 'd1' }), named('ran /dataviz', '/dataviz', 'again'),
     ]);
-    expect(captionText(parts, true)).toBe('Edited a, ran a command, ran /dataviz, used notion, +2');
+    expect(caption(parts, true)).toEqual({ text: 'Edited a, ran a command, ran /dataviz, used notion, +2', fold: 2 });
     // nothing but named parts left out: no count
-    expect(captionText(captionParts([step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), named('ran /dataviz', 'ran /dataviz'), named('used notion · search', 'used notion')]), true))
-      .toBe('Edited a, ran a command, ran /dataviz, used notion');
+    expect(caption(captionParts([step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), named('ran /dataviz', '/dataviz'), named('used notion · search', 'notion')]), true))
+      .toEqual({ text: 'Edited a, ran a command, ran /dataviz, used notion', fold: 0 });
     // a connector a kept part already names is not named again: its other part is counted
-    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), named('used notion · search', 'used notion'), named('used notion · create_page', 'used notion'), named('ran /dataviz', 'ran /dataviz')]), true))
+    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), named('used notion · search', 'notion'), named('used notion · create_page', 'notion'), named('ran /dataviz', '/dataviz')]), true))
       .toBe('Ran a command, used notion · search, ran /dataviz, +1');
+    // a part of a kind some of whose calls used a connector names it and is counted for the rest
+    expect(caption(captionParts([step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'w1', connector: 'web' }), step({ kind: 'web_fetch', key: 'w2' }), step({ kind: 'todos', key: 'd1' })]), true))
+      .toEqual({ text: 'Ran a command, searched code, used web, +3', fold: 3 });
+    // the fold is data, not read back from the words: a file whose name ends like a count is no fold
+    expect(caption(captionParts([step({ kind: 'edit', key: '/w/notes, +6', path: '/w/notes, +6' })]), true)).toEqual({ text: 'Edited notes, +6', fold: 0 });
     // uncapped, every part reads its own words
     expect(captionText(parts, false)).toBe('Edited a, ran a command, searched code, updated todos, ran /dataviz 2 times, used notion · search, used notion · create_page');
   });

@@ -692,7 +692,7 @@ describe('turn origin', () => {
     const list = rows(b.events);
     const dividers = list.filter((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider');
     expect(dividers.map((d) => d.origin)).toEqual(['peer']); // UX wave U2 (O-15): the peer turn without work has none
-    expect(dividers.map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }))).toEqual(['Peer session worked for 1s · Ran a command']);
+    expect(dividers.map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }))).toEqual(['Peer session · 1s · Ran a command']);
     expect(find(list, 'user')).toMatchObject({ text: 'From the peer session' });
     expect(turnActivity(state).map((turn) => turn.origin)).toEqual(['peer', 'peer']);
   });

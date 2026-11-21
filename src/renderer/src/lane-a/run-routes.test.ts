@@ -443,9 +443,9 @@ const RECORDINGS: Record<string, () => Promise<Record<string, SessionEvent[]>>> 
 // One difference between routes, named: a turn a monitor's event opened (the U2a document, Reported 10's visible cost;
 // the architect's ruling on M5). The live wire carries no monitor event, so on that route the turn only answers and has
 // no line (a turn with nothing under it has none), while the file and its rows, which carry the event, draw the
-// engine's `Continued for …`. Listed row by row, the turns by their first text; the exception ends when the live wire
+// engine's `Continued · …`. Listed row by row, the turns by their first text; the exception ends when the live wire
 // carries the monitor's event.
-const monitorTurns = (...texts: string[]) => ['file', 'link'].flatMap((route) => texts.map((text) => `${route} turn line of text:${text}:0 drawn: no → turn line · completed · engine · Continued for 0s`));
+const monitorTurns = (...texts: string[]) => ['file', 'link'].flatMap((route) => texts.map((text) => `${route} turn line of text:${text}:0 drawn: no → turn line · completed · engine · Continued · 0s`));
 const MONITOR_TURN: Record<string, string[]> = {
   'uxwave/u3-tasks-r1': monitorTurns('msg_011CgyEGFdZPRJDtCKFTFsDV', 'msg_011CgyEGnD5hvk8b2VcZ7Anw', 'msg_011CgyEH889fq8Wpv37JEgAX'),
   'uxwave/u3-tasks-r2': monitorTurns('msg_011CgyF4rjii1Qw8FZtavENQ', 'msg_011CgyF5PZNQZn5q9eeR5ma6', 'msg_011CgyF5xhvBxUobnikmA5JM'),
