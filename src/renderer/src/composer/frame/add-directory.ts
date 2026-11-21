@@ -12,15 +12,19 @@ import type { ChipBinding, ChipPhase } from './bindings';
 export const ADD_DIRECTORY = 'Add directory…';
 
 // P2-A (2026-10-09; the execution document §5.6, acceptance 5): on a session with no ready process the choice starts it
-// first; `phase` says so after the picker returns ("Starting…" beside the "+"), then while the directory is applied.
+// first; `phase` says so after the picker returns, then while the directory is applied. The word cut (C20): the wait is
+// a spinner beside the "+", `wait` its words (the spinner's name and the "+"'s tooltip); `disabled` is a real refusal
+// alone, the only words the menu item shows, and `busy` greys the item while a choice is under way.
 export type AddDirectoryPhase = 'idle' | 'choosing' | ChipPhase;
 export const ADDING_DIRECTORY = 'Adding the directory…';
+const WAIT: Partial<Record<AddDirectoryPhase, string>> = { starting: STARTING_SESSION, applying: ADDING_DIRECTORY };
 
-export function useAddDirectory(directories: ChipBinding<string[]>, cwd: string, client: MawsBridge = ipc): { add(): Promise<void>; disabled: string | null; phase: AddDirectoryPhase } {
+export function useAddDirectory(directories: ChipBinding<string[]>, cwd: string, client: MawsBridge = ipc): { add(): Promise<void>; disabled: string | null; busy: boolean; wait: string | null } {
   const [phase, setPhase] = useState<AddDirectoryPhase>('idle');
-  const disabled = directories.disabled ?? (phase === 'choosing' ? 'Choosing a directory…' : phase === 'starting' ? STARTING_SESSION : phase === 'applying' ? ADDING_DIRECTORY : null);
+  const disabled = directories.disabled;
+  const busy = phase !== 'idle';
   const add = async () => {
-    if (disabled !== null) return;
+    if (disabled !== null || busy) return;
     setPhase('choosing');
     try {
       const picked = await client.invoke('layout.pickFiles', { kind: 'directory', directory: cwd === '' ? null : cwd, multiple: false });
@@ -34,5 +38,5 @@ export function useAddDirectory(directories: ChipBinding<string[]>, cwd: string,
       setPhase('idle');
     }
   };
-  return { add, disabled, phase };
+  return { add, disabled, busy, wait: WAIT[phase] ?? null };
 }

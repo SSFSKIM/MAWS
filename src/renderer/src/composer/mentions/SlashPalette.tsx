@@ -57,12 +57,12 @@ const KindIcon = ({ origin, muted }: { origin: SlashOrigin; muted: boolean }) =>
 );
 
 const DETAIL_ID = 'composer-slash-detail';
-const FROM_MAWS = 'MAWS';
 const GAP = 6; // between the list and the popover
 const MARGIN = 8; // between the popover and the window's edges
 
-// Where a row comes from, as its popover says it: MAWS for a panel, the plugin for a plugin's command; null otherwise.
-const fromOf = (item: SlashItem): string | null => (item.origin === 'widget' ? FROM_MAWS : item.origin === 'plugins' ? item.name.slice(0, item.name.indexOf(':')) : null);
+// Where a row comes from, as its popover says it: the plugin for a plugin's command; null otherwise (the word cut, C58:
+// a panel MAWS draws says nothing of where it is from).
+const fromOf = (item: SlashItem): string | null => (item.origin === 'plugins' ? item.name.slice(0, item.name.indexOf(':')) : null);
 const reasonOf = (item: SlashItem): string | null => (item.action.kind === 'unavailable' ? item.action.hint : null);
 const hasDetail = (item: SlashItem): boolean => item.description !== '' || item.argumentHint !== null || fromOf(item) !== null || reasonOf(item) !== null;
 

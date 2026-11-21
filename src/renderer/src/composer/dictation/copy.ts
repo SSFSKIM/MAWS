@@ -4,9 +4,15 @@
 import type { VoicePermission, VoiceErrorCode, VoiceStartResult } from '@shared/ipc/schema/voice';
 import type { DictationNoticeKind } from './store';
 
-// The toolbar microphone's tooltip: a click is the primary way (the owner's ruling, 2026-10-06), and a chord bound to
-// `composer.dictate` in Settings › Keyboard is named as the hold that does the same.
-export const micTitle = (chord: string | null): string => `Click to dictate · on this Mac${chord === null ? '' : ` · or hold ${chord}`}`;
+// The toolbar microphone's word, its name and its tooltip (the word cut, C32: the action alone), and a chord bound to
+// `composer.dictate` in Settings › Keyboard named as the hold that does the same, after it as every glyph's chord is.
+export const MIC = 'Dictate';
+export const micHold = (chord: string | null): string | null => (chord === null ? null : `hold ${chord}`);
+
+// The capture's state beside the microphone. The word cut (C33): asking for permission keeps its words; listening (a
+// pulsing dot) and finishing (a still, faint dot) are drawn without words, which stay for screen readers.
+export const DICTATION_STATE = { requesting: 'Asking for permission…' };
+export const DICTATION_STATE_SPOKEN_ONLY = { listening: 'Listening…', finishing: 'Finishing…' };
 
 export interface NoticeCopy {
   kind: DictationNoticeKind;

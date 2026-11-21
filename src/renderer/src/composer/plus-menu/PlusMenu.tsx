@@ -3,7 +3,9 @@
 // additional directories, where the toolbar's `+ dir` chip was; given the frame's binding, so the editor harness, which
 // has none, shows no such item), the slash palette at `/`, and the Connectors and Plugins widgets (`/mcp`, `/plugins`),
 // disabled with the palette's Not available here where a host registers no widgets. The toolbar that holds it is the
-// Composer's (M4); the menu drives the editor through its handle.
+// Composer's (M4); the menu drives the editor through its handle. The word cut: a plugin row is its name alone (C17), a
+// submenu's last rows "In this chat…" and "Manage…" (C18), an empty submenu says so in two words (C19, P578, P579), and
+// Add directory…'s wait is a spinner beside the "+" whose words are the "+"'s tooltip (C20).
 import { DropdownMenu } from 'radix-ui';
 import type { RefObject } from 'react';
 import { ipc } from '../../ipc/client';
@@ -18,9 +20,16 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../../stores/sessions';
 import { openCustomize } from '../../customize/open';
 import { useConnectorMenu } from '../../widgets/connector-menu'; // UX wave U11a: the Connectors submenu's rows and line
+import { QuietSpinner } from '../../ui/spinner';
+import { Tip } from '../../ui/tip';
 
 const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none select-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
 const NO_DIRECTORIES: ChipBinding<string[]> = { value: [], options: [], disabled: 'No session to add a directory to', set: async () => ({ ok: false, error: 'No session to add a directory to' }) };
+export const PLUS_MENU = {
+  noPlugins: 'No plugins',
+  inThisChat: 'In this chat…',
+  manage: 'Manage…',
+};
 
 export interface PlusMenuProps {
   appSessionId?: AppSessionId;
@@ -43,28 +52,30 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
   };
   const widgetItem = (label: string, name: Extract<WidgetCommandName, 'mcp' | 'plugins'>) => {
     const ready = status?.process === 'ready';
-    const rows = name === 'mcp' ? connectors.rows : !ready ? [] : status.plugins.map((plugin) => ({ name: plugin.name, detail: 'Loaded' }));
-    const empty = name === 'mcp' ? connectors.empty : ready ? 'No plugins reported by this session' : null;
+    const rows: { name: string; detail?: string }[] = name === 'mcp' ? connectors.rows : !ready ? [] : status.plugins.map((plugin) => ({ name: plugin.name }));
+    const empty = name === 'mcp' ? connectors.empty : ready ? PLUS_MENU.noPlugins : null;
     return <DropdownMenu.Sub>
       <DropdownMenu.SubTrigger className={`${ITEM} flex-row items-center justify-between gap-3`}><span>{label}</span><span aria-hidden>›</span></DropdownMenu.SubTrigger>
       <DropdownMenu.Portal><DropdownMenu.SubContent sideOffset={4} className="z-50 max-h-[60vh] min-w-56 max-w-80 overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">
-        {rows.map((row, index) => <DropdownMenu.Item key={`${row.name}:${index}`} onSelect={() => editor.current?.openWidget(name)} disabled={!widgets.has(name)} className={`${ITEM} flex-row items-center justify-between gap-3`}><span className="min-w-0 truncate">{row.name}</span><span className="shrink-0 text-ui-sm text-fg-muted">{row.detail}</span></DropdownMenu.Item>)}
+        {rows.map((row, index) => <DropdownMenu.Item key={`${row.name}:${index}`} onSelect={() => editor.current?.openWidget(name)} disabled={!widgets.has(name)} className={`${ITEM} flex-row items-center justify-between gap-3`}><span className="min-w-0 truncate">{row.name}</span>{row.detail !== undefined && <span className="shrink-0 text-ui-sm text-fg-muted">{row.detail}</span>}</DropdownMenu.Item>)}
         {rows.length === 0 && empty !== null && <DropdownMenu.Label className="max-w-64 px-2 py-2 text-ui-sm text-fg-muted">{empty}</DropdownMenu.Label>}
         <DropdownMenu.Item disabled={!widgets.has(name)} onSelect={() => editor.current?.openWidget(name)} className={ITEM}>
-          <span>{name === 'mcp' ? 'Connectors in this chat…' : 'Plugins in this chat…'}</span>
+          <span>{PLUS_MENU.inThisChat}</span>
           {widgets.has(name) ? null : <span className="text-ui-sm">{UNAVAILABLE_HINT}</span>}
         </DropdownMenu.Item>
         <DropdownMenu.Separator className="my-1 h-px bg-border" />
-        <DropdownMenu.Item onSelect={() => openCustomize(name, projectId)} className={ITEM}>Manage {label.toLowerCase()}…</DropdownMenu.Item>
+        <DropdownMenu.Item onSelect={() => openCustomize(name, projectId)} className={ITEM}>{PLUS_MENU.manage}</DropdownMenu.Item>
       </DropdownMenu.SubContent></DropdownMenu.Portal>
     </DropdownMenu.Sub>;
   };
   return (
     <>
       <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
-        <DropdownMenu.Trigger aria-label="Add files, photos or commands" className="inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
-          +
-        </DropdownMenu.Trigger>
+        <Tip content={addDirectory.wait} description={addDirectory.wait}>
+          <DropdownMenu.Trigger aria-label="Add files, photos or commands" className="inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+            +
+          </DropdownMenu.Trigger>
+        </Tip>
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-56 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
             <DropdownMenu.Item onSelect={() => void pick('files')} className={ITEM}>
@@ -74,7 +85,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
               Photos…
             </DropdownMenu.Item>
             {directories && (
-              <DropdownMenu.Item disabled={addDirectory.disabled !== null} onSelect={() => void addDirectory.add()} className={ITEM}>
+              <DropdownMenu.Item disabled={addDirectory.disabled !== null || addDirectory.busy} onSelect={() => void addDirectory.add()} className={ITEM}>
                 <span>{ADD_DIRECTORY}</span>
                 {addDirectory.disabled !== null && <span className="text-ui-sm">{addDirectory.disabled}</span>}
               </DropdownMenu.Item>
@@ -88,10 +99,11 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      {/* P2-A (2026-10-09): a directory chosen on a session with no ready process starts it first, said beside the "+" */}
-      {addDirectory.phase === 'starting' && (
-        <span role="status" data-add-directory-phase="starting" className="text-ui-sm whitespace-nowrap text-fg-muted">
-          {addDirectory.disabled}
+      {/* P2-A (2026-10-09): a directory chosen on a session with no ready process starts it first, shown beside the "+";
+          the word cut (C20): the quiet spinner, named by the wait's words, while it starts and while the directory is applied */}
+      {addDirectory.wait !== null && (
+        <span data-add-directory-phase="" className="inline-flex size-7 items-center justify-center">
+          <QuietSpinner label={addDirectory.wait} />
         </span>
       )}
     </>

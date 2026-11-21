@@ -558,7 +558,7 @@ describe('the "+" › Connectors submenu', () => {
   it('lists the folder’s configured connectors with their scopes before the start, reading the inventory once for two opens', async () => {
     const user = await openConnectors();
     await waitFor(() => expect(rowTexts()).toEqual(['notionuser scope', 'fileslocal scope']));
-    expect(screen.queryByText('Live details are unavailable until this session is running')).toBeNull();
+    expect(screen.queryByText('Session not running')).toBeNull();
     await user.keyboard('{Escape}{Escape}');
     await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
     act(() => screen.getByRole('menuitem', { name: 'Connectors' }).focus());
@@ -594,8 +594,8 @@ describe('the "+" › Connectors submenu', () => {
     await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
     act(() => screen.getByRole('menuitem', { name: 'Plugins' }).focus());
     await user.keyboard('{ArrowRight}');
-    expect(await screen.findByRole('menuitem', { name: /^Plugins in this chat…/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: 'Manage plugins…' })).toBeTruthy();
-    expect(screen.queryByText('Live details are unavailable until this session is running')).toBeNull();
+    expect(await screen.findByRole('menuitem', { name: /^In this chat…/ })).toBeTruthy(); // the word cut (C18)
+    expect(screen.getByRole('menuitem', { name: 'Manage…' })).toBeTruthy();
+    expect(screen.queryByText('Session not running')).toBeNull();
   });
 });

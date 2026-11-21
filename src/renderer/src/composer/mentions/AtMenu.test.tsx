@@ -2,7 +2,8 @@
 // changes, a list answered or in flight for the folder it left is never offered for the new one, whatever the query.
 import { Editor, type JSONContent, type Range } from '@tiptap/core';
 import { PluginKey } from '@tiptap/pm/state';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -16,7 +17,8 @@ import { serializeDraft } from '../editor/serialize';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { useNotices } from '../../stores/notices';
 import { AtMenu } from './AtMenu';
-import type { PopupItem, PopupProps } from './popup';
+import type { PopupHandle, PopupItem, PopupProps } from './popup';
+import { accessibleText } from '../../test-support/accessible-text';
 
 const APP = at('app-1' as AppSessionId);
 const KEY = new PluginKey('at-menu-test');
@@ -29,7 +31,8 @@ const props = (query: string, cwd: string): PopupProps => ({
   pluginKey: KEY,
   ctx: { appSessionId: APP, cwd, additionalDirectories: [], catalog: EMPTY_CATALOG, widgets: new Set(), openWidget: () => {}, searchesFiles: true },
 });
-const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.textContent, o.getAttribute('aria-disabled')]);
+// a row by its name (its label where it names itself, as the searching row and a row with a description do)
+const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.getAttribute('aria-label') ?? o.textContent, o.getAttribute('aria-disabled')]);
 const files = (paths: string[]) => ({ paths, truncated: false, source: 'git' });
 
 let fake: FakeClient;
@@ -166,5 +169,43 @@ describe('what the @ menu puts in the draft', () => {
     await act(() => fake.reply('git.lsFiles', files(['src/b.ts']), 0));
     await act(() => fake.reply('git.lsFiles', files(['src/c.ts']), 0));
     expect(options().map(([path]) => path)).toEqual(['/repo/src/a.ts', '/work/plain/src/c.ts']);
+  });
+});
+
+// The word cut: an agent's or a skill's description shows on the highlighted row alone, by the arrow keys or the pointer,
+// and is every row's description at all times (C54); the Skills group ends at its last skill (C55); while files are
+// searched the Files group's first row is a spinner, the words its name (C56).
+describe('the @ menu’s rows under the word cut', () => {
+  const catalog = { ...EMPTY_CATALOG, agents: [{ name: 'reviewer', description: 'Reviews a change' }], skills: ['release'], commands: [{ name: 'release', description: 'Cuts a release', argumentHint: null }] } as unknown as SessionCatalog;
+  const nobody = (query: string): PopupProps => ({ ...props(query, ''), editor: { state: {} } as unknown as Editor, ctx: { ...props(query, '').ctx, catalog } });
+  const row = (name: string) => screen.getByRole('option', { name });
+
+  it('shows a description on the highlighted row only, and keeps each as its row’s description', () => {
+    const ref = createRef<PopupHandle>();
+    render(<AtMenu {...nobody('')} ref={ref} />);
+    expect(accessibleText(row('reviewer'))).toBe('reviewerReviews a change'); // highlighted: its description in view
+    expect(accessibleText(row('release'))).toBe('release'); // at rest: its name alone
+    expect(screen.getByRole('option', { name: 'reviewer', description: 'Reviews a change' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'release', description: 'Cuts a release' })).toBeTruthy();
+    expect(screen.getByText('Reviews a change').hidden).toBe(false);
+    expect(screen.getByText('Cuts a release').hidden).toBe(true);
+    act(() => void ref.current!.onKeyDown(new KeyboardEvent('keydown', { key: 'ArrowDown' })));
+    expect(screen.getByText('Reviews a change').hidden).toBe(true);
+    expect(screen.getByText('Cuts a release').hidden).toBe(false);
+    fireEvent.mouseEnter(row('reviewer'));
+    expect(screen.getByText('Reviews a change').hidden).toBe(false);
+  });
+
+  it('ends the Skills group at its last skill', () => {
+    render(<AtMenu {...nobody('')} />);
+    expect(accessibleText(screen.getByRole('group', { name: 'Skills' }))).toBe('Skillsrelease');
+  });
+
+  it('shows a spinner named Searching files… while files are searched, after the quiet half second', async () => {
+    render(<AtMenu {...props('sr', '/repo')} />);
+    const searching = screen.getByRole('option', { name: 'Searching files…' });
+    expect(searching.textContent).toBe('');
+    expect(await screen.findByRole('progressbar', { name: 'Searching files…' })).toBeTruthy();
+    expect(searching.getAttribute('aria-disabled')).toBe('true');
   });
 });

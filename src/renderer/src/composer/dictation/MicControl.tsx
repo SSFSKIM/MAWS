@@ -5,19 +5,19 @@
 // a chord bound to `composer.dictate` carries the hold. Beside it, the capture's state while one of this session runs,
 // and this session's notice with, for a denial, the button that opens the System Settings pane granting it. The button
 // keeps focus where it is (dictation writes at the editor's caret) and sits outside the editor's key sink, so it never
-// takes typing.
+// takes typing. The word cut: a named glyph, "Dictate" its tooltip (C32); listening and finishing are a dot (C33).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { VoicePrivacyPane } from '@shared/ipc/schema/voice';
 import { Icon, useChordHint } from '../../app/IconButton';
+import { NamedGlyph } from '../../ui/glyph';
 import { ipc } from '../../ipc/client';
 import { VOICE } from '../../settings-tab/copy'; // P2-F (L89): Settings › Voice's words for a failed open
 import { toast } from '../../stores/notices';
 import { mountedDictation } from './controller';
-import { micTitle } from './copy';
-import { dismissDictationNotice, useDictationStore, type DictationNoticeKind, type DictationPhase } from './store';
+import { DICTATION_STATE, DICTATION_STATE_SPOKEN_ONLY, MIC, micHold } from './copy';
+import { dismissDictationNotice, useDictationStore, type DictationNoticeKind } from './store';
 
-const STATUS: Record<DictationPhase, string> = { requesting: 'Asking for permission…', listening: 'Listening…', finishing: 'Finishing…' };
 const PANE: Partial<Record<DictationNoticeKind, VoicePrivacyPane>> = { microphone_denied: 'microphone', speech_denied: 'speech' };
 
 const MicIcon = () => (
@@ -41,21 +41,26 @@ export function MicControl({ appSessionId, client = ipc }: { appSessionId: AppSe
   };
   return (
     <>
-      <button
-        type="button"
-        aria-label="Dictate"
-        aria-pressed={phase !== null}
-        title={micTitle(chord)}
+      <NamedGlyph
+        label={MIC}
+        shortcut={micHold(chord)}
+        pressed={phase !== null}
         className={`inline-flex size-7 shrink-0 items-center justify-center rounded-sm outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:bg-bg-active ${phase ? 'text-accent' : 'text-fg-muted'}`}
         onMouseDown={(event) => event.preventDefault()} // focus stays in the editor, whose caret the words go to
         onClick={toggle}
       >
         <MicIcon />
-      </button>
+      </NamedGlyph>
       {phase && (
         <span role="status" aria-label="Dictation" className="flex shrink-0 items-center gap-1 px-1 text-ui-sm text-fg-muted">
-          {phase === 'listening' && <span aria-hidden className="size-1.5 rounded-full bg-accent motion-safe:animate-pulse" />}
-          {STATUS[phase]}
+          {phase === 'requesting' ? (
+            DICTATION_STATE.requesting
+          ) : (
+            <>
+              <span aria-hidden data-dictation-dot={phase} className={`size-1.5 rounded-full ${phase === 'listening' ? 'bg-accent motion-safe:animate-pulse' : 'bg-fg-faint'}`} />
+              <span className="sr-only">{DICTATION_STATE_SPOKEN_ONLY[phase]}</span>
+            </>
+          )}
         </span>
       )}
       <DictationNotice appSessionId={appSessionId} client={client} />

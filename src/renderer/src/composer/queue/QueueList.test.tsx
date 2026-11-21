@@ -28,7 +28,7 @@ import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder } from '../../transcript/model/test-events';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { HOST_UPDATING } from './host-wire';
-import { PAUSED_COPY, QueueList, UNCERTAIN_TEXT } from './QueueList';
+import { PAUSED_COPY, QueueList } from './QueueList';
 import { newestToTake, STACK_WORDS, stackRows } from './stack';
 import { resetTakeBack, TAKE_BACK_WORDS, takeBack } from './take-back';
 
@@ -418,7 +418,7 @@ describe('the stack’s text, fold and pause', () => {
     render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-u', { uncertain: true }), entry('q-s', { state: 'submitting', submittedAt: now.toISOString() })], { paused: true, pauseReason: 'uncertain' })} client={client} onTakeBack={onTakeBack} />);
     const [uncertain] = rows();
     expect(uncertain.getAttribute('data-queue-state')).toBe('uncertain');
-    expect(within(uncertain).getByRole('status').textContent).toBe(UNCERTAIN_TEXT);
+    expect(within(uncertain).getByRole('status').textContent).toBe('May not have been delivered'); // the word cut (C75): the buttons beside it say what to do
     expect(within(uncertain).getAllByRole('button').map((b) => b.textContent)).toEqual(['Resume', 'Edit', 'Delete']);
     expect(screen.queryByText(PAUSED_COPY.uncertain, { exact: false })).toBeNull(); // the row explains the pause, not the header
     expect(screen.queryByText('Sending…')).toBeNull();

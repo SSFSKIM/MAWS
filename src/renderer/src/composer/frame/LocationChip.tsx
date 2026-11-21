@@ -1,11 +1,14 @@
 // The toolbar's location (C7 execution document, "Composer frame" Location; W2: in the toolbar, no chip row): the directory's or worktree's name (the
 // path in the popover and the tooltip), with its branch and a dirty marker. A started session's, and read-only: where a
-// session runs is fixed once it starts. Its popover shows the full path and lists the additional directories with copy.
+// session runs is fixed once it starts. Its popover shows the full path and lists the additional directories, each with
+// a copy glyph. The word cut: no line saying the location is fixed (C22); the copy glyph's word, "Copy" and then
+// "Copied", is its name and its tooltip (C24).
 // New chat (2026-10-01, the owner's ruling): an unstarted tab chooses its project and worktree in the row above the box
 // (`ProjectRow`), and the popover no longer lists worktrees or branches: the agent checks out a worktree or makes a
 // branch when asked.
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
+import { NamedGlyph } from '../../ui/glyph';
 import type { LocationView } from './bindings';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 import { useOpenWhileShown } from './draft-shown';
@@ -23,6 +26,16 @@ export const formatCwd = (directory: string): string => directory.replace(/^\/Us
 // The last segment of the home-abbreviated path: `~` for the home directory itself.
 export const directoryName = (path: string): string => formatCwd(path).split('/').filter(Boolean).at(-1) ?? path;
 
+export const LOCATION_COPY = { copy: 'Copy', copied: 'Copied' };
+const GLYPH = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
+
+// Two sheets, the copy glyph; a tick once copied
+const CopyGlyph = ({ copied }: { copied: boolean }) => (
+  <svg aria-hidden viewBox="0 0 16 16" className="size-3.5">
+    <path d={copied ? 'm3.5 8.5 3 3 6-7' : 'M6 6h7v7H6zM10 6V3H3v7h3'} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export function LocationChip({ location, directories, dirty, onOpen }: LocationChipProps) {
   const [open, setOpen] = useOpenWhileShown();
   const [copied, setCopied] = useState<string | null>(null);
@@ -39,7 +52,7 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Location ${path}`} title={`${path}${branch !== null ? ` · ${branch}` : ''} · ${note}`} className={`${CHIP} shrink-0 font-mono`}>
+      <Popover.Trigger aria-label={`Location ${path}`} title={[`${path}${branch !== null ? ` · ${branch}` : ''}`, note].filter((part) => part).join(' · ')} className={`${CHIP} shrink-0 font-mono`}>
         {/* Truncate the location as one label, never an empty project followed by an orphan separator and branch. */}
         <span className="truncate">{directoryName(path)}{branch !== null ? ` · ⎇ ${branch}` : ''}</span>
         {dirty && (
@@ -52,7 +65,7 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
       <Popover.Portal>
         <Popover.Content aria-label="Location" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} flex w-80 flex-col gap-1`}>
           <p className="px-2 pt-1 font-mono text-ui-sm break-all">{path}</p>
-          <p className={NOTE}>{note}</p>
+          {note !== null && <p className={NOTE}>{note}</p>}
           {directories.length > 0 && (
             <>
               <div className="my-1 h-px bg-border" />
@@ -63,9 +76,9 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
                     <span className="min-w-0 flex-1 truncate font-mono" title={d}>
                       {formatCwd(d)}
                     </span>
-                    <button type="button" className={CHIP} onClick={() => copy(d)}>
-                      {copied === d ? 'Copied' : 'Copy'}
-                    </button>
+                    <NamedGlyph label={copied === d ? LOCATION_COPY.copied : LOCATION_COPY.copy} className={GLYPH} onClick={() => copy(d)}>
+                      <CopyGlyph copied={copied === d} />
+                    </NamedGlyph>
                   </li>
                 ))}
               </ul>

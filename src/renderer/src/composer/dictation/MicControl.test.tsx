@@ -1,5 +1,5 @@
 // The toolbar's microphone (E9 execution document, Design §8): its session's capture state and notice only, the denial's
-// System Settings button, the click that toggles a capture (the owner's ruling, 2026-10-06), and a bound chord in its title.
+// System Settings button, the click that toggles a capture (the owner's ruling, 2026-10-06), and a bound chord in its tooltip.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -8,6 +8,7 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useNotices } from '../../stores/notices';
 import { useSettings } from '../../stores/settings';
 import { VOICE } from '../../settings-tab/copy';
+import { accessibleText } from '../../test-support/accessible-text';
 import { provideDictation, type DictationController } from './controller';
 import { errorNotice, type NoticeCopy } from './copy';
 import { MicControl } from './MicControl';
@@ -22,6 +23,18 @@ const capture = (appSessionId: AppSessionId, phase: 'requesting' | 'listening' |
   useDictationStore.setState({ capture: { appSessionId, captureId, phase, locale: null, interim: '' } });
 const notice = (appSessionId: AppSessionId, copy: NoticeCopy) =>
   useDictationStore.setState({ notice: { appSessionId, ...copy } });
+
+const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
+// What is drawn: the text outside the words kept for screen readers alone (`sr-only`)
+function drawn(root: Element): string {
+  let text = '';
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) text += node.textContent ?? '';
+    else if (node instanceof Element && !node.classList.contains('sr-only')) node.childNodes.forEach(walk);
+  };
+  walk(root);
+  return text;
+}
 
 function renderBoth() {
   render(
@@ -48,16 +61,23 @@ afterEach(() => {
 });
 
 describe('the microphone control', () => {
+  // The word cut (C33): listening is the pressed microphone and a pulsing dot, finishing a still, faint dot, with no word
+  // drawn (the words stay for screen readers); asking for permission keeps its words.
   it('shows the capture’s state in its own session’s toolbar only', () => {
     const { a, b } = renderBoth();
+    const status = () => a.getByRole('status', { name: 'Dictation' });
     expect(a.queryByRole('status')).toBeNull();
     act(() => capture(A, 'requesting'));
-    expect(a.getByRole('status', { name: 'Dictation' }).textContent).toBe('Asking for permission…');
+    expect(drawn(status())).toBe('Asking for permission…');
     act(() => capture(A, 'listening'));
-    expect(a.getByRole('status', { name: 'Dictation' }).textContent).toBe('Listening…');
+    expect(drawn(status())).toBe('');
+    expect(status().querySelector('[data-dictation-dot]')?.getAttribute('data-dictation-dot')).toBe('listening');
+    expect(accessibleText(status())).toBe('Listening…');
     expect(b.queryByRole('status')).toBeNull();
     act(() => capture(A, 'finishing'));
-    expect(a.getByRole('status', { name: 'Dictation' }).textContent).toBe('Finishing…');
+    expect(drawn(status())).toBe('');
+    expect(status().querySelector('[data-dictation-dot]')?.getAttribute('data-dictation-dot')).toBe('finishing');
+    expect(accessibleText(status())).toBe('Finishing…');
   });
 
   it('shows a denial with the button that opens its pane, and × dismisses it', () => {
@@ -95,13 +115,22 @@ describe('the microphone control', () => {
     expect(within(note).queryByRole('button', { name: 'Open System Settings' })).toBeNull();
   });
 
-  it('says a click dictates, and names a bound chord in its title, an override included', () => {
+  // The word cut (C32): its tooltip is its word, "Dictate", with the hold a bound chord gives; focus reaches it
+  it('reads Dictate as its tooltip, and names a bound chord’s hold in it, an override included', () => {
     const { a } = renderBoth();
-    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac'); // unbound by default
+    const mic = () => a.getByRole('button', { name: 'Dictate' });
+    expect(mic().hasAttribute('title')).toBe(false);
+    act(() => mic().focus());
+    expect(tooltip()).toBe('Dictate'); // unbound by default
+    act(() => mic().blur());
     act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.dictate': 'Alt+Space' } }, resolvedTheme: 'light' } }));
-    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac · or hold ⌥Space');
+    expect(a.getByRole('button', { name: 'Dictate', description: 'hold ⌥Space' })).toBe(mic());
+    act(() => mic().focus());
+    expect(tooltip()).toBe('Dictate · hold ⌥Space');
+    act(() => mic().blur());
     act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.dictate': 'Cmd+D' } }, resolvedTheme: 'light' } }));
-    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac · or hold ⌘D');
+    act(() => mic().focus());
+    expect(tooltip()).toBe('Dictate · hold ⌘D');
   });
 
   it('reads pressed only while its own session’s capture runs', () => {

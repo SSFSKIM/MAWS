@@ -174,10 +174,11 @@ export const BEFORE_START = {
   userConfiguration: 'your user configuration',
 };
 
-// The "+" › Connectors submenu's line where a started session lists no rows (connector-menu.ts).
+// The "+" › Connectors submenu's line where a started session lists no rows (connector-menu.ts); the word cut (P578,
+// P579): still saying it is empty, and why, in a few words.
 export const CONNECTOR_MENU = {
-  noneReported: 'No connectors reported by this session',
-  notRunning: 'Live details are unavailable until this session is running',
+  noneReported: 'No connectors',
+  notRunning: 'Session not running',
 };
 
 // Sandbox (E11 §2.2): on or off first, with why it is off or what happens to a command it cannot run; the engine's

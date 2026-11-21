@@ -155,7 +155,7 @@ describe('a session with a record and no ready process: its availability decides
   it('re-attaching: an adopted session not yet ready reads Re-attaching…, and Send joins it', () => {
     const adopting = { ...idle, process: 'initializing' as const, holder: { pid: 4100, holderId: 'L-1', adopted: true } };
     expect(decided({ availability: 'starting', status: adopting })).toEqual(['Re-attaching…', true, null, 'Sends once the session has started', false]);
-    expect(row({ status: adopting, availability: null })).toEqual(['send', 'Send', false, 'Re-attaching to the engine after the update…', false]);
+    expect(row({ status: adopting, availability: null })).toEqual(['send', 'Send', false, 'Reconnecting after the update…', false]);
     // fix wave 1: with the editor empty, Stop ends the session (no turn to interrupt while it re-attaches)
     expect(row({ status: adopting, availability: 'starting', empty: true })).toEqual(['end', 'Stop', true, null, false]);
     expect(row({ status: adopting, availability: null, empty: true })).toEqual(['end', 'Stop', true, null, false]);

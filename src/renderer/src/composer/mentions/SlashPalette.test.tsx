@@ -126,7 +126,7 @@ describe('the highlighted row’s popover', () => {
     const { key, popover, options, active } = open('st');
     expect(screen.getByRole('listbox').contains(popover())).toBe(false); // beside the list, never inside it
     expect(active().textContent).toBe('/status');
-    expect(popover()!.textContent).toBe(`${declared('status')}MAWS`); // a panel MAWS draws
+    expect(popover()!.textContent).toBe(declared('status')); // a panel MAWS draws: no where-from word (the word cut, C58)
     key('ArrowDown');
     expect(popover()!.textContent).toBe('Set up the status line[shape]');
     expect(active().getAttribute('aria-describedby')).toBe(popover()!.id);
@@ -169,11 +169,11 @@ describe('the highlighted row’s popover', () => {
       machineLists([SESSION_ACTS_CAPABILITY]); // one that forks there
       const there = open('fork', { appSessionId: REMOTE, widgets: PANELS });
       expect(there.options()[0].getAttribute('aria-disabled')).toBeNull();
-      expect(there.popover()!.textContent).toBe(`${declared('fork')}[prompt]MAWS`);
+      expect(there.popover()!.textContent).toBe(`${declared('fork')}[prompt]`);
       cleanup();
       const here = open('fork', { widgets: PANELS });
       expect(here.options()[0].getAttribute('aria-disabled')).toBeNull();
-      expect(here.popover()!.textContent).toBe(`${declared('fork')}[prompt]MAWS`);
+      expect(here.popover()!.textContent).toBe(`${declared('fork')}[prompt]`);
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }

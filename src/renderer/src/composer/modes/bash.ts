@@ -5,8 +5,6 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 
-export const BASH_HINT = 'Shell command · runs through the engine · output goes to the transcript';
-
 export async function runBash(client: MawsBridge, appSessionId: AppSessionId, command: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await client.invoke('session.bash', { appSessionId, command });
   return result.ok ? { ok: true } : { ok: false, error: result.error.message };

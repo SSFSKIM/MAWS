@@ -76,8 +76,8 @@ export function nextNeedsYou(rows: NeedsYouRow[], currentAppId: AppSessionId | n
 }
 
 // P5 O9 M5: the line for a foreign session driven through its bridge, the hover card's and the pane tab's marker's title
-// (`held`: a background job's own line)
-export const BRIDGED_LINE = (held: string | null) => `${held === null ? 'Running in Terminal' : `Running as ${held}`} · driven through sminos’s bridge`;
+// (`held`: a background job's own line); the word cut (C130): who runs it, with no word on the bridge
+export const BRIDGED_LINE = (held: string | null) => (held === null ? 'Running in Terminal' : `Running as ${held}`);
 
 // Who holds a foreign-live session (D-12), as a row or card names it; null for any other holder. A background job reads
 // by the short id `claude --bg` printed (`bg · <short>`, as C10's toasts name it), its pid only when no id is known.

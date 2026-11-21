@@ -4,7 +4,7 @@ import { record, status } from '../../../../../test/support/builders';
 import type { SetupIntentHook, SetupProject } from '../setup-intent';
 import { MESSAGE_HELD, STARTING } from '../submit/submit-state';
 import { gitAnswerOf } from '../../sessions/branch-label';
-import { endedBindings, intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf, type LiveReads } from './bindings';
+import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type LiveReads } from './bindings';
 
 const APP = 'app-1';
 
@@ -77,7 +77,7 @@ describe('the frame binds its chips to the setup intent or to the live session',
     const s = { ...status(APP), cwd: '/work/app-1', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, effort: 'medium' as const };
     const refresh = vi.fn();
     const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], git: { repository: true, branch: 'main' }, refresh }, client);
-    expect(b.location).toEqual({ path: '/work/app-1', branch: 'main', note: LOCATION_FIXED });
+    expect(b.location).toEqual({ path: '/work/app-1', branch: 'main', note: null }); // the word cut (C22): no line saying it is fixed
     expect(b.project).toBeNull(); // no project row once started
     expect(b.model.value).toEqual({ model: 'sonnet', effort: 'medium' }); // the model asked for (S-chip), the same one the engine runs
     await b.model.set({ model: 'haiku', effort: 'medium' });

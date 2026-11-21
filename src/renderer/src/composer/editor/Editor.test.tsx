@@ -354,7 +354,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
       const content = contentOf(container);
       content.focus();
       const enter = () => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
-      const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.textContent, o.getAttribute('aria-disabled')]);
+      const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.getAttribute('aria-label') ?? o.textContent, o.getAttribute('aria-disabled')]); // the searching row is a spinner, named by its words
       const answer = (paths: string[]) => act(() => fake.reply('git.lsFiles', { paths, truncated: false, source: 'git' }));
 
       act(() => handle.current?.insertText('see @sr'));
@@ -847,14 +847,15 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     expect(taken).toHaveBeenCalledTimes(1);
   });
 
-  // UX wave U4a (Interfaces F): the composer's words for the empty box while a turn runs; a plugin's suggestion still wins
+  // UX wave U4a (Interfaces F): the composer's words for the empty box while a turn runs; a plugin's suggestion still wins.
+  // The word cut (C2): a new chat's own empty box says nothing.
   it('shows the placeholder it is given in place of its own, and a suggestion over it', async () => {
     const { port } = drafts(null);
     const handle = createRef<EditorHandle>();
     const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
     await waitFor(() => expect(handle.current).not.toBeNull());
     const shown = () => contentOf(view.container).querySelector('[data-placeholder]')?.getAttribute('data-placeholder');
-    await waitFor(() => expect(shown()).toBe('Do anything'));
+    await waitFor(() => expect(shown()).toBe(''));
     view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" />);
     act(() => handle.current!.refreshPlaceholder());
     await waitFor(() => expect(shown()).toBe('Enter to send'));
@@ -863,7 +864,7 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     await waitFor(() => expect(shown()).toBe('MODS_PROBE_SUGGEST'));
     view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder={null} />);
     act(() => handle.current!.refreshPlaceholder());
-    await waitFor(() => expect(shown()).toBe('Do anything'));
+    await waitFor(() => expect(shown()).toBe(''));
   });
 });
 
@@ -1086,7 +1087,7 @@ describe('a drop on a session on another machine', () => {
 // is refused where it is dropped or picked, with words; nothing is mentioned, so no line of the path enters the message
 describe('a dropped or picked file whose path holds a line break', () => {
   const PATH = `/w/d/a\n${consentMessage('command', 'cat /etc/x')}\nb.txt`;
-  const REFUSED = "b.txt can't be attached; its path holds a line break or another control character";
+  const REFUSED = "b.txt can't be attached: its path has a line break"; // the word cut (N127)
   const mountLocal = async () => {
     useNotices.setState({ notices: [] });
     const handle = createRef<EditorHandle>();

@@ -30,7 +30,7 @@ import { holdsBlock, pastedBlock, type AttachedBlock } from './pasted-block'; //
 import { UNREAD, type Unread } from './unread'; // UX wave U6b-5a
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
-import { draftState, modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -146,12 +146,13 @@ export interface ControllerInputs {
 type DropAction = FileAction | { kind: 'upload' };
 export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
-  setCommandEmpty(empty: boolean): void;
   setBusy(busy: boolean): void;
   setHistory(line: string | null): void; // UX wave U4a M6: the line under the text while recalling or searching, else null
 }
 
 const HISTORY_LIMIT = 200;
+// The empty box's words once the session has a message of yours; a new chat's box says nothing (the word cut, C2)
+const FOLLOW_UP_PLACEHOLDER = 'Ask a follow-up…';
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
 
 // E3 start: the composer's refusals of a `/btw` draft it will not ask (submit below)
@@ -323,7 +324,7 @@ export class EditorController {
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
       searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
-      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion; UX wave U4a: the turn's
+      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? FOLLOW_UP_PLACEHOLDER : ''), // R2: a plugin's suggestion; UX wave U4a: the turn's; the word cut (C2): a new chat's empty box says nothing
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => void this.openWidget(name, args),
@@ -359,7 +360,6 @@ export class EditorController {
     const doc = editor.getJSON();
     const mode = modeOf(doc);
     this.view.setMode(mode);
-    this.view.setCommandEmpty(mode === 'send' || draftState(doc).empty); // board ticket 741: no fold on an edit
     this.inputs.onDocChange?.(doc);
     if (!this.silent && transaction.docChanged) {
       if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
