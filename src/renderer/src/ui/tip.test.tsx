@@ -3,7 +3,7 @@
 // `aria-disabled`, still focusable, with its reason as that tooltip.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
@@ -117,6 +117,71 @@ describe('Tip under the keyboard', () => {
     expect(tooltip()).toBe(FACT);
     await keys.keyboard('{Escape}');
     expect(tooltip()).toBeNull();
+    wait(POINTING_DELAY_MS * 2);
+    expect(tooltip()).toBeNull();
+  });
+});
+
+// Task 2 fix round 1 (T105): a fact about a whole line shows on pointing anywhere along it, while the keyboard reaches it
+// on the one word that owns it, and the line's own controls stay controls of their own
+describe('Tip pointed within a region', () => {
+  function Line() {
+    const line = useRef<HTMLDivElement>(null);
+    return (
+      <>
+        <div ref={line} data-testid="line">
+          <Tip content={FACT} description={FACT} pointedWithin={line}>
+            <span tabIndex={0}>Blocked in macOS</span>
+          </Tip>
+          <button type="button">Open tab</button>
+        </div>
+        <button type="button">After</button>
+      </>
+    );
+  }
+  const action = () => screen.getByRole('button', { name: 'Open tab' });
+
+  it('shows on pointing anywhere in the region after the delay, stays while the pointer crosses it, and closes when it leaves', async () => {
+    render(<Line />);
+    const keys = user();
+    await keys.hover(action());
+    wait(POINTING_DELAY_MS - 1);
+    expect(tooltip()).toBeNull();
+    wait(1);
+    expect(tooltip()).toBe(FACT);
+    await keys.hover(screen.getByText('Blocked in macOS'));
+    await keys.hover(action());
+    wait(POINTING_DELAY_MS * 2);
+    expect(tooltip()).toBe(FACT);
+    await keys.hover(screen.getByRole('button', { name: 'After' }));
+    expect(tooltip()).toBeNull();
+  });
+
+  it('keeps the keyboard on its owner alone: the region’s controls are neither its trigger nor described by it', async () => {
+    render(<Line />);
+    expect(action().hasAttribute('aria-describedby')).toBe(false);
+    expect(action().hasAttribute('data-state')).toBe(false); // Radix marks its trigger
+    const keys = user();
+    await keys.tab();
+    expect(document.activeElement).toBe(screen.getByText('Blocked in macOS'));
+    expect(tooltip()).toBe(FACT);
+    await keys.tab();
+    expect(document.activeElement).toBe(action());
+    expect(tooltip()).toBeNull();
+  });
+
+  it('closes on a press of the region’s control, and a pointing still in its delay is dropped by it', async () => {
+    render(<Line />);
+    const keys = user();
+    await keys.hover(action());
+    wait(POINTING_DELAY_MS);
+    expect(tooltip()).toBe(FACT);
+    await keys.click(action());
+    expect(tooltip()).toBeNull();
+    await keys.unhover(action());
+    await keys.hover(action());
+    wait(POINTING_DELAY_MS / 2);
+    await keys.click(action());
     wait(POINTING_DELAY_MS * 2);
     expect(tooltip()).toBeNull();
   });

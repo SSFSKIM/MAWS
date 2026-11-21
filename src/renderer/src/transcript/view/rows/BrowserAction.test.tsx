@@ -4,7 +4,10 @@
 // screenshot's Open, a refusal's reason and a cancelled call's line.
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { POINTING_DELAY_MS } from '../../../ui/pointing';
+import { fakeTimeouts, realTimeouts } from '../../../test-support/fake-timeouts';
 import type { Row } from '../../model/rows';
 import { accessibleText } from '../../../test-support/accessible-text';
 import { renderRow } from './test-support';
@@ -81,6 +84,19 @@ describe('the browser action row', () => {
     cleanup();
     const running = renderRow(row({ state: 'running', ms: null, answered: false }), { storeKey: APP }).container.querySelector<HTMLElement>('[data-browser-heading]')!;
     expect(running.hasAttribute('tabindex')).toBe(false); // nothing waits on a running call's line
+  });
+
+  // Task 2 fix round 1 (T105): the whole line is where pointing shows the time; the keyboard reaches it on the phrase
+  it('shows the time on pointing anywhere along its line, its actions not part of the tip', async () => {
+    fakeTimeouts();
+    onTestFinished(realTimeouts);
+    const { container } = renderRow(row({ ms: 3_400 }), { storeKey: APP });
+    const openTab = screen.getByRole('button', { name: 'Open tab' });
+    await userEvent.setup({ delay: null }).hover(openTab);
+    act(() => void vi.advanceTimersByTime(POINTING_DELAY_MS));
+    expect(screen.getByRole('tooltip').textContent).toBe('3.4s');
+    expect(openTab.hasAttribute('aria-describedby')).toBe(false);
+    expect(described(container.querySelector<HTMLElement>('[data-browser-heading]')!)).toBe('3.4s');
   });
 
   it('draws its actions on pointing or focus within the line, and keeps them while the snapshot is open (T106)', () => {

@@ -20,6 +20,11 @@
 // close Radix asks for while the owner still holds focus (its
 // close on an ancestor's scroll, which the focus itself causes when the owner was out of view) is not taken.
 //
+// `pointedWithin` widens the pointing to a region around the owner (a fact about a whole line, owned by its phrase):
+// pointing anywhere in it arms the delay and leaving it closes the tip, while the keyboard owner stays the one child and
+// the region's other controls stay outside the tip's trigger. A press within the region closes it as a press on the
+// owner does; a close Radix asks for while the pointer is still within the region (its leave of the owner) is not taken.
+//
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
 // the tooltip and the description, and its click (by pointer, Enter or Space) swallowed before the control's own
@@ -29,7 +34,7 @@
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
 import { Tooltip } from 'radix-ui';
-import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type SyntheticEvent } from 'react';
+import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -40,7 +45,7 @@ type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
 let showing: { close(): void } | null = null;
 
-export function Tip({ content, description, children, ...guard }: { content: ReactNode; description?: string | null; children: Owner } & ClickGuard) {
+export function Tip({ content, description, pointedWithin, children, ...guard }: { content: ReactNode; description?: string | null; pointedWithin?: RefObject<HTMLElement | null>; children: Owner } & ClickGuard) {
   const descriptionId = useId();
   const shows = content !== null && content !== undefined && content !== '';
   const [open, setOpen] = useState(false);
@@ -73,6 +78,44 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
     },
     [],
   );
+  // Pointing at the owner, or anywhere in the region that stands for it: the delay armed on entering, dropped on leaving
+  const point = () => {
+    stopPointing();
+    pointing.current = setTimeout(() => {
+      pointing.current = null;
+      if (showsNow.current) setOpen(true);
+    }, POINTING_DELAY_MS);
+  };
+  const inRegion = useRef(false);
+  useEffect(() => {
+    const region = pointedWithin?.current;
+    if (!region) return;
+    // over and out with the element the pointer came from or went to, so crossing the region's children is no leave
+    const within = (event: PointerEvent) => event.relatedTarget instanceof Node && region.contains(event.relatedTarget);
+    const enter = (event: PointerEvent) => {
+      if (within(event)) return;
+      inRegion.current = true;
+      point();
+    };
+    const leave = (event: PointerEvent) => {
+      if (within(event)) return;
+      inRegion.current = false;
+      stopPointing();
+      if (!trigger.current?.contains(document.activeElement)) setOpen(false);
+    };
+    const press = () => {
+      stopPointing();
+      setOpen(false);
+    };
+    region.addEventListener('pointerover', enter);
+    region.addEventListener('pointerout', leave);
+    region.addEventListener('pointerdown', press);
+    return () => {
+      region.removeEventListener('pointerover', enter);
+      region.removeEventListener('pointerout', leave);
+      region.removeEventListener('pointerdown', press);
+    };
+  }, [pointedWithin]);
   const drawn = open && shows;
   useEffect(() => {
     if (!drawn) return;
@@ -104,6 +147,7 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
           // A close while the owner still holds focus is Radix's own, not the person's (the scroll its own focus
           // caused, which Radix reads as the owner moving away): the tip stays while its owner is focused.
           if (!next && !dismissal && trigger.current !== null && trigger.current.contains(document.activeElement)) return;
+          if (!next && !dismissal && inRegion.current) return; // the pointer left the owner for the rest of its region
           setOpen(next && showsNow.current);
         }}
       >
@@ -113,14 +157,8 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
           {...guard}
           onPointerMove={cancel}
           onFocus={shows ? undefined : cancel}
-          onPointerEnter={() => {
-            stopPointing();
-            pointing.current = setTimeout(() => {
-              pointing.current = null;
-              if (showsNow.current) setOpen(true);
-            }, POINTING_DELAY_MS);
-          }}
-          onPointerLeave={stopPointing}
+          onPointerEnter={pointedWithin ? undefined : point}
+          onPointerLeave={pointedWithin ? undefined : stopPointing}
           onPointerDown={dismissByOwner}
           onClick={dismissByOwner} // an activation by the keyboard, which keeps the focus (a disclosure's chevron)
         >
