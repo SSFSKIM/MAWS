@@ -20,6 +20,7 @@ import type { Settings } from '@shared/ipc/schema';
 import { SessionsSection } from './SessionsSection';
 import { AppearanceSection } from './AppearanceSection';
 import { INDEX, SECTIONS } from './copy';
+import { placeOpenNotes } from '../ui/row-note';
 import { QuietSpinner } from '../ui/spinner';
 import { DrawnRows, DrawnRowsContext } from './drawn';
 import { EngineSection } from './EngineSection';
@@ -125,6 +126,7 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
       const origin = root.getBoundingClientRect().top - root.scrollTop;
       const box = landedBox(landing);
       root.scrollTop = scrollTopToLand({ sectionTop: section.getBoundingClientRect().top - origin, rowTop: box.top - origin, rowHeight: box.height, viewHeight: root.clientHeight });
+      placeOpenNotes(root); // the note opened by the focus above took its side from where the row was
       setActive(landed);
     }
     mark.mark(landing);

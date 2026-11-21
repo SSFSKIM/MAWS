@@ -10,9 +10,10 @@
 // down leaves the row it belongs to; its words are read, not pointed into. It opens with the shared disclosure motion.
 // Where opening down would pass the bottom of the scroll area it sits in (the nearest ancestor that clips, else the
 // window), and there is room above, it opens upward over the row above instead (`data-side="up"`); where there is room
-// neither way it opens down, inside the scroll area, which scrolls to it. The side is read when it opens, from layout
-// alone, and written to the element, not rendered. The pointed-row line (a plugin's description under its name) is
-// this same note: both float.
+// neither way it opens down, inside the scroll area, which scrolls to it. The side is read from layout alone, and
+// written to the element, not rendered: when it opens and again while it is open, at any scroll (a search's landing
+// scrolls after its focus has opened the note) and any resize. The pointed-row line (a plugin's description under its
+// name) is this same note: both float.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { useDisclosureMotion } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
@@ -109,16 +110,37 @@ export function RowNote({ note, className = '', children }: { note: RowNoteState
   );
 }
 
+// The side, from the row's place in the live bounds of what clips it and the card's full height (its content's, not
+// the height the opening motion has reached), read on opening and at every scroll (captured: a scroll area's own does
+// not bubble) and resize while open.
 function useOpeningSide(open: boolean, ref: RefObject<HTMLDivElement | null>) {
   useLayoutEffect(() => {
     const element = ref.current;
-    const row = element?.parentElement;
-    if (!open || !element || !row) return;
-    const below = row.getBoundingClientRect();
-    const height = element.scrollHeight;
-    const clip = clipOf(row);
-    element.dataset.side = below.bottom + height > clip.bottom && below.top - height >= clip.top ? 'up' : 'down';
+    if (!open || !element) return;
+    const place = () => placeSide(element);
+    place();
+    document.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      document.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
   }, [open, ref]);
+}
+
+function placeSide(element: HTMLElement) {
+  const row = element.parentElement;
+  if (row === null) return;
+  const below = row.getBoundingClientRect();
+  const height = element.scrollHeight;
+  const clip = clipOf(row);
+  element.dataset.side = below.bottom + height > clip.bottom && below.top - height >= clip.top ? 'up' : 'down';
+}
+
+/** Places every open note under `root` again, at once: for a scroll set in code, whose scroll event waits for a frame
+ * (a search's landing, which opens its row's note by focus before it scrolls; a hidden window draws no frame). */
+export function placeOpenNotes(root: Element) {
+  for (const element of root.querySelectorAll<HTMLElement>('[data-row-note][data-open]')) placeSide(element);
 }
 
 // The box that cuts the note off: the nearest ancestor whose overflow clips, else the window.

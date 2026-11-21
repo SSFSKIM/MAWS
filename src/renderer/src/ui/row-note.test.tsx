@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOSE_MOTION } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
-import { RowNote, useRowNote } from './row-note';
+import { placeOpenNotes, RowNote, useRowNote } from './row-note';
 import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { UnavailableButton } from './tip';
@@ -247,6 +247,28 @@ describe('where the floating note opens', () => {
     render(inScroller());
     await user().tab();
     expect(shown()).toBe(true);
+    expect(side()).toBe('up');
+  });
+
+  it('follows its row while open: a scroll of the area it sits in or a resize places it again', async () => {
+    let at = box(100, 34);
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 60 });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.testid === 'scroller') return box(0, 400);
+      if (this.getAttribute('role') === 'group') return at;
+      return box(0, 0);
+    });
+    render(inScroller());
+    await user().tab();
+    expect(side()).toBe('down');
+    at = box(340, 34); // a search's landing scrolls the row low after its focus opened the note
+    act(() => void screen.getByTestId('scroller').dispatchEvent(new Event('scroll')));
+    expect(side()).toBe('up');
+    at = box(100, 34);
+    act(() => void window.dispatchEvent(new Event('resize')));
+    expect(side()).toBe('down');
+    at = box(340, 34); // a scroll set in code, placed at once, before its event (a hidden window draws no frame)
+    placeOpenNotes(document.body);
     expect(side()).toBe('up');
   });
 
