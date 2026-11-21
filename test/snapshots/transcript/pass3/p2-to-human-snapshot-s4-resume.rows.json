@@ -28,7 +28,7 @@
     "id": "boundary:replay:journal:13:0",
     "kind": "boundary",
     "revealed": false,
-    "text": "Context compacted · 18k → 1k tokens · manual",
+    "text": "Compacted · 18k → 1k",
     "turnId": "turn:144c01cb-7bed-441a-8964-d72eab7aae47"
   },
   {
