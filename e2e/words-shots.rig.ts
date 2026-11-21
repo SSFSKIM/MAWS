@@ -13,8 +13,8 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the eight launches, about 32 minutes (M1 added launches 6 to
-// 8 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes, and the note placement prototype's
+// window here is the product's, MAWS_HARNESS=0) and runs the nine launches, about 35 minutes (M1 added launches 6 to
+// 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes, and the note placement prototype's
 // twins, `m1-<scene>-overlay`). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
 // not). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
@@ -22,8 +22,9 @@
 //
 // The `m1-` scenes are this branch's alone, so their "before" is this rig run against master's build: in a clean
 // checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above. Every
-// launch's state is set from this file and e2e/support (fixtures, seams master's main already has); where master has no
-// reveal, a scene captures what it draws at rest instead (`cutBuild`), and the overlay twins are not reached.
+// launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 scene checks
+// its named state right before its capture, on master's build in master's terms (`cutBuild`), and is not reached when it
+// cannot; the overlay twins are not reached there.
 //
 // Locators avoid the app's words (data attributes, menu ids, IPC, positions), because the words are what the other
 // build changes; where only a word reaches a target it comes from the app's own copy module, or is marked. A step that
@@ -31,13 +32,14 @@
 // wave removed is recorded as having no target on master, with why.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { GrantsView, OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
-import { BROWSER, ORG } from '../src/renderer/src/settings-tab/copy';
+import { BROWSER, INDEX, KEYBOARD, NOTIFICATIONS, ORG, VOICE } from '../src/renderer/src/settings-tab/copy';
+import { BROWSER_COPY } from '../src/renderer/src/tools/browser/copy';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
@@ -45,7 +47,7 @@ import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } fr
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign } from './support/design';
 import { startBrowserServer } from './support/browser-server';
-import { closeSheet, importThrough } from './support/browser-import-scene';
+import { closeSheet, importThrough, profilesFile } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { goToFile } from './support/go-to-file';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -130,8 +132,8 @@ function makeRepo(name: string, variant?: RepoVariant): string {
 }
 
 // ClaudeUsage's committed fixture, its readings moved so the newest is two minutes old (c7-shots' way).
-function usageFixture(): string {
-  const usage = join(SCRATCH, 'claude-usage');
+function usageFixture(name = 'claude-usage'): string {
+  const usage = join(SCRATCH, name);
   if (existsSync(usage)) return usage;
   cpSync(join(REPO_ROOT, 'test/fixtures/claude-usage'), usage, { recursive: true });
   const history = join(usage, 'history');
@@ -145,19 +147,12 @@ function usageFixture(): string {
 }
 
 // The relay's requests (ClaudeUsage's `gateway-requests.jsonl`, synthetic) moved so the newest ended 30 s ago, as
-// accounts.spec's freshRequests moves them: what an account served counts the last ten minutes by the wall clock, so the
-// scene that reads it moves them just before its capture, and puts the copied file back after.
+// accounts.spec's freshRequests moves them: what an account served counts the last ten minutes by the wall clock.
 function freshRequests(usage: string) {
   const rows = readFileSync(join(REPO_ROOT, 'test/fixtures/claude-usage/gateway-requests.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { startedAt: string; totalSeconds: number });
   const newest = Math.max(...rows.map((row) => Date.parse(row.startedAt) + row.totalSeconds * 1000));
   const offset = Date.now() - 30_000 - newest;
-  replaceFile(join(usage, 'gateway-requests.jsonl'), rows.map((row) => JSON.stringify({ ...row, startedAt: new Date(Date.parse(row.startedAt) + offset).toISOString() })).join('\n') + '\n');
-}
-// A file replaced by a new one under its name, as ClaudeUsage rolls its ledger: main follows the ledger it holds open
-// by appended bytes and reads a new file under the name from its start (src/main/usage/request-ledger.ts).
-function replaceFile(path: string, text: string) {
-  writeFileSync(`${path}.next`, text);
-  renameSync(`${path}.next`, path);
+  writeFileSync(join(usage, 'gateway-requests.jsonl'), rows.map((row) => JSON.stringify({ ...row, startedAt: new Date(Date.parse(row.startedAt) + offset).toISOString() })).join('\n') + '\n');
 }
 
 // nine-sessions.json (eleven sessions in three projects and one with none) with every directory moved onto the scratch
@@ -275,6 +270,7 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
     });
     const target = of?.() ?? page;
     await settle(target, meta.hover === true);
+    if (meta.round === 'm1') await expect(page.locator('[data-settings-dialog]'), 'Settings open').toBeVisible({ timeout: 3_000 });
     await check?.();
     await target.screenshot({ path: join(OUT, `${meta.id}.png`), animations: 'disabled', caret: 'hide' });
     results.push({ id: meta.id, ok: true, ...(notes.length > 0 && { notes: [...notes] }) });
@@ -288,16 +284,30 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
 }
 // ---- the word cut's M1: what waits for the pointer and the keyboard (ui/row-note.tsx, ui/tip.tsx) -------------------
 // The m1 scenes' before is this rig, with its e2e support files, run against master's build (scenes.md). Master has no
-// row notes, no tooltips on words, no "…" menus and no chevrons: what this branch hides behind them is drawn at rest
-// there. So a reveal is required only on a build that draws the cut's parts, and on master's a scene captures the
-// surface as it rests; an overlay twin, which only the cut's build can draw, is not reached there.
+// row notes, no tooltips on words, no "…" menus and no chevrons: what this branch keeps behind them is drawn at rest
+// there. So each scene proves its named state on either build before its capture: on the cut's, the reveal itself (the
+// owner's own tooltip, the row's own note, the row's own menu with its items, the chevron open); on master's, the words
+// that reveal holds here, drawn at rest and in view. A scene that cannot prove it is not reached. An overlay twin, which
+// only the cut's build draws, is not reached on master's.
 //
-// Whether the build draws the cut's parts: a Settings row's note stays mounted at rest, so the open Settings dialog holds
-// one on this branch's build and none on master's.
-const cutBuild = async (page: Page) => (await page.locator('[data-settings-dialog] [data-row-note]').count()) > 0;
+// Whether the build draws the cut's parts, read once, the first time Settings opens (settingsAt): a Settings row's note
+// stays mounted at rest, so the open dialog holds one on this branch's build and none on master's. Every m1 capture
+// requires Settings open (shot), so no check reads a lost dialog as master's.
+let cut: boolean | null = null;
+function cutBuild(): boolean {
+  if (cut === null) throw new Error('the build is not known yet: Settings has not opened in this run');
+  return cut;
+}
+async function learnBuild(page: Page) {
+  await expect(page.locator('[data-settings-dialog] [data-settings-row]').first()).toBeAttached({ timeout: 10_000 });
+  cut = (await page.locator('[data-settings-dialog] [data-row-note]').count()) > 0;
+  console.log(`[words] this build ${cut ? 'draws' : 'does not draw'} the word cut's row notes`);
+}
 // Words of the Org page's copy that M1 added: absent from master's copy module, where the rig, run as the before, reads
-// them as undefined (and a role query with no name would match any button).
+// them as undefined (and a role query with no name would match any button). And two that M1 removed, which master's
+// copy still has, read on master's build only.
 const CUT_ORG: Partial<typeof ORG> = ORG;
+const MASTER_ORG = ORG as typeof ORG & Partial<Record<'newDelegation' | 'enroll', string>>;
 // Nothing pointed at and nothing focused, so what a scene opens opens from closed.
 async function letGo(page: Page) {
   await page.mouse.move(W - 2, H - 2);
@@ -313,16 +323,17 @@ async function notePlacement(page: Page, overlay: boolean) {
   }, overlay);
 }
 // A scene with a row's note open, then its twin with the switch set before the note opens (`m1-<scene>-overlay`), so the
-// owner sees the baseline placement and the prototype side by side.
+// owner sees the baseline placement and the prototype side by side. The twin asks the latched build first, so on
+// master's it is not reached before any step runs.
 async function noteShots(page: Page, meta: Meta, prepare: () => Promise<void>, options: ShotOptions = {}) {
   await shot(page, meta, prepare, options);
   const id = `${meta.id.startsWith('m1-') ? '' : 'm1-'}${meta.id}-overlay`;
   const twin: Meta = { ...meta, id, title: `${meta.title}, the note over the rows below`, state: `${meta.state}; the note placement prototype: the open note floats over the rows below`, round: 'm1' };
   const overlaid = async () => {
+    if (!cutBuild()) throw new Error('no row note on this build: the overlay twin is the cut’s alone');
     await letGo(page);
     await notePlacement(page, true);
     await prepare();
-    if (!(await cutBuild(page))) throw new Error('no row note on this build: the overlay twin is the cut’s alone');
   };
   const after = async () => {
     await notePlacement(page, false);
@@ -330,48 +341,56 @@ async function noteShots(page: Page, meta: Meta, prepare: () => Promise<void>, o
   };
   await shot(page, twin, overlaid, { ...options, after });
 }
+// What a check requires on master's build: `rest`, the words drawn at rest, inside the viewport.
+const inView = (rest: Locator, what: string) => expect(rest.first(), what).toBeInViewport({ timeout: 3_000 });
 // A word's or a glyph's tooltip, shown as the keyboard shows it: by focus. The owner is brought into view first and
-// left to settle, since a scroll closes an open tooltip. On master's build the word's place is brought into view, the
-// fact drawn beside it.
-async function focusTip(page: Page, owner: Locator, what: string) {
-  if (!(await cutBuild(page))) {
-    await owner.first().scrollIntoViewIfNeeded({ timeout: 2_000 }).catch(() => notes.push(`not on this build: ${what}`));
-    return;
-  }
+// left to settle (a scroll closes an open tooltip). On master's build the words the tooltip holds here, `rest`, are
+// brought into view instead.
+async function focusTip(page: Page, owner: Locator, rest: Locator) {
+  if (!cutBuild()) return rest.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await owner.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await page.waitForTimeout(400);
   await owner.first().focus();
 }
 // The check that `trigger`'s own tooltip is open: the element the tip wraps (the focused word or control, or the label
-// around a box) reads open to Radix, and a tooltip is drawn (one shows at a time).
-const tipShown = (page: Page, trigger: Locator, what: string) => async () => {
-  if (!(await cutBuild(page))) return;
+// around a box) reads open to Radix, and a tooltip is drawn (one shows at a time). On master's, `rest` in view.
+const tipShown = (page: Page, trigger: Locator, what: string, rest: Locator) => async () => {
+  if (!cutBuild()) return inView(rest, `master’s words for the tooltip of ${what}`);
   await expect(trigger.first(), `the tooltip of ${what}`).toHaveAttribute('data-state', /^(delayed|instant)-open$/, { timeout: 3_000 });
   await expect(page.getByRole('tooltip').first(), `the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
 };
-// The check that the row `scope` names has its own note open.
+// The check that the row `scope` names has its own note open; on master's, the row's line at rest (a declared row's
+// `data-settings-note`, else the row, whose plain note master draws in it) in view.
 const noteShown = (scope: Locator, what: string) => async () => {
-  if (!(await cutBuild(scope.page()))) return;
-  await expect(scope.locator('[data-row-note][data-open]').first(), `the note of ${what}`).toBeVisible({ timeout: 3_000 });
+  if (cutBuild()) return void (await expect(scope.locator('[data-row-note][data-open]').first(), `the note of ${what}`).toBeVisible({ timeout: 3_000 }));
+  const line = scope.locator('[data-settings-note]');
+  await inView((await line.count()) > 0 ? line : scope, `master’s line of ${what}`);
 };
+// The checks that the keyboard is inside `scope`, and that the pointer is on it (either build).
+const focusIn = (scope: Locator, what: string) => () =>
+  expect.poll(() => scope.first().evaluate((el) => el.contains(document.activeElement)), { message: `${what} holds the keyboard`, timeout: 3_000 }).toBe(true);
+const pointedAt = (scope: Locator, what: string) => () => expect.poll(() => scope.first().evaluate((el) => el.matches(':hover')), { message: `the pointer on ${what}`, timeout: 3_000 }).toBe(true);
 const checks =
-  (...all: (() => Promise<void>)[]) =>
+  (...all: (() => Promise<unknown>)[]) =>
   async () => {
     for (const check of all) await check();
   };
 // A row's "…" menu opened as a person opens it. Master's build has no menus: the same actions are buttons on the row,
 // captured with the row in view.
-async function openMenu(page: Page, row: Locator, trigger: Locator) {
+async function openMenu(row: Locator, trigger: Locator) {
   await row.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
-  if (!(await cutBuild(page))) return void notes.push('no menu on this build: the row’s own buttons');
-  await trigger.first().click();
+  if (cutBuild()) await trigger.first().click();
 }
-// The check that the menu `trigger` opened is open (Radix names it by its trigger) and offers `items`.
-const menuShows = (page: Page, trigger: Locator, items: (string | undefined)[]) => async () => {
-  if (!(await cutBuild(page))) return;
+// The check that the menu `trigger` opened is open (Radix names it by its trigger) and offers `items`; on master's, each
+// item a button in `rest`, in view.
+const menuShows = (page: Page, trigger: Locator, items: string[], rest: Locator) => async () => {
+  if (!cutBuild()) {
+    for (const item of items) await inView(rest.getByRole('button', { name: item, exact: true }), `${item} on master’s row`);
+    return;
+  }
   const opened = page.getByRole('menu', { name: (await trigger.first().getAttribute('aria-label'))!, exact: true });
   await expect(opened, 'the row’s menu').toBeVisible({ timeout: 3_000 });
-  for (const item of items) await expect(opened.getByRole('menuitem', { name: item!, exact: true })).toBeVisible({ timeout: 3_000 });
+  for (const item of items) await expect(opened.getByRole('menuitem', { name: item, exact: true })).toBeVisible({ timeout: 3_000 });
 };
 // A row's "…" menu closed with the one Esc that is its own (the Settings dialog under it stays).
 async function closeMenu(page: Page) {
@@ -455,6 +474,7 @@ async function settingsAt(app: ElectronApplication, page: Page, section: string)
   }
   const heading = page.locator(`#settings-${section}`);
   await expect(heading).toBeAttached({ timeout: 10_000 });
+  if (cut === null) await learnBuild(page);
   await heading.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await page.waitForTimeout(400);
 }
@@ -741,10 +761,10 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
         await settingsAt(app, page, section);
         await first.hover();
         await page.waitForTimeout(1200);
-      }, { check: noteShown(first, `the first ${title} row`) });
+      }, { check: checks(pointedAt(first, `the first ${title} row`), noteShown(first, `the first ${title} row`)) });
     }
     await reset(page);
-    await settingsM1(app, page, usage);
+    await settingsM1(app, page);
     await reset(page);
 
     // round 2: dialogs from typed commands, answered by the widget backend's recorded reads (MAWS_WIDGET_BACKEND=fixtures)
@@ -838,10 +858,12 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
 // 2026-11-16-word-cut/settings.md): the Settings states a cut row changes that no other scene draws, each reached the way
 // a person reaches it (pointing, the keyboard, a typed search, a switch) or, where the state is a stored setting or a
 // fixture's reading, through the settings write or the scratch ClaudeUsage folder, put back after its capture.
-async function settingsM1(app: ElectronApplication, page: Page, usage: string) {
+async function settingsM1(app: ElectronApplication, page: Page) {
   const section = (id: string) => page.locator(`section[aria-labelledby="settings-${id}"]`);
   const row = (id: string) => page.locator(`[data-settings-row="${id}"]`);
   const searchField = () => page.locator('[data-settings-dialog] nav input[type="search"]');
+  const results = () => page.locator('[data-settings-dialog] nav [role="listbox"] [role="option"]');
+  const clearSearch = async () => void (await searchField().fill('').catch(() => undefined));
 
   // a note opened by the keyboard: Tab from the section's heading into its first row (G13 to G15)
   const firstSessions = section('sessions').locator('[data-settings-row]').first();
@@ -850,109 +872,107 @@ async function settingsM1(app: ElectronApplication, page: Page, usage: string) {
     await letGo(page);
     await page.locator('#settings-sessions').focus();
     await page.keyboard.press('Tab');
-  }, { check: noteShown(firstSessions, 'the first Sessions row') });
+  }, { check: checks(focusIn(firstSessions, 'the first Sessions row'), noteShown(firstSessions, 'the first Sessions row')) });
   // the longest note, the Binary row's, opened by pointing: it pushes Supervisor down (G125, G127, G128)
+  const binary = row('engine.binary');
   await noteShots(page, m1({ id: 'm1-settings-engine-hover', title: 'Settings, Engine, pointer on the Binary row', how: 'Settings, Engine; hover the Binary row', state: 'The Binary row under the pointer: its note with the binary’s path, the config home and the tested version', folders: ['settings-tab', 'ui'], hover: true }), async () => {
     await settingsAt(app, page, 'engine');
-    await row('engine.binary').hover();
+    await binary.hover();
     await page.waitForTimeout(1200);
-  }, { check: noteShown(row('engine.binary'), 'the Binary row') });
+  }, { check: checks(pointedAt(binary, 'the Binary row'), noteShown(binary, 'the Binary row')) });
 
   // the search (G8, G9): results, no match, and a landing whose focus opens the note the words were found in
   await shot(page, m1({ id: 'm1-settings-search-results', title: 'Settings, Search settings with results', how: 'Settings (⌘,), type “hook” in Search settings', state: 'The results in the index’s place, each a row’s name over its section', folders: ['settings-tab'] }), async () => {
     await settingsAt(app, page, 'appearance');
     await searchField().fill('hook');
     await page.waitForTimeout(800);
-  }, { after: async () => void (await searchField().fill('').catch(() => undefined)) });
+  }, { check: () => inView(results(), 'a result for “hook”'), after: clearSearch });
   await shot(page, m1({ id: 'm1-settings-search-none', title: 'Settings, Search settings with no match', how: 'Settings (⌘,), type “zebra crossing” in Search settings', state: 'The index says nothing matches', folders: ['settings-tab'] }), async () => {
     await settingsAt(app, page, 'appearance');
     await searchField().fill('zebra crossing');
     await page.waitForTimeout(800);
-  }, { after: async () => void (await searchField().fill('').catch(() => undefined)) });
+  }, {
+    check: async () => {
+      await expect(page.locator('[data-settings-dialog] nav [role="status"]'), 'the index’s no-match line').toHaveText(INDEX.noMatch, { timeout: 3_000 });
+      await expect(results(), 'no result').toHaveCount(0);
+    },
+    after: clearSearch,
+  });
   await noteShots(page, m1({ id: 'm1-settings-search-landed', title: 'Settings, a search result landed on', how: 'Settings (⌘,), type “PATH” in Search settings, Enter', state: 'The Binary row holding the keyboard, its note open with the words found', folders: ['settings-tab'] }), async () => {
     await settingsAt(app, page, 'appearance');
     await searchField().fill('PATH');
     await page.waitForTimeout(500);
     await searchField().press('Enter');
     await page.waitForTimeout(2000); // past the landing's mark
-  }, { check: noteShown(row('engine.binary'), 'the Binary row'), after: async () => void (await searchField().fill('').catch(() => undefined)) });
+  }, { check: checks(focusIn(binary, 'the Binary row'), noteShown(binary, 'the Binary row')), after: clearSearch });
 
-  // Notifications: the approvals box's caption is its tooltip, shown by the keyboard (G33); the tip wraps the box's label
+  // Notifications: the approvals box's caption is its tooltip, shown by the keyboard (G33); the tip wraps the box's label.
+  // Master draws the caption after the box's word.
   const approvals = row('notifications.kinds').locator('label').nth(1);
+  const caption = row('notifications.kinds').locator('label').filter({ hasText: NOTIFICATIONS.approvalsCaption });
   await shot(page, m1({ id: 'm1-settings-notifications-approvals-tip', title: 'Settings, Notifications, the approvals caption', how: 'Settings, Notifications; Tab to the approvals box', state: 'The approvals box holding the keyboard, its caption as the tooltip', folders: ['settings-tab', 'ui'] }), async () => {
     await settingsAt(app, page, 'notifications');
-    await focusTip(page, approvals.locator('input[type="checkbox"]'), 'the approvals box');
-  }, { check: tipShown(page, approvals, 'the approvals box') });
+    await focusTip(page, approvals.locator('input[type="checkbox"]'), caption);
+  }, { check: tipShown(page, approvals, 'the approvals box', caption) });
 
-  // Keyboard with a binding off its default (G39, G40, G44): Next Needs-you unbound through the settings write
+  // Keyboard with a binding off its default (G39, G40, G44): Next Needs-you unbound through the settings write. Its cap
+  // is empty and named Unbound on the cut's build, the word Unbound on master's.
   const unbound = async () => {
     value(await invoke(page, 'settings.set', { keymap: { 'attention.next': null } } as never));
     await page.waitForTimeout(500);
   };
   const defaults = async () => void value(await invoke(page, 'settings.set', { keymap: {} } as never));
   const nextRow = () => page.locator('[data-settings-binding="attention.next"]');
+  const cap = nextRow().locator('kbd');
+  const capUnbound = () => (cutBuild() ? expect(cap, 'the cap unbound').toHaveAttribute('aria-label', KEYBOARD.unbound, { timeout: 3_000 }) : expect(cap, 'the cap unbound').toHaveText(KEYBOARD.unbound, { timeout: 3_000 }));
   await shot(page, m1({ id: 'm1-settings-keyboard-override', title: 'Settings, Keyboard, a binding changed', how: 'Settings, Keyboard, with Next Needs-you unbound (as Backspace while recording leaves it), scrolled to the table’s end', state: 'Reset to defaults under the table, drawn while a binding differs from its default', folders: ['settings-tab', 'keymap'] }), async () => {
     await unbound();
     await settingsAt(app, page, 'keyboard');
     await row('keyboard.reset').evaluate((el) => el.scrollIntoView({ block: 'center' }));
-  }, { after: defaults });
-  const cap = nextRow().locator('kbd');
+  }, { check: checks(capUnbound, () => inView(row('keyboard.reset'), 'Reset to defaults')), after: defaults });
   await shot(page, m1({ id: 'm1-settings-keyboard-unbound-tip', title: 'Settings, Keyboard, an unbound key cap', how: 'Settings, Keyboard, Next Needs-you unbound; Tab to its key cap', state: 'The empty key cap holding the keyboard, its tooltip Unbound', folders: ['settings-tab', 'keymap', 'ui'] }), async () => {
     await unbound();
     await settingsAt(app, page, 'keyboard');
-    await focusTip(page, cap, 'the unbound key cap');
-  }, { check: tipShown(page, cap, 'the unbound key cap'), after: defaults });
-  // Change is drawn transparent until its row is pointed at (KeymapSection.tsx), which only its opacity tells
+    await focusTip(page, cap, cap);
+  }, { check: checks(capUnbound, tipShown(page, cap, 'the unbound key cap', cap)), after: defaults });
+  // Change is drawn transparent until its row is pointed at (KeymapSection.tsx), which only its opacity tells; master
+  // draws it at rest
   const change = nextRow().locator('[role="cell"]').last().locator('button');
   await shot(page, m1({ id: 'm1-settings-keyboard-row-hover', title: 'Settings, Keyboard, pointer on a binding', how: 'Settings, Keyboard; hover Next Needs-you', state: 'The binding under the pointer, its Change shown', folders: ['settings-tab', 'keymap'], hover: true }), async () => {
     await settingsAt(app, page, 'keyboard');
     await nextRow().scrollIntoViewIfNeeded();
     await nextRow().hover();
     await page.waitForTimeout(800);
-  }, { check: () => expect(change.first(), 'Change on the pointed binding').toHaveCSS('opacity', '1', { timeout: 3_000 }) });
+  }, { check: checks(pointedAt(nextRow(), 'Next Needs-you'), () => expect(change.first(), 'Change on the pointed binding').toHaveCSS('opacity', '1', { timeout: 3_000 })) });
 
   // Supervisor: the status's tooltip with its row's note, both opened by its focus (G129), the memory budget turned off
-  // by its switch (G140) and, on, the limit's note on pointing (G142)
+  // by its switch (G140) and, on, the limit's note on pointing (G142). Master draws the tooltip's facts in the status and
+  // the daemon's own row.
   const budget = () => row('supervisor.memoryBudget').locator('[role="switch"]');
+  const budgetIs = async (on: boolean) => {
+    await expect(budget(), `the memory budget ${on ? 'on' : 'off'}`).toHaveAttribute('aria-checked', String(on), { timeout: 5_000 });
+    await expect(row('supervisor.limit'), `the Limit row ${on ? 'drawn' : 'gone'}`).toHaveCount(on ? 1 : 0, { timeout: 5_000 });
+  };
+  const turnBudget = async (on: boolean) => {
+    if ((await budget().getAttribute('aria-checked')) !== String(on)) await budget().click();
+    await budgetIs(on);
+  };
   const status = row('supervisor.status').locator('[role="status"]');
   await noteShots(page, m1({ id: 'm1-settings-supervisor-status-tip', title: 'Settings, Supervisor, the status’s tooltip', how: 'Settings, Supervisor; Tab to the status', state: 'The status holding the keyboard: its tooltip with the start, the pid, the exit rule and the machine daemon, and the row’s note', folders: ['settings-tab', 'ui'] }), async () => {
     await settingsAt(app, page, 'supervisor');
-    await focusTip(page, status, 'the supervisor’s status');
-  }, { check: checks(tipShown(page, status, 'the supervisor’s status'), noteShown(row('supervisor.status'), 'the status row')) });
+    await focusTip(page, status, row('supervisor.daemon'));
+  }, { check: checks(tipShown(page, status, 'the supervisor’s status', row('supervisor.daemon')), noteShown(row('supervisor.status'), 'the status row')) });
   await noteShots(page, m1({ id: 'm1-settings-supervisor-budget-off', title: 'Settings, Supervisor, the memory budget off', how: 'Settings, Supervisor; turn the memory budget’s switch off', state: 'The budget off, its limit and stateful rows gone, the switch holding the keyboard with the off note open', folders: ['settings-tab', 'budget'] }), async () => {
     await settingsAt(app, page, 'supervisor');
-    if ((await budget().getAttribute('aria-checked')) === 'true') await budget().click();
-  }, { check: noteShown(row('supervisor.memoryBudget'), 'the memory budget row'), after: async () => {
-    if ((await budget().getAttribute('aria-checked').catch(() => null)) === 'false') await budget().click();
-  } });
+    await turnBudget(false);
+  }, { check: checks(() => budgetIs(false), focusIn(row('supervisor.memoryBudget'), 'the memory budget row'), noteShown(row('supervisor.memoryBudget'), 'the memory budget row')), after: () => turnBudget(true) });
   await noteShots(page, m1({ id: 'm1-settings-supervisor-limit-hover', title: 'Settings, Supervisor, pointer on the memory limit', how: 'Settings, Supervisor, the budget on; hover its Limit row', state: 'The limit at its default (the default’s size in the field), its note on pointing', folders: ['settings-tab', 'budget'], hover: true }), async () => {
     await settingsAt(app, page, 'supervisor');
+    await turnBudget(true);
     await row('supervisor.limit').scrollIntoViewIfNeeded();
     await row('supervisor.limit').hover();
     await page.waitForTimeout(1200);
-  }, { check: noteShown(row('supervisor.limit'), 'the Limit row') });
-
-  // Usage: the email's tooltip (W177, W178, G115), what it served counted from the ledger moved to now, and an account to
-  // sign in again (W181), marked in the scratch ClaudeUsage folder as accounts.spec marks it; each file put back after
-  const email = page.locator('[data-usage-panel] [data-account][data-routing] span[tabindex="0"]');
-  const ledger = join(usage, 'gateway-requests.jsonl');
-  const ledgerAsCopied = readFileSync(ledger, 'utf8');
-  await shot(page, m1({ id: 'm1-settings-usage-email-tip', title: 'Settings, Usage, the routed account’s email', how: 'Settings, Usage, the relay’s requests moved to the last minutes; Tab to the routed account’s email', state: 'The email holding the keyboard: its tooltip with the rate-limit tier, the saved sessions and what it served', folders: ['settings-tab', 'usage', 'accounts', 'ui'] }), async () => {
-    freshRequests(usage);
-    await settingsAt(app, page, 'usage');
-    if (await cutBuild(page)) await expect(email.first(), 'what the routed account served').toHaveAccessibleDescription(/\d+ requests? · /, { timeout: 20_000 });
-    await focusTip(page, email, 'the routed account’s email');
-  }, { check: tipShown(page, email, 'the routed account’s email'), after: async () => replaceFile(ledger, ledgerAsCopied) });
-  const accounts = join(usage, 'accounts.json');
-  const original = readFileSync(accounts, 'utf8');
-  const reauth = page.locator('[data-usage-panel] [data-account][data-state="needs_reauth"]').locator('p > span[tabindex="0"]');
-  await shot(page, m1({ id: 'm1-settings-usage-reauth', title: 'Settings, Usage, an account to sign in again', how: 'Settings, Usage, ClaudeUsage marking 5@example.test as needing reauthentication; Tab to its Sign in again', state: 'The account dimmed and last, Sign in again in orange holding the keyboard, what follows from it its tooltip', folders: ['settings-tab', 'usage', 'accounts', 'ui'] }), async () => {
-    const marked = (JSON.parse(original) as { email: string }[]).map((account) => (account.email === '5@example.test' ? { ...account, needsReauthentication: true } : account));
-    writeFileSync(accounts, JSON.stringify(marked, null, 2));
-    await settingsAt(app, page, 'usage');
-    await expect(page.locator('[data-usage-panel] [data-account][data-state="needs_reauth"]').first()).toBeVisible({ timeout: 15_000 });
-    await focusTip(page, reauth, 'Sign in again');
-  }, { check: tipShown(page, reauth, 'Sign in again'), after: async () => writeFileSync(accounts, original) });
+  }, { check: checks(pointedAt(row('supervisor.limit'), 'the Limit row'), noteShown(row('supervisor.limit'), 'the Limit row')) });
 
   // Org, not signed in: Sign in… draws the pairing-code field, focused, its note open (G147 to G149); master draws the
   // field at rest, which takes the focus there
@@ -2056,15 +2076,16 @@ async function orgM1(app: ElectronApplication, page: Page, harnessBuilt: boolean
     await page.waitForTimeout(400);
   };
   // a chevron opened for its capture and folded after, so the next scene opens from the page at rest; master's build has
-  // no chevron (its label not in master's copy), what it discloses drawn at rest
+  // no chevron (its label not in master's copy), what it discloses (`rest`) drawn at rest
   const chevron = (scope: () => Locator, label: string | undefined) => (label === undefined ? null : scope().getByRole('button', { name: label, exact: true }).first());
-  const unfold = async (button: Locator | null) => {
-    if (button === null) return void notes.push('no chevron on this build: drawn at rest');
-    if ((await button.getAttribute('aria-expanded')) !== 'true') await button.click();
-    await expect(button).toHaveAttribute('aria-expanded', 'true');
+  const unfold = async (button: Locator | null, rest: Locator) => {
+    if (!cutBuild()) return rest.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
+    if ((await button!.getAttribute('aria-expanded')) !== 'true') await button!.click();
+    await expect(button!).toHaveAttribute('aria-expanded', 'true');
   };
-  const unfolded = (button: Locator | null) => async () => {
-    if (button !== null) await expect(button, 'the chevron open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+  const unfolded = (button: Locator | null, rest: Locator, what: string) => async () => {
+    if (!cutBuild()) return inView(rest, `master’s ${what}`);
+    await expect(button!, `the chevron of ${what} open`).toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
   };
   const fold = (button: Locator | null) => async () => {
     if (button !== null && (await button.getAttribute('aria-expanded').catch(() => null)) === 'true') await button.click();
@@ -2074,48 +2095,53 @@ async function orgM1(app: ElectronApplication, page: Page, harnessBuilt: boolean
   const trigger = (scope: Locator) => scope.locator('button[aria-haspopup="menu"]').first();
 
   const device = chevron(() => group('you'), CUT_ORG.deviceDetails);
+  const deviceRow = group('you').getByRole('group', { name: ORG.device, exact: true });
   await shot(page, m1({ id: 'm1-org-device-details', title: 'Settings, Org, This Mac’s details open', how: 'Settings, Org; the chevron on This Mac', state: 'This Mac’s device id and fingerprint, out from behind the chevron', folders: ['settings-tab/org'] }), async () => {
     await at('you');
-    await unfold(device);
-  }, { check: unfolded(device), after: fold(device) });
+    await unfold(device, deviceRow);
+  }, { check: unfolded(device, deviceRow, 'This Mac’s id and fingerprint'), after: fold(device) });
   const kind = group('people').locator('[data-org-device] span[tabindex="0"]');
+  const firstDevice = group('people').locator('[data-org-device]').first();
   await shot(page, m1({ id: 'm1-org-device-tip', title: 'Settings, Org, a device’s id', how: 'Settings, Org, People; Tab to a device’s kind', state: 'A device’s kind holding the keyboard, its id’s first 8 as the tooltip', folders: ['settings-tab/org', 'ui'] }), async () => {
     await at('people');
-    await focusTip(page, kind, 'a device’s kind');
-  }, { check: tipShown(page, kind, 'a device’s kind') });
+    await focusTip(page, kind, firstDevice);
+  }, { check: tipShown(page, kind, 'a device’s kind', firstDevice) });
   // Ben, a member and not you: his menu holds the role change, the email change and the removal (PeopleGroup.tsx)
   const ben = member('ben@northwind.example');
   await shot(page, m1({ id: 'm1-org-person-menu', title: 'Settings, Org, a person’s menu', how: 'Settings, Org, People; the … of Ben, a member', state: 'A person’s actions in their menu: make admin, change email, remove', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
     await at('people');
-    await openMenu(page, ben, trigger(ben));
-  }, { check: menuShows(page, trigger(ben), [CUT_ORG.makeAdmin, CUT_ORG.changeEmail, CUT_ORG.removePerson]), after: () => closeMenu(page) });
+    await openMenu(ben, trigger(ben));
+  }, { check: menuShows(page, trigger(ben), [ORG.makeAdmin, ORG.changeEmail, ORG.removePerson], ben), after: () => closeMenu(page) });
   // an admin's Mac that is no root, Maximiliana Ortiz's third device: it may be made a root, or removed
   const ortizMac = member('maximiliana.ortiz@northwind.example').locator('[data-org-device]').nth(2);
   await shot(page, m1({ id: 'm1-org-device-menu', title: 'Settings, Org, a device’s menu', how: 'Settings, Org, People; the … on the line of an admin’s Mac that is no root', state: 'A device’s actions in its menu: make a root, remove', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
     await at('people');
-    await openMenu(page, ortizMac, trigger(ortizMac));
-  }, { check: menuShows(page, trigger(ortizMac), [CUT_ORG.makeDeviceRoot, CUT_ORG.removeDevice]), after: () => closeMenu(page) });
+    await openMenu(ortizMac, trigger(ortizMac));
+  }, { check: menuShows(page, trigger(ortizMac), [ORG.makeDeviceRoot, ORG.removeDevice], ortizMac), after: () => closeMenu(page) });
   // studio-mini, the org's own and not this Mac: grant, owners, re-enroll and drop (MachineRow.tsx)
   const studio = group('machines').getByRole('group', { name: 'studio-mini', exact: true });
   await shot(page, m1({ id: 'm1-org-machine-menu', title: 'Settings, Org, a machine’s menu', how: 'Settings, Org, Machines; the … of studio-mini', state: 'A machine’s actions in its menu: grant, owners, re-enroll, drop', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
     await at('machines');
-    await openMenu(page, studio, trigger(studio));
-  }, { check: menuShows(page, trigger(studio), [CUT_ORG.grant, CUT_ORG.ownersAction, CUT_ORG.reenroll, CUT_ORG.drop]), after: () => closeMenu(page) });
+    await openMenu(studio, trigger(studio));
+  }, { check: menuShows(page, trigger(studio), [ORG.grant, ORG.ownersAction, ORG.reenroll, ORG.drop], studio), after: () => closeMenu(page) });
   const up = group('machines').locator('[role="img"][tabindex="0"]');
+  const upWord = group('machines').getByText(ORG.machineState.up, { exact: true });
   await shot(page, m1({ id: 'm1-org-up-tip', title: 'Settings, Org, a machine’s Up dot', how: 'Settings, Org, Machines; Tab to this machine’s dot', state: 'The green dot holding the keyboard, Up its tooltip', folders: ['settings-tab/org', 'ui'] }), async () => {
     await at('machines');
-    await focusTip(page, up, 'the Up dot');
-  }, { check: tipShown(page, up, 'the Up dot') });
+    await focusTip(page, up, upWord);
+  }, { check: tipShown(page, up, 'the Up dot', upWord) });
   const key = chevron(() => group('machines'), CUT_ORG.keyDetails);
+  const firstMachine = group('machines').getByRole('group').first();
   await shot(page, m1({ id: 'm1-org-key-open', title: 'Settings, Org, a machine’s key open', how: 'Settings, Org, Machines; the chevron on the first machine', state: 'The machine’s key id, out from behind the chevron', folders: ['settings-tab/org'] }), async () => {
     await at('machines');
-    await unfold(key);
-  }, { check: unfolded(key), after: fold(key) });
+    await unfold(key, firstMachine);
+  }, { check: unfolded(key, firstMachine, 'the first machine’s key'), after: fold(key) });
   const details = chevron(() => group('org'), CUT_ORG.details);
+  const recovery = group('org').getByRole('group', { name: ORG.recovery, exact: true });
   await shot(page, m1({ id: 'm1-org-details-open', title: 'Settings, Org, the Org group’s details open', how: 'Settings, Org; the chevron beside the Org heading', state: 'The org’s id, its roots and its recovery key, out from behind the chevron', folders: ['settings-tab/org'] }), async () => {
     await at('org');
-    await unfold(details);
-  }, { check: unfolded(details), after: fold(details) });
+    await unfold(details, recovery);
+  }, { check: unfolded(details, recovery, 'the org’s recovery key'), after: fold(details) });
   const delegations = () => org().locator('[data-org-section="delegations"]');
   const stray = delegations().getByRole('group', { name: ORG.strayKeys, exact: true });
   await noteShots(page, m1({ id: 'm1-org-stray-hover', title: 'Settings, Org, pointer on Stray hub keys', how: 'Settings, Org, Delegations; hover Stray hub keys', state: 'The stray keys’ row under the pointer, its note open', folders: ['settings-tab/org', 'ui'], hover: true }), async () => {
@@ -2123,13 +2149,14 @@ async function orgM1(app: ElectronApplication, page: Page, harnessBuilt: boolean
     await delegations().first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await stray.hover();
     await page.waitForTimeout(1200);
-  }, { check: noteShown(stray, 'Stray hub keys') });
+  }, { check: checks(pointedAt(stray, 'Stray hub keys'), noteShown(stray, 'Stray hub keys')) });
   const create = delegations().locator('[data-org-new-delegation] button');
+  const createRow = delegations().getByRole('group', { name: MASTER_ORG.newDelegation ?? '', exact: true });
   await shot(page, m1({ id: 'm1-org-new-delegation-reason', title: 'Settings, Org, New delegation… greyed', how: 'Settings, Org, Delegations, the code destination unset; Tab to New delegation…', state: 'New delegation… greyed and holding the keyboard, why its tooltip; the destination’s form in view', folders: ['settings-tab/org', 'ui'] }), async () => {
     await at('org');
     await delegations().first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
-    await focusTip(page, create, 'New delegation…');
-  }, { check: tipShown(page, create, 'New delegation…') });
+    await focusTip(page, create, createRow);
+  }, { check: tipShown(page, create, 'New delegation…', createRow) });
 }
 
 // ======================================================================================================================
@@ -2158,29 +2185,60 @@ test('states: Settings › Org read-only, an imported Chrome profile, Voice in t
     await page.waitForTimeout(1500);
     await dismissToasts(page);
     const org = () => page.locator('section[aria-labelledby="settings-org"]');
+    const group = (id: string) => org().locator(`[data-org-group="${id}"]`);
+    const delegations = () => org().locator('[data-org-section="delegations"]');
     const orgAt = async (target: string) => {
       if (!harnessBuilt) throw new Error('the seeded org needs the harness build’s main (scripts/e2e-build.sh harness)');
       await settingsAt(app, page, 'org');
-      await expect(org().locator('[data-org-group="people"]').first()).toBeVisible({ timeout: 15_000 });
+      await expect(group('people').first()).toBeVisible({ timeout: 15_000 });
       await org().locator(target).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    };
+    // What may not sign shows: on the cut's build the one view-only line and neither Enroll's nor New delegation's line;
+    // on master's, Enroll's and New delegation's rows each saying admins do it (this member is no admin), and no
+    // button that would act
+    const viewOnly = () => org().getByText(new RegExp(`^${CUT_ORG.viewOnly?.([]) ?? 'View only'}`));
+    const enrollRest = () => group('machines').getByRole('group', { name: MASTER_ORG.enroll ?? '', exact: true });
+    const createRest = () => delegations().getByRole('group', { name: MASTER_ORG.newDelegation ?? '', exact: true });
+    const mayNotSign = async () => {
+      await expect(org().getByRole('button', { name: ORG.enrollAction, exact: true }), 'no Enroll a machine…').toHaveCount(0);
+      await expect(org().getByRole('button', { name: ORG.createAction, exact: true }), 'no New delegation…').toHaveCount(0);
+      if (cutBuild()) {
+        await expect(viewOnly(), 'the view-only line').toBeVisible({ timeout: 3_000 });
+        await expect(org().locator('[data-org-enroll], [data-org-new-delegation]'), 'no Enroll line and no New delegation line').toHaveCount(0);
+      } else {
+        await expect(enrollRest(), 'Enroll, for admins').toContainText(ORG.enrollAdmins, { timeout: 3_000 });
+        await expect(createRest(), 'New delegation, for admins').toContainText(ORG.delegationsAdmins, { timeout: 3_000 });
+      }
     };
     await shot(page, m1({ id: 'm1-org-read-only', title: 'Settings, Org, for someone who may not sign', how: 'Settings (⌘,), Org, as a member whose Mac is no root', state: 'The one view-only line naming who signs, above You; no Enroll and no New delegation line', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
       await orgAt('#settings-org');
-    });
+    }, { check: checks(mayNotSign, () => inView(cutBuild() ? viewOnly() : group('you'), 'the page’s top')) });
     await shot(page, m1({ id: 'm1-org-read-only-machines', title: 'Settings, Org, Machines for someone who may not sign', how: 'Settings, Org, scrolled to Machines', state: 'The machines with no Enroll a machine… line under them', folders: ['settings-tab/org'] }), async () => {
       await orgAt('[data-org-group="machines"]');
-    });
+    }, { check: checks(mayNotSign, () => inView(cutBuild() ? group('machines') : enrollRest(), 'Machines')) });
     await shot(page, m1({ id: 'm1-org-read-only-delegations', title: 'Settings, Org, Delegations for someone who may not sign', how: 'Settings, Org, scrolled to Delegations', state: 'The delegations with nothing offered to create one', folders: ['settings-tab/org'] }), async () => {
       await orgAt('[data-org-section="delegations"]');
-    });
+    }, { check: checks(mayNotSign, () => inView(cutBuild() ? delegations() : createRest(), 'Delegations')) });
     await reset(page);
 
     // Voice: the helper missing (G50, G55, G56), then the helper there and the permissions not asked yet (G53), the
     // script changed on main's environment (scripted-backend.ts reads it at each probe) and read again past the probe's
-    // ten-second cache
+    // ten-second cache. Each waits for the probe's answer drawn, in the words of the build's copy.
+    const voiceRow = (id: string) => page.locator(`[data-settings-row="voice.${id}"]`);
+    const voiceReads = async (rows: Record<string, string>) => {
+      for (const [id, words] of Object.entries(rows)) await expect(voiceRow(id), `Voice, ${id}`).toContainText(words, { timeout: 3_000 });
+    };
+    const trouble = { microphone: VOICE.permissionUnknown, speech: VOICE.permissionUnknown, recognition: VOICE.permissionUnknown };
+    const notAsked = { microphone: VOICE.permission.notDetermined, speech: VOICE.permission.notDetermined };
     await shot(page, m1({ id: 'm1-settings-voice-trouble', title: 'Settings, Voice, the helper missing', how: 'Settings, Voice, the scripted probe reporting no helper', state: 'The Helper row with where it was looked for, the permissions and the recognition unknown', folders: ['settings-tab'] }), async () => {
       await settingsAt(app, page, 'voice');
-      await soft(page.locator('[data-settings-row="voice.recognition"]'), 'the Recognition row');
+      await expect(voiceRow('recognition'), 'the probe answered').toContainText(VOICE.permissionUnknown, { timeout: 15_000 });
+    }, {
+      check: async () => {
+        await expect(voiceRow('helper'), 'the Helper row').toBeVisible({ timeout: 3_000 });
+        await expect(voiceRow('helper'), 'the Helper row answered').not.toContainText(VOICE.reading);
+        await voiceReads(trouble);
+      },
     });
     await reset(page);
     await shot(page, m1({ id: 'm1-settings-voice-not-asked', title: 'Settings, Voice, permissions not asked yet', how: 'Settings, Voice, the scripted probe reporting the helper and both permissions not asked', state: 'Microphone and Speech recognition not asked yet, each its word alone', folders: ['settings-tab'] }), async () => {
@@ -2188,38 +2246,53 @@ test('states: Settings › Org read-only, an imported Chrome profile, Voice in t
       await reset(page);
       await page.waitForTimeout(11_000);
       await settingsAt(app, page, 'voice');
-      await page.waitForTimeout(1500);
-    });
+      await expect(voiceRow('microphone'), 'the probe answered').toContainText(VOICE.permission.notDetermined, { timeout: 15_000 });
+    }, { check: () => voiceReads(notAsked) });
     await reset(page);
 
-    // Browser: a Chrome profile imported once (history and cookies left out), then its row, its menu, its popups' ⓘ and
-    // its note (G70 to G77, T538)
+    // Browser: a Chrome profile imported once (history and cookies left out), checked whole as main recorded it (its
+    // report done, its bookmarks read with no error, its extensions), then its row, its menu, its popups' ⓘ and its note
+    // (G70 to G77, T538). Master draws the menu's actions as the profile's own buttons and the ⓘ's words as a line.
     const imported = () => page.locator('[data-imported-profile]');
     const profileRow = () => imported().locator('[data-settings-row="browser.importedProfile"]');
     const profileMenu = () => profileRow().locator('button[aria-haspopup="menu"]');
+    const popupLimit = () => imported().locator('[data-extension-popup-limit]');
+    const recordWhole = () => {
+      const profiles = profilesFile(userData)?.profiles ?? [];
+      expect(profiles, 'one imported profile').toHaveLength(1);
+      const [record] = profiles;
+      expect(record!.report.outcome, 'its import done').toBe('done');
+      expect(record!.bookmarks, 'its bookmarks read, with no error').toMatchObject({ syncedAt: expect.any(String), error: null });
+      expect(record!.extensions.length, 'its extensions').toBeGreaterThan(0);
+    };
     const browserAt = async () => {
-      if ((await imported().count()) === 0) {
+      if ((profilesFile(userData)?.profiles.length ?? 0) === 0) {
         await importThrough({ maws, page }, { history: false, cookies: false, bookmarks: true, extensions: true });
         await closeSheet({ maws, page });
       }
+      recordWhole();
       await settingsAt(app, page, 'browser');
       await imported().first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
       await page.waitForTimeout(400);
     };
-    await shot(page, m1({ id: 'm1-settings-browser-imported', title: 'Settings, Browser, a Chrome profile imported', how: 'Settings, Browser; Import…, the synthetic Chrome profile with its bookmarks and extensions', state: 'The imported profile’s row (its date and its …), Extensions with its ⓘ, a switch per extension', folders: ['settings-tab', 'tools/browser/import'] }), browserAt);
+    const profileShown = async () => {
+      recordWhole();
+      await inView(profileRow(), 'the imported profile’s row');
+    };
+    await shot(page, m1({ id: 'm1-settings-browser-imported', title: 'Settings, Browser, a Chrome profile imported', how: 'Settings, Browser; Import…, the synthetic Chrome profile with its bookmarks and extensions', state: 'The imported profile’s row (its date and its …), Extensions with its ⓘ, a switch per extension', folders: ['settings-tab', 'tools/browser/import'] }), browserAt, { check: checks(profileShown, () => inView(popupLimit(), 'Extensions’ ⓘ')) });
     await shot(page, m1({ id: 'm1-settings-browser-profile-menu', title: 'Settings, Browser, the imported profile’s menu', how: 'Settings, Browser; the … of the imported profile', state: 'Show report, Sync bookmarks now and Remove in its menu', folders: ['settings-tab', 'tools/browser/import'] }), async () => {
       await browserAt();
-      await openMenu(page, profileRow(), profileMenu());
-    }, { check: menuShows(page, profileMenu(), [BROWSER.showReport, BROWSER.remove]), after: () => closeMenu(page) });
+      await openMenu(profileRow(), profileMenu());
+    }, { check: checks(profileShown, menuShows(page, profileMenu(), [BROWSER.showReport, BROWSER_COPY.profile.syncNow, BROWSER.remove], imported())), after: () => closeMenu(page) });
     await shot(page, m1({ id: 'm1-settings-browser-popup-tip', title: 'Settings, Browser, what extension popups cannot see', how: 'Settings, Browser; Tab to the ⓘ beside Extensions', state: 'The ⓘ holding the keyboard, the popups’ limit its tooltip', folders: ['settings-tab', 'ui'] }), async () => {
       await browserAt();
-      await focusTip(page, imported().locator('[data-extension-popup-limit]'), 'the ⓘ');
-    }, { check: tipShown(page, imported().locator('[data-extension-popup-limit]'), 'the ⓘ') });
+      await focusTip(page, popupLimit(), popupLimit().filter({ hasText: BROWSER.popupLimit }));
+    }, { check: tipShown(page, popupLimit(), 'the ⓘ', popupLimit().filter({ hasText: BROWSER.popupLimit })) });
     await noteShots(page, m1({ id: 'm1-settings-browser-profile-hover', title: 'Settings, Browser, pointer on the imported profile', how: 'Settings, Browser; hover the imported profile’s row', state: 'The profile’s row under the pointer, its note with when its bookmarks were last read', folders: ['settings-tab', 'tools/browser/import'], hover: true }), async () => {
       await browserAt();
       await profileRow().first().hover();
       await page.waitForTimeout(1200);
-    }, { check: noteShown(profileRow(), 'the imported profile’s row') });
+    }, { check: checks(profileShown, pointedAt(profileRow(), 'the imported profile’s row'), noteShown(profileRow(), 'the imported profile’s row')) });
     await reset(page);
   } finally {
     await maws.cleanup();
@@ -2255,22 +2328,42 @@ test('states: Settings › Org with no delegation, the code destination set', as
       await target().first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
       await page.waitForTimeout(400);
     };
+    const group = (id: string) => org().locator(`[data-org-group="${id}"]`);
+    const signer = () => group('org').getByRole('group', { name: ORG.signer, exact: true });
+    const destinationRow = () => delegations().getByRole('group', { name: ORG.destination, exact: true });
+    // This Mac signs: on the cut's build its "signs" chip and no Signer row; master's build draws the Signer row
+    const signs = async () => {
+      if (!cutBuild()) return void (await expect(signer(), 'master’s Signer row').toBeAttached({ timeout: 3_000 }));
+      await inView(group('you').getByText(CUT_ORG.signsMark!, { exact: true }), 'This Mac’s “signs”');
+      await expect(signer(), 'no Signer row').toHaveCount(0);
+    };
+    // no delegation (the seed's one prefix nowhere in the section): on the cut's build New delegation… alone and the
+    // destination folded behind its chevron; on master's, its no-delegation line and the destination's form at rest
+    const none = async () => {
+      await expect(delegations(), 'no delegation').not.toContainText('ci-runner-');
+      if (!cutBuild()) {
+        await inView(delegations().getByText(ORG.noDelegations, { exact: true }), 'master’s no-delegation line');
+        return void (await expect(destinationRow(), 'master’s destination').toBeVisible({ timeout: 3_000 }));
+      }
+      await inView(delegations().locator('[data-org-new-delegation]'), 'New delegation…');
+      await expect(delegations().getByRole('button', { name: ORG.destination, exact: true }), 'the destination folded').toHaveAttribute('aria-expanded', 'false', { timeout: 3_000 });
+    };
     await shot(page, m1({ id: 'm1-org-signs', title: 'Settings, Org, a root that signs', how: 'Settings (⌘,), Org, as an admin whose Mac is a root, the weekly re-sign not due', state: 'This Mac marked “signs”; no Signer row in the Org group', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
       await orgAt(() => org());
-    });
+    }, { check: checks(signs, () => inView(group('you'), 'You')) });
     await shot(page, m1({ id: 'm1-org-no-delegations', title: 'Settings, Org, no delegation yet', how: 'Settings, Org, scrolled to Delegations', state: 'No delegation: New delegation… alone, and the set code destination behind its chevron', folders: ['settings-tab/org'] }), async () => {
       await orgAt(delegations);
-    });
+    }, { check: none });
     await noteShots(page, m1({ id: 'm1-org-destination-open', title: 'Settings, Org, the code destination open', how: 'Settings, Org, Delegations; the Code destination chevron, then Tab into its form', state: 'The set destination’s project, secret and account, the first field holding the keyboard with the row’s note open', folders: ['settings-tab/org', 'ui'] }), async () => {
       await orgAt(delegations);
       // master's build draws the destination's form at rest, under no chevron
-      if (await cutBuild(page)) {
+      if (cutBuild()) {
         const open = delegations().getByRole('button', { name: ORG.destination, exact: true });
         if ((await open.getAttribute('aria-expanded')) !== 'true') await open.click();
       }
       await project().scrollIntoViewIfNeeded();
       await project().focus();
-    }, { check: checks(() => expect(project(), 'the project field').toBeFocused({ timeout: 3_000 }), noteShown(delegations().getByRole('group', { name: ORG.destination, exact: true }), 'the Code destination row')) });
+    }, { check: checks(() => expect(project(), 'the project field').toBeFocused({ timeout: 3_000 }), noteShown(destinationRow(), 'the Code destination row')) });
     await reset(page);
   } finally {
     await maws.cleanup();
@@ -2299,9 +2392,11 @@ test('states: Settings › Org with a pairing code refused, Gateway with the rel
     await dismissToasts(page);
     const org = () => page.locator('section[aria-labelledby="settings-org"]');
     const code = () => org().getByRole('textbox', { name: ORG.code, exact: true });
-    const refusal = () => org().getByRole('group', { name: ORG.code, exact: true }).getByRole('alert');
-    // an invented code, typed and sent as a person sends it; master's build draws the field at rest
-    await shot(page, m1({ id: 'm1-settings-org-code-refused', title: 'Settings, Org, a pairing code refused', how: 'Settings (⌘,), Org (not signed in); Sign in…, type a pairing code, Enter', state: 'The refusal under the pairing-code field that sent it (the fixture’s main answers busy)', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
+    const codeRow = () => org().getByRole('group', { name: ORG.code, exact: true });
+    const refusal = () => codeRow().getByRole('alert');
+    // an invented code, typed and sent as a person sends it (master's build draws the field at rest), then let go, so
+    // the field's focus no longer holds the row's note open over the refusal
+    await shot(page, m1({ id: 'm1-settings-org-code-refused', title: 'Settings, Org, a pairing code refused', how: 'Settings (⌘,), Org (not signed in); Sign in…, type a pairing code, Enter; then click away', state: 'The refusal under the pairing-code field that sent it (the fixture’s main answers busy), the row’s note closed', folders: ['settings-tab', 'settings-tab/org'] }), async () => {
       if (!harnessBuilt) throw new Error('the Org page fixture needs the harness build’s main (scripts/e2e-build.sh harness)');
       await settingsAt(app, page, 'org');
       const signIn = CUT_ORG.signInOpen === undefined ? null : org().getByRole('button', { name: CUT_ORG.signInOpen, exact: true });
@@ -2310,19 +2405,73 @@ test('states: Settings › Org with a pairing code refused, Gateway with the rel
       await code().fill('QX7K-4MPL-92TD');
       await code().press('Enter');
       await expect(refusal()).toBeVisible({ timeout: 10_000 });
-    }, { check: () => expect(refusal(), 'the code’s refusal').toBeVisible({ timeout: 3_000 }) });
+      await letGo(page);
+    }, {
+      check: async () => {
+        await inView(refusal(), 'the code’s refusal');
+        if (cutBuild()) await expect(codeRow().locator('[data-row-note][data-open]'), 'the row’s note closed').toHaveCount(0);
+      },
+    });
     await reset(page);
     // the relay's address, when it was last checked and how fast its tooltip (G109)
     const address = page.locator('[data-settings-row="gateway.relay"] span[tabindex="0"]');
+    const line = page.locator('[data-settings-row="gateway.relay"]').getByText(/127\.0\.0\.1:\d+/); // master's: the address, when checked and how fast
     await shot(page, m1({ id: 'm1-settings-gateway-relay-tip', title: 'Settings, Gateway, the relay’s check', how: 'Settings, Gateway, the relay up; Tab to its address', state: 'The relay’s address holding the keyboard, when it was checked and its latency the tooltip', folders: ['settings-tab', 'gateway', 'ui'] }), async () => {
       await settingsAt(app, page, 'gateway');
-      if (await cutBuild(page)) await expect(address.first(), 'the relay checked').toBeVisible({ timeout: 15_000 });
-      await focusTip(page, address, 'the relay’s address');
-    }, { check: tipShown(page, address, 'the relay’s address') });
+      await expect((cutBuild() ? address : line).first(), 'the relay checked').toBeVisible({ timeout: 15_000 });
+      await focusTip(page, address, line);
+    }, { check: tipShown(page, address, 'the relay’s address', line) });
     await reset(page);
   } finally {
     await maws.cleanup();
     await relay.close();
+  }
+});
+
+// ======================================================================================================================
+// Launch 9: the word cut's M1, Settings › Usage over a copy of ClaudeUsage's fixture of its own, the relay's requests
+// moved to the last minute before the launch: what an account served counts main's last ten minutes, which a launch that
+// ran on would carry into its later Usage pictures. The routed account's email and its tooltip (W177, W178, G115), then
+// an account to sign in again (W181), marked as accounts.spec marks it. Master draws what the tooltips hold in the card.
+// ======================================================================================================================
+test('states: Settings › Usage, an account that served, an account to sign in again', async () => {
+  test.setTimeout(300_000);
+  const userData = join(SCRATCH, 'profile-m1-usage');
+  mkdirSync(userData, { recursive: true });
+  const usage = usageFixture('claude-usage-m1');
+  freshRequests(usage);
+  const maws = await launchMaws({ userData, env: BASE_ENV({ MAWS_CLAUDE_USAGE_DIR: usage }) });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    await page.waitForTimeout(1500);
+    await dismissToasts(page);
+    const routed = page.locator('[data-usage-panel] [data-account][data-routing]');
+    const email = routed.locator('span[tabindex="0"]');
+    const served = routed.locator('[data-serving]'); // master's: what it served, a chip in the card
+    await shot(page, m1({ id: 'm1-settings-usage-email-tip', title: 'Settings, Usage, the routed account’s email', how: 'Settings, Usage, the relay’s requests from the last minutes; Tab to the routed account’s email', state: 'The email holding the keyboard: its tooltip with the rate-limit tier, the saved sessions and what it served', folders: ['settings-tab', 'usage', 'accounts', 'ui'] }), async () => {
+      await settingsAt(app, page, 'usage');
+      if (cutBuild()) await expect(email.first(), 'what the routed account served').toHaveAccessibleDescription(/\d+ requests? · /, { timeout: 20_000 });
+      else await expect(served.first(), 'what the routed account served').toBeVisible({ timeout: 20_000 });
+      await focusTip(page, email, served);
+    }, { check: tipShown(page, email, 'the routed account’s email', served) });
+    await reset(page);
+    const accounts = join(usage, 'accounts.json');
+    const original = readFileSync(accounts, 'utf8');
+    const card = page.locator('[data-usage-panel] [data-account][data-state="needs_reauth"]');
+    const reauth = card.locator('p > span[tabindex="0"]');
+    const said = card.locator(':scope > p').last(); // master's: the reauthentication paragraph, last in the card
+    await shot(page, m1({ id: 'm1-settings-usage-reauth', title: 'Settings, Usage, an account to sign in again', how: 'Settings, Usage, ClaudeUsage marking 5@example.test as needing reauthentication; Tab to its Sign in again', state: 'The account dimmed and last, Sign in again in orange holding the keyboard, what follows from it its tooltip', folders: ['settings-tab', 'usage', 'accounts', 'ui'] }), async () => {
+      const marked = (JSON.parse(original) as { email: string }[]).map((account) => (account.email === '5@example.test' ? { ...account, needsReauthentication: true } : account));
+      writeFileSync(accounts, JSON.stringify(marked, null, 2));
+      await settingsAt(app, page, 'usage');
+      await expect(card.first()).toBeVisible({ timeout: 15_000 });
+      await focusTip(page, reauth, said);
+    }, { check: tipShown(page, reauth, 'Sign in again', said), after: async () => writeFileSync(accounts, original) });
+    await reset(page);
+  } finally {
+    await maws.cleanup();
   }
 });
 
