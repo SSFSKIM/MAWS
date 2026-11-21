@@ -676,7 +676,7 @@ button.transcript-ask-top:focus-visible { outline-width: 2px; outline-style: sol
 .transcript-delivery-actions { display: inline-flex; gap: 10px; margin-left: auto; }
 .transcript-delivery-actions .transcript-quiet-button { margin-top: 0; }
 /* P5 O7 M4: a remote session's file: the desktop actions greyed, and where the file is */
-.transcript-delivery-actions .transcript-quiet-button:disabled { color: var(--fg-faint); cursor: default; }
+.transcript-delivery-actions .transcript-quiet-button:is(:disabled, [aria-disabled="true"]) { color: var(--fg-faint); cursor: default; }
 .transcript-delivery-elsewhere { color: var(--fg-faint); font-size: var(--text-ui-sm); }
 .transcript-delivery-problem { flex-basis: 100%; color: var(--danger); }
 .transcript-question-refused { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
