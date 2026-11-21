@@ -161,6 +161,10 @@ describe('channelEntries: people’s words', () => {
       { kind: 'words', member: OWNER.id, name: 'You', you: true },
     ]);
     for (const entry of marked) expect(entry).not.toHaveProperty('notice');
+    // a writer outside the machine-name grammar is no machine's: a legacy row there keeps its prior attribution
+    const [legacy] = project([ev({ kind: 'human', writer: 'Legacy/human', from: 'human', member: OWNER.id, to: '*', text: 'from before', ts: T(2), notice: 'devcloud' }, { label: 'legacy' })], { me: OWNER.id });
+    expect(legacy).toMatchObject({ kind: 'words', member: OWNER.id, name: 'You', you: true, label: 'legacy' });
+    expect(legacy).not.toHaveProperty('notice');
   });
 
   it('a migrated word with no author is named by its member id', () => {

@@ -2,7 +2,7 @@
 // names of sessions, the `unlisted` transition notice, and the hub's tombstone of a position it withheld; and X8's
 // machine's notice (`noticeOf`, `noticeSender`), which the endpoint's `words?` and the app's channel read alike. The stream
 // names themselves (`audienceDigest`, `streamOf`, `isAudience`) are in names.ts, beside the writer grammar.
-import { isAudience, isLogSeq, streamOf, writerMachine } from './names.ts';
+import { isAudience, isLogSeq, isMachineName, streamOf, writerMachine } from './names.ts';
 
 /** A session an event names (D4): `addressing` joins its audience's intersection; `provenance` never widens what a
  * session's id reaches, and is redacted when that session's audience does not contain the event's. `path` names the
@@ -52,12 +52,13 @@ export function noticeSender(event: unknown): string | null {
   return `${NOTICE_PROGRAM.test(program) ? program : 'notice'}@${humanWriterMachine((event as { writer: string }).writer)}`;
 }
 
-/** The machine a machine's human writer (`<machine>/human` or its stream) names; null for any other writer. */
+/** The machine a machine's human writer (`<machine>/human` or its stream) names; null for any other writer, one whose
+ * machine is outside the machine-name grammar (`Legacy/human`, a name with a space) included. */
 function humanWriterMachine(writer: unknown): string | null {
   if (typeof writer !== 'string') return null;
   const { base } = streamOf(writer);
   const machine = writerMachine(base);
-  return machine !== null && base === `${machine}/human` ? machine : null;
+  return machine !== null && isMachineName(machine) && base === `${machine}/human` ? machine : null;
 }
 
 /**
