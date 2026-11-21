@@ -954,8 +954,16 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   // front, wholly in view, so neither the click nor keeping the tab in front in view moves the strip: after Back only the
   // restored offset puts it back where it was, since the clamp left it short of that. (The first Mac run: the strip's
   // last tab cannot be in view 40 px short of the strip's end, which its own last 40 px are.)
-  await openSurface(page, 'Background tasks');
   const list = page.locator('[data-chrome-tabs] [role="tablist"]');
+  const widthBefore = await list.evaluate((el) => el.clientWidth);
+  await openSurface(page, 'Background tasks');
+  // Ticket 729: the column narrows the strip once, and the strip's observer delivers that resize a frame or more later,
+  // scrolling the tab in front (Diagnostics, the strip's last) back into view: the one reveal still due once the column
+  // is open. Until it runs the narrowed strip keeps its old, smaller offset, a column's width short of its new end; after
+  // it the strip is at its end. Settle on that state before reading the overflow, so no reveal is left to undo the
+  // offset set below, and the polls after it still fail on anything else that moves the strip.
+  await expect.poll(() => list.evaluate((el, before) => el.clientWidth < before && el.scrollWidth - el.clientWidth - el.scrollLeft < 1, widthBefore),
+    { message: 'the narrowed strip shows the tab in front at its end' }).toBe(true);
   const overflow = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow, 'the strip overflows by more than the step short of its end').toBeGreaterThan(80);
   // the offset the scene sets is known, so every read below waits on that value, not on two reads agreeing
