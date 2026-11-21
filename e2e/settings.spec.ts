@@ -470,14 +470,23 @@ function sidewaysOverflow(body: Element): { overflow: number; content: number; p
 
 type Stacking = { row: string; controlUnderLabel: boolean; noteUnderControl: boolean };
 // Each drawn row of the table: whether its control starts under its label and its note under its control. A note that
-// waits (the word cut) is not drawn and takes no box: what stands under the control is its line, when it has one.
+// waits (the word cut) is not drawn and takes no box: what stands under the control is its line, when it has one. A
+// bare row (Stop all, the word cut's G136) draws its control alone, its label read by the accessibility tree only (a
+// 1 px visually hidden box): there is no label to stack under, so only its line is held under its control.
 const stackingOf = (column: Locator): Promise<Stacking[]> =>
   column.locator('[data-settings-row][role="group"]').evaluateAll((rows) =>
     rows
       .filter((row) => row.getBoundingClientRect().height > 0)
       .map((row) => {
-        const [label, control, note] = Array.from(row.children, (child) => child.getBoundingClientRect()).filter((box) => box.height > 0);
-        return { row: row.getAttribute('data-settings-row')!, controlUnderLabel: control!.top >= label!.bottom - 1, noteUnderControl: note === undefined || note.top >= control!.bottom - 1 };
+        const name = document.getElementById(row.getAttribute('aria-labelledby')!)!;
+        const named = name.getBoundingClientRect();
+        const bare = named.width <= 1 && named.height <= 1;
+        const boxes = Array.from(row.children)
+          .filter((child) => !(bare && child === name))
+          .map((child) => child.getBoundingClientRect())
+          .filter((box) => box.height > 0);
+        const [label, control, note] = bare ? [undefined, ...boxes] : boxes;
+        return { row: row.getAttribute('data-settings-row')!, controlUnderLabel: bare || control!.top >= label!.bottom - 1, noteUnderControl: note === undefined || note.top >= control!.bottom - 1 };
       }),
   );
 
