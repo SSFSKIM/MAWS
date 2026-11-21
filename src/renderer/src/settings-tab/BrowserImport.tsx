@@ -27,6 +27,7 @@ import { ImportSheet } from '../tools/browser/import/ImportSheet';
 import { RemoveSheet } from '../tools/browser/import/RemoveSheet';
 import { StatusChip } from '../tools/browser/import/Report';
 import { openImport, setExtension, showReport, syncBookmarks, useBrowserImport } from '../tools/browser/import/store';
+import { QuietSpinner } from '../ui/spinner';
 import { Tip } from '../ui/tip';
 import { BROWSER } from './copy';
 import { Setting, Switch, TEXT_ACTION, WORD_OWNER } from './parts';
@@ -96,7 +97,8 @@ export function BrowserImport() {
 
 // An imported profile's row: its date and its "…" menu. Show report waits while an import runs; cua #90: Sync bookmarks
 // now, when its bookmarks were imported, with the last read's time in the row's note, or why it failed at rest, as the
-// profile popover says it.
+// profile popover says it. A sync in flight is the row's quiet spinner, named by its words, since the menu that started
+// it has closed; an old failure waits for its answer.
 function ProfileRow({ record, running, onReport, onRemove }: { record: ImportedProfile; running: boolean; onReport(): void; onRemove(): void }) {
   const [syncing, setSyncing] = useState(false);
   const now = useNow();
@@ -111,7 +113,7 @@ function ProfileRow({ record, running, onReport, onRemove }: { record: ImportedP
   return (
     <Setting row="browser.importedProfile" label={record.name} noteEnd={line !== null && !failed ? <p className="m-0">{line}</p> : undefined}>
       <span className="text-fg-muted">{BROWSER.importedOn(importDate(record.importedAt))}</span>
-      {line !== null && failed && <span className="text-warning">{line}</span>}
+      {syncing ? <QuietSpinner label={BROWSER_COPY.profile.syncing} /> : line !== null && failed && <span className="text-warning">{line}</span>}
       <RowMenu
         label={BROWSER.actions(record.name)}
         actions={[

@@ -203,6 +203,24 @@ describe('an imported profile', () => {
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(['Show report', 'Remove imported profile']);
   });
 
+  it('a sync in flight shows on the row once the menu has closed, the quiet spinner named by its words, in place of an old failure', async () => {
+    const failed = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt: null, count: 0, error: 'indexUnavailable' as const, errorAt: RECORD.importedAt } };
+    renderBlock({ 'browser.import.list': () => ({ profiles: [failed], fileBroken: false, running: null }), 'browser.bookmarks.sync': () => ({ syncedAt: new Date().toISOString(), count: 46 }) });
+    let release!: () => void;
+    const answer = window.maws!.invoke;
+    window.maws!.invoke = (async (...args: Parameters<typeof answer>) => {
+      if (args[0] === 'browser.bookmarks.sync') await new Promise<void>((resolve) => (release = resolve));
+      return answer(...args);
+    }) as typeof answer;
+    await screen.findByRole('region', { name: 'Person 1' });
+    await choose('Sync bookmarks now');
+    await vi.waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(await within(row('Person 1')).findByRole('progressbar', { name: 'Syncing bookmarks…' })).toBeTruthy();
+    expect(row('Person 1').querySelector('.text-warning')).toBeNull(); // the old failure is not the row's only word meanwhile
+    act(() => release());
+    await vi.waitFor(() => expect(within(row('Person 1')).queryByRole('progressbar')).toBeNull());
+  });
+
   it('a failed sync keeps its warning on the row at rest', async () => {
     const failed = { ...RECORD, bookmarks: { consentedAt: RECORD.importedAt, syncedAt: null, count: 0, error: 'indexUnavailable' as const, errorAt: RECORD.importedAt } };
     renderBlock({ 'browser.import.list': () => ({ profiles: [failed], fileBroken: false, running: null }) });
