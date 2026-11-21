@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -10,7 +10,9 @@ import { SessionRecordSchema } from '@shared/graph/session';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { gitCheckout, gitWorktree, sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { budgetVerdict, machineLoad } from '../../../test/support/latency-budget';
+import { readAnchor } from './anchor';
 import { Index } from './index';
+import { locate } from './projects';
 import { cutPrompt, promptTitle } from './sessions';
 
 const LAUNCH = {
@@ -49,6 +51,61 @@ describe('session records in the index', () => {
     expect(record.projectId).toBeNull();
     expect(index.projects.list()).toEqual([]);
     expect(index.sessions.upsertFromSummary(summary({ directory: dir.path })).record.projectId).not.toBeNull();
+  });
+
+  // The "watcher delete" flake (tracker): a transcript read before its first row landed names no folder. That says
+  // nothing of where the session is, so the record keeps the membership it has, and nothing is located for it.
+  describe('a summary that names no folder', () => {
+    const folderless = (sessionId: SessionId) =>
+      summary({ sessionId, directory: null, relocatedCwd: null, newestCwd: null, size: 0, mtimeMs: 2_000, firstRecordAt: null, lastRecordAt: null, firstPrompt: null, hasMessages: false });
+
+    it('keeps a removed record in its project after that project moved off its folder and another project took the folder', () => {
+      const a = join(realpathSync(dir.path), 'a');
+      const b = join(realpathSync(dir.path), 'b');
+      mkdirSync(a);
+      const sessionId = sessionIdFor(0x501);
+      const first = index.sessions.upsertFromSummary(summary({ sessionId, directory: a })).record.projectId!;
+      renameSync(a, b);
+      mkdirSync(a);
+      expect(index.projects.relocate(first, b, readAnchor(b)!)).toEqual({ merged: false });
+      const second = index.projects.add(a).id;
+      expect(second).not.toBe(first);
+      index.sessions.markTranscriptRemoved(sessionId);
+
+      expect(index.sessions.upsertFromSummary(folderless(sessionId)).record).toMatchObject({ archived: false, projectId: first, directory: a });
+      expect(index.projects.list().map((p) => p.id).sort()).toEqual([first, second].sort());
+      // its first row lands, naming the folder the session works in now
+      expect(index.sessions.upsertFromSummary(summary({ sessionId, directory: b, size: 120, mtimeMs: 3_000 })).record.projectId).toBe(first);
+    });
+
+    it('locates nothing, so no git runs for it inside the transaction', async () => {
+      const main = realpathSync(await gitCheckout(join(dir.path, 'repo'), 'main'));
+      const sessionId = sessionIdFor(0x502);
+      const { record } = index.sessions.upsertFromSummary(summary({ sessionId, directory: main }));
+      // stored as the record's folder: a linked worktree no locate has asked about yet, as at a cold start
+      const linked = realpathSync(await gitWorktree(main, join(dir.path, 'repo-w'), 'w'));
+      const raw = new DatabaseSync(join(dir.path, 'index.sqlite'));
+      try {
+        raw.prepare('UPDATE sessions SET directory = ? WHERE engine_session_id = ?').run(linked, sessionId);
+      } finally {
+        raw.close();
+      }
+      const calls = join(dir.path, 'git-calls');
+      const git = join(dir.path, 'git');
+      const previous = process.env.MAWS_GIT;
+      writeFileSync(git, `#!/bin/sh\necho "$@" >> '${calls}'\nexec '${previous || '/usr/bin/git'}' "$@"\n`);
+      chmodSync(git, 0o755);
+      process.env.MAWS_GIT = git;
+      try {
+        expect(index.sessions.upsertFromSummary(folderless(sessionId)).record).toMatchObject({ archived: false, projectId: record.projectId });
+        expect(existsSync(calls), 'git ran for a folderless summary').toBe(false);
+        locate(linked); // the seam counts: locating that folder asks git
+        expect(existsSync(calls)).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env.MAWS_GIT;
+        else process.env.MAWS_GIT = previous;
+      }
+    });
   });
 
   // W11 (I1): a launched session has a title before its transcript is summarised, and after a `/clear` once the next

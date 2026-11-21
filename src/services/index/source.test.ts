@@ -1504,6 +1504,33 @@ describe('IndexSessionSource against the real filesystem state service', () => {
     expect(index.projects.list().map((p) => p.id)).toContain(discoveredProject);
   });
 
+  // The CI flake of the case above (tracker, "watcher delete marks missing transcripts gone"): a transcript written back
+  // in one writeFile is created empty before its bytes land, and on Linux the watcher can hear the creation, and the
+  // host read the file, in between. Held here: the file is restored empty, read so, and only then written.
+  it('a removed transcript that comes back empty first keeps its project while its folder is unread', async () => {
+    const discoveredDir = join(dir.path, 'discovered');
+    mkdirSync(discoveredDir);
+    const path = await fixture.addTranscript(discoveredDir, S[0], [user('u1', null, discoveredDir, 'discovered transcript')]);
+    wired.start();
+    begin();
+    await expect.poll(() => index.sessions.list().length, { timeout: 3_000 }).toBe(1);
+    const discoveredProject = index.sessions.getByEngineId(S[0])!.projectId;
+    expect(discoveredProject).not.toBeNull();
+    rmSync(path);
+    await expect.poll(() => index.sessions.getByEngineId(S[0])?.archived, { timeout: 3_000 }).toBe(true);
+    expect(index.projects.list()).toEqual([]);
+
+    await writeFile(path, '');
+    await expect.poll(() => index.sessions.getByEngineId(S[0])?.archived, { timeout: 3_000 }).toBe(false); // the empty read lifted the archive
+    expect(index.sessions.bindings().find((b) => b.sessionId === S[0])?.size).toBe(0);
+    expect(index.sessions.getByEngineId(S[0])!.projectId).toBe(discoveredProject);
+    expect(index.projects.list().map((p) => p.id)).toEqual([discoveredProject]);
+
+    await fixture.appendLines(path, [JSON.stringify(user('u1', null, discoveredDir, 'discovered transcript'))]);
+    await expect.poll(() => index.sessions.bindings().find((b) => b.sessionId === S[0])?.size, { timeout: 3_000 }).toBeGreaterThan(0);
+    expect(index.projects.list().map((p) => p.id)).toEqual([discoveredProject]);
+  });
+
   it('a cold start scans once: one fs.scan, and each transcript reaches main in one fs.sessionChanged (debt wave 6)', async () => {
     for (const [i, sessionId] of S.entries()) await fixture.addTranscript(`/work/p${i}`, sessionId, [user('u1', null, `/work/p${i}`, `hello ${i}`)]);
     const changed: SessionId[] = [];
