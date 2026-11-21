@@ -83,9 +83,9 @@ export const RowSchema = z.discriminatedUnion('kind', [
     toolCalls: z.number(), denied: z.number(), autoDenied: z.number(), firstDeniedCell: nullable(z.string()), expanded: z.boolean(), summary: TurnSummarySchema,
     files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })).optional(),
     opener: z.strictObject({ class: z.enum(ARRIVAL_CLASSES), line: z.string() }).optional(), // U3
-    caption: z.string(), parts: z.array(z.string()), counts: LineCountsSchema, // UX wave U2
+    caption: z.string(), fold: z.number().int().positive().optional() /* the word cut (T2) */, parts: z.array(z.string()), counts: LineCountsSchema, // UX wave U2
   }),
-  z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), counts: LineCountsSchema, icon: category, expanded: z.boolean() }),
+  z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), fold: z.number().int().positive().optional() /* the word cut (T2) */, counts: LineCountsSchema, icon: category, expanded: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape }),
   z.strictObject({
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
