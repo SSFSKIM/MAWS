@@ -28,7 +28,7 @@ describe('actions drawn on the pointed row', () => {
 // keeps that column clear, so no line of it, the first one included, is drawn under the glyph.
 describe('the output’s copy glyph', () => {
   const px = (selector: string, property: string) => {
-    const rule = rules.find((candidate) => candidate.selectors.split(',').some((one) => one.trim() === selector) && new RegExp(`(^|;)\\s*${property}:`).test(candidate.body));
+    const rule = rules.find((candidate) => candidate.selectors.replace(/\/\*[\s\S]*?\*\//g, '').split(',').some((one) => one.trim() === selector) && new RegExp(`(^|;)\\s*${property}:`).test(candidate.body));
     const value = rule?.body.match(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`))?.[1].trim();
     return value === undefined ? NaN : Number(value.replace(/px$/, ''));
   };

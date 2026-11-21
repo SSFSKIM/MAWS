@@ -130,7 +130,7 @@ describe('a run’s caption (acceptance 2)', () => {
     });
     expect(runOf(b).summary).toBe('Read and edited copy.ts');
     const steps = stepsOfCells(runOf(b).cells);
-    expect(captionParts(steps)).toEqual([{ text: 'read and edited copy.ts', calls: 3, count: 2, changed: true, agent: false }]);
+    expect(captionParts(steps)).toEqual([{ text: 'read and edited copy.ts', calls: 3, count: 2, changed: true, agent: false, connectors: [], connected: false }]);
   });
 
   it('a file whose edit failed and then succeeded has no mark; two failed edits of one file are one failed key', () => {
