@@ -321,12 +321,15 @@ export class SessionStore {
     return this.db.transaction(() => {
       const existing = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', summary.sessionId);
       // A summary that names no folder (a transcript read before its first row landed: writeFile creates the file empty,
-      // and the watcher can hear it so) keeps the record's: it says nothing of where the session is, so it moves it out
-      // of no project.
-      const location = locate(summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? null);
+      // and the watcher can hear it so) says nothing of where the session is: a record's membership and the columns
+      // located from its folder stay as stored, and nothing is located for it. Locating the stored folder instead could
+      // file it under another project (a project relocated off that folder, which another project then took) and could
+      // run git in this transaction (a linked worktree the warm-up never saw, since it warms only the summary's folders).
+      const kept = existing !== null && summary.relocatedCwd === null && summary.directory === null ? existing : null;
+      const location = kept === null ? locate(summary.relocatedCwd ?? summary.directory) : null;
       // New chat (2026-10-01): the home directory is no project, so a chat that works in no project lists under Other
       // sessions (a project already made for it stays)
-      const projectId = this.projects.projectAt(location, summary.hasMessages && location.projectDirectory !== homeDirectory());
+      const projectId = location === null ? ((kept?.project_id ?? null) as ProjectId | null) : this.projects.projectAt(location, summary.hasMessages && location.projectDirectory !== homeDirectory());
       // W9 (H2): the branch is what the transcript's latest record names, `HEAD` and empty being none. It is not kept from
       // the previous summary: a branch the engine stopped naming (a non-repository's `HEAD`, a detached checkout) must not
       // outlive it, and migration 3 cleared the `HEAD` an earlier summary stored.
@@ -336,11 +339,20 @@ export class SessionStore {
       // and a removal is still seen.
       const preV4 = summary.birthtimeMs === undefined;
       const stored = { size: summary.size, mtimeMs: preV4 ? -1 : summary.mtimeMs };
+      const located: Record<string, Value> =
+        location === null
+          ? {}
+          : {
+              project_id: projectId,
+              directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',
+              worktree_path: location.worktreePath,
+              worktree_branch: location.worktreePath === null ? null : branch,
+              // UX wave U8c-2 (§B): beside the columns above, which keep build F's rule, where the session was launched
+              // and where its agent is, stamped with the size and mtime this write stores
+              ...folderColumns(summary, location, stored, this.db.scoped('folder-reads', () => new FolderReads())),
+            };
       const facts: Record<string, Value> = {
-        project_id: projectId,
-        directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',
-        worktree_path: location.worktreePath,
-        worktree_branch: location.worktreePath === null ? null : branch,
+        ...located,
         branch,
         custom_title: summary.customTitle,
         ai_title: summary.aiTitle,
@@ -356,9 +368,6 @@ export class SessionStore {
         summary: JSON.stringify(summary),
         root_uuid: summary.rootUuid ?? null, // E3 (A-16)
         transcript_birthtime_ms: summary.birthtimeMs ?? null, // E3
-        // UX wave U8c-2 (§B): beside the columns above, which keep build F's rule, where the session was launched and
-        // where its agent is, stamped with the size and mtime this write stores
-        ...folderColumns(summary, location, stored, this.db.scoped('folder-reads', () => new FolderReads())),
       };
 
       if (!existing) {
