@@ -15,6 +15,9 @@ export interface SettingsResult {
   name: string;
   under: string | null; // a whole section's result has nothing under its name (the word cut, G9)
   target: string; // a row's id (data-settings-row), `section:<section>`, `binding:<action>`, `org:<heading>`, or `customize`
+  // a row not drawn whose words found this one (its label or keywords, counted for the row that reveals it): inside the
+  // target, the word that shows that row's words in its tooltip (`data-settings-shows`), if one does, takes the landing
+  via?: string;
 }
 
 type Input = { rows: readonly SettingsRow[]; shown: ReadonlyMap<string, string>; bindings: readonly { id: string; title: string }[]; orgGroups: readonly string[] };
@@ -39,11 +42,11 @@ export function searchSettings(query: string, { rows, shown, bindings, orgGroups
     return null;
   };
   // the label and keywords of each row not drawn, counted for the drawn row that reveals it
-  const borrowed = new Map<string, string[]>();
+  const borrowed = new Map<string, { id: string; words: string[] }[]>();
   for (const row of rows) {
     if (shown.has(row.id) || row.repeats) continue;
     const at = drawnRevealer(row);
-    if (at !== null) borrowed.set(at, [...(borrowed.get(at) ?? []), row.label, ...(row.keywords ?? [])]);
+    if (at !== null) borrowed.set(at, [...(borrowed.get(at) ?? []), { id: row.id, words: [row.label, ...(row.keywords ?? [])] }]);
   }
 
   const results: SettingsResult[] = [];
@@ -56,7 +59,13 @@ export function searchSettings(query: string, { rows, shown, bindings, orgGroups
       const state = shown.get(row.id);
       if (state !== undefined) {
         const now = row.states[state] ?? {};
-        if (findsAll(words, text([row.label, ...(row.keywords ?? []), sectionName, now.line, now.note, ...(borrowed.get(row.id) ?? [])]))) results.push(result);
+        const own = [row.label, ...(row.keywords ?? []), sectionName, now.line, now.note];
+        const lent = borrowed.get(row.id) ?? [];
+        if (findsAll(words, text([...own, ...lent.flatMap((b) => b.words)]))) {
+          // found by one hidden row's words where its own fall short: that row is the one the landing looks for
+          const via = findsAll(words, text(own)) ? undefined : lent.find((b) => findsAll(words, text([...own, ...b.words])))?.id;
+          results.push(via === undefined ? result : { ...result, via });
+        }
       } else if (row.repeats) {
         const at = drawnRevealer(row);
         if (at !== null && findsAll(words, text([row.label, ...(row.keywords ?? [])]))) results.push({ ...result, target: at });

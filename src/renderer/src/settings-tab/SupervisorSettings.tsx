@@ -12,7 +12,7 @@
 // and read by nothing), and it reads host.status as the daemon's: no branch for another transport or an unavailable daemon.
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1): the status reads its state and its sessions,
 // the start, the pid, the exit rule and the machine daemon's line its tooltip (G129); the daemon's row is drawn only while
-// it is not connected (G133); what the process is for is the status row's note (G130); Stop all is its one button, the
+// it is not connected (G133), its words then shown by the status, where a search for them lands; what the process is for is the status row's note (G130); Stop all is its one button, the
 // label its name (G136).
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { Settings } from '@shared/ipc/schema';
@@ -123,7 +123,7 @@ function StatusRow({ status, keepFocus, returnFocus }: { status: HostStatus | nu
   return (
     <Setting row="supervisor.status" state={note}>
       <Tip content={facts.length === 0 ? null : facts.map((fact) => <span key={fact} className="block">{fact}</span>)} description={facts.join('; ')}>
-        <span role="status" tabIndex={facts.length === 0 ? undefined : 0} className={`min-w-0 text-ui-sm text-fg tabular-nums ${WORD_OWNER}`}>
+        <span role="status" tabIndex={facts.length === 0 ? undefined : 0} data-settings-shows={status?.daemon ? 'supervisor.daemon' : undefined} className={`min-w-0 text-ui-sm text-fg tabular-nums ${WORD_OWNER}`}>
           {text}
         </span>
       </Tip>

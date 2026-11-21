@@ -111,11 +111,12 @@ describe('Search settings', () => {
 
   it('finds a row that is not drawn as the row that reveals it, by its label and keywords only', () => {
     const off = page({ 'supervisor.memoryBudget': 'off' }, ['supervisor.limit', 'supervisor.stateful']);
-    expect(search('stateful', off)).toEqual([{ id: 'supervisor.memoryBudget', name: 'Release idle sessions over a memory limit', under: 'Supervisor', target: 'supervisor.memoryBudget' }]);
+    expect(search('stateful', off)).toEqual([{ id: 'supervisor.memoryBudget', name: 'Release idle sessions over a memory limit', under: 'Supervisor', target: 'supervisor.memoryBudget', via: 'supervisor.stateful' }]);
     expect(ids('memory limit', off)).toEqual(['supervisor.memoryBudget']);
     expect(ids('released', off)).toEqual([]); // the hidden Limit's own note is not on the page
     expect(ids('helper')).toEqual(['voice.language']); // the Helper row, drawn on trouble, as the row whose probe reveals it
-    expect(ids('machine daemon')).toEqual(['supervisor.status']);
+    expect(search('machine daemon')).toEqual([{ id: 'supervisor.status', name: 'Status', under: 'Supervisor', target: 'supervisor.status', via: 'supervisor.daemon' }]); // the landing looks for what shows the daemon's words
+    expect(search('status')[0]).not.toHaveProperty('via'); // found by its own words
     expect(ids('RAM', off)).toEqual(['supervisor.memoryBudget']); // one result, though both carry the word
   });
 

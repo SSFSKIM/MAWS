@@ -11,10 +11,12 @@ import type { AppMcpServer } from '@shared/engine/app-mcp-servers';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
+import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useLayout } from '../stores/layout';
 import { useSettings } from '../stores/settings';
 import { importBridge, RECORD } from '../test-support/browser-import';
+import { hostStatus } from '../test-support/host-status';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { grantsOf, REGISTERED, VIEW } from './org/test-support';
@@ -61,6 +63,7 @@ afterEach(() => {
   resetBrowserImport();
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
+  useHosts.setState({ supervisor: null, hosts: { engine: null, pty: null } });
   delete (window as { maws?: PreloadBridge }).maws;
   vi.restoreAllMocks();
 });
@@ -248,6 +251,21 @@ describe('Search settings: choosing a result', () => {
     expect(openEngineUpdate).not.toHaveBeenCalled();
     await user.click(within(binary).getByRole('button', { name: 'Update Claude Code…' })); // a deliberate press still runs it
     expect(openEngineUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('a word of the row whose tooltip holds the words found takes the landing, so the tooltip shows them (the daemon, G133)', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, { 'host.status': () => hostStatus() });
+    const status = await within(row('Status')).findByRole('status');
+    await vi.waitFor(() => expect(status.textContent).toBe('Running · 3 sessions'));
+    type('machine daemon');
+    expect(optionTexts()).toEqual(['Status · Supervisor']);
+    press('Enter');
+    expect(document.activeElement).toBe(status); // a word, not an action
+    expect(screen.getByRole('tooltip').textContent).toContain('Machine daemon · This profile only');
+    expect(row('Status').dataset.settingsMark).toBe('on');
+    type('status'); // found by its own words, the row itself lands
+    fireEvent.click(options().find((o) => o.textContent === 'StatusSupervisor')!);
+    expect(document.activeElement).toBe(row('Status'));
   });
 
   it('lands on the row that reveals a row not drawn: the memory budget off, "stateful" chooses its switch', () => {

@@ -109,13 +109,16 @@ export function SettingsView({ section, request }: { section: SettingsSection | 
   };
 
   // A chosen result: its row's section heading at the body's top (or the row in the middle), the row itself holding the
-  // keyboard, which opens its note, and the mark. The query stays in the field.
+  // keyboard, which opens its note, and the mark. A result found by a hidden row's words whose word in the row shows them
+  // in its tooltip (`data-settings-shows`, on a word, never an action) gives that word the keyboard instead, so its
+  // tooltip shows the words found. The query stays in the field.
   const choose = (result: SettingsResult) => {
     if (result.target === 'customize') return openCustomize();
     const root = body.current;
     const landing = root === null ? null : landingOf(root, result.target);
     if (root === null || landing === null) return;
-    flushSync(() => landing.focus({ preventScroll: true })); // its note opens now, so the scroll below brings it into view too
+    const shows = result.via === undefined ? null : landing.querySelector<HTMLElement>(`[data-settings-shows~="${result.via}"]`);
+    flushSync(() => (shows ?? landing).focus({ preventScroll: true })); // its note opens now, so the scroll below brings it into view too
     const section = landing.closest<HTMLElement>('section[aria-labelledby]');
     const landed = ORDER.find((s) => section?.getAttribute('aria-labelledby') === sectionHeadingId(s));
     if (section !== null && landed !== undefined) {
