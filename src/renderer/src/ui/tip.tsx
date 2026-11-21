@@ -15,8 +15,9 @@
 // cancelled before its handler (which skips a prevented event), and so is its focus while there is no content: a tip
 // with no content opens nothing and closes no other tooltip. One tip shows at a time. Content that arrives while its
 // owner is already pointed at or focused shows on the next pointing or focus; it is in the owner's description at
-// once. The content stays hoverable (WCAG 1.4.13): Radix keeps it open while the pointer crosses into it. Escape and a
-// press close it and drop a pointing still in its delay; a close Radix asks for while the owner still holds focus (its
+// once. The content stays hoverable (WCAG 1.4.13): Radix keeps it open while the pointer crosses into it. Escape, a
+// press and an activation of the owner (Enter or Space too) close it and drop a pointing still in its delay; any other
+// close Radix asks for while the owner still holds focus (its
 // close on an ancestor's scroll, which the focus itself causes when the owner was out of view) is not taken.
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
@@ -51,6 +52,13 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
   const stopPointing = () => {
     if (pointing.current !== null) clearTimeout(pointing.current);
     pointing.current = null;
+  };
+  // A press or an activation of the owner: the person's close, which Radix asks for next (its own trigger handlers run
+  // after these), and which a press that closes nothing does not carry later.
+  const dismissByOwner = () => {
+    stopPointing();
+    dismissed.current = true;
+    queueMicrotask(() => (dismissed.current = false));
   };
   useLayoutEffect(() => {
     showsNow.current = shows;
@@ -113,11 +121,8 @@ export function Tip({ content, description, children, ...guard }: { content: Rea
             }, POINTING_DELAY_MS);
           }}
           onPointerLeave={stopPointing}
-          onPointerDown={() => {
-            stopPointing();
-            dismissed.current = true;
-            queueMicrotask(() => (dismissed.current = false)); // a press that closes nothing holds nothing later
-          }}
+          onPointerDown={dismissByOwner}
+          onClick={dismissByOwner} // an activation by the keyboard, which keeps the focus (a disclosure's chevron)
         >
           {owner}
         </Tooltip.Trigger>

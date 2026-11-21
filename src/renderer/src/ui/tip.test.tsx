@@ -3,6 +3,7 @@
 // `aria-disabled`, still focusable, with its reason as that tooltip.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
@@ -79,6 +80,32 @@ describe('Tip under the keyboard', () => {
     expect(tooltip()).toBe(FACT);
     fireEvent.scroll(screen.getByTestId('scroller')); // Chromium scrolls an offscreen owner into view as it takes focus
     expect(tooltip()).toBe(FACT);
+  });
+
+  it('closes when its owner is activated from the keyboard and keeps focus', async () => {
+    function Disclosure() {
+      const [open, setOpen] = useState(false);
+      return (
+        <Tip content="Device id and fingerprint">
+          <button type="button" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+            Details
+          </button>
+        </Tip>
+      );
+    }
+    render(<Disclosure />);
+    const keys = user();
+    await keys.tab();
+    expect(tooltip()).toBe('Device id and fingerprint');
+    await keys.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Details', expanded: true })).toBe(document.activeElement);
+    expect(tooltip()).toBeNull();
+    await keys.tab({ shift: true }); // away and back: focus opens it again
+    await keys.tab();
+    expect(tooltip()).toBe('Device id and fingerprint');
+    await keys.keyboard(' ');
+    expect(screen.getByRole('button', { name: 'Details', expanded: false })).toBe(document.activeElement);
+    expect(tooltip()).toBeNull();
   });
 
   it('is not reopened by a pointing still in its delay once Escape has dismissed it', async () => {
