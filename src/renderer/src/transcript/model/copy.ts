@@ -445,6 +445,11 @@ export const HYDRATION = { failed: 'Couldn’t load this conversation', retry: '
 // The long-transcript window: an older page that did not load (lane A's words, session/controls/lane-a.ts)
 export const OLDER = { failed: (reason: string) => `Older messages didn’t load: ${reason}`, retry: 'Retry' } as const;
 
+// UX wave U1b (§D): the jump button while a waiting request is out of view. Its mark is the owner's card 4 of the U1b
+// document's "The look" (closed 2026-11-15: "Waiting glyph ◐"), the waiting glyph, here and nowhere else.
+// The word cut (N109, N110): the sidebar's words for the state; the sentence is its accessible name alone, with no tooltip
+export const NEEDS_INPUT = { mark: '◐', text: 'Needs you', label: 'Needs your input. Scroll to the request' } as const;
+
 // A jump to a message older than what is loaded (the store's `reach`): the pages back to it on their way, and how it ended
 // when it did not land.
 export const REACH = {

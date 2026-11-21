@@ -14,7 +14,7 @@ import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
-import { HYDRATION, OLDER, REACH } from '../model/copy';
+import { HYDRATION, NEEDS_INPUT, OLDER, REACH } from '../model/copy';
 import { QuietSpinner } from '../../ui/spinner'; // the word cut (T111)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
@@ -591,10 +591,6 @@ export interface TranscriptProps {
 const NO_ROWS: Row[] = [];
 const NO_TURNS: readonly TurnId[] = []; // UX wave U3b: no rewound branch
 const CHILD = 'child' as AgentId; // a child transcript's state treats its events as top-level (Derivation, *Child traffic*)
-// UX wave U1b (§D): the jump button while a waiting request is out of view. Its mark is the owner's card 4 of the U1b
-// document's "The look" (closed 2026-11-15: "Waiting glyph ◐"), the waiting glyph, here and nowhere else.
-// the word cut (N109, N110): the sidebar's words for the state; the sentence is its name alone, with no tooltip
-const NEEDS_INPUT = { mark: '◐', text: 'Needs you', label: 'Needs your input. Scroll to the request' } as const;
 
 // The store key of a source: its own (`ipcSource` names the app session and agent), else one per source object.
 const generatedKeys = new WeakMap<TranscriptSource, string>();
