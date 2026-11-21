@@ -131,7 +131,7 @@ Most rows are a string removed or shortened in a `copy.ts`. A minority need a me
 
 **Every hidden fact has an owner that takes keyboard focus.** A greyed button, a greyed field and a heading do not take focus, and a native select's options show nothing on hover that the keyboard can reach. So the reason a control is greyed (the slide limit on New slide, G423; the shadow restriction on Spread and Inset, G450; "Write a commit message" beside Commit, T391) belongs to an enabled owner: the control drawn as `aria-disabled` and still focusable, or its row. An explanation moved to a heading (G130) belongs to a row note under that heading. A fact moved to an option's hover (G609) shows for the selected value instead. The rows this concerns end with a sentence pointing here.
 
-Two placements were shown to the owner and accepted as shown; they are the required baseline. The Settings note opens under its row and pushes the following rows down while it is open. The plugin row reserves the height of its second line at rest, so the list is taller than a list of names needs to be. Each has a cost, and one behaviour for both would be better: the rows under the pointer do not move, and no height is spent at rest. That is an optional attempt inside M1: if a prototype achieves it, it is shown to the owner beside the baseline and built only on the owner's call; otherwise the baseline is built.
+**Where a note opens.** A note or a pointed-row line floats over the rows that follow its row: no height is spent at rest, and the rows under the pointer do not move. It stays above the rows it covers, lets the pointer through to them, and is not clipped by the scroll area it opens in: where opening down would pass the bottom of the nearest clipping ancestor and there is room above, it opens upward over the row above (scrolling it into view was rejected, since it would move the rows under the pointer). The Settings note and the plugin row's line behave the same way. *History:* the owner first accepted two other placements as shown (the Settings note opening under its row and pushing the rows below down, the plugin row reserving its line's height at rest), and M1 built a prototype of this one behind a switch; the owner chose it on 2026-11-21 after seeing the twelve pairs (Decision Log).
 
 ### Seen on the scratch build and to be put right
 
@@ -337,6 +337,7 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - Shipped with a tracker row each:
     - two search edges (scalpel-2#4, scalpel-3#2);
     - three rare focus and visibility edges the review of the fixes found.
+- 2026-11-21. **The owner chose the overlay placement on 2026-11-21, after seeing the twelve pairs.** The note and the pointed-row line float over the rows that follow, always, and are one form of `RowNote` (its `form` prop is gone; M4's plugin-row line is the same note); near the bottom of a scroll area a note opens upward; the placement switch (`data-note-placement`) and the rig's `-overlay` twins are removed, and the baseline scenes show the one placement. "What the cut builds" is revised to say this. Alternative not taken: the two baselines the owner first accepted (a note pushing the rows down; a line reserving its height), each with its cost.
 
 ## Outcomes & Retrospective
 
