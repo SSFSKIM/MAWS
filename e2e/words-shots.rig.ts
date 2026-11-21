@@ -33,6 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { GrantsView, OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
@@ -274,12 +275,21 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
     await target.screenshot({ path: join(OUT, `${meta.id}.png`), animations: 'disabled', caret: 'hide' });
     results.push({ id: meta.id, ok: true, ...(notes.length > 0 && { notes: [...notes] }) });
   } catch (error) {
-    const message = (error instanceof Error ? error.message : String(error)).split('\n')[0]!.slice(0, 300);
+    const message = notReached(error);
     results.push({ id: meta.id, ok: false, error: message });
     console.log(`[words] ${meta.id} not reached: ${message}`);
   } finally {
     if (after) await after().catch((error: unknown) => console.log(`[words] ${meta.id} after: ${String(error).slice(0, 200)}`));
   }
+}
+// Why a scene was not reached, as "<reason>: <what was found>": a failed check's message (its first line) and what
+// Playwright received ("element(s) not found", a viewport ratio, an attribute), so a miss says which way it missed.
+function notReached(error: unknown): string {
+  const lines = stripVTControlCharacters(error instanceof Error ? error.message : String(error)).split('\n');
+  const reason = lines[0]!.trim();
+  const log = lines.findIndex((line) => /^\s*Call log:/.test(line)); // Playwright's steps, past what it found
+  const found = (log < 0 ? lines : lines.slice(0, log)).slice(1).map((line) => line.trim()).filter((line) => /^(Received|Error)\b/.test(line) || /failed$/.test(line));
+  return (found.length === 0 ? reason : `${reason}: ${found.join(' · ')}`).slice(0, 300);
 }
 // ---- the word cut's M1: what waits for the pointer and the keyboard (ui/row-note.tsx, ui/tip.tsx) -------------------
 // The m1 scenes' before is this rig, with its e2e support files, run against master's build (scenes.md). Master has no
