@@ -12,7 +12,7 @@
 // the pointer moves and no height is spent at rest. The float lets the pointer through to the row it covers, so moving
 // down leaves the row the note belongs to; its words are then read, not pointed into. The row the note belongs to is
 // `relative` for it.
-import { useEffect, useId, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FocusEvent as ReactFocusEvent, type PointerEvent, type ReactNode } from 'react';
 import { useDisclosureMotion } from './disclosure';
 import { POINTING_DELAY_MS } from './pointing';
 
@@ -20,10 +20,10 @@ export type RowNoteForm = 'note' | 'line';
 
 export interface RowNoteRowProps {
   'aria-describedby': string;
-  onPointerEnter(): void;
-  onPointerLeave(): void;
-  onFocus(): void;
-  onBlur(event: FocusEvent<HTMLElement>): void;
+  onPointerEnter(event: PointerEvent<HTMLElement>): void;
+  onPointerLeave(event: PointerEvent<HTMLElement>): void;
+  onFocus(event: ReactFocusEvent<HTMLElement>): void;
+  onBlur(event: ReactFocusEvent<HTMLElement>): void;
 }
 
 export interface RowNoteState {
@@ -37,16 +37,27 @@ export function useRowNote(): RowNoteState {
   const [open, setOpen] = useState(false);
   // Where the pointer and the focus are, apart from whether the note may open: the delay gates only the opening of a
   // closed note, and an open one stays open while either is in the row (focus handed to a pointer still inside, or
-  // back, never closes it).
+  // back, never closes it). Focus is read from the document, not from the row's blur: a focused control the row
+  // removes takes the focus with it and no blur reaches the row, so while the note is open the next focus anywhere
+  // outside the row closes it, as does the pointer leaving.
+  const row = useRef<HTMLElement | null>(null);
   const pointerInside = useRef(false);
-  const focusInside = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusInside = () => row.current !== null && row.current.contains(document.activeElement);
   useEffect(
     () => () => {
       if (timer.current !== null) clearTimeout(timer.current);
     },
     [],
   );
+  useEffect(() => {
+    if (!open) return;
+    const focusMoved = (event: FocusEvent) => {
+      if (row.current !== null && !row.current.contains(event.target as Node | null) && !pointerInside.current) setOpen(false);
+    };
+    document.addEventListener('focusin', focusMoved, true);
+    return () => document.removeEventListener('focusin', focusMoved, true);
+  }, [open]);
   const settle = () => {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
@@ -56,7 +67,8 @@ export function useRowNote(): RowNoteState {
     open,
     rowProps: {
       'aria-describedby': id,
-      onPointerEnter: () => {
+      onPointerEnter: (event) => {
+        row.current = event.currentTarget;
         pointerInside.current = true;
         settle();
         timer.current = setTimeout(() => {
@@ -64,18 +76,18 @@ export function useRowNote(): RowNoteState {
           if (pointerInside.current) setOpen(true);
         }, POINTING_DELAY_MS);
       },
-      onPointerLeave: () => {
+      onPointerLeave: (event) => {
+        row.current = event.currentTarget;
         pointerInside.current = false;
         settle();
-        if (!focusInside.current) setOpen(false);
+        if (!focusInside()) setOpen(false);
       },
-      onFocus: () => {
-        focusInside.current = true;
+      onFocus: (event) => {
+        row.current = event.currentTarget;
         setOpen(true);
       },
       onBlur: (event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-        focusInside.current = false;
         if (!pointerInside.current) setOpen(false);
       },
     },

@@ -164,6 +164,38 @@ describe('the row note', () => {
     expect(accessibleText(row('Restore'))).toContain('Restored sessions return to their project.');
   });
 
+  it('closes once focus lands outside the row after its focused control was removed', async () => {
+    function Binary({ installed }: { installed: boolean }) {
+      const rowNote = useRowNote();
+      return (
+        <div role="group" aria-label="Binary" {...rowNote.rowProps}>
+          <span>Binary</span>
+          {!installed && <button type="button">Use installed</button>}
+          <RowNote note={rowNote}>{NOTE}</RowNote>
+        </div>
+      );
+    }
+    const view = render(
+      <>
+        <Binary installed={false} />
+        <button type="button">After</button>
+      </>,
+    );
+    const keys = user();
+    await keys.tab();
+    expect(shown('Binary')).toBe(true);
+    view.rerender(
+      <>
+        <Binary installed />
+        <button type="button">After</button>
+      </>,
+    ); // the focused control goes with its row's change, and no blur reaches the row
+    await keys.tab(); // focus lands outside the row
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'After' }));
+    wait(CLOSE_MOTION.ms);
+    expect(shown('Binary')).toBe(false);
+  });
+
   it('gives each row its own note', async () => {
     render(
       <>
