@@ -32,7 +32,7 @@ function ListingLine({ rowId, entryId, entry }: { rowId: string; entryId: string
           {agentListCopy.message}
         </button>
       </div>
-      {messaging && <PeerComposer appSessionId={appSessionId} target={{ address: entry.name, name: entry.name, mode: 'message' }} label={entry.name} />}
+      {messaging && <PeerComposer appSessionId={appSessionId} target={{ address: entry.name, name: entry.name, mode: 'message' }} label={entry.name} keptAs={`peer-composer:${rowId}:${entryId}`} />}
     </li>
   );
 }

@@ -19,7 +19,7 @@ import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
 import { duration } from '../../model/time';
 import { Tip } from '../../../ui/tip';
-import { useActions, type PeerAddress, type PeerReply } from '../context';
+import { useActions, useKeptState, type PeerAddress, type PeerReply } from '../context';
 import { TickingStatus, useTicker } from './parts';
 
 // The line over the box, or null when nothing was asked of this address yet: its copy with the time it has waited as
@@ -45,7 +45,9 @@ export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['m
   }
 }
 
-export function PeerComposer({ appSessionId, target, label }: { appSessionId: AppSessionId | null; target: PeerAddress; label: string }) {
+// `keptAs` names the box within its transcript: its draft and its own start outlive its mount under that id (a folded
+// listing unmounts the box, and a virtualised row unmounts it too), so a start refused meanwhile shows on reopening.
+export function PeerComposer({ appSessionId, target, label, keptAs }: { appSessionId: AppSessionId | null; target: PeerAddress; label: string; keptAs: string }) {
   const actions = useActions();
   const { peerReplies } = actions;
   const reply = useSyncExternalStore(peerReplies.subscribe, () => (appSessionId === null ? undefined : peerReplies.get(appSessionId, target.address)));
@@ -54,21 +56,20 @@ export function PeerComposer({ appSessionId, target, label }: { appSessionId: Ap
   const availability = useAvailability(appSessionId ?? ('' as AppSessionId));
   const holder = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId)?.holder ?? null)));
   const closed = ready ? null : availabilityRefusal(availability, holder, peerMessageCopy.disabled.notRunningHere(target.mode));
-  const [start, setStart] = useState<{ kind: 'idle' } | { kind: 'starting' } | { kind: 'refused'; words: string }>({ kind: 'idle' });
+  const [start, setStart] = useKeptState<{ kind: 'idle' } | { kind: 'starting' } | { kind: 'refused'; words: string }>(`${keptAs}:start`, () => ({ kind: 'idle' }));
   // P2-A end
   const session = displayTitle(useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null))));
-  // A failed ask's text stays in the relay store until the next edit, so a composer mounted again (its row virtualised
-  // away and back) starts with it in the box (E11 W-D).
-  const [draft, setDraft] = useState(() => (reply?.state.kind === 'failed' ? reply.text : ''));
-  const [sending, setSending] = useState(false); // the steer is out and unanswered
+  const [draft, setDraft] = useKeptState(`${keptAs}:draft`, () => ''); // a box mounted again starts with the draft it kept
+  const [sending, setSending] = useKeptState(`${keptAs}:sending`, () => false); // the steer is out and unanswered
   const reason = closed ?? (reply?.state.kind === 'asked' ? peerMessageCopy.disabled.pending(target.mode) : null);
   const canSend = reason === null && !sending && draft.trim() !== '' && appSessionId !== null;
   const now = useTicker(reply?.state.kind === 'asked');
   const line = peerReplyLine(reply, target.mode, session, now);
 
   // A failed ask puts its text back when the box is empty, never over a draft typed since: adjusted while rendering the
-  // reply that changed, so the box never shows a frame without it.
-  const [shown, setShown] = useState(reply);
+  // reply that changed, so the box never shows a frame without it. A failed ask's text stays in the relay store until
+  // the next edit, so a box mounting (its row virtualised or folded away and back) takes it as a change (E11 W-D).
+  const [shown, setShown] = useState<PeerReply | undefined | null>(null); // null: none shown yet, this mount
   if (reply !== shown) {
     setShown(reply);
     if (reply?.state.kind === 'failed' && draft.trim() === '') setDraft(reply.text);

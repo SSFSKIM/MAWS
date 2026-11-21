@@ -58,7 +58,7 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
       {peer?.result === 'failed' && peer.resultText !== null && <p className="transcript-peer-error">{peer.resultText}</p>}
       {open && <p className="transcript-peer-body">{wholeOf(row)}</p>}
       {peer !== null && peer.replyTo !== null && replying && (
-        <PeerComposer appSessionId={appSessionId} target={{ address: peer.replyTo, name: peer.sender?.name ?? null, mode: 'reply' }} label={who} />
+        <PeerComposer appSessionId={appSessionId} target={{ address: peer.replyTo, name: peer.sender?.name ?? null, mode: 'reply' }} label={who} keptAs={`peer-composer:${row.id}`} />
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 // E7 (M2): the rows of messages between sessions and agents and of a listing, and the Reply composer under them (E7
 // execution document, Design §4): real rows from the model, a spy `replyToPeer`, a hand-held `peerReplies` source. UX
 // wave U3 (O-12; the U3a document, Acceptance 3): every message is one line, the line itself opens the whole message.
-import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,7 +16,7 @@ import { rowsOf, withAllExpanded } from '../../model/derive';
 import { applyEvents, createState } from '../../model/reduce';
 import type { Row } from '../../model/rows';
 import { builder, task, tool, uuid } from '../../model/test-events';
-import type { PeerReply, PeerReplies, TranscriptActions } from '../context';
+import { Disclosures, type PeerReply, type PeerReplies, type TranscriptActions } from '../context';
 import { renderRow, spyActions } from './test-support';
 
 const A = at('A' as AppSessionId); // the page's; main (the fake bridge) is asked and answers with bareOf(A)
@@ -400,6 +400,33 @@ describe('a ListAgents listing', () => {
     fireEvent.change(box, { target: { value: 'ping' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
     expect(actions.replyToPeer).toHaveBeenCalledExactlyOnceWith(A, { address: 'repo-b', name: 'repo-b', mode: 'message' }, 'ping');
+  });
+
+  // Task 2 fix round 1: the fold unmounts its body, so the box's draft and its start's refusal are kept above it
+  it('keeps a typed message and a start’s refusal across closing the listing, its row unmounting, and opening it again', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
+    const row = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.result('l1', 'Peer sessions (1):\n  repo-b [61303a]  ·  idle');
+    }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
+    const disclosures = new Disclosures();
+    const first = renderRow(row, { storeKey: A, disclosures });
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 1 agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message repo-b' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'ping' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 1 agent' }));
+    await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull()); // the body unmounts once its close has run
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: bareOf(A), directory: '/gone' })); // refused while folded
+    first.unmount(); // its row virtualised away and back
+    renderRow(row, { storeKey: A, disclosures });
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 1 agent' }));
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('ping');
+    expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
+    delete (window as { maws?: unknown }).maws;
   });
 
   it('keeps two rows of one name apart: each its own Message disclosure', () => {
