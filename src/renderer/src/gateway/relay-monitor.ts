@@ -10,6 +10,7 @@ import { formatAgo } from '@shared/app/date-format';
 import { runAction as runShellAction } from '../keymap/actions-runtime';
 import { useNotices, type NoticesState } from '../stores/notices';
 import { useSessions, type SessionsState } from '../stores/sessions';
+import { RELAY_BANNER } from './copy';
 import { throughClaudeUsage } from './observed-route';
 import { useGateway, type GatewayStore } from './store';
 
@@ -30,8 +31,7 @@ export interface RelayMonitorDeps {
 // In the display locale (`@shared/app/date-format`): "now", "30 seconds ago", "1 minute ago".
 const since = (fromIso: string, toIso: string): string => formatAgo(Math.max(0, Date.parse(toIso) - Date.parse(fromIso)), { seconds: true });
 
-// The word cut (C153): how long, and the consequence
-const bannerText = (outageSince: string, checkedAt: string): string => `ClaudeUsage's relay stopped answering ${since(outageSince, checkedAt)} · requests fail until it is back`;
+const bannerText = (outageSince: string, checkedAt: string): string => RELAY_BANNER.down(since(outageSince, checkedAt));
 
 export function startRelayMonitor(
   deps: RelayMonitorDeps = { gateway: useGateway, sessions: useSessions, notices: useNotices, runAction: (id) => runShellAction(id) },

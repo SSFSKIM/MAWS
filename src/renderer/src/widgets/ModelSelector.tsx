@@ -373,7 +373,16 @@ function EffortSlider({ levels, value, disabled, focusOnMount, onChange }: { lev
   );
 }
 
-function Check({ on }: { on: boolean }) {
+// A row's check; the word cut (P549): the checked row's change on its way (a named model's or Default's) is a quiet
+// spinner in the check's place, named by the word it replaced.
+function Check({ on, pending }: { on: boolean; pending: boolean }) {
+  if (on && pending) {
+    return (
+      <span className="mt-1 flex w-3 shrink-0 justify-center">
+        <QuietSpinner label={SELECTOR.setting} />
+      </span>
+    );
+  }
   return (
     <span aria-hidden className={`mt-0.5 w-3 shrink-0 text-accent ${on ? '' : 'invisible'}`}>
       ✓
@@ -381,18 +390,11 @@ function Check({ on }: { on: boolean }) {
   );
 }
 
-// One menu item of the model list. The word cut (P549): the checked row's change on its way is a quiet spinner in its
-// check's place, named by the word it replaced.
+// One menu item of the model list.
 function ModelItem({ entry, checked, proposed, pending, locked, greyed, choose }: { entry: ModelEntryView; checked: boolean; proposed: boolean; pending: boolean; locked: boolean; greyed: boolean; choose(): void }) {
   return (
     <button type="button" role="menuitemradio" aria-checked={checked} data-proposed={proposed || undefined} disabled={locked} onClick={choose} className={`${ROW} ${greyed ? 'text-fg-faint' : ''} ${proposed ? 'bg-bg-active' : ''}`}>
-      {checked && pending ? (
-        <span className="mt-1 flex w-3 shrink-0 justify-center">
-          <QuietSpinner label={SELECTOR.setting} />
-        </span>
-      ) : (
-        <Check on={checked} />
-      )}
+      <Check on={checked} pending={pending} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-1.5">
           <span className="truncate">{entry.displayName}</span>
@@ -671,14 +673,15 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
       {unknown && view === 'model' && <p className="m-0 px-2 text-ui-sm text-warning">{unknown}</p>}
       <div role="menu" aria-label={SELECTOR.models} className="flex max-h-[min(316px,50vh)] flex-col overflow-y-auto">
         <button type="button" role="menuitemradio" aria-checked={binding.current === null} disabled={locked} onClick={() => void choose(null)} className={ROW}>
-          <Check on={binding.current === null} />
+          <Check on={binding.current === null} pending={binding.pending} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate">{SELECTOR.default}</span>
             <span className="text-ui-sm text-fg-muted">{SELECTOR.recommended}</span>
           </span>
         </button>
         {binding.models.length === 0 && status === null && wait === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{MODEL.none}</p>}
-        {binding.models.length === 0 && wait && (
+        {/* a read or a start under way, above whatever rows the catalogue already gives */}
+        {wait && (
           <div className="flex px-2 py-1">
             <QuietSpinner label={wait} />
           </div>

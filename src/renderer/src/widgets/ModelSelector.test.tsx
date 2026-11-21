@@ -329,6 +329,12 @@ describe('the model view: Model, Default with its recommendation, the catalogue 
     await waitFor(() => expect(view()).toBe('effort'));
     fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
     expect(item(/^Default/).getAttribute('aria-checked')).toBe('true');
+    // an explicit Default on its way is marked as a named row's is (P549), until the engine reports running it
+    expect(await within(item(/^Default/)).findByRole('progressbar', { name: 'setting…' })).toBeTruthy();
+    expect(item(/^Default/).textContent).not.toContain('✓');
+    setStatus({ model: { requested: null, resolved: 'claude-opus-5-5[1m]' } }); // the init frame: Default runs Opus
+    await waitFor(() => expect(within(item(/^Default/)).queryByRole('progressbar', { hidden: true })).toBeNull());
+    expect(item(/^Default/).textContent).toContain('✓');
   });
 
   it('`/model claude/astra` in auto proposes it with the local-lane note and applies nothing until chosen', async () => {
@@ -398,6 +404,17 @@ describe('a session with a record and no ready process', () => {
     expect(useSessions.getState().engine.get(ID)?.process).toBe('ready');
     await waitFor(() => expect(view()).toBe('effort'));
     expect(screen.getByText('setting…')).toBeTruthy(); // the live binding keeps it until an init confirms
+  });
+
+  // the word cut (P535): a start under way shows its spinner in the list too, above the rows the catalogue already gives
+  it('shows the start-up wait in a model list the catalogue has already filled', async () => {
+    dormant();
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'starting' }]]) });
+    mount('model');
+    const claude = await screen.findByRole('group', { name: 'Claude models' });
+    expect(names(claude).length).toBeGreaterThan(0);
+    expect(await within(screen.getByRole('menu', { name: 'Models' })).findByRole('progressbar', { name: 'Starting…' })).toBeTruthy();
+    expect(screen.queryByText('Starting…')).toBeNull();
   });
 
   it('a start that fails clears the pending mark, applies nothing and says why', async () => {

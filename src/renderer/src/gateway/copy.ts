@@ -106,6 +106,11 @@ export const START = {
   missingDirectory: (directory: string) => `Directory not found: ${directory}`,
 };
 
+// The relay outage banner (relay-monitor.ts); the word cut (C153): how long, and the consequence.
+export const RELAY_BANNER = {
+  down: (since: string) => `ClaudeUsage's relay stopped answering ${since} · requests fail until it is back`,
+};
+
 export const DIRECT_MODEL = {
   title: 'Choose a Claude model',
   why: "Direct can't use a gateway model.", // the word cut (C151): the title says to choose a Claude model
