@@ -341,6 +341,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u-edit-and-receipt-002",
     "kind": "divider",
     "origin": "human",

@@ -511,6 +511,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:21025d7d-f733-48bb-9a87-6da34b929707",
     "kind": "divider",
     "origin": "human",

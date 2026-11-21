@@ -390,6 +390,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_2_0_0",
     "kind": "group",
@@ -670,6 +671,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_2_1_0",
     "kind": "group",
@@ -710,6 +712,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u2",
     "kind": "divider",
     "origin": "human",
@@ -1208,6 +1211,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_4_2_0",
     "kind": "group",
@@ -1255,6 +1259,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u4",
     "kind": "divider",
     "origin": "human",
@@ -2051,6 +2056,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_6_1_0",
     "kind": "group",
@@ -2312,6 +2318,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_6_2_0",
     "kind": "group",
@@ -2359,6 +2366,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 12,
     "id": "divider:turn:u6",
     "kind": "divider",
     "origin": "human",
@@ -2592,6 +2600,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_7_0_0",
     "kind": "group",
@@ -2837,6 +2846,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u7",
     "kind": "divider",
     "origin": "human",
@@ -3128,6 +3138,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_8_0_0",
     "kind": "group",
@@ -3500,6 +3511,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u8",
     "kind": "divider",
     "origin": "human",
@@ -3909,6 +3921,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_9_0_0",
     "kind": "group",
@@ -4156,6 +4169,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u9",
     "kind": "divider",
     "origin": "human",
@@ -4481,6 +4495,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_10_0_0",
     "kind": "group",
@@ -4550,6 +4565,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u10",
     "kind": "divider",
     "origin": "human",
@@ -5032,6 +5048,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_12_0_0",
     "kind": "group",
@@ -5217,6 +5234,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u12",
     "kind": "divider",
     "origin": "human",
@@ -5588,6 +5606,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_13_0_0",
     "kind": "group",
@@ -5635,6 +5654,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u13",
     "kind": "divider",
     "origin": "human",
@@ -5991,6 +6011,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u14",
     "kind": "divider",
     "origin": "human",
@@ -6325,6 +6346,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_15_0_0",
     "kind": "group",
@@ -6365,6 +6387,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u15",
     "kind": "divider",
     "origin": "human",
@@ -6680,6 +6703,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_16_0_0",
     "kind": "group",
@@ -6912,6 +6936,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_16_1_0",
     "kind": "group",
@@ -6952,6 +6977,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u16",
     "kind": "divider",
     "origin": "human",
@@ -7373,6 +7399,7 @@
       "removed": 9
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_17_0_0",
     "kind": "group",
@@ -7603,6 +7630,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_17_1_0",
     "kind": "group",
@@ -7874,6 +7902,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_17_2_0",
     "kind": "group",
@@ -7921,6 +7950,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u17",
     "kind": "divider",
     "origin": "human",
@@ -8182,6 +8212,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "exploration",
     "id": "group:cell:toolu_18_0_0",
     "kind": "group",
@@ -8392,6 +8423,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u18",
     "kind": "divider",
     "origin": "human",
@@ -8762,6 +8794,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_19_0_0",
     "kind": "group",
@@ -8794,6 +8827,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u19",
     "kind": "divider",
     "origin": "human",
@@ -9079,6 +9113,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_20_0_0",
     "kind": "group",
@@ -9155,6 +9190,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u20",
     "kind": "divider",
     "origin": "human",
@@ -9879,6 +9915,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_24_1_0",
     "kind": "group",
@@ -10121,6 +10158,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u24",
     "kind": "divider",
     "origin": "human",
@@ -10495,6 +10533,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_25_0_0",
     "kind": "group",
@@ -10800,6 +10839,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u25",
     "kind": "divider",
     "origin": "human",
@@ -11075,6 +11115,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_26_0_0",
     "kind": "group",
@@ -11269,6 +11310,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u26",
     "kind": "divider",
     "origin": "human",
@@ -11809,6 +11851,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_27_1_0",
     "kind": "group",
@@ -11841,6 +11884,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u27",
     "kind": "divider",
     "origin": "human",
@@ -12259,6 +12303,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_29_0_0",
     "kind": "group",
@@ -12691,6 +12736,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u29",
     "kind": "divider",
     "origin": "human",
@@ -13024,6 +13070,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_30_0_0",
     "kind": "group",
@@ -13100,6 +13147,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u30",
     "kind": "divider",
     "origin": "human",
@@ -13393,6 +13441,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_31_0_0",
     "kind": "group",
@@ -13643,6 +13692,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_31_1_0",
     "kind": "group",
@@ -13972,6 +14022,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_31_2_0",
     "kind": "group",
@@ -14019,6 +14070,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u31",
     "kind": "divider",
     "origin": "human",
@@ -14441,6 +14493,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_33_0_0",
     "kind": "group",
@@ -14473,6 +14526,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u33",
     "kind": "divider",
     "origin": "human",
@@ -15529,6 +15583,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_37_0_0",
     "kind": "group",
@@ -15854,6 +15909,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_37_1_0",
     "kind": "group",
@@ -15894,6 +15950,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u37",
     "kind": "divider",
     "origin": "human",
@@ -16854,6 +16911,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_40_2_0",
     "kind": "group",
@@ -16923,6 +16981,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_40_0_1",
+    "fold": 12,
     "id": "divider:turn:u40",
     "kind": "divider",
     "origin": "human",
@@ -17258,6 +17317,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_41_0_0",
     "kind": "group",
@@ -17546,6 +17606,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_41_1_0",
     "kind": "group",
@@ -17600,6 +17661,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u41",
     "kind": "divider",
     "origin": "human",
@@ -18383,6 +18445,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u42",
     "kind": "divider",
     "origin": "human",
@@ -19094,6 +19157,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u44",
     "kind": "divider",
     "origin": "human",
@@ -19736,6 +19800,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_47_0_0",
     "kind": "group",
@@ -19966,6 +20031,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_47_1_0",
     "kind": "group",
@@ -20092,6 +20158,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u47",
     "kind": "divider",
     "origin": "human",
@@ -20590,6 +20657,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_48_1_0",
     "kind": "group",
@@ -20622,6 +20690,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u48",
     "kind": "divider",
     "origin": "human",
@@ -21079,6 +21148,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_49_1_0",
     "kind": "group",
@@ -21133,6 +21203,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u49",
     "kind": "divider",
     "origin": "human",
@@ -21657,6 +21728,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_50_1_0",
     "kind": "group",
@@ -21726,6 +21798,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u50",
     "kind": "divider",
     "origin": "human",
@@ -22227,6 +22300,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_53_0_0",
     "kind": "group",
@@ -22596,6 +22670,7 @@
       "removed": 12
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_53_1_0",
     "kind": "group",
@@ -22867,6 +22942,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_53_2_0",
     "kind": "group",
@@ -22928,6 +23004,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u53",
     "kind": "divider",
     "origin": "human",
@@ -23222,6 +23299,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_54_0_0",
     "kind": "group",
@@ -23535,6 +23613,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_54_1_0",
     "kind": "group",
@@ -23575,6 +23654,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u54",
     "kind": "divider",
     "origin": "human",
@@ -23975,6 +24055,7 @@
       "removed": 9
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_55_0_0",
     "kind": "group",
@@ -24022,6 +24103,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u55",
     "kind": "divider",
     "origin": "human",
@@ -24393,6 +24475,7 @@
       "removed": 8
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_56_0_0",
     "kind": "group",
@@ -24728,6 +24811,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 6,
     "icon": "files",
     "id": "group:cell:toolu_56_1_0",
     "kind": "group",
@@ -24831,6 +24915,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u56",
     "kind": "divider",
     "origin": "human",
@@ -25136,6 +25221,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_57_0_0",
     "kind": "group",
@@ -25168,6 +25254,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u57",
     "kind": "divider",
     "origin": "human",
@@ -25433,6 +25520,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_58_0_0",
     "kind": "group",
@@ -25873,6 +25961,7 @@
       "removed": 12
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_58_2_0",
     "kind": "group",
@@ -25934,6 +26023,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u58",
     "kind": "divider",
     "origin": "human",
@@ -26368,6 +26458,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u60",
     "kind": "divider",
     "origin": "human",
@@ -27691,6 +27782,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_67_0_0",
     "kind": "group",
@@ -27731,6 +27823,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u67",
     "kind": "divider",
     "origin": "human",
@@ -28411,6 +28504,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u68",
     "kind": "divider",
     "origin": "human",
@@ -29817,6 +29911,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_74_0_0",
     "kind": "group",
@@ -30125,6 +30220,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_74_1_0",
     "kind": "group",
@@ -30261,6 +30357,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u74",
     "kind": "divider",
     "origin": "human",
@@ -30829,6 +30926,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_77_1_0",
     "kind": "group",
@@ -30869,6 +30967,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u77",
     "kind": "divider",
     "origin": "human",
@@ -31663,6 +31762,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_80_0_2",
     "kind": "group",
@@ -31969,6 +32069,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_80_1_0",
     "kind": "group",
@@ -32238,6 +32339,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_80_0_1",
+    "fold": 13,
     "id": "divider:turn:u80",
     "kind": "divider",
     "origin": "human",
@@ -32587,6 +32689,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_81_0_0",
     "kind": "group",
@@ -32634,6 +32737,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u81",
     "kind": "divider",
     "origin": "human",
@@ -32988,6 +33092,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_82_0_0",
     "kind": "group",
@@ -33333,6 +33438,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_82_1_0",
     "kind": "group",
@@ -33387,6 +33493,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u82",
     "kind": "divider",
     "origin": "human",
@@ -34060,6 +34167,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u83",
     "kind": "divider",
     "origin": "human",
@@ -34420,6 +34528,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_84_0_0",
     "kind": "group",
@@ -34584,6 +34693,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u84",
     "kind": "divider",
     "origin": "human",
@@ -35335,6 +35445,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_85_2_0",
     "kind": "group",
@@ -35396,6 +35507,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u85",
     "kind": "divider",
     "origin": "human",
@@ -35866,6 +35978,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_86_1_0",
     "kind": "group",
@@ -36100,6 +36213,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_86_2_0",
     "kind": "group",
@@ -36147,6 +36261,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u86",
     "kind": "divider",
     "origin": "human",
@@ -36500,6 +36615,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_87_0_0",
     "kind": "group",
@@ -36828,6 +36944,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_87_1_0",
     "kind": "group",
@@ -37030,6 +37147,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u87",
     "kind": "divider",
     "origin": "human",
@@ -37757,6 +37875,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_89_0_0",
     "kind": "group",
@@ -37789,6 +37908,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u89",
     "kind": "divider",
     "origin": "human",
@@ -38082,6 +38202,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "exploration",
     "id": "group:cell:toolu_90_1_0",
     "kind": "group",
@@ -38151,6 +38272,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u90",
     "kind": "divider",
     "origin": "human",
@@ -38385,6 +38507,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "exploration",
     "id": "group:cell:toolu_91_0_0",
     "kind": "group",
@@ -38756,6 +38879,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_91_2_0",
     "kind": "group",
@@ -38796,6 +38920,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u91",
     "kind": "divider",
     "origin": "human",
@@ -39254,6 +39379,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_94_0_0",
     "kind": "group",
@@ -39294,6 +39420,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u94",
     "kind": "divider",
     "origin": "human",
@@ -39770,6 +39897,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_95_1_0",
     "kind": "group",
@@ -40032,6 +40160,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_95_2_0",
     "kind": "group",
@@ -40079,6 +40208,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u95",
     "kind": "divider",
     "origin": "human",
@@ -40459,6 +40589,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_96_0_0",
     "kind": "group",
@@ -40672,6 +40803,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_96_1_0",
     "kind": "group",
@@ -40726,6 +40858,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u96",
     "kind": "divider",
     "origin": "human",
@@ -41103,6 +41236,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_97_1_0",
     "kind": "group",
@@ -41143,6 +41277,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u97",
     "kind": "divider",
     "origin": "human",
@@ -41427,6 +41562,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_98_0_0",
     "kind": "group",
@@ -41713,6 +41849,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_98_1_0",
     "kind": "group",
@@ -41760,6 +41897,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u98",
     "kind": "divider",
     "origin": "human",
@@ -42217,6 +42355,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_99_1_0",
     "kind": "group",
@@ -42458,6 +42597,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_99_2_0",
     "kind": "group",
@@ -42505,6 +42645,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u99",
     "kind": "divider",
     "origin": "human",
@@ -42863,6 +43004,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_100_0_0",
     "kind": "group",
@@ -42932,6 +43074,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u100",
     "kind": "divider",
     "origin": "human",
@@ -43496,6 +43639,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "exploration",
     "id": "group:cell:toolu_103_0_0",
     "kind": "group",
@@ -43528,6 +43672,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u103",
     "kind": "divider",
     "origin": "human",
@@ -43884,6 +44029,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u104",
     "kind": "divider",
     "origin": "human",
@@ -44492,6 +44638,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_106_1_0",
     "kind": "group",
@@ -44573,6 +44720,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u106",
     "kind": "divider",
     "origin": "human",
@@ -45252,6 +45400,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_110_0_0",
     "kind": "group",
@@ -45541,6 +45690,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_110_1_0",
     "kind": "group",
@@ -45617,6 +45767,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u110",
     "kind": "divider",
     "origin": "human",
@@ -45946,6 +46097,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_111_0_0",
     "kind": "group",
@@ -46274,6 +46426,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_111_2_0",
     "kind": "group",
@@ -46314,6 +46467,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u111",
     "kind": "divider",
     "origin": "human",
@@ -46759,6 +46913,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_113_0_0",
     "kind": "group",
@@ -46799,6 +46954,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u113",
     "kind": "divider",
     "origin": "human",
@@ -47073,6 +47229,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_114_0_0",
     "kind": "group",
@@ -47113,6 +47270,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u114",
     "kind": "divider",
     "origin": "human",
@@ -47674,6 +47832,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_115_2_0",
     "kind": "group",
@@ -47714,6 +47873,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u115",
     "kind": "divider",
     "origin": "human",
@@ -48482,6 +48642,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_118_0_0",
     "kind": "group",
@@ -48682,6 +48843,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_118_1_0",
     "kind": "group",
@@ -48729,6 +48891,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u118",
     "kind": "divider",
     "origin": "human",
@@ -49057,6 +49220,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_119_0_0",
     "kind": "group",
@@ -49368,6 +49532,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_119_2_0",
     "kind": "group",
@@ -49415,6 +49580,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u119",
     "kind": "divider",
     "origin": "human",
@@ -50896,6 +51062,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_124_0_0",
     "kind": "group",
@@ -50936,6 +51103,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u124",
     "kind": "divider",
     "origin": "human",
@@ -51218,6 +51386,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_125_0_0",
     "kind": "group",
@@ -51258,6 +51427,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u125",
     "kind": "divider",
     "origin": "human",
@@ -51865,6 +52035,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_126_1_0",
     "kind": "group",
@@ -51905,6 +52076,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u126",
     "kind": "divider",
     "origin": "human",
@@ -52243,6 +52415,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_127_0_0",
     "kind": "group",
@@ -52275,6 +52448,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u127",
     "kind": "divider",
     "origin": "human",
@@ -52681,6 +52855,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_128_0_0",
     "kind": "group",
@@ -52728,6 +52903,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u128",
     "kind": "divider",
     "origin": "human",
@@ -53223,6 +53399,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_129_1_0",
     "kind": "group",
@@ -53263,6 +53440,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u129",
     "kind": "divider",
     "origin": "human",
@@ -53666,6 +53844,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_130_0_0",
     "kind": "group",
@@ -53742,6 +53921,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u130",
     "kind": "divider",
     "origin": "human",
@@ -54420,6 +54600,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_131_2_0",
     "kind": "group",
@@ -54467,6 +54648,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u131",
     "kind": "divider",
     "origin": "human",
@@ -54837,6 +55019,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_132_1_0",
     "kind": "group",
@@ -55163,6 +55346,7 @@
       "removed": 9
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_132_2_0",
     "kind": "group",
@@ -55217,6 +55401,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u132",
     "kind": "divider",
     "origin": "human",
@@ -55713,6 +55898,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_134_1_0",
     "kind": "group",
@@ -55760,6 +55946,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u134",
     "kind": "divider",
     "origin": "human",
@@ -56112,6 +56299,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_135_0_0",
     "kind": "group",
@@ -56152,6 +56340,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u135",
     "kind": "divider",
     "origin": "human",
@@ -56797,6 +56986,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u137",
     "kind": "divider",
     "origin": "human",
@@ -57383,6 +57573,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_140_1_0",
     "kind": "group",
@@ -57459,6 +57650,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u140",
     "kind": "divider",
     "origin": "human",
@@ -57701,6 +57893,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_141_0_0",
     "kind": "group",
@@ -57895,6 +58088,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u141",
     "kind": "divider",
     "origin": "human",
@@ -58234,6 +58428,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_142_1_0",
     "kind": "group",
@@ -58274,6 +58469,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u142",
     "kind": "divider",
     "origin": "human",
@@ -58856,6 +59052,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_144_1_0",
     "kind": "group",
@@ -58888,6 +59085,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u144",
     "kind": "divider",
     "origin": "human",
@@ -59193,6 +59391,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_145_0_0",
     "kind": "group",
@@ -59240,6 +59439,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u145",
     "kind": "divider",
     "origin": "human",
@@ -59900,6 +60100,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_147_2_0",
     "kind": "group",
@@ -59947,6 +60148,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u147",
     "kind": "divider",
     "origin": "human",
@@ -60703,6 +60905,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_150_0_0",
     "kind": "group",
@@ -60772,6 +60975,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u150",
     "kind": "divider",
     "origin": "human",
@@ -61109,6 +61313,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_152_0_0",
     "kind": "group",
@@ -61141,6 +61346,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u152",
     "kind": "divider",
     "origin": "human",
@@ -61535,6 +61741,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u154",
     "kind": "divider",
     "origin": "human",
@@ -62188,6 +62395,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "exploration",
     "id": "group:cell:toolu_155_2_0",
     "kind": "group",
@@ -62228,6 +62436,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u155",
     "kind": "divider",
     "origin": "human",
@@ -62647,6 +62856,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 5,
     "icon": "skills",
     "id": "group:cell:toolu_156_0_0",
     "kind": "group",
@@ -62944,6 +63154,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_156_1_0",
     "kind": "group",
@@ -63160,6 +63371,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 12,
     "id": "divider:turn:u156",
     "kind": "divider",
     "origin": "human",
@@ -63427,6 +63639,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_157_0_0",
     "kind": "group",
@@ -63576,6 +63789,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u157",
     "kind": "divider",
     "origin": "human",
@@ -64041,6 +64255,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_159_0_0",
     "kind": "group",
@@ -64379,6 +64594,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u159",
     "kind": "divider",
     "origin": "human",
@@ -64861,6 +65077,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_160_1_0",
     "kind": "group",
@@ -65085,6 +65302,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_160_2_0",
     "kind": "group",
@@ -65168,6 +65386,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_160_0_1",
+    "fold": 11,
     "id": "divider:turn:u160",
     "kind": "divider",
     "origin": "human",
@@ -65617,6 +65836,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_163_0_0",
     "kind": "group",
@@ -65844,6 +66064,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_163_1_0",
     "kind": "group",
@@ -65884,6 +66105,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u163",
     "kind": "divider",
     "origin": "human",
@@ -66320,6 +66542,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_165_0_0",
     "kind": "group",
@@ -66360,6 +66583,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u165",
     "kind": "divider",
     "origin": "human",
@@ -67188,6 +67412,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_168_0_0",
     "kind": "group",
@@ -67565,6 +67790,7 @@
       "removed": 13
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_168_1_0",
     "kind": "group",
@@ -67619,6 +67845,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u168",
     "kind": "divider",
     "origin": "human",
@@ -68008,6 +68235,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_169_0_0",
     "kind": "group",
@@ -68062,6 +68290,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u169",
     "kind": "divider",
     "origin": "human",
@@ -68415,6 +68644,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_170_0_0",
     "kind": "group",
@@ -68484,6 +68714,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u170",
     "kind": "divider",
     "origin": "human",
@@ -69217,6 +69448,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_172_1_0",
     "kind": "group",
@@ -69448,6 +69680,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u172",
     "kind": "divider",
     "origin": "human",
@@ -70313,6 +70546,7 @@
       "removed": 9
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_175_0_0",
     "kind": "group",
@@ -70360,6 +70594,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u175",
     "kind": "divider",
     "origin": "human",
@@ -70816,6 +71051,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_177_0_0",
     "kind": "group",
@@ -71156,6 +71392,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_177_1_0",
     "kind": "group",
@@ -71318,6 +71555,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u177",
     "kind": "divider",
     "origin": "human",
@@ -71766,6 +72004,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_179_0_0",
     "kind": "group",
@@ -72115,6 +72354,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_179_2_0",
     "kind": "group",
@@ -72162,6 +72402,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u179",
     "kind": "divider",
     "origin": "human",
@@ -72502,6 +72743,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_180_0_0",
     "kind": "group",
@@ -72781,6 +73023,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_180_1_0",
     "kind": "group",
@@ -72986,6 +73229,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 12,
     "id": "divider:turn:u180",
     "kind": "divider",
     "origin": "human",
@@ -73397,6 +73641,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u181",
     "kind": "divider",
     "origin": "human",
@@ -73958,6 +74203,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u183",
     "kind": "divider",
     "origin": "human",
@@ -74532,6 +74778,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u186",
     "kind": "divider",
     "origin": "human",
@@ -75141,6 +75388,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_189_1_0",
     "kind": "group",
@@ -75181,6 +75429,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u189",
     "kind": "divider",
     "origin": "human",
@@ -75699,6 +75948,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u190",
     "kind": "divider",
     "origin": "human",
@@ -76080,6 +76330,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_191_0_0",
     "kind": "group",
@@ -76127,6 +76378,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u191",
     "kind": "divider",
     "origin": "human",
@@ -76824,6 +77076,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_193_2_0",
     "kind": "group",
@@ -76856,6 +77109,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u193",
     "kind": "divider",
     "origin": "human",
@@ -77249,6 +77503,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_194_1_0",
     "kind": "group",
@@ -77463,6 +77718,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_194_2_0",
     "kind": "group",
@@ -77503,6 +77759,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u194",
     "kind": "divider",
     "origin": "human",
@@ -78234,6 +78491,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_197_0_0",
     "kind": "group",
@@ -78565,6 +78823,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_197_1_0",
     "kind": "group",
@@ -78619,6 +78878,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u197",
     "kind": "divider",
     "origin": "human",
@@ -79044,6 +79304,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u199",
     "kind": "divider",
     "origin": "human",
@@ -79611,6 +79872,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_200_1_0",
     "kind": "group",
@@ -79811,6 +80073,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_200_0_1",
+    "fold": 10,
     "id": "divider:turn:u200",
     "kind": "divider",
     "origin": "human",
@@ -80090,6 +80353,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_201_0_0",
     "kind": "group",
@@ -80371,6 +80635,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_201_1_0",
     "kind": "group",
@@ -80612,6 +80877,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_201_2_0",
     "kind": "group",
@@ -80644,6 +80910,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u201",
     "kind": "divider",
     "origin": "human",
@@ -80884,6 +81151,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_202_0_0",
     "kind": "group",
@@ -81127,6 +81395,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u202",
     "kind": "divider",
     "origin": "human",
@@ -81434,6 +81703,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u203",
     "kind": "divider",
     "origin": "human",
@@ -81959,6 +82229,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_204_1_0",
     "kind": "group",
@@ -81999,6 +82270,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u204",
     "kind": "divider",
     "origin": "human",
@@ -82616,6 +82888,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_206_0_0",
     "kind": "group",
@@ -82656,6 +82929,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u206",
     "kind": "divider",
     "origin": "human",
@@ -82991,6 +83265,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_207_0_0",
     "kind": "group",
@@ -83311,6 +83586,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_207_1_0",
     "kind": "group",
@@ -83620,6 +83896,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_207_2_0",
     "kind": "group",
@@ -83667,6 +83944,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u207",
     "kind": "divider",
     "origin": "human",
@@ -84113,6 +84391,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_208_1_0",
     "kind": "group",
@@ -84145,6 +84424,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u208",
     "kind": "divider",
     "origin": "human",
@@ -84634,6 +84914,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_209_2_0",
     "kind": "group",
@@ -84674,6 +84955,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u209",
     "kind": "divider",
     "origin": "human",
@@ -85118,6 +85400,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u210",
     "kind": "divider",
     "origin": "human",
@@ -85766,6 +86049,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_212_2_0",
     "kind": "group",
@@ -85806,6 +86090,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u212",
     "kind": "divider",
     "origin": "human",
@@ -86350,6 +86635,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_213_1_0",
     "kind": "group",
@@ -86659,6 +86945,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_213_2_0",
     "kind": "group",
@@ -86691,6 +86978,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u213",
     "kind": "divider",
     "origin": "human",
@@ -87042,6 +87330,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_214_0_0",
     "kind": "group",
@@ -87395,6 +87684,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u214",
     "kind": "divider",
     "origin": "human",
@@ -87913,6 +88203,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_215_1_0",
     "kind": "group",
@@ -88115,6 +88406,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u215",
     "kind": "divider",
     "origin": "human",
@@ -88692,6 +88984,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_216_1_0",
     "kind": "group",
@@ -88936,6 +89229,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u216",
     "kind": "divider",
     "origin": "human",
@@ -89682,6 +89976,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_219_1_0",
     "kind": "group",
@@ -89729,6 +90024,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u219",
     "kind": "divider",
     "origin": "human",
@@ -90377,6 +90673,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_221_0_0",
     "kind": "group",
@@ -90789,6 +91086,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_221_2_0",
     "kind": "group",
@@ -90829,6 +91127,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u221",
     "kind": "divider",
     "origin": "human",
@@ -91226,6 +91525,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_222_0_0",
     "kind": "group",
@@ -91273,6 +91573,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u222",
     "kind": "divider",
     "origin": "human",
@@ -91575,6 +91876,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_223_0_0",
     "kind": "group",
@@ -91801,6 +92103,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_223_1_0",
     "kind": "group",
@@ -91973,6 +92276,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u223",
     "kind": "divider",
     "origin": "human",
@@ -92459,6 +92763,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u224",
     "kind": "divider",
     "origin": "human",
@@ -93276,6 +93581,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_227_0_0",
     "kind": "group",
@@ -93316,6 +93622,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u227",
     "kind": "divider",
     "origin": "human",
@@ -93650,6 +93957,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_228_1_0",
     "kind": "group",
@@ -93690,6 +93998,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u228",
     "kind": "divider",
     "origin": "human",
@@ -94114,6 +94423,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_230_0_0",
     "kind": "group",
@@ -94478,6 +94788,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_230_2_0",
     "kind": "group",
@@ -94554,6 +94865,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u230",
     "kind": "divider",
     "origin": "human",
@@ -94878,6 +95190,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_232_0_0",
     "kind": "group",
@@ -95168,6 +95481,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_232_1_0",
     "kind": "group",
@@ -95437,6 +95751,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u232",
     "kind": "divider",
     "origin": "human",
@@ -96012,6 +96327,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_235_0_0",
     "kind": "group",
@@ -96052,6 +96368,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u235",
     "kind": "divider",
     "origin": "human",
@@ -96406,6 +96723,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u236",
     "kind": "divider",
     "origin": "human",
@@ -96741,6 +97059,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_237_0_0",
     "kind": "group",
@@ -97045,6 +97364,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_237_1_0",
     "kind": "group",
@@ -97077,6 +97397,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u237",
     "kind": "divider",
     "origin": "human",
@@ -97559,6 +97880,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_239_0_0",
     "kind": "group",
@@ -97833,6 +98155,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "exploration",
     "id": "group:cell:toolu_239_1_0",
     "kind": "group",
@@ -97873,6 +98196,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u239",
     "kind": "divider",
     "origin": "human",
@@ -98464,6 +98788,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_240_2_0",
     "kind": "group",
@@ -98547,6 +98872,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_240_0_1",
+    "fold": 6,
     "id": "divider:turn:u240",
     "kind": "divider",
     "origin": "human",
@@ -98920,6 +99246,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u241",
     "kind": "divider",
     "origin": "human",
@@ -99298,6 +99625,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_242_0_0",
     "kind": "group",
@@ -99500,6 +99828,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u242",
     "kind": "divider",
     "origin": "human",
@@ -100098,6 +100427,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_244_1_0",
     "kind": "group",
@@ -100138,6 +100468,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u244",
     "kind": "divider",
     "origin": "human",
@@ -100544,6 +100875,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_245_1_0",
     "kind": "group",
@@ -100584,6 +100916,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u245",
     "kind": "divider",
     "origin": "human",
@@ -100847,6 +101180,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_246_0_0",
     "kind": "group",
@@ -100879,6 +101213,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u246",
     "kind": "divider",
     "origin": "human",
@@ -101166,6 +101501,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_247_0_0",
     "kind": "group",
@@ -101206,6 +101542,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u247",
     "kind": "divider",
     "origin": "human",
@@ -101772,6 +102109,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_249_0_0",
     "kind": "group",
@@ -101819,6 +102157,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u249",
     "kind": "divider",
     "origin": "human",
@@ -102387,6 +102726,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_252_0_0",
     "kind": "group",
@@ -102419,6 +102759,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u252",
     "kind": "divider",
     "origin": "human",
@@ -102837,6 +103178,7 @@
       "removed": 9
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_253_0_0",
     "kind": "group",
@@ -103093,6 +103435,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_253_1_0",
     "kind": "group",
@@ -103382,6 +103725,7 @@
       "removed": 9
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_253_2_0",
     "kind": "group",
@@ -103443,6 +103787,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u253",
     "kind": "divider",
     "origin": "human",
@@ -103771,6 +104116,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_254_0_0",
     "kind": "group",
@@ -103811,6 +104157,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u254",
     "kind": "divider",
     "origin": "human",
@@ -104118,6 +104465,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_255_0_0",
     "kind": "group",
@@ -104165,6 +104513,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u255",
     "kind": "divider",
     "origin": "human",
@@ -104448,6 +104797,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_256_0_0",
     "kind": "group",
@@ -104621,6 +104971,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_256_1_0",
     "kind": "group",
@@ -104668,6 +105019,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u256",
     "kind": "divider",
     "origin": "human",
@@ -104971,6 +105323,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_257_0_0",
     "kind": "group",
@@ -105003,6 +105356,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u257",
     "kind": "divider",
     "origin": "human",
@@ -105680,6 +106034,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u258",
     "kind": "divider",
     "origin": "human",
@@ -106375,6 +106730,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u260",
     "kind": "divider",
     "origin": "human",
@@ -106791,6 +107147,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_262_0_0",
     "kind": "group",
@@ -107104,6 +107461,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_262_1_0",
     "kind": "group",
@@ -107144,6 +107502,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u262",
     "kind": "divider",
     "origin": "human",
@@ -107544,6 +107903,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_263_0_0",
     "kind": "group",
@@ -107584,6 +107944,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u263",
     "kind": "divider",
     "origin": "human",
@@ -107931,6 +108292,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_264_0_0",
     "kind": "group",
@@ -108168,6 +108530,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_264_1_0",
     "kind": "group",
@@ -108309,6 +108672,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u264",
     "kind": "divider",
     "origin": "human",
@@ -108885,6 +109249,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_267_0_0",
     "kind": "group",
@@ -109118,6 +109483,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_267_1_0",
     "kind": "group",
@@ -109432,6 +109798,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u267",
     "kind": "divider",
     "origin": "human",
@@ -109997,6 +110364,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_269_1_0",
     "kind": "group",
@@ -110029,6 +110397,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u269",
     "kind": "divider",
     "origin": "human",
@@ -110386,6 +110755,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u270",
     "kind": "divider",
     "origin": "human",
@@ -110629,6 +110999,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_271_0_0",
     "kind": "group",
@@ -110669,6 +111040,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u271",
     "kind": "divider",
     "origin": "human",
@@ -111676,6 +112048,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_274_0_0",
     "kind": "group",
@@ -111761,6 +112134,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u274",
     "kind": "divider",
     "origin": "human",
@@ -112152,6 +112526,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u275",
     "kind": "divider",
     "origin": "human",
@@ -112721,6 +113096,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 5,
     "icon": "files",
     "id": "group:cell:toolu_277_0_0",
     "kind": "group",
@@ -112761,6 +113137,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u277",
     "kind": "divider",
     "origin": "human",
@@ -113075,6 +113452,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u278",
     "kind": "divider",
     "origin": "human",
@@ -113589,6 +113967,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_279_1_0",
     "kind": "group",
@@ -113629,6 +114008,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u279",
     "kind": "divider",
     "origin": "human",
@@ -114041,6 +114421,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_280_0_2",
     "kind": "group",
@@ -114110,6 +114491,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_280_0_1",
+    "fold": 4,
     "id": "divider:turn:u280",
     "kind": "divider",
     "origin": "human",
@@ -114412,6 +114794,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_281_0_0",
     "kind": "group",
@@ -114591,6 +114974,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_281_1_0",
     "kind": "group",
@@ -114829,6 +115213,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_281_2_0",
     "kind": "group",
@@ -114869,6 +115254,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u281",
     "kind": "divider",
     "origin": "human",
@@ -115463,6 +115849,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_283_1_0",
     "kind": "group",
@@ -115495,6 +115882,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u283",
     "kind": "divider",
     "origin": "human",
@@ -116003,6 +116391,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_285_0_0",
     "kind": "group",
@@ -116043,6 +116432,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u285",
     "kind": "divider",
     "origin": "human",
@@ -116478,6 +116868,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_287_1_0",
     "kind": "group",
@@ -116525,6 +116916,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u287",
     "kind": "divider",
     "origin": "human",
@@ -116928,6 +117320,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_288_0_0",
     "kind": "group",
@@ -117268,6 +117661,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u288",
     "kind": "divider",
     "origin": "human",
@@ -117690,6 +118084,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u289",
     "kind": "divider",
     "origin": "human",
@@ -118554,6 +118949,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 5,
     "icon": "skills",
     "id": "group:cell:toolu_291_0_0",
     "kind": "group",
@@ -118601,6 +118997,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u291",
     "kind": "divider",
     "origin": "human",
@@ -118943,6 +119340,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_292_0_0",
     "kind": "group",
@@ -119238,6 +119636,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_292_1_0",
     "kind": "group",
@@ -119471,6 +119870,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_292_2_0",
     "kind": "group",
@@ -119511,6 +119911,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u292",
     "kind": "divider",
     "origin": "human",
@@ -119975,6 +120376,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_294_0_0",
     "kind": "group",
@@ -120259,6 +120661,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u294",
     "kind": "divider",
     "origin": "human",
@@ -121025,6 +121428,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_296_1_0",
     "kind": "group",
@@ -121065,6 +121469,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u296",
     "kind": "divider",
     "origin": "human",
@@ -121460,6 +121865,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_297_1_0",
     "kind": "group",
@@ -121592,6 +121998,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u297",
     "kind": "divider",
     "origin": "human",
@@ -121961,6 +122368,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_298_0_0",
     "kind": "group",
@@ -122008,6 +122416,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u298",
     "kind": "divider",
     "origin": "human",
@@ -122334,6 +122743,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_299_0_0",
     "kind": "group",
@@ -122749,6 +123159,7 @@
       "removed": 8
     },
     "expanded": true,
+    "fold": 5,
     "icon": "skills",
     "id": "group:cell:toolu_299_2_0",
     "kind": "group",
@@ -122810,6 +123221,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u299",
     "kind": "divider",
     "origin": "human",
@@ -123094,6 +123506,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u300",
     "kind": "divider",
     "origin": "human",
@@ -123653,6 +124066,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_301_2_0",
     "kind": "group",
@@ -123700,6 +124114,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u301",
     "kind": "divider",
     "origin": "human",
@@ -124110,6 +124525,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_302_1_0",
     "kind": "group",
@@ -124157,6 +124573,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u302",
     "kind": "divider",
     "origin": "human",
@@ -124442,6 +124859,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_303_0_0",
     "kind": "group",
@@ -124747,6 +125165,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_303_1_0",
     "kind": "group",
@@ -124946,6 +125365,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u303",
     "kind": "divider",
     "origin": "human",
@@ -125276,6 +125696,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_304_0_0",
     "kind": "group",
@@ -125316,6 +125737,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u304",
     "kind": "divider",
     "origin": "human",
@@ -125720,6 +126142,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_305_1_0",
     "kind": "group",
@@ -125767,6 +126190,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u305",
     "kind": "divider",
     "origin": "human",
@@ -126205,6 +126629,7 @@
       "removed": 13
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_306_0_0",
     "kind": "group",
@@ -126633,6 +127058,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u306",
     "kind": "divider",
     "origin": "human",
@@ -126986,6 +127412,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_307_0_0",
     "kind": "group",
@@ -127026,6 +127453,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u307",
     "kind": "divider",
     "origin": "human",
@@ -127548,6 +127976,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_308_1_0",
     "kind": "group",
@@ -127595,6 +128024,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u308",
     "kind": "divider",
     "origin": "human",
@@ -127986,6 +128416,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_309_1_0",
     "kind": "group",
@@ -128026,6 +128457,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u309",
     "kind": "divider",
     "origin": "human",
@@ -128713,6 +129145,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u310",
     "kind": "divider",
     "origin": "human",
@@ -129093,6 +129526,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_311_1_0",
     "kind": "group",
@@ -129302,6 +129736,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_311_2_0",
     "kind": "group",
@@ -129349,6 +129784,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u311",
     "kind": "divider",
     "origin": "human",
@@ -129978,6 +130414,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_313_0_0",
     "kind": "group",
@@ -130010,6 +130447,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u313",
     "kind": "divider",
     "origin": "human",
@@ -130390,6 +130828,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_314_1_0",
     "kind": "group",
@@ -130422,6 +130861,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u314",
     "kind": "divider",
     "origin": "human",
@@ -131406,6 +131846,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u318",
     "kind": "divider",
     "origin": "human",
@@ -131694,6 +132135,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_319_0_0",
     "kind": "group",
@@ -132009,6 +132451,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_319_1_0",
     "kind": "group",
@@ -132341,6 +132784,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_319_2_0",
     "kind": "group",
@@ -132388,6 +132832,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u319",
     "kind": "divider",
     "origin": "human",
@@ -132803,6 +133248,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_320_0_1",
+    "fold": 4,
     "id": "divider:turn:u320",
     "kind": "divider",
     "origin": "human",
@@ -133142,6 +133588,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_321_1_0",
     "kind": "group",
@@ -133174,6 +133621,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u321",
     "kind": "divider",
     "origin": "human",
@@ -133673,6 +134121,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_322_1_0",
     "kind": "group",
@@ -133713,6 +134162,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u322",
     "kind": "divider",
     "origin": "human",
@@ -134732,6 +135182,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_325_1_0",
     "kind": "group",
@@ -134779,6 +135230,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u325",
     "kind": "divider",
     "origin": "human",
@@ -135265,6 +135717,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u326",
     "kind": "divider",
     "origin": "human",
@@ -135929,6 +136382,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_329_1_0",
     "kind": "group",
@@ -135969,6 +136423,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u329",
     "kind": "divider",
     "origin": "human",
@@ -136282,6 +136737,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u330",
     "kind": "divider",
     "origin": "human",
@@ -136877,6 +137333,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u331",
     "kind": "divider",
     "origin": "human",
@@ -137372,6 +137829,7 @@
       "removed": 11
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_333_0_0",
     "kind": "group",
@@ -137612,6 +138070,7 @@
       "removed": 8
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_333_1_0",
     "kind": "group",
@@ -137960,6 +138419,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_333_2_0",
     "kind": "group",
@@ -138021,6 +138481,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 12,
     "id": "divider:turn:u333",
     "kind": "divider",
     "origin": "human",
@@ -138771,6 +139232,7 @@
       "removed": 8
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_336_1_0",
     "kind": "group",
@@ -138818,6 +139280,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u336",
     "kind": "divider",
     "origin": "human",
@@ -139244,6 +139707,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_338_0_0",
     "kind": "group",
@@ -139523,6 +139987,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_338_1_0",
     "kind": "group",
@@ -139708,6 +140173,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u338",
     "kind": "divider",
     "origin": "human",
@@ -140035,6 +140501,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_339_0_0",
     "kind": "group",
@@ -140075,6 +140542,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u339",
     "kind": "divider",
     "origin": "human",
@@ -140638,6 +141106,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_341_0_0",
     "kind": "group",
@@ -140939,6 +141408,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u341",
     "kind": "divider",
     "origin": "human",
@@ -141507,6 +141977,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_343_1_0",
     "kind": "group",
@@ -141561,6 +142032,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u343",
     "kind": "divider",
     "origin": "human",
@@ -142225,6 +142697,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u346",
     "kind": "divider",
     "origin": "human",
@@ -142736,6 +143209,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_348_0_0",
     "kind": "group",
@@ -143009,6 +143483,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_348_1_0",
     "kind": "group",
@@ -143063,6 +143538,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u348",
     "kind": "divider",
     "origin": "human",
@@ -143429,6 +143905,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_349_0_0",
     "kind": "group",
@@ -143903,6 +144380,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_349_2_0",
     "kind": "group",
@@ -143964,6 +144442,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u349",
     "kind": "divider",
     "origin": "human",
@@ -144374,6 +144853,7 @@
       "removed": 13
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_350_0_0",
     "kind": "group",
@@ -144627,6 +145107,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_350_1_0",
     "kind": "group",
@@ -144893,6 +145374,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u350",
     "kind": "divider",
     "origin": "human",
@@ -146007,6 +146489,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_355_1_0",
     "kind": "group",
@@ -146054,6 +146537,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u355",
     "kind": "divider",
     "origin": "human",
@@ -146588,6 +147072,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_356_1_0",
     "kind": "group",
@@ -146751,6 +147236,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "exploration",
     "id": "group:cell:toolu_356_2_0",
     "kind": "group",
@@ -146783,6 +147269,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u356",
     "kind": "divider",
     "origin": "human",
@@ -147192,6 +147679,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_357_0_0",
     "kind": "group",
@@ -147232,6 +147720,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u357",
     "kind": "divider",
     "origin": "human",
@@ -147704,6 +148193,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_358_1_0",
     "kind": "group",
@@ -147795,6 +148285,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u358",
     "kind": "divider",
     "origin": "human",
@@ -148106,6 +148597,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_359_0_0",
     "kind": "group",
@@ -148428,6 +148920,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_359_1_0",
     "kind": "group",
@@ -148460,6 +148953,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u359",
     "kind": "divider",
     "origin": "human",
@@ -148837,6 +149331,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_360_0_2",
     "kind": "group",
@@ -149076,6 +149571,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_360_0_1",
+    "fold": 3,
     "id": "divider:turn:u360",
     "kind": "divider",
     "origin": "human",
@@ -149374,6 +149870,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_361_0_0",
     "kind": "group",
@@ -149468,6 +149965,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u361",
     "kind": "divider",
     "origin": "human",
@@ -149900,6 +150398,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_362_1_0",
     "kind": "group",
@@ -149993,6 +150492,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u362",
     "kind": "divider",
     "origin": "human",
@@ -151115,6 +151615,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_366_0_0",
     "kind": "group",
@@ -151201,6 +151702,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u366",
     "kind": "divider",
     "origin": "human",
@@ -151486,6 +151988,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u367",
     "kind": "divider",
     "origin": "human",
@@ -152169,6 +152672,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 5,
     "icon": "files",
     "id": "group:cell:toolu_369_0_0",
     "kind": "group",
@@ -152209,6 +152713,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u369",
     "kind": "divider",
     "origin": "human",
@@ -152534,6 +153039,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u370",
     "kind": "divider",
     "origin": "human",
@@ -153004,6 +153510,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u372",
     "kind": "divider",
     "origin": "human",
@@ -153408,6 +153915,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "exploration",
     "id": "group:cell:toolu_373_1_0",
     "kind": "group",
@@ -153696,6 +154204,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_373_2_0",
     "kind": "group",
@@ -153736,6 +154245,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u373",
     "kind": "divider",
     "origin": "human",
@@ -154131,6 +154641,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_374_1_0",
     "kind": "group",
@@ -154336,6 +154847,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u374",
     "kind": "divider",
     "origin": "human",
@@ -155007,6 +155519,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "exploration",
     "id": "group:cell:toolu_376_2_0",
     "kind": "group",
@@ -155039,6 +155552,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u376",
     "kind": "divider",
     "origin": "human",
@@ -155329,6 +155843,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_377_0_0",
     "kind": "group",
@@ -155535,6 +156050,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_377_1_0",
     "kind": "group",
@@ -155831,6 +156347,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u377",
     "kind": "divider",
     "origin": "human",
@@ -156287,6 +156804,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_379_0_0",
     "kind": "group",
@@ -156577,6 +157095,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_379_2_0",
     "kind": "group",
@@ -156617,6 +157136,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u379",
     "kind": "divider",
     "origin": "human",
@@ -157049,6 +157569,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u380",
     "kind": "divider",
     "origin": "human",
@@ -157296,6 +157817,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_381_0_0",
     "kind": "group",
@@ -157648,6 +158170,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_381_2_0",
     "kind": "group",
@@ -157680,6 +158203,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u381",
     "kind": "divider",
     "origin": "human",
@@ -158092,6 +158616,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_383_0_0",
     "kind": "group",
@@ -158132,6 +158657,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u383",
     "kind": "divider",
     "origin": "human",
@@ -158374,6 +158900,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_384_0_0",
     "kind": "group",
@@ -158772,6 +159299,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u384",
     "kind": "divider",
     "origin": "human",
@@ -159450,6 +159978,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_386_0_0",
     "kind": "group",
@@ -159490,6 +160019,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u386",
     "kind": "divider",
     "origin": "human",
@@ -160101,6 +160631,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_387_1_0",
     "kind": "group",
@@ -160141,6 +160672,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u387",
     "kind": "divider",
     "origin": "human",
@@ -160512,6 +161044,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_388_0_0",
     "kind": "group",
@@ -160544,6 +161077,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u388",
     "kind": "divider",
     "origin": "human",
@@ -161019,6 +161553,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_389_2_0",
     "kind": "group",
@@ -161051,6 +161586,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u389",
     "kind": "divider",
     "origin": "human",
@@ -161320,6 +161856,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_390_0_0",
     "kind": "group",
@@ -161468,6 +162005,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u390",
     "kind": "divider",
     "origin": "human",
@@ -161771,6 +162309,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_391_0_0",
     "kind": "group",
@@ -161897,6 +162436,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u391",
     "kind": "divider",
     "origin": "human",
@@ -162231,6 +162771,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_392_0_0",
     "kind": "group",
@@ -162384,6 +162925,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u392",
     "kind": "divider",
     "origin": "human",
@@ -163103,6 +163645,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u396",
     "kind": "divider",
     "origin": "human",
@@ -163605,6 +164148,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_397_1_0",
     "kind": "group",
@@ -163652,6 +164196,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u397",
     "kind": "divider",
     "origin": "human",
@@ -164042,6 +164587,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_398_0_0",
     "kind": "group",
@@ -164082,6 +164628,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u398",
     "kind": "divider",
     "origin": "human",
@@ -164515,6 +165062,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_400_0_1",
+    "fold": 1,
     "id": "divider:turn:u400",
     "kind": "divider",
     "origin": "human",
@@ -164770,6 +165318,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_401_0_0",
     "kind": "group",
@@ -164802,6 +165351,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u401",
     "kind": "divider",
     "origin": "human",
@@ -165181,6 +165731,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_402_1_0",
     "kind": "group",
@@ -165324,6 +165875,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u402",
     "kind": "divider",
     "origin": "human",
@@ -166154,6 +166706,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_405_1_0",
     "kind": "group",
@@ -166194,6 +166747,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u405",
     "kind": "divider",
     "origin": "human",
@@ -166520,6 +167074,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_406_0_0",
     "kind": "group",
@@ -166552,6 +167107,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u406",
     "kind": "divider",
     "origin": "human",
@@ -166876,6 +167432,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_407_0_0",
     "kind": "group",
@@ -167127,6 +167684,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u407",
     "kind": "divider",
     "origin": "human",
@@ -167484,6 +168042,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_408_1_0",
     "kind": "group",
@@ -167516,6 +168075,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u408",
     "kind": "divider",
     "origin": "human",
@@ -167785,6 +168345,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_409_0_0",
     "kind": "group",
@@ -167817,6 +168378,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u409",
     "kind": "divider",
     "origin": "human",
@@ -168133,6 +168695,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_410_1_0",
     "kind": "group",
@@ -168202,6 +168765,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u410",
     "kind": "divider",
     "origin": "human",
@@ -168575,6 +169139,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u412",
     "kind": "divider",
     "origin": "human",
@@ -169117,6 +169682,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u415",
     "kind": "divider",
     "origin": "human",
@@ -169412,6 +169978,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_416_0_0",
     "kind": "group",
@@ -169754,6 +170321,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_416_1_0",
     "kind": "group",
@@ -169808,6 +170376,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u416",
     "kind": "divider",
     "origin": "human",
@@ -170161,6 +170730,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_417_0_0",
     "kind": "group",
@@ -170290,6 +170860,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u417",
     "kind": "divider",
     "origin": "human",
@@ -170594,6 +171165,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_418_0_0",
     "kind": "group",
@@ -170846,6 +171418,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_418_1_0",
     "kind": "group",
@@ -170886,6 +171459,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u418",
     "kind": "divider",
     "origin": "human",
@@ -171175,6 +171749,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "exploration",
     "id": "group:cell:toolu_419_0_0",
     "kind": "group",
@@ -171515,6 +172090,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 5,
     "icon": "files",
     "id": "group:cell:toolu_419_1_0",
     "kind": "group",
@@ -171724,6 +172300,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u419",
     "kind": "divider",
     "origin": "human",
@@ -172307,6 +172884,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_421_0_0",
     "kind": "group",
@@ -172347,6 +172925,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u421",
     "kind": "divider",
     "origin": "human",
@@ -172747,6 +173326,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u422",
     "kind": "divider",
     "origin": "human",
@@ -173333,6 +173913,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_424_0_0",
     "kind": "group",
@@ -173648,6 +174229,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_424_1_0",
     "kind": "group",
@@ -173695,6 +174277,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u424",
     "kind": "divider",
     "origin": "human",
@@ -174115,6 +174698,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_426_0_0",
     "kind": "group",
@@ -174155,6 +174739,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u426",
     "kind": "divider",
     "origin": "human",
@@ -174959,6 +175544,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_430_1_0",
     "kind": "group",
@@ -175278,6 +175864,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_430_2_0",
     "kind": "group",
@@ -175361,6 +175948,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 10,
     "id": "divider:turn:u430",
     "kind": "divider",
     "origin": "human",
@@ -175714,6 +176302,7 @@
       "removed": 8
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_431_0_0",
     "kind": "group",
@@ -176011,6 +176600,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_431_1_0",
     "kind": "group",
@@ -176248,6 +176838,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_431_2_0",
     "kind": "group",
@@ -176302,6 +176893,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u431",
     "kind": "divider",
     "origin": "human",
@@ -176652,6 +177244,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_432_1_0",
     "kind": "group",
@@ -176692,6 +177285,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u432",
     "kind": "divider",
     "origin": "human",
@@ -177216,6 +177810,7 @@
       "removed": 10
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_435_0_0",
     "kind": "group",
@@ -177458,6 +178053,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_435_1_0",
     "kind": "group",
@@ -177639,6 +178235,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u435",
     "kind": "divider",
     "origin": "human",
@@ -178189,6 +178786,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_436_2_0",
     "kind": "group",
@@ -178236,6 +178834,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u436",
     "kind": "divider",
     "origin": "human",
@@ -179030,6 +179629,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_438_1_0",
     "kind": "group",
@@ -179062,6 +179662,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u438",
     "kind": "divider",
     "origin": "human",
@@ -179541,6 +180142,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_439_1_0",
     "kind": "group",
@@ -179634,6 +180236,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u439",
     "kind": "divider",
     "origin": "human",
@@ -180431,6 +181034,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_442_0_0",
     "kind": "group",
@@ -180471,6 +181075,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u442",
     "kind": "divider",
     "origin": "human",
@@ -180820,6 +181425,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u443",
     "kind": "divider",
     "origin": "human",
@@ -181218,6 +181824,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_444_0_0",
     "kind": "group",
@@ -181347,6 +181954,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u444",
     "kind": "divider",
     "origin": "human",
@@ -181671,6 +182279,7 @@
       "removed": 14
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_445_0_0",
     "kind": "group",
@@ -182029,6 +182638,7 @@
       "removed": 13
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_445_1_0",
     "kind": "group",
@@ -182340,6 +182950,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_445_2_0",
     "kind": "group",
@@ -182401,6 +183012,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u445",
     "kind": "divider",
     "origin": "human",
@@ -183238,6 +183850,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_448_1_0",
     "kind": "group",
@@ -183278,6 +183891,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u448",
     "kind": "divider",
     "origin": "human",
@@ -183644,6 +184258,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u450",
     "kind": "divider",
     "origin": "human",
@@ -184361,6 +184976,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_452_0_0",
     "kind": "group",
@@ -184401,6 +185017,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u452",
     "kind": "divider",
     "origin": "human",
@@ -185035,6 +185652,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_454_0_0",
     "kind": "group",
@@ -185313,6 +185931,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_454_1_0",
     "kind": "group",
@@ -185632,6 +186251,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_454_2_0",
     "kind": "group",
@@ -185686,6 +186306,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u454",
     "kind": "divider",
     "origin": "human",
@@ -186004,6 +186625,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u455",
     "kind": "divider",
     "origin": "human",
@@ -186421,6 +187043,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_457_0_0",
     "kind": "group",
@@ -186707,6 +187330,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_457_1_0",
     "kind": "group",
@@ -186761,6 +187385,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u457",
     "kind": "divider",
     "origin": "human",
@@ -187172,6 +187797,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_458_0_0",
     "kind": "group",
@@ -187383,6 +188009,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_458_1_0",
     "kind": "group",
@@ -187620,6 +188247,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_458_2_0",
     "kind": "group",
@@ -187681,6 +188309,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u458",
     "kind": "divider",
     "origin": "human",
@@ -187914,6 +188543,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_459_0_0",
     "kind": "group",
@@ -188038,6 +188668,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u459",
     "kind": "divider",
     "origin": "human",
@@ -188448,6 +189079,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_460_1_0",
     "kind": "group",
@@ -188571,6 +189203,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u460",
     "kind": "divider",
     "origin": "human",
@@ -188863,6 +189496,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_461_0_0",
     "kind": "group",
@@ -188903,6 +189537,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u461",
     "kind": "divider",
     "origin": "human",
@@ -189260,6 +189895,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 5,
     "icon": "files",
     "id": "group:cell:toolu_462_0_0",
     "kind": "group",
@@ -189300,6 +189936,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u462",
     "kind": "divider",
     "origin": "human",
@@ -190062,6 +190699,7 @@
       "removed": 14
     },
     "expanded": true,
+    "fold": 5,
     "icon": "files",
     "id": "group:cell:toolu_465_0_0",
     "kind": "group",
@@ -190109,6 +190747,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 5,
     "id": "divider:turn:u465",
     "kind": "divider",
     "origin": "human",
@@ -190573,6 +191212,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_467_0_0",
     "kind": "group",
@@ -190656,6 +191296,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u467",
     "kind": "divider",
     "origin": "human",
@@ -190965,6 +191606,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_468_0_0",
     "kind": "group",
@@ -190997,6 +191639,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u468",
     "kind": "divider",
     "origin": "human",
@@ -191347,6 +191990,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_469_0_0",
     "kind": "group",
@@ -191617,6 +192261,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_469_1_0",
     "kind": "group",
@@ -191946,6 +192591,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 5,
     "icon": "mcp",
     "id": "group:cell:toolu_469_2_0",
     "kind": "group",
@@ -192000,6 +192646,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 16,
     "id": "divider:turn:u469",
     "kind": "divider",
     "origin": "human",
@@ -192314,6 +192961,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u470",
     "kind": "divider",
     "origin": "human",
@@ -192851,6 +193499,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_473_0_0",
     "kind": "group",
@@ -193178,6 +193827,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u473",
     "kind": "divider",
     "origin": "human",
@@ -193418,6 +194068,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "skills",
     "id": "group:cell:toolu_474_0_0",
     "kind": "group",
@@ -193450,6 +194101,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u474",
     "kind": "divider",
     "origin": "human",
@@ -193849,6 +194501,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_475_0_0",
     "kind": "group",
@@ -193896,6 +194549,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u475",
     "kind": "divider",
     "origin": "human",
@@ -194477,6 +195131,7 @@
       "removed": 4
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_476_1_0",
     "kind": "group",
@@ -194517,6 +195172,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u476",
     "kind": "divider",
     "origin": "human",
@@ -194938,6 +195594,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u477",
     "kind": "divider",
     "origin": "human",
@@ -195302,6 +195959,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_478_0_0",
     "kind": "group",
@@ -195349,6 +196007,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u478",
     "kind": "divider",
     "origin": "human",
@@ -195589,6 +196248,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_479_0_0",
     "kind": "group",
@@ -195921,6 +196581,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u479",
     "kind": "divider",
     "origin": "human",
@@ -196270,6 +196931,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_480_0_1",
+    "fold": 2,
     "id": "divider:turn:u480",
     "kind": "divider",
     "origin": "human",
@@ -197157,6 +197819,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 4,
     "icon": "skills",
     "id": "group:cell:toolu_485_0_0",
     "kind": "group",
@@ -197412,6 +198075,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_485_1_0",
     "kind": "group",
@@ -197466,6 +198130,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u485",
     "kind": "divider",
     "origin": "human",
@@ -198185,6 +198850,7 @@
       "removed": 11
     },
     "expanded": true,
+    "fold": 3,
     "icon": "files",
     "id": "group:cell:toolu_487_1_0",
     "kind": "group",
@@ -198239,6 +198905,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u487",
     "kind": "divider",
     "origin": "human",
@@ -198555,6 +199222,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "skills",
     "id": "group:cell:toolu_488_1_0",
     "kind": "group",
@@ -198587,6 +199255,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u488",
     "kind": "divider",
     "origin": "human",
@@ -198872,6 +199541,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_489_0_0",
     "kind": "group",
@@ -199145,6 +199815,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_489_1_0",
     "kind": "group",
@@ -199185,6 +199856,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u489",
     "kind": "divider",
     "origin": "human",
@@ -199682,6 +200354,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_490_1_0",
     "kind": "group",
@@ -199982,6 +200655,7 @@
       "removed": 5
     },
     "expanded": true,
+    "fold": 3,
     "icon": "skills",
     "id": "group:cell:toolu_490_2_0",
     "kind": "group",
@@ -200065,6 +200739,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 11,
     "id": "divider:turn:u490",
     "kind": "divider",
     "origin": "human",
@@ -200437,6 +201112,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 4,
     "icon": "files",
     "id": "group:cell:toolu_491_0_0",
     "kind": "group",
@@ -200484,6 +201160,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 3,
     "id": "divider:turn:u491",
     "kind": "divider",
     "origin": "human",
@@ -200930,6 +201607,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_493_0_0",
     "kind": "group",
@@ -200970,6 +201648,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 1,
     "id": "divider:turn:u493",
     "kind": "divider",
     "origin": "human",
@@ -201522,6 +202201,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 4,
     "id": "divider:turn:u494",
     "kind": "divider",
     "origin": "human",
@@ -201905,6 +202585,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_495_0_0",
     "kind": "group",
@@ -202248,6 +202929,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_495_1_0",
     "kind": "group",
@@ -202530,6 +203212,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 7,
     "id": "divider:turn:u495",
     "kind": "divider",
     "origin": "human",
@@ -203030,6 +203713,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_497_1_0",
     "kind": "group",
@@ -203279,6 +203963,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 6,
     "id": "divider:turn:u497",
     "kind": "divider",
     "origin": "human",
@@ -203647,6 +204332,7 @@
       "removed": 7
     },
     "expanded": true,
+    "fold": 3,
     "icon": "mcp",
     "id": "group:cell:toolu_498_0_0",
     "kind": "group",
@@ -203961,6 +204647,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 4,
     "icon": "mcp",
     "id": "group:cell:toolu_498_1_0",
     "kind": "group",
@@ -204251,6 +204938,7 @@
       "removed": 2
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_498_2_0",
     "kind": "group",
@@ -204298,6 +204986,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 15,
     "id": "divider:turn:u498",
     "kind": "divider",
     "origin": "human",
@@ -204555,6 +205244,7 @@
       "removed": 1
     },
     "expanded": true,
+    "fold": 2,
     "icon": "files",
     "id": "group:cell:toolu_499_0_0",
     "kind": "group",
@@ -204800,6 +205490,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_499_1_0",
     "kind": "group",
@@ -205024,6 +205715,7 @@
       "removed": 3
     },
     "expanded": true,
+    "fold": 2,
     "icon": "mcp",
     "id": "group:cell:toolu_499_2_0",
     "kind": "group",
@@ -205071,6 +205763,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 8,
     "id": "divider:turn:u499",
     "kind": "divider",
     "origin": "human",
@@ -205359,6 +206052,7 @@
       "removed": 6
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_500_0_0",
     "kind": "group",
@@ -205428,6 +206122,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u500",
     "kind": "divider",
     "origin": "human",

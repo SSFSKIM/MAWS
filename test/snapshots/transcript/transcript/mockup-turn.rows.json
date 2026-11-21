@@ -631,6 +631,7 @@
       }
     ],
     "firstDeniedCell": "cell:toolu_synth_mock_7",
+    "fold": 6,
     "id": "divider:turn:u-mockup-turn-002",
     "kind": "divider",
     "origin": "human",

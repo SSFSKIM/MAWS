@@ -550,6 +550,7 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_synth_x_websearch",
     "kind": "group",
@@ -582,6 +583,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u-exploration-and-web-002",
     "kind": "divider",
     "origin": "human",
