@@ -2,8 +2,8 @@ import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
-  boundaryCopy, cellLabel, dividerCopy, dividerHead, lineCountsCopy, liveThinkingLabel, plural, stoppedLabel, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy,
-  waitingLabel,
+  ARTIFACT_CELL, bashFooter, BLOCKED, boundaryCopy, cellLabel, compactingLine, dividerCopy, dividerHead, endsInFold, HANDOVER_REINIT_COPY, lineCountsCopy, liveThinkingLabel, NOTICE, plural,
+  commandLead, PENDING_CAPTION, processExitCopy, REACH, rewindLabel, SAFEGUARD_LINE, shellFooter, stoppedLabel, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, waitingLabel,
 } from './copy';
 import { rowsOf } from './derive';
 import { applyEvents, createState } from './reduce';
@@ -23,10 +23,13 @@ describe('divider and summary copy', () => {
   });
 
   // UX wave U2 (O-15; acceptance 7): the turn's line says what the turn did, in the caption's words; no count of calls
-  it('reads Worked, Continued, You stopped and Failed with what the turn did, omitted when it did nothing', () => {
-    expect(line({ state: 'completed', durationMs: 192_000, caption: 'Edited 2 files, ran 2 agents, ran 5 commands', counts: { added: 33, removed: 5 } })).toBe('Worked for 3m 12s · Edited 2 files, ran 2 agents, ran 5 commands +33 −5');
-    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Ran a command' })).toBe('Worked for 5s · Ran a command');
-    expect(line({ state: 'completed', durationMs: 5_000 })).toBe('Worked for 5s');
+  // The word cut (T1, ruled): a finished turn of the person's reads its duration alone, then what it did; Continued,
+  // Peer session, You stopped and Failed keep their words
+  it('reads the duration alone, Continued, You stopped and Failed with what the turn did, omitted when it did nothing', () => {
+    expect(line({ state: 'completed', durationMs: 192_000, caption: 'Edited 2 files, ran 2 agents, ran 5 commands', counts: { added: 33, removed: 5 } })).toBe('3m 12s · Edited 2 files, ran 2 agents, ran 5 commands +33 −5');
+    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Ran a command' })).toBe('5s · Ran a command');
+    expect(line({ state: 'completed', durationMs: 5_000 })).toBe('5s');
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Ran an agent' })).not.toContain('Worked for');
     expect(line({ state: 'completed', origin: 'engine', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Continued for 5s · Read 2 files');
     expect(line({ state: 'completed', origin: 'peer', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Peer session worked for 5s · Read 2 files');
     expect(line({ state: 'stopped', durationMs: 5_000, caption: 'Ran 3 commands (2 stopped)' })).toBe('You stopped after 5s · Ran 3 commands (2 stopped)');
@@ -36,16 +39,27 @@ describe('divider and summary copy', () => {
 
   it('reads a running turn’s lines so far after its verb, and a closed turn’s after its caption, a zero side left out', () => {
     expect(line({ state: 'working', durationMs: 72_000, counts: { added: 12, removed: 3 } })).toBe('Working for 1m 12s +12 −3');
-    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Created a file', counts: { added: 4, removed: 0 } })).toBe('Worked for 5s · Created a file +4');
-    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Edited a file', counts: { added: 0, removed: 2 } })).toBe('Worked for 5s · Edited a file −2');
+    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Created a file', counts: { added: 4, removed: 0 } })).toBe('5s · Created a file +4');
+    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Edited a file', counts: { added: 0, removed: 2 } })).toBe('5s · Edited a file −2');
     expect(lineCountsCopy({ added: 33, removed: 5 })).toBe('+33 −5');
     expect(lineCountsCopy(NONE)).toBe('');
-    expect(dividerHead({ state: 'completed', origin: 'human', durationMs: 5_000, caption: 'Edited a file' })).toBe('Worked for 5s · Edited a file');
+    expect(dividerHead({ state: 'completed', origin: 'human', durationMs: 5_000, caption: 'Edited a file' })).toBe('5s · Edited a file');
+  });
+
+  // The word cut (T2, "Seen on the scratch build"): a caption folded to `+N` is kept apart from the lines that follow it,
+  // so the fold's count does not read as one of them
+  it('separates a folded caption’s `+N` from the turn’s lines; an unfolded caption keeps its lines beside it', () => {
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited 3 files, ran 2 commands, +6', counts: { added: 4, removed: 2 } })).toBe('3s · Edited 3 files, ran 2 commands, +6 · +4 −2');
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited 3 files, ran 2 commands, +6' })).toBe('3s · Edited 3 files, ran 2 commands, +6');
+    expect(line({ state: 'completed', durationMs: 3_000, caption: 'Edited a file, ran a command', counts: { added: 4, removed: 2 } })).toBe('3s · Edited a file, ran a command +4 −2');
+    expect(endsInFold('Edited 3 files, ran 2 commands, +6')).toBe(true);
+    expect(endsInFold('Edited a file, ran /dataviz')).toBe(false);
+    expect(endsInFold('')).toBe(false);
   });
 
   // UX wave U2 (l2-transcript-04; C2): a turn the answer to an asynchronous question opened is the person's
-  it('reads Worked for a turn an answer opened, whatever its origin; every other opener keeps the origin’s verb', () => {
-    expect(line({ state: 'completed', origin: 'engine', opener: { class: 'answer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Worked for 5s · Ran a command');
+  it('reads a turn an answer opened as the person’s, its duration alone, whatever its origin; every other opener keeps the origin’s verb', () => {
+    expect(line({ state: 'completed', origin: 'engine', opener: { class: 'answer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('5s · Ran a command');
     expect(line({ state: 'completed', origin: 'engine', opener: { class: 'subagent' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Continued for 5s · Ran a command');
     expect(line({ state: 'completed', origin: 'peer', opener: { class: 'peer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Peer session worked for 5s · Ran a command');
   });
@@ -65,11 +79,12 @@ describe('divider and summary copy', () => {
   });
 
   it('suffixes the denied and auto-denied counts', () => {
-    expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', denied: 1 })).toBe('Worked for 2m 14s · Ran 12 commands · 1 denied');
-    expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', counts: { added: 1, removed: 1 }, denied: 1, autoDenied: 2 })).toBe('Worked for 2m 14s · Ran 12 commands +1 −1 · 1 denied · 2 auto-denied');
+    expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', denied: 1 })).toBe('2m 14s · Ran 12 commands · 1 denied');
+    expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', counts: { added: 1, removed: 1 }, denied: 1, autoDenied: 2 })).toBe('2m 14s · Ran 12 commands +1 −1 · 1 denied · 2 auto-denied');
   });
 
-  // UX wave U2 (O-15): the popover lists every part, uncapped; the count of subagents goes, the agent part says it
+  // UX wave U2 (O-15): the popover lists every part, uncapped; the count of subagents goes, the agent part says it. The
+  // word cut (T1) shortens the turn's line only: the popover is where its words wait
   it('composes the summary popover, omitting zero and unknown segments', () => {
     const summary = turnSummaryCopy({
       state: 'completed', origin: 'human', durationMs: 134_000, model: 'claude-opus-5-5', parts: ['edited 3 files', 'ran 2 agents', 'ran 2 commands', 'read a file', 'searched code', 'updated todos'],
@@ -157,11 +172,24 @@ describe('cell lines', () => {
     ]);
   });
 
-  it('a streaming block’s label names the effort when known and the elapsed time', () => {
-    expect(liveThinkingLabel(4_000, 'xhigh')).toBe('Thinking with xhigh effort · 4s');
-    expect(liveThinkingLabel(47_500, 'high')).toBe('Deep in thought with high effort · 47s');
-    expect(liveThinkingLabel(75_000, null)).toBe('Deep in thought · 1m 15s');
-    expect(liveThinkingLabel(12_000, '')).toBe('Still thinking · 12s');
+  // The word cut (T37): the effort is the model chip's, so the label is the tier and the elapsed time
+  it('a streaming block’s label is its tier and the elapsed time, with no effort', () => {
+    expect(liveThinkingLabel(4_000)).toBe('Thinking · 4s');
+    expect(liveThinkingLabel(34_000)).toBe('Thinking some more · 34s');
+    expect(liveThinkingLabel(75_000)).toBe('Deep in thought · 1m 15s');
+    expect(liveThinkingLabel(12_000)).toBe('Still thinking · 12s');
+  });
+
+  // The word cut (T22, T66): exit 0 is the normal state, so a successful command shows its time alone; a failure keeps it
+  it('a shell call’s footer names a non-zero exit only, and a ! command’s footer is drawn only for one', () => {
+    expect(shellFooter('done', 0, 3_000)).toBe('3s');
+    expect(shellFooter('done', null, 3_000)).toBe('3s');
+    expect(shellFooter('error', 1, 3_000)).toBe('✕ Exit code 1 · 3s');
+    expect(shellFooter('error', null, 3_000)).toBe('Failed · 3s');
+    expect(shellFooter('stopped', null, 3_000)).toBe('Stopped after 3s');
+    expect(bashFooter(0)).toBe('');
+    expect(bashFooter(null)).toBe('');
+    expect(bashFooter(2)).toBe('exit 2');
   });
 
   it('warms to the warning colour between 10 and 20 s, in eighths', () => {
@@ -204,15 +232,51 @@ describe('subagent and boundary copy', () => {
   });
 
   it('boundaries', () => {
-    expect(boundaryCopy({ kind: 'compaction', preTokens: 160_000, postTokens: 24_000, trigger: 'auto', historical: false })).toBe('Context compacted · 160k → 24k tokens · auto');
-    expect(boundaryCopy({ kind: 'compaction', preTokens: 160_000, postTokens: 24_000, trigger: 'manual', historical: true })).toBe('Compacted earlier · 160k → 24k');
-    expect(boundaryCopy({ kind: 'reset', trigger: 'plan_approved' })).toBe('Conversation reset · after plan approval');
-    expect(boundaryCopy({ kind: 'reset', trigger: 'clear' })).toBe('Conversation reset · cleared');
-    expect(boundaryCopy({ kind: 'reset', trigger: 'fresh_session' })).toBe('Conversation reset · fresh_session');
-    expect(boundaryCopy({ kind: 'retraction', reason: 'transcript_branch', fallbackModel: null })).toBe('Conversation continued from an earlier point');
+    // The word cut (T48, T49, T50, T52): the figures and the count stay, the words around them shorten
+    expect(boundaryCopy({ kind: 'compaction', preTokens: 160_000, postTokens: 24_000, trigger: 'auto', historical: false })).toBe('Compacted · 160k → 24k');
+    expect(boundaryCopy({ kind: 'compaction', preTokens: 160_000, postTokens: 24_000, trigger: 'manual', historical: true })).toBe('Compacted · 160k → 24k');
+    expect(boundaryCopy({ kind: 'compaction', preTokens: 160_000, postTokens: null, trigger: 'auto', historical: false })).toBe('Compacted · 160k → ?');
+    expect(boundaryCopy({ kind: 'reset', trigger: 'plan_approved' })).toBe('Reset after plan approval');
+    expect(boundaryCopy({ kind: 'reset', trigger: 'plan_approval' })).toBe('Reset after plan approval');
+    expect(boundaryCopy({ kind: 'reset', trigger: 'clear' })).toBe('Cleared');
+    expect(boundaryCopy({ kind: 'reset', trigger: 'cleared' })).toBe('Cleared');
+    expect(boundaryCopy({ kind: 'reset', trigger: null })).toBe('Reset');
+    expect(boundaryCopy({ kind: 'reset', trigger: 'fresh_session' })).toBe('Reset · fresh_session');
+    expect(boundaryCopy({ kind: 'retraction', reason: 'transcript_branch', fallbackModel: null })).toBe('Continued from an earlier point');
     expect(boundaryCopy({ kind: 'retraction', reason: 'refusal', fallbackModel: 'claude-sonnet-5' })).toBe('Response retracted · refusal · switched to claude-sonnet-5');
-    expect(boundaryCopy({ kind: 'rewind', hiddenRows: 4, revealed: false })).toBe('Rewound to here · 4 messages hidden · Show');
-    expect(boundaryCopy({ kind: 'rewind', hiddenRows: 4, revealed: true })).toBe('Rewound to here · 4 messages hidden · Hide');
+    expect(boundaryCopy({ kind: 'rewind', hiddenRows: 3, revealed: false })).toBe('Rewound · 3 hidden · Show');
+    expect(boundaryCopy({ kind: 'rewind', hiddenRows: 4, revealed: true })).toBe('Rewound · 4 hidden · Hide');
+    expect(rewindLabel(1)).toBe('Rewound · 1 hidden');
+  });
+
+  // The word cut (T57, T59, T64, T68, T70, T114, N100, N101, N117, T17): the lines and notices in a person's words
+  it('notices, a release, a jump’s bar, a blocked call’s line, the compaction’s row and an artifact’s screenshot', () => {
+    expect(processExitCopy('budget', 0)).toBe('Paused to save memory · send to resume');
+    expect(processExitCopy('idle', 0)).toBe('Paused while idle · send to resume');
+    expect(HANDOVER_REINIT_COPY).toBe('Resumed after the update');
+    expect(NOTICE.schedule('Check the nightly build')).toBe('Scheduled · Check the nightly build');
+    expect(NOTICE.schedule(null)).toBe('Scheduled');
+    expect(NOTICE.wake).toBe('Woken to read a message');
+    expect(REACH.loading(0.4)).toBe('Finding the message · 40%');
+    expect(REACH.loading(null)).toBe('Finding the message…');
+    expect(BLOCKED.always.command).toBe('A rule always denies this command. Change the rule or the mode to run it.');
+    expect(BLOCKED.always.call).toBe('A rule always denies this call. Change the rule or the mode to run it.');
+    expect(compactingLine('')).toBe('Compacting…');
+    expect(compactingLine('12s')).toBe('Compacting… 12s');
+    expect(ARTIFACT_CELL.screenshot({ title: 'Q3 plan', version: 3, width: 1280, height: 800 }, 'a1')).toBe('Screenshot of Q3 plan');
+    expect(ARTIFACT_CELL.screenshot({ title: 'Q3 plan', revision: 2, width: 1280, height: 800 }, 'a1')).toBe('Screenshot of Q3 plan');
+    expect(ARTIFACT_CELL.screenshot(null, 'a1')).toBe('Screenshot of a1');
+  });
+
+  // The word cut's `stays` rows (Acceptance 3: what was to stay, stayed): T11, T13, T15, T34, T36, T41, N99, N118
+  it('keeps the words the cut leaves as they read', () => {
+    expect(cellLabel({ kind: 'edit', path: 'src/app/main.ts', change: 'update', added: 3, removed: 1 })).toBe('Edited src/app/main.ts +3 −1');
+    expect(cellLabel({ kind: 'moved', name: 'pnpm dev', durationMs: 12_000 })).toBe('Moved `pnpm dev` to the background after 12s');
+    expect(cellLabel({ kind: 'denied', subject: 'rm -rf build', disposition: 'auto_denied', denialKind: 'automode-blocked', reason: null, again: true, approved: true })).toBe('Auto mode blocked again: `rm -rf build` · approved');
+    expect(SAFEGUARD_LINE.not_flagged).toBe('Auto mode · reviewed · not flagged');
+    expect(thinkingLabel(false, 14_000)).toBe('Thought for 14s');
+    expect(PENDING_CAPTION.next).toBe('Sends at the next step');
+    expect(commandLead({ command: 'cost' })).toBe('/cost · ');
   });
 
   it('pluralises', () => {
