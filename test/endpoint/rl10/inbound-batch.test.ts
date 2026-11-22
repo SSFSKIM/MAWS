@@ -1,6 +1,7 @@
 // The inbound index fsynced a page at a time (the first-download rate's fix): each arriving event's line is written as
-// it is judged, memory with it, and the files written are fsynced once before each events frame goes down to sminos,
-// not once an event. A copy later in the same page meets the earlier line, so it is spent as `replayed`.
+// it is judged, memory with it, and the files written are fsynced before anything leaves the relay (an events frame,
+// a `spent`, a `rejected` up, a snapshot's policy change), not once an event. A copy later in the same page meets the
+// earlier line, so it is spent as `replayed`. A file is fsynced once as it is first read.
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +31,8 @@ const ORG = 'org-inbound';
 const P = '7d2b9c40-1f3e-4a6b-8c5d-9e0f1a2b3c4d';
 const NAME = 'host';
 const REF = 'q4Hc2Wv9Kp0Lm8Tr1Xy7Za';
+const MAC = 'm4Hc2Wv9Kp0Lm8Tr1Xy7Za';
+const S = '22222222-2222-4222-8222-222222222222';
 const NO_CERTS: Certificates = { certs: [], retirements: [] };
 
 const dirs: string[] = [];
@@ -49,11 +52,14 @@ async function scene() {
   const A = memberId();
   const B = memberId();
   const machine = await generateSigningKey();
+  const mac = await generateSigningKey();
   let head = await genesis(ORG, A, a1, await generateSigningKey());
   head = await successor(head, [a1], (s) => {
     s.members.push({ id: B, email: 'b@example.com', role: 'member', devices: [b1.device] });
     s.machines.push({ name: NAME, ref: REF, pub: machine.pub, owners: [A] });
     s.machineNames.push({ name: NAME, ref: REF });
+    s.machines.push({ name: 'mac', ref: MAC, pub: mac.pub, owners: [A] });
+    s.machineNames.push({ name: 'mac', ref: MAC });
   });
   const state = EndpointState.open(scratch());
   const inbound = state.subdirectory('inbound');
@@ -68,7 +74,7 @@ async function scene() {
     ledger: new SignatureLedger(() => state.subdirectory('signatures')),
     index: new InboundIndex(() => inbound, Date.now),
     legacy: new LegacyKey(() => state, () => ORG),
-    hub: { openProject: () => () => {}, send: () => true },
+    hub: { openProject: () => () => {}, send: (frame) => (calls.push(`hub ${frame.t}`), true) },
     toSminos: (frame) => {
       calls.push(`down ${frame.t}`);
       down.push(frame);
@@ -76,6 +82,7 @@ async function scene() {
     opened: () => {},
     now: Date.now,
     log: () => {},
+    policyChanged: (session) => void calls.push(`policy ${session}`),
   });
   relay.hello({ t: 'hello', project: P, name: 'maws', have: {} });
   /** Words B's device signed, as the hub posts them at `seq` (the signature leaves a `hub/` position out). */
@@ -84,8 +91,13 @@ async function scene() {
     return signEvent({ org: ORG, project: P }, { kind: 'human', from: 'human', member: B, to: '*', text, created, nonce: 'AAAAAAAAAAAAAAAAAAAAAA' }, b1.channel.privateKey, b1.channel.pub);
   };
   const at = (signed: object, seq: number) => ({ ...signed, writer: `hub/${B}`, seq, ts: (signed as { created: string }).created });
+  /** A remote session's `joined` snapshot, signed by the machine `mac`. */
+  const joined = async (seq: number) => {
+    const created = new Date().toISOString();
+    return signEvent({ org: ORG, project: P }, { ts: created, created, writer: `mac/${S}`, seq, kind: 'joined', session: S }, mac.privateKey, mac.pub);
+  };
   const lines = () => fs.readFileSync(join(inbound, `${P}.idx`), 'utf8').trim().split('\n').length;
-  return { relay, inbound, calls, down, words, at, lines, B };
+  return { relay, inbound, calls, down, words, at, joined, lines, B };
 }
 
 describe('the inbound index, fsynced a page at a time', () => {
@@ -118,7 +130,42 @@ describe('the inbound index, fsynced a page at a time', () => {
     calls.length = 0;
     const [f, g] = [await words('f'), await words('g')];
     await relay.fromHub({ t: 'events', project: P, events: [at(f, 7), at(page[0], 8), at(g, 9)] });
-    expect(calls).toEqual(['fsync', 'down events', 'down spent', 'fsync', 'down events']);
+    expect(calls).toEqual(['fsync', 'hub rejected', 'down events', 'down spent', 'fsync', 'down events']);
+  });
+
+  it('sends a copy’s verdict, the hub’s `rejected` and sminos’s `spent`, only after the page’s lines are fsynced', async () => {
+    const { relay, calls, words, at } = await scene();
+    await relay.fromHub({ t: 'events', project: P, events: [at(await words('first'), 1)] });
+    calls.length = 0;
+    const one = await words('one');
+    await relay.fromHub({ t: 'events', project: P, events: [at(one, 2), at(one, 3)] });
+    expect(calls).toEqual(['fsync', 'hub rejected', 'down events', 'down spent']);
+  });
+
+  it('changes no policy for a snapshot before its line is fsynced', async () => {
+    const { relay, calls, words, at, joined } = await scene();
+    await relay.fromHub({ t: 'events', project: P, events: [at(await words('first'), 1)] });
+    calls.length = 0;
+    await relay.fromHub({ t: 'events', project: P, events: [await joined(1)] });
+    expect(calls).toEqual(['fsync', `policy ${S}`, 'down events']);
+  });
+
+  it('fsyncs a file once as it is first read: lines a crashed endpoint wrote may never have been synced', async () => {
+    const { relay, inbound, calls, words, at } = await scene();
+    await relay.fromHub({ t: 'events', project: P, events: [at(await words('first'), 1)] });
+    calls.length = 0;
+    const reread = new InboundIndex(() => inbound, Date.now);
+    reread.seen(P, 'c', 'hub/b', 1);
+    reread.seen(P, 'c', 'hub/b', 2);
+    expect(calls).toEqual(['fsync']);
+  });
+
+  it('fails the sync of a file gone since its write, so nothing judged from it leaves', async () => {
+    const { inbound } = await scene();
+    const index = new InboundIndex(() => inbound, Date.now);
+    index.record(P, 'c1', 'hub/b', 1);
+    fs.renameSync(join(inbound, `${P}.idx`), join(inbound, 'aside.idx'));
+    expect(() => index.sync()).toThrow(/ENOENT/);
   });
 
   it('fsyncs nothing for a page that writes nothing', async () => {

@@ -73,13 +73,16 @@ export function removeFile(dir: string, name: string): void {
   syncDirectory(dir);
 }
 
-/** Fsyncs the file at `path` (an fsync is the file's, whichever descriptor asks); nothing when it is gone. */
-export function syncFile(path: string): void {
+/**
+ * Fsyncs the file at `path` (an fsync is the file's, whichever descriptor asks). One that is gone throws, since what was
+ * written to it is not known to be on disk; `absent: 'skip'` takes a file that may never have been written as nothing.
+ */
+export function syncFile(path: string, options: { absent?: 'skip' } = {}): void {
   let fd: number;
   try {
     fd = fs.openSync(path, 'r');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if (options.absent === 'skip' && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
   try {

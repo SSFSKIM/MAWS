@@ -62,7 +62,10 @@ export class InboundIndex {
     if (!held.byPosition.has(`${writer}\n${seq}`)) held.byPosition.set(`${writer}\n${seq}`, content);
   }
 
-  /** Fsyncs each file written since the last call: what `record` wrote is on disk when it returns. */
+  /**
+   * Fsyncs each file written since the last call: what `record` wrote is on disk when it returns. A file gone since its
+   * write (`inbound/` moved aside) throws, so nothing judged from it leaves; it is downloaded again.
+   */
   sync(): void {
     for (const path of [...this.#dirty]) {
       syncFile(path);
@@ -75,6 +78,9 @@ export class InboundIndex {
     let held = this.#projects.get(project);
     if (held !== undefined) return held;
     held = { byContent: new Map(), byPosition: new Map() };
+    // Fsynced once as it is first read: lines a crashed endpoint wrote and never synced may be in the page cache alone,
+    // and what is judged from them must not be lost to a power cut after.
+    syncFile(join(this.#dir(), `${project}.idx`), { absent: 'skip' });
     const since = this.#now() - INBOUND_KEPT_MS;
     let dropped = 0;
     for (const raw of readLines(this.#dir(), `${project}.idx`)) {
