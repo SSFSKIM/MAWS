@@ -1274,13 +1274,19 @@ describe('scheduled jobs', () => {
   const next = (cron: string, from: number) => nextCronMatch(parseCron(cron)!, from)!;
   const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
 
+  const shownText = (element: Element | null) => {
+    if (!element) return undefined;
+    const copy = element.cloneNode(true) as Element;
+    for (const hidden of copy.querySelectorAll('[hidden]')) hidden.remove();
+    return copy.textContent;
+  };
   const scheduled = () =>
     Array.from(section('scheduled')?.querySelectorAll<HTMLElement>('[data-scheduled]') ?? []).map((row) => ({
       id: row.dataset.scheduled,
       schedule: row.querySelector('[data-part="schedule"]')?.textContent,
       kind: row.querySelector('[data-part="kind"]')?.textContent,
       prompt: row.querySelector('[data-part="prompt"]')?.textContent,
-      when: row.querySelector('[data-part="when"]')?.textContent,
+      when: shownText(row.querySelector('[data-part="when"]')), // the next run's tip keeps its description hidden beside it
       link: row.querySelector('button')?.getAttribute('aria-label') ?? null, // the word cut (T222): a glyph named by the words
     }));
   const attachTranscript = (events: SessionEvent[]) => act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
