@@ -1,5 +1,5 @@
 // A background shell's row, a monitor's and a task of another kind's (C8b execution document, M3; the UX wave's U8b,
-// M7): its kind's mark, then `<description> · running <elapsed>`, then `· <status> <ago>` once it ends; the description
+// M7): its kind's mark, then `<description> · <elapsed>`, then `· <status> <ago>` once it ends; the description
 // is the part a narrow row cuts first, the state only when the row cannot hold the state alone. A shell's `Output` opens the Log on the file the engine reported (the Bash result's
 // own sentence at start, or the notification), never a derived one, and is disabled until one is reported (P5 O9 M5: and
 // absent for a lane A job, whose output tail is remote-only). `Stop` asks
@@ -19,15 +19,17 @@ export const ACTION =
 
 export const statusWord = (status: TaskStatus): string => (status === 'running' ? '' : BACKGROUND_COPY.status[status]);
 
-// A shell's or a monitor's state after its description: ` · running <elapsed>`, ` · <status> <ago>`.
+// A shell's or a monitor's state after its description: ` · <elapsed>` while it runs, ` · <status> <ago>` once it ends.
+// The word cut (T216, T217, T218, P126): no word for running or completed, none for an unknown outcome, and nothing for a
+// time no source gave; a failed, stopped or session-ended row keeps its word.
 export function taskState(node: TaskNode, now: number): string {
   if (node.status === 'running') {
     const elapsed = elapsedOf(node, now);
-    return elapsed ? BACKGROUND_COPY.runningState(formatElapsed(elapsed.ms)) : BACKGROUND_COPY.runningUntimedState;
+    return BACKGROUND_COPY.state(elapsed ? [formatElapsed(elapsed.ms)] : []);
   }
-  const word = statusWord(node.status);
-  if (node.status === 'exited' || node.endedAt === null) return BACKGROUND_COPY.endedUndatedState(word);
-  return BACKGROUND_COPY.endedState(word, formatAgo(now - Date.parse(node.endedAt)));
+  const word = node.status === 'completed' ? '' : statusWord(node.status);
+  const ago = node.status === 'exited' || node.endedAt === null ? '' : formatAgo(now - Date.parse(node.endedAt));
+  return BACKGROUND_COPY.state([word, ago].filter((part) => part !== ''));
 }
 
 // The one line whole (a row's tooltip).

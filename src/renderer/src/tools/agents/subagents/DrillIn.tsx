@@ -1,5 +1,6 @@
 // The Subagents drill-in (C8b execution document, M2; K2; mockup 03 study 02): Back, the agent's identity with
-// `<model> · <elapsed> · <tokens>` (no effort cell: no source gives a child's effort), `Dispatched by <session>` and
+// `<model> · <elapsed> · <tokens>`, each value only when known (no effort cell: no source gives a child's effort; the
+// word cut, T183, P97, T184: no words for a missing value and no `Dispatched by <session>`, said by the tab already) and
 // `Stop agent` behind a confirmation; C6's `Transcript variant: 'child'` over the child's own `ipcSource`, which it
 // mounts and never builds (the store's one attachment is shared with C5's agent tab), with the registered actions and
 // C7's inline request card, so a child's permission is answered in place; then the relay composer.
@@ -26,6 +27,7 @@ import { RelayComposer } from './RelayComposer';
 import { agentOfToolUse, refOf, STOP_DOUBT_MS, taskOf, useTicker } from './shared';
 import type { SubagentsHandle } from './SubagentsTool';
 import { displayTitle } from '../../../sessions/title';
+import { QuietSpinner } from '../../../ui/spinner';
 
 // The child's source: C6's `ipcSource` in the product; the `#panel` harness sets `HarnessSession.childSource(ref)` here
 // (as C8a's `child` tool mounts it), so the product path stays `ipcSource`.
@@ -91,9 +93,9 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   const now = useTicker(ticking);
   const elapsed = node ? elapsedOf(node, now) : null;
   const meta = SUBAGENTS_COPY.header(
-    node?.agent?.model ?? ctx.status?.subagentModel ?? SUBAGENTS_COPY.modelUnknown,
-    elapsed ? formatElapsed(elapsed.ms) : SUBAGENTS_COPY.elapsedUnavailable,
-    node?.usage ? formatTokens(node.usage.totalTokens) : SUBAGENTS_COPY.tokensUnavailable,
+    node?.agent?.model ?? ctx.status?.subagentModel ?? null,
+    elapsed ? formatElapsed(elapsed.ms) : null,
+    node?.usage ? formatTokens(node.usage.totalTokens) : null,
   );
 
   return (
@@ -106,9 +108,6 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
             <h2 className="truncate text-ui font-semibold">{title}</h2>
             <p data-part="agent-meta" className="truncate text-ui-sm text-fg-muted tabular-nums">
               {meta}
-            </p>
-            <p data-part="dispatched-by" className="truncate text-ui-sm text-fg-muted">
-              {SUBAGENTS_COPY.dispatchedBy(sessionTitle)}
             </p>
           </div>
           {!driven && node?.status === 'running' && ctx.status !== null && <StopAgent key={node.taskId} appSessionId={appSessionId} node={node} title={title} />}
@@ -224,7 +223,9 @@ export function PendingAgent({ appSessionId, toolUseId, handle }: { appSessionId
   return (
     <div data-view="pending" className="flex h-full min-h-0 flex-col">
       <BackButton handle={handle} />
-      <p className="flex flex-1 items-center justify-center p-4 text-ui text-fg-muted">{SUBAGENTS_COPY.waitingToStart}</p>
+      <p className="flex flex-1 items-center justify-center p-4">
+        <QuietSpinner label={SUBAGENTS_COPY.waitingToStart} /* the word cut (T189) */ />
+      </p>
     </div>
   );
 }

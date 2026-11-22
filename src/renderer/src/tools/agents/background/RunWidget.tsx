@@ -1,5 +1,5 @@
 // The workflow widget (E7 execution document, Design §2; the vault's widget layout, advisory): one run in Background
-// work's drill-in view. A header with the run's description, its line, the badge once ended or `Stop workflow` while it
+// work's drill-in view. A header with the run's description, its line, the badge once ended or `Stop` while it
 // runs and the session is live here; below, phases on the left (`All phases` first, each `<title>` with `<done>/<total>`
 // or `Queued` and a state mark) and the selected phase's agents on the right (glyph, label, model, state, time, tokens),
 // stacked below 520 px of width (at the panel's default 380 px, side by side left the five-column table some 230 px).
@@ -8,6 +8,7 @@
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
+import { QuietSpinner } from '../../../ui/spinner';
 import type { PanelToolContext } from '../../../panel/tool';
 import { glyphFor, SubagentGlyph } from '../../../transcript';
 import { BACKGROUND_COPY } from '../copy';
@@ -52,7 +53,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
     return (
       <div data-view="run" className="flex h-full min-h-0 flex-col gap-2 overflow-auto px-3.5 py-2">
         {back}
-        <p className="text-ui-sm text-fg-muted">{BACKGROUND_COPY.runNotFound}</p>
+        <QuietSpinner label={BACKGROUND_COPY.runNotFound} /* the word cut (T209) */ />
       </div>
     );
   }
@@ -77,13 +78,15 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
         </p>
         {node.status === 'running' && live && (
           <div className="mt-1 flex flex-col items-start gap-1">
-            <StopButton node={node} label={BACKGROUND_COPY.stopWorkflow} onStop={handle.stop} />
+            <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={handle.stop} />
           </div>
         )}
         <StopError message={stopError(node.taskId)} />
       </header>
       {view.phases.length === 0 ? (
-        <p className="px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.phasesPending}</p>
+        <p className="px-3.5 pt-3">
+          <QuietSpinner label={BACKGROUND_COPY.phasesPending} /* the word cut (T212) */ />
+        </p>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col @min-[520px]:flex-row">
           <PhaseList phases={view.phases} selection={selection} running={view.running} onSelect={handle.selectPhase} />
@@ -167,8 +170,8 @@ function PhaseMark({ state, running }: { state: RunPhase['state']; running: bool
   return <span role="img" aria-label={state} className={`size-1.5 rounded-full ${state === 'queued' ? 'border border-border-strong' : 'bg-border-strong'}`} />;
 }
 
-const Check = ({ hidden = false }: { hidden?: boolean }) => (
-  <span role={hidden ? undefined : 'img'} aria-label={hidden ? undefined : BACKGROUND_COPY.phaseDone} aria-hidden={hidden || undefined} className="text-success">
+const Check = () => (
+  <span role="img" aria-label={BACKGROUND_COPY.phaseDone} className="text-success">
     <Icon className="size-3">
       <path d="M3.5 8.5l3 3 6-7" />
     </Icon>
@@ -234,11 +237,9 @@ function AgentRow({ agent, onOpenAgent }: { agent: RunAgent; onOpenAgent: (agent
       <td data-part="model" className="truncate py-0.5 text-left text-fg-muted" title={agent.model ?? undefined}>
         {agent.model ?? ''}
       </td>
+      {/* the word cut (T238): the check or the spinner alone, named by the engine's word; any other word shows */}
       <td data-part="state" className="truncate py-0.5 text-left">
-        <span className="flex min-w-0 items-center gap-1.5">
-          {agent.state === 'done' ? <Check hidden /> : agent.live ? <Spinner label={null} /> : null}
-          <span className={`truncate ${agent.state === 'done' ? 'text-fg-muted' : ''}`}>{agent.state}</span>
-        </span>
+        <span className="flex min-w-0 items-center gap-1.5">{agent.state === 'done' ? <Check /> : agent.live ? <Spinner label={agent.state} /> : <span className="truncate">{agent.state}</span>}</span>
       </td>
       <td data-part="time" className="py-0.5 text-right">
         {agent.elapsedMs === null ? '' : formatElapsed(agent.elapsedMs)}

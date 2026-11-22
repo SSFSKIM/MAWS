@@ -1,11 +1,12 @@
 // A workflow run's card (C8b execution document, M3; mockup 03 study 03; compact since E7, Design §2): the task's
-// description as its title (the progress frame's `summary` is not on X1 for a workflow), `workflow <name> · <elapsed> ·
-// <n> agents · <tokens>`, then one summary line (`<phase> · <done>/<total> agents`, `Queued` before any start, `Done`
-// after) where its per-phase tables were: those live in the run's widget, which the title and the chevron open.
-// `Stop workflow` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once. The UX wave's
+// description as its title (the progress frame's `summary` is not on X1 for a workflow), `<name> · <elapsed> · <n>
+// agents`, then one summary line (`<phase> · <done>/<total> agents`, `Queued` before any start, `Done` after, a quiet
+// spinner before the first progress) where its per-phase tables were: those live in the run's widget, which the title and
+// the chevron open. `Stop` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once. The UX wave's
 // U8b (M7): the title leads with the workflow's kind mark, since the Background tasks panel lists every kind together.
 import type { TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
+import { QuietSpinner } from '../../../ui/spinner';
 import { BACKGROUND_COPY } from '../copy';
 import { KindMark } from '../marks';
 import type { TaskNode } from '../model/task-graph';
@@ -23,12 +24,15 @@ interface Props {
   onStop: (taskId: TaskId) => void;
 }
 
-const summaryText = (summary: RunSummary | null): string =>
-  summary === null
-    ? BACKGROUND_COPY.phasesPending
-    : summary.kind === 'phase'
-      ? BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
-      : BACKGROUND_COPY.runSummary[summary.kind];
+// The word cut (T212): before the first progress, a quiet spinner in the sentence's place, the words its name.
+const summaryText = (summary: RunSummary | null) =>
+  summary === null ? (
+    <QuietSpinner label={BACKGROUND_COPY.phasesPending} />
+  ) : summary.kind === 'phase' ? (
+    BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
+  ) : (
+    BACKGROUND_COPY.runSummary[summary.kind]
+  );
 
 export function WorkflowCard({ node, view, live, selected, stopError, onOpen, onStop }: Props) {
   return (
@@ -64,12 +68,12 @@ export function WorkflowCard({ node, view, live, selected, stopError, onOpen, on
       <p data-part="line" className="truncate text-ui-sm text-fg-muted tabular-nums">
         {runLine(node, view)}
       </p>
-      <p data-part="summary" className="truncate text-ui-sm tabular-nums">
+      <p data-part="summary" className="min-h-[1lh] truncate text-ui-sm tabular-nums">
         {summaryText(runSummary(view.phases))}
       </p>
       {node.status === 'running' && live && (
         <div className="mt-1 flex flex-col items-start gap-1">
-          <StopButton node={node} label={BACKGROUND_COPY.stopWorkflow} onStop={onStop} />
+          <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={onStop} />
         </div>
       )}
       <StopError message={stopError} />

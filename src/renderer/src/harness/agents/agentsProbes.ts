@@ -53,7 +53,8 @@ function click(el: Element | null | undefined, what: string): void {
   if (el instanceof HTMLButtonElement && el.disabled) throw new Error(`agents: ${what} is disabled`);
   el.click();
 }
-const buttonNamed = (root: ParentNode | null | undefined, name: string) => [...(root?.querySelectorAll('button') ?? [])].find((b) => text(b) === name) ?? null;
+// by its text, or by its accessible name where the word cut made its word a glyph (Open creating turn, T222)
+const buttonNamed = (root: ParentNode | null | undefined, name: string) => [...(root?.querySelectorAll('button') ?? [])].find((b) => text(b) === name || b.getAttribute('aria-label') === name) ?? null;
 
 // ---- Subagents -------------------------------------------------------------------------------------------------------------
 
@@ -462,7 +463,7 @@ async function sendRelay(): Promise<void> {
 async function stop(taskId: string): Promise<void> {
   const body = region();
   const row = body?.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`);
-  if (row) click(buttonNamed(row, BACKGROUND_COPY.stopWorkflow) ?? buttonNamed(row, BACKGROUND_COPY.stop), `Stop for ${taskId}`);
+  if (row) click(buttonNamed(row, BACKGROUND_COPY.stop), `Stop for ${taskId}`); // a workflow's too (the word cut, T215)
   else {
     click(buttonNamed(agentView(), SUBAGENTS_COPY.stopAgent), 'Stop agent');
     await frames(1);

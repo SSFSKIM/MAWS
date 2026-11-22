@@ -2,11 +2,11 @@
 // TaskCreate writes, through the agent-work client's `tasks` as a TanStack query keyed `['fs.tasks', listId, machine]`
 // (never `useCommand`, which would reach the real bridge for a harness session; `connectAgentWorkEvents` invalidates the
 // `['fs.tasks', listId]` prefix on `fs.tasksChanged`). P5 O6 M4: a list id names no machine, so the list is read on the
-// session's machine (`fs.tasks` is graded machine-wide, which alone would read this machine's list for any session). A live session's list is C3's `taskListId`, a disk-only one's the record's engine session id,
-// labelled `session list`; with neither, the section says the list is not known yet rather than guessing one.
+// session's machine (`fs.tasks` is graded machine-wide, which alone would read this machine's list for any session). A live session's list is C3's `taskListId`, a disk-only one's the record's engine session id
+// (the word cut, T230: no longer labelled `session list`); with neither, the section says the list is not known yet rather than guessing one.
 // E7 (P-20): the read and the list body are shared with the Tasks panel (`useChecklist`, `ChecklistBody`), so the glance
-// and the panel are two surfaces over one list; this section's heading gains `Open`, which opens the panel. Its own
-// module, neither tool's (E11 W-D).
+// and the panel are two surfaces over one list; this section's heading gains `Open`, which opens the panel, drawn on
+// pointing at the heading or focus within it (the word cut, P140). Its own module, neither tool's (E11 W-D).
 import { useQuery } from '@tanstack/react-query';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
@@ -17,13 +17,13 @@ import { agentWorkClient } from '../client';
 import { BACKGROUND_COPY, TASKS_COPY } from '../copy';
 import { checklistOf, listIdFor, type ListIdAnswer } from '../model/task-list';
 import { Group } from '../background/Group';
+import { ON_HOVER } from '../../../ui/hover-scope';
 import { machineFor } from '../../../ipc/machine';
 
 export interface Checklist {
   answer: ListIdAnswer;
   list: ReturnType<typeof checklistOf> | null; // null until the first read answers, or while it cannot be read
   error: Error | null;
-  label: string | null; // `session list` for a disk-only session's list
 }
 
 export function useChecklist(status: EngineSessionStatus | null, session: SessionRecord | null): Checklist {
@@ -34,8 +34,7 @@ export function useChecklist(status: EngineSessionStatus | null, session: Sessio
   // P5 O7 M8: the read names its session, so another machine admits it as that session's own list
   const tasks = useQuery({ queryKey: ['fs.tasks', listId, machine], queryFn: () => agentWorkClient().tasks(machine, listId!, appSessionId), enabled: listId !== null });
   const list = listId !== null && tasks.data ? checklistOf(tasks.data) : null;
-  const label = answer.listId !== null && answer.label === 'session list' ? BACKGROUND_COPY.sessionList : null;
-  return { answer, list, error: tasks.error, label };
+  return { answer, list, error: tasks.error };
 }
 
 interface Props {
@@ -55,12 +54,12 @@ export function TaskChecklist({ status, session, expanded, onToggle, showEarlier
   const checklist = useChecklist(status, session);
   if (checklist.list === null || checklist.list.total === 0) return null;
   const open = (
-    <button type="button" aria-label={TASKS_COPY.openPanel} onClick={onOpen} className={actionClass}>
+    <button type="button" {...ON_HOVER} aria-label={TASKS_COPY.openPanel} onClick={onOpen} className={actionClass}>
       {TASKS_COPY.open}
     </button>
   );
   return (
-    <Group id="tasks" heading={BACKGROUND_COPY.tasks} suffix={checklist.label} action={open} expanded={expanded} onToggle={onToggle}>
+    <Group id="tasks" heading={BACKGROUND_COPY.tasks} action={open} expanded={expanded} onToggle={onToggle}>
       <ChecklistBody checklist={checklist} showEarlier={showEarlier} onToggleEarlier={onToggleEarlier} />
     </Group>
   );

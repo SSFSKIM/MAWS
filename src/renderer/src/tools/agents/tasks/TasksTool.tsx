@@ -10,6 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
 import { ChecklistBody, useChecklist } from '../checklist/TaskChecklist';
+import { BareCount } from '../../../ui/count';
 import { TASKS_COPY } from '../copy';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 
@@ -108,7 +109,7 @@ function TasksBody({ state, ctx }: { state: TasksHandle; ctx: PanelToolContext }
 
 function TaskList({ handle, snapshot, own, ctx }: { handle: TasksHandle; snapshot: TasksState; own: boolean; ctx: PanelToolContext }) {
   const checklist = useChecklist(ctx.status, ctx.session);
-  const { list, label } = checklist;
+  const { list } = checklist;
   const selected = own ? snapshot.selected : null;
   const showCompleted = own && snapshot.showCompleted;
 
@@ -129,13 +130,15 @@ function TaskList({ handle, snapshot, own, ctx }: { handle: TasksHandle; snapsho
     handle.revealDone(reveal);
   }, [where, reveal, showCompleted, selected, handle]);
 
-  const progress = list !== null && list.total > 0 ? TASKS_COPY.progress(list.completed, list.total) : null;
+  // the word cut (T232): `3/7`, its meaning its accessible name and tooltip; the word cut (T230): no session list label
+  const progress = list !== null && list.total > 0 ? list : null;
   return (
     <div ref={scroller} data-tool="tasks" onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto py-2">
-      {(progress !== null || label !== null) && (
+      {progress !== null && (
         <p className="flex shrink-0 items-baseline gap-1.5 px-3.5 pb-1.5 text-ui-sm text-fg-muted">
-          {progress !== null && <span data-part="progress">{progress}</span>}
-          {label !== null && <span data-part="label">{label}</span>}
+          <span data-part="progress">
+            <BareCount count={TASKS_COPY.progress(progress.completed, progress.total)} meaning={TASKS_COPY.progressMeaning(progress.completed, progress.total)} />
+          </span>
         </p>
       )}
       <ChecklistBody checklist={checklist} showEarlier={showCompleted} onToggleEarlier={() => handle.setShowCompleted(!showCompleted)} selected={selected} />

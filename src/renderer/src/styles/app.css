@@ -138,6 +138,15 @@
   [data-touch-fact="block"] { display: block; }
 }
 
+/* The word cut's rule 5 outside the transcript (ui/hover-scope.ts): a row's or a heading's action drawn while its scope
+   is pointed at or holds keyboard focus, and always where nothing can point. Outside every layer, so no utility class
+   draws it at rest. */
+[data-hover-scope] [data-on-hover] { opacity: 0; }
+[data-hover-scope]:hover [data-on-hover], [data-hover-scope]:focus-within [data-on-hover] { opacity: 1; }
+@media (hover: none) {
+  [data-hover-scope] [data-on-hover] { opacity: 1; }
+}
+
 /* board 505 (UX wave U11a): one rule for the shell's gutters. A scroller with a footer or a composer aligned under it reserves
    its scrollbar's gutter whether or not it overflows, and the element under it reserves the same gutter, so under classic
    scrollbars both centre their column in the same width; with overlay scrollbars nothing moves. `scrollbar-gutter` acts

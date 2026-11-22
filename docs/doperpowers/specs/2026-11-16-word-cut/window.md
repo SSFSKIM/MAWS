@@ -4,7 +4,7 @@
 
 105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 4 rows for the UX wave's new text (0 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 6 rows for the UX wave's new text (2 cut, 1 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -325,6 +325,13 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N128 | the toast when "Toggle report and transcript" is used in a session the to-human mod draws | The to-human mod draws this session's view. Use its switch above the composer. | reword | The toast reads "The to-human mod draws this view. Use its switch." | pattern | `src/renderer/src/owner/view/copy.ts:31` | new `src/renderer/src/owner/view/copy.ts:31` | M4 · no scene: needs the to-human mod drawing the view; no fixture installs it |
+
+#### Menu bar
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N156 | View ▸ More surfaces, the item that opens the surface; the same action title in the command palette, Settings › Keyboard and the shortcuts sheet | Subagents | cut | View ▸ More surfaces reads Agents, as the tab does. | pattern | `src/shared/keymap/actions.ts:75` | new `src/shared/keymap/actions.ts:76` | M3 · no scene: The native menu bar is drawn by the OS outside the window; the command palette's and Settings › Keyboard's rows are in the window (wanted: the command palette filtered to the surface's name, and Settings › Keyboard's View › More surfaces group) |
+| N157 | View ▸ More surfaces, the item that opens the surface; the same action title in the command palette, Settings › Keyboard and the shortcuts sheet | Background tasks | cut | View ▸ More surfaces reads Background, as the tab does. | pattern | `src/shared/keymap/actions.ts:76` | new `src/shared/keymap/actions.ts:77` | M3 · no scene: The native menu bar is drawn by the OS outside the window; the command palette's and Settings › Keyboard's rows are in the window (wanted: the command palette filtered to the surface's name, and Settings › Keyboard's View › More surfaces group) |
 
 ### Banners, toasts and the main area
 

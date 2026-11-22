@@ -22,6 +22,7 @@ import type { Job } from 'desk-hub/protocol';
 import { useDrivenJobs } from '../../../lane-a/jobs/lane-jobs'; // P5 O9 M5
 import { taskNodeOf } from '../../../lane-a/jobs/job-nodes'; // P5 O9 M5
 import { stopSessionTask, useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
+import { QuietSpinner } from '../../../ui/spinner';
 import { BACKGROUND_COPY } from '../copy';
 import { openLog } from '../log/LogTool';
 import { BackgroundIcon } from '../marks';
@@ -337,7 +338,12 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
     <div ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
       {!listed && !driven && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</p>}
       {runsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{BACKGROUND_COPY.runsUnavailable(runsError)}</p>}
-      {pendingRun !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.runNotFound}</p>}
+      {/* the word cut (T209): a run a hand-off named and no read has brought yet is a wait, drawn as a quiet spinner */}
+      {pendingRun !== null && (
+        <p className="shrink-0 px-3.5 pt-3">
+          <QuietSpinner label={BACKGROUND_COPY.runNotFound} />
+        </p>
+      )}
       {running.length > 0 ? (
         <Group id="running" heading={BACKGROUND_COPY.running(running.length)} expanded={expanded.has('running')} onToggle={handle.toggle}>
           {running.map(row)}

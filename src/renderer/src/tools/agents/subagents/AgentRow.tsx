@@ -5,11 +5,15 @@
 // closed and N agents run under it at any depth, then an arrow, turned while open, at the row's right end before the
 // elapsed time, as tall as the row. The line under the title is the agent's own state and says nothing of what runs
 // under it, except for an agent whose own run has ended while a task it started still runs (item 359): its outcome word
-// without a time, then how many background tasks run under it, the part of the line that is never cut.
+// without a time, then how many tasks run under it, the part of the line that is never cut. The word cut: an agent
+// waiting on a request of its own keeps its line, its mark a warning disc beside its glyph and `Approval needed` the
+// row's tooltip and description (T166); a row of unknown status has no second line and a running one with no start
+// time no elapsed (T167, T168).
 import { useId } from 'react';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import { SubagentGlyph } from '../../../transcript';
+import { Tip } from '../../../ui/tip';
 import { SUBAGENTS_COPY } from '../copy';
 import { elapsedOf, formatElapsed } from '../model/elapsed';
 import { agentsRunningUnder, isEnded, outcomeSummary, rowSecondLine, rowTitle, runningUnder, tasksRunningUnder, type TaskGraph, type TaskNode, type TreeRow } from '../model/task-graph';
@@ -19,29 +23,25 @@ type AgentTreeRow = Extract<TreeRow, { kind: 'agent' }>;
 export const indent = (depth: number) => ({ marginInlineStart: depth * 24 });
 
 // The row's line: its state (cut first when the row is narrow, unless `whole`), then what still runs under an agent
-// whose own run has ended.
+// whose own run has ended; null for an agent of unknown status, whose line would only say so.
 interface Line {
   state: string;
-  tone: 'muted' | 'danger' | 'warning';
+  tone: 'muted' | 'danger';
   tasks: string;
   whole: boolean;
 }
 
-function lineOf(node: TaskNode, graph: TaskGraph, waiting: boolean, now: number): Line {
+function lineOf(node: TaskNode, graph: TaskGraph, now: number): Line | null {
   const tone = node.status === 'failed' ? 'danger' : 'muted';
   const kept = isEnded(node.status) && runningUnder(graph, node.taskId) > 0;
   const tasks = tasksRunningUnder(graph, node.taskId);
-  const base: Line = kept
-    ? { state: outcomeWord(node), tone, tasks: tasks > 0 ? SUBAGENTS_COPY.tasksRunning(tasks) : '', whole: true }
-    : node.status === 'running'
-      ? { state: rowSecondLine(node), tone: 'muted', tasks: '', whole: false }
-      : node.status === 'unknown'
-        ? { state: SUBAGENTS_COPY.statusUnavailable, tone: 'muted', tasks: '', whole: false }
-        : { state: outcomeSummary(node) ? `${outcomeOf(node, now)} · ${outcomeSummary(node)}` : outcomeOf(node, now), tone, tasks: '', whole: false };
-  return waiting ? { ...base, state: SUBAGENTS_COPY.approvalNeeded, tone: 'warning' } : base;
+  if (kept) return { state: outcomeWord(node), tone, tasks: tasks > 0 ? SUBAGENTS_COPY.tasksRunning(tasks) : '', whole: true };
+  if (node.status === 'running') return { state: rowSecondLine(node), tone: 'muted', tasks: '', whole: false };
+  if (node.status === 'unknown') return null;
+  return { state: outcomeSummary(node) ? `${outcomeOf(node, now)} · ${outcomeSummary(node)}` : outcomeOf(node, now), tone, tasks: '', whole: false };
 }
 
-const TONE = { muted: 'text-fg-muted', danger: 'text-danger', warning: 'text-warning' } as const;
+const TONE = { muted: 'text-fg-muted', danger: 'text-danger' } as const;
 
 export function AgentRow({
   row, graph, waiting, now, onOpen, under,
@@ -63,7 +63,7 @@ export function AgentRow({
     const e = elapsedOf(node, now);
     elapsed = e ? formatElapsed(e.ms) : SUBAGENTS_COPY.elapsedUnavailable;
   }
-  const line = lineOf(node, graph, waiting, now);
+  const line = lineOf(node, graph, now);
   return (
     <div
       data-agent-row={row.taskId}
@@ -72,15 +72,18 @@ export function AgentRow({
       style={indent(row.depth)}
       className={`relative flex min-h-12 items-stretch ${row.depth > 0 ? 'border-l border-border-strong' : ''}`}
     >
-      <button
-        type="button"
-        data-part="open"
-        aria-labelledby={`${id}-text ${id}-elapsed`}
-        onClick={() => onOpen(row.taskId as unknown as AgentId)}
-        className="absolute inset-0 outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2"
-      />
+      <Tip content={waiting ? SUBAGENTS_COPY.approvalNeeded : null} description={waiting ? SUBAGENTS_COPY.approvalNeeded : null}>
+        <button
+          type="button"
+          data-part="open"
+          aria-labelledby={`${id}-text ${id}-elapsed`}
+          onClick={() => onOpen(row.taskId as unknown as AgentId)}
+          className="absolute inset-0 outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2"
+        />
+      </Tip>
       <span className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3.5">
         <SubagentGlyph agent={refOf(node)} className={`shrink-0 text-accent ${row.depth > 0 ? 'text-ui' : 'text-prose'}`} />
+        {waiting && <span data-part="waiting" aria-hidden="true" className="-ml-1 size-1.5 shrink-0 rounded-full bg-warning" />}
         <span id={`${id}-text`} className="min-w-0 flex-1 text-left">
           <span className="block min-w-0 truncate font-medium">
             <span data-part="title">{title}</span>
@@ -90,16 +93,18 @@ export function AgentRow({
               </span>
             )}
           </span>
-          <span data-part="line" title={`${line.state}${line.tasks}`} className="flex min-w-0 text-ui-sm text-fg-muted">
-            <span data-part="state" className={`${line.whole ? 'shrink-0 whitespace-nowrap' : 'min-w-0 truncate'} ${TONE[line.tone]}`}>
-              {line.state}
-            </span>
-            {line.tasks !== '' && (
-              <span data-part="tasks" className="shrink-0 whitespace-pre">
-                {line.tasks}
+          {line !== null && (
+            <span data-part="line" title={`${line.state}${line.tasks}`} className="flex min-w-0 text-ui-sm text-fg-muted">
+              <span data-part="state" className={`${line.whole ? 'shrink-0 whitespace-nowrap' : 'min-w-0 truncate'} ${TONE[line.tone]}`}>
+                {line.state}
               </span>
-            )}
-          </span>
+              {line.tasks !== '' && (
+                <span data-part="tasks" className="shrink-0 whitespace-pre">
+                  {line.tasks}
+                </span>
+              )}
+            </span>
+          )}
         </span>
       </span>
       {under && <Disclosure taskId={row.taskId} title={title} graph={graph} open={under.open} onToggle={under.onToggle} />}

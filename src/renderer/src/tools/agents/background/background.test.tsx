@@ -230,11 +230,13 @@ describe('background work', () => {
     expect(widget()!.querySelector('[data-part="line"]')?.textContent).toMatch(/^maws-probe · .+ · 2 agents$/);
     expect(options()).toEqual(['All phases|', '*Echo|0/2']); // the running phase by default
     expect(Array.from(widget()!.querySelectorAll('th')).map((th) => th.textContent)).toEqual(['Agent', 'Model', 'State', 'Time', 'Tokens']);
-    // a row with an agent id leads with its glyph; the state is the engine's word (`start` while an agent runs)
+    // a row with an agent id leads with its glyph; a running agent's state is the spinner alone, named by the engine's
+    // word (`start` while an agent runs; the word cut, T238)
     expect(tableRows().map((cells) => [cells[0], cells[2]])).toEqual([
-      [expect.stringMatching(/^.alpha$/u), 'start'],
-      ['beta', 'start'],
+      [expect.stringMatching(/^.alpha$/u), ''],
+      ['beta', ''],
     ]);
+    expect(Array.from(widget()!.querySelectorAll('td[data-part="state"]'), (cell) => cell.querySelector('[role="img"]')?.getAttribute('aria-label'))).toEqual(['start', 'start']);
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
     expect(options()).toEqual(['All phases|', '*Echo|2/2']); // the last phase once none runs
     expect(tableRows().map((cells) => cells.slice(2))).toEqual([

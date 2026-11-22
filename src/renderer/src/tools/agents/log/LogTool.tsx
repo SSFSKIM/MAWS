@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
+import { NamedGlyph } from '../../../ui/glyph';
 import { instanceOf, panelHost } from '../../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
 import { agentWorkClient } from '../client';
@@ -134,10 +135,14 @@ function LogBody({ state, ctx }: { state: LogHandle; ctx: PanelToolContext }) {
               {formatBytes(s.bytes)}
             </span>
           )}
+          {/* the word cut (T241): Refresh is the circular arrow, its word its name and tooltip; a press while a read is out
+              does nothing (a named glyph is never `disabled`, which would take it out of the keyboard) */}
           {!refused && (
-            <button type="button" className={ACTION} disabled={s.loading} onClick={() => void state.refresh()}>
-              {LOG_COPY.refresh}
-            </button>
+            <NamedGlyph label={LOG_COPY.refresh} aria-busy={s.loading || undefined} onClick={() => !s.loading && void state.refresh()}>
+              <Icon className="size-3.5">
+                <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
+              </Icon>
+            </NamedGlyph>
           )}
         </div>
         <PathLine path={s.path} />

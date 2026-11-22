@@ -5,6 +5,8 @@
 // jitter in the tooltip) or, for a session-only job of a session not running here, that it resumes with the session;
 // its expiry; and `Open creating turn` when this transcript holds the call, which jumps the transcript to its cell. The
 // section is omitted with nothing to list and nothing to say. Read-only: MAWS never writes the file or asks for a job.
+// The word cut (T222, T224, T226): Open creating turn is an arrow drawn on the pointed or focused row, its words its name
+// and tooltip; a next run reads `14:30 · in 3m`, and a schedule MAWS cannot read leaves the next run blank.
 import { useMemo } from 'react';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,9 +19,11 @@ import { BACKGROUND_COPY, SCHEDULED_COPY } from '../copy';
 import { formatAgo, formatIn } from '../model/elapsed';
 import { createdCrons, cronHistoryActivity, scheduledRows, sessionCrons, type ScheduledRow } from '../model/scheduled';
 import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
+import { Icon } from '../../../app/IconButton';
+import { NamedGlyph } from '../../../ui/glyph';
+import { HOVER_SCOPE, ON_HOVER } from '../../../ui/hover-scope';
 import { Group, type BackgroundSection } from './Group';
 import { useScheduledFile } from './scheduled-file';
-import { ACTION } from './TaskRows';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NO_TURNS: readonly TurnId[] = [];
@@ -94,8 +98,9 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
     row.expiresAt !== null && (row.expiresAt > now ? SCHEDULED_COPY.expires(formatShortDate(row.expiresAt, now)) : SCHEDULED_COPY.expired(formatShortDate(row.expiresAt, now))),
     row.lastFiredAt !== null && SCHEDULED_COPY.lastRan(formatAgo(now - row.lastFiredAt)),
   ].filter((part): part is string => part !== false);
+  const when = row.dormant ? SCHEDULED_COPY.dormant : row.next === null ? null : <span title={SCHEDULED_COPY.jitter}>{SCHEDULED_COPY.next(localTime(row.next, now), formatIn(row.next - now))}</span>;
   return (
-    <li data-scheduled={row.id} data-store={row.store} className={`mx-3 flex flex-col gap-0.5 rounded-sm px-2 py-1.5 text-ui-sm ${row.dormant ? 'text-fg-faint' : 'text-fg'}`}>
+    <li {...HOVER_SCOPE} data-scheduled={row.id} data-store={row.store} className={`mx-3 flex flex-col gap-0.5 rounded-sm px-2 py-1.5 text-ui-sm ${row.dormant ? 'text-fg-faint' : 'text-fg'}`}>
       {/* the schedule keeps the first line with the link; its kind and store go under it with the prompt, so a narrow
           panel truncates the prompt, never the schedule to a letter */}
       <div className="flex min-h-6 items-center gap-2">
@@ -103,9 +108,11 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
           {row.schedule}
         </span>
         {row.link !== null && (
-          <button type="button" onClick={() => onOpen(row)} className={`shrink-0 ${ACTION}`}>
-            {SCHEDULED_COPY.openTurn}
-          </button>
+          <NamedGlyph {...ON_HOVER} label={SCHEDULED_COPY.openTurn} onClick={() => onOpen(row)} className={OPEN_TURN}>
+            <Icon className="size-3.5">
+              <path d="M5.5 10.5l5-5M6.5 5.5h4v4" />
+            </Icon>
+          </NamedGlyph>
         )}
       </div>
       <p className={`flex min-w-0 gap-1.5 ${row.dormant ? '' : 'text-fg-muted'}`}>
@@ -118,15 +125,13 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
         </span>
       </p>
       <p data-part="when" className={`tabular-nums ${row.dormant ? '' : 'text-fg-muted'}`}>
-        {row.dormant ? (
-          SCHEDULED_COPY.dormant
-        ) : row.next === null ? (
-          SCHEDULED_COPY.nextUnknown
-        ) : (
-          <span title={SCHEDULED_COPY.jitter}>{SCHEDULED_COPY.next(localTime(row.next, now), formatIn(row.next - now))}</span>
-        )}
-        {after.map((part) => ` · ${part}`).join('')}
+        {when}
+        {after.map((part, i) => (when === null && i === 0 ? part : ` · ${part}`)).join('')}
       </p>
     </li>
   );
 }
+
+// A small square glyph at the row's right, its look the shared glyph's at the row's size.
+const OPEN_TURN =
+  'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
