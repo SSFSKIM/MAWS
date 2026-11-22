@@ -160,9 +160,9 @@ async function runBindings(): Promise<Record<string, unknown>> {
   };
 }
 
-/** The event the endpoint sent the hub at `(writer, seq)` in P, each copy in order. */
-const sentUp = (writer: string, seq: number) =>
-  toHub.flatMap((f) => (f.t === 'events' && f.project === PROJECT ? (f.events as Array<Record<string, unknown>>) : [])).filter((e) => e.writer === writer && e.seq === seq);
+/** The event the endpoint sent the hub at `(writer, seq)` in `project` (P unless named), each copy in order. */
+const sentUp = (writer: string, seq: number, project = PROJECT) =>
+  toHub.flatMap((f) => (f.t === 'events' && f.project === project ? (f.events as Array<Record<string, unknown>>) : [])).filter((e) => e.writer === writer && e.seq === seq);
 
 const nonEmpty = <T>(list: T[]) => (list.length > 0 ? list : null);
 const fromHub = (events: unknown[]) => endpoint.rl10.relay.fromHub({ t: 'events', project: PROJECT, events });
@@ -210,11 +210,13 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       return;
     }
     case 'hub-holds': {
-      const [event] = await until(() => nonEmpty(sentUp(step.writer as string, step.seq as number)), 'the upload');
+      // `project`: the log it went up in, and the scope it is signed over (P unless named).
+      const project = (step.project as string | undefined) ?? PROJECT;
+      const [event] = await until(() => nonEmpty(sentUp(step.writer as string, step.seq as number, project)), 'the upload');
       expect(event.created).toBe(step.created);
-      const ctx = { org: ORG, project: PROJECT };
+      const ctx = { org: ORG, project };
       expect(await verifyEvent(ctx, head.state, event as never, { certs: [], retirements: [] }, new Date())).toEqual({ ok: true });
-      expect(await verify(await importOrgKey(base64urlDecode(legacyKey)), 'log', PROJECT, event)).toBe(true);
+      expect(await verify(await importOrgKey(base64urlDecode(legacyKey)), 'log', project, event)).toBe(true);
       if (step.attest !== undefined) expect((event.attest as { owners: string[] }).owners).toEqual(step.attest);
       else expect(event.attest).toBeUndefined();
       if (step.thread !== undefined) expect(event.thread).toBe(step.thread);
