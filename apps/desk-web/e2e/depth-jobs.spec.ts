@@ -287,7 +287,8 @@ test('G4: a stop the engine refuses shows its message under the row, which keeps
   await serve.getByRole('button', { name: 'Stop' }).click();
   await expect(serve).toContainText(`Couldn't stop it: ${engine}`);
   await expect(serve).toHaveAttribute('data-stop', 'failed');
-  await expect(serve.locator('[data-part="line"]')).toContainText('running');
+  // the word cut (T216): a running row's state is its time alone, with no "running"; it names no outcome
+  await expect(serve.locator('[data-part="state"]')).not.toHaveText(/stopped|failed|ended with the session/);
   await expect(serve.getByRole('button', { name: 'Stop' })).toBeEnabled();
   await shot(page, 'dc10-failed');
 
