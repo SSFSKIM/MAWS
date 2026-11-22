@@ -35,6 +35,18 @@ export function taskState(node: TaskNode, now: number): string {
 // The one line whole (a row's tooltip).
 export const taskLine = (node: TaskNode, now: number): string => BACKGROUND_COPY.line(node.description, taskState(node, now));
 
+// The row's accessible name: the line's state with the words the line leaves to the dot (running, completed, an
+// outcome no source gave), a running time named as one.
+export function taskName(node: TaskNode, now: number): string {
+  if (node.status === 'running') {
+    const elapsed = elapsedOf(node, now);
+    return BACKGROUND_COPY.rowName(node.description, BACKGROUND_COPY.runningFor(elapsed ? formatElapsed(elapsed.ms) : null));
+  }
+  const word = statusWord(node.status) || BACKGROUND_COPY.ended;
+  const ago = node.status === 'exited' || node.endedAt === null ? '' : formatAgo(now - Date.parse(node.endedAt));
+  return BACKGROUND_COPY.rowName(node.description, [word, ago].filter((part) => part !== '').join(' '));
+}
+
 // `gap`: why the session's port can't stop it (P5 O9 M5, its `stop-task` capability): drawn in place, disabled, with that.
 export function StopButton({ node, label, onStop, gap = null }: { node: TaskNode; label: string; onStop: (taskId: TaskId) => void; gap?: string | null }) {
   return (
@@ -71,6 +83,8 @@ function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, st
   const state = taskState(node, now);
   return (
     <div
+      role="group"
+      aria-label={taskName(node, now)}
       data-shell={kind === 'shell' ? node.taskId : undefined}
       data-monitor={kind === 'monitor' ? node.taskId : undefined}
       data-other={kind === 'other' ? node.taskId : undefined}

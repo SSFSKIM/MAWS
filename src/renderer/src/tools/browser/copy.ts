@@ -132,6 +132,7 @@ export const BROWSER_COPY = {
   // the word cut (T462, split): an extension's options tab the cap closed, so no greyed chip shows what happened
   tabsCapClosed: 'Closed: too many pages open',
   tabsCapClosedMemory: 'Closed: pages use too much memory',
+  tabsCapRefused: 'Not loaded: too many pages open', // a page the count cap left suspended, nothing being free to unload for it
   profileMissing: (name: string | undefined) => `${profileNamed(name)} was not found; this tab browses with the default profile`,
   partitionFallback: (name: string | undefined) => `${profileNamed(name)} could not be opened; this tab browses with the default profile`,
   downloadRefusedAgent: 'Blocked a download the agent started',
