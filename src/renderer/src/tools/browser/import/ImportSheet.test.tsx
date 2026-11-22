@@ -116,6 +116,33 @@ describe('pick', () => {
     await within(sheet()).findByText("Couldn't use that folder: the Chrome folder must be an absolute, normal path");
   });
 
+  // the word cut (T503): the reads are quiet spinners named by their words, in the list's place and under it
+  it('waits for the profiles, and for an inspection, with a spinner named by the wait', async () => {
+    // main's answers to the two reads held until released
+    type Invoke = (name: string, input: unknown) => Promise<unknown>;
+    const bridge = b.bridge as unknown as { invoke: Invoke };
+    const answer = bridge.invoke;
+    const listing = Promise.withResolvers<void>();
+    const inspecting = Promise.withResolvers<void>();
+    const held: Record<string, Promise<void>> = { 'browser.import.profiles': listing.promise, 'browser.import.inspect': inspecting.promise };
+    bridge.invoke = async (name, input) => {
+      await held[name];
+      return answer(name, input);
+    };
+    renderSheet();
+    expect(within(sheet()).queryByText("Reading Chrome's profiles…")).toBeNull();
+    expect(await within(sheet()).findByRole('progressbar', { name: "Reading Chrome's profiles…" })).toBeTruthy();
+    listing.resolve();
+    await within(sheet()).findByRole('radio', { name: /Person 1/ });
+    expect(within(sheet()).queryByRole('progressbar')).toBeNull();
+    fireEvent.click(button('Continue'));
+    const spinner = await within(sheet()).findByRole('progressbar', { name: 'Reading what this profile holds…' });
+    expect(within(sheet()).queryByText('Reading what this profile holds…')).toBeNull();
+    expect(sheet().querySelector('fieldset')!.compareDocumentPosition(spinner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // under the list
+    inspecting.resolve();
+    await vi.waitFor(() => expect(sheet().dataset.browserImport).toBe('consent'));
+  });
+
   it('shows the Chrome-running hint, never as a block', async () => {
     renderSheet({ 'browser.import.profiles': () => ({ ...PROFILES_ANSWER, chromeRunning: true }) });
     await within(sheet()).findByText('Quit Chrome for the most complete copy');
@@ -124,7 +151,8 @@ describe('pick', () => {
 });
 
 describe('consent', () => {
-  it('shows the counts, Saved passwords disabled with P-17’s words, the agents line, and the extension facts', async () => {
+  // the word cut (T511, T516): no Saved passwords row; an extension carries no MV2 or No background chip
+  it('shows the counts, the agents line, and the extension facts, with no Saved passwords row', async () => {
     await toConsent();
     expect(box('History').checked).toBe(true);
     expect(within(sheet()).getByText(/^6 pages\. Read from a copy; needs no password\./)).toBeTruthy();
@@ -132,8 +160,7 @@ describe('consent', () => {
     expect(within(sheet()).getByText(/^5 cookies \(1 partitioned\)\. macOS will ask once/)).toBeTruthy();
     expect(within(sheet()).getByText(/choose Allow\./)).toBeTruthy();
     expect(within(sheet()).getByText("New browser tabs, including the ones agents open through MAWS's browser tools, will be signed in as Person 1 wherever Chrome was.")).toBeTruthy();
-    const passwords = box('Saved passwords — a credential store comes later');
-    expect([passwords.disabled, passwords.checked]).toEqual([true, false]);
+    expect(within(sheet()).queryByRole('checkbox', { name: /Saved passwords/ })).toBeNull();
     expect(sheet().textContent).not.toMatch(/always/i);
 
     const row = (id: string) => sheet().querySelector(`[data-extension-id="${id}"]`) as HTMLElement;
@@ -142,7 +169,8 @@ describe('consent', () => {
     expect(box('Import Disabled in Chrome').checked).toBe(false); // Decision Log 9
     expect(within(row(DISABLED_ID)).getByText('Disabled in Chrome', { selector: 'span span' })).toBeTruthy();
     expect(within(row(FAILS_ID)).getByText('1 permission MAWS doesn\'t support').closest('[title]')!.getAttribute('title')).toBe('contextMenus');
-    expect(within(row(WALLET_ID)).getByText('No background')).toBeTruthy();
+    expect(within(row(WALLET_ID)).queryByText('No background')).toBeNull();
+    expect(sheet().textContent).not.toContain('MV2');
   });
 
   it('Import needs a category, and the acknowledgement only while an extension is chosen; it sends exactly what is checked', async () => {
@@ -204,7 +232,7 @@ describe('consent', () => {
   it('lists Bookmarks between Cookies and Extensions with the count found, checked, and Bookmarks alone is enough to import', async () => {
     await toConsent();
     const categories = [...sheet().querySelectorAll('[data-category]')].map((row) => row.getAttribute('data-category'));
-    expect(categories).toEqual(['history', 'cookies', 'bookmarks', 'passwords', 'extensions']);
+    expect(categories).toEqual(['history', 'cookies', 'bookmarks', 'extensions']);
     expect([box('Bookmarks').checked, box('Bookmarks').disabled]).toEqual([true, false]);
     expect(within(sheet().querySelector('[data-category="bookmarks"]') as HTMLElement).getByText(/^46 bookmarks\./)).toBeTruthy();
     for (const name of ['History', 'Cookies', 'Extensions']) fireEvent.click(box(name));
@@ -228,17 +256,30 @@ describe('consent', () => {
 });
 
 describe('running', () => {
-  it('shows the phase main reports, the Keychain line while it is asked, and Cancel sends cancel for this run', async () => {
+  // the word cut (P385): over the bar the category being imported, and nothing for the steps around them; the Keychain's
+  // line still says to choose Allow
+  it('names the category main reports, the Keychain line while it is asked, and Cancel sends cancel for this run', async () => {
     await toConsent();
     fireEvent.click(box('Extensions'));
     fireEvent.click(button('Import'));
     await vi.waitFor(() => expect(sheet().dataset.browserImport).toBe('running'));
     expect(screen.getByText('Importing from Person 1…')).toBeTruthy();
+    const phase = () => sheet().querySelector<HTMLElement>('[data-import-phase]')!;
+    expect(phase().querySelector('p')).toBeNull(); // starting
+    expect(phase().textContent).toBe('');
     b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'copying', done: 0, total: 1 });
+    await vi.waitFor(() => expect(phase().dataset.importPhase).toBe('copying'));
+    expect(phase().textContent).toBe('');
+    b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'history', done: 2, total: 6 });
+    await within(sheet()).findByText('History');
+    expect(within(sheet()).queryByText('Importing browsing history…')).toBeNull();
     b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'keychain', done: 0, total: 1 });
     await within(sheet()).findByText('Waiting for the Keychain… choose Allow in the macOS dialog');
+    b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'verifying', done: 0, total: 1 });
+    await vi.waitFor(() => expect(phase().dataset.importPhase).toBe('verifying'));
+    expect(phase().textContent).toBe('');
     b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'extensions', done: 1, total: 3 }); // no cookies phase: a wrong key has none
-    await within(sheet()).findByText('Importing extensions…');
+    await within(sheet()).findByText('Extensions');
     expect(within(sheet()).getByText('1 of 3')).toBeTruthy();
     fireEvent.click(button('Cancel'));
     expect(calls('browser.import.cancel')).toEqual([{ importId: IMPORT_ID }]);
@@ -305,38 +346,54 @@ describe('close', () => {
 describe('report', () => {
   const extensionRow = (id: string) => sheet().querySelector(`[data-extension-id="${id}"]`) as HTMLElement;
 
-  it('the full import: the summary, the partitioned line, each extension’s state, and the active line once the setting names it', async () => {
+  // the word cut (P388, T527, T533): the summary ends at the skipped count, the reasons in the lines under it; the
+  // partitioned line only when some were not confirmed; the active line without its pointer to Settings
+  it('the full import: the summary, each extension’s state, and the active line once the setting names it', async () => {
     renderSheet();
     b.emit('browser.import.finished', { importId: IMPORT_ID, report: DONE });
     await vi.waitFor(() => expect(sheet().dataset.browserImport).toBe('report'));
     expect(screen.getByText('Imported from Person 1')).toBeTruthy();
-    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe(
-      "4 cookies, 4 history entries, 3 extensions · 3 skipped: 1 rejected by Chromium (SameSite=None without Secure), 1 hidden page, 1 page MAWS's browser can't open",
-    );
-    expect(within(sheet()).getByText('1 partitioned cookie set, 1 confirmed in the partition')).toBeTruthy();
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('4 cookies, 4 history entries, 3 extensions · 3 skipped');
+    expect(within(sheet()).queryByText(/partitioned cookie/)).toBeNull(); // the one set was confirmed
+    expect(within(sheet()).getByText('History · Hidden pages (1)')).toBeTruthy();
+    expect(within(sheet()).getByText("History · Pages MAWS's browser can't open (1)")).toBeTruthy();
     expect(within(extensionRow(DONE.extensions[0]!.id)).getByText('Loaded · background running')).toBeTruthy();
     expect(within(extensionRow(FAILS_ID)).getByText('Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS')).toBeTruthy();
     expect(within(extensionRow(WALLET_ID)).getByText('Off (wallet)')).toBeTruthy();
     expect(within(sheet()).getByText('Cookies · Rejected by Chromium (SameSite=None without Secure) (1)')).toBeTruthy();
-    await within(sheet()).findByText("New tabs browse as Person 1. Change in Settings › Browser.");
+    await within(sheet()).findByText('New tabs browse as Person 1.');
     expect(sheet().querySelector('[data-import-keychain]')).toBeNull();
+  });
+
+  it('a partitioned cookie not confirmed keeps its line; a reason main named no host for is a line of its own', () => {
+    const cookies = { ...DONE.cookies, imported: 3, partitioned: { imported: 2, verified: 1 }, skipped: { ...NO_SKIPS.cookies, notVerified: 1, corruptRow: 2 }, hosts: { notVerified: ['embed.test'] } };
+    showReport({ ...DONE, cookies, bookmarks: { imported: 46, skipped: 1, error: null } });
+    renderSheet();
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('5 cookies, 4 history entries, 46 bookmarks, 3 extensions · 6 skipped');
+    expect(within(sheet()).getByText('2 partitioned cookies set, 1 confirmed in the partition')).toBeTruthy();
+    expect(within(sheet()).getByText('Cookies · Partitioned cookies not confirmed in the partition (1)').closest('details')).not.toBeNull();
+    expect(within(sheet()).getByText('Cookies · Unreadable rows (2)').closest('details')).toBeNull();
+    expect(within(sheet()).getByText('Bookmarks · Not imported (1)')).toBeTruthy();
   });
 
   it('the wrong key: the summary names it and the Keychain line says the password did not match', async () => {
     useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' } });
     showReport(WRONG_KEY_REPORT);
     renderSheet();
-    expect(sheet().querySelector('[data-import-summary]')!.textContent).toMatch(/^0 cookies, 4 history entries, 3 extensions · 7 skipped: 5 could not be decrypted/);
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('0 cookies, 4 history entries, 3 extensions · 7 skipped');
+    expect(within(sheet()).getByText('Cookies · Could not be decrypted (5)')).toBeTruthy();
     expect(sheet().querySelector('[data-import-keychain="wrongKey"]')!.textContent).toBe('The Safe Storage password did not match this profile; no cookie was imported');
     expect(within(sheet()).queryByText(/New tabs browse as/)).toBeNull(); // the setting names another profile
   });
 
-  it('a cancelled run is framed as nothing kept, with the counts it reached, and no extension state or active line', () => {
+  // the word cut (P398): a run that kept nothing says so, without the counts it had reached
+  it('a cancelled run is framed as nothing kept, with no counts, extension state or active line', () => {
     showReport({ ...CANCELLED_REPORT, extensions: DONE.extensions });
     renderSheet();
     expect(screen.getByText('Cancelled')).toBeTruthy();
     expect(within(sheet()).getByText('Nothing from Person 1 was kept: what the import reached was removed again.')).toBeTruthy();
-    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('Before it stopped: 1,200 cookies, 2 history entries, 3 extensions · 3,912 skipped: 3,912 not imported (cancelled)');
+    expect(sheet().querySelector('[data-import-summary]')).toBeNull();
+    expect(within(sheet()).queryByText(/Before it stopped/)).toBeNull();
     expect(within(sheet()).queryByText(/Loaded ·/)).toBeNull();
     expect(button('Close')).toBeTruthy();
   });
@@ -356,7 +413,7 @@ describe('report', () => {
   it('the bookmarks count joins the summary, and a bookmarks error is said in words with its code as the title', () => {
     showReport({ ...DONE, bookmarks: { imported: 46, skipped: 1, error: null } });
     renderSheet();
-    expect(sheet().querySelector('[data-import-summary]')!.textContent).toContain('46 bookmarks');
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped');
     cleanup();
     disconnect();
     showReport({ ...DONE, bookmarks: { imported: 0, skipped: 0, error: 'missing' } });
@@ -403,7 +460,7 @@ describe('IMPORT_COPY’s Keychain and extension words', () => {
     expect(words({ background: 'none' })).toBe('Loaded · no background');
     expect(words({ background: 'stopped' })).toBe('Loaded · background stopped');
     expect(words({ background: 'failed', backgroundError: null })).toBe('Loaded · background failed');
-    expect(words({ status: 'off', enabled: true, background: 'none' })).toBe('On · loads when a tab next opens in this profile');
+    expect(words({ status: 'off', enabled: true, background: 'none' })).toBe('On'); // the word cut (P394)
     expect(words({ status: 'off', enabled: false })).toBe('Off');
     expect(words({ status: 'loadFailed', error: 'Manifest file is missing or unreadable' })).toBe("Couldn't load: Manifest file is missing or unreadable");
     expect(words({ status: 'copyFailed', error: 'EACCES' })).toBe("Couldn't copy");

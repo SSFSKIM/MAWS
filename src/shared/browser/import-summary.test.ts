@@ -16,6 +16,16 @@ describe('summaryWords (E4b Design §10: "N cookies, M history entries, K extens
     );
   });
 
+  // the word cut (P388): the import sheet's report ends at the skipped count, its reasons in the lines under it
+  it('without its reasons ends at the skipped count', () => {
+    expect(summaryWords(DONE_REPORT, { reasons: false })).toBe('4 cookies, 4 history entries, 3 extensions · 3 skipped');
+    expect(summaryWords(BOOKMARKS_REPORT, { reasons: false })).toBe('4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped');
+    expect(summaryWords({ ...DONE_REPORT, cookies: { ...DONE_REPORT.cookies, skipped: NO_SKIPS.cookies }, history: { ...DONE_REPORT.history, skipped: NO_SKIPS.history } }, { reasons: false })).toBe(
+      '4 cookies, 4 history entries, 3 extensions',
+    );
+    expect(summaryWords({ ...DONE_REPORT, history: null, cookies: null, extensions: null }, { reasons: false })).toBe('Nothing imported');
+  });
+
   it('reads a cancelled run with the counts it reached', () => {
     expect(summaryWords(CANCELLED_REPORT)).toBe('1,200 cookies, 2 history entries · 3,912 skipped: 3,912 not imported (cancelled)');
   });

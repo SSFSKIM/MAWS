@@ -76,9 +76,18 @@ describe('MarkupLayer', () => {
     expect(screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Pen', 'Box', 'Arrow', 'Text', 'Red', 'Blue', 'Green', 'Black', 'White']);
     const undo = screen.getByRole('button', { name: 'Undo' });
     expect(undo).toHaveProperty('disabled', true);
-    expect(undo.getAttribute('title')).toBe('Nothing to undo yet');
-    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('title')).toBe('Nothing to clear yet');
+    // the word cut (T124): a greyed icon's tooltip is its word, as when it acts
+    expect(undo.getAttribute('title')).toBe('Undo');
+    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('title')).toBe('Clear');
     expect(screen.getByRole('button', { name: 'Add to chat' })).toHaveProperty('disabled', false); // an unmarked still is a screenshot
+  });
+
+  // the word cut (T123, T125): a colour dot shows its colour and has no tooltip, its name kept; the handle's tooltip is Move
+  it('names each ink without a tooltip, and the drag handle’s tooltip reads Move', async () => {
+    await open();
+    for (const name of ['Red', 'Blue', 'Green', 'Black', 'White']) expect(screen.getByRole('radio', { name }).hasAttribute('title')).toBe(false);
+    expect(screen.getByRole('radio', { name: 'Pen' }).getAttribute('title')).toBe('Pen');
+    expect(screen.getByRole('button', { name: 'Move mark-up toolbar' }).getAttribute('title')).toBe('Move');
   });
 
   it('moves the toolbar without drawing and keeps it inside the annotation surface', async () => {

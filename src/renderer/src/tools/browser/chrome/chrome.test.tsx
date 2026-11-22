@@ -28,6 +28,7 @@ import { PanelRegion } from '../../../panel/PanelRegion'; // P3-F (F-shell)
 import { registerSlot, resetSlots } from '../../../app/slots'; // P3-F (F-shell)
 import { browser, connectBrowser, onShowRequest, raiseNotice, resetBrowser } from '../store';
 import { Chrome, type ChromeProps } from './Chrome';
+import { accessibleText } from '../../../test-support/accessible-text';
 
 // P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with the bare MAIN_A.
 const MAIN_A = 'app-a' as AppSessionId;
@@ -157,31 +158,56 @@ describe('the partition pill', () => {
   });
 });
 
-describe('the zoom banner', () => {
-  it('is absent at 100% and shows the level with Zoom out, Zoom in and Reset otherwise', async () => {
-    const { rerender } = show({ tab: tab() });
-    expect(screen.queryByRole('group', { name: BROWSER_COPY.zoom.label })).toBeNull();
-    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns />);
-    const banner = screen.getByRole('group', { name: BROWSER_COPY.zoom.label });
-    expect(within(banner).getByText('125%')).toBeTruthy();
-    for (const name of ['Zoom out', 'Zoom in', 'Reset']) fireEvent.click(within(banner).getByRole('button', { name }));
+// the word cut (T452): no zoom row under the navigation row; while the page is not at 100% a chip with the level sits in
+// the navigation row beside the size chip, and opens − Reset +, which keep it open while they step
+describe('the zoom chip', () => {
+  const chip = () => document.querySelector<HTMLElement>('[data-browser-zoom]');
+  const steps = () => screen.findAllByRole('menuitem');
+
+  it('is absent at 100%; otherwise the level in the navigation row, before the size chip, opening − Reset +', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab(), owns: true, room: ROOM });
+    expect(chip()).toBeNull();
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25, viewport: { width: 375, height: 812 } })} tabs={[]} owns room={ROOM} />);
+    expect(chip()!.textContent).toBe('125%');
+    expect(chip()!.closest('[data-browser-nav]')).not.toBeNull();
+    expect(chip()!.compareDocumentPosition(document.querySelector('[data-browser-viewport-chip]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Page zoom: 125%' })).toBe(chip());
+    expect(screen.queryByRole('group', { name: BROWSER_COPY.zoom.label })).toBeNull(); // the row is gone
+    await user.click(chip()!);
+    const items = await steps();
+    expect(items.map((item) => [item.textContent, item.getAttribute('aria-label')])).toEqual([
+      ['−', 'Zoom out'],
+      ['Reset', 'Reset zoom'],
+      ['+', 'Zoom in'],
+    ]);
+    for (const item of items) await user.click(item);
     await wait(0);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(3); // stepping keeps the steps open
     expect(calls('browser.tabs.zoom')).toEqual([
       { tabId: T1, action: 'out' },
-      { tabId: T1, action: 'in' },
       { tabId: T1, action: 'reset' },
+      { tabId: T1, action: 'in' },
     ]);
   });
 
-  it('in a chrome whose pane does not hold the view, the level shows but the buttons are disabled (as the menu\'s zoom items)', async () => {
+  it('its tooltip reads Page zoom, on pointing or focus', async () => {
+    const user = userEvent.setup();
+    show({ tab: tab({ zoom: 1.25 }), owns: true });
+    expect(chip()!.hasAttribute('title')).toBe(false);
+    chip()!.focus();
+    expect((await screen.findByRole('tooltip')).textContent).toBe(BROWSER_COPY.zoom.label);
+    await user.keyboard('{Escape}');
+  });
+
+  it('in a chrome whose pane does not hold the view, the level shows but the steps are disabled (as the menu’s zoom row)', async () => {
+    const user = userEvent.setup();
     show({ tab: tab({ zoom: 1.25 }), owns: false });
-    const banner = screen.getByRole('group', { name: BROWSER_COPY.zoom.label });
-    expect(within(banner).getByText('125%')).toBeTruthy();
-    for (const name of ['Zoom out', 'Zoom in', 'Reset']) {
-      const button = within(banner).getByRole<HTMLButtonElement>('button', { name });
-      expect(button.disabled, name).toBe(true);
-      fireEvent.click(button);
-    }
+    expect(chip()!.textContent).toBe('125%');
+    await user.click(chip()!);
+    const items = await steps();
+    expect(items.map((item) => item.getAttribute('aria-disabled'))).toEqual(['true', 'true', 'true']);
+    for (const item of items) fireEvent.click(item);
     await wait(0);
     expect(calls('browser.tabs.zoom')).toEqual([]);
   });
@@ -228,8 +254,11 @@ describe('the address field', () => {
     await user.keyboard('wikipedia.org');
     await waitFor(() => {
       expect(calls('browser.history.suggest').at(-1)).toEqual({ partition: 'persist:maws-browser', query: 'wikipedia.org' });
-      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-        BROWSER_COPY.goTo('https://wikipedia.org/'), BROWSER_COPY.searchFor('wikipedia.org'), 'Ahttps://wikipedia.org/wiki/A',
+      // the word cut (T433): the typed rows show the address or the query beside their glyph; "Go to" and "Search for"
+      // stay their names
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['https://wikipedia.org/', 'wikipedia.org', 'Ahttps://wikipedia.org/wiki/A']);
+      expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
+        'Go to https://wikipedia.org/', 'Search for “wikipedia.org”', null,
       ]);
     });
     const selected = () => field().getAttribute('aria-activedescendant');
@@ -253,7 +282,8 @@ describe('the address field', () => {
     await user.keyboard('f1');
     await wait(80);
     const options = screen.getAllByRole('option');
-    expect(options.map((option) => option.textContent)).toEqual([BROWSER_COPY.searchFor('f1'), 'F1https://b.test/F1', 'f1 historyhttps://h.test/f1']);
+    expect(options.map((option) => option.textContent)).toEqual(['f1', 'F1https://b.test/F1', 'f1 historyhttps://h.test/f1']);
+    expect(screen.getByRole('option', { name: BROWSER_COPY.searchFor('f1') })).toBe(options[0]);
     expect(options.map((option) => option.querySelector('[data-suggestion-bookmark]') !== null)).toEqual([false, true, false]);
     expect(within(options[1]!).getByRole('img', { name: BROWSER_COPY.bookmarks.suggestion })).toBeTruthy();
     await user.keyboard('{ArrowDown}{Enter}');
@@ -423,10 +453,14 @@ describe('the find bar', () => {
       { tabId: T1, text: 'ne', forward: true, findNext: true, matchCase: false },
       { tabId: T1, text: 'ne', forward: false, findNext: true, matchCase: false },
     ]);
+    // the word cut (T454, T455): the count is the numbers alone; a screen reader hears them with their word
+    const count = () => within(bar()!).getByRole('status');
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ find: { active: 2, matches: 7 } })} tabs={[]} owns />);
-    expect(within(bar()!).getByRole('status').textContent).toBe('2 / 7 results');
+    expect([count().textContent, accessibleText(count())]).toEqual(['2 / 72 of 7 results', '2 of 7 results']);
+    expect(count().querySelector('[aria-hidden]')!.textContent).toBe('2 / 7');
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ find: { active: 0, matches: 0 } })} tabs={[]} owns />);
-    expect(within(bar()!).getByRole('status').textContent).toBe('0 results');
+    expect(count().querySelector('[aria-hidden]')!.textContent).toBe('0');
+    expect(accessibleText(count())).toBe('No results');
     await user.keyboard('{Escape}');
     await wait(0);
     expect(bar()).toBeNull();
@@ -480,20 +514,23 @@ describe('the notice lines', () => {
     expect(within(line('download')!).queryByRole('button')).toBeNull();
   });
 
+  // the word cut (T462): a tab left unloaded at the page cap, by count or by memory, draws no line (its chip is greyed);
+  // an extension's options refused at the cap still does (T463). T464: a copy reads Copied.
   it('the session’s transient notices, routed by session, each with its sentence and Dismiss', () => {
     show({ tab: tab() });
     act(() => {
       raiseNotice({ appSessionId: A, tabId: T2, kind: 'tabsCap', count: 12 });
       raiseNotice({ appSessionId: A, tabId: T2, kind: 'tabsCap' });
+      raiseNotice({ appSessionId: A, tabId: null, kind: 'tabsCap', count: 12, name: 'uBlock' });
       raiseNotice({ appSessionId: A, tabId: null, kind: 'urlCopied' });
       raiseNotice({ appSessionId: A, tabId: null, kind: 'partitionFallback', name: 'Work' });
       raiseNotice({ appSessionId: B, tabId: null, kind: 'tabsFileBroken' });
     });
     const texts = [...document.querySelectorAll('[data-browser-notice]')].map((element) => element.textContent);
-    expect(texts).toEqual([BROWSER_COPY.tabsCap(12), BROWSER_COPY.tabsCapMemory, BROWSER_COPY.urlCopied, BROWSER_COPY.partitionFallback('Work')]);
+    expect(texts).toEqual(['Too many pages are loaded to open uBlock’s options', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
     fireEvent.click(within(line('urlCopied')!).getByRole('button', { name: BROWSER_COPY.dismiss }));
     expect(line('urlCopied')).toBeNull();
-    expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['tabsCap', 'tabsCap', 'partitionFallback', 'tabsFileBroken']);
+    expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['tabsCap', 'tabsCap', 'tabsCap', 'partitionFallback', 'tabsFileBroken']);
   });
 });
 
@@ -509,7 +546,9 @@ describe('the tab strip', () => {
     ]);
     expect(document.querySelector(`[data-browser-chip="${T2}"]`)!.hasAttribute('data-suspended')).toBe(true);
     fireEvent.click(chips[1]!);
-    fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.closeTabNamed('b.test') }));
+    const close = screen.getByRole('button', { name: BROWSER_COPY.closeTabNamed('b.test') });
+    expect(close.getAttribute('title')).toBe('Close'); // the word cut (T426): the tooltip is the word; the name keeps the tab
+    fireEvent.click(close);
     fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.newTabAction }));
     await wait(0);
     expect(calls('browser.tabs.select')).toEqual([{ appSessionId: MAIN_A, tabId: T2 }]);
@@ -631,12 +670,32 @@ describe('the overflow menu', () => {
   });
 
   const disabledItems = async (user: ReturnType<typeof userEvent.setup>) =>
-    (await menu(user)).filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.textContent);
+    (await menu(user)).filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.getAttribute('aria-label') ?? item.textContent);
+  const ZOOM = (level: string) => ['Zoom out', `Reset zoom, ${level}`, 'Zoom in'];
+
+  // the word cut (T444, T446): one Zoom row, − level +, whose level resets and whose steps keep the menu open; no Close tab
+  it('has one Zoom row, − level +, stepping with the menu kept open; Close tab is the tab’s ×', async () => {
+    const user = userEvent.setup();
+    show({ tab: tab({ zoom: 1.25 }), owns: true, room: ROOM });
+    const items = await menu(user);
+    expect(items.map((item) => item.textContent)).not.toContain('Close tab');
+    const row = screen.getByRole('group', { name: 'Zoom' });
+    expect(row.textContent).toBe('Zoom−125%+');
+    expect(within(row).getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(ZOOM('125%'));
+    for (const name of ZOOM('125%')) await user.click(within(row).getByRole('menuitem', { name }));
+    await wait(0);
+    expect(screen.getByRole('group', { name: 'Zoom' })).toBeTruthy(); // still open
+    expect(calls('browser.tabs.zoom')).toEqual([
+      { tabId: T1, action: 'out' },
+      { tabId: T1, action: 'reset' },
+      { tabId: T1, action: 'in' },
+    ]);
+  });
 
   it('a chrome whose pane does not hold the view offers neither find nor zoom (they act on the page it does not show)', async () => {
     const user = userEvent.setup();
     const { rerender } = show({ tab: tab({ zoom: 1.25 }), owns: false });
-    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyScreenshot]);
+    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, ...ZOOM('125%'), BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyScreenshot]);
     await user.keyboard('{Escape}');
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns room={ROOM} />);
     expect(await disabledItems(user)).toEqual([]);
@@ -645,7 +704,7 @@ describe('the overflow menu', () => {
   it('a suspended tab offers no page actions; Find in page opens the bar on a live one', async () => {
     const user = userEvent.setup();
     const { rerender } = show({ tab: tab({ suspended: true }), owns: true });
-    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyScreenshot, BROWSER_COPY.menu.inspect]);
+    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, ...ZOOM('100%'), BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyScreenshot, BROWSER_COPY.menu.inspect]);
     await user.keyboard('{Escape}');
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[]} owns />);
     await menu(user);
@@ -725,15 +784,15 @@ describe('device sizes and Copy screenshot (U12a)', () => {
     const disabled = async () => {
       await user.click(screen.getByRole('button', { name: BROWSER_COPY.options }));
       const items = await screen.findAllByRole('menuitem');
-      const names = items.filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.textContent);
+      const names = items.filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.getAttribute('aria-label') ?? item.textContent);
       await user.keyboard('{Escape}');
       return names;
     };
     const { rerender } = show({ tab: tab(), owns: true, room: null });
-    expect(await disabled()).toEqual([BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport]); // at 100%: nothing to reset
+    expect(await disabled()).toEqual(['Reset zoom, 100%', BROWSER_COPY.menu.viewport]); // at 100%: nothing to reset
     const internal = { kind: 'extension' as const, extensionId: 'nenbjdahllkkbfanbpfmmdacjencdfpg', title: 'Probe · Options' };
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ url: `chrome-extension://${internal.extensionId}/options.html`, internal })} tabs={[]} owns room={ROOM} />);
-    expect(await disabled()).toEqual([BROWSER_COPY.menu.openExternal, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyUrl]);
+    expect(await disabled()).toEqual([BROWSER_COPY.menu.openExternal, 'Reset zoom, 100%', BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyUrl]);
   });
 
   it('the chip: absent in Responsive and without room; with a size, the page’s real size, before the options menu, opening the three choices', async () => {
@@ -745,6 +804,10 @@ describe('device sizes and Copy screenshot (U12a)', () => {
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={{ width: 1000, height: 600 }} />);
     expect(chip()!.textContent).toBe('375 × 600'); // a pane under 812 tall: the view's real size
     expect(chip()!.getAttribute('aria-label')).toBe('Viewport: 375 × 600');
+    // the word cut (T441): its tooltip is Viewport, which the keyboard reaches; the size is on the chip and in its name
+    expect(chip()!.hasAttribute('title')).toBe(false);
+    chip()!.focus();
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Viewport');
     const trigger = screen.getByRole('button', { name: BROWSER_COPY.options });
     expect(chip()!.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(chip()!.closest('[data-browser-nav]')).not.toBeNull();

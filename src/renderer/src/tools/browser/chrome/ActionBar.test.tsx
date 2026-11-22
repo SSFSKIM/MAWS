@@ -224,9 +224,18 @@ describe('the fold follows the address field on screen (M3 review)', () => {
 });
 
 describe('the cap\'s notice for an options tab it could not open (M3 review)', () => {
+  // the word cut (T463): the fact without the mechanism; T462: a tab left unloaded at the cap says nothing
   it('names the extension', () => {
-    expect(noticeText({ kind: 'tabsCap', count: 12, name: 'MAWS probe extension' })).toBe('At most 12 pages stay loaded at once, so the options of MAWS probe extension could not open');
-    expect(noticeText({ kind: 'tabsCap', count: 12 })).toBe('At most 12 pages stay loaded at once, so a tab was left unloaded');
+    expect(noticeText({ kind: 'tabsCap', count: 12, name: 'MAWS probe extension' })).toBe('Too many pages are loaded to open MAWS probe extension’s options');
+    expect(noticeText({ kind: 'tabsCap', count: 12 })).toBeNull();
+    expect(noticeText({ kind: 'tabsCap' })).toBeNull();
+  });
+
+  // the word cut (T464, T467): a copy's receipt is Copied; an agent's refused download is said as what happened
+  it('words the copies and an agent’s refused download plainly', () => {
+    expect(noticeText({ kind: 'urlCopied' })).toBe('Copied');
+    expect(noticeText({ kind: 'screenshotCopied' })).toBe('Copied');
+    expect(noticeText({ kind: 'downloadRefusedAgent' })).toBe('Blocked a download the agent started');
   });
 });
 

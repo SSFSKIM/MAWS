@@ -97,25 +97,29 @@ describe('an imported profile’s popover', () => {
     const popover = await openPopover('Person 1');
     expect(popover.querySelector('header img')?.getAttribute('src')).toBe(PICTURE);
     expect(within(popover).getByText('Person 1')).toBeTruthy();
-    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('Signed in as Probe Owner · probe@example.test');
-    const switchList = within(popover).getByRole('region', { name: BROWSER_COPY.profile.switchProfile });
-    expect(within(switchList).getByText(BROWSER_COPY.profile.appliesToNewTabs)).toBeTruthy();
-    expect([...popover.querySelectorAll<HTMLElement>('[data-profile-switch]')].map((row) => [row.dataset.profileSwitch, row.textContent])).toEqual([
-      ['Profile 1', 'WWork'],
-      ['default', 'Default'],
+    // the word cut: the account's names alone (T478); the list headed "New tabs as" with no caption (T480), its rows
+    // named "Open a new tab as …" with no tooltip (T481); Sync bookmarks over the age (T483, T484); Re-import… (T486)
+    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('Probe Owner · probe@example.test');
+    const switchList = within(popover).getByRole('region', { name: 'New tabs as' });
+    expect(switchList.textContent).not.toContain('Applies to new tabs');
+    expect(within(switchList).getByText('New tabs as')).toBeTruthy();
+    const rows = [...popover.querySelectorAll<HTMLElement>('[data-profile-switch]')];
+    expect(rows.map((row) => [row.dataset.profileSwitch, row.textContent, row.getAttribute('aria-label'), row.hasAttribute('title')])).toEqual([
+      ['Profile 1', 'WWork', 'Open a new tab as Work', false],
+      ['default', 'Default', 'Open a new tab as Default', false],
     ]);
-    expect(popover.querySelector('[data-profile-sync]')!.textContent).toContain(BROWSER_COPY.profile.syncNow);
-    expect(popover.querySelector('[data-profile-sync-line]')!.textContent).toBe('Last synced 5 minutes ago');
-    expect(popover.querySelector('[data-profile-reimport]')!.textContent).toBe(BROWSER_COPY.profile.reimport);
+    expect(popover.querySelector('[data-profile-sync]')!.textContent).toBe('Sync bookmarks5 minutes ago');
+    expect(popover.querySelector('[data-profile-sync-line]')!.textContent).toBe('5 minutes ago');
+    expect(popover.querySelector('[data-profile-reimport]')!.textContent).toBe('Re-import…');
     expect(popover.querySelector('[data-profile-settings]')!.textContent).toBe(BROWSER_COPY.profile.settings);
   });
 
-  it('a profile not signed in says so, and one imported without bookmarks has no Sync row', async () => {
+  it('a profile not signed in has no account line, and one imported without bookmarks has no Sync row', async () => {
     browserImport.setState({ records: [PERSON_RECORD, { ...RECORD, profileDir: 'Profile 1', name: 'Work', partition: profilePartition('Profile 1') }] });
     showPill(profilePartition('Profile 1'));
     await vi.waitFor(() => expect(pill().textContent).toContain('Work'));
     const popover = await openPopover('Work');
-    expect(popover.querySelector('[data-profile-account]')!.textContent).toBe('Not signed in to Chrome');
+    expect(popover.querySelector('[data-profile-account]')).toBeNull();
     expect(popover.querySelector('[data-profile-sync]')).toBeNull();
     expect(popover.querySelector('[data-profile-reimport]')).not.toBeNull();
   });

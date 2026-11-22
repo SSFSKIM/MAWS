@@ -9,6 +9,7 @@ import { addressOf } from '@shared/machine/address';
 import { OTHER_MACHINE } from '../../../../../../test/support/machine';
 import { useMachines } from '../../../stores/machines';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
+import { accessibleText } from '../../../test-support/accessible-text';
 import { TabStrip } from './TabStrip';
 
 const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
@@ -27,7 +28,9 @@ describe('the tab strip’s forwarded mark', () => {
     render(<TabStrip appSessionId={R} surface="panel" tabs={[forwarded, plain]} shownId={T1} />);
     const marks = document.querySelectorAll('[data-forward-mark]');
     expect(marks).toHaveLength(1);
-    expect(marks[0]!.textContent).toBe('forwarded from mini');
+    // the word cut (T429): the badge reads the machine's name; "forwarded from" stays for a screen reader
+    expect(marks[0]!.querySelector('[aria-hidden]')?.textContent ?? marks[0]!.textContent).toBe('mini');
+    expect(accessibleText(marks[0]!)).toBe('forwarded from mini');
     expect(marks[0]!.getAttribute('title')).toBe('Port 5173 on mini, forwarded to this Mac');
     expect(marks[0]!.closest('[data-browser-chip]')?.getAttribute('data-browser-chip')).toBe(T1);
     expect(screen.getByRole('tab', { name: /Vite App/ })).toBeTruthy();

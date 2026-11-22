@@ -172,14 +172,47 @@ describe('the agent’s tabs on another machine’s session', () => {
     fireEvent.click(screen.getByRole('button', { name: C.retry }));
     await settle();
     expect(main.callsOf('browser.remote.select')).toHaveLength(2);
-    expect(within(surfaceOf()!).getByRole('status').textContent, 'the kept picture, dimmed, says it is opening').toContain(C.loading);
+    // the word cut (T498): the wait for the page is a spinner named by its words, over the kept picture, dimmed
+    expect(await within(surfaceOf()!).findByRole('progressbar', { name: C.loading })).toBeTruthy();
+    expect(within(surfaceOf()!).queryByText(C.loading)).toBeNull();
+  });
+
+  it('waits for the first frame with a spinner in the middle of the picture, and nothing once a frame is drawn', async () => {
+    await shown();
+    expect(surfaceOf()!.querySelector('[data-remote-overlay]')!.textContent).toBe('');
+    expect(await within(surfaceOf()!).findByRole('progressbar', { name: C.loading })).toBeTruthy();
+    act(() => main.emit('browser.remote.frame', frameOf(1)));
+    await settle();
+    expect(document.querySelector('[data-remote-overlay]')).toBeNull();
+  });
+
+  // the word cut (T491, and the picture's own wait while it connects): connecting is the group's label, dimmed, with a
+  // spinner named by the words; the picture shows the same wait as a spinner
+  it('while the link is made, dims the group’s label beside a spinner, and says no words', async () => {
+    opened = { inventory: { epoch: 'e1', tabs: [], selected: null, state: 'unavailable', reason: 'connecting to studio' }, view: { kind: 'connecting' } };
+    await shown();
+    const group = screen.getByRole('group', { name: C.group('studio') });
+    expect(within(group).queryByText(C.connecting('studio'))).toBeNull();
+    expect(await within(group).findByRole('progressbar', { name: C.connecting('studio') })).toBeTruthy();
+    expect(group.querySelector('[data-browser-agent-label]')!.className).toContain('text-fg-faint');
+  });
+
+  it('a live view with no agent tab keeps its words beside the label (T490)', async () => {
+    opened = { inventory: ready('e1', []), view: { kind: 'live' } };
+    await shown();
+    const group = screen.getByRole('group', { name: C.group('studio') });
+    expect(within(group).getByText(C.noTabs)).toBeTruthy();
+    expect(group.querySelector('[data-browser-agent-label]')!.className).not.toContain('text-fg-faint');
   });
 
   it('takes control only at the person’s gesture; then a click inside the image reaches the page at the viewport’s point, and keys and text go once', async () => {
     await shown();
     act(() => main.emit('browser.remote.frame', frameOf(1)));
     await settle();
-    expect(screen.getByText(C.viewOnly)).toBeTruthy();
+    // the word cut (T493): no View only badge; Take control stands alone at the row's end
+    expect(screen.queryByText('View only')).toBeNull();
+    expect(document.querySelector('[data-remote-control-state]')).toBeNull();
+    expect(screen.getByRole('button', { name: C.takeControl }).closest('[data-browser-nav]')!.lastElementChild).toBe(screen.getByRole('button', { name: C.takeControl }));
     fireEvent.pointerDown(surfaceOf()!, { button: 0, buttons: 1, clientX: 200, clientY: 200, pointerId: 1 });
     expect(main.callsOf('browser.remote.input'), 'view only: nothing reaches the page').toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: C.takeControl }));
@@ -216,7 +249,7 @@ describe('the agent’s tabs on another machine’s session', () => {
     expect(sent().at(-1)).toEqual({ kind: 'blur' });
     fireEvent.click(screen.getByRole('button', { name: C.giveBack }));
     expect(main.callsOf('browser.remote.releaseControl')).toEqual([{ viewId: 'rv-1' }]);
-    expect(screen.getByText(C.viewOnly)).toBeTruthy();
+    expect(screen.getByRole('button', { name: C.takeControl })).toBeTruthy();
   });
 
   it('says why control was not taken, a machine’s word in words and main’s sentence as it is', async () => {
@@ -235,7 +268,7 @@ describe('the agent’s tabs on another machine’s session', () => {
     expect(await said('expired')).toContain(C.controlRefused.expired);
     expect(await said('producer-failed'), 'any other word of the machine’s').toContain(C.controlRefused.unavailable('studio'));
     expect(await said('studio did not admit control in time')).toContain(C.controlRefused.said('studio did not admit control in time'));
-    expect(screen.getByText(C.viewOnly)).toBeTruthy();
+    expect(screen.getByRole('button', { name: C.takeControl })).toBeTruthy();
   });
 
   it('types text that reaches the target outside a composition once, whatever brought it', async () => {
