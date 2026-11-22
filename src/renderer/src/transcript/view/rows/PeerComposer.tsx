@@ -19,13 +19,15 @@ import { useSessions } from '../../../stores/sessions';
 import { peerMessageCopy } from '../../model/copy';
 import { duration } from '../../model/time';
 import { Tip } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 import { useActions, useKeptState, type PeerAddress, type PeerReply } from '../context';
 import { TickingStatus, useTicker } from './parts';
 
 // The line over the box, or null when nothing was asked of this address yet: its copy with the time it has waited as
 // the argument, and that time while it ticks (an ask not yet forwarded), else null. The word cut (T79): the line is the
 // state, "Sending · 48s", "Sent", "Sent, reworded"; `why` (why it waits, how it was sent) is its tooltip and its
-// description; a failure keeps its words and has none.
+// description, and stands under the line where nothing points (the touch rule, ticket 830), outside the live line so
+// nothing more is announced; a failure keeps its words and has none.
 export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): { line: (elapsed: string) => string; elapsed: string | null; why: string | null } | null {
   const state = reply?.state;
   if (!state) return null;
@@ -120,9 +122,14 @@ export function PeerComposer({ appSessionId, target, label, keptAs }: { appSessi
       ) : (
         line !== null && (
           // the word cut (T79): why it waits, or how it went, waits on the line, which takes the keyboard for it
-          <Tip content={line.why} description={line.why}>
-            <TickingStatus line={line.line} elapsed={line.elapsed} tabIndex={line.why === null ? undefined : 0} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
-          </Tip>
+          <>
+            <Tip content={line.why} description={line.why}>
+              <TickingStatus line={line.line} elapsed={line.elapsed} tabIndex={line.why === null ? undefined : 0} data-part="peer-line" className="transcript-peer-line" data-failed={reply?.state.kind === 'failed' ? '' : undefined} />
+            </Tip>
+            <TouchFact block className="transcript-peer-line">
+              {line.why}
+            </TouchFact>
+          </>
         )
       )}
       {/* the word cut (T76): no label over the box; its words are the box's name, the session in its placeholder */}

@@ -5,9 +5,11 @@
 // agent is doing and for how long (`{name} · {lastTool} · {t}`, updated from the child's own events, which are never
 // rendered in the parent; a workflow's phase in its tool's place) is the tooltip and the description of what stands for
 // it: its glyph in a grouped row, the line of a one-agent row, and the line's words where nothing opens an agent. A
-// failed child's goes while the others keep ticking.
+// failed child's goes while the others keep ticking. The touch rule (ticket 830): where nothing points, every working
+// agent's detail stands under the line, one a line, whichever owner carries it.
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { Tip } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 import { subagentActivity } from '../../model/activity';
 import { SUBAGENT_WORKING, subagentDetail } from '../../model/copy';
 import { SUBAGENT_GLYPHS } from '../../model/glyphs';
@@ -108,6 +110,7 @@ export function SubagentRow({ row }: { row: SubagentRowData }) {
       ) : (
         <div className="transcript-subagent-line">{line}</div>
       )}
+      <TouchFact block className="text-ui-sm">{all}</TouchFact>
     </div>
   );
 }

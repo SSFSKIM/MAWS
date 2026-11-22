@@ -6,10 +6,12 @@
 // capsule's top line stays, its button reads Open beside (the sheet, with the same form and draft), and the form stands
 // under the line. The word cut (T93, T94, T97, T98): an ask with no title of its own is headed by its count ("3
 // questions"), a titled one keeps the count after its title; a cancelled capsule's chip reads Cancelled, why its tooltip
-// and its description; an answered capsule has no button, its top row is the press that opens its answers.
+// and its description (and after the chip where nothing points: the touch rule, ticket 830); an answered capsule has no
+// button, its top row is the press that opens its answers.
 import { useId, type ReactNode } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
 import { Tip } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy, askStateWhy } from '../../model/copy';
 import type { AskRowData, Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
@@ -61,6 +63,7 @@ export function AskCapsule({ row, form = null }: { row: AskRow; form?: ReactNode
           {askStateCopy(row)}
         </span>
       </Tip>
+      <TouchFact>{why}</TouchFact>
     </>
   );
   return (

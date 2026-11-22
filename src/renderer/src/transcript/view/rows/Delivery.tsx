@@ -12,7 +12,8 @@
 // stays greyed, and the line says where the file is ("on <machine>", in view whether or not the buttons show). Ticket
 // 627: a terminal (lane A) session there over RL2 has no copy route here: both are greyed, each with the window's
 // helper's sentence. The word cut (T101): a greyed button keeps the keyboard (`aria-disabled`, as UnavailableButton
-// draws it), its sentence its tooltip and description, and the copy's sentence is Open externally's tooltip the same way.
+// draws it), its sentence its tooltip and description, and the copy's sentence is Open externally's tooltip the same way;
+// where nothing points, each tip's sentence stands after its button (the touch rule, ticket 830).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -20,6 +21,7 @@ import { COPY_WORDS } from '../../../lane-b/open-copy'; // P5 O7 M5a
 import { ELSEWHERE_WORDS, useElsewhereMachine } from '../../../lane-b/remote-session'; // P5 O7 M4
 import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable'; // ticket 627
 import { Tip, unavailableClickProps } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 import { DELIVERY, deliveryHeading } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
@@ -34,11 +36,14 @@ export const REFUSAL_SHOWN_MS = 4_000;
 function FileAction({ words, name, reason, fact, disabled, onPress }: { words: string; name: string; reason: string | null; fact: string | null; disabled: boolean; onPress: () => Promise<void> }) {
   const tip = reason ?? fact;
   return (
-    <Tip content={tip} description={tip} {...unavailableClickProps(reason)}>
-      <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(words, name)} disabled={disabled} onClick={() => void onPress()}>
-        {words}
-      </button>
-    </Tip>
+    <>
+      <Tip content={tip} description={tip} {...unavailableClickProps(reason)}>
+        <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(words, name)} disabled={disabled} onClick={() => void onPress()}>
+          {words}
+        </button>
+      </Tip>
+      <TouchFact>{tip}</TouchFact>
+    </>
   );
 }
 

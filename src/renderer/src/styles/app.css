@@ -130,6 +130,14 @@
   }
 }
 
+/* The word cut's touch rule (ui/touch-fact.tsx): a fact a tip shows on pointing is drawn at rest only where nothing can
+   point. Outside every layer, so no utility class draws it where the pointer can point. */
+[data-touch-fact] { display: none; }
+@media (hover: none) {
+  [data-touch-fact] { display: inline; }
+  [data-touch-fact="block"] { display: block; }
+}
+
 /* board 505 (UX wave U11a): one rule for the shell's gutters. A scroller with a footer or a composer aligned under it reserves
    its scrollbar's gutter whether or not it overflows, and the element under it reserves the same gutter, so under classic
    scrollbars both centre their column in the same width; with overlay scrollbars nothing moves. `scrollbar-gutter` acts
