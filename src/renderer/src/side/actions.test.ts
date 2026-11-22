@@ -123,6 +123,10 @@ describe('a promotion’s exchanges', () => {
     expect(promotable([answered('short', 'fine')])).toEqual([{ question: 'short', response: 'fine' }]);
   });
 
+  it('leave out an answer with no text, which the card reads as No answer (P408)', () => {
+    expect(promotable([answered('blank', '  \n'), answered('kept', 'fine'), answered('empty', '')])).toEqual([{ question: 'kept', response: 'fine' }]);
+  });
+
   it('never cut a surrogate pair in half', () => {
     const question = 'q'.repeat(SIDE_QUESTION_CAP - 2) + '😀' + 'tail';
     const [clipped] = promotable([answered(question, 'ok')]);

@@ -95,7 +95,7 @@ describe('needsYouOf', () => {
 
   it('first match wins: a setup card, then a failed start, then a holder, then attention', () => {
     const all = { card: trust, failed: true, holder: { kind: 'terminal', pid: 42 } as const, pending: [waiting('permission')] };
-    expect(needsYouOf(all)).toEqual({ kind: 'setup-card', text: 'Waiting for you to trust this folder', noun: 'Trust this folder', tabOnly: false });
+    expect(needsYouOf(all)).toEqual({ kind: 'setup-card', text: 'Waiting for you to trust this folder', noun: null, tabOnly: false }); // a consent step: its words stand, no noun (P440)
     expect(needsYouOf({ ...all, card: undefined })).toEqual({ kind: 'setup-failed', text: 'Could not start', noun: null, tabOnly: false });
     expect(needsYouOf({ ...all, card: undefined, failed: false })).toEqual({ kind: 'held', text: 'Held by terminal · 42', noun: null, tabOnly: true });
     expect(needsYouOf({ ...all, card: undefined, failed: false, holder: null })).toEqual({ kind: 'attention', text: 'Waiting for your permission', noun: 'Permission', tabOnly: false });

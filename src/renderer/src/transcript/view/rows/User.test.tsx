@@ -245,11 +245,15 @@ describe('waiting and steered bubbles', () => {
   });
 
   // the word cut (P443): a mount's mark drawn as a glyph keeps its words as its name and its tooltip
-  it('a mark drawn as a glyph is named by its words', () => {
+  it('a mark drawn as a glyph is named by its words, its tooltip reached by the keyboard', async () => {
     const { container } = renderRow(userRow('look at b too'), { actions: { ...spyActions(), userRowMark: () => ({ shown: '✓', name: 'Sent to Claude' }) } });
     const caption = container.querySelector<HTMLElement>('.transcript-user-caption')!;
     expect(caption.textContent).toBe('✓');
     expect(screen.getByRole('img', { name: 'Sent to Claude' })).toBe(caption);
-    expect(caption.getAttribute('title')).toBe('Sent to Claude');
+    expect(caption.getAttribute('title')).toBeNull();
+    await userEvent.tab();
+    while (document.activeElement !== caption && document.activeElement !== document.body) await userEvent.tab();
+    expect(document.activeElement).toBe(caption);
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Sent to Claude');
   });
 });

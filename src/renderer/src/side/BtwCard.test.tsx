@@ -672,11 +672,23 @@ describe('the card’s words, after the cut', () => {
     expect(screen.getByRole('button', { name: 'Side chat' })).toBe(chip());
   });
 
-  it('an answer with no text reads No answer', async () => {
+  // P408: an answer with no text is nothing to continue: Clear is drawn, Continue as thread is not
+  it('an answer with no text reads No answer, and leaves nothing to continue as a thread', async () => {
     listing([exchange({ response: '  ' })]);
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
     const empty = await within(card()!).findByText('No answer');
     expect(empty.closest('[data-side-exchange="answered"]')).not.toBeNull();
+    expect(within(card()!).getByRole('button', { name: 'Clear' })).toBeTruthy();
+    expect(within(card()!).queryByRole('button', { name: /^Continue as thread/ })).toBeNull();
+  });
+
+  // N167: an answer the engine put in Claude's place says so in plain words
+  it('an answer the engine substituted reads Not from Claude', async () => {
+    listing([exchange({ synthetic: true, response: 'Prompt is too long' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await within(card()!).findByText('Prompt is too long');
+    expect(card()!.querySelector('[data-side-synthetic]')?.textContent).toBe('Not from Claude');
   });
 });

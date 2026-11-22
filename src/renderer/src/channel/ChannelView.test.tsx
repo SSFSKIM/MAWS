@@ -103,10 +103,15 @@ describe('the tab’s hold', () => {
     await act(() => fake.reply('org.channel.open', opened({ events: [say(1, S1, S2, 0), say(2, S2, S1, 1), say(3, S1, S2, 2)] })));
     // the word cut (P448): "<name> and <name> · 3", the count named by its meaning
     const fold = screen.getByRole('button', { name: /maws-45/ });
-    expect(fold.textContent).toContain('maws-45');
-    expect(fold.textContent).toContain('ci-opt');
     expect(fold.textContent).not.toContain('messages');
-    expect(within(fold).getByRole('img', { name: '3 messages' }).textContent).toBe('3');
+    const count = within(fold).getByRole('img', { name: '3 messages' });
+    expect(count.textContent).toBe('3');
+    // in order: the one name, "and", the other, the dot, the count, then the time
+    expect(fold.textContent!.slice(0, fold.textContent!.indexOf('·'))).toMatch(/maws-45.*and.*ci-opt/);
+    expect(count.previousElementSibling!.textContent).toBe('·');
+    expect(count.nextElementSibling!.tagName).toBe('TIME');
+    act(() => fold.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('3 messages');
     expect(screen.queryByText('say 2')).toBeNull();
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('true');
@@ -146,6 +151,14 @@ describe('the tab’s hold', () => {
     render(<ChannelView project={SMNS} />);
     await act(() => fake.reply('org.channel.open', { ok: false, reason: 'unknown-project', rev: 10 }));
     expect(stream().querySelector('[data-channel-closed="unknown-project"]')).toBeTruthy();
+  });
+
+  // N169: a channel this Mac cannot reach the hub for and never loaded reads as the open one never loaded does (N168)
+  it('says a channel with no hub and nothing loaded is not connected and not loaded on this Mac yet', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', { ok: false, reason: 'no-hub', rev: 10 }));
+    expect(stream().querySelector('[data-channel-closed="no-hub"]')?.textContent).toBe('Not connected to the hub, and not loaded on this Mac yet.');
   });
 });
 
@@ -218,16 +231,16 @@ describe('the footer’s words', () => {
     expect(screen.getByRole('textbox', { name: 'Message the project' })).toBeTruthy();
   });
 
-  it('says this Mac has no copy of a channel open with nothing held and never caught up; one caught up with nothing says it is empty', async () => {
+  it('says a channel open with nothing held and never caught up is not loaded on this Mac yet; one caught up with nothing says it is empty (N168)', async () => {
     install();
     render(<ChannelView project={SMNS} />);
     await act(() => fake.reply('org.channel.open', opened({ asOf: null, live: false, reach: 'unreachable' })));
-    expect(within(stream()).getByText('This Mac has no copy of this channel yet.')).toBeTruthy();
+    expect(within(stream()).getByText('Not loaded on this Mac yet.')).toBeTruthy();
     expect(within(stream()).queryByText('Nothing in this channel yet.')).toBeNull();
     expect(footer().textContent).toBe('Offline · retrying'); // no "As of" before it: never caught up
     tell(change({ asOf: T(31), live: true }));
     expect(within(stream()).getByText('Nothing in this channel yet.')).toBeTruthy();
-    expect(within(stream()).queryByText('This Mac has no copy of this channel yet.')).toBeNull();
+    expect(within(stream()).queryByText('Not loaded on this Mac yet.')).toBeNull();
   });
 });
 
@@ -271,9 +284,17 @@ describe('people’s words', () => {
     const send = () => screen.getByRole('button', { name: /^Send/ }) as HTMLButtonElement;
     expect(send().textContent).toBe('');
     expect(send().getAttribute('aria-label')).toBe('Send');
-    expect(send().disabled).toBe(true);
-    await userEvent.type(composer(), 'first');
+    // greyed with nothing typed, yet in the Tab order, its tooltip reached by the keyboard, its press sending nothing
+    expect(send().getAttribute('aria-disabled')).toBe('true');
     expect(send().disabled).toBe(false);
+    await userEvent.click(composer());
+    await userEvent.tab();
+    expect(document.activeElement).toBe(send());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Send');
+    await userEvent.keyboard('{Enter}');
+    expect(fake.invoked('org.channel.send')).toHaveLength(0);
+    await userEvent.type(composer(), 'first');
+    expect(send().getAttribute('aria-disabled')).toBeNull();
     act(() => send().focus());
     expect((await screen.findByRole('tooltip')).textContent).toBe('Send');
     await userEvent.type(composer(), '{Enter}');

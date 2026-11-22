@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // A link in a message opens in a new tab, cut off from this page (`noopener`), through the browser's own TranscriptActions
 // around MAWS's Markdown — never MAWS's IPC defaults, which the desk does not load.
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Delivery, LogEvent, Raised, Settled } from 'desk-hub/protocol';
 import { dateFormats } from '@shared/app/date-format';
@@ -421,4 +421,47 @@ it("names a scoped broadcast by its scope, and every project a broadcast's copy 
   expect(bubble('text 6').querySelector('[data-testid="deliveries"]')).toBeNull();
   connection.stop();
   useGrid.setState({ projects: [] });
+});
+
+// The word cut (the desk's fold, after P447 and P448): a run of agent messages folds to "a and b · N" with its time
+// span, as the app's Channel draws it; the count is named "N messages", as its keyboard tooltip and, on a phone, which
+// cannot point, as a fact at rest.
+it('folds a run of agent messages to its names and its count, named as messages, its tooltip and its touch fact', async () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
+  const say = (seq: number, from: string, alias: string) =>
+    ({ ts: `2026-10-21T08:0${seq}:00.000Z`, writer: `macbook/${S1}`, seq, kind: 'say', mac: { nonce: `n${seq}`, value: 'v' }, from, to: [{ session: 'x', alias }], text: `text ${seq}` }) as LogEvent;
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions: new Map() }}>
+      <StreamView items={[{ kind: 'agents', key: 'a1', says: [1, 2, 3].map((seq) => ({ offset: seq, event: seq === 2 ? say(seq, 'ci-opt', 'maws-45') : say(seq, 'maws-45', 'ci-opt') })) }]} outbox={[]} />
+    </DeskContext.Provider>,
+  );
+  const run = screen.getByTestId('agent-run');
+  const fold = within(run).getByRole('button');
+  expect(fold.textContent).toContain('maws-45 and ci-opt · 3');
+  expect(fold.textContent).not.toContain('between agents');
+  expect(fold.textContent).toMatch(/^maws-45 and ci-opt · 3.+–.+3 messages$/); // the names, the count, the span, then the touch fact
+  expect(within(fold).getByRole('img', { name: '3 messages' }).textContent).toBe('3');
+  const touch = run.querySelector<HTMLElement>('[data-touch-fact]')!;
+  expect(touch.textContent).toBe('3 messages');
+  expect(touch.getAttribute('aria-hidden')).toBe('true');
+  act(() => fold.focus());
+  expect((await screen.findByRole('tooltip')).textContent).toBe('3 messages');
+  fireEvent.click(fold);
+  expect(screen.getByTestId('agent-run-messages').querySelectorAll('li')).toHaveLength(3);
+  connection.stop();
+});
+
+it('names three or more agents in a run as a list ending in "and"', () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
+  const say = (seq: number, from: string) =>
+    ({ ts: `2026-10-21T08:0${seq}:00.000Z`, writer: `macbook/${S1}`, seq, kind: 'say', mac: { nonce: `n${seq}`, value: 'v' }, from, to: '*', text: `text ${seq}` }) as LogEvent;
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions: new Map() }}>
+      <StreamView items={[{ kind: 'agents', key: 'a1', says: ['maws-45', 'ci-opt', 'docs-writer'].map((from, i) => ({ offset: i + 1, event: say(i + 1, from) })) }]} outbox={[]} />
+    </DeskContext.Provider>,
+  );
+  expect(within(screen.getByTestId('agent-run')).getByRole('button').textContent).toContain('maws-45, ci-opt and docs-writer · 3');
+  connection.stop();
 });

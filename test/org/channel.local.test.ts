@@ -599,9 +599,6 @@ describe('the project channel on the local hub', { timeout: 120_000 }, () => {
     const exchange = entries.find((e): e is ExchangeEntry => e.kind === 'exchange' && e.label === 'verified')!;
     expect(exchange).toMatchObject({ count: 3, between: [{ session: S1, alias: 'maws-45', machine: 'mini' }, { session: S2, alias: 'ci-opt', machine: 'mini' }] });
     expect(exchange.says.map((s) => s.owners.map((o) => o.id))).toEqual([[A], [A], [A]]);
-    // the word cut (P448): the fold reads "maws-45 and ci-opt · 3", its count named "3 messages"
-    expect(`${exchange.between[0].alias} ${CHANNEL.and} ${(exchange.between[1] as { alias: string }).alias} · ${exchange.count}`).toBe('maws-45 and ci-opt · 3');
-    expect(CHANNEL.messages(exchange.count)).toBe('3 messages');
 
     // oldmini's attested three fold as its broadcasts, migrated by mini; the fourth, past `upTo`, is legacy on its own.
     const migrated = entries.find((e): e is ExchangeEntry => e.kind === 'exchange' && e.label === 'migrated')!;
