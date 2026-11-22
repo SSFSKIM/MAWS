@@ -154,6 +154,10 @@ export const BACKGROUND_COPY = {
   // running row's time alone, a finished one's age alone, and nothing for a time no source gave.
   line: (description: string, state: string) => `${description}${state}`,
   state: (parts: readonly string[]) => (parts.length === 0 ? '' : ` · ${parts.join(' ')}`),
+  // the row's accessible name: the state the line leaves to its dot, and what its time measures
+  rowName: (description: string, state: string) => `${description}, ${state}`,
+  runningFor: (elapsed: string | null) => (elapsed === null ? 'running' : `running for ${elapsed}`),
+  ended: 'ended', // an outcome no source gave
   output: 'Output',
   outputPending: 'Output path not reported yet',
   earlierCompleted: (n: number) => `${n} done`, // the word cut (T231)

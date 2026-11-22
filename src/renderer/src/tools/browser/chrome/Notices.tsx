@@ -6,9 +6,9 @@
 //   (`navigate 'stop'`, which main turns into a kill and reload, Decision Log 42), the pop-ups the gate blocked;
 // - the session's transient notices from the store, main's `browser.notice` and the chrome's own (Copy URL, a refused
 //   address; U12a: Copy screenshot's outcome), routed by session (Decision Log 44 (f)) and gone after 4 s or on Dismiss.
-//   The word cut (T462): a tab left unloaded at the page cap draws none, since its chip is already greyed; an
-//   extension's options tab the cap closed instead (main's notice without a tab) keeps a short line, since nothing
-//   else on screen says why it went.
+//   The word cut (T462): a tab the memory cap unloaded draws none, since its chip is already greyed; an extension's
+//   options tab the cap closed instead (main's notice without a tab) keeps a short line, since nothing else on screen
+//   says why it went, and so does a page the count cap left suspended (main's notice on it), whose Load did nothing.
 //   E4d: comment mode's refused pick and unconfirmed arm come this way too (E4d execution document, Decision Log 35).
 //
 // Each line sits on whole px (a 24 px text line in 4 px padding, Decision Log 48), so the pane under the chrome starts on
@@ -82,8 +82,8 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' 
   switch (notice.kind) {
     case 'tabsCap':
       if (notice.name !== undefined) return BROWSER_COPY.tabsCapOptions(notice.name); // cua #90: an extension's options it could not open
-      if (notice.tabId !== null) return null; // the tab stays, its chip greyed
-      return notice.count !== undefined ? BROWSER_COPY.tabsCapClosed : BROWSER_COPY.tabsCapClosedMemory; // the count cap, or the memory cap
+      if (notice.count === undefined) return notice.tabId === null ? BROWSER_COPY.tabsCapClosedMemory : null; // the memory cap: a tab unloaded stays, its chip greyed
+      return notice.tabId === null ? BROWSER_COPY.tabsCapClosed : BROWSER_COPY.tabsCapRefused; // the count cap: a tab closed, or the page left suspended
     case 'profileMissing':
       return BROWSER_COPY.profileMissing(notice.name);
     case 'partitionFallback':

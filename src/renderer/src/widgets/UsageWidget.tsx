@@ -68,19 +68,25 @@ function windowRows(windows: Windows, now: number): { label: string; value: stri
   return [row(USAGE.fiveHour, windows.fiveHour), row(USAGE.weekly, windows.sevenDay), ...windows.scoped.map((s) => row(s.model, s.window))];
 }
 
+// A direct session's windows: this widget's own read, or (no answer of its own) the reading Session info's poll holds.
+function DirectWindows({ windows, now }: { windows: Windows | null; now: number }) {
+  return (
+    <Group label={USAGE.direct}>
+      {windows ? <KeyValues rows={windowRows(windows, now)} label={USAGE.windows} /> : <p className="m-0 text-ui-sm text-fg-muted">{USAGE.noPlanLimits}</p>}
+    </Group>
+  );
+}
+
+function HeldDirectWindows({ windows }: { windows: Windows | null }) {
+  return <DirectWindows windows={windows} now={useNow(POPOVER_TICK_MS)} />;
+}
+
 // The account's windows for a routed session (C7's store) or the engine's for a direct one (this widget's own read).
 function AccountWindows({ record, status, answer }: { record: SessionRecord; status: EngineSessionStatus | null; answer: GetUsageResponse }) {
   const shown = useSessionWindows(record, status);
   const snapshot = useUsage((s) => s.snapshot);
   const now = useNow(POPOVER_TICK_MS);
-  if (shown.source === 'direct') {
-    const windows = windowsFromGetUsage(answer, new Date(now).toISOString());
-    return (
-      <Group label={USAGE.direct}>
-        {windows ? <KeyValues rows={windowRows(windows, now)} label={USAGE.windows} /> : <p className="m-0 text-ui-sm text-fg-muted">{USAGE.noPlanLimits}</p>}
-      </Group>
-    );
-  }
+  if (shown.source === 'direct') return <DirectWindows windows={windowsFromGetUsage(answer, new Date(now).toISOString())} now={now} />;
   const who = shown.account ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ') : snapshot?.available === false ? USAGE.unavailable : USAGE.readingClaudeUsage;
   return (
     <Group label={shown.source === 'pinned' ? USAGE.pinned : USAGE.routing}>
@@ -120,9 +126,15 @@ export function UsageBody({ view, answer, appSessionId }: { view: UsageView; ans
 export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getUsage', { appSessionId });
   const route = useSessions((s) => (throughClaudeUsage(s.engine.get(appSessionId) ?? null, null) === false ? 'direct' : 'gateway')); // P5 O7 M9: what it was observed reaching
+  // A direct session whose process exited before this widget read: the windows Session info's poll last read, dated as
+  // a cached answer is (the word cut took them out of Session info, and the title bar's ring reads relay accounts)
+  const direct = useSessions((s) => throughClaudeUsage(s.engine.get(appSessionId) ?? null, s.records.get(appSessionId) ?? null) === false);
+  const reading = useUsage((s) => s.direct.get(appSessionId) ?? null);
+  const held = read.data === undefined && direct ? reading : null;
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} readAt={read.readAt} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} readAt={held ? Date.parse(held.readAt) : read.readAt} close={close}>
       {read.data && <UsageBody view={present(read.data, route)} answer={read.data} appSessionId={appSessionId} />}
+      {held && <HeldDirectWindows windows={held.windows} />}
     </WidgetFrame>
   );
 }

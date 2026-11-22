@@ -21,6 +21,7 @@ import { createdCrons, cronHistoryActivity, scheduledRows, sessionCrons, type Sc
 import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
 import { Icon } from '../../../app/IconButton';
 import { NamedGlyph } from '../../../ui/glyph';
+import { Tip } from '../../../ui/tip';
 import { HOVER_SCOPE, ON_HOVER } from '../../../ui/hover-scope';
 import { Group, type BackgroundSection } from './Group';
 import { useScheduledFile } from './scheduled-file';
@@ -98,7 +99,16 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
     row.expiresAt !== null && (row.expiresAt > now ? SCHEDULED_COPY.expires(formatShortDate(row.expiresAt, now)) : SCHEDULED_COPY.expired(formatShortDate(row.expiresAt, now))),
     row.lastFiredAt !== null && SCHEDULED_COPY.lastRan(formatAgo(now - row.lastFiredAt)),
   ].filter((part): part is string => part !== false);
-  const when = row.dormant ? SCHEDULED_COPY.dormant : row.next === null ? null : <span title={SCHEDULED_COPY.jitter}>{SCHEDULED_COPY.next(localTime(row.next, now), formatIn(row.next - now))}</span>;
+  // the engine's jitter is the next run's tip, so the keyboard reaches it (the desk does not draw these rows: no TouchFact)
+  const when = row.dormant ? (
+    SCHEDULED_COPY.dormant
+  ) : row.next === null ? null : (
+    <Tip content={SCHEDULED_COPY.jitter} description={SCHEDULED_COPY.jitter}>
+      <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+        {SCHEDULED_COPY.next(localTime(row.next, now), formatIn(row.next - now))}
+      </span>
+    </Tip>
+  );
   return (
     <li {...HOVER_SCOPE} data-scheduled={row.id} data-store={row.store} className={`mx-3 flex flex-col gap-0.5 rounded-sm px-2 py-1.5 text-ui-sm ${row.dormant ? 'text-fg-faint' : 'text-fg'}`}>
       {/* the schedule keeps the first line with the link; its kind and store go under it with the prompt, so a narrow
