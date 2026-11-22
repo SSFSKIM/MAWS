@@ -156,6 +156,25 @@ describe('the design_system question', () => {
 
     expect(within(section('s1')).getByRole('button', { name: 'Decide for me' })).toBeTruthy();
     expect(within(section('s1')).getByRole('button', { name: 'Skip' })).toBeTruthy();
+    // the word cut (T285): "Build one with me" has no line under it
+    expect(within(section('s1')).getByRole('radio', { name: 'Build one with me' }).textContent).toBe('Build one with me');
+  });
+
+  // the word cut (N163): the systems' read is a quiet spinner named by its words, never the words themselves
+  it('while the systems are read, a quiet spinner stands in the list’s place', async () => {
+    const pending = ask([PICK]);
+    const state = askSheetTool.createState({ appSessionId: A, session: record(A), instanceId: 'ask-sheet:t', params: { askId: pending.askId } });
+    const Body = askSheetTool.render;
+    render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Body state={state} ctx={ctx()} />
+      </DesignSystemHostContext.Provider>,
+    );
+    await fake.reply('maws.asks.list', { asks: [pending] });
+    expect(await within(section('s1')).findByRole('progressbar', { name: SHEET.readingSystems })).toBeTruthy();
+    expect(section('s1').textContent).not.toContain(SHEET.readingSystems);
+    await fake.reply('library.list', { rows: [row(HOUSE, 'MAWS')], counts });
+    expect(within(section('s1')).queryByRole('progressbar')).toBeNull();
   });
 
   // P4 (W1, tracker 2026-10-19 L277): a duplicate of the house system reads as a copy of its source, not "Built in"; an

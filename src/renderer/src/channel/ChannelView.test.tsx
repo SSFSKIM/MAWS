@@ -101,13 +101,44 @@ describe('the tab’s hold', () => {
     install();
     render(<ChannelView project={SMNS} />);
     await act(() => fake.reply('org.channel.open', opened({ events: [say(1, S1, S2, 0), say(2, S2, S1, 1), say(3, S1, S2, 2)] })));
-    const fold = screen.getByRole('button', { name: /3 messages between/ });
+    // the word cut (P448): "<name> and <name> · 3", the count named by its meaning
+    const fold = screen.getByRole('button', { name: /maws-45/ });
     expect(fold.textContent).toContain('maws-45');
     expect(fold.textContent).toContain('ci-opt');
+    expect(fold.textContent).not.toContain('messages');
+    expect(within(fold).getByRole('img', { name: '3 messages' }).textContent).toBe('3');
     expect(screen.queryByText('say 2')).toBeNull();
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('true');
     expect(within(stream().querySelector<HTMLElement>('[data-channel-exchange-messages]')!).getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  // the word cut (P447): the default audience is not said, on a message nor on a folded run of them
+  it('a message to the whole project, and a folded run of them, carry no “to everyone”', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    const all = (offset: number, minute: number): ChannelEvent => {
+      const event = say(offset, S1, S2, minute);
+      return { ...event, event: { ...event.event, to: '*' } as ChannelEvent['event'] };
+    };
+    await act(() => fake.reply('org.channel.open', opened({ events: [all(1, 0)] })));
+    expect(entries()).toEqual(['say:1']);
+    expect(stream().textContent).not.toContain('to everyone');
+    tell(change({ upserts: [all(1, 0), all(2, 1), all(3, 2)], reset: true }));
+    expect(entries()).toEqual(['exchange:1']);
+    const run = screen.getByRole('button', { name: /maws-45/ });
+    expect(run.textContent).not.toMatch(/everyone|messages/);
+    expect(within(run).getByRole('img', { name: '3 messages' }).textContent).toBe('3');
+  });
+
+  // the word cut (P457): the first read is a quiet spinner named by its words
+  it('while the channel is first read, a quiet spinner stands in the stream’s place', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    expect(stream().textContent).not.toContain('Reading the channel…');
+    expect(await within(stream()).findByRole('progressbar', { name: 'Reading the channel…' })).toBeTruthy();
+    await act(() => fake.reply('org.channel.open', opened()));
+    expect(within(stream()).queryByRole('progressbar')).toBeNull();
   });
 
   it('says why there is nothing to draw', async () => {
@@ -233,6 +264,27 @@ describe('people’s words', () => {
     expect(entries()).toEqual(['words:5']);
   });
 
+  // the word cut (P460): Send is the message box's round arrow, "Send" its name and tooltip; while it goes, a spinner
+  it('Send is the message box’s arrow, named Send; while a word goes it is a spinner', async () => {
+    install(); // each send answered when the test says
+    await mount();
+    const send = () => screen.getByRole('button', { name: /^Send/ }) as HTMLButtonElement;
+    expect(send().textContent).toBe('');
+    expect(send().getAttribute('aria-label')).toBe('Send');
+    expect(send().disabled).toBe(true);
+    await userEvent.type(composer(), 'first');
+    expect(send().disabled).toBe(false);
+    act(() => send().focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Send');
+    await userEvent.type(composer(), '{Enter}');
+    await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(1));
+    expect(send().getAttribute('aria-label')).toBe('Sending…');
+    expect(send().getAttribute('aria-busy')).toBe('true');
+    expect(send().querySelector('.animate-spin')).not.toBeNull();
+    await act(() => fake.reply('org.channel.send', { ok: true, nonce: 'n1' }));
+    expect(send().getAttribute('aria-label')).toBe('Send');
+  });
+
   it('keeps what is typed while a send is in flight, clearing only the text it sent', async () => {
     install(); // each send answered when the test says
     await mount();
@@ -351,7 +403,7 @@ describe('to-human entries', () => {
     const drawn = stream().querySelector<HTMLElement>('[data-channel-entry="to-human"]')!;
     expect(within(drawn).getByText('maws-45')).toBeTruthy();
     expect(within(drawn).getByText('message m1')).toBeTruthy();
-    expect(stream().querySelector('[data-channel-unavailable]')?.textContent).toContain('Old Mac');
+    expect(stream().querySelector('[data-channel-unavailable]')?.textContent).toBe('Old Mac: update MAWS there to see its sessions'); // the word cut (P454)
     tell(change({ hosts: { upserts: [host('m2', 40)], removed: [`${OTHER_MACHINE} m1`] } }));
     expect(entries()).toEqual(['say:1', 'say:2', 'to-human:-']);
     expect(stream().querySelector('[data-channel-entry="to-human"]')?.getAttribute('data-key')).toBe(`${OTHER_MACHINE} m2`);

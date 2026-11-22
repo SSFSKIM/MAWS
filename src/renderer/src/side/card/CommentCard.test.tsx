@@ -2,7 +2,7 @@
 // a card for a card placement and the sheet otherwise; the card is the sheet's form at card size, sharing its phases and
 // its sends (byte-identical payloads for the same anchor and text), drawn by its host at D4's placement; Close and
 // Escape dismiss it and give focus back; one card per window.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -100,6 +100,14 @@ function mount(layout: 'anchored' | 'docked' = 'anchored', frame: CardFrame = FR
 const pick = (anchor: Anchor = ANCHOR, placement: CommentPlacement = cardPlacement()) => act(() => openCommentComposer(anchor, { appSessionId: PARENT, placement }));
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
+// the word cut (P432): Send keeps its word while it goes, busy, with a quiet spinner in it named by the wait's words
+async function expectSendWaiting(words: string) {
+  const send = screen.getByRole('button', { name: /^Send\b(?! to main)/ }) as HTMLButtonElement;
+  expect(send.getAttribute('aria-busy')).toBe('true');
+  expect(send.disabled).toBe(true);
+  expect(within(send).getByText('Send')).toBeTruthy();
+  expect(await within(send).findByRole('progressbar', { name: words })).toBeTruthy();
+}
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement; // UX wave U5a
 const titleOf = (input: HTMLInputElement) => input.closest('label')!.getAttribute('title');
 
@@ -225,7 +233,7 @@ describe('the composer half', () => {
     const [sheet, fromCard] = fake.invoked('side.thread.open');
     expect(fromCard).toEqual(sheet);
     expect(fromCard).toEqual({ appSessionId: PARENT_ID, from: { kind: 'comment', anchor: ANCHOR, text: 'Line one\nline two', screenshot: null } });
-    expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
+    await expectSendWaiting('Starting…');
     expect(field().disabled).toBe(true);
   });
 
@@ -267,14 +275,14 @@ describe('the composer half', () => {
     mount();
     const screenshot = { path: '/user-data/captures/one.png', width: 640, height: 480 };
     pick({ ...ANCHOR, screenshot });
-    expect(screen.getByText('Screenshot · 640 × 480')).toBeTruthy();
+    expect(screen.getByText('Screenshot').getAttribute('aria-describedby')).not.toBeNull(); // the word cut (P434): its size its tip
     await userEvent.click(box());
     await userEvent.type(field(), 'Here{Enter}');
     expect(fake.invoked('side.comment.content')).toEqual([{ comments: [{ anchor: ANCHOR, text: 'Here', screenshot }] }]);
 
     pick({ ...ANCHOR, screenshot });
     await userEvent.click(screen.getByRole('button', { name: 'Remove screenshot' }));
-    expect(screen.queryByText('Screenshot · 640 × 480')).toBeNull();
+    expect(screen.queryByText('Screenshot')).toBeNull();
   });
 });
 
@@ -505,7 +513,7 @@ describe('the checkbox and the one send path', () => {
     expect(titleOf(box())).toBe('Sends at the next step');
     await userEvent.click(box());
     await userEvent.type(field(), 'Look here{Enter}');
-    expect(note()!.textContent).toBe('Sent to Q3 plan; read at the next step');
+    expect(note()!.textContent).toBe('Sent to Q3 plan'); // the word cut (P438): a steer's place reads as a send's
 
     withParent('ready');
     fake = fakeClient({ ...MAIN_SENDS, 'session.send': { messageUuid: null, disposition: 'queued', queueId: 'q1' } });
@@ -514,7 +522,7 @@ describe('the checkbox and the one send path', () => {
     expect(titleOf(box())).toBe('Sent now');
     await userEvent.click(box());
     await userEvent.type(field(), 'Look here{Enter}');
-    expect(note()!.textContent).toBe('Queued for Q3 plan; it sends when the queue resumes');
+    expect(note()!.textContent).toBe('Queued for Q3 plan');
     expect(useNotices.getState().notices).toEqual([]); // the host's line, not a toast
   });
 
@@ -615,7 +623,7 @@ describe('the checkbox and the one send path', () => {
     expect(useNotices.getState().notices).toEqual([]);
   });
 
-  it('a start: the button reads Starting… while the send starts the session itself, with no acquisition of its own', async () => {
+  it('a start: Send waits, a spinner named Starting… in it, while the send starts the session itself, with no acquisition of its own', async () => {
     withParent('exited');
     fake = fakeClient({ 'side.comment.content': { content: BUILT } });
     window.maws = fake.client as unknown as PreloadBridge;
@@ -624,7 +632,7 @@ describe('the checkbox and the one send path', () => {
     await userEvent.click(box());
     await userEvent.type(field(), 'Look here{Enter}');
     await vi.waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: PARENT_ID, reason: 'send' }])); // the port's, not the form's 'side'
-    expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
+    await expectSendWaiting('Starting…');
   });
 
   describe('a terminal session’s hand-off that is not confirmed (decision 8)', () => {
@@ -712,7 +720,7 @@ describe('the checkbox and the one send path', () => {
     const screenshot = { path: '/user-data/browser/crops/one.png', width: 640, height: 480 };
     act(() => openCommentComposer({ ...ANCHOR, screenshot }, { appSessionId: remote, placement: cardPlacement() }));
     expect(box().checked).toBe(true); // locked: no side thread on another machine yet
-    expect(screen.queryByText('Screenshot · 640 × 480')).toBeNull();
+    expect(screen.queryByText('Screenshot')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Remove screenshot' })).toBeNull();
     const line = card()!.querySelector<HTMLElement>('[data-left-out]')!;
     expect(line.textContent).toBe('1 screenshot is left out: Attachments to a session on another machine wait for uploads across machines');

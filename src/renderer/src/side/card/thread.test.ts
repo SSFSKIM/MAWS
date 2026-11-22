@@ -95,15 +95,16 @@ describe('needsYouOf', () => {
 
   it('first match wins: a setup card, then a failed start, then a holder, then attention', () => {
     const all = { card: trust, failed: true, holder: { kind: 'terminal', pid: 42 } as const, pending: [waiting('permission')] };
-    expect(needsYouOf(all)).toEqual({ kind: 'setup-card', text: 'Waiting for you to trust this folder', tabOnly: false });
-    expect(needsYouOf({ ...all, card: undefined })).toEqual({ kind: 'setup-failed', text: 'Could not start', tabOnly: false });
-    expect(needsYouOf({ ...all, card: undefined, failed: false })).toEqual({ kind: 'held', text: 'Held by terminal · 42', tabOnly: true });
-    expect(needsYouOf({ ...all, card: undefined, failed: false, holder: null })).toEqual({ kind: 'attention', text: 'Waiting for your permission', tabOnly: false });
+    expect(needsYouOf(all)).toEqual({ kind: 'setup-card', text: 'Waiting for you to trust this folder', noun: 'Trust this folder', tabOnly: false });
+    expect(needsYouOf({ ...all, card: undefined })).toEqual({ kind: 'setup-failed', text: 'Could not start', noun: null, tabOnly: false });
+    expect(needsYouOf({ ...all, card: undefined, failed: false })).toEqual({ kind: 'held', text: 'Held by terminal · 42', noun: null, tabOnly: true });
+    expect(needsYouOf({ ...all, card: undefined, failed: false, holder: null })).toEqual({ kind: 'attention', text: 'Waiting for your permission', noun: 'Permission', tabOnly: false });
   });
 
   it('a relay card, and a background job holding the thread', () => {
     expect(needsYouOf({ ...none, card: relay })?.text).toBe('The relay is not answering');
-    expect(needsYouOf({ ...none, holder: { kind: 'background_job', pid: 7, jobId: 'ab12', command: 'claude' } as never })).toEqual({ kind: 'held', text: 'Held by bg · ab12', tabOnly: true });
+    expect(needsYouOf({ ...none, holder: { kind: 'background_job', pid: 7, jobId: 'ab12', command: 'claude' } as never })).toEqual({ kind: 'held', text: 'Held by bg · ab12', noun: null, tabOnly: true });
+    expect(needsYouOf({ ...none, card: relay })?.noun, 'an error keeps its words').toBeNull();
   });
 
   it('names every tier-1 kind by its oldest item', () => {
@@ -118,11 +119,18 @@ describe('needsYouOf', () => {
       auto_mode_unavailable: 'Auto mode is unavailable',
     };
     for (const [kind, text] of Object.entries(texts)) expect(needsYouOf({ ...none, pending: [waiting(kind)] })?.text, kind).toBe(text);
+    // the word cut (P440): what waits on the person is drawn as the waiting disc and a noun, the sentence its words for a
+    // screen reader; an error keeps its words
+    const nouns: Record<string, string | null> = {
+      permission: 'Permission', question: 'Question', plan: 'Plan', dialog: 'Input', elicitation: 'Input',
+      error: null, interrupted: null, auto_mode_unavailable: null,
+    };
+    for (const [kind, noun] of Object.entries(nouns)) expect(needsYouOf({ ...none, pending: [waiting(kind)] })?.noun, kind).toBe(noun);
     expect(needsYouOf({ ...none, pending: [waiting('question', 2), waiting('plan', 1)] })?.text, 'the oldest').toBe('Waiting for you to review a plan');
   });
 
   it('a tier-1 kind it has no words for reads "Waiting for you"; held peer messages (tier 2) raise none', () => {
-    expect(needsYouOf({ ...none, pending: [waiting('future_kind')] })?.text).toBe('Waiting for you');
+    expect(needsYouOf({ ...none, pending: [waiting('future_kind')] })).toEqual({ kind: 'attention', text: 'Waiting for you', noun: null, tabOnly: false });
     expect(needsYouOf({ ...none, pending: [waiting('held_peer_message')] })).toBeNull();
   });
 

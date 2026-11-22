@@ -2,7 +2,7 @@
 // its title and locator, Side thread chosen by default, Send disabled until the comment has text, and each destination
 // sent. UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 19): the sheet shows the
 // card's checkbox, "Send to main", its caption as its title; ticked, the comment goes through the session's port.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -42,6 +42,15 @@ const BUILT = [{ type: 'text', text: 'the built message' }];
 const MAIN_SENDS = { 'side.comment.content': { content: BUILT }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' } } as const;
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement;
 const titleOf = (input: HTMLInputElement) => input.closest('label')!.getAttribute('title');
+// the word cut (P432): Send keeps its word while it goes, busy, with a quiet spinner in it named by the wait's words
+const sendButton = () => screen.getByRole('button', { name: /^Send\b/ }) as HTMLButtonElement;
+async function expectSendWaiting(words: string) {
+  expect(sendButton().getAttribute('aria-busy')).toBe('true');
+  expect(sendButton().disabled).toBe(true);
+  expect(within(sendButton()).getByText('Send')).toBeTruthy();
+  expect(await within(sendButton()).findByRole('progressbar', { name: words })).toBeTruthy();
+}
+const descriptionOf = (element: Element) => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.textContent ?? null;
 
 beforeEach(() => {
   resetShellStores();
@@ -132,7 +141,7 @@ describe('the comment composer', () => {
     await userEvent.click(box());
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
     await vi.waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: PARENT_ID, reason: 'send' }]));
-    expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
+    await expectSendWaiting('Starting…');
     expect(fake.invoked('session.send')).toEqual([]);
     await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: PARENT_ID, launched: true, joined: false }));
     expect(fake.invoked('session.send')).toEqual([{ appSessionId: PARENT_ID, content: BUILT }]);
@@ -171,7 +180,7 @@ describe('the comment composer', () => {
     const field = screen.getByRole('textbox', { name: 'Comment' });
     await userEvent.type(field, 'Line one{Shift>}{Enter}{/Shift}line two{Enter}');
     expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT_ID, from: { kind: 'comment', anchor: ANCHOR, text: 'Line one\nline two', screenshot: null } }]);
-    expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
+    await expectSendWaiting('Starting…');
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'no_engine_session', message: 'This session has not started yet' }));
     expect(screen.getByRole('alert').textContent).toContain('This session has not started yet');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
@@ -183,7 +192,11 @@ describe('the comment composer', () => {
     render(<CommentComposerHost />);
     const screenshot = { path: '/user-data/captures/one.png', width: 640, height: 480 };
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
-    expect(screen.getByText('Screenshot · 640 × 480')).toBeTruthy();
+    // the word cut (P434): with no thumbnail, the word alone, its size its tooltip and description
+    const words = screen.getByText('Screenshot');
+    expect(words.textContent).toBe('Screenshot');
+    expect(descriptionOf(words)).toBe('640 × 480');
+    expect(words.tabIndex).toBe(0);
     await userEvent.click(box());
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here');
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -193,7 +206,7 @@ describe('the comment composer', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
     await userEvent.click(screen.getByRole('button', { name: 'Remove screenshot' }));
-    expect(screen.queryByText('Screenshot · 640 × 480')).toBeNull();
+    expect(screen.queryByText('Screenshot')).toBeNull();
   });
 
   // E11 F2b (Q4, owner-decided: "a small image preview"): the screenshot shows as a thumbnail of itself, named as the chip
@@ -221,7 +234,7 @@ describe('the comment composer', () => {
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
     await act(() => fake.fail('side.screenshot.preview', 'screenshot: not found'));
     expect(screen.queryByRole('img', { name: 'Screenshot · 640 × 480' })).toBeNull();
-    expect(screen.getByText('Screenshot · 640 × 480')).toBeTruthy();
+    expect(descriptionOf(screen.getByText('Screenshot'))).toBe('640 × 480');
     expect(screen.getByRole('button', { name: 'Remove screenshot' })).toBeTruthy();
   });
 
@@ -246,7 +259,7 @@ describe('the comment composer', () => {
     await userEvent.click(box());
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Later{Enter}');
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Queued for Q3 plan; it sends when the queue resumes']);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Queued for Q3 plan']); // the word cut (P438)
   });
 
   // Decision Log 27 (the architect's ruling): the hand-off's toast is keyed and follows its pending send as a place's
