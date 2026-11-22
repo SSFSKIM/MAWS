@@ -7,6 +7,7 @@ import { getChunks } from '@codemirror/merge';
 import { EditorView } from '@codemirror/view';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -301,7 +302,7 @@ describe('a main file tab moves beside the chat', () => {
     expect(item.getAttribute('title')).toBeNull();
     expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToPanel, description: TRANSFER_COPY.noSession })).toBe(item);
     act(() => within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Move to other pane' }).focus());
-    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    await userEvent.setup().keyboard('{ArrowDown}');
     expect(document.activeElement).toBe(item);
     expect(item.querySelector('[data-row-note]')?.hasAttribute('data-open')).toBe(true); // the reason shows on focus
     fireEvent.click(item);

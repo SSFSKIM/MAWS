@@ -3,9 +3,12 @@
 // for every test in it.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { fakeClient } from '../../../../test/support/fake-client';
 import { at } from '../../../../test/support/machine';
+import { resetQueueStore } from '../stores/queue';
+import { preloadOf } from '../test-support/preload-of';
 import { CompactWidget } from './CompactWidget';
 
 vi.mock('../session/controls/controls-for', async (importOriginal) => ({
@@ -14,7 +17,14 @@ vi.mock('../session/controls/controls-for', async (importOriginal) => ({
 }));
 
 const ID = at('app-0c4a1d2e' as AppSessionId);
-afterEach(cleanup);
+beforeEach(() => {
+  window.maws = preloadOf(fakeClient());
+});
+afterEach(() => {
+  cleanup();
+  resetQueueStore();
+  delete (window as { maws?: unknown }).maws;
+});
 
 describe('the compact widget of a driven terminal session', () => {
   it('reads a dash while the bridge has reported no usage', () => {
