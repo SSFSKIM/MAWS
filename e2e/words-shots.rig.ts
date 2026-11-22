@@ -19,7 +19,9 @@
 // the panels beside the conversation, and the project Channel's folds). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
 // not), and each run's build (its commit and a digest of out/). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
-// pictures are the same command on the build's branch into another folder.
+// pictures are the same command on the build's branch into another folder. A folder holds one build's pictures: a run of
+// another build into it moves the earlier results it does not take again aside (`stale` in _run.json, their pictures
+// under _stale/<build>/), and a scene taken again loses its old picture before it starts.
 //
 // The `m1-`, `m2-` and `m3-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
@@ -33,7 +35,8 @@
 // wave removed is recorded as having no target on master, with why.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
@@ -51,7 +54,7 @@ import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign } from './support/design';
-import { startBrowserServer } from './support/browser-server';
+import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { CHANNEL_FIXTURE_ENV, WORDS_CHANNEL_COUNTS, WORDS_CHANNEL_PROJECT, WORDS_CHANNEL_PROJECT_ID, wordsChannel, wordsChannelScenario } from './support/words-channel';
@@ -243,6 +246,22 @@ function noGh({ shellHome }: { shellHome: string }) {
   for (const file of ['.zshrc', '.bash_profile']) appendFileSync(join(shellHome, file), `export PATH='${NO_GH_PATH}'\n`);
 }
 
+// A loopback port that refuses a connection, the same one on every run where it can be, so a before and an after draw one
+// address. Not a low port such as 9: Chromium refuses those itself (ERR_UNSAFE_PORT, which draws the generic error page,
+// never the refused one); a fixed high port checked to refuse, else one bound and closed (support/browser-server.ts).
+const REFUSING_PORT = 47_913;
+async function refusingPort(): Promise<number> {
+  const refuses = await new Promise<boolean>((resolve) => {
+    const socket = connect(REFUSING_PORT, '127.0.0.1');
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once('error', (error: NodeJS.ErrnoException) => resolve(error.code === 'ECONNREFUSED'));
+  });
+  return refuses ? REFUSING_PORT : closedPort();
+}
+
 // ---- capture ---------------------------------------------------------------------------------------------------------
 // The window at the rig's size, and every action bounded: `_electron.launch` makes its own context, which the words
 // config's `use.actionTimeout` does not reach, so the context and the page are given the bound here (each launch calls
@@ -307,6 +326,7 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
   if (!wanted(meta.id)) return;
   META.push(meta);
   notes = [];
+  clearPicture(meta.id); // a miss leaves no earlier run's picture under the scene's name
   try {
     if (meta.hover) await dismissToasts(page);
     // one more try after a failed step: a loaded Mac can take a press before its target has drawn
@@ -317,6 +337,8 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
       notes = [];
       await prepare();
     });
+    // M3's evidence, its own scenes and the carried ones, only from the checkout's own build (m3Build refuses another's)
+    if (meta.round === 'm3' || M3_CARRIED.has(meta.id)) await m3Build(page);
     const target = of?.() ?? page;
     await settle(target, meta.hover === true);
     if (meta.round === 'm1') await expect(page.locator('[data-settings-dialog]'), 'Settings open').toBeVisible({ timeout: 3_000 });
@@ -340,14 +362,20 @@ function whole(error: unknown): string {
 }
 // A step that stages a launch's state and failed: the whole error in the console, the scenes it was for not reached.
 const setupFailed = (what: string, error: unknown) => console.log(`[words] ${what} failed:\n${whole(error)}`);
-// Why a scene was not reached, as "<reason>: <what was found>": a failed check's message (its first line) and what
-// Playwright received ("element(s) not found", a viewport ratio, an attribute), so a miss says which way it missed.
+// Why a scene was not reached, as "<reason>: <what was found> · waiting for <locator>": a failed check's message (its
+// first line), what Playwright received ("element(s) not found", a viewport ratio, an attribute), so a miss says which
+// way it missed, and the locator it waited on (an assertion's `Locator:` line, else an action's first "waiting for"
+// step), so a timed-out click says what it could not find.
 function notReached(error: unknown): string {
   const lines = stripVTControlCharacters(error instanceof Error ? error.message : String(error)).split('\n');
   const reason = lines[0]!.trim();
   const log = lines.findIndex((line) => /^\s*Call log:/.test(line)); // Playwright's steps, past what it found
   const found = (log < 0 ? lines : lines.slice(0, log)).slice(1).map((line) => line.trim()).filter((line) => /^(Received|Error)\b/.test(line) || /failed$/.test(line));
-  return (found.length === 0 ? reason : `${reason}: ${found.join(' · ')}`).slice(0, 300);
+  const named = lines.map((line) => line.trim()).find((line) => line.startsWith('Locator:'))?.slice('Locator:'.length).trim();
+  const waited = lines.map((line) => /^\s*-\s*waiting for (.+)$/.exec(line)?.[1]?.trim()).find((locator) => locator !== undefined);
+  const locator = named ?? waited;
+  const said = found.length === 0 ? reason : `${reason}: ${found.join(' · ')}`;
+  return (locator === undefined || said.includes(locator) ? said : `${said} · waiting for ${locator}`).slice(0, 800);
 }
 // ---- the word cut's M1: what waits for the pointer and the keyboard (ui/row-note.tsx, ui/tip.tsx) -------------------
 // The m1 scenes' before is this rig, with its e2e support files, run against master's build (scenes.md). Master has no
@@ -599,6 +627,9 @@ const M3_WORDS = {
   openSurface: 'Open surface', // master's panel/copy.ts COPY.openSurface, which M3 removed (P9)
   side: 'Side', // side/copy.ts SIDE_COPY.pane.title, the same on both builds
   binaryFile: 'Binary file', // tools/code/copy.ts REVIEW_COPY.binaryFile, the same on both builds
+  source: 'Source', // tools/code/copy.ts VIEWER_COPY.source, a markdown file's Source view (the one that edits), the same on both builds
+  engine: 'Engine', // tools/session-info/copy.ts INFO.sections.engine, the group holding the Browser tabs row; M3 folds it (T252)
+  latest: '· latest', // tools/scm/copy.ts SCM_COPY.latest, the Commits heading with no base, the same on both builds
   save: 'Save', // tools/code/copy.ts EDITOR_COPY's save, compare and reload, the same on both builds
   compare: 'Compare',
   reload: 'Reload',
@@ -639,8 +670,29 @@ async function emitToWindow(app: ElectronApplication, name: string, payload: unk
 function gone(meta: Meta, why: string) {
   if (!wanted(meta.id)) return;
   META.push(meta);
+  clearPicture(meta.id);
   results.push({ id: meta.id, ok: false, error: `no target on master: ${why}` });
 }
+// A scene whose state no launch of this rig reaches on the build (scenes.md says why): kept in _run.json, never captured.
+function unreachable(meta: Meta, why: string) {
+  if (!wanted(meta.id)) return;
+  META.push(meta);
+  clearPicture(meta.id);
+  results.push({ id: meta.id, ok: false, error: `not reachable in this rig: ${why}` });
+}
+// An earlier run's picture of a scene this run takes again, gone before the scene starts (fix wave, scalpel-5#1)
+const clearPicture = (id: string) => rmSync(join(OUT, `${id}.png`), { force: true });
+// The scenes that existed before M3 and show its surfaces (scenes.md, "Existing scenes that show M3's surfaces"): M3's
+// evidence as much as its own `m3-` scenes, so each is refused on a build that is not the checkout's (fix wave,
+// scalpel-5#3), as an m3 scene is
+const M3_CARRIED = new Set([
+  'panel-session-info', 'session-terminal-held-info', 'session-running-cards', 'r2-cards-unfolded', 'r2-run-cards', 'panel-subagents-tools-session', 'r2-subagents-finished',
+  'r2-subagent-page', 'r2-run-subagents', 'r2-run-subagent-page', 'panel-background', 'r2-run-background', 'r2-run-background-shell', 'm0-tasks', 'panel-source-control',
+  'panel-review', 'm0-scm-commit-review', 'panel-files', 'm0-files-nomatch', 'm0-file-beside-chat', 'm0-file-outside', 'm0-tab-menu', 'r2-browser-blank', 'r2-browser-failed',
+  'm0-browser-options', 'm0-browser-suggestions', 'r2-disk-tohuman', 'panel-subagents', 'm0-subagents-stopped', 'm0-background-stopped', 'm0-background-workflow',
+  'm0-background-scheduled', 'm0-scm-behind', 'm0-scm-conflict', 'm0-review-staged', 'm0-files-goto', 'm0-browser-find', 'm0-browser-profile', 'm1-settings-browser-imported',
+  'r2-palette', 'r2-shortcuts',
+]);
 
 // Escape only while an overlay is open. Since the UX wave's U1b, Escape on a waiting request's row (or on nothing while
 // its pane holds the keyboard) denies the request (request-card/prompt-guard.ts), so a bare Escape could answer one.
@@ -714,12 +766,25 @@ async function sideSurface(app: ElectronApplication, page: Page, id: string) {
   await expect(surface(page, id)).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(800);
 }
-// The cards beside the conversation, each open (panel/summary/FloatingCard.tsx: section > h3 > button)
+// The cards beside the conversation, each open (panel/summary/FloatingCard.tsx: section > h3 > button). The first folded
+// card each time: the folded set shrinks with each press, so its matches listed once (`all()`, which indexes them) skip
+// every other card.
 async function unfoldCards(page: Page) {
   await expect(cards(page)).toBeVisible({ timeout: 10_000 });
-  for (const button of await cards(page).locator('section > h3 > button[aria-expanded="false"]').all()) await button.click().catch(() => undefined);
+  const folded = cards(page).locator('section > h3 > button[aria-expanded="false"]');
+  for (let i = 0; i < 8 && (await folded.count()) > 0; i++) await folded.first().click();
   await page.waitForTimeout(600);
 }
+// The Files surface's tree: Go to file's field emptied, since a query left in it from an earlier scene (m0-files-goto,
+// m0-files-nomatch) draws the finder's list in the tree's place (files/FinderView.tsx), and no tree row is mounted
+const filesTree = async (page: Page) => {
+  const filter = surface(page, 'files').locator('[data-files-filter]').first();
+  if ((await filter.inputValue({ timeout: 2_000 }).catch(() => '')) !== '') await filter.fill('');
+};
+// A row of the Files tree by its path, never the Changed group's row of the same path (files/FilesTool.tsx's
+// ChangedItem, `data-changed-row`), which is drawn above the tree, is never a folder to open, and holds an untracked
+// folder's path too
+const treeItem = (page: Page, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]:not([data-changed-row])`).first();
 async function settingsAt(app: ElectronApplication, page: Page, section: string) {
   if ((await page.getByRole('dialog').locator(`#settings-${section}`).count()) === 0) {
     await reset(page);
@@ -782,11 +847,30 @@ test.beforeAll(() => {
   mkdirSync(EMPTY_BIN, { recursive: true });
   mkdirSync(OUT, { recursive: true });
 });
+// One folder holds one build's pictures (fix wave, scalpel-5#1). Each result carries the build it was taken from (its
+// commit and out/'s digest); a later run of the same build into the folder (a WORDS_ONLY rerun) keeps the scenes it did
+// not take again, and a run of another build moves every earlier result it did not take again, and its picture, aside:
+// the result under `stale` in _run.json, the picture under _stale/<build>/, so nothing another build drew reads as this
+// one's.
+type Result = (typeof results)[number] & { build?: string };
 test.afterAll(() => {
-  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[]; runs?: Run[] };
-  const keep = <T extends { id: string }>(old: T[], fresh: T[]) => [...old.filter((o) => !fresh.some((f) => f.id === o.id)), ...fresh];
-  const run: Run = { at: new Date().toISOString(), ...buildIdentity(), m1: cut, m2: cut2, m3: cut3, scenes: results.map((result) => result.id) };
-  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META), runs: [...(all.runs ?? []), run] }, null, 2));
+  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: Result[]; screens: Meta[]; runs?: Run[]; stale?: Result[] };
+  const identity = buildIdentity();
+  const build = `${identity.commit.slice(0, 12)}-${identity.out.slice(0, 12)}`;
+  const fresh: Result[] = results.map((result) => ({ ...result, build }));
+  const untaken = all.results.filter((old) => !fresh.some((f) => f.id === old.id));
+  const stale = untaken.filter((old) => old.build !== build);
+  for (const old of stale) {
+    const picture = join(OUT, `${old.id}.png`);
+    if (!existsSync(picture)) continue;
+    const aside = join(OUT, '_stale', old.build ?? 'unknown');
+    mkdirSync(aside, { recursive: true });
+    renameSync(picture, join(aside, `${old.id}.png`));
+  }
+  const kept = [...untaken.filter((old) => old.build === build), ...fresh];
+  const screens = [...all.screens.filter((o) => !META.some((f) => f.id === o.id)), ...META].filter((screen) => kept.some((result) => result.id === screen.id));
+  const run: Run = { at: new Date().toISOString(), ...identity, m1: cut, m2: cut2, m3: cut3, scenes: results.map((result) => result.id) };
+  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: kept, screens, runs: [...(all.runs ?? []), run], stale: [...(all.stale ?? []), ...stale] }, null, 2));
 });
 // What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
 // build restored twice from scripts/e2e-build.sh's cache) show as one build: the checkout's commit, the tracked files
@@ -1579,11 +1663,13 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
   IDLE.forEach((title, i) => seedSession(config, i % 2 ? other : repo, `0a1b2c3d-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`, title, `2026-09-29T10:0${i}:00.000Z`));
   const usage = usageFixture();
   trust(config);
-  // a file outside every session's folder, which File › Open picks through the e2e pick seam (src/main/client/e2e-pick.ts)
-  const outside = join(SCRATCH, 'outside', 'notes.txt');
-  mkdirSync(join(SCRATCH, 'outside'), { recursive: true });
-  writeFileSync(outside, 'Notes kept outside every project.\n');
+  // a file outside every session's folder, which File › Open picks through the e2e pick seam (src/main/client/e2e-pick.ts).
+  // It is in MAWS's own profile folder: a file the person picks anywhere else opens editable, with no Read-only mark (the
+  // pick grants it, services/files/service.ts), and MAWS's own files are the ones a pick still opens read-only
+  // (services/files/own.ts; e2e/sessions.spec.ts's A8 opens one so)
   mkdirSync(join(SCRATCH, 'profile-replay'), { recursive: true });
+  const outside = join(SCRATCH, 'profile-replay', 'notes.txt');
+  writeFileSync(outside, 'Notes kept outside every project.\n');
   const maws = await launchMaws({ userData: join(SCRATCH, 'profile-replay'), prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, MAWS_E2E_PICK_PATHS: outside, PATH: NO_GH_PATH }) });
   const { app, page } = maws;
   try {
@@ -1785,14 +1871,15 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
     await shot(page, m0({ id: 'm0-file-beside-chat', title: 'A file open beside the conversation', how: 'Files, click a file in the tree', state: 'src/sidebar.ts of the scratch repository in the side column’s viewer, its change marked', folders: ['tools/code/viewer', 'tools/code/files', 'panel'] }), async () => {
       await openSession(page, ids.agents!);
       await sideSurface(app, page, 'files');
+      await filesTree(page);
       const root = surface(page, 'files').locator('[role="treeitem"][data-kind="root"]').first();
       if ((await root.getAttribute('aria-expanded').catch(() => null)) === 'false') await root.click();
-      const src = surface(page, 'files').locator(`[role="treeitem"][data-path="${repo}/src"]`).first();
+      const src = treeItem(page, `${repo}/src`);
       if ((await src.getAttribute('aria-expanded').catch(() => null)) === 'false') await src.click();
-      await surface(page, 'files').locator(`[role="treeitem"][data-path="${repo}/src/sidebar.ts"]`).first().click();
+      await treeItem(page, `${repo}/src/sidebar.ts`).click();
       await expect(page.locator(`[data-region="panel"] [data-file-viewer][data-path="${repo}/src/sidebar.ts"]`).first()).toBeVisible({ timeout: 10_000 });
     });
-    await shot(page, m0({ id: 'm0-file-outside', title: 'A file outside the session’s folders, its Read-only panel', how: 'File › Open File… (⌘O) on a file outside every project, then its read-only mark', state: 'notes.txt from a scratch folder no session works in: the viewer’s notice and the Read-only panel', folders: ['tools/code/viewer', 'panel'] }), async () => {
+    await shot(page, m0({ id: 'm0-file-outside', title: 'A file outside the session’s folders, its Read-only panel', how: 'File › Open File… (⌘O) on a file outside every project, then its read-only mark', state: 'notes.txt from MAWS’s own profile folder, outside every session’s folders: the viewer’s Read-only mark and its panel', folders: ['tools/code/viewer', 'panel'] }), async () => {
       await openSession(page, ids.agents!);
       await menu(app, 'file.open');
       const viewer = page.locator(`[data-file-viewer][data-path="${outside}"]`).first();
@@ -2080,13 +2167,14 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
     // M3 (T210, T213, T238, T239): the recorded workflow's page, opened from its card (tools/agents/background/RunWidget.tsx:
     // its line, its phases and its agents' table, `data-view="run"` on both builds)
     const run = () => surface(page, 'background').locator('[data-view="run"]').first();
-    await shot(page, m3({ id: 'm3-background-workflow-page', title: 'Right column, Background, a finished workflow’s page', how: 'The agents session, Background with Done open, click the workflow’s card', state: 'The recorded workflow’s page: its line, its phases and its agents with their states (T210, T213, T238, T239)', folders: ['tools/agents/background', 'panel'] }), async () => {
+    await shot(page, m3({ id: 'm3-background-workflow-page', title: 'Right column, Background, a finished workflow’s page', how: 'The agents session, Background with Done open, click the workflow card’s title', state: 'The recorded workflow’s page: its line, its phases and its agents with their states (T210, T213, T238, T239)', folders: ['tools/agents/background', 'panel'] }), async () => {
       await openSession(page, ids.subagents!);
       await m3Build(page);
       await sideSurface(app, page, 'background');
       if ((await run().count()) === 0) {
         await unfoldSections(page, 'background');
-        await surface(page, 'background').locator('[data-workflow]').first().click();
+        // the card's title opens the page (background/WorkflowCard.tsx, both builds); the card itself takes no press
+        await surface(page, 'background').locator('[data-workflow] h4 button').first().click();
       }
       await expect(run(), 'the workflow’s page').toBeVisible({ timeout: 10_000 });
     }, {
@@ -2221,8 +2309,8 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await page.waitForTimeout(1000);
     });
     await reset(page);
-    // the in-app browser: a tab that never navigated, a page that failed to load (127.0.0.1:9 refuses on macOS), and a
-    // page of the repository's scratch server with the tab's own controls open
+    // the in-app browser: a tab that never navigated, a page that failed to load (a closed loopback port refuses it), and
+    // a page of the repository's scratch server with the tab's own controls open
     const browserTab = async (url: string | null) => {
       await openSession(page, ids.browser!);
       await sideSurface(app, page, 'browser');
@@ -2230,24 +2318,27 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await page.waitForTimeout(3000);
     };
     const browser = () => surface(page, 'browser');
+    // Browser options, the address row's last control, is itself the menu's trigger (chrome/OverflowMenu.tsx: no element
+    // wraps it, so a button inside the row's last child never matches), named the same on both builds
+    const browserOptions = () => browser().getByRole('button', { name: BROWSER_COPY.options, exact: true }).first();
     await shot(page, r2({ id: 'r2-browser-blank', title: 'Browser, a tab that never navigated', how: 'Browser in the right column, a new tab', state: 'A new tab with no address', folders: ['tools/browser'] }), async () => {
       await browserTab(null);
       await soft(browser().locator('[data-browser-page="empty"]'), 'the empty tab');
     });
-    await shot(page, r2({ id: 'r2-browser-failed', title: 'Browser, a page that failed to load', how: 'Browser in the right column, an address that refuses', state: 'http://127.0.0.1:9/ refused the connection', folders: ['tools/browser'] }), async () => {
-      await browserTab('http://127.0.0.1:9/');
+    await shot(page, r2({ id: 'r2-browser-failed', title: 'Browser, a page that failed to load', how: 'Browser in the right column, an address that refuses', state: `http://127.0.0.1:${REFUSING_PORT}/ refused the connection`, folders: ['tools/browser'] }), async () => {
+      await browserTab(`http://127.0.0.1:${await refusingPort()}/`);
       await expect(browser().locator('[data-browser-page="error-refused"]').first()).toBeAttached({ timeout: 30_000 });
     });
     await shot(page, m0({ id: 'm0-browser-find', title: 'Browser, the options menu’s Find', how: 'A loaded page, the options menu at the end of the address row, Find', state: 'A scratch page with the find row open', folders: ['tools/browser'] }), async () => {
       await browserTab(server.url('/a.html'));
-      await browser().locator('[data-browser-nav] > :last-child button').first().click();
-      await page.locator('[role="menu"] [role="menuitem"]').nth(1).click();
+      await browserOptions().click();
+      await page.getByRole('menu').first().getByRole('menuitem', { name: BROWSER_COPY.menu.find, exact: true }).click();
       await expect(browser().locator('[data-browser-find]').first()).toBeVisible({ timeout: 10_000 });
     });
     await closeOverlays(page);
     await shot(page, m0({ id: 'm0-browser-options', title: 'Browser, the options menu', how: 'A loaded page, the options menu at the end of the address row', state: 'The tab’s options menu open over a scratch page', folders: ['tools/browser'] }), async () => {
       await browserTab(server.url('/a.html'));
-      await browser().locator('[data-browser-nav] > :last-child button').first().click();
+      await browserOptions().click();
       await expect(page.locator('[role="menu"]').first()).toBeVisible({ timeout: 5_000 });
     });
     await closeOverlays(page);
@@ -2460,11 +2551,16 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
     const agentRows = () => surface(page, 'subagents').locator('[data-agent-row]');
     const waitingRow = () => agentRows().filter({ has: page.locator('[data-part="waiting"]') }).or(agentRows().filter({ hasText: SUBAGENTS_COPY.approvalNeeded })).first();
     const waitingOpen = () => waitingRow().locator('button[data-part="open"]').first();
-    await shot(page, m3({ id: 'm3-agents-approval', title: 'Right column, Agents, an agent waiting on an approval', how: 'The same session after its third prompt, Agents; Tab to the waiting agent’s row', state: 'The waiting agent’s row holding the keyboard: on M3 its disc, Approval needed the tooltip; master: its line (T166)', folders: ['tools/agents/subagents', 'tools/agents', 'panel', 'ui'] }), async () => {
+    await shot(page, m3({ id: 'm3-agents-approval', title: 'Right column, Agents, an agent waiting on an approval', how: 'The same session after its third prompt, Agents (back to its list), its sections open; Tab to the waiting agent’s row', state: 'The waiting agent’s row holding the keyboard: on M3 its disc, Approval needed the tooltip; master: its line (T166)', folders: ['tools/agents/subagents', 'tools/agents', 'panel', 'ui'] }), async () => {
       atApproval();
       await openSession(page, ids.run!);
       await m3Build(page);
       await sideSurface(app, page, 'subagents');
+      // the list, not the agent's page r2-run-subagent-page opened, which the panel keeps (subagents/DrillIn.tsx's Back:
+      // the agent's page's header's first button, or the waiting page's own)
+      if ((await surface(page, 'subagents').locator('[data-view="lists"]').count()) === 0) await surface(page, 'subagents').locator('[data-view="agent"] > header > button, [data-view="pending"] > button').first().click();
+      await expect(surface(page, 'subagents').locator('[data-view="lists"]'), 'the agents’ list').toBeVisible({ timeout: 10_000 });
+      await unfoldSections(page, 'subagents');
       await expect(waitingRow(), 'the waiting agent’s row').toBeAttached({ timeout: 10_000 });
       await letGo(page);
       if (m3Cut()) await waitingOpen().focus();
@@ -3556,12 +3652,24 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     // `browserTabsRow`); master's row reads No tabs loaded. Its label is the browser copy's, the same on both builds.
     const info = () => surface(page, 'session-info');
     const browserRow = () => info().getByText(BROWSER_COPY.sessionInfoLabel, { exact: true });
-    await shot(page, meta('m3-session-info-no-pages', 'T540', 'Session info with no browser page loaded', 'The quiet session, View › More surfaces › Session info, before any browser tab opened', 'Session info’s rows, with no Browser tabs row on M3 (master: No tabs loaded)'), async () => {
+    // On M3 each group is folded to its head, Permissions and Usage open (session-info/SessionInfoView.tsx, T252), and the
+    // Browser tabs row is in Engine, mounted only while it is open: its head pressed open (fix wave, scalpel-5#4). Master
+    // draws every row at rest.
+    const engineHead = () => info().locator(`[data-info-group="${M3_WORDS.engine}"] h4 button[aria-expanded]`).first();
+    const engineOpen = async () => {
+      if (!m3Cut()) return;
+      if ((await engineHead().getAttribute('aria-expanded')) === 'false') await engineHead().click();
+      await expect(engineHead(), 'the Engine group open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+      await page.waitForTimeout(400);
+    };
+    await shot(page, meta('m3-session-info-no-pages', 'T540', 'Session info with no browser page loaded', 'The quiet session, View › More surfaces › Session info, before any browser tab opened; on M3 its Engine group opened', 'Session info’s rows, Engine’s with no Browser tabs row on M3 (master: No tabs loaded)'), async () => {
       await opened('quiet');
       await sideSurface(app, page, 'session-info');
+      await engineOpen();
     }, {
       check: async () => {
         await inView(info().locator('[data-session-info]'), 'Session info');
+        if (m3Cut()) await expect(engineHead(), 'the Engine group open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
         if (m3Cut()) await expect(browserRow(), 'no Browser tabs row').toHaveCount(0);
         else await inView(browserRow(), 'master’s Browser tabs row');
       },
@@ -3581,6 +3689,8 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     }, {
       check: async () => {
         await inView(commitsHeading(), 'the Commits heading');
+        // the loaded heading (fix wave, scalpel-5#5): the bare heading of the pending and the failed reads holds no "latest"
+        if (m3Cut()) await expect(commitsHeading(), 'the loaded heading’s “· latest”').toContainText(M3_WORDS.latest, { timeout: 3_000 });
         if (m3Cut()) await expect(commitsHeading(), 'no branch after “latest”').not.toContainText('latest on', { timeout: 3_000 });
         else await expect(commitsHeading(), 'master’s heading naming the branch').toContainText('latest on main', { timeout: 3_000 });
       },
@@ -3637,7 +3747,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
 
     // ---- Files: a symbolic link (T316), a binary (T328), a file past the viewer's cap (T322), the find bar (T336), unsaved
     // edits (T338), the disk's copy changed under them (T341, T342)
-    const item = (path: string) => files().locator(`[role="treeitem"][data-path="${path}"]`).first();
+    const item = (path: string) => treeItem(page, path);
     const unfolded = async (path: string) => {
       if ((await item(path).getAttribute('aria-expanded', { timeout: 10_000 }).catch(() => null)) === 'false') await item(path).click();
       await page.waitForTimeout(400);
@@ -3645,6 +3755,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     const filesAt = async (...folders: string[]) => {
       await opened('panels');
       await sideSurface(app, page, 'files');
+      await filesTree(page);
       const root = files().locator('[role="treeitem"][data-kind="root"]').first();
       if ((await root.getAttribute('aria-expanded').catch(() => null)) === 'false') await root.click();
       for (const folder of folders) await unfolded(join(panels, folder));
@@ -3682,6 +3793,8 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     let edited = false; // the notes file holds an unsaved edit (cleared when the compare scene reloads the disk's copy)
     const editedNotes = async () => {
       if (!(await viewer('src/notes.md').isVisible().catch(() => false))) await openFile('src', 'src/notes.md');
+      // a markdown file opens rendered and is edited only in its Source view (viewer/FileViewer.tsx's toggle)
+      if ((await code('src/notes.md').count()) === 0) await viewer('src/notes.md').getByRole('button', { name: M3_WORDS.source, exact: true }).first().click();
       if (!edited) {
         await code('src/notes.md').click();
         await page.keyboard.press('Meta+ArrowDown');
@@ -3697,7 +3810,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       if ((await theirs().count()) === 0) writeFileSync(join(panels, 'src/notes.md'), 'Drag keeps the row under the pointer.\nThe list scrolls with it.\nNothing jumps.\n');
       await expect(theirs(), 'the disk’s notice').toBeVisible({ timeout: 15_000 });
     };
-    await shot(page, meta('m3-file-unsaved', 'T338', 'A file with unsaved edits, Save holding the keyboard', 'The panels session, Files, src/notes.md; type at its end, then Tab to Save', 'Save focused; on M3 its chord the tooltip (master: a system title, not drawn)'), async () => {
+    await shot(page, meta('m3-file-unsaved', 'T338', 'A file with unsaved edits, Save holding the keyboard', 'The panels session, Files, src/notes.md in its Source view; type at its end, then Tab to Save', 'Save focused; on M3 its chord the tooltip (master: a system title, not drawn)'), async () => {
       await editedNotes();
       await letGo(page);
       await save().focus();
@@ -3729,11 +3842,15 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     });
     await reset(page);
 
-    // ---- the surfaces' icons and tabs: an open surface's menu (P8), a closed one's (P9), a tab's pin glyph (P11)
+    // ---- the surfaces' icons and tabs: an open surface's menu (P8), a closed one's (P9), a tab's pin glyph (P11). Pin tab
+    // and the pin glyph act on a Files tab that holds no file, the tree alone (panel/SurfaceRow.tsx, files/tabs.ts
+    // `pinnableTab`), and a file opened beside the chat takes the session's tree-only tab (files/tabs.ts `placeOpen`), so
+    // the panels session, whose Files tabs the scenes above filled, has none: these two are the quiet session's, whose
+    // Files no scene opened a file in
     const icon = (title: string) => page.locator(`[data-surface-row] button[aria-label="${title}"]`).first();
     const contextMenu = () => page.getByRole('menu').first();
-    await shot(page, meta('m3-surface-icon-menu', 'P8', 'An open surface’s icon, right-clicked', 'The panels session with Files open; right-click the Files icon in the header', 'The icon’s menu: Pin tab and Hide surface (master: Keep open for every session)'), async () => {
-      await opened('panels');
+    await shot(page, meta('m3-surface-icon-menu', 'P8', 'An open surface’s icon, right-clicked', 'The quiet session with Files open; right-click the Files icon in the header', 'The icon’s menu: Pin tab and Hide surface (master: Keep open for every session)'), async () => {
+      await opened('quiet');
       await sideSurface(app, page, 'files');
       await icon('Files').click({ button: 'right' });
       await expect(contextMenu(), 'the icon’s menu').toBeVisible({ timeout: 5_000 });
@@ -3757,9 +3874,11 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       },
       after: () => closeOverlays(page),
     });
-    const pinGlyph = () => page.locator('[data-region="panel"]:not([inert]) [data-side-strip] [data-tab-id] button[aria-label^="Pin "]').first();
-    await shot(page, meta('m3-tab-pin-tip', 'P11', 'A side tab’s pin glyph holding the keyboard', 'The panels session with Files open; Tab to the Files tab’s pin glyph', 'The glyph focused; on M3 its verb the tooltip (master: a system title, not drawn)'), async () => {
-      await opened('panels');
+    // the Files tab's own pin glyph (fix wave, scalpel-5#6), named "Pin <the tab's title>" (panel/copy.ts COPY.pin, both
+    // builds), never another tab's: the quiet session's Review and Source control tabs carry one too
+    const pinGlyph = () => page.locator('[data-region="panel"]:not([inert]) [data-side-strip] [data-tab-id] button[aria-label="Pin Files"]').first();
+    await shot(page, meta('m3-tab-pin-tip', 'P11', 'A side tab’s pin glyph holding the keyboard', 'The quiet session with Files open; Tab to the Files tab’s pin glyph', 'The glyph focused; on M3 its verb the tooltip (master: a system title, not drawn)'), async () => {
+      await opened('quiet');
       await sideSurface(app, page, 'files');
       await letGo(page);
       await pinGlyph().focus();
@@ -3979,9 +4098,10 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     // tooltip, reached by focus (P162; session-info/SessionInfoView.tsx's Value), on master they end the value at rest
     const budget = 'outside the engine budget'; // tools/browser/copy.ts: M3's sessionInfoSource, the end of master's sessionInfo
     const loadedValue = () => (m3Cut() ? info().locator('span[tabindex="0"]').filter({ hasText: /^[1-9]\d* loaded( · \d+ MB)?$/ }) : info().getByText(new RegExp(`^[1-9]\\d* loaded( · \\d+ MB)? · ${budget}$`)));
-    await shot(page, meta('m3-session-info-pages', 'T539, P162', 'Session info with browser pages loaded, its value holding the keyboard', 'The panels session after its browser tab loaded, View › More surfaces › Session info; on M3 Tab to the Browser tabs value', 'The Browser tabs row: the pages loaded and their memory; on M3 “outside the engine budget” its tooltip, master’s at the value’s end'), async () => {
+    await shot(page, meta('m3-session-info-pages', 'T539, P162', 'Session info with browser pages loaded, its value holding the keyboard', 'The panels session after its browser tab loaded, View › More surfaces › Session info; on M3 open Engine, then Tab to the Browser tabs value', 'The Browser tabs row: the pages loaded and their memory; on M3 “outside the engine budget” its tooltip, master’s at the value’s end'), async () => {
       await browserTab(); // the scratch page loaded, whether or not an earlier scene opened it
       await sideSurface(app, page, 'session-info');
+      await engineOpen();
       await expect(loadedValue().first(), 'a loaded page’s value').toBeVisible({ timeout: 15_000 });
       await loadedValue().first().scrollIntoViewIfNeeded();
       await letGo(page);
@@ -4003,9 +4123,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     // Browser's extension rows with the same chip (P394), and the imported profile's popover (T478, T480, T483, T484, T486)
     const win = { maws, page };
     const sheet = () => sheetOf(win);
-    // the chip of an extension switched on and not loaded yet (tools/browser/import/Report.tsx's StatusChip, shared with
-    // Settings): "On" on M3 (P394), master's "On · loads when a tab next opens in this profile"
-    // the import the report, Settings' extension rows and the imported popover show: run once, by whichever of them comes
+    // the import the report and the imported popover show: run once, by whichever of them comes
     // first (the report scene in a whole run; a later one alone under WORDS_ONLY), the sheet left on its report
     const importChoices = { history: false, cookies: false, bookmarks: true, extensions: true };
     const importedProfile = async () => {
@@ -4015,7 +4133,13 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       await closeSheet(win);
       await closeSettings(win);
     };
-    const onChip = (scope: Locator) => scope.locator('[data-extension-status]').filter({ hasText: m3Cut() ? /^On$/ : /^On · / }).first();
+    // An extension's chip as the import left it (tools/browser/import/Report.tsx's StatusChip, shared with Settings). The
+    // chip of one switched on and not loaded yet ("On" on M3, P394; master's "On · loads when a tab next opens in this
+    // profile") no launch of this rig draws: the import loads each extension it switches on at once
+    // (main/browser/import/extensions-loader.ts, `importExtensions`), opening the profile's partition, and a switch turned
+    // on in a partition opened this boot loads too (`setExtension`); only a later boot that has not opened the profile holds
+    // an extension on and not loaded.
+    const chip = (scope: Locator) => scope.locator('[data-extension-status]');
     await shot(page, meta('m3-import-consent', 'T511, T516', 'Import a Chrome profile, the categories', 'Settings › Browser, Import a Chrome profile…, Continue', 'The categories over the synthetic Chrome profile and its extensions (master adds a greyed passwords row and each extension’s chips)'), async () => {
       await opened('panels');
       if ((await sheet().getAttribute('data-browser-import').catch(() => null)) !== 'consent') {
@@ -4030,7 +4154,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
         await closeSettings(win);
       },
     });
-    await shot(page, meta('m3-import-report', 'P388, P394, T533', 'Import a Chrome profile, the report', 'Settings › Browser, Import a Chrome profile…, bookmarks and extensions, Import', 'The finished report: its summary, the skipped lines under it, each extension’s chip (“On” on M3)'), async () => {
+    await shot(page, meta('m3-import-report', 'P388, T533', 'Import a Chrome profile, the report', 'Settings › Browser, Import a Chrome profile…, bookmarks and extensions, Import', 'The finished report: its summary, the skipped lines under it, each extension’s chip as the import left it (loaded, or why not)'), async () => {
       if ((await sheet().getAttribute('data-browser-import').catch(() => null)) !== 'report') {
         if ((profilesFile(userData)?.profiles.length ?? 0) > 0) throw new Error('a profile is imported already: the report of a retried import is not this scene’s');
         await opened('panels');
@@ -4039,17 +4163,11 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     }, {
       check: async () => {
         await inView(sheet().locator('[data-import-summary]'), 'the report’s summary');
-        await inView(onChip(sheet()), 'an extension switched on, not loaded yet');
+        await inView(chip(sheet()), 'an extension’s chip');
       },
       after: () => closeSheet(win).catch(() => undefined),
     });
-    const imported = () => page.locator('[data-imported-profile]').first();
-    await shot(page, meta('m3-settings-browser-extension-on', 'P394', 'Settings › Browser, an imported extension switched on', 'Settings (⌘,), Browser, scrolled to the imported profile’s extensions', 'The extension rows with the chip the report draws (“On” on M3)'), async () => {
-      await importedProfile();
-      await settingsAt(app, page, 'browser');
-      await imported().locator('[data-extension-status]').first().scrollIntoViewIfNeeded({ timeout: 10_000 });
-      await page.waitForTimeout(400);
-    }, { check: () => inView(onChip(imported()), 'an extension switched on, not loaded yet') });
+    unreachable(meta('m3-settings-browser-extension-on', 'P394', 'Settings › Browser, an imported extension switched on', 'Settings (⌘,), Browser, scrolled to the imported profile’s extensions', 'The extension rows with the chip of one on and not loaded yet (“On” on M3)'), 'an extension on and not loaded yet needs a boot that has not opened its profile; this launch’s import opened it and loaded every extension it switched on');
     await closeSettings(win).catch(() => undefined);
     await reset(page);
     const popover = () => page.locator('[data-profile-popover]').first();
