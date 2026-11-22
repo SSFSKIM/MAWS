@@ -144,7 +144,7 @@ describe('what a row says (rowWords)', () => {
   const MiB = 1024 * 1024;
   const LOCAL = addressOf(TEST_MACHINE, 'app-l' as AppSessionId);
   const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
-  const TOO_LARGE = 'Too large to show here: MAWS copies at most 64.0 MB from another machine.';
+  const TOO_LARGE = 'Too large to show here'; // the word cut (N14): the size under it says the rest
   const entryOf = (over: Partial<ViewerEntry> & { frame?: EntryFrame | null } = {}): ViewerEntry => ({
     tabId: 'file:t:/r/tide.mov', appSessionId: LOCAL, artifact: null, path: '/r/tide.mov', status: 'ready', error: null, kind: 'frame', mime: 'video/quicktime', encoding: 'base64',
     bytes: 3 * MiB, loaded: 0, complete: true, text: '', epoch: 1, base64: null, removed: false, updated: 0, sourceView: false, line: null, pendingJump: null, loadingMore: false,
@@ -185,31 +185,34 @@ describe('what a row says (rowWords)', () => {
 
   it('a file of this Mac whose service cannot serve a frame: its sentence and Open externally', () => {
     const entry = entryOf({ path: '/r/ledger.pdf', mime: 'application/pdf', frame: { status: 'row', why: 'unserved' } });
-    expect(rowWords(entry)).toEqual({ sentence: 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.', open: true });
+    expect(rowWords(entry)).toEqual({ sentence: 'This file can’t be shown here yet.', open: true }); // the word cut (N15)
     render(<ExternalRow entry={entry} />);
-    expect(screen.getByText('MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.')).toBeTruthy();
+    expect(screen.getByText('This file can’t be shown here yet.')).toBeTruthy();
     expect(openButton()).not.toBeNull();
   });
 
-  it('the bound in the too-large sentence is the formatter’s, for another bound too', () => {
-    expect(VIEWER_COPY.tooLargeHere(REMOTE_COPY_MAX_BYTES)).toBe(TOO_LARGE);
-    expect(VIEWER_COPY.tooLargeHere(1536)).toBe(`Too large to show here: MAWS copies at most ${formatSize(1536)} from another machine.`);
+  it('the too-large sentence names no bound: the size under it is the fact (the word cut, N14)', () => {
+    expect(VIEWER_COPY.tooLargeHere).toBe(TOO_LARGE);
+    expect(VIEWER_COPY.tooLargeHere).not.toContain(formatSize(REMOTE_COPY_MAX_BYTES));
     expect(formatSize(1536)).toBe('1.5 KB');
-    expect(rowWords(entryOf({ frame: { status: 'row', why: 'too-large' } })).sentence).toBe(VIEWER_COPY.tooLargeHere(REMOTE_COPY_MAX_BYTES));
+    expect(rowWords(entryOf({ frame: { status: 'row', why: 'too-large' } })).sentence).toBe(TOO_LARGE);
   });
 
-  it('a kind MAWS does not frame reads as it did', () => {
+  // The word cut (T327, T328): a kind MAWS does not frame reads its kind and its size on one line, above Open externally
+  it('a kind MAWS does not frame reads its kind and its size, one line', () => {
     const binary = entryOf({ kind: 'external', path: '/r/data.bin', mime: 'application/octet-stream', bytes: 12 });
-    expect(rowWords(binary)).toEqual({ sentence: 'Binary file · 12 B', open: true });
+    expect(rowWords(binary)).toEqual({ sentence: 'Binary · 12 B', open: true });
     const { unmount } = render(<ExternalRow entry={binary} />);
-    expect(screen.getByText('Binary file · 12 B')).toBeTruthy();
+    expect(screen.getByText('Binary · 12 B')).toBeTruthy();
+    expect(document.querySelectorAll('[data-external-row] p')).toHaveLength(1);
     expect(openButton()).toBeNull(); // files.openExternal would not hand it out
     unmount();
     const tiff = entryOf({ kind: 'external', path: '/r/scan.tiff', mime: 'image/tiff', bytes: 2048 });
-    expect(rowWords(tiff)).toEqual({ sentence: 'Image files open outside MAWS', open: true });
+    expect(rowWords(tiff)).toEqual({ sentence: 'Image · 2.0 KB', open: true });
     render(<ExternalRow entry={tiff} />);
-    expect(screen.getByText('Image files open outside MAWS')).toBeTruthy();
-    expect(screen.getByText('2.0 KB')).toBeTruthy();
+    expect(screen.getByText('Image · 2.0 KB')).toBeTruthy();
+    expect(screen.queryByText('2.0 KB')).toBeNull(); // no size line of its own
+    expect(screen.queryByText(/open outside MAWS/)).toBeNull();
     expect(openButton()).not.toBeNull();
   });
 
@@ -219,7 +222,7 @@ describe('what a row says (rowWords)', () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
     installDisk({ '/r/ledger.pdf': '%PDF-1.4 invented\n' }, { frames: () => ok({ status: 'row', why: 'unframed' }) });
     render(<FileViewer tab={{ id: 'file:t:/r/ledger.pdf', kind: 'file', path: '/r/ledger.pdf', line: null, appSessionId: LOCAL, machine: TEST_MACHINE, pinned: false }} />);
-    await waitFor(() => expect(screen.getByText('This file stopped loading: it changed, or it can no longer be read.')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('This file stopped loading.')).toBeTruthy()); // the word cut (N12)
     expect(screen.getByRole('button', { name: 'Open again' })).toBeTruthy();
     expect(document.querySelector('[data-external-row]')).toBeNull();
     useViewer.getState().reset();

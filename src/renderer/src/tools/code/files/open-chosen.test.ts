@@ -43,8 +43,8 @@ vi.mock('./remote-chooser', async (importOriginal) => {
 
 const OUT = '/elsewhere/chosen.txt';
 const R = addressOf(OTHER_MACHINE, 'app-remote') as AppSessionId; // a session of another machine
-const NOT_A_FILE = 'Open File opens one file. A folder or an app’s package cannot be opened here.';
-const UNAVAILABLE = 'MAWS could not open the file just now. Try Open File again in a moment.';
+const NOT_A_FILE = 'A folder or an app’s package cannot be opened here.'; // the word cut (N26)
+const UNAVAILABLE = 'Could not open the file. Try again in a moment.'; // the word cut (N27)
 
 type Answer = ReturnType<typeof ok>;
 let answer: () => Answer | Promise<Answer>;

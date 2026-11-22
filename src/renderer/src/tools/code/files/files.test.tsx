@@ -455,10 +455,26 @@ describe('files tool', () => {
     expect(extent()).toBeLessThan(initial);
   });
 
+  // The word cut (T314, T316): the session's own folder is its name alone, while the other roots keep the word that tells
+  // them apart; a link reads its arrow and target, "Symbolic link" kept for a screen reader
+  it('draws the session’s folder by its name alone and a link as its arrow and target', async () => {
+    render(<TestHost />);
+    openTool();
+    await waitFor(() => expect(items()).toHaveLength(5));
+    const drawn = (element: Element) => [...element.childNodes].map((node) => (node instanceof Element && node.classList.contains('sr-only') ? '' : drawnText(node))).join('');
+    const drawnText = (node: Node): string => (node instanceof Element ? drawn(node) : (node.textContent ?? ''));
+    expect(drawn(item('r'))).toBe('r');
+    expect(drawn(item('docs'))).toBe('docsadditional directory');
+    const link = item('link-out');
+    expect(drawn(link)).toBe('link-out→ /elsewhere/secret');
+    expect(link.querySelector('.sr-only')?.textContent).toBe('Symbolic link ');
+    expect(link.textContent).toBe('link-outSymbolic link → /elsewhere/secret'); // what a screen reader hears, as before
+  });
+
   it('opens the project root immediately, keeps additional roots lazy, and preserves a deliberate collapse on refresh and remount', async () => {
     const mounted = render(<TestHost />);
     openTool();
-    await waitFor(() => expect(items()).toEqual(['rdirectory', 'src', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']));
+    await waitFor(() => expect(items()).toEqual(['r', 'src', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']));
     expect(main.calls.filter((c) => c.name.startsWith('files.')).map((c) => [c.name, c.input.path])).toEqual([
       ['files.list', undefined],
       ['files.watch', '/r'], // the watch first, then the listing it guards
@@ -501,7 +517,7 @@ describe('files tool', () => {
     const row = document.querySelector('[data-notice="refused"]')!;
     expect(row.textContent).toBe('This folder is outside the folders this session works in./docs');
     expect(row.getAttribute('data-notice-cause')).toBe('outside');
-    expect(row.getAttribute('title')).toBe("This folder is outside the folders this session works in.\npath outside the session's directories"); // the whole headline, then the command's words
+    expect(row.getAttribute('title')).toBe('This folder is outside the folders this session works in.'); // the whole headline; the word cut (N11): no command's words under a named cause
     fireEvent.click(item('docs'));
     fireEvent.click(item('docs'));
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === '/docs')).toHaveLength(2));
@@ -518,7 +534,7 @@ describe('files tool', () => {
     const row = document.querySelector('[data-notice="error"]')!;
     expect(row.textContent).toBe('No folder at this path.');
     expect(row.getAttribute('data-notice-cause')).toBe('not-found');
-    expect(row.getAttribute('title')).toBe('No folder at this path.\nnot found: /r/src');
+    expect(row.getAttribute('title')).toBe('No folder at this path.'); // the word cut (N11)
   });
 
   it('roots that could not be listed read the folder’s sentences and the command’s words, and Retry lists them again', async () => {
@@ -535,7 +551,7 @@ describe('files tool', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.getAttribute('data-notice-cause')).toBe('unreachable');
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull(); // Retry is the one control that lists them again
-    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(["MAWS's service on this Mac is not answering.", 'files.list: the files service is not running']);
+    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(["MAWS's service on this Mac is not answering."]); // the word cut (N11): the headline names the cause
     for (const p of alert.querySelectorAll('p:not([data-notice-detail])')) expect(p.textContent).not.toMatch(/^(Refused|Could not list|files\.)/); // the sentences; the command's words are the small line's
     up = true;
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
@@ -548,7 +564,7 @@ describe('files tool', () => {
     render(<TestHost />);
     openTool();
     const alert = await screen.findByRole('alert');
-    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['This folder is outside the folders this session works in.', "path outside the session's directories"]);
+    expect([...alert.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['This folder is outside the folders this session works in.']); // the word cut (N11)
     expect(within(alert).queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy(); // with no Retry, Refresh stands beside it as before
   });
@@ -584,12 +600,12 @@ describe('files tool', () => {
       tree[''] = [dir('/r'), dir('/docs'), dir('/wt')]; // the service appends the admitted working folder
       put(byCd);
       await waitFor(() => expect(items()[0]).toBe('wtworking folder'));
-      await waitFor(() => expect(items()).toEqual(['wtworking folder', 'w.ts', 'rdirectory', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']));
+      await waitFor(() => expect(items()).toEqual(['wtworking folder', 'w.ts', 'r', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']));
       expect(item('src').getAttribute('aria-selected')).toBe('true');
       tree[''] = [dir('/r'), dir('/docs')];
       put({});
       await waitFor(() => expect(items()[0]).toBe('rdirectory'));
-      expect(items()).toEqual(['rdirectory', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']);
+      expect(items()).toEqual(['r', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']);
     });
 
     it('lists the working folder first after a move by the tool, ahead of the directory the engine files the session in', async () => {
@@ -940,9 +956,12 @@ describe('the Files list’s menu (U6e)', () => {
     expect(row.getAttribute('aria-disabled')).toBe('true');
     expect(row.className.split(/\s+/)).toContain('truncate');
     expect(row.querySelector('.text-fg-muted')?.textContent).toBe(` (this session runs on ${STUDIO})`);
+    // the word cut (N28; "What the cut builds"): the greyed row keeps the menu's keyboard, so its reason is reached
+    expect(row.hasAttribute('data-disabled')).toBe(false);
     fireEvent.click(row);
     await act(flush);
     expect(main.callsOf('layout.openFile')).toEqual([]);
+    expect(screen.queryByRole('menu')).not.toBeNull(); // selecting it does nothing and keeps the menu open
   });
 });
 
@@ -1797,12 +1816,14 @@ describe('the Files list’s menu for a session on another machine (U6f)', () =>
     ['a build that does not list the capability', { capabilities: ['rl2.channel'] }, 'Can’t open a file on studio yet. Update MAWS on studio and try again.'],
     ['the machine offline', { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }, 'Open File is unavailable while studio is offline.'],
     ['the link connecting', { state: 'connecting', capabilities: undefined }, 'Connecting to studio…'],
-  ] as const)('%s: the row is disabled, its title the sentence, and nothing is asked', async (_, over, sentence) => {
+  ] as const)('%s: the row is greyed, keeps the keyboard, its description the sentence, and nothing is asked', async (_, over, sentence) => {
     rosterSays(T, over as Partial<MachineState>);
     const row = await menuRow(T);
     expect(row.getAttribute('aria-disabled')).toBe('true');
-    expect(row.getAttribute('title')).toBe(sentence);
-    expect(row.textContent).toBe('Open File…');
+    // the word cut (N29): the reason is the row's description and its note, which the keyboard reaches; no system tooltip
+    expect(row.hasAttribute('data-disabled')).toBe(false);
+    expect(row.hasAttribute('title')).toBe(false);
+    expect(screen.getByRole('menuitem', { name: 'Open File…', description: sentence })).toBe(row);
     fireEvent.click(row);
     await act(flush);
     expect(document.querySelector('[data-remote-chooser]')).toBeNull();

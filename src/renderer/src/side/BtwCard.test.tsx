@@ -611,13 +611,12 @@ describe('a path in the card’s answer (U6b-4b)', () => {
     await settle();
     expect(fake.invoked('files.read')).toEqual([{ appSessionId: A_ID, path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
     await act(() => fake.fail('files.read', "path outside the session's directories"));
-    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences, the path, the command's words
+    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences and the path
     expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual([
       'This file is outside the folders this session works in.',
-      "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+      'Choose it with File ▸ Open File…', // the word cut (N7)
       'Ask the agent to send the file to see it here.',
-      '/elsewhere/o.md',
-      "path outside the session's directories",
+      '/elsewhere/o.md', // the word cut (N11): no command's words under a notice that names its cause
     ]);
   });
 });

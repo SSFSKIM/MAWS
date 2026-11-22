@@ -523,9 +523,9 @@ describe('a file in the merge view moved to the main area', () => {
     act(() => void moveFileToMain(sideTabOf(APP)!));
     await waitFor(() => expect(chunksIn('main')).toHaveLength(2));
     const counted = () => region('main').querySelector('[data-merge-changes]')?.textContent;
-    expect(counted()).toBe('2 changes from disk');
+    expect(counted()).toBe('2 changes');
     fireEvent.click(within(chunksIn('main')[1]).getByRole('button', { name: 'Take theirs' }));
-    await waitFor(() => expect(counted()).toBe('1 change from disk'));
+    await waitFor(() => expect(counted()).toBe('1 change'));
     const main = editorIn('main')!;
     expect(main.state.doc.toString()).toBe(numbered({ 2: 'mine 2', 8: 'theirs 8' }));
     expect(getChunks(main.state)?.chunks).toHaveLength(1);
