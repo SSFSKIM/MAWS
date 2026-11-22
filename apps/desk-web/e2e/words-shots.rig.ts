@@ -161,7 +161,7 @@ function scene(meta: Meta, body: (page: Page, hub: HubDouble, meta: Meta) => Pro
   });
 }
 
-let cleanup: Array<() => void> = [];
+const cleanup: Array<() => void> = [];
 test.afterEach(() => {
   for (const stop of cleanup.splice(0)) stop();
 });
