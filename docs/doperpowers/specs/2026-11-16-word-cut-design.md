@@ -386,7 +386,12 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - P447 and P448 fold a run of agent messages to "maws-45 and ci-opt · 3" ("maws-45 · 3" for a broadcast). The count is an image named "3 messages" inside the fold button, and the button's `Tip` says the same.
   - P460's Send follows the message box's arrow and spinner.
 
-  None of these surfaces is drawn by the desk's web app, which draws a project channel as its own group chat. On the coordinator's call of 2026-11-22, that chat's fold follows P447 and P448 as a `new` row: "a and b · N", keeping its time range, with the count named "N messages" as its tip and as a `TouchFact` on the phone. Its single "a → b" lines stay.
+  None of these surfaces is drawn by the desk's web app, which draws a project channel as its own group chat. On the coordinator's call of 2026-11-22, that chat's fold follows P447 and P448 as a `new` row: "a and b · N", keeping its time range, with the count named "N messages" as its tip and as a `TouchFact` on the phone. Its single "a → b" lines stay; this is N170. After the task review:
+- One `hasAnswer` check decides "No answer", whether Continue shows, what it sends, and which exchanges count as in flight, so a blank reply is no answer everywhere.
+- The trust strip is a consent step and stays as on master, with no disc and no noun (P440 corrected).
+- P443's delivery mark is a focusable `Tip` owner.
+- An idle Send is `aria-disabled` and stays in the Tab order.
+- Three `new` rows: N167, the side chat's "The engine substituted this answer", becomes "Not from Claude". N168, the Channel's no-copy state, reads "Not loaded on this Mac yet.", which tells a channel never loaded from an empty one. N169 is the no-hub closed state that shared its words.
 - 2026-11-22. **M3 task 5: Files and the file tab.** 17 cuts and 13 rewordings, with 22 `stays` rows left as they read; no `new` row.
   - T305 puts Wrap in a View menu behind a sliders glyph named "View", as the row says; Review keeps its worded "View ▾" (the owner's "words wide, glyphs narrow" on Review), so the two code tools draw the menu differently.
   - T324: the ring of a long file still arriving takes Tab, so the keyboard reaches its sizes tip.
