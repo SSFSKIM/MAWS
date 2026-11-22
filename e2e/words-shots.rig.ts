@@ -3487,6 +3487,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     // each scene's folders by its id's family, the first prefix that matches
     const FOLDERS: [string, string[]][] = [
       ['m3-cards-', ['panel', 'panel/summary']],
+      ['m3-session-info-', ['tools/session-info', 'tools/browser', 'panel']],
       ['m3-review-', ['tools/code/review', 'panel']],
       ['m3-scm-', ['tools/scm', 'panel']],
       ['m3-file', ['tools/code/files', 'tools/code/viewer', 'tools/code/editor', 'panel']],
@@ -3514,6 +3515,22 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
         await expect(cards(page).locator('section > h3 > button[aria-expanded="false"]'), 'every card open').toHaveCount(0, { timeout: 3_000 });
       },
     });
+
+    // ---- Session info before any browser page is loaded (T540): on M3 no Browser tabs row (tools/session-info/model.ts
+    // `browserTabsRow`); master's row reads No tabs loaded. Its label is the browser copy's, the same on both builds.
+    const info = () => surface(page, 'session-info');
+    const browserRow = () => info().getByText(BROWSER_COPY.sessionInfoLabel, { exact: true });
+    await shot(page, meta('m3-session-info-no-pages', 'T540', 'Session info with no browser page loaded', 'The quiet session, View › More surfaces › Session info, before any browser tab opened', 'Session info’s rows, with no Browser tabs row on M3 (master: No tabs loaded)'), async () => {
+      await opened('quiet');
+      await sideSurface(app, page, 'session-info');
+    }, {
+      check: async () => {
+        await inView(info().locator('[data-session-info]'), 'Session info');
+        if (m3Cut()) await expect(browserRow(), 'no Browser tabs row').toHaveCount(0);
+        else await inView(browserRow(), 'master’s Browser tabs row');
+      },
+    });
+    await reset(page);
 
     // ---- the quiet repository: Review's empty scope (T362) and Source control with no base (N62)
     await shot(page, meta('m3-review-empty', 'T362', 'Review of a clean working tree', 'The quiet session, View › Review (⌘⇧D)', 'The Uncommitted scope with no change: its one line'), async () => {
@@ -3857,6 +3874,16 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
         check: () => inView(notice(payload.kind), 'the notice’s line'),
       });
     }
+    await reset(page);
+
+    // Session info once the browser holds a page (T539): the Browser tabs row, its count and memory (on M3 without
+    // "outside the engine budget", which is its tooltip)
+    await shot(page, meta('m3-session-info-pages', 'T539', 'Session info with browser pages loaded', 'The panels session after its browser tab loaded, View › More surfaces › Session info', 'The Browser tabs row: the pages loaded and their memory'), async () => {
+      if (tabId === null) throw new Error('no browser tab was opened');
+      await opened('panels');
+      await sideSurface(app, page, 'session-info');
+      await browserRow().first().scrollIntoViewIfNeeded({ timeout: 10_000 });
+    }, { check: () => inView(browserRow(), 'the Browser tabs row') });
     await reset(page);
 
     // ---- the Chrome import (launch 6's fixture): the consent step (T511, T516), the report (P388, P394, T533), Settings ›
