@@ -676,6 +676,7 @@ describe('the card’s words, after the cut', () => {
     listing([exchange({ response: '  ' })]);
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
-    expect(await within(card()!.querySelector<HTMLElement>('[data-side-exchange="answered"]')!).findByText('No answer')).toBeTruthy();
+    const empty = await within(card()!).findByText('No answer');
+    expect(empty.closest('[data-side-exchange="answered"]')).not.toBeNull();
   });
 });
