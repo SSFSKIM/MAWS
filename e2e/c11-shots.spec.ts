@@ -110,13 +110,20 @@ test('the widgets and Session info on the #widgets harness page', async () => {
     await shoot(page, 'model-widget', true);
     await page.keyboard.press('Escape');
     await page.evaluate((id) => (window as unknown as { __maws_widgets: WidgetsHarnessApi }).__maws_widgets.control('setModel', { appSessionId: id, model: 'claude/astra' }), READY);
-    await expect(page.locator(`[data-session-info="${await addressed(page, READY)}"]`)).toContainText('Local (expected)');
     // the tool scrolls inside its panel: its top, then its bottom
     const info = page.locator(`[data-session-info="${await addressed(page, READY)}"]`);
+    // the word cut (T254): the lane row draws its word, and its sentence is the value's tooltip and description (the
+    // panel's text would also hold the tip's hidden description, so each is read on its own)
+    const lane = info.locator('dt', { hasText: /^Auto-mode lane$/ }).locator('xpath=following-sibling::dd[1]').locator('span[tabindex]');
+    await expect(lane).toHaveText('Local');
+    await expect(lane).toHaveAccessibleDescription(/^Local \(expected\)/);
     for (const theme of THEMES) {
       await setTheme(page, theme, true);
       await info.evaluate((el) => (el.scrollTop = 0));
+      await lane.focus(); // the top shot shows the lane's sentence, its tooltip opened by the keyboard
+      await expect(page.getByRole('tooltip')).toContainText('Local (expected)');
       await info.screenshot({ path: join(SHOTS, `c11-session-info-${theme}.png`) });
+      await lane.blur();
       await info.evaluate((el) => (el.scrollTop = el.scrollHeight));
       await info.screenshot({ path: join(SHOTS, `c11-session-info-lower-${theme}.png`) });
     }

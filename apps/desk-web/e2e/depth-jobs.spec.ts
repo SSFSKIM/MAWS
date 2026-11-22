@@ -70,10 +70,13 @@ const agentRow = (depth: Locator, agentId: string) => depth.locator(`[data-agent
 const isRowNaming = (text: string) => (step: Step) => step.k === 'row' && JSON.stringify(step.row).includes(text);
 const jobRow = (depth: Locator, taskId: string) => depth.locator('[data-job-row]').filter({ has: depth.page().locator(`[data-task-id="${taskId}"]`) });
 // The word cut (T218): a completed job's state is its age alone (MAWS's shared row draws no `completed`); it reads as
-// ended (no Stop) and names no other outcome.
+// ended (no Stop) and draws the time since the recording's completion of the suites, in whole weeks (the narrow age's
+// largest unit; the recording is weeks old), with no word for the outcome.
+const SUITE_COMPLETED_AT = Date.parse('2026-10-15T18:52:47.006Z'); // its task-notification's timestamp in SESSION_VIEW
+const WEEK = 7 * 24 * 3_600_000;
 async function expectCompleted(row: Locator): Promise<void> {
   await expect(row.getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
-  await expect(row.locator('[data-part="state"]')).not.toHaveText(/completed|stopped|failed|ended with the session/);
+  await expect(row.locator('[data-part="state"]')).toHaveText(` · ${Math.floor((Date.now() - SUITE_COMPLETED_AT) / WEEK)}w ago`);
 }
 const outputOf = (depth: Locator, taskId: string) => depth.locator(`[data-testid="job-output"][data-task="${taskId}"]`);
 

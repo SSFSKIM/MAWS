@@ -108,6 +108,57 @@ test('usage: the popover keeps each account’s windows and reset times, Session
   }
 });
 
+// The per-session half (the word cut, P176): Session info no longer resolves a session's windows, and the popover is per
+// account, so which account a session reads is proved on the surface that still resolves it per session, the `/usage`
+// widget (widgets/UsageWidget.tsx, `AccountWindows`), answered by the fixture widget backend over this spec's scenario
+// (its get_usage is reads.jsonl's, which reports no plan limits). Each session is opened by its sidebar row first, so its
+// tab is open and main is asked for its account pin.
+async function usageWidget(page: Page, title: string): Promise<Locator> {
+  if (await page.locator('[data-widget="usage"]').count()) await page.keyboard.press('Escape');
+  await expect(page.locator('[data-widget="usage"]')).toHaveCount(0);
+  await (await sidebarRow(page, title)).click();
+  await page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('/usage');
+  const chosen = page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]');
+  await expect(chosen).toContainText('/usage');
+  await page.keyboard.press('Enter');
+  const widget = page.locator('[data-widget="usage"]');
+  await expect(widget).toBeVisible();
+  return widget;
+}
+const windowValue = (group: Locator, label: '5h' | 'Weekly') => group.locator('dt', { hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
+
+test('usage: each session reads its own windows in /usage: the routed one the drain target’s, the pinned one its account’s, the direct one the engine’s', async () => {
+  test.setTimeout(90_000);
+  const maws = await launchMaws({ env: { ...ENV(), MAWS_WIDGET_BACKEND: 'fixtures' } });
+  const { page } = maws;
+  try {
+    // an unpinned routed session: the drain target's windows
+    const routed = (await usageWidget(page, QUOTA)).getByRole('region', { name: 'Routing account', exact: true });
+    await expect(routed).toContainText(DRAIN);
+    await expect(windowValue(routed, '5h')).toHaveText(/^53% · resets in /);
+    await expect(windowValue(routed, 'Weekly')).toHaveText(/^63% · resets in /);
+
+    // a session pinned to another account: that account's windows, not the drain target's
+    const pinned = (await usageWidget(page, PROBE)).getByRole('region', { name: 'Pinned account', exact: true });
+    await expect(pinned).toContainText(PINNED);
+    await expect(pinned).not.toContainText(DRAIN);
+    await expect(windowValue(pinned, '5h')).toHaveText(/^77% · resets in /);
+    await expect(windowValue(pinned, 'Weekly')).toHaveText(/^44% · resets in /);
+
+    // a direct session: the engine's own reading, never an account's
+    const widget = await usageWidget(page, CHARTER);
+    const direct = widget.getByRole('region', { name: 'Direct · the engine’s own login', exact: true });
+    await expect(direct).toHaveText(/The engine reported no plan limits$/);
+    await expect(widget.getByRole('region', { name: /^(Routing|Pinned) account$/ })).toHaveCount(0);
+    await expect(widget).not.toContainText(DRAIN);
+    await expect(widget).not.toContainText(PINNED);
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 test('usage: without ClaudeUsage data the popover says so, and no banner posts', async () => {
   const maws = await launchMaws({ env: { ...ENV(), MAWS_CLAUDE_USAGE_DIR: join(scratch, 'absent') } });
   try {

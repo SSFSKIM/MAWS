@@ -34,6 +34,13 @@ const WORK = profilePartition('Profile 1');
 // cua #90: the fixture's Default has a Bookmarks file (46 kept, a bookmarklet skipped), checked by default. The word cut
 // (P388): the summary ends at the skipped count, each reason a line under it.
 const REPORT_DONE = '4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped';
+// The word cut (P388): each skip reason with its count, a line under the summary (a fold's summary where main named
+// sites, a plain line where it named none), in the report's order; the summary above holds their total.
+const HISTORY_SKIPS = ['History · Hidden pages (1)', "History · Pages MAWS's browser can't open (1)"];
+async function expectSkipLines(report: Locator, lines: string[]): Promise<void> {
+  const drawn = report.locator(':scope p:not([data-import-summary]):not([data-import-keychain]), :scope details > summary').filter({ hasText: / · .+ \(\d+\)$/ });
+  await expect(drawn).toHaveText(lines);
+}
 const FAILS_STATUS = 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS';
 
 const pill = (view: Locator) => view.locator('[data-browser-partition] [data-browser-partition-name]'); // cua #90: the name, beside the avatar
@@ -106,7 +113,7 @@ test('the full import: picker, consent, phases, report, active profile, cookies,
       // the report
       await expect(s.page.getByRole('dialog', { name: 'Imported from Person 1' })).toBeVisible();
       await expect(done.locator('[data-import-summary]')).toHaveText(REPORT_DONE);
-      await expect(done.getByText('Bookmarks · Not imported (1)', { exact: true })).toBeVisible();
+      await expectSkipLines(done, ['Cookies · Rejected by Chromium (SameSite=None without Secure) (1)', ...HISTORY_SKIPS, 'Bookmarks · Not imported (1)']);
       // the word cut (T527): every partitioned cookie was confirmed, so no partitioned line
       await expect(done).not.toContainText('confirmed in the partition');
       await expect(done.locator(`[data-extension-id="${probe.id}"] [data-extension-status]`)).toHaveText('Loaded · background running');
@@ -199,7 +206,7 @@ test('a wrong Safe Storage password fails every cookie and says so; history and 
       const done = await importThrough(s);
       // the word cut (P388): the summary ends at the skipped count, each reason a line under it
       await expect(done.locator('[data-import-summary]')).toHaveText('0 cookies, 4 history entries, 46 bookmarks, 3 extensions · 8 skipped');
-      await expect(done.getByText('Bookmarks · Not imported (1)', { exact: true })).toBeVisible();
+      await expectSkipLines(done, ['Cookies · Could not be decrypted (5)', ...HISTORY_SKIPS, 'Bookmarks · Not imported (1)']);
       await expect(done.locator('[data-import-keychain="wrongKey"]')).toHaveText('The Safe Storage password did not match this profile; no cookie was imported');
       expect(profilesFile(s.maws.userData)!.profiles[0]!.report.cookies).toMatchObject({ imported: 0, keychain: 'wrongKey', skipped: { wrongKey: 5 } });
       await closeSheet(s);

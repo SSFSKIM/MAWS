@@ -1549,7 +1549,8 @@ test('a browser call’s time shows on pointing along its line and on its phrase
     const noHover = await page.evaluate(() => matchMedia('(hover: none)').matches);
     if (noHover) {
       await expect(quiet).toHaveCSS('opacity', '1');
-      await expect(touchFact, 'where nothing points, the time stands on the line at rest').toHaveCSS('display', 'inline');
+      // drawn at all (a flex item of the line, so its computed display is blockified, not `inline`)
+      await expect(touchFact, 'where nothing points, the time stands on the line at rest').not.toHaveCSS('display', 'none');
       await expect(touchFact).toBeVisible();
     }
     // unverified, not proof: the always-drawn rule then stands only on pointed-actions.test.ts's and touch-fact.test.tsx's

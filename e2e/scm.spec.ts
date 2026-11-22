@@ -316,10 +316,10 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = 
   if (staged.widestAge !== undefined) expect(m.ages.map((age) => age.text), `${at}: the widest age drawn`).toContain(staged.widestAge);
   if (staged.wraps) {
     expect(new Set(m.phrases.map((phrase) => phrase.top)).size, `${at}: the state line breaks (between its phrases)`).toBeGreaterThan(1);
-    // the word cut (N75) left the counts line three counts, which may fit at this width: it breaks between them, or
-    // stands whole on one line inside the page
-    if (new Set(m.checkCounts.map((count) => count.top)).size === 1) for (const count of m.checkCounts) expect(count.right, `${at}: the count "${count.text}" inside the page on the one line`).toBeLessThanOrEqual(m.page.right + 1);
   }
+  // the word cut (N75) left the counts line three counts, which may fit at a narrow width: it breaks between them or
+  // stands whole on one line; wrapped or not, at every width, no count passes the page's right edge
+  for (const count of m.checkCounts) expect(count.right, `${at}: the count "${count.text}" inside the page`).toBeLessThanOrEqual(m.page.right + 1);
   // Decision Log 44: a measured word, drawn by its ::before, is as wide as the words it measures: the Where line's
   // branch word against the branch drawn in full (the drawn span's scroll width), and "since <base>" where it is whole
   expect(m.where.measuredBranch, `${at}: the measured branch word is laid out`).toBeGreaterThan(0);

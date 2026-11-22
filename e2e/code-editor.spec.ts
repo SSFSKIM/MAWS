@@ -193,34 +193,51 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await expect(previous).toHaveText('↑');
       await expect(bar.getByRole('checkbox', { name: 'Match case', exact: true })).toHaveCount(1);
       await expect(matchCase).toContainText('Aa');
-      // the words of every tip drawn now
-      const shown = () =>
+      // every tip drawn now, by the words its `::after` renders (its computed `content`) and the delay it opened after
+      // (its computed transition delay, the pointing delay's stand-in for a wall-clock wait)
+      type Drawn = { words: string; attribute: string | null; delay: string };
+      const drawn = () =>
         bar.locator('[data-find-tip]').evaluateAll((owners) =>
-          owners
-            .filter((owner) => {
-              const tip = getComputedStyle(owner, '::after');
-              return tip.visibility === 'visible' && tip.opacity === '1';
-            })
-            .map((owner) => owner.getAttribute('data-find-tip')),
+          owners.flatMap((owner): Drawn[] => {
+            const tip = getComputedStyle(owner, '::after');
+            if (tip.visibility !== 'visible' || tip.opacity !== '1') return [];
+            return [{ words: tip.content.replace(/^"(.*)"$/, '$1'), attribute: owner.getAttribute('data-find-tip'), delay: tip.transitionDelay }];
+          }),
         );
+      // The words as drawn: the computed `content`, which Chromium resolves from `attr()`; where an engine leaves it
+      // unresolved, the attribute it names stands in and the run says so.
+      let unresolved = false;
+      const shown = async () =>
+        (await drawn()).map((tip) => {
+          if (tip.words === 'attr(data-find-tip)') {
+            unresolved = true;
+            return tip.attribute;
+          }
+          return tip.words;
+        });
+      const delays = async () => (await drawn()).map((tip) => tip.delay);
       await p.page.mouse.move(0, 0);
       await expect.poll(shown, { message: 'nothing pointed, no glyph focused: no tip' }).toEqual([]);
 
-      // pointing while the search field holds the focus: the pointed glyph's word, after the pointing delay
+      // pointing while the search field holds the focus: the pointed glyph's word, after the pointing delay (300 ms)
       await previous.hover();
       await expect.poll(shown, { message: 'Previous pointed, the field focused' }).toEqual(['Previous match']);
+      expect(await delays(), 'opened after the pointing delay').toEqual(['0.3s, 0.3s']);
       await expect(field).toBeFocused();
 
       // the pointer held on Previous, Tab takes the focus to Next: its word at once, and Previous's gives way
       await p.page.keyboard.press('Tab');
       await expect(next).toBeFocused();
       await expect.poll(shown, { message: 'Next reached by Tab while Previous stays pointed' }).toEqual(['Next match']);
+      expect(await delays(), 'opened by the keyboard at once').toEqual(['0s']);
 
       // the focus back in the code, the pointer on a toggle: its word alone, after the pointing delay
       await first.click();
       await expect.poll(shown, { message: 'the focus in the code, the pointer on it' }).toEqual([]);
       await matchCase.hover();
       await expect.poll(shown, { message: 'Match case pointed' }).toEqual(['Match case']);
+      expect(await delays()).toEqual(['0.3s, 0.3s']);
+      if (unresolved) test.info().annotations.push({ type: 'unverified', description: 'the engine left the tips’ computed content as attr(data-find-tip): their words were read from the attribute it names' });
     });
   });
 
