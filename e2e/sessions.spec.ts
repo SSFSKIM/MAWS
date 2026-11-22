@@ -1498,7 +1498,7 @@ test.describe('sessions', () => {
   // the session: nobody holds its transcript, so its agent reads as ended with the session and its row folds with the
   // turn, which the scene unfolds as a person does. The child's answer links a file outside the session's folder that
   // neither the parent's records nor the call's prompt and result write. The agent is opened by the app's own drill-in (its
-  // row in the transcript opens Subagents on it) and the link is clicked there: the click is the proof.
+  // row in the transcript opens Agents on it) and the link is clicked there: the click is the proof.
   test("a link in a subagent's transcript, clicked in its drill-in, opens a file from outside the session's folder, editable, and saves", async () => {
     test.setTimeout(180_000);
     const repo = await ScratchRepo.create();

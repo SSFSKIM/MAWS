@@ -171,6 +171,59 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
+  // The word cut (T336; viewer/find-glyphs.ts): the ⌘F bar's controls are glyphs that keep their words as their names
+  // and as tips the stylesheet draws from `data-find-tip`, which jsdom cannot vouch for. Read here as drawn (the tip is
+  // the owner's ::after, shown once it is visible and opaque): pointing shows a glyph's word after the pointing delay,
+  // also while the search field holds the focus; a glyph reached by Tab shows its word at once, and the pointed one's
+  // gives way, so one tip shows at a time. Waits are on the tip, never on a time.
+  test('the find bar’s glyphs show their words as tips, one at a time: pointed after the delay, reached by Tab at once', async () => {
+    await withProduct(async (p) => {
+      const viewer = await openEditor(p, APP);
+      const first = viewer.locator('.cm-content .cm-line').first();
+      await first.click();
+      await p.page.keyboard.press('Meta+f');
+      const bar = viewer.locator('.cm-panel.cm-search');
+      await expect(bar).toBeVisible();
+      const field = bar.locator('input[name="search"]');
+      await expect(field, 'the bar opens with its search field focused').toBeFocused();
+      const next = bar.getByRole('button', { name: 'Next match', exact: true });
+      const previous = bar.getByRole('button', { name: 'Previous match', exact: true });
+      const matchCase = bar.locator('label[data-find-tip="Match case"]');
+      await expect(next).toHaveText('↓');
+      await expect(previous).toHaveText('↑');
+      await expect(bar.getByRole('checkbox', { name: 'Match case', exact: true })).toHaveCount(1);
+      await expect(matchCase).toContainText('Aa');
+      // the words of every tip drawn now
+      const shown = () =>
+        bar.locator('[data-find-tip]').evaluateAll((owners) =>
+          owners
+            .filter((owner) => {
+              const tip = getComputedStyle(owner, '::after');
+              return tip.visibility === 'visible' && tip.opacity === '1';
+            })
+            .map((owner) => owner.getAttribute('data-find-tip')),
+        );
+      await p.page.mouse.move(0, 0);
+      await expect.poll(shown, { message: 'nothing pointed, no glyph focused: no tip' }).toEqual([]);
+
+      // pointing while the search field holds the focus: the pointed glyph's word, after the pointing delay
+      await previous.hover();
+      await expect.poll(shown, { message: 'Previous pointed, the field focused' }).toEqual(['Previous match']);
+      await expect(field).toBeFocused();
+
+      // the pointer held on Previous, Tab takes the focus to Next: its word at once, and Previous's gives way
+      await p.page.keyboard.press('Tab');
+      await expect(next).toBeFocused();
+      await expect.poll(shown, { message: 'Next reached by Tab while Previous stays pointed' }).toEqual(['Next match']);
+
+      // the focus back in the code, the pointer on a toggle: its word alone, after the pointing delay
+      await first.click();
+      await expect.poll(shown, { message: 'the focus in the code, the pointer on it' }).toEqual([]);
+      await matchCase.hover();
+      await expect.poll(shown, { message: 'Match case pointed' }).toEqual(['Match case']);
+    });
+  });
+
   test('asks before closing a dirty tab: Cancel keeps it, Don’t save closes it and leaves the disk alone', async () => {
     await withProduct(async (p) => {
       const original = read(p, APP);
