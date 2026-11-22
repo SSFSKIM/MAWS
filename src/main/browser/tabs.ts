@@ -549,12 +549,14 @@ export class TabStore {
   }
 
   // Room for one more loaded tab: true under the cap, or once the least recently shown eligible tab (never the page that
-  // opened it) is suspended for it (with the notice on `entry`); false when no tab is eligible.
+  // opened it) is suspended for it (with the notice on `entry`); false when no tab is eligible. cua #90: an internal
+  // victim is closed instead, and its own session told without the tab that is gone (as the memory cap tells it).
   private makeRoom(entry: TabEntry, opener?: TabEntry): boolean {
     if (this.loadedCount() < BROWSER_LOADED_TABS_MAX) return true;
     const victim = this.capVictim(entry, ...(opener ? [opener] : []));
     if (!victim) return false;
-    this.evict(victim.tab.tabId); // cua #90: an internal tab is closed instead
+    const { appSessionId, tabId } = victim.tab;
+    if (this.evict(tabId) === 'closed') this.deps.emit('browser.notice', { appSessionId, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
     this.capNotice(entry);
     return true;
   }

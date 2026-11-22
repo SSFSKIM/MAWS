@@ -681,6 +681,25 @@ describe('TabStore: internal tabs (cua #90)', () => {
     expect(h.store.evict(page.tab.tabId)).toBe('suspended');
     expect(page.tab.suspended).toBe(true);
   });
+
+  // the word cut (T462, split): the options tab closed to make room leaves no greyed chip, so its session is told
+  // without a tab, as the memory cap tells it; the session that opened the page keeps its notice on the page it opened
+  it('the options tab the count cap closed to admit another session’s page is told to its own session without a tab', () => {
+    const h = harness();
+    const options = openOptions(h);
+    h.store.update(options.tabId, { loading: false });
+    h.tick(1000);
+    for (let i = 1; i < BROWSER_LOADED_TABS_MAX; i++) {
+      h.store.update(open(h, `https://${i}.test/`).tab.tabId, { loading: false });
+      h.tick(1000);
+    }
+    const added = open(h, 'https://new.test/', { appSessionId: B }).tab;
+    expect(h.store.entry(options.tabId)).toBeUndefined();
+    expect(h.notices()).toEqual([
+      { appSessionId: A, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX },
+      { appSessionId: B, tabId: added.tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX },
+    ]);
+  });
 });
 
 describe('TabStore: adopting a page\'s window.open child (Design §14, Decision Log 24)', () => {
