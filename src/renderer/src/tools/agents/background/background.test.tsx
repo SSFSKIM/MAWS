@@ -854,6 +854,30 @@ describe('background work', () => {
     expect(screen.queryByRole('progressbar', { name: 'Loading run…' })).toBeNull();
   });
 
+  // The word cut's M3 fix wave review: an exited engine's journal is still read once on open, and it can bring the run
+  // after the disk read answered without it, so the wait holds until both have settled.
+  it('a link to a run of a session whose engine exited waits while its journal is still read, though its disk read answered without it', async () => {
+    seedSessions(live({ process: 'exited' }));
+    const handle = create({ taskId: 'wayue3on6', view: 'run' });
+    render(<Mounted state={handle} />);
+    await act(async () => {
+      await fake.answer('subagents', []);
+      await fake.answer('workflows', []);
+    });
+    await pastQuietDelay();
+    expect(screen.getByRole('progressbar', { name: 'Loading run…' })).toBeTruthy();
+    expect(screen.queryByText('Run not found')).toBeNull();
+    act(() => handle.openRun('wayue3on6')); // the page on a run the graph does not hold yet
+    await pastQuietDelay();
+    expect(within(widget()!).getByRole('progressbar', { name: 'Loading run…' })).toBeTruthy();
+    expect(screen.queryByText('Run not found')).toBeNull();
+    const events = upTo(workflow, 82);
+    await act(async () => {
+      await fake.answer('events', { events, lastSeq: lastSeqOf(events), complete: true });
+    });
+    expect(widget()?.dataset.run).toBe('wayue3on6');
+  });
+
   // The word cut's M3 panel (scalpel-3#3): a host disconnect clears the engine status and leaves the running node. With
   // its first runs read failed, nothing is left to bring its phases: the list says the read's error once, the card's
   // line waits on nothing, and the page, where nothing else says it, says the error.
