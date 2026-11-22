@@ -30,14 +30,16 @@ export function PhasesPending({ node, canArrive, readError = null, error = false
 }
 
 // A run a link named that no read has brought yet (the word cut, T209). A quiet spinner while a read can still bring it:
-// the session is live here (its events), or its disk read has not answered. Settled otherwise: the read's error, said
+// the session is live here (its events), its disk read has not answered, or its journal's first read is out (an exited
+// engine's journal is still read once on open, and can bring the run after the disk answered without it). Settled otherwise: the read's error, said
 // once by the list on its own line (`error` draws it here, where nothing else does), or `Run not found` once the read
 // answered without it. Either way the run opens when a later read brings it.
 export function PendingRun({ appSessionId, live, error, className = '' }: { appSessionId: AppSessionId; live: boolean; error: boolean; className?: string }) {
   const runsRead = useTaskGraph((s) => (s.entries.get(appSessionId)?.disk.runs ?? null) !== null);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
+  const journalOut = useTaskGraph((s) => s.entries.get(appSessionId)?.phase === 'loading');
   if (runsError !== null) return error ? <p className={`text-ui-sm text-danger ${className}`}>{BACKGROUND_COPY.runsUnavailable(runsError)}</p> : null;
-  if (live || !runsRead) {
+  if (live || !runsRead || journalOut) {
     return (
       <p className={className || undefined}>
         <QuietSpinner label={BACKGROUND_COPY.runNotFound} />
