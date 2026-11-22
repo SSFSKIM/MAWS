@@ -1186,6 +1186,10 @@ describe('review tool', () => {
     await waitFor(() => expect(screen.queryByRole('tooltip')?.textContent).toBe('main · Index against HEAD'));
     expect(document.activeElement).toBe(chipOf('staged'));
     expect(scopeWords()).toBe('main · Index against HEAD');
+    await user.click(chipOf('uncommitted')!); // a click: the pointer shows the words on its next pointing, as any tip's
+    await waitFor(() => expect(chipOf('uncommitted')!.getAttribute('aria-pressed')).toBe('true'));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 400))); // past the pointing delay
+    expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
   it('keeps Staged selected but disabled once the index matches HEAD again', async () => {

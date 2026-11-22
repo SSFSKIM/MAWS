@@ -422,14 +422,14 @@ function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>;
   const turnId = useStore(ui, (s) => s.turnId);
   const latest = useTranscriptStore((s) => latestTurnWithFiles(s.rows(appSessionId)));
   const group = useRef<HTMLDivElement>(null);
-  // The chip just pressed (the word cut's M3 panel): its scope's words come with its press, under the focus that pressed
-  // it, and a `Tip` shows content that arrives under focus only on the next focus (its pinned rule, so a greyed reason
-  // never springs open on the control that holds focus). Once the words are drawn the chip is given that next focus, so it
-  // says what it compares at once. Not for the pressed chip or a commit's, whose words were there before the press,
-  // which closed them.
+  // The chip just pressed from the keyboard (the word cut's M3 panel): its scope's words come with its press, under the
+  // focus that pressed it, and a `Tip` shows content that arrives under focus only on the next focus (its pinned rule, so
+  // a greyed reason never springs open on the control that holds focus). Once the words are drawn the chip is given that
+  // next focus, so it says what it compares at once. Not for the pressed chip or a commit's, whose words were there
+  // before the press, which closed them; nor for a click, after which the pointer shows them, as it shows any tip.
   const pressed = useRef<ReviewScope | null>(null);
-  const pick = (next: ReviewScope) => {
-    pressed.current = next === scope || next === 'commit' ? null : next;
+  const pick = (next: ReviewScope, byKeyboard = false) => {
+    pressed.current = !byKeyboard || next === scope || next === 'commit' ? null : next;
     ui.setState((s) => (next === 'turn' ? selectLastTurn(s, latest) : selectScope(s, next)));
   };
   const branchReason = data.branch.settled && data.branch.base === null ? data.branch.reason : null;
@@ -459,7 +459,7 @@ function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>;
     const about = refused ?? (id === 'commit' || scope === id ? scopeWordsOf(id, data, commit, false) : null);
     return (
       <Tip key={id} content={about} description={about} {...unavailableClickProps(refused)}>
-        <button type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={off && reason === null} onClick={() => pick(id)}>
+        <button type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={off && reason === null} onClick={(event) => pick(id, event.detail === 0)}>
           {words}
         </button>
       </Tip>
