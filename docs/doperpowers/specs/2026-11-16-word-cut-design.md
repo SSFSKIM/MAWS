@@ -401,6 +401,28 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - N11: a command's own words show only under the generic "could not be opened / listed" notice, decided in one place (`classifyFailure`).
   - N28 and N29: both greyed Open File… rows stay in the keyboard. N29 uses the refused menu item; N28 keeps its words and title.
   - The desk's web app imports the code tools' copy, but no key it reads changed, so it needs no edit.
+- 2026-11-22. **M3 task 9: the rig's M3 scenes and the desk's pictures.** The rig takes 44 `m3-` scenes, 282 in all.
+  - Launch 11 is new and holds most of them, on fixtures of its own (`panels` and `quiet` repositories, two listed sessions, the browser's scratch server, the Chrome import's seams), so launches 1 to 10 keep their pictures.
+  - Launch 12 is new and photographs the Channel's folds (P447, P448). Its seed is the rig-only `e2e/support/words-channel.ts`, since importing the Channel spec would register its tests in the rig.
+  - A few scenes join launches 3 and 4.
+  - A scene reads which build it is on from whether the window's stylesheet holds the touch rule's `[data-touch-fact]` rule, cross-checked against the checkout. It proves its named state in that build's exact words before capture, sets up what it needs (so `WORDS_ONLY` works on a fresh launch), and is bounded by a 15 s default timeout set on the rig's Electron context.
+  - Main's browser notices last 4 s, so they are raised through `emitToWindow` in a final step before the check.
+  - The rig writes the renderer's words out with their sources, not imported, because the shared e2e project lists the renderer modules it allows.
+  - The native View menu cannot be photographed, so N156 and N157 are shown in the command palette, Settings › Keyboard, the Settings search and the shortcuts sheet.
+  - T464 (copy link) is not taken, since it would write the Mac's clipboard.
+
+  The desk's web app has its own words rig, `apps/desk-web/e2e/words-shots.rig.ts`, run on demand by `pnpm --filter desk-web shots:words`. No desk gate collects it. It takes ten scenes on phone and desktop viewports: N160, N170 (the fold's touch fact on a line under its row), the Agents tab, T158's "Earlier", T184, and the touch facts the desk draws (T87, T97, T105, T106). All ten were reached on master and on M3 on the build VM.
+
+  `scenes.md` records every changed M3 row still without a scene, with the state it needs and why (board ticket 816), and each touch-rule surface the desk does not draw or no recording stages. A delivered file is one of these: the desk fails to load on a `send_file` row, on master too.
+- 2026-11-22. **M3 task 8: the e2e moves.**
+  - Every e2e read of a control M3 changed now reads what the surface draws: its role and accessible name, a moved fact in its description, a tip's owner read by itself (a parent's text also holds the hidden tip), a greyed control by `aria-disabled`. No spec was added or deleted, and the groups are unchanged.
+  - Session info's folded groups unmount their rows, so one support helper (`e2e/support/session-info.ts`) opens a group before its rows are read.
+  - P176 removed the status line spec's only subject. That spec now reads the usage ring's popover, and a session-scoped case reads the routed, pinned and direct sessions' windows in `/usage`.
+  - The browser import's reasons and counts are asserted on the lines where they now stand.
+  - The touch rule is checked by computed visibility: on the desk's phone project, and in Electron through touch emulation. A step the emulation cannot flip is annotated unverified.
+  - The find bar's tips are read by their computed `::after` content and delay.
+  - Cross-build keeps the peer build's words.
+  - The desk's chromium e2e passed on the build VM. WebKit runs only on the gate's image.
 
 ## Outcomes & Retrospective
 
