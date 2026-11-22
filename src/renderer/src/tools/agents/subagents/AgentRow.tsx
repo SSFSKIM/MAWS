@@ -6,9 +6,9 @@
 // elapsed time, as tall as the row. The line under the title is the agent's own state and says nothing of what runs
 // under it, except for an agent whose own run has ended while a task it started still runs (item 359): its outcome word
 // without a time, then how many tasks run under it, the part of the line that is never cut. The word cut: an agent
-// waiting on a request of its own keeps its line, its mark a warning disc beside its glyph and `Approval needed` the
-// row's tooltip and description (T166); a row of unknown status has no second line and a running one with no start
-// time no elapsed (T167, T168).
+// waiting on a request of its own keeps its line, its mark a warning disc beside its glyph, drawn in the glyph's slot so
+// its title stays in line with its siblings', and `Approval needed` the row's tooltip and description (T166); a row of
+// unknown status has no second line and a running one with no start time no elapsed (T167, T168).
 import { useId, useRef } from 'react';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -85,8 +85,11 @@ export function AgentRow({
         />
       </Tip>
       <span className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3.5">
-        <SubagentGlyph agent={refOf(node)} className={`shrink-0 text-accent ${row.depth > 0 ? 'text-ui' : 'text-prose'}`} />
-        {waiting && <span data-part="waiting" aria-hidden="true" className="-ml-1 size-1.5 shrink-0 rounded-full bg-warning" />}
+        {/* the glyph's slot holds the waiting disc at its right, out of the flow, so the mark never moves the text */}
+        <span data-part="glyph" className="relative flex shrink-0">
+          <SubagentGlyph agent={refOf(node)} className={`text-accent ${row.depth > 0 ? 'text-ui' : 'text-prose'}`} />
+          {waiting && <span data-part="waiting" aria-hidden="true" className="absolute top-1/2 -right-1.5 size-1.5 -translate-y-1/2 rounded-full bg-warning" />}
+        </span>
         <span id={`${id}-text`} className="min-w-0 flex-1 text-left">
           <span className="block min-w-0 truncate font-medium">
             <span data-part="title">{title}</span>

@@ -37,13 +37,14 @@ export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
                 <Party party={other} title={false} />
               </>
             )}
+            {/* the count follows the names, in their group, the group's room left after it */}
+            <span aria-hidden className="shrink-0 text-fg-faint">
+              ·
+            </span>
+            <span role="img" aria-label={count} className="shrink-0 tabular-nums">
+              {entry.count}
+            </span>
           </Names>
-          <span aria-hidden className="shrink-0 text-fg-faint">
-            ·
-          </span>
-          <span role="img" aria-label={count} className="shrink-0 tabular-nums">
-            {entry.count}
-          </span>
           <Time at={entry.last} />
         </button>
       </Tip>

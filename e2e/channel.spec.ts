@@ -405,11 +405,15 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       const fold = exchange.getByRole('button').first();
       await expect(fold.getByRole('img', { name: `${EXCHANGE} messages`, exact: true })).toHaveText(String(EXCHANGE));
       await expect(fold).not.toContainText('messages between');
+      // The count follows the last name in the names' group (pair review of M3's pictures), not carried to the far end.
       expect(await fold.evaluate((button) => {
-        const names = button.querySelector(':scope > [data-names]')!.getBoundingClientRect();
-        const count = button.querySelector('[role="img"]')!.getBoundingClientRect();
-        return names.right <= count.left;
-      }), 'the count stands after the names').toBe(true);
+        const parts = button.querySelectorAll(':scope > [data-names] [data-name-part]');
+        const last = parts[parts.length - 1]!.getBoundingClientRect();
+        const count = button.querySelector(':scope > [data-names] > [role="img"]');
+        if (count === null) return false;
+        const left = count.getBoundingClientRect().left;
+        return left >= last.right && left - last.right <= 32;
+      }), 'the count stands right after the names').toBe(true);
       // The exchange opened in place: its 40 messages, each under its sender.
       await fold.click();
       await expect(exchange.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
