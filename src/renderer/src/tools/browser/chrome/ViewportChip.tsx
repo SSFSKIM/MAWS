@@ -4,7 +4,8 @@
 // refused change leaves the old mark), and a size whose width does not fit this mount's room at the page's zoom is
 // disabled with "Wider than this pane". `ViewportChip`, in the navigation row while a size is on, reads the page's real
 // size (`pageBox`'s `reads`, so in a pane shorter than the size its height is the pane's) and opens the same choices.
-// UX wave U6b-5b (decision 35): both read the app window's zoom (`useZoom`), so a change of it redraws them.
+// UX wave U6b-5b (decision 35): both read the app window's zoom (`useZoom`), so a change of it redraws them. The word
+// cut (T441): the chip's tooltip is Viewport, which keyboard focus shows; the size is on the chip and in its name.
 import { DropdownMenu } from 'radix-ui';
 import { BROWSER_VIEWPORTS, type BrowserTab, type BrowserViewport } from '@shared/browser/tab';
 import { setViewport } from '../actions';
@@ -12,6 +13,7 @@ import { BROWSER_COPY } from '../copy';
 import { CheckIcon } from '../icons';
 import { fits, pageBox, type Room } from '../viewport';
 import { useZoom } from '../../../stores/zoom'; // UX wave U6b-5b
+import { Tip } from '../../../ui/tip';
 
 const V = BROWSER_COPY.viewport;
 const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
@@ -66,17 +68,18 @@ export function ViewportChip({ tab, room }: { tab: BrowserTab; room: Room }) {
   const { width, height } = box.reads;
   return (
     <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          data-browser-viewport-chip=""
-          aria-label={V.chip(width, height)}
-          title={V.chip(width, height)}
-          className="h-6 shrink-0 rounded-sm px-1.5 font-mono text-ui-sm text-fg-muted tabular-nums outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
-        >
-          {V.size(width, height)}
-        </button>
-      </DropdownMenu.Trigger>
+      <Tip content={BROWSER_COPY.menu.viewport}>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            data-browser-viewport-chip=""
+            aria-label={V.chip(width, height)}
+            className="h-6 shrink-0 rounded-sm px-1.5 font-mono text-ui-sm text-fg-muted tabular-nums outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
+          >
+            {V.size(width, height)}
+          </button>
+        </DropdownMenu.Trigger>
+      </Tip>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
           <ViewportChoices tab={tab} room={room} />

@@ -1,6 +1,6 @@
 // E4b Task 3.1: the import sheet (Design §3, §10; Decision Log 21, 28; P-17, P-23): the picker's preselection and the
-// chosen-folder route, the consent's rule (a category, the acknowledgement only with extensions; Saved passwords
-// disabled with P-17's words; the agents line under Cookies), the Keychain line, the report for the fixture's runs, and
+// chosen-folder route, the consent's rule (a category, the acknowledgement only with extensions; the agents line under
+// Cookies), the Keychain line, the report for the fixture's runs, and
 // the lifecycle per state (pick and consent discard on close, running ignores it and only Cancel ends the run, report
 // just closes, a remounted sheet shows the run).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

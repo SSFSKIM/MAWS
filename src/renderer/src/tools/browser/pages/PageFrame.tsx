@@ -11,7 +11,7 @@ export function PageFrame({ page, heading, summary, children }: { page: string; 
   return (
     <div data-browser-page={page} className="absolute inset-0 overflow-auto bg-bg">
       <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3 px-6 pt-[20vh] pb-8 text-ui text-fg-muted">
-        <h2 className="m-0 text-prose font-medium text-fg">{heading}</h2>
+        <h2 className="m-0 text-prose font-medium break-words text-fg">{heading}</h2>
         {summary !== undefined && <p className="m-0 break-words">{summary}</p>}
         {children}
       </div>

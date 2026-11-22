@@ -2,9 +2,10 @@
 // main's order, and "+". In the panel a chip selects its tab (the tool shows the session's selected tab); in a main tab,
 // which shows its own tab, a chip opens that tab's own main tab, so one tab of a session is reachable from another.
 // Chips shrink to a minimum and the strip then scrolls sideways; a suspended tab's chip is muted, a loading one's title
-// shimmers. Closing a chip closes the browser tab. P3-G (M2): `trailing` sits at the row's right end (the floating
-// card's pill while the card is closed over this page in the panel). P5 O7 M3: a tab whose page is on a forward's local
-// listener carries "forwarded from <machine>" after its title. P5 O17 M10: on another machine's session, the agent's tabs
+// shimmers. Closing a chip closes the browser tab (its ×'s tooltip the word Close, its name the tab's: the word cut,
+// T426). P3-G (M2): `trailing` sits at the row's right end (the floating card's pill while the card is closed over this
+// page in the panel). P5 O7 M3: a tab whose page is on a forward's local listener carries the machine's name after its
+// title (the word cut, T429: "forwarded from" for a screen reader alone). P5 O17 M10: on another machine's session, the agent's tabs
 // there follow the person's as their own group (`agent`, remote/View.tsx's AgentGroup); a chip of the person's or "+"
 // tells the surface the person's own tabs are shown again (`onLocal`), and while an agent tab is shown no chip of the
 // person's reads selected; their first chip is then the strip's tab stop, so each group keeps one.
@@ -110,7 +111,7 @@ function Chip({ tab, selected, tabbable, onSelect }: { tab: BrowserTab; selected
       <button
         type="button"
         aria-label={BROWSER_COPY.closeTabNamed(title)}
-        title={BROWSER_COPY.closeTabNamed(title)}
+        title={BROWSER_COPY.close}
         onClick={() => closeTab(tab.tabId)}
         className={`mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:visible focus-visible:outline-2 ${revealed}`}
       >
@@ -149,6 +150,7 @@ function ForwardMarkOf({ forward }: { forward: BrowserTabForward }) {
   const name = useMachines((s) => machineName(s.machines, forward.machine, ipc.localMachine));
   return (
     <span data-forward-mark="" title={BROWSER_COPY.forwarded.markTitle(name, forward.port)} className="max-w-24 shrink-0 truncate rounded-sm bg-bg-raised px-1 text-fg-muted">
+      <span className="sr-only">{BROWSER_COPY.forwarded.markLead}</span>
       {BROWSER_COPY.forwarded.mark(name)}
     </span>
   );

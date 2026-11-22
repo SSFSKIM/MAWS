@@ -27,10 +27,10 @@ export const MARKUP_COPY = {
   layer: 'Mark-up',
   tools: 'Mark-up tool',
   inks: 'Ink colour',
-  undo: 'Undo',
-  nothingToUndo: 'Nothing to undo yet',
+  undo: 'Undo', // the word cut (T124): the icon's tooltip whether or not it is greyed
   clear: 'Clear',
-  nothingToClear: 'Nothing to clear yet',
+  moveToolbar: 'Move mark-up toolbar', // the drag handle's accessible name
+  move: 'Move', // the word cut (T125): its tooltip
   cancel: 'Cancel',
   addToChat: 'Add to chat',
   text: 'Mark-up text',

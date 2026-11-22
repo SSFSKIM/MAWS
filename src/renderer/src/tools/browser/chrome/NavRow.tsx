@@ -3,6 +3,7 @@
 // popover), the control slot, later children's
 // extras (E4d's Comment toggle), and the overflow menu. While the page loads a thin bar runs along the row's foot, as Codex's toolbar shows it; it sits
 // over the row's border, so the row keeps its height. U12a: before the overflow menu, the device size's chip while one is on.
+// The word cut (T452): beside it, before it, the zoom's chip while the page is not at 100%.
 import { useState, type RefObject } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,6 +18,7 @@ import { ControlSlot } from './ControlSlot';
 import { OverflowMenu } from './OverflowMenu';
 import { PartitionPill } from './PartitionPill';
 import { ViewportChip } from './ViewportChip'; // U12a
+import { ZoomChip } from './ZoomChip'; // the word cut
 import type { Room } from '../viewport'; // U12a
 
 export interface NavRowProps {
@@ -57,6 +59,7 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, room, onF
       <PartitionPill appSessionId={appSessionId} surface={surface} partition={tab?.partition ?? DEFAULT_PARTITION} />
       {tab?.control === 'agent' && <ControlSlot tab={tab} />}
       {tab && extras.map((Extra, index) => <Extra key={index} tab={tab} appSessionId={appSessionId} surface={surface} />)}
+      {tab && tab.zoom !== 1 && <ZoomChip tab={tab} owns={owns} />}
       {tab && room && <ViewportChip tab={tab} room={room} />}
       <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} owns={owns} room={room} onFind={onFind} />
       {loading && (

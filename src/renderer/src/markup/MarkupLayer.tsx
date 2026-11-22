@@ -334,8 +334,8 @@ function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, addin
     >
       <button
         type="button"
-        aria-label="Move mark-up toolbar"
-        title="Drag to move; arrow keys to adjust"
+        aria-label={MARKUP_COPY.moveToolbar}
+        title={MARKUP_COPY.move}
         className={`${BUTTON} cursor-move touch-none`}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
@@ -372,16 +372,17 @@ function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, addin
       <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
       <RadioGroup.Root aria-label={MARKUP_COPY.inks} value={inkName} onValueChange={(value) => onInk(value as InkName)} orientation="horizontal" className="flex items-center gap-0.5">
         {INKS.map((name) => (
-          <RadioGroup.Item key={name} value={name} aria-label={INK_LABEL[name]} title={INK_LABEL[name]} className={RADIO}>
+          // the word cut (T123): the dot shows its colour; the name is for a screen reader alone
+          <RadioGroup.Item key={name} value={name} aria-label={INK_LABEL[name]} className={RADIO}>
             <span aria-hidden className="size-3.5 rounded-full border border-border-strong" style={{ background: ink(name) }} />
           </RadioGroup.Item>
         ))}
       </RadioGroup.Root>
       <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
-      <button type="button" aria-label={MARKUP_COPY.undo} title={undo ? MARKUP_COPY.undo : MARKUP_COPY.nothingToUndo} disabled={!undo} onClick={() => undo?.()} className={`${BUTTON} w-7 px-0`}>
+      <button type="button" aria-label={MARKUP_COPY.undo} title={MARKUP_COPY.undo} disabled={!undo} onClick={() => undo?.()} className={`${BUTTON} w-7 px-0`}>
         <UndoIcon />
       </button>
-      <button type="button" aria-label={MARKUP_COPY.clear} title={clear ? MARKUP_COPY.clear : MARKUP_COPY.nothingToClear} disabled={!clear} onClick={() => clear?.()} className={`${BUTTON} w-7 px-0`}>
+      <button type="button" aria-label={MARKUP_COPY.clear} title={MARKUP_COPY.clear} disabled={!clear} onClick={() => clear?.()} className={`${BUTTON} w-7 px-0`}>
         <ClearIcon />
       </button>
       <button type="button" onClick={endMarkup} className={`${BUTTON} px-2`}>

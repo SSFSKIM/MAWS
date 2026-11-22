@@ -4,7 +4,7 @@
 
 314 items: 208 cut, 6 reworded, 100 stay. Of the 214 that change, the owner saw 47 in a picture or ruled on them; 167 follow the pattern and were not seen.
 
-Against master (M0): 255 unchanged, 48 moot, 5 moved, 5 rewritten by the wave, 1 gone; none waits on the owner; 18 put to the owner (new rows included) and since ruled. M0 added 99 rows for the UX wave's new text (9 cut, 29 reworded, 61 stay), listed at the end.
+Against master (M0): 255 unchanged, 48 moot, 5 moved, 5 rewritten by the wave, 1 gone; none waits on the owner; 18 put to the owner (new rows included) and since ruled. M0 added 100 rows for the UX wave's new text (10 cut, 29 reworded, 61 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -1094,3 +1094,11 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N98 | placeholder of the disabled field once the agent is known to have ended with no record of how | This agent ended | stays | Stays. rule 3: a disabled field says why; the fifth of the family T194 stands for (finished, stopped, ended with the session, and the relay and bridge reasons). | pattern | `src/renderer/src/tools/agents/copy.ts:93` | new `src/renderer/src/tools/agents/copy.ts:93` | M3 · no scene: needs a session whose agents or background work is in that state (wanted: The page of an agent known to have ended with no record of how) |
+
+### Browser
+
+#### Browser, the agent's tabs on another machine
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N161 | middle of the agent's picture while the link to the machine is being made (the view connecting again while a tab of the agent's is shown); the strip's label says the same, T491 | Connecting to devbox | cut | Nothing shows for the first half second, then a quiet spinner in the middle of the picture, "Connecting to devbox" its accessible name. | pattern | `src/renderer/src/tools/browser/copy.ts:166` | new `src/renderer/src/tools/browser/remote/View.tsx:414` | M3 · no scene: needs a session on another machine whose link is being made again while an agent tab is shown (wanted: Browser on a session of another machine, reconnecting) |

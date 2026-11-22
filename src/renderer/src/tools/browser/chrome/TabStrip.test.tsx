@@ -29,7 +29,9 @@ describe('the tab strip’s forwarded mark', () => {
     const marks = document.querySelectorAll('[data-forward-mark]');
     expect(marks).toHaveLength(1);
     // the word cut (T429): the badge reads the machine's name; "forwarded from" stays for a screen reader
-    expect(marks[0]!.querySelector('[aria-hidden]')?.textContent ?? marks[0]!.textContent).toBe('mini');
+    const drawn = [...marks[0]!.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('');
+    expect(drawn).toBe('mini');
+    expect(marks[0]!.querySelector('.sr-only')!.textContent).toBe('forwarded from ');
     expect(accessibleText(marks[0]!)).toBe('forwarded from mini');
     expect(marks[0]!.getAttribute('title')).toBe('Port 5173 on mini, forwarded to this Mac');
     expect(marks[0]!.closest('[data-browser-chip]')?.getAttribute('data-browser-chip')).toBe(T1);

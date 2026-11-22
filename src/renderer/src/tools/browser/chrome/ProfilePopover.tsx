@@ -1,10 +1,12 @@
 // cua #90: the partition pill's popover (the spec's "The avatar and the profile popover"), Chrome's profile bubble in
-// MAWS's chrome: the avatar, the profile's name and the Chrome account it is signed in to, then Switch profile (every
-// other profile and Default, each opening a new tab in this session as that profile), Sync bookmarks now with the
-// mirror's last read, Re-import this profile…, and the old click, Browser settings, as a muted link. The Default
-// partition's has the person glyph, "Default profile", Switch profile and the link. Every action closes the popover
-// first; Re-import runs at app level (ProfileSheets.tsx), since its removal closes this tab.
-import { useState } from 'react';
+// MAWS's chrome: the avatar, the profile's name and the Chrome account it is signed in to, then the other profiles
+// headed "New tabs as" (every other profile and Default, each opening a new tab in this session as that profile), Sync
+// bookmarks with the age of the mirror's last read, Re-import…, and the old click, Browser settings, as a muted link.
+// The Default partition's has the person glyph, "Default profile", the other profiles and the link. Every action closes
+// the popover first; Re-import runs at app level (ProfileSheets.tsx), since its removal closes this tab. The word cut
+// (T478 to T486): no account line for a profile signed in to none, no caption by the heading, the rows' words their
+// accessible names rather than tooltips.
+import { useId, useState } from 'react';
 import type { BrowserProfileListItem, ImportedBookmarks } from '@shared/browser/profiles';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -34,6 +36,8 @@ export function ProfilePopover({ appSessionId, surface, partition, profiles, pro
   const record = useBrowserImport((s) => (isDefault ? undefined : s.records.find((r) => r.partition === partition)));
   const targets = switchTargets(profiles, partition);
   const name = isDefault ? COPY.defaultName : (profile?.name ?? record?.name ?? '');
+  const account = !isDefault && profile ? accountLine(profile) : null;
+  const heading = useId();
   const act = (action: () => void) => () => {
     close();
     action();
@@ -43,17 +47,16 @@ export function ProfilePopover({ appSessionId, surface, partition, profiles, pro
       <header className="flex flex-col items-center gap-1 px-4 pt-4 pb-3 text-center">
         <ProfileAvatar profile={isDefault ? null : profile} size={40} />
         <div className="mt-1 max-w-full truncate font-medium text-fg">{name}</div>
-        {!isDefault && profile && (
-          <div data-profile-account="" title={accountLine(profile)} className="max-w-full truncate text-ui-sm text-fg-muted">
-            {accountLine(profile)}
+        {account !== null && (
+          <div data-profile-account="" title={account} className="max-w-full truncate text-ui-sm text-fg-muted">
+            {account}
           </div>
         )}
       </header>
       {targets.length > 0 && (
-        <section aria-label={COPY.switchProfile} className="border-t border-border px-1 pt-2 pb-1">
-          <div className="flex items-baseline justify-between gap-2 px-2 pb-1">
-            <span className="text-ui-sm font-medium text-fg-muted">{COPY.switchProfile}</span>
-            <span className="text-ui-sm text-fg-faint">{COPY.appliesToNewTabs}</span>
+        <section aria-labelledby={heading} className="border-t border-border px-1 pt-2 pb-1">
+          <div id={heading} className="px-2 pb-1 text-ui-sm font-medium text-fg-muted">
+            {COPY.newTabsAs}
           </div>
           <ul className="m-0 flex max-h-64 list-none flex-col overflow-y-auto p-0">
             {targets.map((target) => (
@@ -61,7 +64,7 @@ export function ProfilePopover({ appSessionId, surface, partition, profiles, pro
                 <button
                   type="button"
                   data-profile-switch={target.profileDir ?? 'default'}
-                  title={COPY.switchTo(target.profile?.name ?? COPY.defaultRow)}
+                  aria-label={COPY.switchTo(target.profile?.name ?? COPY.defaultRow)}
                   onClick={act(() => void switchProfile(appSessionId, surface, target.profileDir))}
                   className={`${ROW} h-8`}
                 >
@@ -96,12 +99,12 @@ export function ProfilePopover({ appSessionId, surface, partition, profiles, pro
   );
 }
 
-// Sync bookmarks now, with when the mirror last read Chrome's file (or why it could not) under it. The popover stays
-// open while main reads, and the line follows the record main writes.
+// Sync bookmarks, with how long ago the mirror last read Chrome's file (or why it could not) under it. The popover
+// stays open while main reads, and the line follows the record main writes.
 function SyncRow({ profileDir, bookmarks }: { profileDir: string; bookmarks: ImportedBookmarks }) {
   const [syncing, setSyncing] = useState(false);
   const now = useNow();
-  const line = syncLine(bookmarks, now);
+  const line = syncLine(bookmarks, now, 'age');
   const sync = async () => {
     if (syncing) return;
     setSyncing(true);
@@ -113,7 +116,7 @@ function SyncRow({ profileDir, bookmarks }: { profileDir: string; bookmarks: Imp
     <button type="button" data-profile-sync="" aria-disabled={syncing} onClick={() => void sync()} className={`${ROW} min-h-8 py-1.5 aria-disabled:text-fg-muted`}>
       <SyncIcon className={`size-4 self-start text-fg-muted ${line ? 'mt-px' : ''} ${syncing ? 'animate-spin motion-reduce:animate-none' : ''}`} />
       <span className="flex min-w-0 flex-col">
-        <span>{syncing ? COPY.syncing : COPY.syncNow}</span>
+        <span>{syncing ? COPY.syncing : COPY.sync}</span>
         {line && (
           <span data-profile-sync-line="" className={`text-ui-sm ${bookmarks.error === null ? 'text-fg-muted' : 'text-warning'}`} title={line}>
             {line}

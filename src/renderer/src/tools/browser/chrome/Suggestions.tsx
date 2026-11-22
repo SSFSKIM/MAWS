@@ -4,6 +4,8 @@
 // cover while the list shows, so it draws over the page's frozen picture as an omnibox popup does. cua #90: a bookmark's
 // row carries the bookmark star where a history row carries the clock. P3-F (F-shell): the list stacks inside the
 // chrome, which rises over the floating card's layer while it holds the list (`data-address-suggestions`, Chrome.tsx).
+// The word cut (T433): a typed row shows the address or the query beside its arrow or magnifier, "Go to" and "Search
+// for" its accessible name.
 import type { AddressRow } from './address-rows';
 import { BROWSER_COPY } from '../copy';
 import { BookmarkIcon, ForwardIcon, HistoryIcon, SearchIcon } from '../icons';
@@ -25,6 +27,7 @@ export function Suggestions({ id, rows, highlighted, onRun }: { id: string; rows
           id={optionId(id, index)}
           role="option"
           aria-selected={index === highlighted}
+          aria-label={row.kind === 'go' ? BROWSER_COPY.goTo(row.url) : row.kind === 'search' ? BROWSER_COPY.searchFor(row.query) : undefined}
           // keep the field focused: the row runs on the press, before the field would blur
           onMouseDown={(event) => {
             event.preventDefault();
@@ -44,7 +47,7 @@ function Row({ row }: { row: AddressRow }) {
     return (
       <>
         <SearchIcon className="size-3.5 text-fg-muted" />
-        <span className="min-w-0 truncate">{BROWSER_COPY.searchFor(row.query)}</span>
+        <span className="min-w-0 truncate">{row.query}</span>
       </>
     );
   }
@@ -52,7 +55,7 @@ function Row({ row }: { row: AddressRow }) {
     return (
       <>
         <ForwardIcon className="size-3.5 text-fg-muted" />
-        <span className="min-w-0 truncate">{BROWSER_COPY.goTo(row.url)}</span>
+        <span className="min-w-0 truncate">{row.url}</span>
       </>
     );
   }

@@ -1,4 +1,4 @@
-// E4a (Task 3.3): the chrome (Design §4): the control slot's three states, the zoom banner's presence rule, the address
+// E4a (Task 3.3): the chrome (Design §4): the control slot's three states, the zoom chip's presence rule, the address
 // field's display and its suggestions under the keyboard (the typed address first, history after it, the newest query's
 // answer only, a refused scheme's line, the cover held while the list shows), the find bar's messages and its session
 // with main, the notice lines and their dismissal, the tab strip per surface, the overflow menu, main's chrome commands

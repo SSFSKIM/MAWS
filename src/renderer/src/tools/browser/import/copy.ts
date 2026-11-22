@@ -1,5 +1,5 @@
 // Every sentence the Chrome profile import sheet shows (E4b execution document, Design §3, §10, §12 and §18): its
-// titles per state, the picker, the five category rows (Bookmarks since cua board #90), the Keychain line, the progress labels, the report and the
+// titles per state, the picker, the four category rows (Bookmarks since cua board #90), the Keychain line, the progress labels, the report and the
 // removal sheet. The report's summary line is `summaryWords` (src/shared/browser/import-summary.ts), its one English
 // home. The Cookies row names the Keychain dialog's Allow button and no other (E0b S1e).
 import type { CookieSkipReason, ExtensionCandidate, HistorySkipReason, ImportedExtension, ImportPhase, ImportReport, KeychainOutcome } from '@shared/browser/import';
@@ -41,6 +41,19 @@ const PHASES: Record<ImportPhase, string> = {
   bookmarks: 'Importing bookmarks…', // cua #90
   extensions: 'Importing extensions…',
   cleaning: 'Cleaning up…',
+};
+
+// The word cut (P385): the sheet's line over the bar names the category being imported, and nothing for the steps
+// around them; the Keychain's line still says which button to choose. Settings › Browser's running row keeps `PHASES`.
+const PHASE_NAMES: Record<ImportPhase, string | null> = {
+  copying: null,
+  history: CATEGORIES.history,
+  keychain: PHASES.keychain,
+  cookies: CATEGORIES.cookies,
+  verifying: null,
+  bookmarks: CATEGORIES.bookmarks,
+  extensions: CATEGORIES.extensions,
+  cleaning: null,
 };
 
 // The Keychain's answer when it was not `allowed` (Design §5); `skipped` is worded by `keychainLine`.
@@ -92,6 +105,7 @@ export const IMPORT_COPY = {
   noProfiles: 'This Chrome folder lists no profiles',
   chooseFolder: 'Choose another Chrome folder…',
   imported: (date: string | null) => (date === null ? 'Imported' : `Imported ${date}`),
+  // the word cut (T503): the two reads' quiet spinners' names
   reading: "Reading Chrome's profiles…",
   profilesFailed: (message: string) => `Couldn't list Chrome's profiles: ${message}`,
   chooseFailed: (message: string) => `Couldn't use that folder: ${message}`,
@@ -108,7 +122,6 @@ export const IMPORT_COPY = {
       : `${plural(rows, 'cookie')}${partitioned > 0 ? ` (${count(partitioned)} partitioned)` : ''}. macOS will ask once for Chrome's Safe Storage password from your login keychain; choose Allow. ` +
         'MAWS reads it once, keeps it in memory only while the cookies are decrypted, and never writes it anywhere. Nothing is written back to Chrome.',
   cookiesAgents: (name: string) => `New browser tabs, including the ones agents open through MAWS's browser tools, will be signed in as ${name} wherever Chrome was.`,
-  passwords: 'Saved passwords — a credential store comes later',
   extensions: (n: number) => (n === 0 ? 'No extensions in this profile.' : `${plural(n, 'extension')}. Copied into MAWS and loaded in this profile's tabs.`),
   // cua #90: a read-only mirror, read where Chrome keeps it
   bookmarks: (n: number) => `${plural(n, 'bookmark')}. Shown in a bar under the address field and in its suggestions, and read again from Chrome each time this profile opens. Nothing is written to Chrome.`,
@@ -119,23 +132,22 @@ export const IMPORT_COPY = {
   candidateError: (error: NonNullable<ExtensionCandidate['error']>) => CANDIDATE_ERRORS[error],
   walletChip: 'Wallet · off until you turn it on',
   disabledInChrome: 'Disabled in Chrome',
-  mv2: 'MV2',
-  noBackground: 'No background',
   unsupported: (n: number) => `${plural(n, 'permission')} MAWS doesn't support`,
   unverified: (name: string) =>
     `MAWS can't verify these extensions or their saved permissions. Imported extensions run code inside MAWS's browser pages for this profile. Continue only if you trust what ${name} installed in Chrome.`,
   import: 'Import',
 
   // the run
-  phase: (phase: ImportPhase) => PHASES[phase],
+  phase: (phase: ImportPhase) => PHASES[phase], // Settings › Browser's running row
+  phaseName: (phase: ImportPhase) => PHASE_NAMES[phase], // the sheet's
   starting: 'Starting…',
   progress: (done: number, total: number) => `${count(done)} of ${count(total)}`,
   cancel: 'Cancel',
   cancelling: 'Cancelling…',
 
-  // the report
-  summary: summaryWords,
-  reached: (summary: string) => `Before it stopped: ${summary}`,
+  // the report. The word cut: the summary ends at the skipped count, its reasons the lines under it (P388); a run that
+  // kept nothing says only that (P398); the partitioned line shows only when some were not confirmed (T527)
+  summary: (report: ImportReport) => summaryWords(report, { reasons: false }),
   nothingKept: (name: string) => `Nothing from ${name} was kept: what the import reached was removed again.`,
   failure: (code: string | null) => FAILURES[code ?? 'unexpected'] ?? FAILURES.unexpected!,
   partitionedLine: (set: number, verified: number) => `${plural(set, 'partitioned cookie')} set, ${count(verified)} confirmed in the partition`,
@@ -146,6 +158,7 @@ export const IMPORT_COPY = {
   extensionStatus,
   unsupportedHeading: "Permissions MAWS doesn't support",
   skippedSites: (store: Store, reason: string, n: number) => `${CATEGORIES[store]} · ${reason} (${count(n)})`,
+  skippedBookmarks: (n: number) => `${CATEGORIES.bookmarks} · Not imported (${count(n)})`, // the bookmarks the import left out (not a web address, or past the cap)
   cookieReasons: {
     wrongKey: 'Could not be decrypted',
     corruptRow: 'Unreadable rows',
@@ -156,7 +169,7 @@ export const IMPORT_COPY = {
     cancelled: 'Not imported (cancelled)',
   } satisfies Record<CookieSkipReason, string>,
   historyReasons: { hidden: 'Hidden pages', unsupportedScheme: "Pages MAWS's browser can't open", invalid: 'Unreadable history entries' } satisfies Record<HistorySkipReason, string>,
-  nowActive: (name: string) => `New tabs browse as ${name}. Change in Settings › Browser.`,
+  nowActive: (name: string) => `New tabs browse as ${name}.`, // the word cut (T533)
   done: 'Done',
   close: 'Close',
 
@@ -198,7 +211,7 @@ function extensionStatus(extension: ImportedExtension): string {
       if (extension.background === 'stopped') return 'Loaded · background stopped';
       return extensionBackgroundFailure(extension.backgroundError);
     case 'off':
-      if (extension.enabled) return 'On · loads when a tab next opens in this profile';
+      if (extension.enabled) return 'On'; // the word cut (P394): not loaded until a tab next opens in this profile
       return extension.wallet ? 'Off (wallet)' : 'Off';
     case 'loadFailed':
       return `Couldn't load: ${extension.error ?? 'unknown error'}`;

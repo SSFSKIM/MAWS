@@ -12,15 +12,16 @@ export const BROWSER_COPY = {
   // P5 O5 M5: the session's agent has no browser on its machine (the session's capabilities), with mawsd's reason
   agentUnavailable: (reason: string | null) => (reason === null ? 'The agent has no browser here' : `The agent has no browser here: ${reason}`),
   tabGone: 'That tab was closed',
-  empty: { title: 'Start browsing', body: 'Enter a URL to open a page' },
-  suspended: { open: (url: string) => `Open ${url}`, note: 'Tabs are restored unloaded' },
+  // the word cut: a tab that never navigated shows the globe alone (T409, T410); a restored one's button reads Load, its
+  // address its tooltip (T412), with no note under it (T413)
+  load: 'Load',
   shownElsewhere: 'Shown in another pane',
   showHere: 'Show here',
   reload: 'Reload',
   retry: 'Retry',
   // Codex's error page (`browserSidebar.loadError.*`), with MAWS as the app's name.
   loadError: {
-    heading: "This site can't be reached",
+    // the word cut (T415): the summary is the heading; the tips under it stay (T417, T418)
     summary: {
       dns: (host: string) => `${host}'s server IP address could not be found`,
       offline: (host: string) => `${host} could not be loaded because the computer is offline`,
@@ -53,7 +54,8 @@ export const BROWSER_COPY = {
   // ---- the chrome (Task 3.3; Design §4) ----
   tabs: 'Browser tabs',
   newTabAction: 'New tab',
-  closeTabNamed: (title: string) => `Close ${title}`,
+  closeTabNamed: (title: string) => `Close ${title}`, // a tab's ×'s accessible name
+  close: 'Close', // the word cut (T426): its tooltip
   back: 'Back',
   forward: 'Forward',
   reloadPage: 'Reload page', // Codex's `thread.browser.reload`
@@ -61,6 +63,7 @@ export const BROWSER_COPY = {
   address: 'Address',
   addressPlaceholder: 'Search or enter a URL', // Codex's `thread.browser.addressPlaceholder`
   addressSuggestions: 'Address suggestions', // Codex's `thread.browser.addressSuggestions`
+  // the word cut (T433): the typed rows' accessible names; the row shows the address or the query beside its glyph
   goTo: (url: string) => `Go to ${url}`,
   searchFor: (text: string) => `Search for “${text}”`,
   notSecure: 'Not secure', // Codex's `thread.browser.notSecure`
@@ -70,14 +73,16 @@ export const BROWSER_COPY = {
   menu: {
     openExternal: 'Open in external browser',
     find: 'Find in page',
+    // the word cut (T444): one row, "Zoom" with − level +, the level resetting; Close tab is the tab's × (T446)
+    zoom: 'Zoom',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     resetZoom: 'Reset zoom',
+    resetZoomAt: (level: string) => `Reset zoom, ${level}`,
     openInTab: 'Open in tab',
     showInPanel: 'Show in side surface',
     copyUrl: 'Copy URL',
     inspect: 'Inspect',
-    closeTab: 'Close tab',
     viewport: 'Viewport', // U12a
     copyScreenshot: 'Copy screenshot', // U12a
   },
@@ -88,16 +93,20 @@ export const BROWSER_COPY = {
     tablet: 'Tablet',
     tooWide: 'Wider than this pane',
     size: (width: number, height: number) => `${width} × ${height}`,
-    chip: (width: number, height: number) => `Viewport: ${width} × ${height}`,
+    chip: (width: number, height: number) => `Viewport: ${width} × ${height}`, // the chip's accessible name; its tooltip is `menu.viewport` (the word cut, T441)
   },
-  // Codex's `browserSidebar.zoomBanner.*` and `thread.browser.zoomPercent`
-  zoom: { label: 'Page zoom', level: (percent: number) => `${percent}%`, out: 'Zoom out', in: 'Zoom in', reset: 'Reset' },
-  // Codex's `codex.threadFindBar.*` for a browser page
+  // Codex's `browserSidebar.zoomBanner.*` and `thread.browser.zoomPercent`; the word cut (T452): no banner, a chip with
+  // the level in the navigation row, Page zoom its tooltip, opening − Reset +
+  zoom: { label: 'Page zoom', level: (percent: number) => `${percent}%`, chip: (level: string) => `Page zoom: ${level}`, reset: 'Reset' },
+  // Codex's `codex.threadFindBar.*` for a browser page; the word cut (T454, T455): the count is its numbers, with its
+  // words for a screen reader
   find: {
     label: 'Find in page',
     placeholder: 'Find in page…',
-    results: (active: number, matches: number) => `${active} / ${matches} results`,
-    noResults: '0 results',
+    results: (active: number, matches: number) => `${active} / ${matches}`,
+    noResults: '0',
+    resultsSpoken: (active: number, matches: number) => `${active} of ${matches} results`,
+    noResultsSpoken: 'No results',
     unavailable: 'Couldn’t search this page',
     previous: 'Previous result',
     next: 'Next result',
@@ -116,15 +125,15 @@ export const BROWSER_COPY = {
   stopPage: 'Stop page',
   popupsBlocked: (n: number) => `${n} ${n === 1 ? 'pop-up' : 'pop-ups'} blocked`,
   refusedScheme: (scheme: string) => `Can’t open ${scheme || 'that'} addresses here; the browser opens http and https only`,
-  // main's transient notices (`browser.notice`) and the chrome's own `urlCopied` (Decision Log 37, 44 (b))
-  tabsCap: (n: number) => `At most ${n} pages stay loaded at once, so a tab was left unloaded`,
-  tabsCapOptions: (n: number, name: string) => `At most ${n} pages stay loaded at once, so the options of ${name} could not open`, // cua #90
-  tabsCapMemory: 'Loaded pages passed the browser’s memory limit, so a tab was unloaded',
+  // main's transient notices (`browser.notice`) and the chrome's own `urlCopied` (Decision Log 37, 44 (b)). The word cut:
+  // a tab left unloaded at the page cap draws no line, its chip already greyed (T462); the refused options keep the fact
+  // (T463); an agent's refused download is what happened (T467); both copies read Copied (T464)
+  tabsCapOptions: (name: string) => `Too many pages are loaded to open ${name}’s options`, // cua #90
   profileMissing: (name: string | undefined) => `${profileNamed(name)} was not found; this tab browses with the default profile`,
   partitionFallback: (name: string | undefined) => `${profileNamed(name)} could not be opened; this tab browses with the default profile`,
-  downloadRefusedAgent: 'A download the agent started was refused; downloads are yours to start',
-  urlCopied: 'URL copied to clipboard', // Codex's `thread.browser.url.copied`
-  screenshotCopied: 'Screenshot copied to clipboard', // U12a: Copy screenshot
+  downloadRefusedAgent: 'Blocked a download the agent started',
+  urlCopied: 'Copied', // Codex's `thread.browser.url.copied`
+  screenshotCopied: 'Copied', // U12a: Copy screenshot
   screenshotFailed: 'Couldn’t copy a screenshot of this page', // U12a: nothing could be captured
   tabsFileBroken: 'The saved browser tabs could not be read; the file was set aside',
   // E4c start: a dialog a never-placed tab's page raised, which MAWS answered with the page's default (A-42)
@@ -137,14 +146,16 @@ export const BROWSER_COPY = {
   agentBadge: 'Opened by an agent', // E13: the badge on a tab an agent created through cua
   // P5 O7 M3: a loopback page of another machine's session, through a port forwarded over the machine's link
   forwarded: {
-    mark: (machine: string) => `forwarded from ${machine}`,
+    // the word cut (T429): the badge reads the machine's name, "forwarded from" before it for a screen reader alone
+    markLead: 'forwarded from ',
+    mark: (machine: string) => machine,
     markTitle: (machine: string, port: number) => `Port ${port} on ${machine}, forwarded to this Mac`,
     failedHeading: (port: number, machine: string) => `Couldn’t open port ${port} on ${machine}`,
     unreachable: (machine: string) => `${machine} isn’t reachable from this Mac right now`,
     notAllowed: (machine: string) => `This Mac isn’t allowed to open ports on ${machine}`,
     notOffered: (machine: string) => `${machine} runs a version of MAWS that can’t forward ports`,
     cancelled: 'Opening the port was cancelled',
-    refused: (machine: string) => `This link points at ${machine}’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1, 0.0.0.0, [::] or [::1])`,
+    refused: (machine: string) => `This link is local to ${machine} and can’t be opened from here`, // the word cut (T470)
     tryAgain: 'Try again',
     dismiss: 'Dismiss',
   },
@@ -157,7 +168,7 @@ export const BROWSER_COPY = {
     group: (machine: string) => `Agent on ${machine}`,
     pick: (machine: string) => `Agent tab on ${machine}`,
     noTabs: 'No agent browser tabs',
-    connecting: (machine: string) => `Connecting to ${machine}`,
+    connecting: (machine: string) => `Connecting to ${machine}`, // the word cut (T491): the spinner's name beside the dimmed label
     lost: 'Connection lost',
     unavailable: (reason: string | null) => (reason === null || reason === '' ? 'The agent has no browser' : `The agent has no browser: ${reason}`),
     unsupported: (machine: string) => `${machine} runs a version of MAWS that can’t show the agent’s browser here`,
@@ -170,13 +181,12 @@ export const BROWSER_COPY = {
       failed: (machine: string) => `The agent’s browser on ${machine} stopped`,
     },
     reconnect: 'Reconnect',
-    loading: 'Waiting for the agent’s page…',
+    loading: 'Waiting for the agent’s page…', // the word cut (T498): the spinner's name over the picture
     waiting: 'The agent’s tab isn’t available right now', // its stream closed with the tab or the engine; the next listing or Retry
     stopped: 'The picture stopped',
     retry: 'Retry',
     page: (title: string, machine: string) => `The agent’s page on ${machine}: ${title}`,
-    viewOnly: 'View only',
-    viewOnlyHint: 'View only; take control to use the page',
+    viewOnlyHint: 'View only; take control to use the page', // the word cut (T493): no View only badge beside Take control
     youControl: 'You have control',
     youControlHint: 'You have control; Escape gives the keyboard back to this window',
     takeControl: 'Take control',
@@ -207,8 +217,7 @@ export const BROWSER_COPY = {
   bookmarks: {
     bar: 'Bookmarks bar',
     more: 'More bookmarks', // the » slot (Chrome's tooltip names the hidden ones "bookmarks")
-    chipTitle: (name: string, url: string) => (name === '' ? url : `${name}\n${url}`),
-    folderTitle: (name: string) => name,
+    chipTitle: (name: string, url: string) => (name === '' ? url : `${name}\n${url}`), // a folder has none: it said its name again (the word cut, T449)
     suggestion: 'Bookmark', // the star's label on an address suggestion
   },
   // the pill's avatar and its popover (Chrome's profile bubble); in English like the rest of MAWS (the owner,
@@ -216,12 +225,15 @@ export const BROWSER_COPY = {
   profile: {
     label: (name: string) => `Profile: ${name}`, // the popover's accessible name
     defaultName: 'Default profile', // the Default partition's popover heading
-    defaultRow: 'Default', // the Default partition in Switch profile
-    signedIn: (parts: string[]) => `Signed in as ${parts.join(' · ')}`,
-    notSignedIn: 'Not signed in to Chrome',
-    switchProfile: 'Switch profile',
-    appliesToNewTabs: 'Applies to new tabs', // a switch sets the profile new tabs open in; this tab keeps its own
+    defaultRow: 'Default', // the Default partition in the list of other profiles
+    // the word cut: the account's names alone, and no line for a profile signed in to none (T478, T479); the list headed
+    // "New tabs as", with no caption (T480), a switch setting the profile new tabs open in while this tab keeps its own;
+    // its rows named in full, with no tooltip (T481); the popover's Sync bookmarks over the age alone (T483, T484);
+    // Re-import… (T486). Settings › Browser's row menu and note keep Sync bookmarks now and Last synced.
+    account: (parts: string[]) => parts.join(' · '),
+    newTabsAs: 'New tabs as',
     switchTo: (name: string) => `Open a new tab as ${name}`,
+    sync: 'Sync bookmarks',
     syncNow: 'Sync bookmarks now',
     syncing: 'Syncing bookmarks…',
     lastSynced: (age: string) => `Last synced ${age}`,
@@ -229,7 +241,7 @@ export const BROWSER_COPY = {
     unreadable: (age: string | null) => `${UNREADABLE} · ${age === null ? 'Never synced' : `Last synced ${age}`}`, // the record's error, with the last good read
     indexUnavailable: 'Unavailable in this build',
     syncFailed: (why: string) => `Bookmarks could not be synced: ${why}`,
-    reimport: 'Re-import this profile…',
+    reimport: 'Re-import…',
     settings: 'Browser settings',
   },
   // the extensions action bar (Chrome's words) and its notices

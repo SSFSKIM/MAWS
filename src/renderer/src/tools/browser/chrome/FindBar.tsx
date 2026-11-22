@@ -16,12 +16,15 @@ export interface FindBarProps {
   onClose(): void;
 }
 
-// What the count reads: nothing before a search, Codex's "0 results" or "{active} / {matches} results" after one.
-export function findMessage(tab: BrowserTab, text: string): string {
+// What the count reads: nothing before a search, then "0" or "{active} / {matches}" (the word cut, T454 and T455: the
+// numbers alone, their words for a screen reader), or that the page cannot be searched.
+export function findMessage(tab: BrowserTab, text: string): { shown: string; spoken: string } {
   const copy = BROWSER_COPY.find;
-  if (tab.suspended || tab.url === '' || tab.loadError || tab.crashed || tab.failed) return copy.unavailable;
-  if (text === '' || tab.find === null) return '';
-  return tab.find.matches === 0 ? copy.noResults : copy.results(tab.find.active, tab.find.matches);
+  const said = (words: string) => ({ shown: words, spoken: words });
+  if (tab.suspended || tab.url === '' || tab.loadError || tab.crashed || tab.failed) return said(copy.unavailable);
+  if (text === '' || tab.find === null) return said('');
+  const { active, matches } = tab.find;
+  return matches === 0 ? { shown: copy.noResults, spoken: copy.noResultsSpoken } : { shown: copy.results(active, matches), spoken: copy.resultsSpoken(active, matches) };
 }
 
 export function FindBar({ tab, focusRequest, onClose }: FindBarProps) {
@@ -73,7 +76,14 @@ export function FindBar({ tab, focusRequest, onClose }: FindBarProps) {
         className="h-7 min-w-0 flex-1 rounded-md border border-border-strong bg-bg px-2 text-ui text-fg outline-accent placeholder:text-fg-faint focus-visible:outline-2"
       />
       <span role="status" className="shrink-0 px-1.5 text-ui-sm text-fg-muted tabular-nums">
-        {message}
+        {message.shown === message.spoken ? (
+          message.shown
+        ) : (
+          <>
+            <span aria-hidden>{message.shown}</span>
+            <span className="sr-only">{message.spoken}</span>
+          </>
+        )}
       </span>
       <IconButton label={copy.previous} disabled={text === ''} onClick={() => step(false)}>
         <ChevronUpIcon />

@@ -4,21 +4,23 @@
 // chrome's pane to hold the view, since they act on the page as it shows (Inspect opens detached DevTools wherever).
 // U12a (the UX wave's U12, l9-browser-delivery-06): Viewport after the zoom group and Copy screenshot after Copy URL, both
 // where find and zoom are; Viewport also needs this pane's room (`room`, which only the pane holding the view has) and is
-// not offered on an extension's options tab.
+// not offered on an extension's options tab. The word cut: one Zoom row, − level +, whose level resets and whose steps
+// keep the menu open (T444); no Close tab, which the tab's × does (T446).
 import { DropdownMenu } from 'radix-ui';
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
-import { useRef, type ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
 import { IconButton } from '../../../app/IconButton';
 import { panelHost } from '../../../panel/host';
-import { closeTab, copyScreenshot, inspect, openExternal, openMainTab, zoom } from '../actions';
+import { copyScreenshot, inspect, openExternal, openMainTab } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { ChevronRightIcon, MoreIcon } from '../icons';
 import { raiseNotice, requestShow } from '../store';
 import type { Room } from '../viewport';
 import { ViewportChoices } from './ViewportChip';
+import { ZoomSteps, zoomPercent } from './ZoomChip';
 
 export interface OverflowMenuProps {
   appSessionId: AppSessionId;
@@ -39,6 +41,8 @@ export function OverflowMenu({ appSessionId, surface, tab, owns, room, onFind }:
   const shown = live && owns; // and in this chrome's pane, so find and zoom act on what the person sees
   const sizing = shown && room !== null && tab?.internal === null ? room : null; // U12a: the room a device size is offered in
   const toFind = useRef(false); // Find in page chosen: the find bar keeps the keyboard, not the menu's trigger
+  const zoomLabel = useId();
+  const level = BROWSER_COPY.zoom.level(zoomPercent(tab?.zoom ?? 1));
   const copyUrl = (tab: BrowserTab, url: string) =>
     void navigator.clipboard.writeText(url).then(
       () => raiseNotice({ appSessionId, tabId: tab.tabId, kind: 'urlCopied' }),
@@ -82,15 +86,12 @@ export function OverflowMenu({ appSessionId, surface, tab, owns, room, onFind }:
             {copy.find}
           </Item>
           <Separator />
-          <Item disabled={!shown} onSelect={() => tab && zoom(tab.tabId, 'in')}>
-            {copy.zoomIn}
-          </Item>
-          <Item disabled={!shown} onSelect={() => tab && zoom(tab.tabId, 'out')}>
-            {copy.zoomOut}
-          </Item>
-          <Item disabled={!shown || tab?.zoom === 1} onSelect={() => tab && zoom(tab.tabId, 'reset')}>
-            {copy.resetZoom}
-          </Item>
+          <DropdownMenu.Group aria-labelledby={zoomLabel} data-browser-menu-zoom="" className="flex h-7 items-center gap-0.5 pl-2">
+            <span id={zoomLabel} className={`flex-1 ${shown ? '' : 'text-fg-faint'}`}>
+              {copy.zoom}
+            </span>
+            <ZoomSteps tab={tab} enabled={shown} reset={level} resetName={copy.resetZoomAt(level)} />
+          </DropdownMenu.Group>
           <DropdownMenu.Sub>
             <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={sizing === null} className={`${ITEM} data-[state=open]:bg-bg-hover`}>
               <span className="flex-1">{copy.viewport}</span>
@@ -120,10 +121,6 @@ export function OverflowMenu({ appSessionId, surface, tab, owns, room, onFind }:
           </Item>
           <Item disabled={!live} onSelect={() => tab && inspect(tab.tabId)}>
             {copy.inspect}
-          </Item>
-          <Separator />
-          <Item disabled={tab === null} onSelect={() => tab && closeTab(tab.tabId)}>
-            {copy.closeTab}
           </Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

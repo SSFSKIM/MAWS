@@ -1,7 +1,8 @@
 // The import report's summary line (E4b Design §10), the one place its English lives: the import sheet's report and
 // Settings › Browser's records both show it (`IMPORT_COPY.summary` reuses it). "N cookies, M history entries,
 // B bookmarks, K extensions · J skipped: reasons", a category the owner did not choose left out, the reasons in the
-// report's order (cua board #90 added the bookmarks).
+// report's order (cua board #90 added the bookmarks). The import sheet's report asks for it without the reasons
+// (`reasons: false`, the word cut's P388): it ends at "· J skipped", the reasons being the lines under it.
 import type { CookieSkipReason, HistorySkipReason, ImportedExtension, ImportReport } from './import';
 import { COOKIE_SKIP_REASONS, HISTORY_SKIP_REASONS } from './import';
 
@@ -29,7 +30,7 @@ const EXTENSION_SKIPS = {
   loadFailed: (n: number) => `${plural(n, 'extension')} couldn't load`,
 } satisfies Partial<Record<ImportedExtension['status'], (n: number) => string>>;
 
-export function summaryWords(report: ImportReport): string {
+export function summaryWords(report: ImportReport, { reasons: named = true }: { reasons?: boolean } = {}): string {
   const imported: string[] = [];
   const skipped: [number, string][] = [];
   const { cookies, history, extensions, bookmarks } = report;
@@ -56,5 +57,6 @@ export function summaryWords(report: ImportReport): string {
   if (imported.length === 0) return 'Nothing imported';
   const reasons = skipped.filter(([n]) => n > 0);
   const total = reasons.reduce((sum, [n]) => sum + n, 0);
-  return total === 0 ? imported.join(', ') : `${imported.join(', ')} · ${count(total)} skipped: ${reasons.map(([, words]) => words).join(', ')}`;
+  if (total === 0) return imported.join(', ');
+  return named ? `${imported.join(', ')} · ${count(total)} skipped: ${reasons.map(([, words]) => words).join(', ')}` : `${imported.join(', ')} · ${count(total)} skipped`;
 }
