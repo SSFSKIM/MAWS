@@ -6,9 +6,13 @@
 // own plugin does in the same update, ahead of this one.
 //
 // One tip at a time, as `Tip`'s: a glyph that holds keyboard focus shows its tip at once; a pointed glyph shows its own
-// after the pointing delay only while no other glyph holds focus, so two neighbours' tips never stack. A shown tip is
-// part of its glyph, so the pointer can move onto it and keep it (WCAG 1.4.13): it sits flush under the glyph, its gap
-// a transparent border the pointer crosses without leaving.
+// after the pointing delay only while no other glyph holds focus, so two neighbours' tips never stack. A tip never takes
+// the pointer: a pseudo-element is part of its glyph, so a tip that did would run Next or flip a toggle when clicked and
+// swallow clicks meant for the code under it.
+//
+// The rules go through the theme's style-mod, which splits a selector on every comma, even one inside `:has(…)`, and
+// Chromium refuses a `:has` nested in another: so each condition is its own `:has` and no selector holds a comma inside
+// parentheses.
 import { EditorState, type Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import { FIND_COPY } from '../copy';
@@ -37,7 +41,8 @@ export const findGlyphs: Extension = [
 ];
 
 const OWNER = '.cm-panel.cm-search [data-find-tip]';
-const FOCUSED = '[data-find-tip]:focus-visible, [data-find-tip]:has(input:focus-visible)';
+// the bar holds no focused glyph: neither a focused button nor a label whose hidden box is focused
+const NONE_FOCUSED = ':not(:has([data-find-tip]:focus-visible)):not(:has([data-find-tip] input:focus-visible))';
 
 export const FIND_TIP_THEME: Record<string, Record<string, string>> = {
   [OWNER]: { position: 'relative' },
@@ -48,7 +53,7 @@ export const FIND_TIP_THEME: Record<string, Record<string, string>> = {
     fontSize: 'var(--text-ui-sm)', pointerEvents: 'none', visibility: 'hidden', opacity: '0',
   },
   // pointed, while no glyph of the bar holds focus but this one (POINTING_DELAY_MS)
-  [`.cm-panel.cm-search:not(:has(${FOCUSED})) [data-find-tip]:hover::after`]: { visibility: 'visible', opacity: '1', pointerEvents: 'auto', transition: 'visibility 0s 300ms, opacity 0s 300ms' },
+  [`.cm-panel.cm-search${NONE_FOCUSED} [data-find-tip]:hover::after`]: { visibility: 'visible', opacity: '1', transition: 'visibility 0s 300ms, opacity 0s 300ms' },
   // focused from the keyboard: at once, whatever is pointed
-  [`${OWNER}:focus-visible::after, ${OWNER}:has(input:focus-visible)::after`]: { visibility: 'visible', opacity: '1', pointerEvents: 'auto' },
+  [`${OWNER}:focus-visible::after, ${OWNER}:has(input:focus-visible)::after`]: { visibility: 'visible', opacity: '1' },
 };
