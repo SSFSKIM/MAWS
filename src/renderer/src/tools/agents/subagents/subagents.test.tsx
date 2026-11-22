@@ -451,7 +451,7 @@ describe('subagents lists', () => {
     const runs = workflowRunsOf();
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', runs[0].runId), runs });
     expect(section('running') ?? section('done') ?? section('disk')).toBeNull();
-    expect(screen.getByText('No subagents yet')).toBeTruthy();
+    expect(screen.getByText('No agents yet')).toBeTruthy(); // the word cut (N158): the tool is Agents
     const nodes = [...useTaskGraph.getState().entries.get(A)!.graph.tasks.values()].filter((n) => n.kind === 'agent');
     expect(nodes.map((n) => n.agent?.runId)).toEqual([runs[0].runId, runs[0].runId]);
   });
@@ -472,6 +472,19 @@ describe('subagents lists', () => {
     expect(descriptionOf(open)).toBe('Approval needed');
     expect(row('a2').querySelector<HTMLElement>(':scope > [data-part="open"]')!.getAttribute('aria-describedby')).toBeNull();
     act(() => open.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Approval needed');
+  });
+
+  // Fix round 1 of the word cut (T166): pointing anywhere on the row opens it, its disclosure included, which is the
+  // row's own control and not the tip's trigger; the keyboard still reaches it on the row's open button alone.
+  it('says Approval needed on pointing at the row’s disclosure as on the row, the disclosure staying its own control', async () => {
+    await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
+    act(() =>
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'p' as AgentId } })], TEST_MACHINE),
+    );
+    const under = disclosure('p')!;
+    expect(under.getAttribute('aria-describedby')).toBeNull();
+    fireEvent.pointerOver(under);
     expect((await screen.findByRole('tooltip')).textContent).toContain('Approval needed');
   });
 
@@ -1301,7 +1314,7 @@ describe('subagents summary', () => {
     expect(summary().textContent).toContain('2 on disk');
   });
 
-  it('reads No subagents yet when nothing is known', async () => {
+  it('reads No subagents yet when nothing is known (the summary card’s words, T145, stay)', async () => {
     seedSessions(null);
     showSummary();
     await act(async () => {

@@ -151,6 +151,8 @@ const heading = (name: string) => section(name)?.querySelector('h3 > button')?.t
 // The UX wave's U8b (M7): a section folded or unfolded by its heading (Done is folded at first)
 const toggleSection = (name: string) => act(() => void fireEvent.click(section(name)!.querySelector('h3 > button')!));
 const card = (taskId: string) => document.querySelector<HTMLElement>(`[data-workflow="${taskId}"]`)!;
+// The quiet spinner draws nothing for its first 500 ms: a check that none spins waits past that.
+const pastQuietDelay = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
 const summaryLine = (taskId: string) => card(taskId).querySelector('[data-part="summary"]')?.textContent;
 // E7: the run's widget, as shown: the phase options (`<title>|<count>`, the selected one marked `*`) and the agent rows.
 const widget = () => document.querySelector<HTMLElement>('[data-view="run"]');
@@ -405,6 +407,23 @@ describe('background work', () => {
     expect(await within(card('wf1')).findByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeTruthy();
     openWidget('wf1');
     expect(await within(widget()!).findByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeTruthy();
+  });
+
+  // Fix round 1 of the word cut (T212): the spinner is a wait, so a run that ends before any progress settles. Its card
+  // and its page say it has no phases, and nothing spins once the quiet spinner's delay has passed.
+  it('a workflow that ends before any progress shows No phases on its card and page, and no spinner', async () => {
+    await mount({
+      events: [
+        event('task.started', { taskId: 'wf1', taskType: 'local_workflow', description: 'Judge panel', workflowName: 'demo' }, { seq: 1, at: T }),
+        event('task.notification', { taskId: 'wf1', status: 'failed' }, { seq: 2, at: T }),
+      ],
+    });
+    toggleSection('done');
+    expect(summaryLine('wf1')).toBe('No phases');
+    openWidget('wf1');
+    expect(within(widget()!).getByText('No phases')).toBeTruthy();
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
   it('a per-agent row with an agentId opens the drill-in through ctx.openTool; a row without one is not a button', async () => {
@@ -754,6 +773,39 @@ describe('background work', () => {
     push(upTo(workflow, 82));
     expect(handle.snapshot()).toMatchObject({ view: { kind: 'run', taskId: 'wayue3on6' }, pendingRun: null, selected: 'wayue3on6' });
     expect(widget()?.dataset.run).toBe('wayue3on6');
+  });
+
+  // Fix round 1 of the word cut (T209): a link's run is waited on only while a read can still bring it. Once the disk
+  // read of a session not live here failed, the list says why and nothing spins; once it answered without the run, the
+  // list says the run is not found. Either way a later read that brings it opens it.
+  it('a link to a run of a session not live here settles once its read fails, and opens the run a later read brings', async () => {
+    const [run] = workflowRunsOf();
+    const taskId = run.snapshot!.taskId!;
+    seedSessions(null);
+    const handle = create({ taskId, runId: run.runId, view: 'run' });
+    render(<Mounted state={handle} />);
+    await act(async () => {
+      await fake.answer('subagents', []);
+      await fake.fail('workflows', 'unknown app session: A');
+    });
+    expect(handle.snapshot().pendingRun).not.toBeNull();
+    expect(screen.getByText('Workflow runs unavailable: unknown app session: A')).toBeTruthy();
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar', { name: 'Loading run…' })).toBeNull();
+    act(() => useTaskGraph.getState().applyDisk(A, { runs: [run], runsError: null }));
+    expect(widget()?.dataset.run).toBe(taskId);
+  });
+
+  it('a link to a run a session’s answered read does not hold reads Run not found, and opens the run once a read brings it', async () => {
+    const [run] = workflowRunsOf();
+    const taskId = run.snapshot!.taskId!;
+    const { handle } = await mount({ status: null, runs: [], params: { taskId, runId: run.runId, view: 'run' } });
+    expect(handle.snapshot().pendingRun).not.toBeNull();
+    expect(screen.getByText('Run not found')).toBeTruthy();
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar', { name: 'Loading run…' })).toBeNull();
+    act(() => useTaskGraph.getState().applyDisk(A, { runs: [run] }));
+    expect(widget()?.dataset.run).toBe(taskId);
   });
 
   it('Back keeps the list’s scroll; a pinned tab following another session leaves the widget', async () => {

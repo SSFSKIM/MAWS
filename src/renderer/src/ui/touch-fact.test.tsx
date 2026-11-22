@@ -4,44 +4,15 @@
 // the fact and hides it from the accessibility tree; the stylesheet hides every marked fact outside any layer (so no
 // utility class can draw it where the pointer can point) and draws it only under `(hover: none)`.
 import { cleanup, render, screen } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { accessibleText } from '../test-support/accessible-text';
+import { appCssRules } from '../test-support/app-css';
 import { TOUCH_FACT, TouchFact } from './touch-fact';
 
 afterEach(cleanup);
 
-const css = readFileSync(resolve(__dirname, '../styles/app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-
-// The rules at the stylesheet's top level (outside any `@layer` or `@media`), and the rules inside each `@media`.
-function rules() {
-  const top: { selector: string; body: string }[] = [];
-  const media: { query: string; selector: string; body: string }[] = [];
-  const at: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < css.length; i++) {
-    if (css[i] === '{') {
-      at[depth] = css.slice(start, i).trim();
-      depth++;
-      start = i + 1;
-    } else if (css[i] === '}') {
-      depth--;
-      const body = css.slice(start, i).trim();
-      const selector = at[depth]!;
-      if (!selector.startsWith('@') && !body.includes('{')) {
-        if (depth === 0) top.push({ selector, body });
-        else if (depth === 1 && at[0]!.startsWith('@media')) media.push({ query: at[0]!, selector, body });
-      }
-      start = i + 1;
-    } else if (css[i] === ';' && depth === 0) start = i + 1;
-  }
-  return { top, media };
-}
-
 describe('the touch fact’s stylesheet', () => {
-  const { top, media } = rules();
+  const { top, media } = appCssRules();
   it('hides a marked fact outside every layer, so no utility draws it where the pointer can point', () => {
     expect(top).toContainEqual({ selector: `[${TOUCH_FACT}]`, body: 'display: none;' });
   });
