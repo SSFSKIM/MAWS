@@ -243,7 +243,7 @@ describe('background work', () => {
     ]);
     expect(tableRows().map((cells) => cells[0])).toEqual([expect.stringMatching(/alpha$/), expect.stringMatching(/beta$/)]);
     // Back returns to the list, the card still selected
-    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background tasks' }));
+    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background' }) /* the word cut (T153) */);
     expect(widget()).toBeNull();
     expect(card('wayue3on6').dataset.selected).toBe('true');
     openWidget('wayue3on6');
@@ -752,7 +752,7 @@ describe('background work', () => {
     scroller().scrollTop = 40;
     fireEvent.scroll(scroller());
     openWidget('wayue3on6');
-    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background tasks' }));
+    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background' }) /* the word cut (T153) */);
     expect(handle.snapshot().scrollTop).toBe(40);
     expect(scroller().scrollTop).toBe(40);
     openWidget('wayue3on6');

@@ -85,8 +85,7 @@ describe('plugin panes as panel tabs (R2)', () => {
     render(<TestHost />);
     attach();
     const status = await screen.findByRole('status');
-    expect(within(status).getByText('Nothing to show yet')).toBeTruthy();
-    expect(within(status).getByText('mods-probe has not drawn in this pane')).toBeTruthy();
+    expect(status.textContent).toBe('mods-probe has not drawn here yet'); // the word cut (P511): one line
   });
 
   it('a pushed pane the engine does not show gets a tab left unselected; showing it tells the engine', async () => {

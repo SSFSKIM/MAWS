@@ -76,7 +76,7 @@ describe('the push-state row’s PR line', () => {
 
   it('says No PR, the PR, or why the PR state is unavailable', () => {
     expect(line({ data: scmStatus() }, { data: prState({ pr: null }) })).toEqual({ kind: 'no_pr', branch: 'feature' });
-    expect(line({ data: scmStatus() }, { data: prState() })).toEqual({ kind: 'pr', number: 12, url: 'https://github.com/o/r/pull/12', details: 'Open · 3 passed, 1 pending' });
+    expect(line({ data: scmStatus() }, { data: prState() })).toEqual({ kind: 'pr', number: 12, url: 'https://github.com/o/r/pull/12', details: '1 pending' });
     expect(line({ data: scmStatus() }, { data: prState({ pr: null, error: 'gh pr view: HTTP 502' }) })).toEqual({ kind: 'unavailable', reason: 'gh pr view: HTTP 502' });
     expect(line({ data: scmStatus() }, { error: 'timeout' })).toEqual({ kind: 'unavailable', reason: 'timeout' });
   });
@@ -88,20 +88,23 @@ describe('the push-state row’s PR line', () => {
 });
 
 describe('a PR’s state in words', () => {
-  it('names the state, the review decision and the checks', () => {
-    expect(prDetails(pr())).toBe('Open · 3 passed, 1 pending');
-    expect(prDetails(pr({ isDraft: true }))).toBe('Draft · 3 passed, 1 pending');
-    expect(prDetails(pr({ state: 'MERGED', checks: { summary: 'pass', items: [check('pass')] } }))).toBe('Merged · 1 passed');
-    expect(prDetails(pr({ state: 'CLOSED', isDraft: true }))).toBe('Closed · 3 passed, 1 pending');
-    expect(prDetails(pr({ reviewDecision: 'CHANGES_REQUESTED' }))).toBe('Open · Changes requested · 3 passed, 1 pending');
-    expect(prDetails(pr({ reviewDecision: 'APPROVED' }))).toBe('Open · Approved · 3 passed, 1 pending');
-    expect(prDetails(pr({ reviewDecision: 'REVIEW_REQUIRED' }))).toBe('Open · 3 passed, 1 pending');
+  // the word cut (P44): an open PR says no state, and passed and skipped checks say nothing
+  it('names a state other than open, the review decision and the checks that carry news', () => {
+    expect(prDetails(pr())).toBe('1 pending');
+    expect(prDetails(pr({ isDraft: true }))).toBe('Draft · 1 pending');
+    expect(prDetails(pr({ state: 'MERGED', checks: { summary: 'pass', items: [check('pass')] } }))).toBe('Merged');
+    expect(prDetails(pr({ state: 'CLOSED', isDraft: true }))).toBe('Closed · 1 pending');
+    expect(prDetails(pr({ reviewDecision: 'CHANGES_REQUESTED' }))).toBe('Changes requested · 1 pending');
+    expect(prDetails(pr({ reviewDecision: 'APPROVED' }))).toBe('Approved · 1 pending');
+    expect(prDetails(pr({ reviewDecision: 'REVIEW_REQUIRED' }))).toBe('1 pending');
   });
 
-  it('counts every bucket in one order and says when there are no checks or they could not be read', () => {
+  // P45: no checks, or checks that could not be read, say nothing
+  it('counts the failed, cancelled and pending buckets in one order, and says nothing without checks to report', () => {
     const all = [check('skipping'), check('pending'), check('cancel'), check('fail'), check('fail'), check('pass')];
-    expect(prDetails(pr({ checks: { summary: 'fail', items: all } }))).toBe('Open · 1 passed, 2 failed, 1 cancelled, 1 pending, 1 skipped');
-    expect(prDetails(pr({ checks: { summary: 'none', items: [] } }))).toBe('Open · No checks reported yet');
-    expect(prDetails(pr({ checks: { summary: 'unknown', items: [] } }))).toBe('Open · Checks unavailable');
+    expect(prDetails(pr({ checks: { summary: 'fail', items: all } }))).toBe('2 failed, 1 cancelled, 1 pending');
+    expect(prDetails(pr({ checks: { summary: 'pass', items: [check('pass'), check('skipping')] } }))).toBe('');
+    expect(prDetails(pr({ checks: { summary: 'none', items: [] } }))).toBe('');
+    expect(prDetails(pr({ checks: { summary: 'unknown', items: [] } }))).toBe('');
   });
 });

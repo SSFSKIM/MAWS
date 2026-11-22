@@ -236,10 +236,30 @@ describe('the list', () => {
     expect(listed()).toContain(id(7));
   });
 
-  it('says what puts artifacts here when the session has none', async () => {
+  it('says the list is empty when the session has made nothing', async () => {
     rows = [OTHER];
     await mount();
-    expect(screen.getByText(/Nothing made in this session yet/)).toBeTruthy();
+    expect(screen.getByText('Nothing made yet')).toBeTruthy(); // the word cut (T546)
+  });
+
+  // the word cut (T548): a quiet spinner while the list is first read, nothing for its first half second
+  it('shows nothing, then a quiet spinner named by the wait, while the list is first read', async () => {
+    main = installFakeMain((name) => (name === 'library.list' ? new Promise<never>(() => {}) : fail(`unexpected ${name}`)));
+    await mount();
+    expect(screen.queryByText('Reading…')).toBeNull();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(await screen.findByRole('progressbar', { name: 'Reading…' }, { timeout: 2000 })).toBeTruthy();
+  });
+
+  // the word cut (T556): the record bar's Back is a chevron, "Back to list" its name and tooltip
+  it('draws the record bar’s Back as a chevron named Back to list', async () => {
+    testEditor();
+    await mount();
+    await openRow(1);
+    const back = button('Back to list')!;
+    expect(back.textContent).toBe('');
+    act(() => back.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Back to list');
   });
 
   it('a refused read shows with Try again, which reads again', async () => {
@@ -288,11 +308,12 @@ describe('the list', () => {
     list().scrollTop = 120;
     fireEvent.scroll(list());
     await openRow(1);
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(list().scrollTop, 'Back returns to where the list was').toBe(120);
     fireEvent.click(button('All')!); // a scope the library has not read yet: its lines wait for the reading
-    expect(screen.getByText('Reading…')).toBeTruthy();
+    expect(listed()).not.toContain(OTHER.id);
+    expect(screen.queryByText('Reading…')).toBeNull(); // the word cut (T548): the wait is a quiet spinner
     await settle();
     expect(listed()).toContain(OTHER.id);
     expect(list().scrollTop).toBe(0);
@@ -388,7 +409,7 @@ describe('the record view', () => {
     await waitFor(() => expect(main.callsOf('artifacts.markViewed')).toEqual([{ artifactId: NOTES.id }]));
     expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
 
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(editor.dispose).toHaveBeenCalledTimes(1);
     expect(editor.dispose).toHaveBeenCalledWith(editor.createState.mock.results[0]!.value);
@@ -453,7 +474,7 @@ describe('the record view', () => {
     await screen.findByText(`panel editor for ${NOTES.id} in panel:${TAB}`);
     const state = editor.createState.mock.results[0]!.value as TestState;
 
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
     act(() => artifactsTool.open!(handle, { target: SPEC.id }));
@@ -468,7 +489,7 @@ describe('the record view', () => {
     expect(editor.dispose).toHaveBeenCalledWith(state);
     const next = editor.createState.mock.results[1]!.value as TestState;
     next.allowClose = true;
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(editor.dispose).toHaveBeenCalledTimes(2);
     expect(listed()).toHaveLength(5);
@@ -544,7 +565,7 @@ describe('the record view', () => {
     expect(document.querySelector('[data-artifact-facts]')!.textContent).toContain('Q3 deck');
     expect(editorHostOf(SCOPE)?.title).toBe('Q3 deck');
     expect(main.callsOf('artifacts.markViewed')).toEqual([]);
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(editorHostOf(SCOPE)).toBeNull();
     expect(listed()).toHaveLength(5);
@@ -554,7 +575,7 @@ describe('the record view', () => {
     testEditor();
     await mount({ target: id(99) });
     expect(await screen.findByText('This artifact was deleted, or it is not in the library.')).toBeTruthy();
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(listed()).toHaveLength(5);
   });
@@ -567,7 +588,7 @@ describe('the record view', () => {
     view.rerender(<Mounted state={handle} appSessionId={B} />);
     await settle();
     expect(screen.getByText(/panel editor for/)).toBeTruthy();
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(listFilters().at(-1)).toEqual({ appSessionId: MAIN_B, lineage: true });
     expect(listed()).toEqual([OTHER.id]);
@@ -588,7 +609,7 @@ describe('restore', () => {
     act(() => handle.open({ target: SPEC.id }));
     await settle();
     expect(paramsOf(TAB)).toEqual({ target: SPEC.id, machine: TEST_MACHINE });
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
     expect(paramsOf(TAB)).toBeUndefined();
     await openRow(1);
@@ -641,7 +662,7 @@ describe('restore', () => {
     const second = await launch(first.left());
     expect(overview()).toBeNull();
     expect(screen.getByText(`panel editor for ${NOTES.id} in panel:${tabId}`)).toBeTruthy();
-    fireEvent.click(button('Back')!);
+    fireEvent.click(button('Back to list')!);
     await settle();
 
     await launch(second.left());

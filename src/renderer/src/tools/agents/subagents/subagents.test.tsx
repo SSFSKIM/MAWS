@@ -639,7 +639,7 @@ describe('drill-in', () => {
     fireEvent.scroll(lists);
     openRow('a2');
     expect(document.querySelector('[data-view="lists"]')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '‹ Subagents' }));
+    fireEvent.click(screen.getByRole('button', { name: '‹ Agents' }) /* the word cut (T152) */);
     expect(handle.snapshot().view).toEqual({ kind: 'lists' });
     expect(document.querySelector<HTMLElement>('[data-view="lists"]')!.scrollTop).toBe(120);
   });

@@ -1914,12 +1914,14 @@ describe('review tool', () => {
     expect(header()).toBe('3 files changed · +3 −0');
   });
 
-  // UX wave U8b (A8, l5-code-16): the line is a control named Open changes, its counts its description, and Environment is open
-  it('fills the Environment card’s change line with the staged count, as a control that opens Review', async () => {
+  // UX wave U8b (A8, l5-code-16): the line is a control named Open changes, its counts its description, and Environment is
+  // open. The word cut (P36, T364): "+3 −0 · 3 files", the untracked count its tooltip and part of its description, no
+  // staged count
+  it('fills the Environment card’s change line as a control that opens Review', async () => {
     render(<QueryClientProvider client={queryClient}><FloatingSummary appSessionId={A} /><TestHost /></QueryClientProvider>);
-    await waitFor(() => expect(screen.getByTestId('change-line').textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged'));
-    const line = screen.getByRole('button', { name: 'Open changes', description: '+3 −0 across 3 files · 1 untracked · 1 staged' });
-    expect(line.textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged›');
+    await waitFor(() => expect(screen.getByTestId('change-line').textContent).toBe('+3 −0 · 3 files'));
+    const line = screen.getByRole('button', { name: 'Open changes', description: '+3 −0 · 3 files 1 untracked' });
+    expect(line.textContent).toBe('+3 −0 · 3 files›');
     fireEvent.click(line);
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);

@@ -128,8 +128,10 @@ describe('floating session cards', () => {
     const env = region('Environment');
     expect(await within(env).findByText('⎇ main')).toBeTruthy();
     expect(within(env).getByText(DIR)).toBeTruthy();
-    expect(within(env).getByTestId('change-line').textContent).toBe('+3 −1 across 1 file');
-    await userEvent.setup().click(within(env).getByRole('button', { name: '1 ahead of origin/main' }));
+    expect(within(env).getByTestId('change-line').textContent).toBe('+3 −1 · 1 file'); // the word cut (P36)
+    const push = within(env).getByRole('button', { name: '1 ahead of origin/main', description: 'Open Source control' }); // P39: the mark's sentence its name
+    expect(push.textContent).toBe('↑1');
+    await userEvent.setup().click(push);
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
     await userEvent.setup().click(within(env).getByRole('button', { name: 'Open on GitHub' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://github.com/o/maws/tree/main' }]);
@@ -231,8 +233,10 @@ describe('floating session cards', () => {
 
   it('reads sampled context without presenting an unknown sample as zero', async () => {
     mount();
+    expect(within(region('Context')).getByRole('button', { expanded: false }).textContent).toBe('Context'); // the word cut (P52): no "Not reported"
     await open('Context');
-    expect(within(region('Context')).getByText('Not observed yet')).toBeTruthy();
+    expect(within(region('Context')).getByText('—')).toBeTruthy(); // P174
+    expect(within(region('Context')).queryByText('Not observed yet')).toBeNull();
     act(() => useSessions.setState({ engine: new Map([[A, status(A)]]), digests: new Map([[A, digest(A, { context: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 } })]]) }));
     expect(within(region('Context')).getByText('42,812 of 200,000 tokens')).toBeTruthy();
     expect(within(region('Context')).getByText('Autocompacts at 167,000 tokens')).toBeTruthy();
@@ -248,19 +252,38 @@ describe('floating session cards', () => {
     expect(within(connectors).getByText('needs-auth')).toBeTruthy();
     expect(within(connectors).getByRole('button', { expanded: true }).textContent).toContain('1 connected');
     act(() => useSessions.setState({ engine: new Map([[A, { ...status(A, { process: 'exited' }), mcpServers: [{ name: 'github', status: 'connected', source: null }] }]]) }));
-    expect(within(connectors).getByText('Last reported by this session')).toBeTruthy();
-    expect(within(connectors).getByRole('button', { expanded: true }).textContent).not.toContain('connected');
+    expect(within(connectors).getByRole('button', { expanded: true }).textContent).toBe('Connectors1 last reported'); // the word cut (P62): the heading says it
+    expect(within(connectors).queryByText('Last reported by this session')).toBeNull();
   });
 
   it('keeps empty connector metadata unknown even when a ready session has events', async () => {
     mount();
     await open('Connectors');
     const connectors = region('Connectors');
-    expect(within(connectors).getByText('Connector status not reported')).toBeTruthy();
+    // the word cut (P52, P62): nothing reported says nothing, neither in the heading nor in the card
+    expect(within(connectors).queryByRole('list')).toBeNull();
     act(() => useSessions.setState({ engine: new Map([[A, { ...status(A, { process: 'ready' }), lastEventSeq: 5, mcpServers: [] }]]) }));
-    expect(within(connectors).getByText('Connector status not reported')).toBeTruthy();
-    expect(within(connectors).getByRole('button', { expanded: true }).textContent).toContain('Not reported');
-    expect(within(connectors).queryByText('No MCP servers reported')).toBeNull();
+    expect(within(connectors).queryByRole('list')).toBeNull();
+    expect(within(connectors).getByRole('button', { expanded: true }).textContent).toBe('Connectors');
+    expect(within(connectors).queryByText(/not reported|No MCP servers reported/i)).toBeNull();
+  });
+
+  // the word cut (P63): "Manage…" and "Plugins…", "Manage connectors…" still the first's name, no tooltip while they
+  // work; greyed, each keeps the keyboard and gives its reason as its description
+  it('names the two buttons as before with shorter words, and gives a greyed one’s reason to the keyboard', async () => {
+    mount();
+    await open('Connectors');
+    const connectors = region('Connectors');
+    const manage = within(connectors).getByRole('button', { name: 'Manage connectors…', description: 'Open the session to manage its connectors' });
+    expect(manage.textContent).toBe('Manage…');
+    expect(manage.getAttribute('aria-disabled')).toBe('true');
+    expect(manage.hasAttribute('disabled')).toBe(false);
+    expect(within(connectors).getByRole('button', { name: 'Plugins…', description: 'Open the session to manage its plugins' }).getAttribute('aria-disabled')).toBe('true');
+    act(() => useComposerStore.setState({ focusTargets: new Map([[A, { openWidget: () => {} } as never]]) }));
+    const ready = within(connectors).getByRole('button', { name: 'Manage connectors…' });
+    expect(ready.getAttribute('aria-disabled')).toBeNull();
+    expect(ready.getAttribute('aria-describedby')).toBeNull();
+    expect(ready.title).toBe('');
   });
 
   it('keeps transcript Sources actionable inside Context instead of losing them with the old section', async () => {
@@ -271,12 +294,18 @@ describe('floating session cards', () => {
     await open('Context');
     const context = region('Context');
     expect(within(context).getAllByRole('listitem')).toHaveLength(8);
+    expect(within(context).getByRole('button', { name: /reduce\.ts/ }).textContent).not.toMatch(/TS$/); // the word cut (P57)
     await userEvent.setup().click(within(context).getByRole('button', { name: /reduce\.ts/ }));
     const files = (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
     expect(files.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts', line: null, preview: true }]);
     await userEvent.setup().click(within(context).getByRole('button', { name: /tanstack\.com/ }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://tanstack.com/virtual/latest/docs/api/virtualizer' }]);
     expect(within(context).queryByRole('button', { name: /docs · search/ })).toBeNull();
+    // the word cut (P58): that a connector's tool opens nothing is the row's tooltip, the row taking the keyboard for it
+    const mcp = within(context).getByText(/docs · search/).parentElement!;
+    expect(mcp.textContent).not.toContain('Source only');
+    expect(mcp.tabIndex).toBe(0);
+    expect(document.getElementById(mcp.getAttribute('aria-describedby')!)?.textContent).toBe('Source only');
   });
 
   it('keeps plugin status lines and reload controls within Connectors', async () => {
@@ -289,7 +318,8 @@ describe('floating session cards', () => {
     await open('Connectors');
     const connectors = region('Connectors');
     expect(within(connectors).getByText('mods-probe · watching the build')).toBeTruthy();
-    expect(within(connectors).getByText('Plugins · 1 loaded')).toBeTruthy();
+    expect(within(connectors).getByText('1 plugin')).toBeTruthy(); // the word cut (P65): and no "Loaded now"
+    expect(within(connectors).queryByText('Loaded now')).toBeNull();
     await userEvent.setup().click(within(connectors).getByRole('button', { name: 'Reload plugins' }));
     expect(fake.invoked('session.reloadPlugins')).toEqual([{ appSessionId: MAIN.A }]);
     await act(() => fake.reply('session.reloadPlugins', { opId: 'op-1' }));

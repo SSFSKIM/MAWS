@@ -472,12 +472,12 @@ describe('no way of pinning pins a file’s tab', () => {
     const file = filesOf(A)[0].id;
     fireEvent.contextMenu(within(surfaceRow()).getByRole('button', { name: 'Files' }));
     expect(await screen.findByRole('menuitem', { name: /^(?:Open|Hide) surface$/ })).toBeTruthy();
-    expect(screen.queryByRole('menuitem', { name: 'Keep open for every session' })).toBeNull(); // the only Files tab holds a file
+    expect(screen.queryByRole('menuitem', { name: 'Pin tab' })).toBeNull(); // the only Files tab holds a file
     await user.keyboard('{Escape}');
     let tree = '';
     act(() => void (tree = panelHost.addTool('files', { appSessionId: A })));
     fireEvent.contextMenu(within(surfaceRow()).getByRole('button', { name: 'Files' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Keep open for every session' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Pin tab' }));
     expect(pinIds()).toEqual([tree]);
     expect(filesOf(A).map((tab) => tab.id)).toEqual([file]);
   });
@@ -492,7 +492,7 @@ describe('no way of pinning pins a file’s tab', () => {
     const trigger = await screen.findByRole('menuitem', { name: 'files (unavailable)' });
     act(() => trigger.focus());
     await user.keyboard('{ArrowRight}');
-    const action = await screen.findByRole('menuitem', { name: 'Keep open for every session' });
+    const action = await screen.findByRole('menuitem', { name: 'Pin tab' });
     act(() => action.focus());
     await user.keyboard('{Enter}');
     expect(pinIds()).toEqual([]);
