@@ -189,6 +189,8 @@ export class LogRelay {
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
   /** The keys that asked for a read, and when, in that order: each asks again only `HELD_READ_MS` later. */
   readonly #asked = new Map<string, number>();
+  /** Each project's arrivals, judged one after another (`#inOrder`). */
+  readonly #arrivals = new Map<string, Promise<void>>();
   /** The `retry`s begun (`#arrived` reads it). */
   #retries = 0;
 
@@ -314,12 +316,31 @@ export class LogRelay {
   /** The head, the certificates or the legacy key moved: every held event judged again, in the order it arrived. */
   async retry(): Promise<void> {
     this.#retries++;
-    for (const [project, held] of [...this.#held]) {
-      const prior = new Map(held);
-      held.clear();
-      await this.#arrived(project, [...prior.values()].map((h) => h.event), (key) => prior.get(key)?.since);
-      if (this.#held.get(project)?.size === 0) this.#held.delete(project);
+    for (const project of [...this.#held.keys()]) {
+      await this.#inOrder(project, async () => {
+        const held = this.#held.get(project);
+        if (held === undefined) return;
+        const prior = new Map(held);
+        held.clear();
+        await this.#arrived(project, [...prior.values()].map((h) => h.event), (key) => prior.get(key)?.since);
+        if (this.#held.get(project)?.size === 0) this.#held.delete(project);
+      });
     }
+  }
+
+  /**
+   * Runs `run` behind every arrival of `project` begun before it: the hub's pages and a `retry`'s judgement of what was
+   * held each stage the inbound index's entries and commit them as one batch, so a position's first content judged is
+   * the first written, whichever path met it.
+   */
+  #inOrder(project: string, run: () => Promise<void>): Promise<void> {
+    const next = (this.#arrivals.get(project) ?? Promise.resolve()).then(run);
+    const tail = next.catch(() => {});
+    this.#arrivals.set(project, tail);
+    void tail.then(() => {
+      if (this.#arrivals.get(project) === tail) this.#arrivals.delete(project);
+    });
+    return next;
   }
 
   /** How many arriving events are held now. */
@@ -465,7 +486,7 @@ export class LogRelay {
   /** A log-plane frame from the hub for an open project (`have`, `events`, `resend`, `refused`), in the project's order. */
   async fromHub(frame: { t: string; project: string } & Record<string, unknown>): Promise<void> {
     if (!this.#projects.has(frame.project)) return;
-    if (frame.t === 'events') return this.#arrived(frame.project, frame.events);
+    if (frame.t === 'events') return this.#inOrder(frame.project, () => this.#arrived(frame.project, frame.events));
     // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (uplink.ts).
     if (frame.t === 'resend' && typeof frame.writer === 'string' && isLogSeq(frame.from) && this.#uplink.resend(frame.project, frame.writer, frame.from)) return;
     this.#toSminos(frame);
@@ -491,17 +512,45 @@ export class LogRelay {
     if (!Array.isArray(events)) return;
     let down: Wrapped[] = [];
     let read = false;
-    // The inbound index's entries of what goes down, written in one append before any of it does.
+    // The inbound index's entries of what goes down, written in one append before any of it takes effect: then the
+    // snapshots it carries feed the policy cache, in order, then the events frame goes.
     const staged: Staged[] = [];
-    const flush = () => {
-      if (staged.length > 0) this.#ctx.index.commit(staged.splice(0));
+    const feeds: Wrapped[] = [];
+    const flush = (): boolean => {
+      if (staged.length > 0 && !this.#ctx.index.commit(staged.splice(0))) return false;
+      for (const wrapped of feeds.splice(0)) this.#feed(wrapped, false);
       if (down.length > 0) this.#toSminos({ t: 'events', project, events: down });
       down = [];
+      return true;
     };
+    const stale = () =>
+      this.#ctx.log(`endpoint: the inbound records were moved aside while a page of project ${project} was judged: the rest of it is dropped, and comes again from the hub at sminos's next hello`);
+    try {
+      const deliver = (wrapped: Wrapped) => void (feeds.push(wrapped), down.push(wrapped));
+      if (!(await this.#judgeAll(project, events, since, staged, deliver, flush, () => (read = true)))) return stale();
+      if (!flush()) return stale();
+    } catch (error) {
+      // Nothing the batch staged was written: it is new again.
+      this.#ctx.index.abandon(staged);
+      throw error;
+    }
+    if (read) this.#ctx.behind?.();
+  }
+
+  /** `#arrived`'s judgement of each event in order: false once a flush found the inbound batch stale. */
+  async #judgeAll(
+    project: string,
+    events: unknown[],
+    since: ((key: string) => number | undefined) | undefined,
+    staged: Staged[],
+    deliver: (wrapped: Wrapped) => void,
+    flush: () => boolean,
+    asked: () => void,
+  ): Promise<boolean> {
     for (const e of events) {
       // The hub's tombstone of a position it withheld (D5): spent, in stream order, so the writer goes on past it.
       if (isWithheldTombstone(e)) {
-        flush();
+        if (!flush()) return false;
         this.#toSminos({ t: 'spent', project, writer: e.writer, seq: e.seq, reason: 'withheld' satisfies SpentReason });
         continue;
       }
@@ -514,23 +563,20 @@ export class LogRelay {
         if (!('hold' in judged) || retries === this.#retries) break;
       }
       const at = position(e);
-      if ('deliver' in judged) {
-        this.#feed(judged.deliver, false);
-        down.push(judged.deliver);
-      } else if ('hold' in judged) {
+      if ('deliver' in judged) deliver(judged.deliver);
+      else if ('hold' in judged) {
         const kept = at !== null && this.#hold(project, at, e, judged.hold, since?.(`${at.writer}\n${at.seq}`));
-        if (kept && judged.read !== undefined && this.#ask(judged.read)) read = true;
+        if (kept && judged.read !== undefined && this.#ask(judged.read)) asked();
       } else {
         this.#ctx.log(`endpoint: refused an event the hub sent in project ${project}${at === null ? '' : ` at ${at.writer}:${at.seq}`}: ${judged.message}`);
         this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
         if (at !== null && isLogSeq(at.seq)) {
-          flush();
+          if (!flush()) return false;
           this.#toSminos({ t: 'spent', project, writer: at.writer, seq: at.seq, reason: judged.spent });
         }
       }
     }
-    flush();
-    if (read) this.#ctx.behind?.();
+    return true;
   }
 
   /**

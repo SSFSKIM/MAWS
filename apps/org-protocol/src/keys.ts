@@ -44,12 +44,16 @@ export function isSig(sig: unknown): sig is Sig {
 const KEY_IDS = new Map<string, string>();
 const KEPT = 4096;
 
+/** The length of a point's base64url: only what has it is kept, so no input of any other size grows the map. */
+const POINT_CHARS = Math.ceil((POINT_BYTES * 4) / 3);
+
 /** The key id of a public point: base64url of the first 16 bytes of its SHA-256. */
 export async function keyId(pub: B64): Promise<string> {
-  const held = typeof pub === 'string' ? KEY_IDS.get(pub) : undefined;
+  const kept = typeof pub === 'string' && pub.length === POINT_CHARS;
+  const held = kept ? KEY_IDS.get(pub) : undefined;
   if (held !== undefined) return held;
   const kid = await keyIdOf(pub);
-  if (typeof pub !== 'string') return kid;
+  if (!kept) return kid;
   if (KEY_IDS.size >= KEPT) KEY_IDS.delete(KEY_IDS.keys().next().value as string);
   KEY_IDS.set(pub, kid);
   return kid;

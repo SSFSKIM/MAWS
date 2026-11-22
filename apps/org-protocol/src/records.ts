@@ -18,7 +18,7 @@
 // nothing, so a recreated VM under the same delegation can take its old name, and its history stands whatever the state
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
 import { canonicalize } from './canonical.ts';
-import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
+import { keyId, signBody, signingInput, utf8, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey, type MemberId } from './names.ts';
 import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isProjectsRecord, isSigned } from './shapes.ts';
 import {
@@ -56,22 +56,26 @@ async function signedBy(domain: Domain, record: Signed<unknown>, allowed: Iterab
 }
 
 /**
- * The verdicts of `signedOnce`, by everything one depends on: the domain, the key, the signature and the signed body's
- * canonical form. A certificate set is judged again at every event a verifier checks, and its records' signatures
- * are its cost; a verdict is a pure function of this key, so no state, set or time can meet a stale one.
+ * The verifications `signedOnce` found good, by all they rest on: the key, the signature and the signing input. A
+ * certificate set is judged again at every event a verifier checks, and its records' signatures are its cost; a good
+ * verification is a pure function of this key, so no state, set or time meets a stale one. Only successes are kept: a
+ * failure (a WebCrypto error among them, which `verifyInput` answers as false) is verified again the next time.
  */
-const SIGNED = new Map<string, Verdict>();
-const SIGNED_KEPT = 4096;
+const VERIFIED = new Set<string>();
+const VERIFIED_KEPT = 4096;
 
-/** `signedBy(domain, record, [pub])`, each distinct record and key verified once (see `SIGNED`). */
+/** `signedBy(domain, record, [pub])`, a good signature verified once per record and key (see `VERIFIED`). */
 async function signedOnce(domain: Domain, record: Signed<unknown>, pub: B64): Promise<Verdict> {
-  const key = `${pub}\n${record.sig.kid}\n${record.sig.value}\n${domain}\n${canonicalize(record.body)}`;
-  const held = SIGNED.get(key);
-  if (held !== undefined) return held;
-  const verdict = await signedBy(domain, record, [pub]);
-  if (SIGNED.size >= SIGNED_KEPT) SIGNED.delete(SIGNED.keys().next().value as string);
-  SIGNED.set(key, verdict);
-  return verdict;
+  // What is verified is what is keyed, read once before any await: a record changed meanwhile can't key a success.
+  const { kid, value } = record.sig;
+  const text = `${domain}\n${canonicalize(record.body)}`;
+  const key = `${pub}\n${kid}\n${value}\n${text}`;
+  if (VERIFIED.has(key)) return accept();
+  if ((await keyId(pub)) !== kid) return refuse('unknown-signer');
+  if (!(await verifyInput(utf8(text), { kid, value }, pub))) return refuse('bad-signature');
+  if (VERIFIED.size >= VERIFIED_KEPT) VERIFIED.delete(VERIFIED.values().next().value as string);
+  VERIFIED.add(key);
+  return accept();
 }
 
 const entryByRef = (state: OrgState, ref: string) => state.machines.find((m) => m.ref === ref);

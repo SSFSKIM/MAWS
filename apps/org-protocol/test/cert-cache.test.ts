@@ -2,7 +2,7 @@
 // `now` or on the set is judged again at each call, whatever was verified before. The same set at two `now`s across
 // its delegation's expiry, a retirement added in a new set and dropped again, and a copy of a verified certificate
 // with another body each give the verdict a verifier holding no cache would.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { signEvent, verifyEvent } from '../src/events.ts';
 import { generateSigningKey, keyId, type SigningKey } from '../src/keys.ts';
 import { machineSigners, signRecord, verifyMachineCert } from '../src/records.ts';
@@ -34,6 +34,10 @@ function state(delegation: SigningKey): OrgState {
 
 const cert = (delegation: SigningKey, machine: SigningKey, ref: string, name: string, use: number): Promise<Signed<MachineCert>> =>
   signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: `${D}_${ref.repeat(22)}`, name, pub: machine.pub, delegation: D, use, issued: '2026-11-01T00:00:00.000Z' }, delegation.privateKey, delegation.pub);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('the certificate set, its signatures verified once', () => {
   it('judges liveness at each now: the same set across its delegation’s expiry, and back', async () => {
@@ -82,5 +86,71 @@ describe('the certificate set, its signatures verified once', () => {
     const moved: OrgState = { ...s, delegations: [{ ...s.delegations[0], pub: other.pub }] };
     expect(await verifyMachineCert(moved, genuine, before)).toEqual({ ok: false, code: 'unknown-signer' });
     expect(await verifyMachineCert(s, genuine, before)).toEqual({ ok: true });
+  });
+
+  it('keys a verification by what it verified: a record changed during its awaits keys nothing it was not', async () => {
+    const delegation = await generateSigningKey();
+    const machine = await generateSigningKey();
+    const s = state(delegation);
+    const genuine = await cert(delegation, machine, 'a', 'vm-one', 1);
+    const forgedBody = { ...genuine.body, name: 'vm-two' };
+    // A forged record, made genuine while it is being verified: its verdict is the forgery's, and the forgery stays one.
+    const record: Signed<MachineCert> = { body: forgedBody, sig: { ...genuine.sig } };
+    const judging = verifyMachineCert(s, record, before);
+    record.body = genuine.body;
+    expect(await judging).toEqual({ ok: false, code: 'bad-signature' });
+    expect(await verifyMachineCert(s, { body: forgedBody, sig: genuine.sig }, before)).toEqual({ ok: false, code: 'bad-signature' });
+    // A genuine one forged while verified: its success is keyed under the genuine inputs alone.
+    const other = await cert(delegation, machine, 'b', 'vm-three', 2);
+    const turning: Signed<MachineCert> = { body: other.body, sig: { ...other.sig } };
+    const judged = verifyMachineCert(s, turning, before);
+    turning.sig.value = genuine.sig.value;
+    expect(await judged).toEqual({ ok: true });
+    expect(await verifyMachineCert(s, { body: other.body, sig: { kid: other.sig.kid, value: genuine.sig.value } }, before)).toEqual({ ok: false, code: 'bad-signature' });
+  });
+
+  it('answers a fresh verdict each time, which a caller may change', async () => {
+    const delegation = await generateSigningKey();
+    const s = state(delegation);
+    const genuine = await cert(delegation, await generateSigningKey(), 'a', 'vm-one', 1);
+    const first = await verifyMachineCert(s, genuine, before);
+    (first as { ok: boolean }).ok = false;
+    const second = await verifyMachineCert(s, genuine, before);
+    expect(second).toEqual({ ok: true });
+    expect(second).not.toBe(first);
+  });
+
+  it('keeps no failure: a retirement whose check WebCrypto failed once retires on the next check', async () => {
+    const delegation = await generateSigningKey();
+    const machine = await generateSigningKey();
+    const s = state(delegation);
+    const created = '2026-11-20T10:00:00.000Z';
+    const event = await signEvent({ org: ORG, project: P }, { ts: created, created, writer: 'vm-one/human', seq: 1, kind: 'human', text: 'hi' }, machine.privateKey, machine.pub);
+    const retirement = await signRecord(SIGNING_DOMAINS.certRetire, { org: ORG, keyId: await keyId(machine.pub), notAfter: '2026-11-20T09:00:00.000Z' }, delegation.privateKey, delegation.pub);
+    const set: Certificates = { certs: [await cert(delegation, machine, 'a', 'vm-one', 1)], retirements: [retirement] };
+    await verifyMachineCert(s, set.certs[0], before); // the certificate's own signature verified and kept
+    const verify = crypto.subtle.verify.bind(crypto.subtle);
+    let failures = 1;
+    vi.spyOn(crypto.subtle, 'verify').mockImplementation(async (...args: Parameters<SubtleCrypto['verify']>) => {
+      if (failures > 0 && args[3] instanceof Uint8Array && new TextDecoder().decode(args[3]).startsWith(`${SIGNING_DOMAINS.certRetire}\n`)) {
+        failures--;
+        throw new Error('transient');
+      }
+      return verify(...args);
+    });
+    expect(await verifyEvent({ org: ORG, project: P }, s, event, set, before)).toEqual({ ok: true });
+    expect(await verifyEvent({ org: ORG, project: P }, s, event, set, before)).toEqual({ ok: false, code: 'expired' });
+  });
+
+  it('keeps the key id of a point only: an input of another length is derived each time', async () => {
+    const point = (await generateSigningKey()).pub;
+    const long = 'A'.repeat(4000);
+    const digest = vi.spyOn(crypto.subtle, 'digest');
+    await keyId(point);
+    await keyId(point);
+    expect(digest).toHaveBeenCalledTimes(1);
+    digest.mockClear();
+    expect(await keyId(long)).toBe(await keyId(long));
+    expect(digest).toHaveBeenCalledTimes(2);
   });
 });

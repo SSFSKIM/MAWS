@@ -26,7 +26,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { HubLink } from '../../../src/endpoint/hub-link';
 import { EndpointPolicy } from '../../../src/endpoint/policy';
 import { verifiedOwners } from '../../../src/endpoint/rl10/attest';
-import { InboundIndex } from '../../../src/endpoint/rl10/inbound-index';
+import { InboundIndex, type Staged } from '../../../src/endpoint/rl10/inbound-index';
 import { Rl10 } from '../../../src/endpoint/rl10/link';
 import { signerOf } from '../../../src/endpoint/rl10/log-relay';
 import { EndpointState } from '../../../src/endpoint/state/store';
@@ -287,36 +287,47 @@ bench(`a first download through the endpoint (certs ${CERTS}, retired ${RETIRED}
     fs.chmodSync(dir, 0o700);
     closers.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const index = new InboundIndex(() => dir, Date.now);
-    const t = { verifyEvent: 0, signerOf: 0, sha256: 0, seen: 0, record: 0, verifiedOwners: 0 };
+    // The relay's pattern: each event's entry staged, one commit (one append and fsync) a page; `commit` is per event,
+    // amortized over the page.
+    const t = { verifyEvent: 0, signerOf: 0, sha256: 0, seen: 0, stage: 0, commit: 0, verifiedOwners: 0 };
     const now = new Date();
-    const all = [...pages(log)].flat();
+    const all = [...pages(log)];
+    const count = all.reduce((n, page) => n + page.length, 0);
     const cpu0 = process.cpuUsage();
     const w0 = performance.now();
-    for (const event of all) {
-      let s = performance.now();
-      const verdict = await verifyEvent({ org: ORG, project: P }, org.state, event, org.certificates, now);
-      t.verifyEvent += performance.now() - s;
-      if (!verdict.ok) throw new Error(`not verified: ${verdict.code}`);
-      s = performance.now();
-      await signerOf(org.state, org.certificates, event);
-      t.signerOf += performance.now() - s;
-      s = performance.now();
-      const content = createHash('sha256').update(eventSigningInput({ org: ORG, project: P }, event)).digest('base64url');
-      t.sha256 += performance.now() - s;
-      s = performance.now();
-      const seen = index.seen(P, content, event.writer, event.seq);
-      t.seen += performance.now() - s;
-      s = performance.now();
-      if (seen.kind === 'new') index.record(P, content, event.writer, event.seq);
-      t.record += performance.now() - s;
-      s = performance.now();
-      const owners = await verifiedOwners(event, org.state, org.certificates, () => {});
-      t.verifiedOwners += performance.now() - s;
-      if (owners === undefined || owners.length === 0) throw new Error('attestation did not verify');
+    for (const page of all) {
+      const staged: Staged[] = [];
+      for (const event of page) {
+        const seq = event.seq as number;
+        let s = performance.now();
+        const verdict = await verifyEvent({ org: ORG, project: P }, org.state, event, org.certificates, now);
+        t.verifyEvent += performance.now() - s;
+        if (!verdict.ok) throw new Error(`not verified: ${verdict.code}`);
+        s = performance.now();
+        await signerOf(org.state, org.certificates, event);
+        t.signerOf += performance.now() - s;
+        s = performance.now();
+        const content = createHash('sha256').update(eventSigningInput({ org: ORG, project: P }, event)).digest('base64url');
+        t.sha256 += performance.now() - s;
+        s = performance.now();
+        const seen = index.seen(P, content, event.writer, seq);
+        t.seen += performance.now() - s;
+        s = performance.now();
+        const entry = seen.kind === 'replayed' ? null : index.stage(P, content, event.writer, seq);
+        if (entry !== null) staged.push(entry);
+        t.stage += performance.now() - s;
+        s = performance.now();
+        const owners = await verifiedOwners(event, org.state, org.certificates, () => {});
+        t.verifiedOwners += performance.now() - s;
+        if (owners === undefined || owners.length === 0) throw new Error('attestation did not verify');
+      }
+      const s = performance.now();
+      if (!index.commit(staged)) throw new Error('a stale batch');
+      t.commit += performance.now() - s;
     }
     const wall = performance.now() - w0;
     const cpu = process.cpuUsage(cpu0);
-    const per = Object.fromEntries(Object.entries(t).map(([k, v]) => [k, +(v / all.length).toFixed(4)]));
-    process.stderr.write('\n' + JSON.stringify({ stagesMsPerEvent: per, totalMsPerEvent: +(wall / all.length).toFixed(4), cpuShare: +((cpu.user + cpu.system) / 1000 / wall).toFixed(2) }, null, 1));
+    const per = Object.fromEntries(Object.entries(t).map(([k, v]) => [k, +(v / count).toFixed(4)]));
+    process.stderr.write('\n' + JSON.stringify({ stagesMsPerEvent: per, totalMsPerEvent: +(wall / count).toFixed(4), cpuShare: +((cpu.user + cpu.system) / 1000 / wall).toFixed(2) }, null, 1));
   }, 1_900_000);
 });

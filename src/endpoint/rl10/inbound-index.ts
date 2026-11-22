@@ -19,15 +19,18 @@ type Entry = { content: string; writer: string; seq: number; at: number };
 
 export type Seen = { kind: 'new' } | { kind: 'same' } | { kind: 'replayed'; writer: string; seq: number };
 
-/** Content `stage` holds for its project: on disk once a `commit` took it, let go when the commit failed. */
-export type Staged = { readonly project: string; readonly entry: Entry; state: 'staged' | 'committed' | 'dropped'; first: boolean };
+/**
+ * Content `stage` holds for its project, from the index's generation then (`forget` begins another): on disk once a
+ * `commit` took it, let go when its batch was abandoned or its write failed.
+ */
+export type Staged = { readonly project: string; readonly entry: Entry; readonly generation: number; state: 'staged' | 'committed' | 'dropped'; first: boolean };
 
 export class InboundIndex {
   readonly #dir: () => string;
   readonly #now: () => number;
   readonly #projects = new Map<string, { byContent: Map<string, Entry>; byPosition: Map<string, string> }>();
-  /** The entry each stage made, by the entry. */
-  readonly #stages = new WeakMap<Entry, Staged>();
+  /** Advanced by `forget`: a batch staged before it is stale, never written into what is read after it. */
+  #generation = 0;
 
   constructor(dir: () => string, now: () => number) {
     this.#dir = dir;
@@ -49,6 +52,7 @@ export class InboundIndex {
   /** Drops what was read: `inbound/` was moved aside (an enrollment under another authority), and is read anew. */
   forget(): void {
     this.#projects.clear();
+    this.#generation++;
   }
 
   /** Records content new to `project` at its position, on disk before it returns. */
@@ -58,60 +62,59 @@ export class InboundIndex {
   }
 
   /**
-   * Content at its position, held now (`seen` meets it) and on disk once a `commit` takes it; null when it is on disk
-   * already. Content another caller staged and hasn't committed yet is answered as that caller's entry, so whoever
-   * delivers on it commits it first, whichever commit runs (or fails) first.
+   * Content new to `project` at its position, held now (`seen` meets it) and on disk once a `commit` takes it; null
+   * when the content is held already (on disk, or staged earlier in the batch). One batch of a project at a time
+   * stages (the relay judges a project's pages in order), so the first content staged at a position is the first
+   * written there, and a restart reads the position as it was judged.
    */
   stage(project: string, content: string, writer: string, seq: number): Staged | null {
     const held = this.#load(project);
-    const at = held.byContent.get(content);
-    if (at !== undefined) {
-      const staged = this.#stages.get(at);
-      return staged === undefined || staged.state === 'committed' ? null : staged;
-    }
-    const entry: Entry = { content, writer, seq, at: this.#now() };
-    const staged: Staged = { project, entry, state: 'staged', first: false };
-    this.#stages.set(entry, staged);
-    this.#hold(staged);
+    if (held.byContent.has(content)) return null;
+    const staged: Staged = { project, entry: { content, writer, seq, at: this.#now() }, generation: this.#generation, state: 'staged', first: false };
+    held.byContent.set(content, staged.entry);
+    const key = `${writer}\n${seq}`;
+    staged.first = !held.byPosition.has(key);
+    if (staged.first) held.byPosition.set(key, content);
     return staged;
   }
 
   /**
-   * Writes what `staged` holds that isn't on disk, in one append (one fsync) a project, before it returns. A write that
-   * fails lets go of what it would have written, as a write that fails per event left the index without it, and throws.
+   * Writes the batch's staged entries, one append (one fsync) a project, before it returns true. A batch staged in an
+   * earlier generation (`forget` came since), or holding an entry let go, is stale: nothing is written, the batch is
+   * abandoned, and false is answered, so its events are judged again rather than sent. A write that fails abandons the
+   * batch, as a failed write per event left the index without it, and throws.
    */
-  commit(staged: Iterable<Staged>): void {
-    const byProject = new Map<string, Set<Staged>>();
-    for (const s of staged) if (s.state !== 'committed') byProject.set(s.project, (byProject.get(s.project) ?? new Set()).add(s));
+  commit(staged: readonly Staged[]): boolean {
+    const pending = staged.filter((s) => s.state !== 'committed');
+    if (pending.some((s) => s.state === 'dropped' || s.generation !== this.#generation)) {
+      this.abandon(staged);
+      return false;
+    }
+    const byProject = new Map<string, Staged[]>();
+    for (const s of pending) byProject.set(s.project, [...(byProject.get(s.project) ?? []), s]);
     for (const [project, entries] of byProject) {
-      for (const s of entries) if (s.state === 'dropped') this.#hold(s);
       try {
-        appendLines(this.#dir(), `${project}.idx`, [...entries].map((s) => JSON.stringify(s.entry)));
+        appendLines(this.#dir(), `${project}.idx`, entries.map((s) => JSON.stringify(s.entry)));
       } catch (error) {
-        for (const s of entries) this.#drop(s);
+        this.abandon(staged);
         throw error;
       }
       for (const s of entries) s.state = 'committed';
     }
+    return true;
   }
 
-  #hold(staged: Staged): void {
-    const held = this.#load(staged.project);
-    const { entry } = staged;
-    staged.state = 'staged';
-    held.byContent.set(entry.content, entry);
-    const key = `${entry.writer}\n${entry.seq}`;
-    staged.first = !held.byPosition.has(key);
-    if (staged.first) held.byPosition.set(key, entry.content);
-  }
-
-  #drop(staged: Staged): void {
-    const held = this.#load(staged.project);
-    const { entry } = staged;
-    staged.state = 'dropped';
-    if (held.byContent.get(entry.content) === entry) held.byContent.delete(entry.content);
-    const key = `${entry.writer}\n${entry.seq}`;
-    if (staged.first && held.byPosition.get(key) === entry.content) held.byPosition.delete(key);
+  /** Lets go of what the batch staged and didn't write: its contents are new again (in this generation). */
+  abandon(staged: readonly Staged[]): void {
+    for (const s of staged) {
+      if (s.state !== 'staged') continue;
+      s.state = 'dropped';
+      if (s.generation !== this.#generation) continue;
+      const held = this.#load(s.project);
+      if (held.byContent.get(s.entry.content) === s.entry) held.byContent.delete(s.entry.content);
+      const key = `${s.entry.writer}\n${s.entry.seq}`;
+      if (s.first && held.byPosition.get(key) === s.entry.content) held.byPosition.delete(key);
+    }
   }
 
   #load(project: string) {
