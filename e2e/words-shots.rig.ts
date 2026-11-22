@@ -13,18 +13,19 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the ten launches, about 36 minutes (M1 added launches 6 to
-// 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
-// scenes: the conversation's and the message box's states its cut changes). The pictures are
+// window here is the product's, MAWS_HARNESS=0) and runs the eleven launches, about 40 minutes (M1 added launches 6
+// to 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
+// scenes: the conversation's and the message box's states its cut changes; M3 added launch 11 and the `m3-` scenes:
+// the panels beside the conversation). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
 // not), and each run's build (its commit and a digest of out/). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
 // pictures are the same command on the build's branch into another folder.
 //
-// The `m1-` and `m2-` scenes are this branch's alone, so their "before" is this rig run against master's build: in a
+// The `m1-`, `m2-` and `m3-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
 // Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 and m2
 // scene checks its named state right before its capture, on master's build in master's terms (`cutBuild` for M1's
-// parts, `m2Build` for M2's), and is not reached when it cannot.
+// parts, `m2Build` for M2's, `m3Build` for M3's), and is not reached when it cannot.
 //
 // Locators avoid the app's words (data attributes, menu ids, IPC, positions), because the words are what the other
 // build changes; where only a word reaches a target it comes from the app's own copy module, or is marked. A step that
@@ -32,7 +33,7 @@
 // wave removed is recorded as having no target on master, with why.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
@@ -42,6 +43,11 @@ import { memberNames } from '../src/shared/org/member-name';
 import { BROWSER, INDEX, KEYBOARD, NOTIFICATIONS, ORG, SUPERVISOR, VOICE } from '../src/renderer/src/settings-tab/copy';
 import { BROWSER_COPY } from '../src/renderer/src/tools/browser/copy';
 import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../src/renderer/src/tools/agents/copy';
+import { ARTIFACTS_TOOL_COPY } from '../src/renderer/src/tools/artifacts/copy';
+import { COPY as PANEL_COPY } from '../src/renderer/src/panel/copy';
+import { EDITOR_COPY, REVIEW_COPY } from '../src/renderer/src/tools/code/copy';
+import { SIDE_COPY } from '../src/renderer/src/side/copy';
+import { ACTIONS } from '../src/shared/keymap/actions';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
@@ -50,7 +56,7 @@ import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } fr
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign } from './support/design';
 import { startBrowserServer } from './support/browser-server';
-import { closeSheet, importThrough, profilesFile } from './support/browser-import-scene';
+import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { goToFile } from './support/go-to-file';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -68,8 +74,8 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 // ---- _run.json: what each capture shows, for a person and for matching a table row to it -----------------------------
 // round: 1 and 2 are the owner's rounds at the pin; 'm0' a scene the word cut's M0 added on master; 'm1' one its M1
 // added for the Settings and Org states the cut changes; 'm2' one its M2 added for the conversation's and the message
-// box's. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' };
+// box's; 'm3' one its M3 added for the panels beside the conversation. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
@@ -77,6 +83,7 @@ const r2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 2 });
 const m0 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm0' });
 const m1 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm1' });
 const m2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm2' });
+const m3 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm3' });
 
 // ---- scratch fixtures ------------------------------------------------------------------------------------------------
 const FIXED_DATE = '2026-09-20T09:00:00+00:00';
@@ -90,7 +97,9 @@ function git(cwd: string, ...args: string[]) {
 //   behind     origin/main gains a commit main lacks (fetched): main is one ahead and one behind
 //   conflict   a file in conflict, its three stages in the index (scm-scratch's way)
 //   scheduled  the engine's durable scheduled jobs (a recorded scheduled_tasks.json) under .claude/, excluded from git
-type RepoVariant = 'behind' | 'conflict' | 'scheduled';
+//   panels     (the word cut's M3) a tracked binary, a side branch merged with --no-ff and an empty commit after it, all
+//              unpushed; then the binary changed, a symbolic link, two untracked folders (one holding a 5 MB log)
+type RepoVariant = 'behind' | 'conflict' | 'scheduled' | 'panels';
 function makeRepo(name: string, variant?: RepoVariant): string {
   const dir = join(SCRATCH, 'repos', name);
   if (existsSync(dir)) return dir;
@@ -112,6 +121,14 @@ function makeRepo(name: string, variant?: RepoVariant): string {
   git(dir, 'branch', '--quiet', '-u', 'origin/main');
   git(dir, 'remote', 'set-head', 'origin', 'main'); // as a clone has it (scm-scratch.ts)
   commit('src/quota.ts', 'export const resetAfterMs = 5 * 60 * 60 * 1000;\n', 'Add quota reset');
+  if (variant === 'panels') {
+    commit('assets/sprite.dat', 'SPRT\0\u0001\u0002frame\0'.repeat(16), 'Add the sprite sheet');
+    git(dir, 'checkout', '--quiet', '-b', 'side');
+    commit('docs/side.md', 'A note made on a side branch.\n', 'Add the side note');
+    git(dir, 'checkout', '--quiet', 'main');
+    git(dir, 'merge', '--quiet', '--no-ff', '-m', 'Merge the side note', 'side');
+    git(dir, 'commit', '--quiet', '--allow-empty', '-m', 'Mark the release');
+  }
   writeFileSync(join(dir, 'src/sidebar.ts'), 'export function dragRow(from: number, to: number) {\n  if (from === to) return null;\n  return { from, to };\n}\n');
   writeFileSync(join(dir, 'src/notes.md'), 'Drag keeps the row under the pointer.\n');
   writeFileSync(join(dir, 'README.md'), `# ${name}\n\nA scratch project for the words rig.\n\nSee src/ for the code.\n`);
@@ -127,11 +144,33 @@ function makeRepo(name: string, variant?: RepoVariant): string {
     execFileSync('/usr/bin/git', ['update-index', '--index-info'], { cwd: dir, env: GIT_ENV(), input: `100644 ${base} 1\tconflicted.txt\n100644 ${ours} 2\tconflicted.txt\n100644 ${theirs} 3\tconflicted.txt\n` });
     writeFileSync(join(dir, 'conflicted.txt'), 'our text\n');
   }
+  if (variant === 'panels') {
+    writeFileSync(join(dir, 'assets/sprite.dat'), 'SPRT\0\u0003\u0004frame\0'.repeat(20));
+    symlinkSync('../README.md', join(dir, 'docs/readme-link.md'));
+    mkdirSync(join(dir, 'notes'), { recursive: true });
+    writeFileSync(join(dir, 'notes/ideas.md'), 'Keep the row under the pointer.\n');
+    writeFileSync(join(dir, 'notes/later.md'), 'Measure the drag.\n');
+    mkdirSync(join(dir, 'logs'), { recursive: true });
+    writeFileSync(join(dir, 'logs/build.log'), Array.from({ length: 80_000 }, (_, i) => `step ${String(i).padStart(6, '0')} · compiled one more module of the scratch project\n`).join(''));
+  }
   if (variant === 'scheduled') {
     mkdirSync(join(dir, '.claude'), { recursive: true });
     cpSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/e7-cron-durable/scheduled_tasks.json'), join(dir, '.claude/scheduled_tasks.json'));
     appendFileSync(join(dir, '.git/info/exclude'), '.claude/\n');
   }
+  return dir;
+}
+
+// A repository with one commit, nothing changed and no remote (the word cut's M3): Review's empty scope, and Source
+// control with no base to count commits from.
+function quietRepo(name: string): string {
+  const dir = join(SCRATCH, 'repos', name);
+  if (existsSync(dir)) return dir;
+  mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '--quiet', '-b', 'main');
+  writeFileSync(join(dir, 'README.md'), `# ${name}\n\nA quiet scratch project for the words rig.\n`);
+  git(dir, 'add', 'README.md');
+  git(dir, 'commit', '--quiet', '-m', 'Start the quiet project');
   return dir;
 }
 
@@ -257,8 +296,10 @@ async function soft(locator: Locator, what: string, timeout = 10_000) {
 // One capture. `of` names another window's page (the presenter view's). `check` is what the capture is for (a tooltip,
 // a note, a menu), required once the page has settled and right before the capture: a reveal that closed or never came
 // leaves the scene not reached, never a picture of the row at rest under its name. `after` runs once the capture is taken.
-type ShotOptions = { of?: () => Page; check?: () => Promise<void>; after?: () => Promise<void> };
-async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, check, after }: ShotOptions = {}) {
+// `last` is a step taken once the page has settled, right before the check: what lasts only a few seconds (a browser
+// notice, a toast) is raised there, since the settling alone can outlast it.
+type ShotOptions = { of?: () => Page; check?: () => Promise<void>; after?: () => Promise<void>; last?: () => Promise<void> };
+async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, check, after, last }: ShotOptions = {}) {
   if (!wanted(meta.id)) return;
   META.push(meta);
   notes = [];
@@ -275,6 +316,7 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
     const target = of?.() ?? page;
     await settle(target, meta.hover === true);
     if (meta.round === 'm1') await expect(page.locator('[data-settings-dialog]'), 'Settings open').toBeVisible({ timeout: 3_000 });
+    await last?.();
     await check?.();
     await target.screenshot({ path: join(OUT, `${meta.id}.png`), animations: 'disabled', caret: 'hide' });
     results.push({ id: meta.id, ok: true, ...(notes.length > 0 && { notes: [...notes] }) });
@@ -505,6 +547,56 @@ async function seek(page: Page, target: Locator) {
 // build it is drawn at rest, so the same check holds there.
 const drawn = (target: Locator, what: string) => () => expect(target.first(), what).toHaveCSS('opacity', '1', { timeout: 3_000 });
 
+// ---- the word cut's M3: the panels beside the conversation -----------------------------------------------------------
+// The m3 scenes' before is this rig, with its e2e support files, run against master's build, as the m1 and m2 scenes'
+// is (scenes.md). Each proves its named state on either build before its capture: on M3's build the reveal (a tooltip
+// of the control holding the keyboard, a menu, a notice) and the state it is named for; on master's, the same state in
+// master's terms, what master draws there at rest, in view.
+//
+// Whether the build has M3's cut, read once, the first time a scene asks (m3Build), from what the window loaded: M3's
+// touch rule (ui/touch-fact.tsx, task 1) put one unlayered `[data-touch-fact]` rule into the app's stylesheet
+// (styles/app.css), which master's stylesheet has nowhere. The checkout says which side it is by that module, absent
+// from master's tree, and a build that draws the other side is refused (the m2 check's rule), every m3 scene then not
+// reached with why.
+let cut3: boolean | null = null;
+let cut3Refused: string | null = null;
+const M3_SOURCE = 'src/renderer/src/ui/touch-fact.tsx';
+async function m3Build(page: Page): Promise<boolean> {
+  if (cut3 === null && cut3Refused === null) {
+    const drawn = await page.evaluate(() =>
+      [...document.styleSheets].some((sheet) => {
+        try {
+          return [...sheet.cssRules].some((rule) => rule.cssText.includes('[data-touch-fact]'));
+        } catch {
+          return false; // a sheet of another origin (none in the app) says nothing
+        }
+      }),
+    );
+    const source = existsSync(join(REPO_ROOT, M3_SOURCE));
+    const head = headCommit();
+    if (CACHE_KEY !== null && !head.startsWith(CACHE_KEY)) cut3Refused = `out/ came from the build cache under key ${CACHE_KEY}, not this checkout's commit ${head}`;
+    else if (drawn === source) cut3 = drawn;
+    else cut3Refused = `out/ is not this checkout's build: its stylesheet ${drawn ? 'has' : 'lacks'} the touch rule, and the checkout ${source ? 'has' : 'lacks'} ${M3_SOURCE}`;
+    console.log(`[words] ${cut3Refused ?? `this build ${drawn ? 'draws' : 'does not draw'} the word cut's M3 (the touch rule's stylesheet rule ${drawn ? 'present' : 'absent'})`}`);
+  }
+  if (cut3Refused !== null) throw new Error(cut3Refused);
+  return cut3!;
+}
+function m3Cut(): boolean {
+  if (cut3 === null) throw new Error('the build is not known yet: no m3 scene has read it in this run');
+  return cut3;
+}
+// The check that `owner`'s own tooltip is open on M3's build (the owner holding the keyboard); on master's, `rest`, what
+// master draws in its place, in view.
+const tip3 = (page: Page, owner: Locator, what: string, rest: Locator) => checks(() => (m3Cut() ? focusIn(owner, what)() : Promise.resolve()), tipShown(page, owner, what, rest, m3Cut));
+// A main-side event as main sends it to the window (main/ipc/events.ts: `maws:evt:<name>`, no machine argument, which
+// the renderer reads as this Mac's), for a state only main's own limits produce: the browser's notices of a page cap.
+async function emitToWindow(app: ElectronApplication, name: string, payload: unknown) {
+  await app.evaluate(({ BrowserWindow }, [channel, value]) => {
+    for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(channel as string, value);
+  }, [`maws:evt:${name}`, payload] as const);
+}
+
 // A scene of the pin's manifest whose surface the UX wave removed: kept in _run.json, never captured.
 function gone(meta: Meta, why: string) {
   if (!wanted(meta.id)) return;
@@ -655,7 +747,7 @@ test.beforeAll(() => {
 test.afterAll(() => {
   const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[]; runs?: Run[] };
   const keep = <T extends { id: string }>(old: T[], fresh: T[]) => [...old.filter((o) => !fresh.some((f) => f.id === o.id)), ...fresh];
-  const run: Run = { at: new Date().toISOString(), ...buildIdentity(), m1: cut, m2: cut2, scenes: results.map((result) => result.id) };
+  const run: Run = { at: new Date().toISOString(), ...buildIdentity(), m1: cut, m2: cut2, m3: cut3, scenes: results.map((result) => result.id) };
   writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META), runs: [...(all.runs ?? []), run] }, null, 2));
 });
 // What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
@@ -663,7 +755,7 @@ test.afterAll(() => {
 // it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, the cache key out/
 // came under, and which cut each build check read (null where no scene read it). An m2 scene refuses a cached out/
 // whose key is not the checkout's commit (m2Build).
-type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; scenes: string[] };
+type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; m3: boolean | null; scenes: string[] };
 // The key out/ was restored or stored under when scripts/e2e-build.sh's cache was on (the commit that built it), else
 // null: out/ was built from this checkout
 const CACHE_KEY = process.env.MAWS_E2E_BUILD_CACHE && process.env.MAWS_E2E_BUILD_KEY ? process.env.MAWS_E2E_BUILD_KEY : null;
@@ -1947,6 +2039,20 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await unfoldSections(page, 'background');
       await soft(surface(page, 'background').locator('[data-workflow]'), 'the workflow row');
     });
+    // M3 (T210, T213, T238, T239): the recorded workflow's page, opened from its card (tools/agents/background/RunWidget.tsx:
+    // its line, its phases and its agents' table, `data-view="run"` on both builds)
+    const run = () => surface(page, 'background').locator('[data-view="run"]').first();
+    await shot(page, m3({ id: 'm3-background-workflow-page', title: 'Right column, Background, a finished workflow’s page', how: 'The agents session, Background with Done open, click the workflow’s card', state: 'The recorded workflow’s page: its line, its phases and its agents with their states (T210, T213, T238, T239)', folders: ['tools/agents/background', 'panel'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await m3Build(page);
+      await sideSurface(app, page, 'background');
+      if ((await run().count()) === 0) {
+        await unfoldSections(page, 'background');
+        await surface(page, 'background').locator('[data-workflow]').first().click();
+      }
+      await expect(run(), 'the workflow’s page').toBeVisible({ timeout: 10_000 });
+      await soft(run().locator('[data-run-agent]'), 'an agent’s row');
+    }, { check: () => inView(run(), 'the workflow’s page') });
     await shot(page, m0({ id: 'm0-background-scheduled', title: 'Right column, Background tasks, scheduled jobs', how: 'A session of the project with durable scheduled jobs, Background tasks', state: 'The project’s recorded durable jobs under Scheduled (their next runs follow the clock)', folders: ['tools/agents/background', 'panel'] }), async () => {
       await openSession(page, ids[DISK[3]!.key]!); // the fourth disk session's project: stages, the one with .claude/scheduled_tasks.json
       await sideSurface(app, page, 'background');
@@ -2302,6 +2408,24 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await sideSurface(app, page, 'background');
     });
     if (await surface(page, 'background').isVisible().catch(() => false)) await menu(app, 'surface.background').catch(() => undefined);
+    // M3 (T166): the agent waiting on the approval, in Agents: on M3's build its row's warning disc, and Approval needed
+    // the tooltip of its open button (tools/agents/subagents/AgentRow.tsx: `data-part="waiting"`, the open button the
+    // keyboard's owner); master's row says it in its second line
+    const agentRows = () => surface(page, 'subagents').locator('[data-agent-row]');
+    const waitingRow = () => agentRows().filter({ has: page.locator('[data-part="waiting"]') }).or(agentRows().filter({ hasText: SUBAGENTS_COPY.approvalNeeded })).first();
+    const waitingOpen = () => waitingRow().locator('button[data-part="open"]').first();
+    await shot(page, m3({ id: 'm3-agents-approval', title: 'Right column, Agents, an agent waiting on an approval', how: 'The same session after its third prompt, Agents; Tab to the waiting agent’s row', state: 'The waiting agent’s row holding the keyboard: on M3 its disc, Approval needed the tooltip; master: its line (T166)', folders: ['tools/agents/subagents', 'tools/agents', 'panel', 'ui'] }), async () => {
+      atApproval();
+      await openSession(page, ids.run!);
+      await m3Build(page);
+      await sideSurface(app, page, 'subagents');
+      await expect(waitingRow(), 'the waiting agent’s row').toBeAttached({ timeout: 10_000 });
+      await letGo(page);
+      if (m3Cut()) await waitingOpen().focus();
+      else await waitingRow().scrollIntoViewIfNeeded();
+    }, { check: tip3(page, waitingOpen(), 'the waiting agent’s row', waitingRow().locator('[data-part="state"]')) });
+    await letGo(page);
+    if (await surface(page, 'subagents').isVisible().catch(() => false)) await menu(app, 'surface.subagents').catch(() => undefined);
 
     // ---- the queue: a counting turn held at its next user write (two releases recorded, so a stop can follow); ↑ walks
     // history while nothing waits; one message for the next step, one for after the turn; ↑ takes the newest back; the
@@ -3298,6 +3422,490 @@ test('the word cut’s M2: recorded transcripts for the conversation’s states'
     await reset(page);
   } finally {
     await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 11: the word cut's M3, the panels beside the conversation. Two sessions the engine store lists, never started:
+// one on a repository with M3's git and file states (`panels`: a tracked binary changed, a merge commit and an empty
+// commit unpushed, a symbolic link, untracked folders, a 5 MB log), one on a quiet repository (nothing changed, no
+// remote). The browser's scratch server, and the Chrome import's seams over the synthetic Chrome profile (launch 6's).
+// Its own launch, so every earlier launch's fixtures stay as they were.
+// ======================================================================================================================
+test('the word cut’s M3: Review, Source control, Files, the browser and its import, the surfaces’ menus and names', async () => {
+  test.setTimeout(1_200_000);
+  const panels = makeRepo('panels', 'panels');
+  const quiet = quietRepo('quiet');
+  const config = join(SCRATCH, 'claude-config-m3');
+  rmSync(config, { recursive: true, force: true });
+  const engineIds = { panels: '0e5f6a7b-0000-4000-8000-000000000501', quiet: '0e5f6a7b-0000-4000-8000-000000000502' };
+  seedSession(config, panels, engineIds.panels, 'Tidy the panels', '2026-09-29T12:00:00.000Z');
+  seedSession(config, quiet, engineIds.quiet, 'A quiet tree', '2026-09-29T12:01:00.000Z');
+  trust(config);
+  const usage = usageFixture();
+  const server = await startBrowserServer();
+  const chrome = buildChromeUserData(join(SCRATCH, 'chrome-m3'));
+  const userData = join(SCRATCH, 'profile-m3');
+  mkdirSync(userData, { recursive: true });
+  const maws = await launchMaws({
+    userData,
+    prepare: noGh,
+    env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH, MAWS_E2E_CHROME_USER_DATA: chrome.dir, MAWS_E2E_KEYCHAIN: `file:${chrome.passwordFile}` }),
+  });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    const ids: Record<string, string> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const [key, id] of Object.entries(engineIds)) ids[key] = sessions.find((s) => s.engineSessionId === id)?.appId ?? '';
+      return Object.values(ids).every(Boolean);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed('the two sessions’ index', error));
+    await dismissToasts(page);
+    // a session in front, the build read
+    const opened = async (key: 'panels' | 'quiet') => {
+      if (!ids[key]) throw new Error(`the ${key} session was not listed by the index`);
+      await openSession(page, ids[key]!);
+      await m3Build(page);
+    };
+    const review = () => surface(page, 'review');
+    const scm = () => surface(page, 'source-control');
+    const files = () => surface(page, 'files');
+    const browser = () => surface(page, 'browser');
+    const meta = (id: string, rows: string, title: string, how: string, state: string, folders: string[], hover?: true) => m3({ id, title, how, state: `${state} (${rows})`, folders, ...(hover && { hover }) });
+
+    // ---- the session cards of a session never started (P52, P62): nothing reported, each card open
+    await shot(page, meta('m3-cards-not-reported', 'P52, P62', 'Session cards of a session that has reported nothing', 'Open a session the engine store lists and nothing has started, then each card', 'Environment, Context and Connectors open, Context and Connectors with nothing reported'), async () => {
+      await opened('quiet');
+      await unfoldCards(page);
+    }, {
+      check: async () => {
+        await inView(cards(page), 'the session cards');
+        await expect(cards(page).locator('section > h3 > button[aria-expanded="false"]'), 'every card open').toHaveCount(0, { timeout: 3_000 });
+      },
+    });
+
+    // ---- the quiet repository: Review's empty scope (T362) and Source control with no base (N62)
+    await shot(page, meta('m3-review-empty', 'T362', 'Review of a clean working tree', 'The quiet session, View › Review (⌘⇧D)', 'The Uncommitted scope with no change: its one line'), async () => {
+      await opened('quiet');
+      await sideSurface(app, page, 'review');
+    }, { check: () => inView(review().locator('[data-review-empty]'), 'the empty scope’s line') });
+    // master's heading names the branch the commits are counted on (master's tools/scm/copy.ts `latestOn`, which M3 removed)
+    const commitsHeading = () => scm().locator('[data-scm-commits-heading]').first();
+    await shot(page, meta('m3-scm-no-base', 'N62', 'Source control with no base to count from', 'The quiet session, View › More surfaces › Source control', 'On main with no remote and no default branch: the Commits heading’s “· latest”'), async () => {
+      await opened('quiet');
+      await sideSurface(app, page, 'source-control');
+    }, {
+      check: async () => {
+        await inView(commitsHeading(), 'the Commits heading');
+        if (m3Cut()) await expect(commitsHeading(), 'no branch after “latest”').not.toContainText('latest on', { timeout: 3_000 });
+        else await expect(commitsHeading(), 'master’s heading naming the branch').toContainText('latest on main', { timeout: 3_000 });
+      },
+    });
+
+    // ---- the panels repository in Review: an untracked folder (T361), a tracked binary changed (N44)
+    const section = (path: string) => review().locator(`section[data-review-file="${path}"]`).first();
+    const toSection = async (path: string) => {
+      await opened('panels');
+      await sideSurface(app, page, 'review');
+      await expect(review().locator('[data-review-file]').first(), 'the review stack').toBeAttached({ timeout: 15_000 });
+      await section(path).scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await page.waitForTimeout(800);
+    };
+    const untrackedFolder = () => review().locator('section[data-review-file^="notes"] [data-review-note]').first();
+    await shot(page, meta('m3-review-untracked-folder', 'T361', 'Review, an untracked folder', 'The panels session, View › Review, scrolled to the notes/ folder', 'The untracked folder’s section and its one line in place of a diff'), async () => {
+      await toSection('notes/');
+    }, { check: () => inView(untrackedFolder(), 'the untracked folder’s line') });
+    await shot(page, meta('m3-review-binary', 'N44', 'Review, a changed binary file', 'The panels session, View › Review, scrolled to assets/sprite.dat', 'The binary’s section: its header, and nothing under it on M3 (master: “Binary file”)'), async () => {
+      await toSection('assets/sprite.dat');
+    }, {
+      check: async () => {
+        await inView(section('assets/sprite.dat'), 'the binary’s section');
+        await expect(section('assets/sprite.dat'), 'a binary diff').toHaveAttribute('data-kind', 'binary', { timeout: 3_000 });
+        const body = section('assets/sprite.dat').getByText(REVIEW_COPY.binaryFile, { exact: true });
+        if (m3Cut()) await expect(body, 'no body under the header').toHaveCount(0);
+        else await inView(body, 'master’s Binary file');
+      },
+    });
+
+    // ---- commits opened in Review from Source control (m0-scm-commit-review's way): a merge commit (N52), an empty one (N40)
+    const commitChip = () => review().locator('[data-chip="commit"]').first();
+    const openCommit = async (subject: string) => {
+      await opened('panels');
+      await sideSurface(app, page, 'source-control');
+      const commit = scm().locator('button[data-scm-commit]').filter({ hasText: subject }).first();
+      await commit.scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await commit.focus();
+      await page.keyboard.press('Enter');
+      await expect(review().locator('[data-chip="commit"][aria-pressed="true"]').first(), 'the Commit scope').toBeVisible({ timeout: 10_000 });
+      await page.waitForTimeout(800);
+    };
+    await shot(page, meta('m3-review-merge-commit', 'N52', 'A merge commit opened in Review, its chip holding the keyboard', 'The panels session, Source control, focus the merge commit and press Enter; then Tab to the commit’s chip', 'The merge commit’s diff against its first parent; on M3 the chip’s tooltip with its subject (master: the foot line)'), async () => {
+      await openCommit('Merge the side note');
+      if (m3Cut()) {
+        await letGo(page);
+        await commitChip().focus();
+      }
+    }, { check: tip3(page, commitChip(), 'the commit’s chip', review().locator('[data-review-footer]')) });
+    await letGo(page);
+    await shot(page, meta('m3-review-empty-commit', 'N40', 'An empty commit opened in Review', 'The panels session, Source control, focus the empty commit and press Enter', 'The commit that changed nothing: its one line'), async () => {
+      await openCommit('Mark the release');
+    }, { check: () => inView(review().locator('[data-review-empty]'), 'the empty commit’s line') });
+
+    // ---- Files: a symbolic link (T316), a binary (T328), a file past the viewer's cap (T322), the find bar (T336), unsaved
+    // edits (T338), the disk's copy changed under them (T341, T342)
+    const item = (path: string) => files().locator(`[role="treeitem"][data-path="${path}"]`).first();
+    const unfolded = async (path: string) => {
+      if ((await item(path).getAttribute('aria-expanded', { timeout: 10_000 }).catch(() => null)) === 'false') await item(path).click();
+      await page.waitForTimeout(400);
+    };
+    const filesAt = async (...folders: string[]) => {
+      await opened('panels');
+      await sideSurface(app, page, 'files');
+      const root = files().locator('[role="treeitem"][data-kind="root"]').first();
+      if ((await root.getAttribute('aria-expanded').catch(() => null)) === 'false') await root.click();
+      for (const folder of folders) await unfolded(join(panels, folder));
+    };
+    const viewer = (path: string) => page.locator(`[data-region="panel"] [data-file-viewer][data-path="${join(panels, path)}"]`).first();
+    const openFile = async (folder: string | null, path: string) => {
+      await filesAt(...(folder === null ? [] : [folder]));
+      await item(join(panels, path)).click();
+      await expect(viewer(path), `${path} in the viewer`).toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(800);
+    };
+    await shot(page, meta('m3-files-symlink', 'T316', 'Files, a symbolic link', 'The panels session, View › Files, the docs folder opened', 'The link’s row: its arrow and target (master: “Symbolic link →” before them)'), async () => {
+      await filesAt('docs');
+    }, { check: () => inView(item(join(panels, 'docs/readme-link.md')), 'the link’s row') });
+    await shot(page, meta('m3-file-binary', 'T328', 'A binary file opened from Files', 'The panels session, Files, assets/sprite.dat', 'The viewer’s one line for a file it does not draw: its kind and its size'), async () => {
+      await openFile('assets', 'assets/sprite.dat');
+    }, { check: () => inView(viewer('assets/sprite.dat').locator('[data-external-row]'), 'the binary’s row') });
+    await shot(page, meta('m3-file-head', 'T322', 'A file past the viewer’s cap opened from Files', 'The panels session, Files, logs/build.log (5.6 MB)', 'The first part of the log, the bar’s notice its two sizes beside Load more'), async () => {
+      await openFile('logs', 'logs/build.log');
+    }, { check: () => inView(viewer('logs/build.log').locator('[data-notice]'), 'the bar’s notice') });
+    const code = (path: string) => viewer(path).locator('.cm-content').first();
+    await shot(page, meta('m3-file-find', 'T336', 'The find bar over a code file', 'The panels session, Files, src/sidebar.ts; click into the code, ⌘F, type “row”', 'The find bar with its controls (glyphs on M3, the editor library’s words on master)'), async () => {
+      await openFile('src', 'src/sidebar.ts');
+      await code('src/sidebar.ts').click();
+      await page.keyboard.press('Meta+f');
+      await expect(viewer('src/sidebar.ts').locator('.cm-search').first(), 'the find bar').toBeVisible({ timeout: 5_000 });
+      await page.keyboard.type('row');
+    }, { check: () => inView(viewer('src/sidebar.ts').locator('.cm-search'), 'the find bar'), after: () => closeOverlays(page) });
+    await page.keyboard.press('Escape').catch(() => undefined);
+    // an edit of the untracked notes file, never saved: the disk's copy is changed under it, then Reload takes the disk's
+    const save = () => viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: EDITOR_COPY.save, exact: true });
+    let edited = false;
+    await shot(page, meta('m3-file-unsaved', 'T338', 'A file with unsaved edits, Save holding the keyboard', 'The panels session, Files, src/notes.md; type at its end, then Tab to Save', 'Save focused; on M3 its chord the tooltip (master: a system title, not drawn)'), async () => {
+      await openFile('src', 'src/notes.md');
+      if (!edited) {
+        await code('src/notes.md').click();
+        await page.keyboard.press('Meta+ArrowDown');
+        await page.keyboard.type('And the drop keeps its place.');
+        edited = true;
+      }
+      await expect(save(), 'Save').toBeVisible({ timeout: 5_000 });
+      await letGo(page);
+      await save().focus();
+    }, { check: tip3(page, save(), 'Save', save()) });
+    await letGo(page);
+    const theirs = () => viewer('src/notes.md').locator('[data-theirs-notice]').first();
+    await shot(page, meta('m3-file-disk-changed', 'T341', 'Unsaved edits whose file changed on disk', 'The same file, its copy on disk rewritten', 'The bar’s notice that the disk changed, with Reload, Keep mine and Compare'), async () => {
+      if (!edited) throw new Error('the file was not edited');
+      if ((await theirs().count()) === 0) writeFileSync(join(panels, 'src/notes.md'), 'Drag keeps the row under the pointer.\nThe list scrolls with it.\nNothing jumps.\n');
+      await expect(theirs(), 'the disk’s notice').toBeVisible({ timeout: 15_000 });
+    }, { check: () => inView(theirs(), 'the disk’s notice') });
+    const changes = () => viewer('src/notes.md').locator('[data-merge-changes]').first();
+    await shot(page, meta('m3-file-disk-compare', 'T342', 'Unsaved edits compared with the disk’s copy', 'The same file, Compare', 'The merge view, the count of changes beside its arrows'), async () => {
+      if ((await changes().count()) === 0) await viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: EDITOR_COPY.compare, exact: true }).click();
+      await expect(changes(), 'the count of changes').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: () => inView(changes(), 'the count of changes'),
+      // Reload takes the disk's copy, so no unsaved edit is left to hold the app's quit
+      after: async () => {
+        const reload = viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: EDITOR_COPY.reload, exact: true });
+        if (await reload.count()) await reload.click();
+      },
+    });
+    await reset(page);
+
+    // ---- the surfaces' icons and tabs: an open surface's menu (P8), a closed one's (P9), a tab's pin glyph (P11)
+    const icon = (title: string) => page.locator(`[data-surface-row] button[aria-label="${title}"]`).first();
+    // master's words for the two items (master's panel/SurfaceRow.tsx literals, which M3 replaced with COPY.pinTab and dropped)
+    const MASTER_ICON_MENU = { pinTab: 'Keep open for every session', open: 'Open surface' };
+    const PIN_TAB = PANEL_COPY as Partial<Record<'pinTab', string>>; // M3's (P8), absent from master's copy
+    const contextMenu = () => page.getByRole('menu').first();
+    await shot(page, meta('m3-surface-icon-menu', 'P8', 'An open surface’s icon, right-clicked', 'The panels session with Files open; right-click the Files icon in the header', 'The icon’s menu: Pin tab and Hide surface (master: Keep open for every session)'), async () => {
+      await opened('panels');
+      await sideSurface(app, page, 'files');
+      await icon('Files').click({ button: 'right' });
+      await expect(contextMenu(), 'the icon’s menu').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await inView(contextMenu(), 'the icon’s menu');
+        const pin = m3Cut() ? PIN_TAB.pinTab! : MASTER_ICON_MENU.pinTab;
+        await inView(contextMenu().getByRole('menuitem', { name: pin, exact: true }), pin);
+      },
+      after: () => closeOverlays(page),
+    });
+    await shot(page, meta('m3-surface-icon-menu-closed', 'P9', 'A closed surface’s icon, right-clicked', 'The panels session; right-click the Terminal icon, its surface never opened', 'On M3 no menu (a press opens it); master: its menu with Open surface'), async () => {
+      await opened('panels');
+      await icon('Terminal').click({ button: 'right' });
+      await page.waitForTimeout(800);
+    }, {
+      check: async () => {
+        await inView(icon('Terminal'), 'the Terminal icon');
+        if (m3Cut()) await expect(page.getByRole('menu'), 'no menu').toHaveCount(0);
+        else await inView(contextMenu().getByRole('menuitem', { name: MASTER_ICON_MENU.open, exact: true }), 'master’s Open surface');
+      },
+      after: () => closeOverlays(page),
+    });
+    const pinGlyph = () => page.locator('[data-region="panel"]:not([inert]) [data-side-strip] [data-tab-id] button[aria-label^="Pin "]').first();
+    await shot(page, meta('m3-tab-pin-tip', 'P11', 'A side tab’s pin glyph holding the keyboard', 'The panels session with Files open; Tab to the Files tab’s pin glyph', 'The glyph focused; on M3 its verb the tooltip (master: a system title, not drawn)'), async () => {
+      await opened('panels');
+      await sideSurface(app, page, 'files');
+      await letGo(page);
+      await pinGlyph().focus();
+    }, { check: tip3(page, pinGlyph(), 'the pin glyph', pinGlyph()) });
+    await letGo(page);
+
+    // ---- surfaces opened from More surfaces: Artifacts with nothing made (T546) and with one open (T556), Questions with
+    // no ask (T292), Side with no thread (P419)
+    const fromMore = async (id: string, title: string) => {
+      if (await surface(page, id).isVisible().catch(() => false)) return;
+      await page.locator('[data-surface-row] button[aria-label="More surfaces"]').first().click();
+      await page.getByRole('menu').first().getByRole('menuitem', { name: title, exact: true }).click();
+      await expect(surface(page, id), title).toBeVisible({ timeout: 10_000 });
+      await page.waitForTimeout(800);
+    };
+    const artifacts = () => surface(page, 'artifacts');
+    const scope = (n: number) => artifacts().locator('[data-artifacts-list] [role="group"] button').nth(n);
+    await shot(page, meta('m3-artifacts-tab-empty', 'T546', 'The Artifacts tab of a session that made nothing', 'The panels session, More surfaces › Artifacts, This session', 'This session’s list empty: its one line'), async () => {
+      await opened('panels');
+      await fromMore('artifacts', ARTIFACTS_TOOL_COPY.title);
+      if ((await scope(0).getAttribute('aria-pressed')) !== 'true') await scope(0).click();
+    }, {
+      check: async () => {
+        await inView(artifacts().locator('[data-artifacts-list]'), 'the list');
+        await expect(scope(0), 'This session').toHaveAttribute('aria-pressed', 'true');
+        await expect(artifacts().locator('[data-artifact-row]'), 'no artifact').toHaveCount(0);
+      },
+    });
+    const back = () => artifacts().getByRole('button', { name: ARTIFACTS_TOOL_COPY.back, exact: true }).first();
+    let madeArtifact = false;
+    await shot(page, meta('m3-artifacts-tab-open', 'T556', 'The Artifacts tab with an artifact open, Back holding the keyboard', 'The panels session, More surfaces › Artifacts, All, a document; Tab to Back', 'The record bar over the document; on M3 Back a chevron with its words the tooltip (master: the word Back)'), async () => {
+      await opened('panels');
+      if ((await back().count()) === 0) {
+        if (!madeArtifact) {
+          value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Launch notes' } as never));
+          madeArtifact = true;
+        }
+        await fromMore('artifacts', ARTIFACTS_TOOL_COPY.title);
+        await scope(1).click();
+        await artifacts().locator('[data-artifact-row]').first().click({ timeout: 15_000 });
+      }
+      await expect(back(), 'Back').toBeVisible({ timeout: 15_000 });
+      await letGo(page);
+      if (m3Cut()) await back().focus();
+    }, { check: tip3(page, back(), 'Back', back()) });
+    await letGo(page);
+    await shot(page, meta('m3-questions-empty', 'T292', 'Questions with no open ask', 'The panels session, View › More surfaces › Questions', 'The panel’s empty state'), async () => {
+      await opened('panels');
+      await sideSurface(app, page, 'ask-sheet');
+    }, { check: () => inView(surface(page, 'ask-sheet'), 'the Questions panel') });
+    await shot(page, meta('m3-side-empty', 'P419', 'Side with no side thread', 'The panels session, More surfaces › Side', 'The panel’s empty line'), async () => {
+      await opened('panels');
+      await fromMore('side', SIDE_COPY.pane.title);
+    }, { check: () => inView(surface(page, 'side'), 'the Side panel') });
+    await reset(page);
+
+    // ---- the surfaces' names where the keymap's titles show them (N156, N157): the command palette, Settings › Keyboard,
+    // Settings' search and the shortcuts window; View › More surfaces is the OS's menu bar, outside the window. Each title
+    // is the checkout's own (shared/keymap/actions.ts): "Agents" and "Background" on M3, "Subagents" and "Background
+    // tasks" on master.
+    const titles = { agents: ACTIONS['surface.subagents'].title, background: ACTIONS['surface.background'].title };
+    for (const [key, words] of Object.entries(titles)) {
+      await shot(page, meta(`m3-palette-${key}`, key === 'agents' ? 'N156' : 'N157', `The command palette finding ${words}`, `Go › Command palette (⌘K), type “${words}”`, `The surface’s action among the results, under its title ${words}`), async () => {
+        await opened('panels');
+        await menu(app, 'palette.open');
+        await expect(page.locator('[cmdk-root]').first()).toBeVisible({ timeout: 10_000 });
+        await page.keyboard.type(words);
+        await page.waitForTimeout(800);
+      }, { check: () => inView(page.locator('[cmdk-item]').filter({ hasText: words }), `the action titled ${words}`), after: () => closeOverlays(page) });
+    }
+    const binding = (id: string) => page.locator(`[data-settings-dialog] [data-settings-binding="${id}"]`).first();
+    await shot(page, meta('m3-settings-keyboard-surfaces', 'N156, N157', 'Settings › Keyboard, the surfaces’ rows', 'Settings (⌘,), Keyboard, scrolled to the surfaces', `The rows ${titles.agents} and ${titles.background} among the View actions`), async () => {
+      await settingsAt(app, page, 'keyboard');
+      await binding('surface.subagents').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+      await page.waitForTimeout(400);
+    }, {
+      check: async () => {
+        await inView(binding('surface.subagents'), titles.agents);
+        await expect(binding('surface.subagents')).toContainText(titles.agents);
+        await inView(binding('surface.background'), titles.background);
+      },
+    });
+    const searchField = () => page.locator('[data-settings-dialog] nav input[type="search"]');
+    const results = () => page.locator('[data-settings-dialog] nav [role="listbox"] [role="option"]');
+    for (const [key, words] of Object.entries(titles)) {
+      await shot(page, meta(`m3-settings-search-${key}`, key === 'agents' ? 'N156' : 'N157', `Settings’ search finding ${words}`, `Settings (⌘,), type “${words}” in Search settings`, `The result for the surface’s key binding, titled ${words}`), async () => {
+        await settingsAt(app, page, 'keyboard');
+        await searchField().fill(words);
+        await page.waitForTimeout(800);
+      }, { check: () => inView(results().filter({ hasText: words }), `a result titled ${words}`), after: async () => void (await searchField().fill('').catch(() => undefined)) });
+    }
+    await reset(page);
+    await shot(page, meta('m3-shortcuts-surfaces', 'N156, N157', 'The shortcuts window, the surfaces’ rows', 'Help › Keyboard shortcuts (⌘/), scrolled to the surfaces', `The rows ${titles.agents} and ${titles.background}`), async () => {
+      await menu(app, 'shortcuts.open');
+      const dialog = page.getByRole('dialog').first();
+      await expect(dialog).toBeVisible({ timeout: 10_000 });
+      await dialog.getByText(titles.agents, { exact: true }).first().scrollIntoViewIfNeeded({ timeout: 5_000 });
+      await page.waitForTimeout(400);
+    }, {
+      check: async () => {
+        const dialog = page.getByRole('dialog').first();
+        await inView(dialog.getByText(titles.agents, { exact: true }), titles.agents);
+        await inView(dialog.getByText(titles.background, { exact: true }), titles.background);
+      },
+    });
+    await reset(page);
+
+    // ---- the browser on a scratch page: the find count (T454, T455), the zoom (T452), the viewport chip (T441), and the
+    // page cap's and a refused download's notices (T462, T463, T467), which only main's limits raise: sent to the window
+    // as main sends them (emitToWindow), each in the scene's last step since a notice lasts four seconds
+    let tabId: string | null = null;
+    const browserTab = async () => {
+      await opened('panels');
+      await sideSurface(app, page, 'browser');
+      if (tabId === null) tabId = (value(await invoke(page, 'browser.tabs.open', { appSessionId: ids.panels as never, url: server.url('/a.html'), select: true } as never)) as { tab: { tabId: string } }).tab.tabId;
+      else value(await invoke(page, 'browser.tabs.select', { appSessionId: ids.panels as never, tabId: tabId as never }));
+      await expect(browser().locator('[data-browser-nav]').first(), 'the tab’s address row').toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(2000);
+    };
+    const find = () => browser().locator('[data-browser-find]').first();
+    const findFor = async (text: string) => {
+      await browserTab();
+      if (!(await find().isVisible().catch(() => false))) {
+        await browser().locator('[data-browser-nav] > :last-child button').first().click();
+        await page.locator('[role="menu"] [role="menuitem"]').nth(1).click(); // Find, the menu's second item (m0-browser-find's way)
+        await expect(find(), 'the find row').toBeVisible({ timeout: 10_000 });
+      }
+      await find().locator('input').first().fill(text);
+      await page.waitForTimeout(1000);
+    };
+    await shot(page, meta('m3-browser-find-count', 'T454', 'Browser, the find row with matches', 'A scratch page, the options menu’s Find, type “needle”', 'The count of the three matches beside the field (its numbers on M3, “results” after them on master)'), async () => {
+      await findFor('needle');
+    }, { check: () => inView(find().locator('[role="status"]'), 'the count') });
+    await shot(page, meta('m3-browser-find-none', 'T455', 'Browser, the find row with no match', 'The same, type “zzqx”', 'The count of no match beside the field'), async () => {
+      await findFor('zzqx');
+    }, { check: () => inView(find().locator('[role="status"]'), 'the count'), after: async () => void (await find().locator('input').first().press('Escape').catch(() => undefined)) });
+    const zoomed = () => browser().locator('[data-browser-zoom]').first();
+    const zoomChip = () => zoomed().locator('button').first();
+    await shot(page, meta('m3-browser-zoom', 'T452', 'Browser, a page zoomed to 125%', 'A scratch page zoomed in twice; on M3 Tab to the zoom chip', 'On M3 the chip “125%” in the address row, Page zoom its tooltip; master: the zoom row under the address row'), async () => {
+      await browserTab();
+      for (let i = 0; i < 4; i++) {
+        const { zoom } = value(await invoke(page, 'browser.tabs.zoom', { tabId: tabId as never, action: 'in' }));
+        if (zoom >= 1.25) break;
+      }
+      await expect(zoomed(), 'the zoom’s place').toBeVisible({ timeout: 5_000 });
+      await letGo(page);
+      if (m3Cut()) await zoomChip().focus();
+    }, { check: tip3(page, zoomChip(), 'the zoom chip', zoomed()), after: async () => void (tabId && (await invoke(page, 'browser.tabs.zoom', { tabId: tabId as never, action: 'reset' }))) });
+    await letGo(page);
+    const viewportChip = () => browser().locator('[data-browser-viewport-chip]').first();
+    await shot(page, meta('m3-browser-viewport', 'T441', 'Browser, a device size chosen, its chip holding the keyboard', 'A scratch page at 390 × 844; Tab to the viewport chip', 'The chip “390 × 844” focused; on M3 Viewport its tooltip (master: a system title, not drawn)'), async () => {
+      await browserTab();
+      value(await invoke(page, 'browser.tabs.setViewport', { tabId: tabId as never, viewport: { width: 390, height: 844 } }));
+      await expect(viewportChip(), 'the viewport chip').toBeVisible({ timeout: 5_000 });
+      await letGo(page);
+      await viewportChip().focus();
+    }, { check: tip3(page, viewportChip(), 'the viewport chip', viewportChip()), after: async () => void (tabId && (await invoke(page, 'browser.tabs.setViewport', { tabId: tabId as never, viewport: null }))) });
+    await letGo(page);
+    const notice = (kind: string) => browser().locator(`[data-browser-notice="${kind}"]`).first();
+    for (const [id, rows, title, state, payload] of [
+      ['m3-browser-cap-closed', 'T462', 'Browser, the page cap closed an extension’s options tab', 'The line main’s notice draws when the cap closes a tab it could not keep: on M3 “Closed: too many pages open”', { kind: 'tabsCap', count: 8 }],
+      ['m3-browser-cap-options', 'T463', 'Browser, the page cap refused an extension’s options', 'The line for an extension’s options the cap would not open', { kind: 'tabsCap', count: 8, name: 'uBlock Origin' }],
+      ['m3-browser-download-refused', 'T467', 'Browser, a download the agent started refused', 'The line for a download only the person may start', { kind: 'downloadRefusedAgent' }],
+    ] as const) {
+      await shot(page, meta(id, rows, title, 'A scratch page; main’s notice sent to the window as main sends it', state), browserTab, {
+        last: () => emitToWindow(app, 'browser.notice', { appSessionId: ids.panels, tabId: null, ...payload }),
+        check: () => inView(notice(payload.kind), 'the notice’s line'),
+      });
+    }
+    await reset(page);
+
+    // ---- the Chrome import (launch 6's fixture): the consent step (T511, T516), the report (P388, P394, T533), Settings ›
+    // Browser's extension rows with the same chip (P394), and the imported profile's popover (T478, T480, T483, T484, T486)
+    const win = { maws, page };
+    const sheet = () => sheetOf(win);
+    // the chip of an extension switched on and not loaded yet (tools/browser/import/Report.tsx's StatusChip, shared with
+    // Settings): "On" on M3 (P394), master's "On · loads when a tab next opens in this profile"
+    const onChip = (scope: Locator) => scope.locator('[data-extension-status]').filter({ hasText: m3Cut() ? /^On$/ : /^On · / }).first();
+    await shot(page, meta('m3-import-consent', 'T511, T516', 'Import a Chrome profile, the categories', 'Settings › Browser, Import a Chrome profile…, Continue', 'The categories over the synthetic Chrome profile and its extensions (master adds a greyed passwords row and each extension’s chips)'), async () => {
+      await opened('panels');
+      if ((await sheet().getAttribute('data-browser-import').catch(() => null)) !== 'consent') {
+        await openImportSheet(win);
+        await sheet().getByRole('button', { name: 'Continue' }).click();
+      }
+      await expect(sheet()).toHaveAttribute('data-browser-import', 'consent', { timeout: 10_000 });
+    }, {
+      check: () => inView(sheet().locator('[data-category="extensions"]'), 'the extensions category'),
+      after: async () => {
+        await closeSheet(win);
+        await closeSettings(win);
+      },
+    });
+    await shot(page, meta('m3-import-report', 'P388, P394, T533', 'Import a Chrome profile, the report', 'Settings › Browser, Import a Chrome profile…, bookmarks and extensions, Import', 'The finished report: its summary, the skipped lines under it, each extension’s chip (“On” on M3)'), async () => {
+      if ((await sheet().getAttribute('data-browser-import').catch(() => null)) !== 'report') {
+        if ((profilesFile(userData)?.profiles.length ?? 0) > 0) throw new Error('a profile is imported already: the report of a retried import is not this scene’s');
+        await importThrough(win, { history: false, cookies: false, bookmarks: true, extensions: true });
+      }
+    }, {
+      check: async () => {
+        await inView(sheet().locator('[data-import-summary]'), 'the report’s summary');
+        await inView(onChip(sheet()), 'an extension switched on, not loaded yet');
+      },
+      after: () => closeSheet(win).catch(() => undefined),
+    });
+    const imported = () => page.locator('[data-imported-profile]').first();
+    await shot(page, meta('m3-settings-browser-extension-on', 'P394', 'Settings › Browser, an imported extension switched on', 'Settings (⌘,), Browser, scrolled to the imported profile’s extensions', 'The extension rows with the chip the report draws (“On” on M3)'), async () => {
+      if ((profilesFile(userData)?.profiles.length ?? 0) === 0) throw new Error('no profile was imported');
+      await settingsAt(app, page, 'browser');
+      await imported().locator('[data-extension-status]').first().scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await page.waitForTimeout(400);
+    }, { check: () => inView(onChip(imported()), 'an extension switched on, not loaded yet') });
+    await closeSettings(win).catch(() => undefined);
+    await reset(page);
+    const popover = () => page.locator('[data-profile-popover]').first();
+    await shot(page, meta('m3-browser-profile-imported', 'T478, T480, T483, T484, T486', 'Browser, the imported profile’s popover', 'A tab in the imported Chrome profile, its profile pill', 'The profile’s popover: its account, the other profiles, Sync bookmarks and Re-import'), async () => {
+      if ((profilesFile(userData)?.profiles.length ?? 0) === 0) throw new Error('no profile was imported');
+      await opened('panels');
+      await sideSurface(app, page, 'browser');
+      const pill = async () => {
+        await browser().locator('[data-browser-partition]').first().click();
+        await expect(popover(), 'the profile popover').toBeVisible({ timeout: 5_000 });
+      };
+      value(await invoke(page, 'browser.tabs.open', { appSessionId: ids.panels as never, url: server.url('/b.html'), select: true } as never));
+      await page.waitForTimeout(2000);
+      await pill();
+      if ((await popover().getAttribute('data-profile-popover')) !== 'profile') {
+        // new tabs still open in Default: the imported profile's row sets them to it, then a new tab opens there
+        await popover().locator('[data-profile-switch]').first().click();
+        await closeOverlays(page);
+        value(await invoke(page, 'browser.tabs.open', { appSessionId: ids.panels as never, url: server.url('/c.html'), select: true } as never));
+        await page.waitForTimeout(2000);
+        await pill();
+      }
+    }, {
+      check: async () => {
+        await expect(popover(), 'the imported profile’s popover').toHaveAttribute('data-profile-popover', 'profile', { timeout: 3_000 });
+        await inView(popover().locator('[data-profile-sync]'), 'its Sync bookmarks');
+      },
+      after: () => closeOverlays(page),
+    });
+    await reset(page);
+  } finally {
+    await maws.cleanup();
+    await server.close();
   }
 });
 
