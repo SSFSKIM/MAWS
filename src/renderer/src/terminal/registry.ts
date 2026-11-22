@@ -259,7 +259,11 @@ export class TerminalRegistry {
   async adopt(accept: (info: PtyInfo) => boolean = () => true, onListed?: (adopting: Adopting[], listed: boolean) => void, session?: AppSessionId): Promise<TerminalId[]> {
     this.start();
     const remote = session !== undefined && this.isRemote(session);
-    const listed = remote ? await this.listFor(session) : await this.deps.ipc.invoke('pty.list', undefined);
+    const list = () => (remote ? this.listFor(session) : this.deps.ipc.invoke('pty.list', undefined));
+    let listed = await list();
+    // a host that left before answering (mawsd's pty host parked as an app reconnects, in a handover): main holds the
+    // second ask for the host it reaches next. A timeout is not retried: a host that did not answer in 10 s is no race.
+    if (!listed.ok && listed.error.code === 'host_unavailable') listed = await list();
     if (!listed.ok) {
       console.error(`[terminal] ${remote ? 'pty.listFor' : 'pty.list'} failed`, listed.error);
       onListed?.([], false);

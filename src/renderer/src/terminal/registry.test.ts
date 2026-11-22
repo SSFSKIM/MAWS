@@ -452,6 +452,36 @@ describe('terminal registry reattaches without a gap', () => {
     const onListed = vi.fn();
     await expect(registry.adopt(undefined, onListed)).resolves.toEqual([]);
     expect(onListed).toHaveBeenCalledExactlyOnceWith([], false);
+    expect(ipc.inputs('pty.list')).toHaveLength(2); // asked once more, then given up
+    expect(log).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
+  // The cross-build handover: the pty host main reached left before answering (mawsd parked it as the app reconnected);
+  // the second ask is answered by its successor, and nothing is said of the first.
+  it('asks pty.list once more after host_unavailable and adopts what the next host lists, logging nothing', async () => {
+    const registry = makeRegistry();
+    const kept = ptyInfo({ ptyId: 'pty-kept' as PtyId, label: 'terminal:kept' });
+    let asks = 0;
+    ipc.handlers['pty.list'] = () => (++asks === 1 ? fail('host_unavailable', 'pty-host disconnected before answering pty.list') : { ptys: [kept] });
+    ipc.handlers['pty.attach'] = () => ({ info: kept, checkpoint: null, replay: new Uint8Array(0), replayFrom: 0, nextOffset: 0 });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onListed = vi.fn();
+    const ids = await registry.adopt((info) => info.appSessionId === A, onListed);
+    expect(ids).toHaveLength(1);
+    expect(registry.get(ids[0]!)?.info.label).toBe('terminal:kept');
+    expect(onListed).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ label: 'terminal:kept' })], true);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it('does not ask pty.list again after a timeout', async () => {
+    const registry = makeRegistry();
+    ipc.handlers['pty.list'] = () => fail('timeout', 'pty-host did not answer pty.list within 10 s');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(registry.adopt()).resolves.toEqual([]);
+    expect(ipc.inputs('pty.list')).toHaveLength(1);
+    expect(log).toHaveBeenCalledOnce();
     log.mockRestore();
   });
 
