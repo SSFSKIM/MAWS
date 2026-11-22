@@ -18,6 +18,9 @@ import { askModAnswers } from '../../../../../src/renderer/src/transcript/model/
 import { TranscriptActionsProvider } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
 import { MessageIcon } from '../../../../../src/renderer/src/transcript/view/rows/icons';
+import { CHANNEL } from '../../../../../src/renderer/src/channel/copy';
+import { Tip } from '../../../../../src/renderer/src/ui/tip';
+import { TouchFact } from '../../../../../src/renderer/src/ui/touch-fact';
 import { chatBlocks, dayOf, type ChatBlock, type HumanItem, type QuietLine, type RunItem } from '../../conversation/chat';
 import { broadcastLabel, byWhom, crossProject, type StreamItem } from '../../conversation/stream';
 import { settledText, DELIVERY_TEXT } from '../../../../../src/renderer/src/lane-a/conversation/words';
@@ -617,7 +620,9 @@ function CrossProject({ event }: { event: LogEvent }) {
 
 /**
  * One run of agent-to-agent traffic, as MAWS draws a message between sessions: a lifecycle line with the bubble mark. A
- * run of one is the line itself; more fold behind their count, their participants and their span, and open in place.
+ * run of one is the line itself; more fold behind their participants, their count and their span, and open in place.
+ * The fold reads as the app's Channel draws one (the word cut, after P447 and P448): "maws-45 and ci-opt · 3", the count
+ * named by its meaning ("3 messages"), its keyboard tooltip too, and drawn at rest on a phone, which cannot point.
  */
 function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }) {
   const [open, setOpen] = useState(false);
@@ -643,17 +648,27 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
       </div>
     );
   const who = [...new Set(says.map((s) => str(s.event.from)))];
+  const count = CHANNEL.messages(says.length);
   return (
     <div className="transcript-peer" data-testid="agent-run">
       <div className="transcript-lifecycle">
         <MessageIcon />
-        <button type="button" className="transcript-disclosure desk-chat-agents" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          <Chevron />
-          {says.length} messages between agents · {who.join(', ')}
-          <span className="desk-chat-time">
-            {clock(says[0].event.ts)}–{clock(says.at(-1)!.event.ts)}
-          </span>
-        </button>
+        <Tip content={count}>
+          <button type="button" className="transcript-disclosure desk-chat-agents" aria-expanded={open} aria-describedby={undefined} onClick={() => setOpen((o) => !o)}>
+            <Chevron />
+            {/* one inline run, so the spaces between the names, the dot and the count hold inside the flex row */}
+            <span>
+              {namesOf(who)} <span aria-hidden="true">·</span>{' '}
+              <span role="img" aria-label={count}>
+                {says.length}
+              </span>
+            </span>
+            <span className="desk-chat-time">
+              {clock(says[0].event.ts)}–{clock(says.at(-1)!.event.ts)}
+            </span>
+            <TouchFact className="desk-chat-count-fact">{count}</TouchFact>
+          </button>
+        </Tip>
       </div>
       {open && (
         <ul className="desk-chat-says" data-testid="agent-run-messages">
@@ -667,6 +682,9 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
     </div>
   );
 }
+
+// "maws-45", "maws-45 and ci-opt", "maws-45, ci-opt and docs-writer"
+const namesOf = (who: string[]) => (who.length <= 2 ? who.join(` ${CHANNEL.and} `) : `${who.slice(0, -1).join(', ')} ${CHANNEL.and} ${who.at(-1)}`);
 
 /**
  * A direct channel's working record where this stream is drawn — a machine that is offline, a session whose machine

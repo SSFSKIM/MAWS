@@ -4,7 +4,8 @@
 // to, one naming two sessions) comes straight back, said under the field, with the text kept to mend. A sent word
 // clears the field only if it still holds what was sent: an edit made while the send was out is kept. The word cut
 // (P460): Send is the session message box's round arrow (composer/submit/glyphs.tsx), "Send" its name and its tooltip,
-// which the keyboard reaches; while a word goes it is the message box's spinner, named "Sending…".
+// which the keyboard reaches; while a word goes it is the message box's spinner, named "Sending…". Greyed while there is
+// nothing to send, it stays in the Tab order (`aria-disabled`, its press refused by `submit`), so its tooltip is reached.
 import { useState, type KeyboardEvent } from 'react';
 import type { CommandResult } from '@shared/ipc/schema';
 import { CHANNEL_TEXT_MAX } from '@shared/ipc/schema/org';
@@ -62,9 +63,9 @@ export function Composer({ send }: { send(text: string): Promise<CommandResult<'
             type="button"
             aria-label={busy ? CHANNEL.composer.sending : CHANNEL.composer.send}
             aria-busy={busy || undefined}
-            disabled={!ready}
+            aria-disabled={!ready || undefined}
             onClick={() => void submit()}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-bg outline-accent hover:opacity-90 focus-visible:outline-2 disabled:bg-bg-hover disabled:text-fg-faint"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-bg outline-accent hover:opacity-90 focus-visible:outline-2 aria-disabled:bg-bg-hover aria-disabled:text-fg-faint aria-disabled:hover:opacity-100"
           >
             {busy ? <Spinner /> : <Arrow />}
           </button>

@@ -4,7 +4,7 @@
 
 314 items: 208 cut, 6 reworded, 100 stay. Of the 214 that change, the owner saw 47 in a picture or ruled on them; 167 follow the pattern and were not seen.
 
-Against master (M0): 255 unchanged, 48 moot, 5 moved, 5 rewritten by the wave, 1 gone; none waits on the owner; 18 put to the owner (new rows included) and since ruled. M0 added 105 rows for the UX wave's new text (13 cut, 29 reworded, 63 stay), listed at the end.
+Against master (M0): 255 unchanged, 48 moot, 5 moved, 5 rewritten by the wave, 1 gone; none waits on the owner; 18 put to the owner (new rows included) and since ruled. M0 added 109 rows for the UX wave's new text (14 cut, 32 reworded, 63 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -808,7 +808,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | P432 | the same button while the send runs: "Starting…" or "Sending…"; also the reply field's placeholder and the line under the first message of a thread that is starting | Sending… | cut | The comment card's Send keeps its word and shows a spinner while it goes; the echo under a starting thread's first message is a spinner. (Partly applied on the scratch branch: The comment sheet's button (SheetForm in src/renderer/src/sessions/Sheet.tsx takes words only) and the reply field's placeholder still read "Starting…"/"Sending…".) | pattern | `src/renderer/src/side/copy.ts:28` | unchanged `src/renderer/src/side/copy.ts:28` | M3 · no scene: a transient wait no fixture holds (wanted: Comment card with a send held in flight) |
 | P434 | over the field, when the comment carries a picture of the element: a thumbnail, or these words when it cannot be drawn, with a "Remove screenshot" button | Screenshot · 640 × 480 | cut | Without a thumbnail the comment shows "Screenshot", its size its tooltip (on a word that takes keyboard focus); "Remove screenshot" stays a worded button. | pattern | `src/renderer/src/side/copy.ts:31` | unchanged `src/renderer/src/side/copy.ts:31` | M3 · no scene: needs a session with side threads, comments or a project channel (wanted: Comment card open on a code line or page element (empty field, a screenshot thumbnail)) |
 | P438 | a small line where the card was, after a send to the main conversation: "Sent to <title>"; variants "Sent to <title>; read at the next step" and "Queued for <title>; it sends when the queue resumes" | Sent to Fix flaky upload test; read at the next step | cut | After a send the card's place reads "Sent to <title>" or "Queued for <title>". | pattern | `src/renderer/src/side/copy.ts:41` | unchanged `src/renderer/src/side/copy.ts:41` | M3 · no scene: needs a session with side threads, comments or a project channel (wanted: Comment card after Send to main during a running turn) |
-| P440 | the card once it holds a thread: a strip over the reply field when the thread waits on the person. Twelve forms, among them "Waiting for your permission", "Asked you a question", "Waiting for you to review a plan", "Waiting for you to trust this folder", "Waiting for your input", "Waiting for you", "Hit an error", "Was interrupted", "Could not start", "The relay is not answering", "Held by <who>", "Auto mode is unavailable" | Waiting for your permission | cut | The needs-you strip shows the orange disc and a noun: Permission, Question, Plan, Input, Trust this folder; error and held forms keep their words. | pattern | `src/renderer/src/side/copy.ts:78` | unchanged `src/renderer/src/side/copy.ts:78` | M3 · no scene: needs a session with side threads, comments or a project channel (wanted: Thread card whose side thread waits on a permission) |
+| P440 | the card once it holds a thread: a strip over the reply field when the thread waits on the person. Twelve forms, among them "Waiting for your permission", "Asked you a question", "Waiting for you to review a plan", "Waiting for you to trust this folder", "Waiting for your input", "Waiting for you", "Hit an error", "Was interrupted", "Could not start", "The relay is not answering", "Held by <who>", "Auto mode is unavailable" | Waiting for your permission | cut | The needs-you strip shows the orange disc and a noun: Permission, Question, Plan, Input; the trust card's, error and held forms keep their words. | pattern | `src/renderer/src/side/copy.ts:78` | unchanged `src/renderer/src/side/copy.ts:78` | M3 · no scene: needs a session with side threads, comments or a project channel (wanted: Thread card whose side thread waits on a permission) |
 | P442 | in the thread card's reply field | Reply to this thread | cut | The thread reply field's placeholder reads "Reply…". | pattern | `src/renderer/src/side/copy.ts:60` | unchanged `src/renderer/src/side/copy.ts:60` | M3 · no scene: needs a session with side threads, comments or a project channel (wanted: Thread card with a delivered reply (reply field and its Sent to Claude mark)) |
 | P443 | beside a message of the person's in the thread card, once the engine has taken it | Sent to Claude | cut | A delivered message in the thread card shows "✓" instead of "Sent to Claude". (Partly applied on the scratch branch: The transcript draws the mark as caption text (src/renderer/src/transcript/view/rows/User.tsx), so it is a text check with no hover name.) | pattern | `src/renderer/src/side/copy.ts:69` | unchanged `src/renderer/src/side/copy.ts:69` | M3 · no scene: needs a session with side threads, comments or a project channel (wanted: Thread card with a delivered reply (reply field and its Sent to Claude mark)) |
 
@@ -854,6 +854,22 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 ## The UX wave's new text (M0)
 
 Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master `028cecd10`, every row's basis is `pattern` (or `consent` for a consent text, or `ruled` where the owner has since ruled on it), and **Source** is the file and line on master.
+
+### Channel
+
+#### The desk's project chat
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N170 | the desk's chat (phone and desktop browser): a folded run of messages between agents, a chevron, these words, the senders' names, then the run's time span | 3 messages between agents · maws-45, ci-opt | cut | A folded run reads "maws-45 and ci-opt · 3" (three or more names as "a, b and c"), then its time span; the count is named "3 messages", as its keyboard tooltip and, on a screen that cannot point, as a fact at rest after the span. A run of one stays its "a → b" line. | pattern | `apps/desk-web/src/views/conversation/StreamView.tsx:652` | new `apps/desk-web/src/views/conversation/StreamView.tsx:652` | M3 · no scene: a phone picture of the desk's project chat with a folded agent run (Task 9's) |
+
+#### Channel tab
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N162 | the sender's name over a machine's notice in the stream (board ticket 828): the program and the machine it ran on, in place of a member's name | devcloud@dc-x | stays | Stays. rule 2: it says who wrote the words and on which machine (a program's, never a person's: X8); a rule could read it as developer words, but it is the only name the notice has | pattern | `src/renderer/src/channel/project.ts:181` | new `src/renderer/src/channel/Entries.tsx:35` | M3 · no scene: needs a project channel holding a machine's notice (wanted: Channel tab with a notice from a machine's program) |
+| N168 | middle of the stream when the channel is open, holds nothing, and this Mac has never caught up with it (beside P455's empty channel, which it is told apart from) | This Mac has no copy of this channel yet. | reword | Not loaded on this Mac yet. | pattern | `src/renderer/src/channel/copy.ts:32` | new `src/renderer/src/channel/copy.ts:32` | M3 · no scene: needs a project channel opened with nothing held while the hub is unreachable (wanted: Channel tab, offline, never caught up) |
+| N169 | in the stream's place when the channel cannot open because this Mac has no hub connection and holds nothing of it | This Mac isn’t connected to the hub, and has no copy of this channel yet. | reword | Not connected to the hub, and not loaded on this Mac yet. | pattern | `src/renderer/src/channel/copy.ts:38` | new `src/renderer/src/channel/copy.ts:38` | M3 · no scene: needs a project channel opened on a Mac with no hub connection (wanted: Channel tab, closed for no hub) |
 
 ### Files and the file tab
 
@@ -1103,14 +1119,6 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 |---|---|---|---|---|---|---|---|---|
 | N161 | middle of the agent's picture while the link to the machine is being made (the view connecting again while a tab of the agent's is shown); the strip's label says the same, T491 | Connecting to devbox | cut | Nothing shows for the first half second, then a quiet spinner in the middle of the picture, "Connecting to devbox" its accessible name. | pattern | `src/renderer/src/tools/browser/copy.ts:166` | new `src/renderer/src/tools/browser/remote/View.tsx:414` | M3 · no scene: needs a session on another machine whose link is being made again while an agent tab is shown (wanted: Browser on a session of another machine, reconnecting) |
 
-### Channel
-
-#### Channel tab
-
-| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
-|---|---|---|---|---|---|---|---|---|
-| N162 | the sender's name over a machine's notice in the stream (board ticket 828): the program and the machine it ran on, in place of a member's name | devcloud@dc-x | stays | Stays. rule 2: it says who wrote the words and on which machine (a program's, never a person's: X8); a rule could read it as developer words, but it is the only name the notice has | pattern | `src/renderer/src/channel/project.ts:181` | new `src/renderer/src/channel/Entries.tsx:35` | M3 · no scene: needs a project channel holding a machine's notice (wanted: Channel tab with a notice from a machine's program) |
-
 ### Questions panel
 
 #### Questions panel (the agent's structured questions)
@@ -1127,6 +1135,7 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N165 | "Continue as a side thread" under the field while the thread it opens starts | Starting… | cut | "Continue as thread" keeps its words while the thread starts, greyed and busy, with a quiet spinner beside them named "Starting…". | pattern | `src/renderer/src/side/copy.ts:129` | new `src/renderer/src/side/BtwView.tsx:195` | M3 · no scene: a transient wait no fixture holds (wanted: Side chat card with its continuation as a thread in flight) |
+| N167 | over an answer the engine put in Claude's place (an error or a substitute the engine wrote as the answer) | The engine substituted this answer | reword | Not from Claude | pattern | `src/renderer/src/side/copy.ts:134` | new `src/renderer/src/side/copy.ts:134` | M3 · no scene: needs a side question the engine answered with a synthetic message (wanted: the /btw card with a substituted answer) |
 
 #### Side panel (side threads)
 

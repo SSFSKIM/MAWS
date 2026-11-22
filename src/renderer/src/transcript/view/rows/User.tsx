@@ -28,6 +28,7 @@ import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
 import { formatClock } from '@shared/app/date-format';
 import { Chevron, copyText } from './parts';
+import { Tip } from '../../../ui/tip';
 import { AnchorIcon } from './icons'; // E3
 
 type UserRowData = Extract<Row, { kind: 'user' }>;
@@ -156,10 +157,12 @@ function UserBubble({ row }: { row: UserRowData }) {
       {notSent !== null && <span className="transcript-not-sent" title={notSent}>{notSent}</span>}
       {caption !== null &&
         (mark !== null && mark.shown !== mark.name ? (
-          // the word cut (P443): a mark drawn as a glyph, its words its name and tooltip
-          <span className="transcript-user-caption" role="img" aria-label={mark.name} title={mark.name}>
-            {mark.shown}
-          </span>
+          // the word cut (P443): a mark drawn as a glyph, its words its name and its tooltip, which the keyboard reaches
+          <Tip content={mark.name}>
+            <span className="transcript-user-caption" role="img" aria-label={mark.name} aria-describedby={undefined} tabIndex={0}>
+              {mark.shown}
+            </span>
+          </Tip>
         ) : (
           <span className="transcript-user-caption" title={caption}>{caption}</span>
         ))}

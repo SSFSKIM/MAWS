@@ -29,13 +29,13 @@ export const CHANNEL = {
   },
   unverified: (count: number) => (count === 1 ? '1 event didn’t verify' : `${count} events didn’t verify`),
   empty: 'Nothing in this channel yet.',
-  noCopy: 'This Mac has no copy of this channel yet.', // U11a M4: open, nothing held, never caught up
+  noCopy: 'Not loaded on this Mac yet.', // U11a M4: open, nothing held, never caught up (the word cut, N168)
   opening: 'Reading the channel…', // the first read's quiet spinner's name (the word cut, P457)
   failed: 'Couldn’t open the channel.',
   retry: 'Retry',
   closed: {
     'signed-out': 'Sign this Mac in to the org to read its project channels.',
-    'no-hub': 'This Mac isn’t connected to the hub, and has no copy of this channel yet.',
+    'no-hub': 'Not connected to the hub, and not loaded on this Mac yet.', // the word cut, N169
     'unknown-project': 'The hub holds no channel for this project.',
   } as const,
   waiting: 'Waiting on you',

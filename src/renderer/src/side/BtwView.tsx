@@ -33,7 +33,7 @@ import { openFile } from '../tools/code/open-file';
 import { UnavailableButton, UNAVAILABLE_LOOK } from '../ui/tip';
 import { WaitingWords } from '../ui/spinner';
 import { SIDE_COPY } from './copy';
-import { askSide, beginPromotion, btwCardOf, clearSide, promotable, promotionInFlight, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, usePromotions, useSidePane } from './store';
+import { askSide, beginPromotion, btwCardOf, clearSide, hasAnswer, promotable, promotionInFlight, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, usePromotions, useSidePane } from './store';
 
 const COPY = SIDE_COPY.btw;
 const SHOWN = 50; // the most recent exchanges kept on screen
@@ -249,7 +249,7 @@ export function Exchange({ exchange, canRetry, onRetry, waiting }: { exchange: S
               {COPY.synthetic}
             </p>
           )}
-          {exchange.response === null || exchange.response.trim() === '' ? <p className="m-0 text-ui-sm text-fg-muted">{COPY.noAnswer}</p> : <Markdown markdown={exchange.response} live={false} />}
+          {hasAnswer(exchange) ? <Markdown markdown={exchange.response} live={false} /> : <p className="m-0 text-ui-sm text-fg-muted">{COPY.noAnswer}</p>}
         </div>
       )}
       {exchange.state === 'failed' && (

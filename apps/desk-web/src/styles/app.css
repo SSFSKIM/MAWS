@@ -232,7 +232,8 @@
   padding: 2px 0 6px;
 }
 .desk-chat-quiet-run > .transcript-disclosure .desk-chat-time,
-.desk-chat-agents .desk-chat-time {
+.desk-chat-agents .desk-chat-time,
+.desk-chat-count-fact {
   margin-left: 4px;
 }
 .desk-chat-quiet-run[aria-expanded="true"] .desk-chat-quiet {

@@ -55,7 +55,7 @@ const CARRIED_BY_THE_CARD = new Set<string>(['async_input', 'essential_unread'])
 // failed start, which live in the full view; a terminal or background job holding the thread (only a tab helps); the
 // oldest tier-1 attention item, by kind. Tier 2 (held peer messages) raises none.
 export function needsYouOf({ card, failed, holder, pending }: { card: WaitingCard | undefined; failed: boolean; holder: SessionHolder | null; pending: AttentionItem[] }): NeedsYou {
-  if (card !== undefined) return card.kind === 'trust' ? { kind: 'setup-card', text: NEEDS.trust, noun: NOUNS.trust, tabOnly: false } : { kind: 'setup-card', text: NEEDS.relay, noun: null, tabOnly: false };
+  if (card !== undefined) return card.kind === 'trust' ? { kind: 'setup-card', text: NEEDS.trust, noun: null, tabOnly: false } : { kind: 'setup-card', text: NEEDS.relay, noun: null, tabOnly: false };
   if (failed) return { kind: 'setup-failed', text: NEEDS.failed, noun: null, tabOnly: false };
   if (holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job')) return { kind: 'held', text: NEEDS.held(holderWords(holder)), noun: null, tabOnly: true };
   const waiting = waitingItem(pending.filter((i) => !CARRIED_BY_THE_CARD.has(i.kind)));

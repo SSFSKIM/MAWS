@@ -75,8 +75,8 @@ export const SIDE_COPY = {
     openInSidePane: 'Open in Side pane',
     openAsTab: 'Open as tab',
     // the needs-you strip above Reply: the sentence heard; what waits on the person drawn as the waiting disc and its noun
-    // (`nouns`, the word cut, P440), an error and a holder by their words
-    nouns: { trust: 'Trust this folder', permission: 'Permission', question: 'Question', plan: 'Plan', input: 'Input' },
+    // (`nouns`, the word cut, P440), an error, a holder and the trust card (a consent step, never a candidate) by their words
+    nouns: { permission: 'Permission', question: 'Question', plan: 'Plan', input: 'Input' },
     needs: {
       trust: 'Waiting for you to trust this folder',
       relay: 'The relay is not answering',
@@ -131,7 +131,7 @@ export const SIDE_COPY = {
     unseen: 'New answer', // the chip's dot
     empty: 'Ask about the conversation without adding to it. The model answers beside the running turn, with no tools.',
     answering: 'Answering…',
-    synthetic: 'The engine substituted this answer',
+    synthetic: 'Not from Claude', // the word cut, N167: an answer the engine put in Claude's place
     noAnswer: 'No answer', // the word cut (P413)
     retry: 'Retry',
     // the word cut (P409, P408): drawn only once they can act; Continue keeps its words while the thread starts, a quiet
