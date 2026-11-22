@@ -186,8 +186,8 @@ describe('the agent’s tabs on another machine’s session', () => {
     expect(document.querySelector('[data-remote-overlay]')).toBeNull();
   });
 
-  // the word cut (T491, and the picture's own wait while it connects): connecting is the group's label, dimmed, with a
-  // spinner named by the words; the picture shows the same wait as a spinner
+  // the word cut (T491): connecting is the group's label, dimmed, with a spinner named by the words (no agent tab here,
+  // so there is no picture; the reconnect case below covers the picture's wait)
   it('while the link is made, dims the group’s label beside a spinner, and says no words', async () => {
     opened = { inventory: { epoch: 'e1', tabs: [], selected: null, state: 'unavailable', reason: 'connecting to studio' }, view: { kind: 'connecting' } };
     await shown();
@@ -195,6 +195,19 @@ describe('the agent’s tabs on another machine’s session', () => {
     expect(within(group).queryByText(C.connecting('studio'))).toBeNull();
     expect(await within(group).findByRole('progressbar', { name: C.connecting('studio') })).toBeTruthy();
     expect(group.querySelector('[data-browser-agent-label]')!.className).toContain('text-fg-faint');
+  });
+
+  // fix round 1: a view that reconnects after showing keeps the picture, dimmed, with the connecting spinner over it
+  it('reconnecting after a frame was shown puts the connecting spinner over the kept picture, with no words', async () => {
+    await shown();
+    act(() => main.emit('browser.remote.frame', frameOf(1)));
+    await settle();
+    act(() => main.emit('browser.remote.inventory', { viewId: 'rv-1', inventory: { ...opened.inventory, state: 'unavailable', reason: 'connecting to studio' }, view: { kind: 'connecting' } }));
+    await settle();
+    const overlay = () => surfaceOf()!.querySelector<HTMLElement>('[data-remote-overlay]')!;
+    expect(await within(overlay()).findByRole('progressbar', { name: C.connecting('studio') })).toBeTruthy();
+    expect(within(overlay()).queryByText(C.connecting('studio'))).toBeNull();
+    expect(surfaceOf()!.querySelector('canvas')!.className).toContain('opacity-40');
   });
 
   it('a live view with no agent tab keeps its words beside the label (T490)', async () => {
