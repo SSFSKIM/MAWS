@@ -58,7 +58,7 @@ export function OverflowMenu({ appSessionId, surface, tab, owns, room, onFind }:
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <IconButton label={BROWSER_COPY.options}>
+        <IconButton label={BROWSER_COPY.options} data-browser-options="">
           <MoreIcon />
         </IconButton>
       </DropdownMenu.Trigger>

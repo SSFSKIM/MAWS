@@ -59,7 +59,7 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, room, onF
       <PartitionPill appSessionId={appSessionId} surface={surface} partition={tab?.partition ?? DEFAULT_PARTITION} />
       {tab?.control === 'agent' && <ControlSlot tab={tab} />}
       {tab && extras.map((Extra, index) => <Extra key={index} tab={tab} appSessionId={appSessionId} surface={surface} />)}
-      {tab && tab.zoom !== 1 && <ZoomChip tab={tab} owns={owns} />}
+      {tab && <ZoomChip tab={tab} owns={owns} /> /* drawn while not at 100%, or while its steps are open */}
       {tab && room && <ViewportChip tab={tab} room={room} />}
       <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} owns={owns} room={room} onFind={onFind} />
       {loading && (
