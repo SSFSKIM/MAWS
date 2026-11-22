@@ -144,6 +144,12 @@ describe('the toolbar’s controls', () => {
     await user.keyboard('{Escape}');
   });
 
+  it('carries the counter’s numbers as data, apart from the drawn words, which group thousands', () => {
+    render(<Toolbar {...props({ counter: { index: 0, count: 1002 } })} />);
+    const hunk = document.querySelector<HTMLElement>('[data-review-hunk]')!;
+    expect([hunk.textContent, hunk.dataset.index, hunk.dataset.count]).toEqual(['1 / 1,002', '1', '1002']);
+  });
+
   it('draws no counter and no arrows while no file is loaded', () => {
     render(<Toolbar {...props({ counter: null })} />);
     expect(counter()).toBeNull();

@@ -154,6 +154,14 @@ describe('the Commits part’s state over the branch read (frames’ S9)', () =>
     expect(commitsState(null, undefined, false)).toEqual({ kind: 'outstanding' });
   });
 
+  // The word cut (N63): the spinner stands for a wait that can end; with nothing known and the machine offline no read is
+  // asked, so the part says offline, with no refresh (heard again, the read is asked by itself), and keeps an earlier answer
+  it('is offline, with no refresh, while whether the machine serves the reads is not known and it is offline', () => {
+    expect(commitsState(null, undefined, true)).toEqual({ kind: 'failed', failure: { kind: 'offline' }, refresh: false });
+    expect(commitsState(null, { answer: null, failure: null }, true)).toEqual({ kind: 'failed', failure: { kind: 'offline' }, refresh: false });
+    expect(commitsState(null, { answer, failure: null }, true)).toEqual({ kind: 'ready', answer });
+  });
+
   it('is older, with no refresh, for a machine that lists its capabilities without the reads, an unknown command and an endpoint that does not offer them', () => {
     expect(commitsState(false, undefined, false)).toEqual({ kind: 'failed', failure: { kind: 'older' }, refresh: false });
     expect(commitsState(true, { answer: null, failure: { status: 'error', message: 'unknown', code: 'unknown_command' } }, false)).toEqual({ kind: 'failed', failure: { kind: 'older' }, refresh: false });

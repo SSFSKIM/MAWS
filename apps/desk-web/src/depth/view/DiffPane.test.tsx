@@ -33,7 +33,7 @@ it('says when the session has no git working tree to diff, which the machine ans
 it('says there are no changes against a base it names', () => {
   const diff = pane({ base: 'main', text: '' });
   expect(diff.querySelector('[data-review-empty]')!.textContent).toBe('No changes against main');
-  expect(diff.querySelector('[data-review-footer]')!.textContent).toBe('Working tree · Since main');
+  expect(diff.querySelector('[data-review-footer]')).toBeNull(); // the word cut (T357): the header names the base
 });
 
 // The pane's own words and its one-file walk (its view state is its own since MAWS's Review became a stack): the header's
@@ -61,7 +61,9 @@ it('heads the diff with its totals since the base and walks its files one at a t
   const fileHeader = () => diff.querySelector('[data-review-file-header]')!.textContent;
   const previous = () => screen.getByRole('button', { name: 'Previous file' }) as HTMLButtonElement;
   const next = () => screen.getByRole('button', { name: 'Next file' }) as HTMLButtonElement;
-  expect(diff.querySelector('[data-review-header]')!.textContent).toBe('2 files changed · +2 −1 · Since main');
+  expect(diff.querySelector('[data-review-header]')!.textContent).toBe('2 files · +2 −1 · Since main'); // the word cut (T356)
+  expect(diff.querySelector('[data-review-footer]')).toBeNull();
+  expect(diff.textContent).not.toContain('Working tree');
   expect(fileHeader()).toBe('src/harbour.ts · Modified');
   expect([previous().disabled, next().disabled, previous().title, next().title]).toEqual([true, false, 'Previous file', 'Next file']);
   fireEvent.click(next());

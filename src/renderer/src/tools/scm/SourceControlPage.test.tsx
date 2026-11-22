@@ -471,6 +471,18 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
     expect(await within(part('commits')!).findByRole('progressbar', { name: 'Commits' }, { timeout: 2000 })).toBeTruthy();
   });
 
+  // The word cut (N63): a machine offline before its capabilities were heard is asked nothing, so the part says offline
+  // rather than spin
+  it('says "Unavailable while <machine> is offline", with no spinner and no refresh, for a machine offline before its capabilities were heard', async () => {
+    roster([{ capabilities: ['rl2.git-reads'] }, { ref: OTHER_MACHINE, name: 'berth-mini', local: false, state: 'down', since: '2026-01-01T00:00:00.000Z' }]);
+    mount(REMOTE);
+    await waitFor(() => expect(sentence()).toBe('Unavailable while berth-mini is offline'));
+    expect(refresh()).toBeNull();
+    expect(branchAsks()).toBe(0);
+    await flush();
+    expect(within(part('commits')!).queryByRole('progressbar')).toBeNull();
+  });
+
   it('names the machine in the header, "· offline" after it while its link is down', async () => {
     servesRemote({ state: 'down', since: '2026-01-01T00:00:00.000Z' });
     mount(REMOTE);

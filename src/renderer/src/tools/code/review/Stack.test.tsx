@@ -104,7 +104,12 @@ function statusOf(files: readonly Made[], options: { staged?: boolean; untracked
   };
 }
 
-const numstat = (file: Made): GitDiffFile => ({ path: file.path, oldPath: null, insertions: file.added.length, deletions: 0, binary: false });
+const numstat = (file: Made): GitDiffFile => ({ path: file.path, oldPath: null, insertions: file.added.length, deletions: 0, binary: file.patch.includes('\nBinary files ') });
+// A tracked binary: its header alone, and no body (the word cut, N44)
+function binaryMade(index: number): Made {
+  const path = `img/logo-${String(index).padStart(3, '0')}.png`;
+  return { path, patch: `diff --git a/${path} b/${path}\nindex 1..2 100644\nBinary files a/${path} and b/${path} differ\n`, added: [], starts: [] };
+}
 
 // Main over a scope of `files`, the whole patch in one answer, or past the scope's cap with each file read alone; `hold`
 // keeps a file's own read open until the test releases it (its patch) or refuses it (a failed read). An untracked file
@@ -465,6 +470,19 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(third.querySelector('[data-review-body]')?.textContent).toContain('Diff unavailable');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
     expect(scroller().scrollTop).toBe(at);
+  });
+
+  // The word cut (N44): a tracked binary draws no body, so the stack weighs none for it; a request for a file after
+  // binaries lands at its top, as drawn
+  it('weighs no body for a tracked binary, so a request for a file after binaries brings it to its top', async () => {
+    const binaries = Array.from({ length: 6 }, (_, i) => binaryMade(i));
+    const texts = Array.from({ length: 4 }, (_, i) => made(i, 1, 40));
+    await mount([...binaries, ...texts]);
+    for (const binary of binaries) expect(sectionOf(binary.path).querySelector('[data-review-body]')).toBeNull();
+    request(texts[2].path);
+    await page.settle();
+    expect(scroller().scrollTop).toBe(page.topOf(sectionOf(texts[2].path)));
+    expect(scroller().scrollTop).toBe(6 * HEADER + 2 * page.height(sectionOf(texts[0].path)));
   });
 
   it('brings the same file to the top again on a second request after the person scrolled away', async () => {
