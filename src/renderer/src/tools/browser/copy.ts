@@ -129,6 +129,9 @@ export const BROWSER_COPY = {
   // a tab left unloaded at the page cap draws no line, its chip already greyed (T462); the refused options keep the fact
   // (T463); an agent's refused download is what happened (T467); both copies read Copied (T464)
   tabsCapOptions: (name: string) => `Too many pages are loaded to open ${name}’s options`, // cua #90
+  // the word cut (T462, split): an extension's options tab the cap closed, so no greyed chip shows what happened
+  tabsCapClosed: 'Closed: too many pages open',
+  tabsCapClosedMemory: 'Closed: pages use too much memory',
   profileMissing: (name: string | undefined) => `${profileNamed(name)} was not found; this tab browses with the default profile`,
   partitionFallback: (name: string | undefined) => `${profileNamed(name)} could not be opened; this tab browses with the default profile`,
   downloadRefusedAgent: 'Blocked a download the agent started',

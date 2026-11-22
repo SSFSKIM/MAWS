@@ -191,6 +191,34 @@ describe('the zoom chip', () => {
     ]);
   });
 
+  // fix round 1: a step that reaches 100% leaves the open steps and their trigger in place; once they close the chip goes
+  // and focus lands on Browser options
+  it('keeps its steps open through a keyboard Reset to 100%, then gives focus to Browser options as it goes', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab({ zoom: 1.25 }), owns: true });
+    chip()!.focus();
+    await user.keyboard('{Enter}');
+    const reset = (await steps())[1]!;
+    act(() => reset.focus());
+    await user.keyboard('{Enter}');
+    await wait(0);
+    expect(calls('browser.tabs.zoom')).toEqual([{ tabId: T1, action: 'reset' }]);
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1 })} tabs={[]} owns />); // main's snapshot at 100%
+    expect(chip()!.textContent).toBe('100%');
+    expect(screen.getAllByRole('menuitem')).toHaveLength(3);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(chip()).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: BROWSER_COPY.options }));
+  });
+
+  it('a focused chip whose page reaches 100% another way gives focus to Browser options', () => {
+    const { rerender } = show({ tab: tab({ zoom: 1.1 }), owns: true });
+    act(() => chip()!.focus());
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1 })} tabs={[]} owns />); // a pinch, say
+    expect(chip()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: BROWSER_COPY.options }));
+  });
+
   it('its tooltip reads Page zoom, on pointing or focus', async () => {
     const user = userEvent.setup();
     show({ tab: tab({ zoom: 1.25 }), owns: true });
@@ -515,22 +543,23 @@ describe('the notice lines', () => {
   });
 
   // the word cut (T462): a tab left unloaded at the page cap, by count or by memory, draws no line (its chip is greyed);
-  // an extension's options refused at the cap still does (T463). T464: a copy reads Copied.
+  // an extension's options tab the cap closed does, as does one refused at the cap (T463). T464: a copy reads Copied.
   it('the session’s transient notices, routed by session, each with its sentence and Dismiss', () => {
     show({ tab: tab() });
     act(() => {
       raiseNotice({ appSessionId: A, tabId: T2, kind: 'tabsCap', count: 12 });
       raiseNotice({ appSessionId: A, tabId: T2, kind: 'tabsCap' });
       raiseNotice({ appSessionId: A, tabId: null, kind: 'tabsCap', count: 12, name: 'uBlock' });
+      raiseNotice({ appSessionId: A, tabId: null, kind: 'tabsCap', count: 12 });
       raiseNotice({ appSessionId: A, tabId: null, kind: 'urlCopied' });
       raiseNotice({ appSessionId: A, tabId: null, kind: 'partitionFallback', name: 'Work' });
       raiseNotice({ appSessionId: B, tabId: null, kind: 'tabsFileBroken' });
     });
     const texts = [...document.querySelectorAll('[data-browser-notice]')].map((element) => element.textContent);
-    expect(texts).toEqual(['Too many pages are loaded to open uBlock’s options', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
+    expect(texts).toEqual(['Too many pages are loaded to open uBlock’s options', 'Closed: too many pages open', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
     fireEvent.click(within(line('urlCopied')!).getByRole('button', { name: BROWSER_COPY.dismiss }));
     expect(line('urlCopied')).toBeNull();
-    expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['tabsCap', 'tabsCap', 'tabsCap', 'partitionFallback', 'tabsFileBroken']);
+    expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['tabsCap', 'tabsCap', 'tabsCap', 'tabsCap', 'partitionFallback', 'tabsFileBroken']);
   });
 });
 
