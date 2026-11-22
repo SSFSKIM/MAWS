@@ -45,14 +45,16 @@ export function ZoomSteps({ tab, enabled, reset, resetName }: { tab: BrowserTab 
 
 // Drawn while the page is not at 100%, and while its steps are open, so a step that reaches 100% (a Reset, or one step
 // from 90% or 110%) keeps the open steps and their trigger in place; once they close at 100% the chip goes and focus
-// moves to Browser options, the row's next stop that is always there. So does a focused chip whose page reaches 100%
-// by another way (a pinch, a ⌘-wheel).
+// moves to Browser options, the row's next stop that is always there, where Radix would have put it back on the chip
+// (Escape, a chosen step). A close by a press or focus outside the steps keeps the focus the person set there, as Radix
+// does. A focused chip whose page reaches 100% by another way (a pinch, a ⌘-wheel) also hands focus to Browser options.
 export function ZoomChip({ tab, owns }: { tab: BrowserTab; owns: boolean }) {
   const copy = BROWSER_COPY.zoom;
   const level = copy.level(zoomPercent(tab.zoom));
   const [open, setOpen] = useState(false);
   const slot = useRef<HTMLSpanElement>(null);
   const focused = useRef(false); // the chip itself holds focus
+  const outside = useRef(false); // the open steps met a press or focus outside them
   const drawn = tab.zoom !== 1 || open;
   useLayoutEffect(() => {
     if (drawn || !focused.current) return;
@@ -62,7 +64,14 @@ export function ZoomChip({ tab, owns }: { tab: BrowserTab; owns: boolean }) {
   return (
     <span ref={slot} data-browser-zoom-slot="" className="contents">
       {drawn && (
-        <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
+        <DropdownMenu.Root
+          modal={false}
+          open={open}
+          onOpenChange={(next) => {
+            if (next) outside.current = false;
+            setOpen(next);
+          }}
+        >
           <Tip content={copy.label}>
             <DropdownMenu.Trigger asChild>
               <button
@@ -81,8 +90,9 @@ export function ZoomChip({ tab, owns }: { tab: BrowserTab; owns: boolean }) {
             <DropdownMenu.Content
               align="end"
               sideOffset={4}
+              onInteractOutside={() => (outside.current = true)}
               onCloseAutoFocus={(event) => {
-                if (tab.zoom !== 1) return; // back to the chip
+                if (tab.zoom !== 1 || outside.current) return; // back to the chip, or left where the person put it
                 event.preventDefault();
                 focusOptions(slot.current);
               }}

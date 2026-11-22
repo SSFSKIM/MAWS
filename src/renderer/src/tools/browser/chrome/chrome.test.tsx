@@ -211,6 +211,21 @@ describe('the zoom chip', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: BROWSER_COPY.options }));
   });
 
+  // fix round 2: a close by a press outside keeps the focus the press set
+  it('closed at 100% by a click in the address field, leaves the focus in the field', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab({ zoom: 1.25 }), owns: true });
+    await user.click(chip()!);
+    await user.click((await steps())[1]!);
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1 })} tabs={[]} owns />);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(3);
+    const field = screen.getByRole<HTMLInputElement>('combobox', { name: BROWSER_COPY.address });
+    await user.click(field);
+    await waitFor(() => expect(chip()).toBeNull());
+    expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
+    expect(document.activeElement).toBe(field);
+  });
+
   it('a focused chip whose page reaches 100% another way gives focus to Browser options', () => {
     const { rerender } = show({ tab: tab({ zoom: 1.1 }), owns: true });
     act(() => chip()!.focus());
