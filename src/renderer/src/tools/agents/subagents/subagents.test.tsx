@@ -475,6 +475,24 @@ describe('subagents lists', () => {
     expect((await screen.findByRole('tooltip')).textContent).toContain('Approval needed');
   });
 
+  // Pair review of M3's pictures (T166): the mark takes no room in the row's flow, so a waiting row's title and line
+  // start where every sibling's do. It is drawn out of flow (absolute) within the glyph's own slot, beside the glyph.
+  it('draws the waiting mark within the glyph’s slot, out of the row’s flow, so the title does not move', async () => {
+    await mount({ events: [started('a1', 1), started('a2', 2)] });
+    act(() =>
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
+    );
+    // what precedes the text in the row's flow: the same parts, in the same order, waiting or not
+    const flow = (id: string) => Array.from(row(id).querySelector('[data-part="title"]')!.closest('[id$="-text"]')!.parentElement!.children).map((c) => c.getAttribute('data-part') ?? c.id.replace(/^.*-/, ''));
+    expect(flow('a1')).toEqual(flow('a2'));
+    const mark = row('a1').querySelector<HTMLElement>('[data-part="waiting"]')!;
+    const slot = mark.parentElement!;
+    expect(slot.dataset.part).toBe('glyph');
+    expect(slot.className.split(' ')).toContain('relative');
+    expect(slot.className.split(' ')).toContain('shrink-0');
+    expect(mark.className.split(' ')).toContain('absolute');
+  });
+
   // Fix round 1 of the word cut (T166): pointing anywhere on the row opens it, its disclosure included, which is the
   // row's own control and not the tip's trigger; the keyboard still reaches it on the row's open button alone.
   it('says Approval needed on pointing at the row’s disclosure as on the row, the disclosure staying its own control', async () => {

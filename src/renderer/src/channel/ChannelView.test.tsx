@@ -109,7 +109,12 @@ describe('the tab’s hold', () => {
     // in order: the one name, "and", the other, the dot, the count, then the time
     expect(fold.textContent!.slice(0, fold.textContent!.indexOf('·'))).toMatch(/maws-45.*and.*ci-opt/);
     expect(count.previousElementSibling!.textContent).toBe('·');
-    expect(count.nextElementSibling!.tagName).toBe('TIME');
+    // pair review of M3's pictures: the count follows the names, in their group, and the group's room is left after it,
+    // so the count is not carried to the far end beside the time
+    const names = count.closest<HTMLElement>('[data-names]')!;
+    expect(names.parentElement).toBe(fold);
+    expect(names.lastElementChild).toBe(count);
+    expect(names.nextElementSibling!.tagName).toBe('TIME');
     act(() => fold.focus());
     expect((await screen.findByRole('tooltip')).textContent).toBe('3 messages');
     expect(screen.queryByText('say 2')).toBeNull();
@@ -133,7 +138,9 @@ describe('the tab’s hold', () => {
     expect(entries()).toEqual(['exchange:1']);
     const run = screen.getByRole('button', { name: /maws-45/ });
     expect(run.textContent).not.toMatch(/everyone|messages/);
-    expect(within(run).getByRole('img', { name: '3 messages' }).textContent).toBe('3');
+    const runCount = within(run).getByRole('img', { name: '3 messages' });
+    expect(runCount.textContent).toBe('3');
+    expect(runCount.closest('[data-names]')?.lastElementChild).toBe(runCount); // "<name> · 3", the count beside the name
   });
 
   // the word cut (P457): the first read is a quiet spinner named by its words
