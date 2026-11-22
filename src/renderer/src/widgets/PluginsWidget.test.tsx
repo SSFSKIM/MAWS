@@ -546,7 +546,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(starts()).toEqual([]);
   });
 
-  it('a ready process that has not reported its plugins yet (a start with no turn), with nothing observed before, says Not observed yet in the line and the detail', async () => {
+  it('a ready process that has not reported its plugins yet (a start with no turn), with nothing observed before, says Not observed yet in the line, and a dash in the detail (the word cut, P174)', async () => {
     // the engine reports no plugins until its first system/init: nothing was observed, so nothing reads as loaded now
     backend.script('session.observedFacts', () => null);
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
@@ -558,7 +558,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(loadedLine().textContent).not.toContain('Loaded now');
     expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy(); // the process is ready: its reloads stay
     fireEvent.click(within(section('my-items')).getByRole('button', { name: 'View E8 probe' }));
-    expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Not observed yet');
+    expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('—');
   });
 
   it('Filter › Loaded in this session with nothing observed says it is unknown, never that nothing matches (scale review D scalpel-2#1)', async () => {

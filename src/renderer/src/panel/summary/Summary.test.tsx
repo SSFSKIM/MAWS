@@ -328,6 +328,26 @@ describe('floating session cards', () => {
     expect(fake.invoked('session.reloadSkills')).toEqual([{ appSessionId: MAIN.A }]);
   });
 
+  // the word cut (P65): the header is the count and, only when the list is not now, its age; nothing else is drawn in it
+  it('draws the plugins header as the count alone live, and the count and its age when last observed', async () => {
+    const observedAt = '2026-10-01T10:00:00.000Z';
+    const plugins = [{ name: 'mods-probe', path: '/p/probe', source: null, version: null }];
+    const header = () => within(region('Connectors')).getByText(/^\d+ plugins?$/).parentElement!;
+    const textNodes = (el: Element) => [...el.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE);
+    act(() => useSessions.setState({ engine: new Map([[A, { ...status(A, { process: 'ready' }), plugins, pluginsObservedAt: observedAt }]]) }));
+    mount();
+    await open('Connectors');
+    const live = header();
+    expect([...live.children].map((child) => child.textContent)).toEqual(['1 plugin', 'Reload pluginsReload skills']);
+    expect(textNodes(live)).toEqual([]);
+    act(() => useSessions.setState({ engine: new Map([[A, { ...status(A, { process: 'exited' }), plugins, pluginsObservedAt: observedAt }]]) }));
+    await waitFor(() => expect(header().children[1]?.textContent).toMatch(/^Loaded last time, /));
+    const last = header();
+    expect(last.children).toHaveLength(2);
+    expect(last.children[0]!.textContent).toBe('1 plugin');
+    expect(textNodes(last)).toEqual([]);
+  });
+
   it('has no session-dependent reads without a session', () => {
     render(<Summary appSessionId={null} />);
     expect(screen.queryByRole('region', { name: 'Environment' })).toBeNull();
@@ -398,11 +418,30 @@ describe('the Environment card follows the agent', () => {
     await act(() => fake.reply('git.watch', { ...GIT, repoRoot: REPO }, 0)); // the launch folder's answer, late
     expect(within(env()).queryByText('⎇ main')).toBeNull();
     expect(within(env()).queryByTestId('change-line')).toBeNull();
-    expect(within(env()).getAllByText(SUMMARY_COPY.pending).length).toBeGreaterThan(0); // the one pending row
+    expect(within(env()).getAllByText(SUMMARY_COPY.pending).length).toBeGreaterThan(0); // the pending heading
     expect(header()).toContain(SUMMARY_COPY.pending);
     await act(() => fake.reply('git.watch', { ...GIT, repoRoot: W1, branch: 'w1' }, 0));
     expect(await within(env()).findByText('⎇ w1')).toBeTruthy();
     expect(header()).toContain('w1');
     expect(movedFrom()?.textContent).toBe('moved from repo');
+  });
+
+  // the word cut ("Seen on the scratch build and to be put right"): why git has no status is said once, in the heading
+  it.each([
+    ['a failed watch', 'spawn git ENOENT', SUMMARY_COPY.gitUnavailable],
+    ['a folder outside a repository', 'not a git repository', SUMMARY_COPY.notRepository],
+  ])('says why there is no branch once, in the heading, after %s', async (_what, message, words) => {
+    fake = fakeClient({
+      'git.unwatch': undefined, 'layout.get': { value: null }, 'layout.set': undefined,
+      'session.observedFacts': { version: 1, appSessionId: MAIN.A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
+    });
+    window.maws = preloadOf(fake);
+    useGit.setState({ entries: new Map() });
+    put({});
+    mount();
+    await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }]));
+    await act(() => fake.fail('git.watch', message));
+    await waitFor(() => expect(header()).toContain(words));
+    expect(env().textContent!.split(words)).toHaveLength(2); // the words once
   });
 });

@@ -327,7 +327,9 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const marks = within(push()).getByRole('button', { name: '2 ahead of origin/feature · 1 behind', description: 'Open Source control' });
     expect(marks.textContent).toBe('↑2 ↓1');
     setStatus({ ...GIT, ahead: 0, behind: 3 });
-    expect(within(push()).getByRole('button', { name: 'Up to date with origin/feature · 3 behind' }).textContent).toBe('↓3');
+    expect(within(push()).getByRole('button', { name: '3 behind origin/feature', description: 'Open Source control' }).textContent).toBe('↓3'); // not "Up to date": that is a level branch's
+    setStatus({ ...GIT, ahead: 0, behind: 0 });
+    expect(within(push()).getByRole('button', { name: 'Up to date with origin/feature' }).textContent).toBe('Up to date with origin/feature');
     setStatus({ ...GIT, upstream: null });
     expect(within(push()).getByRole('button', { name: 'Not pushed' }).textContent).toBe('Not pushed');
   });

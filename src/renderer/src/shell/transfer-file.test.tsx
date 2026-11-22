@@ -289,13 +289,24 @@ describe('a main file tab moves beside the chat', () => {
     expect(sideTabOf(APP)).toBeDefined();
   });
 
+  // the word cut (N94, N90's pattern): the refused item stays in the keyboard's reach, greyed, its reason its description
+  // and its row note on focus, never a system tooltip; selecting it does nothing and keeps the menu open
   it('refuses a file with no session, or one the window does not know, with its sentence, in the menu and as a notice', async () => {
     useLayout.setState({ main: { ...mainShowing(A), panes: [{ tabs: [{ id: KEY(APP), kind: 'file', path: APP, line: null, appSessionId: null, machine: TEST_MACHINE, pinned: false }], activeTabId: KEY(APP) }] } });
     renderBoth();
     expect(transferRefusal({ to: 'panel', mainTabId: KEY(APP) })).toBe(TRANSFER_COPY.noSession);
     const item = await menuItem(mainTabElement(KEY(APP)), TRANSFER_COPY.moveToPanel);
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noSession);
+    expect(item.hasAttribute('data-disabled')).toBe(false); // not skipped by the menu's keyboard
+    expect(item.getAttribute('title')).toBeNull();
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToPanel, description: TRANSFER_COPY.noSession })).toBe(item);
+    act(() => within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Move to other pane' }).focus());
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(item);
+    expect(item.querySelector('[data-row-note]')?.hasAttribute('data-open')).toBe(true); // the reason shows on focus
+    fireEvent.click(item);
+    expect(screen.getByRole('menu')).toBeTruthy(); // nothing moved, the menu stays
+    expect(mainTabOf(APP)).toBeDefined();
     fireEvent.keyDown(item, { key: 'Escape' });
     act(() => runAction('artifact.moveToPanel'));
     expect(useNotices.getState().notices.map((notice) => notice.text)).toEqual([TRANSFER_COPY.noSession]);

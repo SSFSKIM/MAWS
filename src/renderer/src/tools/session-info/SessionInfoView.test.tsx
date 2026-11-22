@@ -122,8 +122,14 @@ describe('session info renders the six sections', () => {
     expect(screen.getAllByRole('term').map((t) => t.textContent)).toEqual(['Mode', 'Auto-mode lane', 'Rules', 'Cost']);
     fireEvent.click(within(screen.getByRole('heading', { name: 'Engine' })).getByRole('button'));
     expect(within(screen.getByRole('region', { name: 'Engine' })).getAllByRole('term')[0]!.textContent).toBe('Version');
-    fireEvent.click(within(screen.getByRole('heading', { name: 'Permissions' })).getByRole('button'));
-    expect(within(screen.getByRole('heading', { name: 'Permissions' })).getByRole('button').getAttribute('aria-expanded')).toBe('false');
+    const permissions = within(screen.getByRole('heading', { name: 'Permissions' })).getByRole('button');
+    const body = document.getElementById(permissions.getAttribute('aria-controls')!)!;
+    expect(body.hasAttribute('inert')).toBe(false);
+    fireEvent.click(permissions);
+    expect(permissions.getAttribute('aria-expanded')).toBe('false');
+    // while its close runs, the closing body is still drawn but out of the keyboard's and the pointer's reach
+    expect(body.isConnected).toBe(true);
+    expect(body.hasAttribute('inert')).toBe(true);
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Permissions' })).queryAllByRole('term')).toEqual([])); // after the close's motion
   });
 
