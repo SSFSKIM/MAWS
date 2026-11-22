@@ -42,7 +42,6 @@ import type { Locator, Page } from '@playwright/test';
 import { loadRecording, SESSION_VIEW, TWO_SUBAGENTS, type Recording, type Step } from 'desk-hub/fake-machine';
 import type { JsonObject } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 import { DepthPlayer } from './depth-player';
 import { FakeMachineReplay } from './fake-machine';
 import { DIST, expect, seedKey, test } from './fixtures';
@@ -197,8 +196,6 @@ test.afterEach(() => {
 });
 
 // ---- the desk's fixtures as the scenes use them ----------------------------------------------------------------------
-const TWO = readRecording(); // the two-subagents recording, as the depth player plays it
-const KETTLE = TWO.subagents[1]!; // the agent that reports where the kettle is
 const DIFF = readFileSync(join(TWO_SUBAGENTS, 'diff.patch'), 'utf8');
 // An invented file with three hunks, so the Diff tab's hunk counter has somewhere to go
 const SHELF = 'src/shelf.ts';
