@@ -244,7 +244,13 @@ function noGh({ shellHome }: { shellHome: string }) {
 }
 
 // ---- capture ---------------------------------------------------------------------------------------------------------
+// The window at the rig's size, and every action bounded: `_electron.launch` makes its own context, which the words
+// config's `use.actionTimeout` does not reach, so the context and the page are given the bound here (each launch calls
+// this first), and a target that never matches fails its scene alone.
+const ACTION_TIMEOUT = 15_000;
 async function size(maws: MawsLaunch) {
+  maws.app.context().setDefaultTimeout(ACTION_TIMEOUT);
+  maws.page.setDefaultTimeout(ACTION_TIMEOUT);
   await maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((x) => !x.isDestroyed())!.setContentSize(w, h), [W, H] as const);
   await expect.poll(() => maws.page.evaluate(() => [innerWidth, innerHeight])).toEqual([W, H]);
 }
@@ -3686,8 +3692,10 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     };
     const diskChanged = async () => {
       await editedNotes();
-      if ((await theirs().count()) === 0 && (await changes().count()) === 0) writeFileSync(join(panels, 'src/notes.md'), 'Drag keeps the row under the pointer.\nThe list scrolls with it.\nNothing jumps.\n');
-      await expect(theirs().or(changes()), 'the disk’s notice').toBeVisible({ timeout: 15_000 });
+      // the one marker of the disk's change: editor/EditorControls.tsx draws it in the notice and in the merge view alike
+      // (`data-theirs-notice` "notice" or "merge")
+      if ((await theirs().count()) === 0) writeFileSync(join(panels, 'src/notes.md'), 'Drag keeps the row under the pointer.\nThe list scrolls with it.\nNothing jumps.\n');
+      await expect(theirs(), 'the disk’s notice').toBeVisible({ timeout: 15_000 });
     };
     await shot(page, meta('m3-file-unsaved', 'T338', 'A file with unsaved edits, Save holding the keyboard', 'The panels session, Files, src/notes.md; type at its end, then Tab to Save', 'Save focused; on M3 its chord the tooltip (master: a system title, not drawn)'), async () => {
       await editedNotes();
@@ -3695,13 +3703,21 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       await save().focus();
     }, { check: tip3(page, save(), 'Save', save()) });
     await letGo(page);
-    await shot(page, meta('m3-file-disk-changed', 'T341', 'Unsaved edits whose file changed on disk', 'The same file, its copy on disk rewritten', 'The bar’s notice that the disk changed, with Reload, Keep mine and Compare'), diskChanged, { check: () => inView(theirs(), 'the disk’s notice') });
+    await shot(page, meta('m3-file-disk-changed', 'T341', 'Unsaved edits whose file changed on disk', 'The same file, its copy on disk rewritten', 'The bar’s notice that the disk changed, with Reload, Keep mine and Compare'), diskChanged, {
+      check: async () => {
+        await inView(theirs(), 'the disk’s notice');
+        await expect(theirs(), 'the notice, not the merge view').toHaveAttribute('data-theirs-notice', 'notice', { timeout: 3_000 });
+      },
+    });
     await shot(page, meta('m3-file-disk-compare', 'T342', 'Unsaved edits compared with the disk’s copy', 'The same file, Compare', 'The merge view, the count of changes beside its arrows'), async () => {
       await diskChanged();
-      if ((await changes().count()) === 0) await viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: M3_WORDS.compare, exact: true }).click();
+      if ((await theirs().getAttribute('data-theirs-notice')) !== 'merge') await viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: M3_WORDS.compare, exact: true }).click();
       await expect(changes(), 'the count of changes').toBeVisible({ timeout: 10_000 });
     }, {
-      check: () => inView(changes(), 'the count of changes'),
+      check: async () => {
+        await expect(theirs(), 'the merge view').toHaveAttribute('data-theirs-notice', 'merge', { timeout: 3_000 });
+        await inView(changes(), 'the count of changes');
+      },
       // Reload takes the disk's copy, so no unsaved edit is left to hold the app's quit
       after: async () => {
         const reload = viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: M3_WORDS.reload, exact: true });
@@ -3959,11 +3975,28 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
 
     // Session info once the browser holds a page (T539): the Browser tabs row, its count and memory (on M3 without
     // "outside the engine budget", which is its tooltip)
-    await shot(page, meta('m3-session-info-pages', 'T539', 'Session info with browser pages loaded', 'The panels session after its browser tab loaded, View › More surfaces › Session info', 'The Browser tabs row: the pages loaded and their memory'), async () => {
+    // the row's value with a page loaded: "<n> loaded · <m> MB" (n at least 1); on M3 the budget words are the value's
+    // tooltip, reached by focus (P162; session-info/SessionInfoView.tsx's Value), on master they end the value at rest
+    const budget = 'outside the engine budget'; // tools/browser/copy.ts: M3's sessionInfoSource, the end of master's sessionInfo
+    const loadedValue = () => (m3Cut() ? info().locator('span[tabindex="0"]').filter({ hasText: /^[1-9]\d* loaded( · \d+ MB)?$/ }) : info().getByText(new RegExp(`^[1-9]\\d* loaded( · \\d+ MB)? · ${budget}$`)));
+    await shot(page, meta('m3-session-info-pages', 'T539, P162', 'Session info with browser pages loaded, its value holding the keyboard', 'The panels session after its browser tab loaded, View › More surfaces › Session info; on M3 Tab to the Browser tabs value', 'The Browser tabs row: the pages loaded and their memory; on M3 “outside the engine budget” its tooltip, master’s at the value’s end'), async () => {
       await browserTab(); // the scratch page loaded, whether or not an earlier scene opened it
       await sideSurface(app, page, 'session-info');
-      await browserRow().first().scrollIntoViewIfNeeded({ timeout: 10_000 });
-    }, { check: () => inView(browserRow(), 'the Browser tabs row') });
+      await expect(loadedValue().first(), 'a loaded page’s value').toBeVisible({ timeout: 15_000 });
+      await loadedValue().first().scrollIntoViewIfNeeded();
+      await letGo(page);
+      if (m3Cut()) await loadedValue().first().focus();
+    }, {
+      check: async () => {
+        await inView(browserRow(), 'the Browser tabs row');
+        await inView(loadedValue(), 'a loaded page’s value');
+        if (m3Cut()) {
+          await focusIn(loadedValue(), 'the value')();
+          await expect(page.getByRole('tooltip').first(), 'the value’s tooltip').toContainText(budget, { timeout: 3_000 });
+        }
+      },
+    });
+    await letGo(page);
     await reset(page);
 
     // ---- the Chrome import (launch 6's fixture): the consent step (T511, T516), the report (P388, P394, T533), Settings ›
@@ -4100,7 +4133,10 @@ test('the word cut’s M3: the project Channel’s folded runs', async () => {
     }, {
       check: async () => {
         await inView(fold(broadcast), 'the folded run');
+        await expect(fold(broadcast), 'the run folded').toHaveAttribute('aria-expanded', 'false', { timeout: 3_000 });
+        await expect(fold(broadcast), 'its sender').toContainText('docs-writer');
         await inView(lone(), 'the one message to everyone');
+        await expect(lone(), 'its sender').toContainText('ledger-api');
         if (m3Cut()) {
           await expect(fold(broadcast).getByRole('img', { name: M3_WORDS.channelMessages(broadcast), exact: true }), 'the count, named').toHaveText(String(broadcast), { timeout: 3_000 });
           await expect(channel().getByText(M3_WORDS.toEveryone), 'no “to everyone”').toHaveCount(0, { timeout: 3_000 });
@@ -4118,6 +4154,8 @@ test('the word cut’s M3: the project Channel’s folded runs', async () => {
     }, {
       check: async () => {
         await inView(fold(exchange), 'the folded exchange');
+        await expect(fold(exchange), 'the exchange folded').toHaveAttribute('aria-expanded', 'false', { timeout: 3_000 });
+        for (const alias of ['ledger-api', 'reconciler']) await expect(fold(exchange), `its party ${alias}`).toContainText(alias);
         if (m3Cut()) {
           await expect(fold(exchange).getByRole('img', { name: M3_WORDS.channelMessages(exchange), exact: true }), 'the count, named').toHaveText(String(exchange), { timeout: 3_000 });
           await expect(fold(exchange), 'no count words before the names').not.toContainText(M3_WORDS.channelBetween(exchange));

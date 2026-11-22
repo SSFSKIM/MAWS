@@ -10,7 +10,4 @@ export default defineConfig({
   ...base,
   testMatch: 'words-shots.rig.ts',
   testIgnore: [],
-  // every action bounded (the word cut's M3): a click or focus whose target never matches fails its scene, recorded not
-  // reached, instead of waiting out the launch's whole timeout
-  use: { ...base.use, actionTimeout: 15_000 },
 });
