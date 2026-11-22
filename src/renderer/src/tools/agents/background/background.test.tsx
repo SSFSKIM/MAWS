@@ -5,7 +5,7 @@
 // sessions store is seeded directly.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId, TaskId } from '@shared/graph/ids';
@@ -192,6 +192,21 @@ beforeEach(() => {
   openTool.mockClear();
   vi.mocked(openLog).mockClear();
   vi.mocked(query.useCommand).mockClear();
+});
+
+// The scheduled jobs' cases read e7-cron, recorded in America/Los_Angeles: its crons name times in that zone, and its
+// one-shot "15 4 6 10 *" fires three minutes after its creation there (a year later in UTC or Asia/Seoul). A next run
+// shows its date when it is not today (T224), so the file runs in the recording's zone whatever this machine's, set
+// before any module builds its formatters (`@shared/app/date-format` builds them once, in the zone of that moment). The
+// cases pin their clock (`vi.setSystemTime`), so they hold at any hour.
+const machineZone = vi.hoisted(() => {
+  const zone = process.env.TZ;
+  process.env.TZ = 'America/Los_Angeles';
+  return zone;
+});
+afterAll(() => {
+  if (machineZone === undefined) delete process.env.TZ;
+  else process.env.TZ = machineZone;
 });
 
 afterEach(() => {
@@ -1300,7 +1315,7 @@ describe('scheduled jobs', () => {
     await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 3'));
     const rows = scheduled();
     expect(rows.map((r) => [r.id, r.when])).toEqual([
-      ['598b1690', expect.stringMatching(/^(?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2}\s?[AP]M · in /)], // the word cut (T224): its time (and day), then how far
+      ['598b1690', 'Oct 12, 9:00 AM · in 6d · Expires Oct 13'], // the word cut (T224): its date (not today, past the week), then how far
       ['481abb0a', expect.stringMatching(/^Resumes with the session · Expires /)],
       ['8d1a2582', 'Resumes with the session'],
     ]);
