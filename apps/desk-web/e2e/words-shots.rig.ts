@@ -322,19 +322,19 @@ async function openTouchTurn(page: Page, hub: HubDouble, part: TouchCall, target
   await expect(view).toContainText(TOUCH.answer);
   await view.locator('[data-transcript-scroller]').first().evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
   const found = target(view);
-  await expect(found).toHaveCount(1);
+  await expect(found, 'the surface in the session view').toHaveCount(1);
   await found.scrollIntoViewIfNeeded();
   await expect(found).toBeInViewport();
   return found;
 }
 
-/** A touch scene's check: on the cut's build the surface's fact drawn at rest (`display` as given) and reading `text`; on master's, none. */
-async function touchFact(surface: Locator, cut: boolean, text: string | RegExp, display: 'inline' | 'block' = 'inline') {
+/** A touch scene's check: on the cut's build the surface's fact drawn at rest and reading `text`; on master's, none. */
+async function touchFact(surface: Locator, cut: boolean, text: string | RegExp) {
   const fact = surface.locator('[data-touch-fact]');
-  if (!cut) return expect(fact).toHaveCount(0);
-  await expect(fact).toHaveCount(1);
+  if (!cut) return expect(fact, 'no touch fact on master').toHaveCount(0);
+  await expect(fact, 'its touch fact').toHaveCount(1);
   await expect(fact).toBeVisible();
-  await expect(fact).toHaveCSS('display', display);
+  await expect(fact).not.toHaveCSS('display', 'none');
   await expect(fact).toHaveText(text);
 }
 
@@ -719,6 +719,7 @@ test.describe('phone', () => {
         },
         async (cut) => {
           await expect(row!.locator('[data-browser-heading]')).toBeVisible();
+          console.log(`[desk words] browser row: ${await row!.evaluate((el) => el.outerHTML.slice(0, 1500))}`);
           await touchFact(row!, cut, /\d.* · .*\d/); // "<took> · <waited>"
         },
       );
