@@ -271,6 +271,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const controls = useSessionControls(appSessionId);
   const driven = controls !== null && controls.turn() !== null;
   const live = !driven && ctx.status !== null;
+  const runsHere = live && ctx.status!.process !== 'exited'; // an exited engine's kept status brings nothing more (the word cut's M3 panel)
   const jobs = useDrivenJobs(appSessionId, driven && !live);
   const listed = live || jobs !== null;
   // Whether what this session's list reads here has been read, so an empty Running can say `Nothing running`: the live
@@ -327,7 +328,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const row = (node: TaskNode) => {
     const key = node.taskId;
     const common = { node, selected: selected === node.taskId, stopError: stopErrors.get(node.taskId) ?? null };
-    if (node.kind === 'workflow') return <WorkflowCard key={key} {...common} view={runView(node, null, now)} live={live} phasesCanArrive={ctx.status !== null || driven || !runsRead} onOpen={handle.openRun} onStop={handle.stop} />;
+    if (node.kind === 'workflow') return <WorkflowCard key={key} {...common} view={runView(node, null, now)} live={live} phasesCanArrive={ctx.status !== null || driven || (!runsRead && runsError === null)} phasesReadError={runsError} onOpen={handle.openRun} onStop={handle.stop} />;
     const task = { ...common, now, stopDoubt: doubted.has(node.taskId), onStop, stopGap };
     if (node.kind === 'shell') return <ShellRow key={key} {...task} kindMark onOutput={live ? (path) => openLog(appSessionId, path, node.description) : null} />; // a lane A job's tail is remote-only
     if (node.kind === 'monitor') return <MonitorRow key={key} {...task} kindMark />;
@@ -339,7 +340,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
       {!listed && !driven && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</p>}
       {runsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{BACKGROUND_COPY.runsUnavailable(runsError)}</p>}
       {/* the word cut (T209): a run a hand-off named and no read has brought yet, a wait while a read can still bring it */}
-      {pendingRun !== null && <PendingRun appSessionId={appSessionId} live={live} error={false} className="shrink-0 px-3.5 pt-3" />}
+      {pendingRun !== null && <PendingRun appSessionId={appSessionId} live={runsHere} error={false} className="shrink-0 px-3.5 pt-3" />}
       {running.length > 0 ? (
         <Group id="running" heading={BACKGROUND_COPY.running(running.length)} expanded={expanded.has('running')} onToggle={handle.toggle}>
           {running.map(row)}

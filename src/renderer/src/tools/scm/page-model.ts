@@ -90,23 +90,28 @@ export const ageColumnChars = (ages: readonly string[]): number => Math.max(4, .
 
 // The Commits part's state (§H's "Refusals told apart"; frames' S9)
 
-export type CommitsState = { kind: 'outstanding' } | { kind: 'ready'; answer: GitBranchCommits } | { kind: 'failed'; failure: ReadFailure; refresh: boolean };
+export type CommitsState = { kind: 'outstanding' } | { kind: 'unasked' } | { kind: 'ready'; answer: GitBranchCommits } | { kind: 'failed'; failure: ReadFailure; refresh: boolean };
 
 /**
- * `serves`: the machine serves the reads (`servesReads`); `read`: the branch read's entry; `offline`: the machine's phase.
+ * `serves`: the machine serves the reads (`servesReads`); `read`: the branch read's entry; `offline`: the machine's phase;
+ * `socket`: the machine is up over a profile's socket, whose roster entry never lists capabilities.
  * An answer in hand stays shown when the machine stops serving the reads, by a disconnect or by no longer listing them
  * (the branch's max panel, Decision Log 49: what a tab has loaded, it keeps). With no answer: outstanding while nothing is
- * known; offline, with no refresh, while nothing is known and the machine is offline; older, with nothing asked and no
+ * known; offline, with no refresh, while nothing is known and the machine is offline; unasked (the bare heading) while
+ * nothing is known over a socket, where nothing will tell; older, with nothing asked and no
  * refresh, for a machine that lists its capabilities without the reads. While the
  * reads are served, an offline failure keeps what was last read; every other failure is said, with a refresh where a new
  * read can change the answer.
  */
-export function commitsState(serves: boolean | null, read: BranchRead | undefined, offline: boolean): CommitsState {
+export function commitsState(serves: boolean | null, read: BranchRead | undefined, offline: boolean, socket = false): CommitsState {
   if (serves !== true && read?.answer) return { kind: 'ready', answer: read.answer };
   if (serves === false) return { kind: 'failed', failure: { kind: 'older' }, refresh: false };
   // Not known whether it serves the reads, and offline: no read is asked until it is heard again, so this says offline
   // rather than wait (the word cut, N63: the spinner is for a wait that can end); heard again, the read is asked by itself
   if (serves === null && offline) return { kind: 'failed', failure: { kind: 'offline' }, refresh: false };
+  // Up over a socket, whose roster entry lists no capabilities, so no read is asked and nothing will tell: the bare heading,
+  // as before the cut, rather than a spinner for a wait that cannot end (the word cut's M3 panel)
+  if (serves === null && socket) return { kind: 'unasked' };
   if (serves === null || read === undefined) return { kind: 'outstanding' };
   if (read.failure === null) return read.answer === null ? { kind: 'outstanding' } : { kind: 'ready', answer: read.answer };
   const failure = readFailure(read.failure, offline);
