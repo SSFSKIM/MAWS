@@ -4,7 +4,7 @@
 
 314 items: 208 cut, 6 reworded, 100 stay. Of the 214 that change, the owner saw 47 in a picture or ruled on them; 167 follow the pattern and were not seen.
 
-Against master (M0): 255 unchanged, 48 moot, 5 moved, 5 rewritten by the wave, 1 gone; none waits on the owner; 18 put to the owner (new rows included) and since ruled. M0 added 96 rows for the UX wave's new text (6 cut, 29 reworded, 61 stay), listed at the end.
+Against master (M0): 255 unchanged, 48 moot, 5 moved, 5 rewritten by the wave, 1 gone; none waits on the owner; 18 put to the owner (new rows included) and since ruled. M0 added 97 rows for the UX wave's new text (7 cut, 29 reworded, 61 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -1080,6 +1080,7 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N97 | the second line of an agent the session reports as ended, with no record of how | ended | stays | Stays. rule 2: a status that tells what happened to a row; one word, shorter than the pin's "ended with the session" that T165 shortens to "session ended". | pattern | `src/renderer/src/tools/agents/copy.ts:43` | new `src/renderer/src/tools/agents/copy.ts:43` | M3 · no scene: needs a terminal-held session in that state (wanted: An agent known to have ended with no record of how, while its session still runs (a session driven through its terminal bridge)) |
+| N158 | the panel's body when it lists no agent; the desk's depth column tree reads the same words | No subagents yet | cut | An empty Agents panel reads No agents yet. | pattern | `src/renderer/src/tools/agents/copy.ts:53` | new `src/renderer/src/tools/agents/copy.ts:55` | M3 · no scene: Not shot yet (wanted: the Agents panel of a session that has dispatched no agent) |
 
 #### Subagents panel, one agent's page, the message box at the foot
 

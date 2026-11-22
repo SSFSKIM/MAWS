@@ -1,7 +1,7 @@
 // One subagent opened from the tree (the DC6 plan's M2): MAWS's Subagents drill-in as it stands —
 // `tools/agents/subagents/DrillIn.tsx`, copied and adapted — over the agent's own subscription (DX3 scopes it by
 // `agentId`), whose transcript and stream are drawn as the main thread's are. The header is MAWS's: Back, the agent's
-// glyph and title, `<model> · <elapsed> · <tokens>`, and who dispatched it. MAWS's drill-in also stops the agent and
+// glyph and title, `<model> · <elapsed> · <tokens>` (the values it has; the word cut drops who dispatched it, T184). MAWS's drill-in also stops the agent and
 // relays a message to it through its parent; neither is here (stopping an agent is not in phase 1). The agent's own
 // background shells and monitors, which its subscription carries, stand above its transcript while it has any, each
 // with Stop (DC10, `JobsPane`'s agent scope).
@@ -14,7 +14,6 @@ import { refOf, useTicker } from '../../../../../src/renderer/src/tools/agents/s
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import { SubagentGlyph } from '../../../../../src/renderer/src/transcript/view/rows/Subagent';
-import { sessionName } from '../../log/projection';
 import type { SessionPlane } from '../../../../../src/renderer/src/lane-a/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { deskTranscript } from '../source/desk-source';
@@ -57,9 +56,6 @@ export function SubagentDetail({ project, session, plane, agentId, node, actions
             <h2 className="m-0 truncate text-ui font-semibold">{node ? rowTitle(node) : agentId}</h2>
             <p data-part="agent-meta" className="m-0 truncate text-ui-sm text-fg-muted tabular-nums">
               {meta}
-            </p>
-            <p data-part="dispatched-by" className="m-0 truncate text-ui-sm text-fg-muted">
-              {SUBAGENTS_COPY.dispatchedBy(sessionName(session))}
             </p>
           </div>
           <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="depth-subagent-status">

@@ -9,7 +9,7 @@
 // waiting on a request of its own keeps its line, its mark a warning disc beside its glyph and `Approval needed` the
 // row's tooltip and description (T166); a row of unknown status has no second line and a running one with no start
 // time no elapsed (T167, T168).
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import { SubagentGlyph } from '../../../transcript';
@@ -64,15 +64,18 @@ export function AgentRow({
     elapsed = e ? formatElapsed(e.ms) : SUBAGENTS_COPY.elapsedUnavailable;
   }
   const line = lineOf(node, graph, now);
+  // the row is where pointing opens its tip (its disclosure included); the open button its keyboard owner (T166)
+  const rowRef = useRef<HTMLDivElement>(null);
   return (
     <div
+      ref={rowRef}
       data-agent-row={row.taskId}
       data-depth={row.depth}
       data-waiting={waiting || undefined}
       style={indent(row.depth)}
       className={`relative flex min-h-12 items-stretch ${row.depth > 0 ? 'border-l border-border-strong' : ''}`}
     >
-      <Tip content={waiting ? SUBAGENTS_COPY.approvalNeeded : null} description={waiting ? SUBAGENTS_COPY.approvalNeeded : null}>
+      <Tip content={waiting ? SUBAGENTS_COPY.approvalNeeded : null} description={waiting ? SUBAGENTS_COPY.approvalNeeded : null} pointedWithin={rowRef}>
         <button
           type="button"
           data-part="open"

@@ -52,7 +52,7 @@ export const SUBAGENTS_COPY = {
   statusUnavailable: '',
   elapsedUnavailable: '',
   diskOnly: 'Status is known only while the session runs here',
-  empty: 'No subagents yet',
+  empty: 'No agents yet', // the word cut (N158): the tool is Agents (T152); the desk's tree reads it too
   readFailed: (message: string) => `Couldn't read agents: ${message}`, // the word cut (T160): was Sidecars unavailable
   // drill-in
   back: '‹ Agents', // the word cut (T152): the back link follows the tab
@@ -60,8 +60,6 @@ export const SUBAGENTS_COPY = {
   header: (model: string | null, elapsed: string | null, tokens: string | null) => [model, elapsed, tokens].filter(Boolean).join(' · '),
   modelUnknown: '',
   tokensUnavailable: '',
-  // The word cut (T184) removes this line from the app's drill-in; the desk's web app's own drill-in still draws it.
-  dispatchedBy: (session: string) => `Dispatched by ${session}`,
   stopAgent: 'Stop agent',
   stopConfirm: (title: string) => `Stop ${title}?`,
   stopConfirmYes: 'Stop',
@@ -145,6 +143,7 @@ export const BACKGROUND_COPY = {
   phaseUntitled: (index: number) => `Phase ${index}`, // agents naming a phaseIndex with no workflow_phase row
   columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time', /* E7 */ state: 'State' }, // the widget's agent table
   phasesPending: 'Phases arrive with the first progress frame', // the quiet spinner's name (the word cut, T212)
+  noPhases: 'No phases', // a run that ended before any progress: its wait is over (the word cut, T212)
   stop: 'Stop', // a workflow's too, on its own card and page (the word cut, T215)
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
@@ -176,8 +175,10 @@ export const BACKGROUND_COPY = {
   noTranscript: 'No transcript known for this agent', // a started row whose id neither the row nor the run's journal gives
   phaseDone: 'done', // the phase mark of a finished phase and a done agent's state, by its accessible name
   noAgentsInPhase: 'No agents yet', // the word cut (T239)
-  // a hand-off named a run no read has brought yet; the widget opens when one does (the word cut, T209: a quiet spinner)
+  // a hand-off named a run no read has brought yet; the widget opens when one does (the word cut, T209: a quiet spinner
+  // while a read can still bring it; `runMissing` once the session's read answered without it)
   runNotFound: 'Loading run…',
+  runMissing: 'Run not found',
   runSummary: {
     queued: 'Queued',
     done: 'Done',

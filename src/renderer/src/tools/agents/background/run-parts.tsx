@@ -1,9 +1,12 @@
 // What a workflow run's card and its widget both draw (C8b M3, E7 Design §2): the run's line and its ended state's badge.
 // Kept apart from either component's module (E11 W-D, E7 housekeeping).
+import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
+import { QuietSpinner } from '../../../ui/spinner';
 import { BACKGROUND_COPY } from '../copy';
 import { formatElapsed } from '../model/elapsed';
-import type { TaskNode } from '../model/task-graph';
+import { isEnded, type TaskNode } from '../model/task-graph';
+import { useTaskGraph } from '../store';
 import type { RunView } from '../model/workflow-run';
 import { statusWord } from './TaskRows';
 
@@ -11,6 +14,30 @@ import { statusWord } from './TaskRows';
 // tokens, and no words for a time no frame gave).
 export function runLine(node: TaskNode, view: RunView): string {
   return BACKGROUND_COPY.workflowLine(node.workflow?.workflowName ?? null, view.elapsedMs === null ? null : formatElapsed(view.elapsedMs), view.agents);
+}
+
+// Where a run's phases go before it has any (the word cut, T212): a quiet spinner while the run can still report them,
+// `No phases` once it ended without (its badge says how).
+export function PhasesPending({ node }: { node: TaskNode }) {
+  return isEnded(node.status) ? BACKGROUND_COPY.noPhases : <QuietSpinner label={BACKGROUND_COPY.phasesPending} />;
+}
+
+// A run a link named that no read has brought yet (the word cut, T209). A quiet spinner while a read can still bring it:
+// the session is live here (its events), or its disk read has not answered. Settled otherwise: the read's error, said
+// once by the list on its own line (`error` draws it here, where nothing else does), or `Run not found` once the read
+// answered without it. Either way the run opens when a later read brings it.
+export function PendingRun({ appSessionId, live, error, className = '' }: { appSessionId: AppSessionId; live: boolean; error: boolean; className?: string }) {
+  const runsRead = useTaskGraph((s) => (s.entries.get(appSessionId)?.disk.runs ?? null) !== null);
+  const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
+  if (runsError !== null) return error ? <p className={`text-ui-sm text-danger ${className}`}>{BACKGROUND_COPY.runsUnavailable(runsError)}</p> : null;
+  if (live || !runsRead) {
+    return (
+      <p className={className || undefined}>
+        <QuietSpinner label={BACKGROUND_COPY.runNotFound} />
+      </p>
+    );
+  }
+  return <p className={`text-ui-sm text-fg-muted ${className}`}>{BACKGROUND_COPY.runMissing}</p>;
 }
 
 // An ended run's state (the card's and the widget's badge); nothing while it runs. The word cut (T213, P126): a

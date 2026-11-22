@@ -8,7 +8,6 @@
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
-import { QuietSpinner } from '../../../ui/spinner';
 import type { PanelToolContext } from '../../../panel/tool';
 import { glyphFor, SubagentGlyph } from '../../../transcript';
 import { BACKGROUND_COPY } from '../copy';
@@ -21,7 +20,7 @@ import { useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import type { BackgroundHandle } from './BackgroundTool';
 import { StopButton, StopError } from './TaskRows';
-import { RunBadge, runLine } from './run-parts';
+import { PendingRun, PhasesPending, RunBadge, runLine } from './run-parts';
 
 const EMPTY_GRAPH = emptyGraph();
 
@@ -44,6 +43,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
   // earlier run of it, so it offers no lane B Stop workflow (as Background work's card offers none)
   const controls = useSessionControls(appSessionId);
   const driven = controls !== null && controls.turn() !== null;
+  const live = !driven && ctx.status !== null;
   const back = (
     <button type="button" onClick={handle.back} className="self-start rounded-sm text-ui-sm text-fg-muted outline-accent hover:text-fg focus-visible:outline-2">
       {BACKGROUND_COPY.back}
@@ -53,7 +53,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
     return (
       <div data-view="run" className="flex h-full min-h-0 flex-col gap-2 overflow-auto px-3.5 py-2">
         {back}
-        <QuietSpinner label={BACKGROUND_COPY.runNotFound} /* the word cut (T209) */ />
+        <PendingRun appSessionId={appSessionId} live={live} error /* the word cut (T209) */ />
       </div>
     );
   }
@@ -62,7 +62,6 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
   // the owner's pick while the snapshot still has it, else the default (a phase a later snapshot dropped)
   const kept = phase === 'all' || view.phases.some((p) => p.index === phase) ? phase : null;
   const selection = kept ?? defaultPhase(view.phases);
-  const live = !driven && ctx.status !== null;
   // the selection names its session, so a pinned Subagents tab still on another session follows this one first
   const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId, appSessionId } });
   return (
@@ -85,7 +84,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
       </header>
       {view.phases.length === 0 ? (
         <p className="px-3.5 pt-3">
-          <QuietSpinner label={BACKGROUND_COPY.phasesPending} /* the word cut (T212) */ />
+          <PhasesPending node={node} /* the word cut (T212) */ />
         </p>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col @min-[520px]:flex-row">
