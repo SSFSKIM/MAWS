@@ -332,3 +332,22 @@ The rows of `items.json` that M3 cuts or rewords and that no scene shows, by why
 - **Review and the import in a state not taken:** P288 (Staged chosen, then the index emptied under it), T527 (partitioned cookies not all confirmed: the report scene imports no cookies), P398 (an import cancelled before it kept anything: `importThrough`'s `cancelDuring` reaches it in a launch whose Chrome profile is not imported yet).
 - **The clipboard:** T464 (Copy URL's and Copy screenshot's "Copied"). Its only way in writes the Mac's clipboard, which the rig does not touch on a shared Mac.
 - **Open in:** N90 (the reason on Open in's terminal row, for a file outside the session's folders). `m0-file-outside` opens such a file, and the row could be pointed at; not taken here.
+
+## The desk's scenes
+
+The desk's web app has a rig of its own, `apps/desk-web/e2e/words-shots.rig.ts`, for the pictures board ticket 830 asks for. It is not a `*.spec.ts` file, so the desk's gated Playwright config never collects it; its own config, `apps/desk-web/playwright.words.config.ts`, selects it. Run it from a checkout of the branch under test with dependencies installed:
+
+    WORDS_OUT=$HOME/maws-words/desk-after pnpm --filter desk-web shots:words
+
+That builds `dist/` and runs every scene in a minute or two, headless. It writes `<WORDS_OUT>/desk-<scene>.png` and a `_desk-run.json` that records whether each scene was reached. For the before: in a clean checkout of master, run `git checkout <branch> -- apps/desk-web/e2e/words-shots.rig.ts apps/desk-web/playwright.words.config.ts apps/desk-web/package.json`, then the same command into another folder. `WORDS_ONLY` narrows the run. Each scene reads the build from the touch rule's stylesheet rule and checks that build's form before capture. Phone scenes run at 390x844 with `isMobile` and `hasTouch`, and check `(hover: none)`. Desktop scenes run at 1440x900 and check `(hover: hover)`. On the VM on 2026-11-22, all eight scenes were reached on both builds: master b5aa8cd48, and the branch at f7c972d9c.
+
+| Scene | Viewport | Title | Rows |
+|---|---|---|---|
+| `desk-diff` | 1440x900 | The depth column's Diff tab | N160 |
+| `desk-diff-hunk` | 1440x900 | The Diff tab's hunk counter, on a file's second hunk | T306 |
+| `desk-agents` | 1440x900 | The depth column's Agents tab with the two agents' tree | T152 |
+| `desk-agents-earlier` | 1440x900 | The Agents tree from an older producer: agents whose status it does not report ("Earlier") | T158 |
+| `desk-agent-page` | 1440x900 | One agent's page, opened from the tree | T184 |
+| `desk-chat` | 1440x900 | The group chat with the agents' traffic folded | N170 |
+| `desk-phone-chat-fold` | phone 390x844 | The group chat's folded agents' traffic on the phone | N170, ticket 830 |
+| `desk-phone-subagents` | phone 390x844 | A subagent row on the phone while its agents work (the detail at rest) | T87, ticket 830 |
