@@ -1337,19 +1337,13 @@ describe('scheduled jobs', () => {
   const next = (cron: string, from: number) => nextCronMatch(parseCron(cron)!, from)!;
   const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
 
-  const shownText = (element: Element | null) => {
-    if (!element) return undefined;
-    const copy = element.cloneNode(true) as Element;
-    for (const hidden of copy.querySelectorAll('[hidden]')) hidden.remove();
-    return copy.textContent;
-  };
   const scheduled = () =>
     Array.from(section('scheduled')?.querySelectorAll<HTMLElement>('[data-scheduled]') ?? []).map((row) => ({
       id: row.dataset.scheduled,
       schedule: row.querySelector('[data-part="schedule"]')?.textContent,
       kind: row.querySelector('[data-part="kind"]')?.textContent,
       prompt: row.querySelector('[data-part="prompt"]')?.textContent,
-      when: shownText(row.querySelector('[data-part="when"]')), // the next run's tip keeps its description hidden beside it
+      when: row.querySelector('[data-part="when"]')?.textContent, // the line's own text: the next run's tip's description is not in it
       link: row.querySelector('button')?.getAttribute('aria-label') ?? null, // the word cut (T222): a glyph named by the words
     }));
   const attachTranscript = (events: SessionEvent[]) => act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
@@ -1390,9 +1384,11 @@ describe('scheduled jobs', () => {
     const nextRun = document.querySelector<HTMLElement>('[data-scheduled="481abb0a"] [data-part="when"] [tabindex="0"]')!;
     expect(nextRun.textContent).toBe(`${TIME.format(tick)} · ${formatIn(tick - now)}`);
     expect(section('scheduled')!.querySelector('[data-part="when"] [title]')).toBeNull();
-    expect(document.getElementById(nextRun.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early',
-    );
+    const jitter = document.getElementById(nextRun.getAttribute('aria-describedby') ?? '')!;
+    expect(jitter.textContent).toBe('The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early');
+    // the description is kept outside the line, so the line's own text (what a copy or a read of it takes) is its words
+    expect(jitter.closest('[data-part="when"]')).toBeNull();
+    expect(jitter.hidden).toBe(true);
     // Open creating turn is a glyph drawn on the pointed or focused row (and always where nothing points), its words its
     // name and its tooltip; it jumps the transcript to the call's cell
     const link = within(document.querySelector<HTMLElement>('[data-scheduled="481abb0a"]')!).getByRole('button', { name: 'Open creating turn' });
