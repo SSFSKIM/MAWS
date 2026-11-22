@@ -162,6 +162,15 @@ describe('the Commits part’s state over the branch read (frames’ S9)', () =>
     expect(commitsState(null, { answer, failure: null }, true)).toEqual({ kind: 'ready', answer });
   });
 
+  // The word cut's M3 panel (scalpel-3#2): up over a profile's socket, which lists no capabilities, nothing is asked and
+  // nothing will tell, so nothing waits; an earlier answer stays
+  it('is unasked, not outstanding, while whether the machine serves the reads is not known and it is up over a socket', () => {
+    expect(commitsState(null, undefined, false, true)).toEqual({ kind: 'unasked' });
+    expect(commitsState(null, { answer: null, failure: null }, false, true)).toEqual({ kind: 'unasked' });
+    expect(commitsState(null, { answer, failure: null }, false, true)).toEqual({ kind: 'ready', answer });
+    expect(commitsState(true, undefined, false, true)).toEqual({ kind: 'outstanding' });
+  });
+
   it('is older, with no refresh, for a machine that lists its capabilities without the reads, an unknown command and an endpoint that does not offer them', () => {
     expect(commitsState(false, undefined, false)).toEqual({ kind: 'failed', failure: { kind: 'older' }, refresh: false });
     expect(commitsState(true, { answer: null, failure: { status: 'error', message: 'unknown', code: 'unknown_command' } }, false)).toEqual({ kind: 'failed', failure: { kind: 'older' }, refresh: false });

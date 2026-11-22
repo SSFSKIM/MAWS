@@ -483,6 +483,18 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
     expect(within(part('commits')!).queryByRole('progressbar')).toBeNull();
   });
 
+  // The word cut's M3 panel (scalpel-3#2): a machine up over a profile's socket lists no capabilities, so nothing is asked
+  // and nothing will tell; the part keeps its bare heading, as before the cut, rather than spin for a wait that cannot end
+  it('keeps the bare heading, with no spinner, for a machine up over a socket, which never lists its capabilities', async () => {
+    roster([{ capabilities: ['rl2.git-reads'] }, { ref: OTHER_MACHINE, name: 'berth-mini', local: false, state: 'up', carrier: 'socket', since: '2026-01-01T00:00:00.000Z' }]);
+    mount(REMOTE);
+    await waitFor(() => expect(text(part('commits'))).toBe('Commits'));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 600))); // past the quiet spinner's delay
+    expect(within(part('commits')!).queryByRole('progressbar')).toBeNull();
+    expect(text(part('commits'))).toBe('Commits');
+    expect(branchAsks()).toBe(0);
+  });
+
   it('names the machine in the header, "· offline" after it while its link is down', async () => {
     servesRemote({ state: 'down', since: '2026-01-01T00:00:00.000Z' });
     mount(REMOTE);
