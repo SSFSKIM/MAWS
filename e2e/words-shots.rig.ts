@@ -564,9 +564,9 @@ const M3_SOURCE = 'src/renderer/src/ui/touch-fact.tsx';
 async function m3Build(page: Page): Promise<boolean> {
   if (cut3 === null && cut3Refused === null) {
     const drawn = await page.evaluate(() =>
-      [...document.styleSheets].some((sheet) => {
+      Array.from(document.styleSheets).some((sheet) => {
         try {
-          return [...sheet.cssRules].some((rule) => rule.cssText.includes('[data-touch-fact]'));
+          return Array.from(sheet.cssRules).some((rule) => rule.cssText.includes('[data-touch-fact]'));
         } catch {
           return false; // a sheet of another origin (none in the app) says nothing
         }
