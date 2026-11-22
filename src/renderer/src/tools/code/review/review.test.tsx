@@ -1162,6 +1162,16 @@ describe('review tool', () => {
     expect(footer()).toBeNull();
   });
 
+  it('keeps a failed read’s sentence a plain line in the panel, where the pressed chip has the words', async () => {
+    main().state.diff = (input) => (input.path === undefined ? Promise.resolve(fail('git busy')) : undefined);
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: git busy'));
+    expect(document.querySelector('[data-review-unavailable]')!.matches('[data-review-scope-words]')).toBe(false);
+    expect(document.querySelector('[data-review-unavailable]')!.tabIndex).toBe(-1);
+    expect(scopeWords()).toBe('main · Working tree against HEAD');
+  });
+
   it('keeps Staged selected but disabled once the index matches HEAD again', async () => {
     render(<TestHost />);
     openReview({ scope: 'staged' });
@@ -2638,7 +2648,7 @@ describe('review diff tab', () => {
     main().state.uncommitted = { patch: '', files: [] };
     render(<DiffTab tab={diffTab('uncommitted')} />);
     await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes'));
-    const line = document.querySelector<HTMLElement>('[data-review-empty] [data-review-scope-words]')!;
+    const line = document.querySelector<HTMLElement>('[data-review-empty]')!;
     expect([line.tabIndex, describedBy(line)]).toEqual([0, 'main · Working tree against HEAD']);
   });
 
@@ -2646,17 +2656,8 @@ describe('review diff tab', () => {
     main().state.diff = (input) => (input.path === undefined ? Promise.resolve(fail('git busy')) : undefined);
     render(<DiffTab tab={diffTab('uncommitted')} />);
     await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: git busy'));
-    const line = document.querySelector<HTMLElement>('[data-review-unavailable] [data-review-scope-words]')!;
+    const line = document.querySelector<HTMLElement>('[data-review-unavailable]')!;
     expect([line.tabIndex, describedBy(line), footer()]).toEqual([0, 'main · Working tree against HEAD', null]);
-  });
-
-  it('keeps a failed read’s sentence a plain line in the panel, where the pressed chip has the words', async () => {
-    main().state.diff = (input) => (input.path === undefined ? Promise.resolve(fail('git busy')) : undefined);
-    openReview();
-    render(<TestHost />);
-    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: git busy'));
-    expect(document.querySelector('[data-review-unavailable] [data-review-scope-words]')).toBeNull();
-    expect(scopeWords()).toBe('main · Working tree against HEAD');
   });
 
   it('refuses a path outside the repository and opens nothing', async () => {
