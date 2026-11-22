@@ -258,11 +258,12 @@ function agentsAtWork(recording: Recording): number {
 // A turn a touch scene adds to the session-view recording, after its last turn and before the session ends (as
 // long-inputs.ts adds one): one of MAWS's own tool calls, which the recordings do not hold, written as the engine writes
 // its rows — a historical browser call (`mcp__maws__browser_navigate`) with its result, the time it took and a wait for
-// the person; a delivered file (`mcp__maws__send_file`) with its result; or an ask (`mcp__maws__ask`) that never got a
-// result before its turn closed, which the transcript reads as cancelled ("the session ended"). One call a turn, so a
-// surface the desk cannot draw costs only its own scene. Invented content throughout.
-type TouchCall = 'ask' | 'browser' | 'delivery';
-const TOUCH = { tab: 'b_0123456789ab', url: 'https://example.com/shelves', file: '/Users/owner/kettle-works/out/shelf-labels.pdf', answer: 'The labels are printed; the casing question can wait.' };
+// the person; or an ask (`mcp__maws__ask`) that never got a result before its turn closed, which the transcript reads as
+// cancelled ("the session ended"). One call a turn. A delivered file (`mcp__maws__send_file`) has no scene: its row's
+// file buttons read MAWS's bridge (`ipc.localMachine`), which the desk lacks, so the desk fails to load on one (word cut
+// M3, task 9's report). Invented content throughout.
+type TouchCall = 'ask' | 'browser';
+const TOUCH = { tab: 'b_0123456789ab', url: 'https://example.com/shelves', answer: 'The labels are printed; the casing question can wait.' };
 function withTouchTurn(recording: Recording, part: TouchCall): Recording {
   const main = recording.rows.main;
   const lastRow = main.at(-1)!;
@@ -293,14 +294,10 @@ function withTouchTurn(recording: Recording, part: TouchCall): Recording {
       call(2, 'toolu_touch_nav', 'mcp__maws__browser_navigate', { tabId: TOUCH.tab, url: TOUCH.url }),
       result(3, 'toolu_touch_nav', { status: 'ok', tabId: TOUCH.tab, url: TOUCH.url, title: 'Shelves', ms: 1240, waitedFor: 'human', waitedMs: 3000 }),
     ],
-    delivery: [
-      call(2, 'toolu_touch_send', 'mcp__maws__send_file', { files: [TOUCH.file], caption: 'The printed labels' }),
-      result(3, 'toolu_touch_send', { status: 'delivered', deliverables: [{ id: 'dlv_touch1', path: TOUCH.file, name: 'shelf-labels.pdf' }] }),
-    ],
     ask: [call(2, 'toolu_touch_ask', 'mcp__maws__ask', { title: 'Label casing', questions: [{ question: 'Which casing do the labels use?', modality: 'choice', options: [{ label: 'lower' }, { label: 'upper' }] }] })],
   };
   const rows: JsonObject[] = [
-    { ...envelope(1), type: 'user', origin: { kind: 'human' }, promptId: 'p-touch', message: { role: 'user', content: 'Check the shelf page, send me the labels, then ask me about the casing.' } },
+    { ...envelope(1), type: 'user', origin: { kind: 'human' }, promptId: 'p-touch', message: { role: 'user', content: 'Check the shelf page, then ask me about the label casing.' } },
     ...calls[part],
     {
       ...envelope(7),
@@ -321,7 +318,7 @@ async function openTouchTurn(page: Page, hub: HubDouble, part: TouchCall, target
   const view = channel(page).getByTestId('session-view');
   await expect(view).toContainText(TOUCH.answer);
   await view.locator('[data-transcript-scroller]').first().evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-  // A call the report view folds into the turn's working record (a browser action, unlike an ask or a delivery, does
+  // A call the report view folds into the turn's working record (a browser action, unlike an ask, does
   // not stay in view): the record unfolded, then its run of calls opened, each one tap, as phone.spec.ts does.
   const opens = [view.locator('[data-row-id^="record-fold:closed:toolu_touch_"] button'), view.locator(`[data-turn-id] .transcript-run-line[aria-expanded="false"]`).last()];
   for (const open of opens) if ((await target(view).count()) === 0 && (await open.count()) > 0) await open.click();
@@ -724,32 +721,6 @@ test.describe('phone', () => {
         async (cut) => {
           await expect(row!.locator('[data-browser-heading]')).toBeVisible();
           await touchFact(row!, cut, /\d.* · .*\d/); // "<took> · <waited>"
-        },
-      );
-    },
-  );
-
-  scene(
-    {
-      id: 'desk-phone-delivery',
-      title: "A delivered file's row on the phone",
-      how: 'As desk-phone-ask: the invented turn\'s maws send_file call, delivered',
-      state: "The cut: a greyed button's reason drawn at rest after it. Master: the buttons at rest, the reason only their tooltip",
-      viewport: PHONE_NAME,
-      rows: ['T101', 'ticket 830'],
-    },
-    async (page, hub, meta) => {
-      let row: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          row = await openTouchTurn(page, hub, 'delivery', (view) => view.locator('[data-delivery]'));
-        },
-        async (cut) => {
-          await expect(row!.locator('.transcript-delivery-file')).toBeVisible();
-          if (cut) console.log(`[desk words] delivery: ${await row!.evaluate((el) => el.outerHTML.slice(0, 1500))}`);
-          await touchFact(row!, cut, /\S/);
         },
       );
     },
