@@ -41,6 +41,7 @@ import { RouteSwitch } from './RouteSwitch';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { heldModel, resetModelRequests, useModelRequests, type HeldModel } from '../../widgets/model';
 import { liveBindings } from '../../composer/frame/bindings';
+import { accessibleText } from '../../test-support/accessible-text';
 // E4a start
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { browser, resetBrowser } from '../browser/store';
@@ -93,8 +94,12 @@ const mount = (ctx: PanelToolContext) => {
     </QueryClientProvider>,
   );
 };
-// The value beside a key, with its note.
-const valueOf = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.textContent ?? '';
+// The value beside a key, with its note, as the accessibility tree keeps it (a tooltip's description waits hidden beside
+// its value).
+const valueOf = (label: string) => {
+  const value = screen.getByText(label, { selector: 'dt' }).nextElementSibling;
+  return value ? accessibleText(value) : '';
+};
 // UX wave U4a (decision 19), the word cut (T253): a value's tooltip, where it has one (the Main row's raw model id; where
 // a value came from), on the value itself, which takes the keyboard and carries it as its description
 const tipOf = (label: string) => {
@@ -111,14 +116,15 @@ const heads = () => screen.getAllByRole('heading', { level: 4 }).map((h) => [h.t
 
 describe('session info renders the six sections', () => {
   // The word cut (T252): each group's head is its disclosure; Permissions and Usage start open, a press opens another
-  it('folds every group to its head but Permissions and Usage, and a press on a head opens it', () => {
+  it('folds every group to its head but Permissions and Usage, and a press on a head opens it', async () => {
     mount(ctxOf(READY));
     expect(heads()).toEqual([['Engine', 'false'], ['Model', 'false'], ['Gateway', 'false'], ['Permissions', 'true'], ['Usage', 'true'], ['Hooks and MCP', 'false']]);
     expect(screen.getAllByRole('term').map((t) => t.textContent)).toEqual(['Mode', 'Auto-mode lane', 'Rules', 'Cost']);
     fireEvent.click(within(screen.getByRole('heading', { name: 'Engine' })).getByRole('button'));
     expect(within(screen.getByRole('region', { name: 'Engine' })).getAllByRole('term')[0]!.textContent).toBe('Version');
     fireEvent.click(within(screen.getByRole('heading', { name: 'Permissions' })).getByRole('button'));
-    expect(within(screen.getByRole('region', { name: 'Permissions' })).queryByRole('term')).toBeNull();
+    expect(within(screen.getByRole('heading', { name: 'Permissions' })).getByRole('button').getAttribute('aria-expanded')).toBe('false');
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Permissions' })).queryAllByRole('term')).toEqual([])); // after the close's motion
   });
 
   it('Engine, Model, Gateway, Permissions, Usage, Hooks and MCP over a routed scenario session', async () => {
