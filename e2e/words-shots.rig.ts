@@ -43,10 +43,6 @@ import { memberNames } from '../src/shared/org/member-name';
 import { BROWSER, INDEX, KEYBOARD, NOTIFICATIONS, ORG, SUPERVISOR, VOICE } from '../src/renderer/src/settings-tab/copy';
 import { BROWSER_COPY } from '../src/renderer/src/tools/browser/copy';
 import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../src/renderer/src/tools/agents/copy';
-import { ARTIFACTS_TOOL_COPY } from '../src/renderer/src/tools/artifacts/copy';
-import { COPY as PANEL_COPY } from '../src/renderer/src/panel/copy';
-import { EDITOR_COPY, REVIEW_COPY } from '../src/renderer/src/tools/code/copy';
-import { SIDE_COPY } from '../src/renderer/src/side/copy';
 import { ACTIONS } from '../src/shared/keymap/actions';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
@@ -586,6 +582,20 @@ function m3Cut(): boolean {
   if (cut3 === null) throw new Error('the build is not known yet: no m3 scene has read it in this run');
   return cut3;
 }
+// Words of renderer modules the e2e project does not list (tsconfig.e2e.json), written here with their source, each as
+// its build has it
+const M3_WORDS = {
+  artifacts: 'Artifacts', // tools/artifacts/copy.ts ARTIFACTS_TOOL_COPY.title, the same on both builds
+  back: { m3: 'Back to list', master: 'Back' }, // ARTIFACTS_TOOL_COPY.back: M3's chevron's name (T556), master's word
+  pinTab: { m3: 'Pin tab', master: 'Keep open for every session' }, // panel/copy.ts COPY.pinTab (P8); master's panel/SurfaceRow.tsx literal
+  openSurface: 'Open surface', // master's panel/copy.ts COPY.openSurface, which M3 removed (P9)
+  side: 'Side', // side/copy.ts SIDE_COPY.pane.title, the same on both builds
+  binaryFile: 'Binary file', // tools/code/copy.ts REVIEW_COPY.binaryFile, the same on both builds
+  save: 'Save', // tools/code/copy.ts EDITOR_COPY's save, compare and reload, the same on both builds
+  compare: 'Compare',
+  reload: 'Reload',
+};
+const byM3 = (words: { m3: string; master: string }) => (m3Cut() ? words.m3 : words.master);
 // The check that `owner`'s own tooltip is open on M3's build (the owner holding the keyboard); on master's, `rest`, what
 // master draws in its place, in view.
 const tip3 = (page: Page, owner: Locator, what: string, rest: Locator) => checks(() => (m3Cut() ? focusIn(owner, what)() : Promise.resolve()), tipShown(page, owner, what, rest, m3Cut));
@@ -3456,6 +3466,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
   try {
     await size(maws);
     await light(page);
+    await m3Build(page).catch((error: unknown) => setupFailed('reading the build', error)); // the stylesheet is the window's from its start
     const ids: Record<string, string> = {};
     await expect.poll(async () => {
       const { sessions } = value(await invoke(page, 'session.list', {}));
@@ -3473,7 +3484,25 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     const scm = () => surface(page, 'source-control');
     const files = () => surface(page, 'files');
     const browser = () => surface(page, 'browser');
-    const meta = (id: string, rows: string, title: string, how: string, state: string, folders: string[], hover?: true) => m3({ id, title, how, state: `${state} (${rows})`, folders, ...(hover && { hover }) });
+    // each scene's folders by its id's family, the first prefix that matches
+    const FOLDERS: [string, string[]][] = [
+      ['m3-cards-', ['panel', 'panel/summary']],
+      ['m3-review-', ['tools/code/review', 'panel']],
+      ['m3-scm-', ['tools/scm', 'panel']],
+      ['m3-file', ['tools/code/files', 'tools/code/viewer', 'tools/code/editor', 'panel']],
+      ['m3-surface-', ['panel', 'ui']],
+      ['m3-tab-', ['panel', 'ui']],
+      ['m3-artifacts-', ['tools/artifacts', 'panel', 'ui']],
+      ['m3-questions-', ['tools/maws/ask', 'panel']],
+      ['m3-side-', ['side', 'panel']],
+      ['m3-palette-', ['palette', 'src/shared/keymap']],
+      ['m3-settings-browser-', ['settings-tab', 'tools/browser/import']],
+      ['m3-settings-', ['settings-tab', 'src/shared/keymap']],
+      ['m3-shortcuts-', ['keymap', 'src/shared/keymap']],
+      ['m3-browser-', ['tools/browser', 'tools/browser/chrome']],
+      ['m3-import-', ['tools/browser/import', 'settings-tab']],
+    ];
+    const meta = (id: string, rows: string, title: string, how: string, state: string) => m3({ id, title, how, state: `${state} (${rows})`, folders: FOLDERS.find(([prefix]) => id.startsWith(prefix))![1] });
 
     // ---- the session cards of a session never started (P52, P62): nothing reported, each card open
     await shot(page, meta('m3-cards-not-reported', 'P52, P62', 'Session cards of a session that has reported nothing', 'Open a session the engine store lists and nothing has started, then each card', 'Environment, Context and Connectors open, Context and Connectors with nothing reported'), async () => {
@@ -3523,7 +3552,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       check: async () => {
         await inView(section('assets/sprite.dat'), 'the binary’s section');
         await expect(section('assets/sprite.dat'), 'a binary diff').toHaveAttribute('data-kind', 'binary', { timeout: 3_000 });
-        const body = section('assets/sprite.dat').getByText(REVIEW_COPY.binaryFile, { exact: true });
+        const body = section('assets/sprite.dat').getByText(M3_WORDS.binaryFile, { exact: true });
         if (m3Cut()) await expect(body, 'no body under the header').toHaveCount(0);
         else await inView(body, 'master’s Binary file');
       },
@@ -3593,7 +3622,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     }, { check: () => inView(viewer('src/sidebar.ts').locator('.cm-search'), 'the find bar'), after: () => closeOverlays(page) });
     await page.keyboard.press('Escape').catch(() => undefined);
     // an edit of the untracked notes file, never saved: the disk's copy is changed under it, then Reload takes the disk's
-    const save = () => viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: EDITOR_COPY.save, exact: true });
+    const save = () => viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: M3_WORDS.save, exact: true });
     let edited = false;
     await shot(page, meta('m3-file-unsaved', 'T338', 'A file with unsaved edits, Save holding the keyboard', 'The panels session, Files, src/notes.md; type at its end, then Tab to Save', 'Save focused; on M3 its chord the tooltip (master: a system title, not drawn)'), async () => {
       await openFile('src', 'src/notes.md');
@@ -3616,13 +3645,13 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     }, { check: () => inView(theirs(), 'the disk’s notice') });
     const changes = () => viewer('src/notes.md').locator('[data-merge-changes]').first();
     await shot(page, meta('m3-file-disk-compare', 'T342', 'Unsaved edits compared with the disk’s copy', 'The same file, Compare', 'The merge view, the count of changes beside its arrows'), async () => {
-      if ((await changes().count()) === 0) await viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: EDITOR_COPY.compare, exact: true }).click();
+      if ((await changes().count()) === 0) await viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: M3_WORDS.compare, exact: true }).click();
       await expect(changes(), 'the count of changes').toBeVisible({ timeout: 10_000 });
     }, {
       check: () => inView(changes(), 'the count of changes'),
       // Reload takes the disk's copy, so no unsaved edit is left to hold the app's quit
       after: async () => {
-        const reload = viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: EDITOR_COPY.reload, exact: true });
+        const reload = viewer('src/notes.md').locator('[data-editor-controls]').getByRole('button', { name: M3_WORDS.reload, exact: true });
         if (await reload.count()) await reload.click();
       },
     });
@@ -3630,9 +3659,6 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
 
     // ---- the surfaces' icons and tabs: an open surface's menu (P8), a closed one's (P9), a tab's pin glyph (P11)
     const icon = (title: string) => page.locator(`[data-surface-row] button[aria-label="${title}"]`).first();
-    // master's words for the two items (master's panel/SurfaceRow.tsx literals, which M3 replaced with COPY.pinTab and dropped)
-    const MASTER_ICON_MENU = { pinTab: 'Keep open for every session', open: 'Open surface' };
-    const PIN_TAB = PANEL_COPY as Partial<Record<'pinTab', string>>; // M3's (P8), absent from master's copy
     const contextMenu = () => page.getByRole('menu').first();
     await shot(page, meta('m3-surface-icon-menu', 'P8', 'An open surface’s icon, right-clicked', 'The panels session with Files open; right-click the Files icon in the header', 'The icon’s menu: Pin tab and Hide surface (master: Keep open for every session)'), async () => {
       await opened('panels');
@@ -3642,7 +3668,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     }, {
       check: async () => {
         await inView(contextMenu(), 'the icon’s menu');
-        const pin = m3Cut() ? PIN_TAB.pinTab! : MASTER_ICON_MENU.pinTab;
+        const pin = byM3(M3_WORDS.pinTab);
         await inView(contextMenu().getByRole('menuitem', { name: pin, exact: true }), pin);
       },
       after: () => closeOverlays(page),
@@ -3655,7 +3681,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       check: async () => {
         await inView(icon('Terminal'), 'the Terminal icon');
         if (m3Cut()) await expect(page.getByRole('menu'), 'no menu').toHaveCount(0);
-        else await inView(contextMenu().getByRole('menuitem', { name: MASTER_ICON_MENU.open, exact: true }), 'master’s Open surface');
+        else await inView(contextMenu().getByRole('menuitem', { name: M3_WORDS.openSurface, exact: true }), 'master’s Open surface');
       },
       after: () => closeOverlays(page),
     });
@@ -3681,7 +3707,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     const scope = (n: number) => artifacts().locator('[data-artifacts-list] [role="group"] button').nth(n);
     await shot(page, meta('m3-artifacts-tab-empty', 'T546', 'The Artifacts tab of a session that made nothing', 'The panels session, More surfaces › Artifacts, This session', 'This session’s list empty: its one line'), async () => {
       await opened('panels');
-      await fromMore('artifacts', ARTIFACTS_TOOL_COPY.title);
+      await fromMore('artifacts', M3_WORDS.artifacts);
       if ((await scope(0).getAttribute('aria-pressed')) !== 'true') await scope(0).click();
     }, {
       check: async () => {
@@ -3690,7 +3716,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
         await expect(artifacts().locator('[data-artifact-row]'), 'no artifact').toHaveCount(0);
       },
     });
-    const back = () => artifacts().getByRole('button', { name: ARTIFACTS_TOOL_COPY.back, exact: true }).first();
+    const back = () => artifacts().getByRole('button', { name: new RegExp(`^(${M3_WORDS.back.m3}|${M3_WORDS.back.master})$`) }).first(); // either build's
     let madeArtifact = false;
     await shot(page, meta('m3-artifacts-tab-open', 'T556', 'The Artifacts tab with an artifact open, Back holding the keyboard', 'The panels session, More surfaces › Artifacts, All, a document; Tab to Back', 'The record bar over the document; on M3 Back a chevron with its words the tooltip (master: the word Back)'), async () => {
       await opened('panels');
@@ -3699,7 +3725,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
           value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Launch notes' } as never));
           madeArtifact = true;
         }
-        await fromMore('artifacts', ARTIFACTS_TOOL_COPY.title);
+        await fromMore('artifacts', M3_WORDS.artifacts);
         await scope(1).click();
         await artifacts().locator('[data-artifact-row]').first().click({ timeout: 15_000 });
       }
@@ -3714,7 +3740,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     }, { check: () => inView(surface(page, 'ask-sheet'), 'the Questions panel') });
     await shot(page, meta('m3-side-empty', 'P419', 'Side with no side thread', 'The panels session, More surfaces › Side', 'The panel’s empty line'), async () => {
       await opened('panels');
-      await fromMore('side', SIDE_COPY.pane.title);
+      await fromMore('side', M3_WORDS.side);
     }, { check: () => inView(surface(page, 'side'), 'the Side panel') });
     await reset(page);
 
