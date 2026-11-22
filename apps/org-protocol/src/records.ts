@@ -17,7 +17,8 @@
 // certificate's name never meets another delegation's or an entry's. A retired or expired certificate contests
 // nothing, so a recreated VM under the same delegation can take its old name, and its history stands whatever the state
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
-import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
+import { canonicalize } from './canonical.ts';
+import { keyId, signBody, signingInput, utf8, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey, type MemberId } from './names.ts';
 import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isProjectsRecord, isSigned } from './shapes.ts';
 import {
@@ -52,6 +53,38 @@ async function signedBy(domain: Domain, record: Signed<unknown>, allowed: Iterab
     return (await verifyInput(signingInput(domain, record.body), record.sig, pub)) ? accept() : refuse('bad-signature');
   }
   return refuse('unknown-signer');
+}
+
+/**
+ * A record's signed parts, read once (its body by its canonical form, parsed again): what a caller checks, verifies,
+ * keys and returns is this copy, so a record changed during an await changes none of it.
+ */
+type Snapshot<T> = { body: T; text: string; kid: string; value: string };
+
+function snapshot<T>(domain: Domain, record: Signed<T>): Snapshot<T> {
+  const canonical = canonicalize(record.body);
+  return { body: JSON.parse(canonical) as T, text: `${domain}\n${canonical}`, kid: record.sig.kid, value: record.sig.value };
+}
+
+/**
+ * The verifications `signedOnce` found good, by all they rest on: the key, the signature and the signing input. A
+ * certificate set is judged again at every event a verifier checks, and its records' signatures are its cost; a good
+ * verification is a pure function of this key, so no state, set or time meets a stale one. Only successes are kept: a
+ * failure (a WebCrypto error among them, which `verifyInput` answers as false) is verified again the next time.
+ */
+const VERIFIED = new Set<string>();
+const VERIFIED_KEPT = 4096;
+
+/** `signedBy` of a snapshot under `pub` alone, a good signature verified once per snapshot and key (see `VERIFIED`). */
+async function signedOnce(snap: Snapshot<unknown>, pub: B64): Promise<Verdict> {
+  const { kid, value, text } = snap;
+  const key = `${pub}\n${kid}\n${value}\n${text}`;
+  if (VERIFIED.has(key)) return accept();
+  if ((await keyId(pub)) !== kid) return refuse('unknown-signer');
+  if (!(await verifyInput(utf8(text), { kid, value }, pub))) return refuse('bad-signature');
+  if (VERIFIED.size >= VERIFIED_KEPT) VERIFIED.delete(VERIFIED.values().next().value as string);
+  VERIFIED.add(key);
+  return accept();
 }
 
 const entryByRef = (state: OrgState, ref: string) => state.machines.find((m) => m.ref === ref);
@@ -197,16 +230,23 @@ export async function machineOfSigner(state: OrgState, name: string, kid: string
 
 const delegationOf = (state: OrgState, cert: MachineCert) => state.delegations.find((d) => d.id === cert.delegation);
 
-/** Whether a certificate is authentic (see the header): its delegation's, whatever its liveness and claims. */
-async function certAuthentic(state: OrgState, c: Signed<MachineCert>): Promise<Verdict> {
-  if (!isSigned(c, isMachineCert) || c.body.org !== state.org) return refuse('malformed');
-  const delegation = delegationOf(state, c.body);
-  if (delegation === undefined) return refuse('not-listed');
-  if (c.body.use > delegation.maxUses) return refuse('expired');
-  if (!machineNameKey(c.body.name).startsWith(machineNameKey(delegation.prefix))) return refuse('unknown-signer');
-  const ref = c.body.machine;
-  if (!ref.startsWith(`${delegation.id}_`) || ref.length < delegation.id.length + 1 + REF_RANDOM_CHARS) return refuse('unknown-signer');
-  return signedBy(SIGNING_DOMAINS.machineCert, c, [delegation.pub]);
+/**
+ * Whether a certificate is authentic (see the header): its delegation's, whatever its liveness and claims. An authentic
+ * one answers the body it authenticated, a copy read once, which is what its caller reads after.
+ */
+async function certAuthentic(state: OrgState, c: Signed<MachineCert>): Promise<{ verdict: Verdict; body?: MachineCert }> {
+  if (!isSigned(c, isMachineCert)) return { verdict: refuse('malformed') };
+  const snap = snapshot(SIGNING_DOMAINS.machineCert, c);
+  const { body } = snap;
+  if (body.org !== state.org) return { verdict: refuse('malformed') };
+  const delegation = delegationOf(state, body);
+  if (delegation === undefined) return { verdict: refuse('not-listed') };
+  if (body.use > delegation.maxUses) return { verdict: refuse('expired') };
+  if (!machineNameKey(body.name).startsWith(machineNameKey(delegation.prefix))) return { verdict: refuse('unknown-signer') };
+  const ref = body.machine;
+  if (!ref.startsWith(`${delegation.id}_`) || ref.length < delegation.id.length + 1 + REF_RANDOM_CHARS) return { verdict: refuse('unknown-signer') };
+  const verdict = await signedOnce(snap, delegation.pub);
+  return verdict.ok ? { verdict, body } : { verdict };
 }
 
 /** 128 random bits in base64url: what follows the delegation's id and `_` in a certificate's ref, at the least. */
@@ -222,14 +262,14 @@ const claimAgainstState = (state: OrgState, cert: MachineCert): Verdict => (entr
  * this verdict.
  */
 export async function verifyMachineCert(state: OrgState, c: Signed<MachineCert>, now: Date): Promise<Verdict> {
-  const authentic = await certAuthentic(state, c);
-  if (!authentic.ok) return authentic;
-  const kid = await keyId(c.body.pub);
+  const { verdict, body } = await certAuthentic(state, c);
+  if (body === undefined) return verdict;
+  const kid = await keyId(body.pub);
   if (state.revoked.some((r) => r.keyId === kid)) return refuse('revoked');
   if (state.retired.some((r) => r.keyId === kid)) return refuse('expired');
-  const claim = claimAgainstState(state, c.body);
+  const claim = claimAgainstState(state, body);
   if (!claim.ok) return claim;
-  return now.getTime() < Date.parse(delegationOf(state, c.body)?.expires as string) ? accept() : refuse('expired');
+  return now.getTime() < Date.parse(delegationOf(state, body)?.expires as string) ? accept() : refuse('expired');
 }
 
 /**
@@ -241,8 +281,9 @@ export async function verifyCertRetirement(state: OrgState, r: Signed<CertRetire
   if (!isSigned(r, isCertRetirement) || r.body.org !== state.org || !Array.isArray(certs)) return refuse('malformed');
   const delegations = new Set<B64>();
   for (const c of certs) {
-    if (!(await certAuthentic(state, c)).ok || (await keyId(c.body.pub)) !== r.body.keyId) continue;
-    delegations.add((delegationOf(state, c.body) as { pub: B64 }).pub);
+    const { body } = await certAuthentic(state, c);
+    if (body === undefined || (await keyId(body.pub)) !== r.body.keyId) continue;
+    delegations.add((delegationOf(state, body) as { pub: B64 }).pub);
   }
   return signedBy(SIGNING_DOMAINS.certRetire, r, delegations);
 }
@@ -260,21 +301,27 @@ async function certViews(state: OrgState, set: Certificates, now: Date): Promise
   const revoked = new Set(state.revoked.map((r) => r.keyId));
   const views: CertView[] = [];
   for (const c of set.certs) {
-    if (!(await certAuthentic(state, c)).ok) continue;
-    const kid = await keyId(c.body.pub);
+    // The body authenticated, a copy: what follows reads it alone.
+    const { body } = await certAuthentic(state, c);
+    if (body === undefined) continue;
+    const kid = await keyId(body.pub);
     if (revoked.has(kid)) continue;
-    const delegation = delegationOf(state, c.body) as { pub: B64; expires: string };
+    const delegation = delegationOf(state, body) as { pub: B64; expires: string };
     // Its retirement: the earliest `notAfter` of the state's entry for its key and its own delegation's records.
     let retiredAt = state.retired.find((r) => r.keyId === kid)?.notAfter;
     for (const r of set.retirements) {
-      if (!isSigned(r, isCertRetirement) || r.body.org !== state.org || r.body.keyId !== kid) continue;
-      if (retiredAt !== undefined && r.body.notAfter >= retiredAt) continue;
-      if ((await signedBy(SIGNING_DOMAINS.certRetire, r, [delegation.pub])).ok) retiredAt = r.body.notAfter;
+      // The key id first: a set's every retirement meets every certificate, and the shape check canonicalizes.
+      if ((r as { body?: { keyId?: unknown } } | null)?.body?.keyId !== kid || !isSigned(r, isCertRetirement)) continue;
+      const retirement = snapshot(SIGNING_DOMAINS.certRetire, r);
+      const { notAfter } = retirement.body;
+      if (retirement.body.keyId !== kid || retirement.body.org !== state.org) continue;
+      if (retiredAt !== undefined && notAfter >= retiredAt) continue;
+      if ((await signedOnce(retirement, delegation.pub)).ok) retiredAt = notAfter;
     }
     const live = retiredAt === undefined && now.getTime() < Date.parse(delegation.expires);
-    const claim = live ? claimAgainstState(state, c.body) : accept();
+    const claim = live ? claimAgainstState(state, body) : accept();
     const notAfter = retiredAt !== undefined && retiredAt < delegation.expires ? retiredAt : delegation.expires;
-    views.push({ body: c.body, live, notAfter, contested: !claim.ok });
+    views.push({ body, live, notAfter, contested: !claim.ok });
   }
   const live = views.filter((v) => v.live);
   for (const v of live) {

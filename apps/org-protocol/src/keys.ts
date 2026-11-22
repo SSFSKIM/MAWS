@@ -36,8 +36,30 @@ export function isSig(sig: unknown): sig is Sig {
   return keys.length === 2 && isBase64urlOf(kid, KID_BYTES) && isBase64urlOf(value, SIGNATURE_BYTES);
 }
 
+/**
+ * The key ids derived so far, by public point, the oldest let go past `KEPT`: a key id is a pure function of the
+ * point, and a verifier derives the same few (every certificate's, every device's) once per event it judges. Values
+ * are kept, not promises, so no runtime's request carries another's pending work.
+ */
+const KEY_IDS = new Map<string, string>();
+const KEPT = 4096;
+
+/** The length of a point's base64url: only what has it is kept, so no input of any other size grows the map. */
+const POINT_CHARS = Math.ceil((POINT_BYTES * 4) / 3);
+
 /** The key id of a public point: base64url of the first 16 bytes of its SHA-256. */
 export async function keyId(pub: B64): Promise<string> {
+  const kept = typeof pub === 'string' && pub.length === POINT_CHARS;
+  const held = kept ? KEY_IDS.get(pub) : undefined;
+  if (held !== undefined) return held;
+  const kid = await keyIdOf(pub);
+  if (!kept) return kid;
+  if (KEY_IDS.size >= KEPT) KEY_IDS.delete(KEY_IDS.keys().next().value as string);
+  KEY_IDS.set(pub, kid);
+  return kid;
+}
+
+async function keyIdOf(pub: B64): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', base64urlDecode(pub)));
   return base64urlEncode(digest.slice(0, KID_BYTES));
 }

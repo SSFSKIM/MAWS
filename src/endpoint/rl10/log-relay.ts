@@ -195,7 +195,7 @@ export class LogRelay {
   constructor(ctx: RelayContext) {
     this.#ctx = { cache: new PolicyCache(null, ctx.log), streamsDown: () => false, hubStreams: () => false, rebuilding: () => false, ...ctx };
     this.#uplink = new Uplink({
-      send: (frame) => ctx.hub.send(frame),
+      send: (frame) => this.#toHub(frame),
       writable: () => ctx.hub.writable?.() ?? Promise.resolve(),
       toSminos: (frame) => this.#toSminos(frame),
       signed: (project, writer, seq) => ctx.ledger.get(project, writer, seq) !== null,
@@ -273,7 +273,22 @@ export class LogRelay {
   }
 
   /** Whether a frame names only what sminos may be sent: every stream writer is left out of one to an old sminos. */
+  /**
+   * The inbound index's lines on disk before anything leaves the relay (inbound-index.ts): every frame to sminos or to
+   * the hub, and each policy change a snapshot makes, comes after `sync`, a no-op when nothing was written.
+   */
+  #durable(): void {
+    this.#ctx.index.sync();
+  }
+
+  /** A frame up RL1, after `#durable`. */
+  #toHub(frame: Frame): boolean {
+    this.#durable();
+    return this.#ctx.hub.send(frame);
+  }
+
   #toSminos(frame: Frame): void {
+    this.#durable();
     if (this.#ctx.streamsDown()) return this.#ctx.toSminos(frame);
     const stream = (writer: unknown) => typeof writer === 'string' && streamOf(writer).digest !== null;
     if (stream(frame.writer) || (isObject(frame.refusal) && stream(frame.refusal.writer))) return;
@@ -299,7 +314,7 @@ export class LogRelay {
   /** sminos's `rejected` (an event it refused on import) on to the hub. */
   rejected(frame: Frame): void {
     if (typeof frame.project !== 'string') return;
-    this.#ctx.hub.send(frame);
+    this.#toHub(frame);
   }
 
   /** sminos's connection ended: its projects close on RL1 until it opens them again. */
@@ -519,7 +534,7 @@ export class LogRelay {
         if (kept && judged.read !== undefined && this.#ask(judged.read)) read = true;
       } else {
         this.#ctx.log(`endpoint: refused an event the hub sent in project ${project}${at === null ? '' : ` at ${at.writer}:${at.seq}`}: ${judged.message}`);
-        this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
+        this.#toHub({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
         if (at !== null && isLogSeq(at.seq)) {
           flush();
           this.#toSminos({ t: 'spent', project, writer: at.writer, seq: at.seq, reason: judged.spent });
@@ -548,6 +563,7 @@ export class LogRelay {
     if (audience === undefined || typeof e.created !== 'string') return;
     const policyRev = Number.isSafeInteger(e.policyRev) && (e.policyRev as number) >= 0 ? (e.policyRev as number) : 0;
     const owners = (wrapped.owners ?? []).map((o) => o.id);
+    this.#durable();
     if (this.#ctx.cache.take({ session, machine: wrapped.signer.ref, audience, policyRev, created: e.created, owners }, rebuild)) this.#ctx.policyChanged?.(session);
   }
 

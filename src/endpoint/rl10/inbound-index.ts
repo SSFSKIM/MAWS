@@ -6,8 +6,14 @@
 //
 // The index keeps 30 days (a line older is dropped when its project's file is read), and a `human` event whose signed
 // `created` is more than 24 hours old is never delivered as words (words.ts), so the window bounds both. Lines are
-// `{content, writer, seq, at}`, appended and fsynced before the event goes down to sminos.
-import { appendLines, readLines, writeAtomic } from '../state/files';
+// `{content, writer, seq, at}`, each appended as its event is judged and the file fsynced once a page (`sync`), before
+// any of the page's events goes down to sminos: an fsync an event held a first download to a few events a second on a
+// slow disk. Memory and file are written together, in the same order, so what is read back after a restart is what was
+// judged. The window this leaves is accepted: a crash between a write and the sync may lose lines, but none of their
+// events reached sminos, and the hub sends them again; a snapshot the policy cache took from one of them is fed again
+// when it comes, and taking a snapshot twice changes nothing.
+import { join } from 'node:path';
+import { appendLines, readLines, syncFile, writeAtomic } from '../state/files';
 import { isProjectFileName } from './signature-ledger';
 
 export const INBOUND_KEPT_MS = 30 * 86_400_000;
@@ -20,6 +26,8 @@ export class InboundIndex {
   readonly #dir: () => string;
   readonly #now: () => number;
   readonly #projects = new Map<string, { byContent: Map<string, Entry>; byPosition: Map<string, string> }>();
+  /** The files written since the last `sync`, by path. */
+  readonly #dirty = new Set<string>();
 
   constructor(dir: () => string, now: () => number) {
     this.#dir = dir;
@@ -43,13 +51,26 @@ export class InboundIndex {
     this.#projects.clear();
   }
 
-  /** Records content new to `project` at its position, on disk before it returns. */
+  /** Records content new to `project` at its position: written before it returns, on disk once `sync` returns. */
   record(project: string, content: string, writer: string, seq: number): void {
     const entry: Entry = { content, writer, seq, at: this.#now() };
-    appendLines(this.#dir(), `${project}.idx`, [JSON.stringify(entry)]);
+    const dir = this.#dir();
+    appendLines(dir, `${project}.idx`, [JSON.stringify(entry)], { sync: false });
+    this.#dirty.add(join(dir, `${project}.idx`));
     const held = this.#load(project);
     held.byContent.set(content, entry);
     if (!held.byPosition.has(`${writer}\n${seq}`)) held.byPosition.set(`${writer}\n${seq}`, content);
+  }
+
+  /**
+   * Fsyncs each file written since the last call: what `record` wrote is on disk when it returns. A file gone since its
+   * write (`inbound/` moved aside) throws, so nothing judged from it leaves; it is downloaded again.
+   */
+  sync(): void {
+    for (const path of [...this.#dirty]) {
+      syncFile(path);
+      this.#dirty.delete(path);
+    }
   }
 
   #load(project: string) {
@@ -57,6 +78,9 @@ export class InboundIndex {
     let held = this.#projects.get(project);
     if (held !== undefined) return held;
     held = { byContent: new Map(), byPosition: new Map() };
+    // Fsynced once as it is first read: lines a crashed endpoint wrote and never synced may be in the page cache alone,
+    // and what is judged from them must not be lost to a power cut after.
+    syncFile(join(this.#dir(), `${project}.idx`), { absent: 'skip' });
     const since = this.#now() - INBOUND_KEPT_MS;
     let dropped = 0;
     for (const raw of readLines(this.#dir(), `${project}.idx`)) {
