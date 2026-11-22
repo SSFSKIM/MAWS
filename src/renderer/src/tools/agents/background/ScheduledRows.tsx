@@ -7,7 +7,7 @@
 // section is omitted with nothing to list and nothing to say. Read-only: MAWS never writes the file or asks for a job.
 // The word cut (T222, T224, T226): Open creating turn is an arrow drawn on the pointed or focused row, its words its name
 // and tooltip; a next run reads `14:30 · in 3m`, and a schedule MAWS cannot read leaves the next run blank.
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TurnId } from '../../../transcript/model/rows';
@@ -99,12 +99,15 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
     row.expiresAt !== null && (row.expiresAt > now ? SCHEDULED_COPY.expires(formatShortDate(row.expiresAt, now)) : SCHEDULED_COPY.expired(formatShortDate(row.expiresAt, now))),
     row.lastFiredAt !== null && SCHEDULED_COPY.lastRan(formatAgo(now - row.lastFiredAt)),
   ].filter((part): part is string => part !== false);
-  // the engine's jitter is the next run's tip, so the keyboard reaches it (the desk does not draw these rows: no TouchFact)
+  // the engine's jitter is the next run's tip, so the keyboard reaches it (the desk draws no such row: no TouchFact); its
+  // description is the row's, outside the when line, so the line's text (a copy of it, a read of it) is its words
+  const jitterId = useId();
+  const timed = !row.dormant && row.next !== null;
   const when = row.dormant ? (
     SCHEDULED_COPY.dormant
   ) : row.next === null ? null : (
-    <Tip content={SCHEDULED_COPY.jitter} description={SCHEDULED_COPY.jitter}>
-      <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+    <Tip content={SCHEDULED_COPY.jitter}>
+      <span tabIndex={0} aria-describedby={jitterId} className="rounded-sm outline-accent focus-visible:outline-2">
         {SCHEDULED_COPY.next(localTime(row.next, now), formatIn(row.next - now))}
       </span>
     </Tip>
@@ -138,6 +141,11 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
         {when}
         {after.map((part, i) => (when === null && i === 0 ? part : ` · ${part}`)).join('')}
       </p>
+      {timed && (
+        <span id={jitterId} hidden>
+          {SCHEDULED_COPY.jitter}
+        </span>
+      )}
     </li>
   );
 }

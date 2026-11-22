@@ -245,7 +245,7 @@ function scheduled(): ScheduledView | null {
   if (!body || body.querySelector('[data-view="run"]')) return null;
   const section = body.querySelector<HTMLElement>('section[data-section="scheduled"]');
   if (!section) return { heading: null, rows: [], error: null };
-  // the next run carries the engine's jitter as its tip (ScheduledRows.tsx): read as drawn, without the tip's description
+  // a part read as drawn: a tip's description, a hidden node, is no part of what it shows
   const part = (row: Element, name: string) => shownText(row.querySelector(`[data-part="${name}"]`));
   return {
     heading: text(section.querySelector('h3 button')),
