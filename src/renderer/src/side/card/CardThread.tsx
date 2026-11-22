@@ -1,8 +1,8 @@
 // The comment card's thread phase (P2-E1 document, D6; X21): once the card's Side thread answered, the card is the
 // thread. Its rows are the shell's own transcript of the thread from its anchored prompt on (none of the parent's copied
 // history), the owner channel drawn by MAWS's presenter whatever the surface's attachment, a request the thread raises
-// answered inline by C7's card; until the anchored prompt arrives, the comment as typed is echoed with "Starting…". A
-// Reply field sends through the human send seam (X22, origin `comment`), whose answer is read in one place
+// answered inline by C7's card; until the anchored prompt arrives, the comment as typed is echoed with a quiet spinner
+// named "Starting…". A Reply field sends through the human send seam (X22, origin `comment`), whose answer is read in one place
 // (`replyOutcomeOf`): queued and delivered are the transcript's own rows (the host queue's held bubble, the user row), so
 // the card keeps no delivery state of its own (since P2-A the seam starts a released thread before it sends). One
 // strip above Reply names what waits on the person, with one click to the Side pane or a tab. The card yields when the
@@ -20,6 +20,7 @@ import { failureOf, isStarting, useSetup } from '../../sessions/store';
 import { TrustCard } from '../../sessions/TrustCard';
 import { continueSetup, releaseMessage } from '../../sessions/setup-actions';
 import { FIELD, PRIMARY, SECONDARY, QUIET } from '../../sessions/ui';
+import { QuietSpinner } from '../../ui/spinner';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
 import { toast } from '../../stores/notices';
@@ -101,11 +102,12 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   // The field waits while the thread starts and while a terminal holds it.
   const waiting = record === null;
   const blocked = waiting || held;
-  const placeholder = waiting ? COPY.starting : held && needs !== null ? needs.text : COPY.replyPlaceholder;
+  // the word cut (P432, P442): the wait is the echo's spinner, so the field keeps its own placeholder meanwhile
+  const placeholder = held && needs !== null ? needs.text : COPY.replyPlaceholder;
   return (
     <>
       <div className="-mx-2.5 flex min-h-0 flex-1 flex-col" data-card-thread={child}>
-        {!started && echo !== null && <Echo text={echo} />}
+        {!started && (echo !== null ? <Echo text={echo} /> : waiting && <QuietSpinner label={COPY.starting} className="mx-2.5 my-1 self-end" />)}
         {record !== null && <TranscriptSlot appSessionId={child} startAt={startAt} presentation="local" actions={actions} className="min-h-0 flex-1" />}
       </div>
       {setupCard?.kind === 'trust' ? (
@@ -118,7 +120,18 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
       ) : needs !== null && (
         <div role="status" data-needs-you={needs.kind} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-warning px-2 py-1 text-ui-sm text-fg">
           {/* P2-E1 M5: a 10rem basis, so at the card's width the buttons wrap under the words rather than squeeze them */}
-          <span className="min-w-0 grow basis-40">{needs.text}</span>
+          {needs.noun === null ? (
+            <span className="min-w-0 grow basis-40">{needs.text}</span>
+          ) : (
+            // the word cut (P440): the waiting disc and a noun drawn, the sentence heard
+            <span className="flex min-w-0 grow basis-40 items-center gap-1.5">
+              <span data-needs-disc="" aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-warning" />
+              <span data-needs-noun="" aria-hidden="true">
+                {needs.noun}
+              </span>
+              <span className="sr-only">{needs.text}</span>
+            </span>
+          )}
           {!needs.tabOnly && (
             <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => openThreadInSidePane(serial, parent, child)}>
               {COPY.openInSidePane}
@@ -168,12 +181,13 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
   );
 }
 
-// The comment as typed, drawn by the card while the thread starts; "Starting…" under it.
+// The comment as typed, drawn by the card while the thread starts; a quiet spinner under it named "Starting…" (the word
+// cut, P432).
 function Echo({ text }: { text: string }) {
   return (
     <div data-card-echo="" className="flex shrink-0 flex-col items-end gap-0.5 px-2.5 py-1">
       <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-md bg-bg-active px-2.5 py-1.5 text-ui text-fg">{text}</div>
-      <span className="text-ui-sm text-fg-muted">{COPY.starting}</span>
+      <QuietSpinner label={COPY.starting} />
     </div>
   );
 }
@@ -181,9 +195,9 @@ function Echo({ text }: { text: string }) {
 // The thread's artifact row opening the artifact whose page the card is on (P3-L M5b; E2's record before the cutover)
 // shows that version in the card's viewer (the latest followed when it is the last); any other artifact goes the
 // registered way (the panel's tool). UX wave U6d: a mention's look for an open main tab passes over the card's own
-// artifact. P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on its row. P2-F F-C1: a
-// bubble's Edit edits the thread's message (the registered default reads the main pane's active tab, which is never
-// this thread).
+// artifact. P2-F L121: a reply of this card's the engine took is marked on its row, a check named "Sent to Claude".
+// P2-F F-C1: a bubble's Edit edits the thread's message (the registered default reads the main pane's active tab, which
+// is never this thread).
 function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
@@ -213,7 +227,8 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
         if (!registered) return false;
         return location ? registered(appSessionId, id, location) : registered(appSessionId, id);
       },
-      userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
+      // the word cut (P443): a check, "Sent to Claude" its name and tooltip
+      userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? { shown: COPY.sentMark, name: COPY.sentToClaude } : null),
       editAndResubmit: (row) => editRowOf(child, row, 'edit'),
       editPrompt: (row) => editRowOf(child, row, 'blocked'),
     }),

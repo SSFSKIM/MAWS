@@ -2,11 +2,18 @@
 // frame. Enter sends and Shift+Enter keeps the newline. A leading `@alias` addresses that session, and untagged words go to
 // everyone: main reads the tags (channel/address.ts) and signs the word, so a refusal of its own (an alias nobody answers
 // to, one naming two sessions) comes straight back, said under the field, with the text kept to mend. A sent word
-// clears the field only if it still holds what was sent: an edit made while the send was out is kept.
+// clears the field only if it still holds what was sent: an edit made while the send was out is kept. The word cut
+// (P460): Send is the session message box's round arrow (composer/submit/glyphs.tsx), "Send" its name and its tooltip,
+// which the keyboard reaches; while a word goes it is the message box's spinner, named "Sending…".
 import { useState, type KeyboardEvent } from 'react';
 import type { CommandResult } from '@shared/ipc/schema';
 import { CHANNEL_TEXT_MAX } from '@shared/ipc/schema/org';
+import { GLYPHS } from '../composer/submit/glyphs';
+import { Tip } from '../ui/tip';
 import { CHANNEL } from './copy';
+
+const Arrow = GLYPHS.arrow;
+const Spinner = GLYPHS.spinner;
 
 export function Composer({ send }: { send(text: string): Promise<CommandResult<'org.channel.send'>> }) {
   const [text, setText] = useState('');
@@ -50,14 +57,18 @@ export function Composer({ send }: { send(text: string): Promise<CommandResult<'
           onKeyDown={onKeyDown}
           className="max-h-40 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1 text-prose leading-[var(--lh-prose)] text-fg outline-none field-sizing-content placeholder:text-fg-faint"
         />
-        <button
-          type="button"
-          disabled={!ready}
-          onClick={() => void submit()}
-          className="h-7 shrink-0 rounded-full bg-fg px-3 text-ui-sm text-bg outline-accent hover:bg-fg-muted focus-visible:outline-2 disabled:bg-fg-faint"
-        >
-          {busy ? CHANNEL.composer.sending : CHANNEL.composer.send}
-        </button>
+        <Tip content={busy ? null : CHANNEL.composer.send}>
+          <button
+            type="button"
+            aria-label={busy ? CHANNEL.composer.sending : CHANNEL.composer.send}
+            aria-busy={busy || undefined}
+            disabled={!ready}
+            onClick={() => void submit()}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-bg outline-accent hover:opacity-90 focus-visible:outline-2 disabled:bg-bg-hover disabled:text-fg-faint"
+          >
+            {busy ? <Spinner /> : <Arrow />}
+          </button>
+        </Tip>
       </div>
     </div>
   );

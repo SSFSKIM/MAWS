@@ -192,7 +192,7 @@ export function tellWhere(place: string | undefined, thread: string | undefined,
     return;
   }
   const PLACE = SIDE_COPY.place;
-  const text = outcome.disposition === 'steered' ? PLACE.steered(title) : outcome.disposition === 'queued' ? PLACE.queued(title) : PLACE.sent(title);
+  const text = outcome.disposition === 'queued' ? PLACE.queued(title) : PLACE.sent(title); // the word cut (P438): a steer reads as a send
   if (place !== undefined) notePlace(place, { kind: 'sent', text, at: Date.now(), ...on });
   else if (outcome.disposition === 'queued') toast({ level: 'info', text, actions: [], dismissible: true });
 }

@@ -10,6 +10,7 @@ import { useDesignSystem } from '@artifacts/design-system/apply';
 import { tokenProperties } from '@artifacts/design-system/css';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { useLibraryList } from '../../../../library/store';
+import { QuietSpinner } from '../../../../ui/spinner';
 import { SHEET } from '../copy';
 import { setDesignSystem } from '../draft';
 import { OPTION_ROW, OptionText } from './Choice';
@@ -56,11 +57,14 @@ export function DesignSystem({ question, draft, disabled, edit }: ModalityProps)
     const system = rows.find((candidate) => candidate.id === value);
     if (system) edit((d) => setDesignSystem(d, { id: system.id, name: system.title }));
   };
+  // the word cut (N163): the read is a quiet spinner named by its words; a failed read and an empty library keep theirs
+  const reading = systems.value === undefined && systems.status !== 'error';
   let note: string | null = null;
-  if (systems.value === undefined) note = systems.status === 'error' ? SHEET.systemsUnread : SHEET.readingSystems;
+  if (systems.value === undefined) note = systems.status === 'error' ? SHEET.systemsUnread : null;
   else if (rows.length === 0) note = SHEET.noSystems;
   return (
     <div className="flex flex-col gap-1.5">
+      {reading && <QuietSpinner label={SHEET.readingSystems} />}
       {note !== null && <p className="m-0 text-ui-sm text-fg-muted">{note}</p>}
       <RadioGroup.Root
         aria-label={question.question}
@@ -75,7 +79,7 @@ export function DesignSystem({ question, draft, disabled, edit }: ModalityProps)
         {allowCreate && (
           <RadioGroup.Item value={CREATE} aria-label={SHEET.buildSystem} className={OPTION_ROW}>
             <Mark />
-            <OptionText label={SHEET.buildSystem} description={SHEET.buildSystemDetail} />
+            <OptionText label={SHEET.buildSystem} />
           </RadioGroup.Item>
         )}
       </RadioGroup.Root>

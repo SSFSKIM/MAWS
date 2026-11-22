@@ -11,6 +11,9 @@
 // UX wave U4a (O-20): since a session's own `/btw` answers in its card (BtwCard.tsx), this view is a side thread's
 // questions under its thread view; the card asks, lists and draws its exchanges through the same hook and row
 // (`useSideAsk`, `Exchange`), with its own waiting line in place of the spinner.
+// The word cut (P409, P408): Clear is drawn once there is a settled exchange to clear, and "Continue as thread" once
+// one was answered, rather than greyed until then; a reason that greys either keeps the keyboard (`UnavailableButton`),
+// and Continue keeps its words while the thread starts, a quiet spinner beside them (N165).
 // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, R4): a path in an answer opens the file
 // for the session the questions are asked of (`answerFiles`; here the side thread's own), as a chip of its transcript does.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -27,6 +30,8 @@ import { sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { TranscriptActionsProvider, type TranscriptActions } from '../transcript/view/context'; // UX wave U6b-4b
 import { openFile } from '../tools/code/open-file';
+import { UnavailableButton, UNAVAILABLE_LOOK } from '../ui/tip';
+import { WaitingWords } from '../ui/spinner';
 import { SIDE_COPY } from './copy';
 import { askSide, beginPromotion, btwCardOf, clearSide, promotable, promotionInFlight, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, usePromotions, useSidePane } from './store';
 
@@ -118,7 +123,9 @@ export function useSideAsk(parent: AppSessionId, kept?: Kept) {
   const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
   // UX wave U4a (the panel's finding 9): the promotion in flight is the store's, so it outlives this mount (a card's fold)
   const promoting = usePromotions((s) => promotionInFlight(s, parent, exchanges ?? []));
-  const canPromote = !promoting && promotable(exchanges ?? []).length > 0 && promoteUnavailable === null;
+  const answered = promotable(exchanges ?? []).length > 0;
+  const showPromote = promoting || answered; // drawn once there is an answer to continue, and while it starts
+  const canPromote = !promoting && answered && promoteUnavailable === null;
   const promote = async () => {
     const end = canPromote ? beginPromotion(parent, exchanges ?? []) : null;
     if (end === null) return;
@@ -132,9 +139,9 @@ export function useSideAsk(parent: AppSessionId, kept?: Kept) {
       end();
     }
   };
-  const canClear = !shown.every((e) => e.state === 'pending') && clearUnavailable === null;
+  const showClear = shown.some((e) => e.state !== 'pending'); // drawn once there is something to clear
   const clear = () => void clearSide(parent);
-  return { log, field, shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, canPromote, promote, promoteUnavailable, canClear, clear, clearUnavailable };
+  return { log, field, shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, showPromote, canPromote, promote, promoteUnavailable, showClear, clear, clearUnavailable };
 }
 
 export function BtwView({ parent }: { parent: AppSessionId }) {
@@ -184,16 +191,31 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
   );
 }
 
-// Clear and "Continue as a side thread", the view's and the card's.
+// Clear and "Continue as thread", the view's and the card's, each drawn only once it can act.
 export function SideActions({ side }: { side: ReturnType<typeof useSideAsk> }) {
+  if (!side.showClear && !side.showPromote) return null;
   return (
     <div className="flex items-center justify-between gap-2">
-      <button type="button" className={`${QUIET} text-ui-sm`} disabled={!side.canClear} title={side.clearUnavailable ?? undefined} onClick={side.clear}>
-        {COPY.clear}
-      </button>
-      <button type="button" className={`${SECONDARY} text-ui-sm`} disabled={!side.canPromote} title={side.promoteUnavailable ?? undefined} onClick={() => void side.promote()}>
-        {side.promoting ? COPY.promoting : COPY.promote}
-      </button>
+      {side.showClear && (
+        <UnavailableButton reason={side.clearUnavailable}>
+          <button type="button" className={`${QUIET} ${UNAVAILABLE_LOOK} text-ui-sm`} onClick={side.clear}>
+            {COPY.clear}
+          </button>
+        </UnavailableButton>
+      )}
+      {side.showPromote && (
+        <UnavailableButton reason={side.promoting ? null : side.promoteUnavailable}>
+          <button
+            type="button"
+            className={`${SECONDARY} ${UNAVAILABLE_LOOK} ml-auto text-ui-sm`}
+            disabled={side.promoting}
+            aria-busy={side.promoting || undefined}
+            onClick={() => void side.promote()}
+          >
+            <WaitingWords words={COPY.promote} wait={side.promoting ? COPY.promoting : null} />
+          </button>
+        </UnavailableButton>
+      )}
     </div>
   );
 }

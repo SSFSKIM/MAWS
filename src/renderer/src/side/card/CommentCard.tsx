@@ -26,6 +26,7 @@ import { GlyphMark } from '../../attention/GlyphMark';
 import { glyphFor } from '../../attention/glyph';
 import { shownSession } from '../../panel/host'; // UX wave U5a
 import { FIELD, PRIMARY, QUIET } from '../../sessions/ui';
+import { WaitingWords } from '../../ui/spinner';
 import { useLayout } from '../../stores/layout';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
@@ -244,8 +245,8 @@ function CardComposer({ card, passKey, commentId, listsPass, restoreFocus }: { c
         <div className="min-w-0 flex-1">
           <SendToMainBox form={form} />
         </div>
-        <button type="submit" disabled={!form.canSend(form.destination)} className={PRIMARY}>
-          {form.submitLabel}
+        <button type="submit" disabled={!form.canSend(form.destination)} aria-busy={form.submitWait !== null || undefined} className={PRIMARY}>
+          <WaitingWords words={form.submitLabel} wait={form.submitWait} />
         </button>
       </div>
       <CommentFormLines form={form} />

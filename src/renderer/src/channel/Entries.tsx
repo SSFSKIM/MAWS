@@ -64,7 +64,8 @@ function SayRow({ entry, me }: { entry: SayEntry; me: string | null }) {
       <header className={`${NAMES_ROW} text-ui-sm`}>
         <Names>
           <Party party={entry.from} />
-          {entry.to === '*' ? <span className="shrink-0 text-fg-muted">{CHANNEL.toEveryone}</span> : <Recipients to={entry.to} />}
+          {/* the word cut (P447): a message to the whole project names no audience */}
+          <Recipients to={entry.to} />
           {owners !== null && (
             <span data-name-part="label" className={`${GIVES_WAY.label} text-fg-faint`}>
               {owners}

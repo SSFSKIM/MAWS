@@ -74,9 +74,10 @@ export interface TranscriptActions {
   // E4c start: a browser action row's Open tab (tools/browser/agent/actions.ts, registered from App.tsx's E4c block)
   openBrowserTab(appSessionId: AppSessionId, tabId: string): void; // the Browser tool on that tab
   // E4c end
-  // P2-F L121: a mark under a user row that its mount knows of (the comment card's "Sent to Claude" on a reply the engine
-  // took); none when omitted
-  userRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
+  // P2-F L121: a mark under a user row that its mount knows of (the comment card's check on a reply the engine took);
+  // none when omitted. `shown` is what the line draws, `name` its words, its accessible name and tooltip where the two
+  // differ (the word cut, P443: the check named "Sent to Claude")
+  userRowMark?(row: Extract<Row, { kind: 'user' }>): { shown: string; name: string } | null;
   // Why a dropped prompt never ran, when its mount knows (the desk: its turn was undone before the session read it), said
   // in place of Not sent; Not sent when omitted or null
   droppedRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;

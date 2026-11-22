@@ -12,6 +12,7 @@ import type { Row } from '../../transcript/model/rows';
 import { SIDE_COPY } from '../copy';
 
 const NEEDS = SIDE_COPY.card.needs;
+const NOUNS = SIDE_COPY.card.nouns;
 
 // The index of the first row the card shows: the last prompt framed as this thread's anchored comment (its anchor's
 // kind, locator and label, its destination a thread). The last, because a thread of a thread copies its parent's
@@ -32,17 +33,20 @@ export function threadStartOf(lineage: Lineage | null): (rows: readonly Row[], l
 }
 
 export type SessionHolder = SessionRecord['holder'];
-export type NeedsYou = { kind: 'setup-card' | 'setup-failed' | 'held' | 'attention'; text: string; tabOnly: boolean } | null;
+// `text` is the strip's sentence; `noun`, when the strip says what waits on the person, is what it draws beside the
+// waiting disc in the sentence's place (the word cut, P440), the sentence then its words for a screen reader. An error,
+// a failed start and a holder keep their words (null), as does a kind with no noun of its own ("Waiting for you").
+export type NeedsYou = { kind: 'setup-card' | 'setup-failed' | 'held' | 'attention'; text: string; noun: string | null; tabOnly: boolean } | null;
 
-const ATTENTION_TEXT: Record<string, string> = {
-  permission: NEEDS.permission,
-  question: NEEDS.question,
-  plan: NEEDS.plan,
-  dialog: NEEDS.input,
-  elicitation: NEEDS.input,
-  error: NEEDS.error,
-  interrupted: NEEDS.interrupted,
-  auto_mode_unavailable: NEEDS.autoModeUnavailable,
+const ATTENTION: Record<string, { text: string; noun: string | null }> = {
+  permission: { text: NEEDS.permission, noun: NOUNS.permission },
+  question: { text: NEEDS.question, noun: NOUNS.question },
+  plan: { text: NEEDS.plan, noun: NOUNS.plan },
+  dialog: { text: NEEDS.input, noun: NOUNS.input },
+  elicitation: { text: NEEDS.input, noun: NOUNS.input },
+  error: { text: NEEDS.error, noun: null },
+  interrupted: { text: NEEDS.interrupted, noun: null },
+  auto_mode_unavailable: { text: NEEDS.autoModeUnavailable, noun: null },
 };
 // P2-C's kinds: the card's rows show an essential and its Reply answers a question, so neither raises the strip.
 const CARRIED_BY_THE_CARD = new Set<string>(['async_input', 'essential_unread']);
@@ -51,12 +55,12 @@ const CARRIED_BY_THE_CARD = new Set<string>(['async_input', 'essential_unread'])
 // failed start, which live in the full view; a terminal or background job holding the thread (only a tab helps); the
 // oldest tier-1 attention item, by kind. Tier 2 (held peer messages) raises none.
 export function needsYouOf({ card, failed, holder, pending }: { card: WaitingCard | undefined; failed: boolean; holder: SessionHolder | null; pending: AttentionItem[] }): NeedsYou {
-  if (card !== undefined) return { kind: 'setup-card', text: card.kind === 'trust' ? NEEDS.trust : NEEDS.relay, tabOnly: false };
-  if (failed) return { kind: 'setup-failed', text: NEEDS.failed, tabOnly: false };
-  if (holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job')) return { kind: 'held', text: NEEDS.held(holderWords(holder)), tabOnly: true };
+  if (card !== undefined) return card.kind === 'trust' ? { kind: 'setup-card', text: NEEDS.trust, noun: NOUNS.trust, tabOnly: false } : { kind: 'setup-card', text: NEEDS.relay, noun: null, tabOnly: false };
+  if (failed) return { kind: 'setup-failed', text: NEEDS.failed, noun: null, tabOnly: false };
+  if (holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job')) return { kind: 'held', text: NEEDS.held(holderWords(holder)), noun: null, tabOnly: true };
   const waiting = waitingItem(pending.filter((i) => !CARRIED_BY_THE_CARD.has(i.kind)));
   if (waiting === null || waiting.tier !== 1) return null;
-  return { kind: 'attention', text: ATTENTION_TEXT[waiting.oldest.kind] ?? NEEDS.other, tabOnly: false };
+  return { kind: 'attention', ...(ATTENTION[waiting.oldest.kind] ?? { text: NEEDS.other, noun: null }), tabOnly: false };
 }
 
 // What a Reply became, as the card shows it (D6's disposition table): delivered (the field clears; the transcript draws
