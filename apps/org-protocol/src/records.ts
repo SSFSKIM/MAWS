@@ -17,6 +17,7 @@
 // certificate's name never meets another delegation's or an entry's. A retired or expired certificate contests
 // nothing, so a recreated VM under the same delegation can take its old name, and its history stands whatever the state
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
+import { canonicalize } from './canonical.ts';
 import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey, type MemberId } from './names.ts';
 import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isProjectsRecord, isSigned } from './shapes.ts';
@@ -52,6 +53,25 @@ async function signedBy(domain: Domain, record: Signed<unknown>, allowed: Iterab
     return (await verifyInput(signingInput(domain, record.body), record.sig, pub)) ? accept() : refuse('bad-signature');
   }
   return refuse('unknown-signer');
+}
+
+/**
+ * The verdicts of `signedOnce`, by everything one depends on: the domain, the key, the signature and the signed body's
+ * canonical form. A certificate set is judged again at every event a verifier checks, and its records' signatures
+ * are its cost; a verdict is a pure function of this key, so no state, set or time can meet a stale one.
+ */
+const SIGNED = new Map<string, Verdict>();
+const SIGNED_KEPT = 4096;
+
+/** `signedBy(domain, record, [pub])`, each distinct record and key verified once (see `SIGNED`). */
+async function signedOnce(domain: Domain, record: Signed<unknown>, pub: B64): Promise<Verdict> {
+  const key = `${pub}\n${record.sig.kid}\n${record.sig.value}\n${domain}\n${canonicalize(record.body)}`;
+  const held = SIGNED.get(key);
+  if (held !== undefined) return held;
+  const verdict = await signedBy(domain, record, [pub]);
+  if (SIGNED.size >= SIGNED_KEPT) SIGNED.delete(SIGNED.keys().next().value as string);
+  SIGNED.set(key, verdict);
+  return verdict;
 }
 
 const entryByRef = (state: OrgState, ref: string) => state.machines.find((m) => m.ref === ref);
@@ -206,7 +226,7 @@ async function certAuthentic(state: OrgState, c: Signed<MachineCert>): Promise<V
   if (!machineNameKey(c.body.name).startsWith(machineNameKey(delegation.prefix))) return refuse('unknown-signer');
   const ref = c.body.machine;
   if (!ref.startsWith(`${delegation.id}_`) || ref.length < delegation.id.length + 1 + REF_RANDOM_CHARS) return refuse('unknown-signer');
-  return signedBy(SIGNING_DOMAINS.machineCert, c, [delegation.pub]);
+  return signedOnce(SIGNING_DOMAINS.machineCert, c, delegation.pub);
 }
 
 /** 128 random bits in base64url: what follows the delegation's id and `_` in a certificate's ref, at the least. */
@@ -267,9 +287,10 @@ async function certViews(state: OrgState, set: Certificates, now: Date): Promise
     // Its retirement: the earliest `notAfter` of the state's entry for its key and its own delegation's records.
     let retiredAt = state.retired.find((r) => r.keyId === kid)?.notAfter;
     for (const r of set.retirements) {
-      if (!isSigned(r, isCertRetirement) || r.body.org !== state.org || r.body.keyId !== kid) continue;
+      // The key id first: a set's every retirement meets every certificate, and the shape check canonicalizes.
+      if ((r as { body?: { keyId?: unknown } } | null)?.body?.keyId !== kid || !isSigned(r, isCertRetirement) || r.body.org !== state.org) continue;
       if (retiredAt !== undefined && r.body.notAfter >= retiredAt) continue;
-      if ((await signedBy(SIGNING_DOMAINS.certRetire, r, [delegation.pub])).ok) retiredAt = r.body.notAfter;
+      if ((await signedOnce(SIGNING_DOMAINS.certRetire, r, delegation.pub)).ok) retiredAt = r.body.notAfter;
     }
     const live = retiredAt === undefined && now.getTime() < Date.parse(delegation.expires);
     const claim = live ? claimAgainstState(state, c.body) : accept();
