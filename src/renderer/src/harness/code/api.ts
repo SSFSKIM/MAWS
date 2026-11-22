@@ -19,7 +19,7 @@ export interface CodeHarnessReview {
   files: { path: string; added: number; removed: number; viewed: boolean; kind: string; folded: boolean }[];
   selected: string | null;
   hunks: string[] | null; // the selected file's hunk texts as Review draws them (null: none to draw, or not loaded)
-  hunk: { index: number; count: number } | null; // `<index> / <count>`, 1-based as shown
+  hunk: { index: number; count: number } | null; // the counter's `data-index` and `data-count` (drawn `<index> / <count>`, grouped), 1-based
   mode: 'unified' | 'split';
   wrap: boolean;
   scopeWords: string; // what the scope reads: the pressed chip's description, or a diff tab's totals line's (the word cut, T357)

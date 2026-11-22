@@ -6,7 +6,8 @@
 // one is on its way. An answer the machine could not take says why: its `error` when git failed, and no base when the
 // session's directory is no git working tree. The body (the diff library, its stylesheet, and the highlighter) loads on
 // first use. Its one-file view state and the words only it says are its own (`diff-view-state.ts`). It follows Review's
-// word cut where it draws what Review draws: the hunk counter (T306) and the wait for the diff.
+// word cut where it draws what Review draws: the totals without "changed" (T356), no foot line, since the header already
+// names the base (T357), the hunk counter (T306) and the wait for the diff.
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { loadChunk } from '../../pwa/load-chunk';
 import { useStore } from 'zustand';
@@ -92,11 +93,6 @@ export function DiffPane({ controller, state, view }: Props) {
           {file ? <FileSection file={file} files={files} view={view} /> : null}
         </>
       )}
-      {answer && based ? (
-        <p data-review-footer className="mt-auto shrink-0 truncate border-t border-border px-3 py-1.5 text-ui-sm text-fg-faint">
-          Working tree · Since {answer.base}
-        </p>
-      ) : null}
     </div>
   );
 }

@@ -216,15 +216,19 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
         data.list.retry ? (
           // UX wave U5b-2 (S22; M9 fix 2): a commit's diff, or a first branch read, that failed, with Retry in its row
           <div role="status" data-review-unavailable className="flex items-start gap-2 px-3 py-2">
-            <p className="m-0 min-w-0 flex-1 text-ui text-fg-muted">{data.list.message}</p>
+            <ScopeOwned scopeWords={chips ? null : scopeWordsOf(scope, data, commitOf, true)} className="m-0 min-w-0 flex-1 text-ui text-fg-muted">
+              {data.list.message}
+            </ScopeOwned>
             <button type="button" data-review-retry className={retryButton} onClick={data.list.retry}>
               {REVIEW_COPY.retry}
             </button>
           </div>
         ) : (
-          <p role="status" data-review-unavailable className="px-3 py-2 text-ui text-fg-muted">
-            {data.list.message}
-          </p>
+          <div role="status" data-review-unavailable className="px-3 py-2">
+            <ScopeOwned scopeWords={chips ? null : scopeWordsOf(scope, data, commitOf, true)} className="m-0 text-ui text-fg-muted">
+              {data.list.message}
+            </ScopeOwned>
+          </div>
         )
       ) : data.list.phase === 'pending' ? (
         <Loading />
@@ -361,22 +365,25 @@ function emptyOf(scope: ReviewScope | null, data: ReviewData): string {
 }
 
 function EmptyLine({ words, scopeWords }: { words: string; scopeWords: string | null }) {
-  const line = 'px-3 py-2 text-ui text-fg-muted';
-  if (scopeWords === null) {
-    return (
-      <p data-review-empty className={line}>
-        {words}
-      </p>
-    );
-  }
   return (
-    <div className="px-1.5 py-0.5">
-      <Tip content={scopeWords} description={scopeWords}>
-        <p data-review-empty data-review-scope-words tabIndex={0} className="m-0 inline-block rounded-sm px-1.5 py-1.5 text-ui text-fg-muted outline-accent focus-visible:outline-2">
-          {words}
-        </p>
-      </Tip>
+    <div data-review-empty className="px-3 py-2">
+      <ScopeOwned scopeWords={scopeWords} className="m-0 text-ui text-fg-muted">
+        {words}
+      </ScopeOwned>
     </div>
+  );
+}
+
+// A line that owns the scope's words where no chip does (a diff tab, T357): the empty line, or a failed read's sentence;
+// it takes the keyboard and its tooltip and description are the words. With no words, a plain line.
+function ScopeOwned({ scopeWords, className, children }: { scopeWords: string | null; className: string; children: string }) {
+  if (scopeWords === null) return <p className={className}>{children}</p>;
+  return (
+    <Tip content={scopeWords} description={scopeWords}>
+      <p data-review-scope-words tabIndex={0} className={`${className} w-fit max-w-full rounded-sm outline-accent focus-visible:outline-2`}>
+        {children}
+      </p>
+    </Tip>
   );
 }
 

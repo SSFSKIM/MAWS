@@ -137,7 +137,9 @@ function sectionOf(from: SectionInputs, ownRead: boolean): MadeSection {
     folded,
     fetch: ownRead && (!folded || mark !== undefined),
     failed,
-    lines: estimateLines(file, hunks, binary || untrackedDirectory || (hunks === null && failed !== null)),
+    // a tracked binary draws no body (the word cut, N44): it weighs none, but for its failed read's line; an untracked
+    // binary keeps its line of words
+    lines: file.kind === 'binary' && failed === null ? 0 : estimateLines(file, hunks, binary || untrackedDirectory || (hunks === null && failed !== null)),
     changed: hold !== null && latest !== null && latest.join('\n') !== hold.hunks.join('\n'),
   };
   const counted = hunkOrder([{ path: file.path, hunks: section.hunks, blocks: section.blocks.map((block) => block.length), viewed: section.viewed }]);
@@ -145,7 +147,7 @@ function sectionOf(from: SectionInputs, ownRead: boolean): MadeSection {
 }
 
 // What a body is estimated from before it is measured: nothing for a section that draws no body (a rename with no
-// change), one row for a line of words (a binary, an untracked folder, a failed read, a file too large to draw), else
+// change; a tracked binary, set by its caller), one row for a line of words (a binary, an untracked folder, a failed read, a file too large to draw), else
 // its diff's lines, or its counts' while it is not read.
 function estimateLines(file: ReviewFile, hunks: readonly string[] | null, words: boolean): number {
   if (words) return 1;

@@ -26,7 +26,8 @@ export function selectFile(path: string): Partial<DiffViewUi> {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export const DIFF_COPY = {
-  header: (files: number, added: number, removed: number, base: string) => `${plural(files, 'file')} changed · +${added} −${removed} · Since ${base}`,
+  // Review's totals as the word cut words them (T356): no "changed"; the base, which no chip names here, stays
+  header: (files: number, added: number, removed: number, base: string) => `${plural(files, 'file')} · +${added} −${removed} · Since ${base}`,
   fileHeader: (path: string, kind: string) => `${path} · ${kind}`,
   previousFile: 'Previous file',
   nextFile: 'Next file',

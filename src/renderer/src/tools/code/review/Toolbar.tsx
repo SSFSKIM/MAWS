@@ -125,7 +125,8 @@ export function Toolbar({ totals, scopeWords, chip, allFolded, onFoldAll, counte
       <div data-review-nav className={`flex shrink-0 items-center gap-1 ${fit.lines === 1 ? '' : 'ml-auto'}`}>
         {counter && (
           <>
-            <span data-review-hunk className="whitespace-nowrap text-ui-sm">
+            {/* the numbers apart from the drawn words (which group thousands), for the harness and the scenes */}
+            <span data-review-hunk data-index={counter.index + 1} data-count={counter.count} className="whitespace-nowrap text-ui-sm">
               <BareCount count={shown} meaning={REVIEW_COPY.hunkOf(counter.index + 1, counter.count)} />
             </span>
             <button type="button" className={quiet} aria-label={REVIEW_COPY.previousHunk} title={REVIEW_COPY.previousHunk} disabled={counter.index === 0} onClick={() => onHunk(counter.index - 1)}>

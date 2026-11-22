@@ -168,14 +168,14 @@ function review(surface?: ReviewSurface): CodeHarnessReview | null {
   const scope = (root.dataset.scope || null) as ReviewScope | null;
   const files = sectionsOf(root).map(fileOf);
   const selected = topSection(root)?.dataset.reviewFile ?? null;
-  const counter = /(\d+) \/ (\d+)/.exec(root.querySelector('[data-review-hunk]')?.textContent ?? '');
+  const counted = root.querySelector<HTMLElement>('[data-review-hunk]'); // its numbers as data, apart from the grouped words
   return {
     scope,
     turnId: targetOf(root)?.turnId ?? null,
     files,
     selected,
     hunks: hunksOf(root, scope, selected),
-    hunk: counter ? { index: Number(counter[1]), count: Number(counter[2]) } : null,
+    hunk: counted ? { index: Number(counted.dataset.index), count: Number(counted.dataset.count) } : null,
     mode: root.dataset.mode === 'split' ? 'split' : 'unified',
     wrap: useViewer.getState().wrap,
     scopeWords: scopeWordsIn(root),
