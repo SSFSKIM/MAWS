@@ -18,6 +18,7 @@ import { useCommand } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message (W9: one constant for every reader)
 import { useGit, type GitEntry } from '../../stores/git';
 import { useSessions } from '../../stores/sessions';
+import { Tip } from '../../ui/tip';
 import { SUMMARY_COPY } from '../copy';
 import { changeLine } from './derive';
 import { FloatingCard, type CardFold } from './FloatingCard';
@@ -90,20 +91,24 @@ function watchFailure(entry: GitEntry | undefined): string {
   return entry.error === NOT_A_REPOSITORY ? SUMMARY_COPY.notRepository : SUMMARY_COPY.gitUnavailable;
 }
 
+// The word cut (P36): "+12 −3 · 4 files", the untracked and binary counts its tooltip and description, on the line
+// itself, which takes the keyboard while it has them (Review's own line is a button already: ReviewSummary.tsx).
 function ChangeLine({ entry }: { entry: GitEntry }) {
   const line = changeLine(entry.status, entry.uncommitted?.files ?? null);
+  const uncounted = line.kind === 'change' ? SUMMARY_COPY.uncounted(line.untracked, line.binary) : '';
   return (
-    <p data-testid="change-line" className="text-ui-sm text-fg-muted">
-      {line.kind === 'clean' && SUMMARY_COPY.clean}
-      {line.kind === 'unknown' && (entry.error ? SUMMARY_COPY.changeUnavailable : SUMMARY_COPY.pending)}
-      {line.kind === 'change' && (
-        <>
-          <span className="text-success">+{line.insertions}</span> <span className="text-danger">−{line.deletions}</span>{' '}
-          {SUMMARY_COPY.across(line.files)}
-          {line.untracked > 0 && SUMMARY_COPY.untracked(line.untracked)}
-          {line.binary > 0 && SUMMARY_COPY.binary(line.binary)}
-        </>
-      )}
+    <p className="text-ui-sm text-fg-muted">
+      <Tip content={uncounted} description={uncounted}>
+        <span data-testid="change-line" tabIndex={uncounted ? 0 : undefined} className="rounded-sm outline-accent focus-visible:outline-2">
+          {line.kind === 'clean' && SUMMARY_COPY.clean}
+          {line.kind === 'unknown' && (entry.error ? SUMMARY_COPY.changeUnavailable : SUMMARY_COPY.pending)}
+          {line.kind === 'change' && (
+            <>
+              <span className="text-success">+{line.insertions}</span> <span className="text-danger">−{line.deletions}</span> {SUMMARY_COPY.files(line.files)}
+            </>
+          )}
+        </span>
+      </Tip>
     </p>
   );
 }

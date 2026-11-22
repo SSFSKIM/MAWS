@@ -10,7 +10,8 @@
 import { useEffect } from 'react';
 import type { MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
-import { Icon } from '../../app/IconButton';
+import { ChevronLeftIcon, Icon } from '../../app/IconButton';
+import { NamedGlyph } from '../../ui/glyph';
 import { ArtifactView } from '../../library/ArtifactTab';
 import type { EditorHostScope } from '../../panel/editor-host';
 import { beginDrag, endDragFrom, moveArtifactToTab, useTransferRefusal } from '../../shell/transfer';
@@ -24,9 +25,10 @@ export function ArtifactRecordView({ artifactId, machine, scope, visible, onBack
   return (
     <div data-artifact-record={artifactId} className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-1 py-0.5">
-        <button type="button" onClick={onBack} className={bar}>
-          {ARTIFACTS_TOOL_COPY.back}
-        </button>
+        {/* the word cut (T556): Back is a left chevron, "Back to list" its name and tooltip */}
+        <NamedGlyph label={ARTIFACTS_TOOL_COPY.back} onClick={onBack}>
+          <ChevronLeftIcon className="size-4" />
+        </NamedGlyph>
         <span className="flex-1" />
         <span
           role="img"

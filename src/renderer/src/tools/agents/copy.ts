@@ -13,7 +13,7 @@ export interface PanelHeading {
 }
 
 export const SUBAGENTS_COPY = {
-  title: 'Subagents',
+  title: 'Agents', // the word cut (T152, the owner's card 4 of 2026-11-20): the tab and the panel menu
   // lists
   done: (n: number) => `Done · ${n}`, // (E7) a running parent's fold over its finished children
   // The UX wave's U8b (M7; Interfaces §F) start: the sections' headings, `Running N` (N every running agent, at any
@@ -53,7 +53,7 @@ export const SUBAGENTS_COPY = {
   empty: 'No subagents yet',
   sidecarsUnavailable: (message: string) => `Sidecars unavailable: ${message}`,
   // drill-in
-  back: '‹ Subagents',
+  back: '‹ Agents', // the word cut (T152): the back link follows the tab
   header: (model: string, elapsed: string, tokens: string) => `${model} · ${elapsed} · ${tokens}`,
   modelUnknown: 'model unknown',
   tokensUnavailable: 'tokens unavailable',
@@ -114,7 +114,7 @@ export const RELAY_COPY = {
 } as const;
 
 export const BACKGROUND_COPY = {
-  title: 'Background tasks', // the UX wave's U8b (M7): the card's name (was Background work)
+  title: 'Background', // the word cut (T153, the owner's card 4 of 2026-11-20); the UX wave's U8b (M7) named it Background tasks
   noSession: 'Open a session to see its background tasks', // a pinned tab while no session is shown
   // The UX wave's U8b (M7; Interfaces §F) start: the sections' headings, `Running N`, `Scheduled N`, `Tasks`, and
   // `Done N · W workflows · S shells · M monitors · T tasks` (a kind of zero left out)
@@ -168,7 +168,7 @@ export const BACKGROUND_COPY = {
   nothingRunning: 'Nothing running',
   // E7 start: the workflow widget and the compact card (E7 execution document, Design §2): the card shows one summary
   // line where its per-phase tables were, and its title and chevron open the widget.
-  back: '‹ Background tasks',
+  back: '‹ Background', // the word cut (T153): the back link follows the tab
   openRun: (description: string) => `Open ${description}`, // the card's chevron, by its accessible name
   allPhases: 'All phases',
   phaseCount: (done: number, total: number) => `${done}/${total}`,

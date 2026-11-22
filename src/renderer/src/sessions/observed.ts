@@ -29,6 +29,7 @@ export const FRESHNESS = {
   loadedNow: 'Loaded now',
   loadedLast: (at: string, now = Date.now()) => `Loaded last time, ${ago(at, now)}`,
   lastReading: (at: string, now = Date.now()) => `Last reading, ${ago(at, now)}`,
+  asOf: (at: string, now = Date.now()) => `as of ${ago(at, now)}`, // the word cut (P55): the session card's Context reading
   lastObserved: (at: string, now = Date.now()) => `Last observed ${ago(at, now)}`,
   notObserved: 'Not observed yet',
 };

@@ -1,5 +1,6 @@
 // The `plugin-pane` panel tool (R2; X5): one tab per pane a plugin opened (`$.ui.open`), its body the plugin's Pane
-// drawing through SurfaceSite, or Claude Desktop's placeholder until the plugin draws (c95e4d2cf-BLkI1oZK.js:10025-10047).
+// drawing through SurfaceSite, or Claude Desktop's placeholder until the plugin draws (c95e4d2cf-BLkI1oZK.js:10025-10047;
+// one line since the word cut, P511).
 // Tabs come and go with the engine's roster (panes.ts), never from the "+" tool list; the panel's "+" lists the open
 // panes under "Plugin panes". Showing a tab tells the engine which pane the surface shows (`session.ui.paneShow`); the
 // keyboard moving into its body or out of it says so (`session.ui.paneFocus`); the person's close asks the engine
@@ -20,8 +21,7 @@ export const PLUGIN_PANE_TOOL = 'plugin-pane';
 export const PANE_COPY = {
   title: 'Plugin pane',
   menu: 'Plugin panes',
-  empty: 'Nothing to show yet',
-  notDrawn: (plugin: string) => `${plugin} has not drawn in this pane`,
+  notDrawn: (plugin: string) => `${plugin} has not drawn here yet`, // the word cut (P511): the placeholder's one line
   closed: 'This pane has closed',
 } as const;
 
@@ -45,9 +45,8 @@ const ROWS = 20;
 
 function Placeholder({ plugin }: { plugin: string }) {
   return (
-    <div role="status" className="flex h-full flex-col items-center justify-center gap-1 p-4 text-center">
-      <p className="m-0 text-ui text-fg-muted">{PANE_COPY.empty}</p>
-      <p className="m-0 text-ui-sm text-fg-faint">{PANE_COPY.notDrawn(plugin)}</p>
+    <div role="status" className="flex h-full flex-col items-center justify-center p-4 text-center">
+      <p className="m-0 text-ui text-fg-muted">{PANE_COPY.notDrawn(plugin)}</p>
     </div>
   );
 }

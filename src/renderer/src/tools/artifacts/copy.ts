@@ -7,13 +7,13 @@ export const ARTIFACTS_TOOL_COPY = {
   scopes: { session: 'This session', all: 'All' },
   openLibrary: 'Open library',
   noSession: 'Open a session to see its artifacts',
-  emptySession: 'Nothing made in this session yet. The pages, documents and files its agent makes land here.',
+  emptySession: 'Nothing made yet', // the word cut (T546)
   emptyAll: 'No artifacts yet.',
-  reading: 'Reading…',
+  reading: 'Reading…', // the word cut (T548): the quiet spinner's name while the list is first read
   couldNotList: (message: string) => `Couldn’t read the artifacts: ${message}`,
   couldNotRefresh: (message: string) => `Couldn’t refresh the artifacts: ${message}`, // the last good list stays below
   retry: 'Try again',
-  back: 'Back',
+  back: 'Back to list', // the word cut (T556): the record bar's chevron, its name and tooltip
   // M6b: the panel summary's Artifacts section
   summary: (n: number, latestTitle: string) => `${n} ${n === 1 ? 'artifact' : 'artifacts'} · ${latestTitle}`,
   nothingYet: 'Nothing made yet',

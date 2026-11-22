@@ -8,8 +8,9 @@ export type SwitchTarget = Route | 'machine';
 
 export const ROUTE = {
   routed: "Routed through ClaudeUsage's relay",
-  direct: "Direct · engine's own login",
-  directLogin: (login: string) => `Direct · engine's own login · ${login}`,
+  // the word cut (T256): Session info's Route row, the one surface that reads these, names the route and the login only
+  direct: 'Direct',
+  directLogin: (login: string) => `Direct · ${login}`,
   directNote: 'no gateway models · usage windows from the engine',
   lastRouted: 'Last ran routed',
   lastDirect: 'Last ran direct',

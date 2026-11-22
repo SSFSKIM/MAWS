@@ -11,6 +11,7 @@ import { SUMMARY_COPY } from '../copy';
 import { absolutePath, displayPath, sourcesOf, type Source } from './derive';
 import { openExternal } from './PushState';
 import { Section } from './Section';
+import { Tip } from '../../ui/tip';
 import { openFile } from '../../tools/code/open-file'; // UX wave U6b-1: beside the chat, as every open
 
 // The session's activity as C6 derives it whatever the reader disclosed; null while this page holds no entry for it.
@@ -65,8 +66,8 @@ const rowClass = 'flex h-7 min-w-0 flex-1 items-center gap-2 rounded-sm px-1 -mx
 const buttonClass = `${rowClass} outline-accent hover:bg-bg-hover focus-visible:outline-2`;
 
 function SourceRow({ source, appSessionId, directory }: { source: Source; appSessionId: AppSessionId; directory: string }) {
+  // the word cut (P57): a file row ends at its name, which carries the extension
   if (source.kind === 'file') {
-    const extension = /\.([A-Za-z0-9]+)$/.exec(source.path)?.[1]?.toUpperCase();
     return (
       <button
         type="button"
@@ -76,7 +77,6 @@ function SourceRow({ source, appSessionId, directory }: { source: Source; appSes
       >
         <FileIcon />
         <span className="min-w-0 flex-1 truncate">{displayPath(source.path, directory)}</span>
-        {extension && <span className="shrink-0 text-ui-sm text-fg-faint">{extension}</span>}
       </button>
     );
   }
@@ -88,12 +88,14 @@ function SourceRow({ source, appSessionId, directory }: { source: Source; appSes
       </button>
     );
   }
+  // the word cut (P58): that a connector's tool opens nothing is the row's tooltip, the row taking the keyboard for it
   return (
-    <div className={rowClass}>
-      <PlugIcon />
-      <span className="min-w-0 flex-1 truncate text-fg-muted">{`${source.server} · ${source.tool}`}</span>
-      <span className="shrink-0 text-ui-sm text-fg-faint">{SUMMARY_COPY.sourceOnly}</span>
-    </div>
+    <Tip content={SUMMARY_COPY.sourceOnly} description={SUMMARY_COPY.sourceOnly}>
+      <div tabIndex={0} className={`${rowClass} outline-accent focus-visible:outline-2`}>
+        <PlugIcon />
+        <span className="min-w-0 flex-1 truncate text-fg-muted">{`${source.server} · ${source.tool}`}</span>
+      </div>
+    </Tip>
   );
 }
 

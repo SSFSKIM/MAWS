@@ -25,6 +25,7 @@ import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { machineOf } from '@shared/machine/address';
 import { Icon, IconButton } from '../app/IconButton';
 import { useLayout, type LayoutState } from '../stores/layout';
+import { Tip } from '../ui/tip';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
@@ -344,6 +345,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
       {!iconOnly && pinnable && (
         <GlyphButton
           label={tab.pinned ? COPY.unpin(title) : COPY.pin(title)}
+          tip={tab.pinned ? COPY.unpinTip : COPY.pinTip}
           pressed={tab.pinned}
           disabled={!canPin}
           className={tab.pinned ? 'text-fg' : revealed}
@@ -353,7 +355,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
         </GlyphButton>
       )}
       {!iconOnly && (
-        <GlyphButton label={COPY.close(title)} disabled={closing} className={revealed} onClick={() => void panelHost.closeTab(tab.id)}>
+        <GlyphButton label={COPY.close(title)} tip={COPY.closeTip} disabled={closing} className={revealed} onClick={() => void panelHost.closeTab(tab.id)}>
           <CloseIcon />
         </GlyphButton>
       )}
@@ -414,19 +416,23 @@ function MoveToMainItem({ tabId }: { tabId: string }) {
   );
 }
 
-function GlyphButton(props: { label: string; pressed?: boolean; disabled?: boolean; className: string; onClick(): void; children: ReactNode }) {
+// The word cut (P11): the glyph's tooltip is its verb alone ("Pin", "Close"), a Tip the keyboard reaches; its accessible
+// name keeps the tab's title ("Pin Terminal"), which the tooltip does not repeat as a description.
+function GlyphButton(props: { label: string; tip: string; pressed?: boolean; disabled?: boolean; className: string; onClick(): void; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      aria-label={props.label}
-      aria-pressed={props.pressed}
-      title={props.label}
-      disabled={props.disabled}
-      onClick={props.onClick}
-      className={`inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:pointer-events-none disabled:text-fg-faint ${props.className}`}
-    >
-      {props.children}
-    </button>
+    <Tip content={props.tip}>
+      <button
+        type="button"
+        aria-label={props.label}
+        aria-describedby={undefined}
+        aria-pressed={props.pressed}
+        disabled={props.disabled}
+        onClick={props.onClick}
+        className={`inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:pointer-events-none disabled:text-fg-faint ${props.className}`}
+      >
+        {props.children}
+      </button>
+    </Tip>
   );
 }
 

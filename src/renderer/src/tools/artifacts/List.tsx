@@ -26,6 +26,7 @@ import { refreshLibrary, useLibraryList } from '../../library/store';
 import { setLibraryView } from '../../library/view';
 import { ipc } from '../../ipc/client';
 import { openArtifacts } from '../../main/artifacts';
+import { QuietSpinner } from '../../ui/spinner';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 
 export type ArtifactsScope = 'session' | 'all';
@@ -107,7 +108,8 @@ function Groups({ filter, machine, scope, initialOffset, onOpen }: { filter: Lib
   const read = useLibraryList(filter, machine);
   const error = read.status === 'error' ? (read.error ?? '') : null;
   if (read.value === undefined) {
-    return error === null ? <Quiet>{ARTIFACTS_TOOL_COPY.reading}</Quiet> : <Failure message={ARTIFACTS_TOOL_COPY.couldNotList(error)} />;
+    // the word cut (T548): the first read is a quiet spinner below the scope row
+    return error === null ? <div className="px-3 py-2"><QuietSpinner label={ARTIFACTS_TOOL_COPY.reading} /></div> : <Failure message={ARTIFACTS_TOOL_COPY.couldNotList(error)} />;
   }
   return <Lines rows={read.value.rows} error={error} scope={scope} appSessionId={filter.appSessionId} initialOffset={initialOffset} onOpen={(id) => onOpen(id, machine)} />;
 }

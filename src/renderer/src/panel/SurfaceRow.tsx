@@ -212,7 +212,7 @@ export function SurfaceRow({ maxIcons = Infinity, overflowControls }: { maxIcons
             <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className={ITEM}>{tab.toolId} (unavailable)</DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className={MENU}>
               <DropdownMenu.Item className={ITEM} onSelect={() => toggleSurface(tab.toolId)}>Show saved surface</DropdownMenu.Item>
-              {session && <DropdownMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? 'Keep with this session only' : 'Keep open for every session'}</DropdownMenu.Item>}
+              {session && <DropdownMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? COPY.unpinTab : COPY.pinTab}</DropdownMenu.Item>}
               <DropdownMenu.Item className={ITEM} onSelect={() => void panelHost.closeTab(tab.id)}>Close saved tab</DropdownMenu.Item>
             </DropdownMenu.SubContent></DropdownMenu.Portal>
           </DropdownMenu.Sub>)}
@@ -231,21 +231,25 @@ function SurfaceContext({ toolId, children }: { toolId: string; children: ReactE
   const session = surfaceSession(state);
   const tool = usePanelHost((s) => s.tools.get(toolId));
   const pinned = state.panelSurfaces.pinnedTools.includes(toolId);
-  // UX wave U6b-1 (Decision 16): the tab "Keep open for every session" acts on is the tool's first that holds no file (for
-  // Files, the tree-only tab), and the item is absent when the scope has none
+  // UX wave U6b-1 (Decision 16): the tab "Pin tab" acts on (the word cut's P8; it read "Keep open for every session") is
+  // the tool's first that holds no file (for Files, the tree-only tab), and the item is absent when the scope has none
   const tab = state.effectivePanelTabs(session).find((tab) => tab.toolId === toolId && !paramsHoldFile(state.panelParams[tab.id]));
   const opened = !state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId);
+  // The word cut (P9): no "Open surface" (a press on the icon opens it), "Hide surface" while it is open; an icon with
+  // nothing to offer opens no menu
+  const toolbarPin = !PRIMARY.includes(toolId);
+  const tabPin = tab !== undefined && tool?.pinnable === true && session !== null;
   return <ContextMenu.Root modal={false}>
-    <ContextMenu.Trigger asChild onKeyDown={(event) => {
+    <ContextMenu.Trigger asChild disabled={!toolbarPin && !tabPin && !opened} onKeyDown={(event) => {
       if (!event.shiftKey || event.key !== 'F10') return;
       event.preventDefault();
       const box = event.currentTarget.getBoundingClientRect();
       event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
     }}>{children}</ContextMenu.Trigger>
     <ContextMenu.Portal><ContextMenu.Content onCloseAutoFocus={keepHandOver} className={MENU}>
-      {!PRIMARY.includes(toolId) && <ContextMenu.Item className={ITEM} onSelect={() => state.toggleSurfacePin(toolId)}>{pinned ? 'Unpin from toolbar' : 'Pin to toolbar'}</ContextMenu.Item>}
-      {tab && tool?.pinnable && session && <ContextMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? 'Keep with this session only' : 'Keep open for every session'}</ContextMenu.Item>}
-      <ContextMenu.Item className={ITEM} onSelect={() => toggleSurface(toolId)}>{opened ? COPY.hideSurface : COPY.openSurface}</ContextMenu.Item>
+      {toolbarPin && <ContextMenu.Item className={ITEM} onSelect={() => state.toggleSurfacePin(toolId)}>{pinned ? 'Unpin from toolbar' : 'Pin to toolbar'}</ContextMenu.Item>}
+      {tabPin && <ContextMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? COPY.unpinTab : COPY.pinTab}</ContextMenu.Item>}
+      {opened && <ContextMenu.Item className={ITEM} onSelect={() => toggleSurface(toolId)}>{COPY.hideSurface}</ContextMenu.Item>}
     </ContextMenu.Content></ContextMenu.Portal>
   </ContextMenu.Root>;
 }

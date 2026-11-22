@@ -196,8 +196,6 @@ export const REVIEW_COPY = {
   unknownRef: 'unknown ref',
   turnNotLoaded: 'the turn is not loaded · Open the session',
   loading: 'Loading',
-  // The Environment summary's addition to the host's change line.
-  staged: (n: number) => ` · ${n} staged`,
 } as const;
 
 // E5: the editor's sentences (E5 execution document, Interfaces *Copy*; exact strings are decisions). M2 shows the save,

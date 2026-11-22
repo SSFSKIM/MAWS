@@ -1,4 +1,6 @@
 // Every sentence of the Session info tool (C11 execution document, Interfaces "Session info tool"; mockup 06 vignette 03).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M3): where a value came from is its tooltip, not a
+// note at rest (T253, P162); the lane reads in a word, its sentence the tooltip (T254).
 
 import type { PermissionMode } from '@shared/graph/enums';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
@@ -13,13 +15,15 @@ export const LANE = {
   expectedDisabled: 'Local (expected) · the server lane is disabled for this session',
   server: 'Server · reviews ride on the main request · no charge · model chosen server-side',
   unknown: 'Not read yet',
-  reviews: (evaluated: number, flagged: number) => `${evaluated} tool call${evaluated === 1 ? '' : 's'} evaluated, ${flagged} flagged`,
+  // the row's value, the lane in a word (T254); a refusal and `unknown` keep their words
+  short: { server: 'Server', local: 'Local', off: 'Off' },
+  reviews: (evaluated: number, flagged: number) => `${evaluated} reviewed · ${flagged} flagged`, // T255
 };
 
 export const INFO = {
   title: 'Session info',
   noSession: 'Open a session to see its details',
-  sections: { engine: 'Engine', model: 'Model', gateway: 'Gateway', permissions: 'Permissions', usage: 'Context, usage, cost', hooks: 'Hooks and MCP' },
+  sections: { engine: 'Engine', model: 'Model', gateway: 'Gateway', permissions: 'Permissions', usage: 'Usage' /* T249 */, hooks: 'Hooks and MCP' },
   // Engine
   version: 'Version',
   binary: 'Binary',
@@ -36,6 +40,7 @@ export const INFO = {
   // P5 O9 M5 (the owner's Q1 and Q2): a terminal session MAWS drives through its bridge, and the controls it can't reach
   bridged: 'Driven through sminos’s bridge',
   unavailableTitle: 'Not available here',
+  unavailableCount: (n: number) => `${n} not available`, // the word cut (T266): the folded group's bare count's meaning
   // every control the port names (ControlKey), each listed with its reason when unreachable
   control: {
     send: 'Send',
@@ -79,20 +84,21 @@ export const INFO = {
   passedThrough: 'passed through from your shell',
   // Gateway
   route: 'Route',
-  routed: (baseUrl: string) => `Gateway · ClaudeUsage relay · ${baseUrl}`,
-  direct: "Direct · engine's own login",
-  directLogin: (login: string) => `Direct · engine's own login · ${login}`,
-  unverified: 'Route unverified',
+  // T256: the route and what it names, the words that repeat it cut
+  routed: (baseUrl: string) => `Gateway · ${baseUrl}`,
+  direct: 'Direct',
+  directLogin: (login: string) => `Direct · ${login}`,
+  engineLogin: "the engine's own login", // who a Direct session's local lane is counted against, in the lane's sentence
+  unverified: 'Route unverified', // T258: with no note until it is checked; a mismatch says why
   mismatch: (mode: string) => `the engine's base URL does not match the ${mode === 'direct' ? 'direct' : 'gateway'} route it was launched on`,
-  pending: 'not verified yet',
   account: 'Account',
   toolSearch: 'Tool search',
-  toolSearchOn: 'on · ENABLE_TOOL_SEARCH, needed behind a base URL',
+  toolSearchOn: 'on', // P163
   toolSearchOff: 'off',
   login: 'Login',
   organization: 'Organization',
   email: 'Email',
-  pinnedHere: 'pinned for this session',
+  pinnedHere: 'pinned', // T259
   routingNow: 'routing now',
   noAccount: 'no account yet',
   // Permissions
@@ -101,17 +107,12 @@ export const INFO = {
   lane: 'Auto-mode lane',
   rules: 'Rules',
   ruleCounts: (allow: number, ask: number, deny: number, grants: number) => `${allow} allow · ${ask} ask · ${deny} deny · ${grants} session grant${grants === 1 ? '' : 's'}`,
-  grantsOnly: (grants: number) => `${grants} session grant${grants === 1 ? '' : 's'} · the rules are not read yet`,
+  grantsOnly: (grants: number) => `${grants} session grant${grants === 1 ? '' : 's'}`, // T258: until the rules are read
   openPermissions: '/permissions',
-  // Context, usage, cost
-  context: 'Context',
-  contextLine: (used: string, max: string, percent: number, threshold: string | null) => `${used} of ${max} · ${percent}%${threshold === null ? '' : ` · autocompact at ${threshold}`}`,
-  usage: 'Usage',
-  fromClaudeUsage: 'from ClaudeUsage, shared by every session',
-  fromEngine: 'from the engine',
+  // Usage (P176: the context and the usage windows are the context ring's and the usage displays', not repeated here)
   pace: 'Pace', // W2: the usage popover's pace line, here since the status line is gone
   cost: 'Cost',
-  costLine: (total: string, since: string) => `${total} this session · ${since} since you last looked`,
+  costLine: (total: string, since: string) => `${total} · ${since} new`, // T264
   // Hooks and MCP
   hooks: 'Hooks',
   hookCounts: (settings: number, plugin: number) => `${settings} settings hook${settings === 1 ? '' : 's'} · ${plugin} plugin hook${plugin === 1 ? '' : 's'}`,

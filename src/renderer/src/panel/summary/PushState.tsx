@@ -7,6 +7,11 @@
 // polled every 2 minutes while the row is shown and there is something to ask (trusted, a remote), asked again when the
 // repository's head or refs move or a session's setup records trust (the app-level listener, `connectPanelEvents`), and
 // on demand by Refresh. The card hands this row its session and that session's checkout (E11 W-D).
+//
+// The word cut (P39, P43): commits ahead and behind are marks, "↑2 ↓1", the sentence with the remote's name their
+// accessible name and tooltip (what the press does stays the description); "Not pushed" and "Up to date with
+// <upstream>" keep their words. A branch with no PR draws no PR row (the queries keep polling, so one that appears
+// shows).
 import { useEffect, useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,6 +21,7 @@ import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
 import { prStateKey, refreshPrState, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
 import { openTerminal } from '../../tools/terminal';
+import { Tip } from '../../ui/tip';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
 import { githubUrl, pushState } from './derive';
@@ -30,10 +36,12 @@ export function PushState({ directory, appSessionId, embedded = false }: { direc
   if (!status || status.branch === null) return null;
   const push = pushState(status);
   const url = githubUrl(status.remoteUrl, status.upstream);
-  const text =
+  const sentence =
     push.kind === 'not_pushed'
       ? SUMMARY_COPY.notPushed
       : `${push.ahead > 0 ? SUMMARY_COPY.ahead(push.ahead, push.upstream) : SUMMARY_COPY.upToDate(push.upstream)}${push.behind > 0 ? SUMMARY_COPY.behind(push.behind) : ''}`;
+  const marks = push.kind === 'ahead' && (push.ahead > 0 || push.behind > 0) ? [push.ahead > 0 && SUMMARY_COPY.aheadMark(push.ahead), push.behind > 0 && SUMMARY_COPY.behindMark(push.behind)].filter(Boolean).join(' ') : null;
+  const tip = marks === null ? null : sentence; // the words stand at rest otherwise
   const body = (
     <>
       <Row
@@ -46,17 +54,25 @@ export function PushState({ directory, appSessionId, embedded = false }: { direc
         }
       >
         {toolRegistered ? (
-          // A-28 (WCAG 2.5.3): named by the text it shows; what it does is its title, the accessible description
-          <button
-            type="button"
-            title={SUMMARY_COPY.openSourceControl}
-            className="block w-full truncate rounded-sm text-left outline-accent hover:text-accent focus-visible:outline-2"
-            onClick={() => panelHost.addTool(SCM_TOOL_ID, { appSessionId })}
-          >
-            {text}
-          </button>
+          // A-28 (WCAG 2.5.3): named by the sentence it shows, or its marks stand for; what it does is the accessible description
+          <Tip content={tip} description={SUMMARY_COPY.openSourceControl}>
+            <button
+              type="button"
+              aria-label={tip ?? undefined}
+              className="block w-full truncate rounded-sm text-left tabular-nums outline-accent hover:text-accent focus-visible:outline-2"
+              onClick={() => panelHost.addTool(SCM_TOOL_ID, { appSessionId })}
+            >
+              {marks ?? sentence}
+            </button>
+          </Tip>
+        ) : marks === null ? (
+          <span className="block truncate">{sentence}</span>
         ) : (
-          <span className="block truncate">{text}</span>
+          <Tip content={tip}>
+            <span role="img" aria-label={sentence} tabIndex={0} className="block w-fit truncate rounded-sm tabular-nums outline-accent focus-visible:outline-2">
+              {marks}
+            </span>
+          </Tip>
         )}
       </Row>
       <PrRow appSessionId={appSessionId} directory={directory} branch={status.branch} />
@@ -76,7 +92,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
   }, [behind, appSessionId, directory]);
 
   const line = prLine({ branch, scm: { data: scm.data, error: scm.error?.message }, pr: { data: pr.data, error: pr.error?.message } });
-  if (line.kind === 'hidden') return null;
+  if (line.kind === 'hidden' || line.kind === 'no_pr') return null; // the word cut (P43): no PR, no row
 
   // gh is asked again (the probe re-runs on `refresh: true`, keeping only a ready answer), and scm.status, whose gh and
   // trust the row reads, is re-read after it so it finds the new probe. Untrusted, there is nothing to ask gh: only
@@ -125,13 +141,12 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
             </button>
           </>
         )}
-        {line.kind === 'no_pr' && SUMMARY_COPY.noPr(line.branch)}
         {line.kind === 'pr' && (
           <>
             <button type="button" className={INLINE_LINK} onClick={() => openExternal(line.url)}>
               {SUMMARY_COPY.prNumber(line.number)}
             </button>
-            {` ${line.details}`}
+            {line.details && ` · ${line.details}`}
           </>
         )}
         {line.kind === 'unavailable' && SUMMARY_COPY.prUnavailable(line.reason)}

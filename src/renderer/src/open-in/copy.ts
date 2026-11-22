@@ -4,8 +4,9 @@ export const OPEN_IN_COPY = {
   label: 'Open in',
   // a session on another machine: the item is drawn disabled and carries the reason in its own words (the cut's decision 10)
   elsewhere: (machine: string) => `Open in (the folder is on ${machine})`,
-  looking: 'Looking for apps…',
+  looking: 'Looking for apps', // the word cut (N88): the quiet spinner's name while main is asked
   failed: 'MAWS could not open it just now', // the bridge threw, or main answered an error
   // a file outside the session's folders: a terminal opens a folder, and this file's is not one the session works in
-  terminalOutside: 'A terminal opens a folder this session works in, and this file is outside them',
+  // (the word cut, N90: the reason in the row itself, on pointing or focus)
+  terminalOutside: "This file is outside the session's folders",
 } as const;

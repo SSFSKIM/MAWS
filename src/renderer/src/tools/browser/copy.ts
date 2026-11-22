@@ -245,8 +245,9 @@ export const BROWSER_COPY = {
 
   // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----
   sessionInfoLabel: 'Browser tabs',
-  sessionInfo: (loaded: number, mib: number | null) => `${loaded} loaded${mib === null ? '' : ` · ${mib} MB`} · outside the engine budget`,
-  sessionInfoNone: 'No tabs loaded',
+  // the word cut: "3 loaded · 120 MB" (T539), where the pages stand its tooltip (P162); no row while none is loaded (T540)
+  sessionInfo: (loaded: number, mib: number | null) => `${loaded} loaded${mib === null ? '' : ` · ${mib} MB`}`,
+  sessionInfoSource: 'outside the engine budget',
 } as const;
 
 // A permission as the denied-permission line names it: Codex's capability phrases (`browser.permission.capability.*`)

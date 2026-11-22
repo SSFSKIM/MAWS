@@ -24,7 +24,7 @@ function Header({ appSessionId, loaded, freshness }: { appSessionId: AppSessionI
     <Row>
       <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
         <span className="shrink-0">{SUMMARY_COPY.pluginsLoaded(loaded)}</span>
-        {freshness.kind !== 'unknown' && <span className="shrink-0 text-fg-muted">{freshness.kind === 'now' ? FRESHNESS.loadedNow : FRESHNESS.loadedLast(freshness.at)}</span>}
+        {freshness.kind === 'last' && <span className="shrink-0 text-fg-muted">{FRESHNESS.loadedLast(freshness.at)}</span> /* the word cut (P65): the age only when it is not now */}
         {ready && <ReloadControls reloads={reloads} />}
       </span>
     </Row>
