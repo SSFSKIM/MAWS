@@ -39,7 +39,11 @@ export function PushState({ directory, appSessionId, embedded = false }: { direc
   const sentence =
     push.kind === 'not_pushed'
       ? SUMMARY_COPY.notPushed
-      : `${push.ahead > 0 ? SUMMARY_COPY.ahead(push.ahead, push.upstream) : SUMMARY_COPY.upToDate(push.upstream)}${push.behind > 0 ? SUMMARY_COPY.behind(push.behind) : ''}`;
+      : push.ahead > 0
+        ? `${SUMMARY_COPY.ahead(push.ahead, push.upstream)}${push.behind > 0 ? SUMMARY_COPY.behind(push.behind) : ''}`
+        : push.behind > 0
+          ? SUMMARY_COPY.behindOnly(push.behind, push.upstream) // "Up to date" is a level branch's alone
+          : SUMMARY_COPY.upToDate(push.upstream);
   const marks = push.kind === 'ahead' && (push.ahead > 0 || push.behind > 0) ? [push.ahead > 0 && SUMMARY_COPY.aheadMark(push.ahead), push.behind > 0 && SUMMARY_COPY.behindMark(push.behind)].filter(Boolean).join(' ') : null;
   const tip = marks === null ? null : sentence; // the words stand at rest otherwise
   const body = (

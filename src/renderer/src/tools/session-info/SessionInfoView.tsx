@@ -71,7 +71,8 @@ const HEAD =
 const CHEVRON = 'size-3 shrink-0 transition-transform duration-150 group-aria-expanded:rotate-90 motion-reduce:transition-none';
 
 // A group folded to its head: the heading is the disclosure's button, the chevron before the words; `count`, a bare
-// count after them, its meaning its name and the head's tooltip (the head is its one focusable owner).
+// count after them, its meaning its name and the head's tooltip (the head is its one focusable owner). Folding puts the
+// body out of reach at once, inert while its close runs, as the counted fold does.
 function FoldGroup({ label, count, open, onToggle, children }: { label: string; count?: { n: number; meaning: string }; open: boolean; onToggle(): void; children: ReactNode }) {
   const bodyId = useId();
   const head = (
@@ -90,7 +91,7 @@ function FoldGroup({ label, count, open, onToggle, children }: { label: string; 
   return (
     <section aria-label={label} data-info-group={label} className="mt-1.5 first:mt-0">
       <h4 className="m-0">{count ? <Tip content={count.meaning}>{head}</Tip> : head}</h4>
-      <DisclosureBody open={open} id={bodyId}>
+      <DisclosureBody open={open} id={bodyId} inert={!open || undefined}>
         <div className="pt-0.5 pb-1.5 pl-4">{children}</div>
       </DisclosureBody>
     </section>

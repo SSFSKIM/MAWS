@@ -8,7 +8,7 @@ import { useId } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useWorkingFolder } from '../../../sessions/working-folder';
 import { SUMMARY_COPY } from '../../../panel/copy';
-import { changeLine } from '../../../panel/summary/derive';
+import { changeWords } from '../../../panel/summary/ChangeWords';
 import { actionClass } from '../../../panel/summary/Section';
 import { checkoutKey, machineFor } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
@@ -20,19 +20,12 @@ export function ReviewSummary({ appSessionId, open }: { appSessionId: AppSession
   const directory = useWorkingFolder(appSessionId)?.path ?? null;
   const entry = useGit((s) => (directory === null ? undefined : s.entries.get(checkoutKey(machineFor(appSessionId), directory))));
   if (!entry) return null;
-  const line = changeLine(entry.status, entry.uncommitted?.files ?? null);
-  const uncounted = line.kind === 'change' ? SUMMARY_COPY.uncounted(line.untracked, line.binary) : '';
+  const { words, uncounted } = changeWords(entry);
   return (
     <Tip content={uncounted} description={uncounted}>
       <button type="button" aria-label={SUMMARY_COPY.openChanges} aria-describedby={countsId} onClick={() => open()} className={`${actionClass} flex w-full min-w-0 items-center gap-1 text-left`}>
         <span id={countsId} data-testid="change-line" className="min-w-0 flex-1 truncate text-fg-muted">
-          {line.kind === 'clean' && SUMMARY_COPY.clean}
-          {line.kind === 'unknown' && (entry.error ? SUMMARY_COPY.changeUnavailable : SUMMARY_COPY.pending)}
-          {line.kind === 'change' && (
-            <>
-              <span className="text-success">+{line.insertions}</span> <span className="text-danger">−{line.deletions}</span> {SUMMARY_COPY.files(line.files)}
-            </>
-          )}
+          {words}
         </span>
         <span aria-hidden="true" className="shrink-0 text-fg-muted">›</span>
       </button>

@@ -32,6 +32,7 @@ export const FRESHNESS = {
   asOf: (at: string, now = Date.now()) => `as of ${ago(at, now)}`, // the word cut (P55): the session card's Context reading
   lastObserved: (at: string, now = Date.now()) => `Last observed ${ago(at, now)}`,
   notObserved: 'Not observed yet',
+  unknown: '—', // the word cut (P174): a fact not observed yet, where a value stands (Session info, the cards, the widgets)
 };
 
 // The facts of one session. Keyed with its engine status's launch and process, so an exit (whose facts the host has

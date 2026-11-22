@@ -44,7 +44,6 @@ export const SUMMARY_COPY = {
   files: (files: number) => `· ${plural(files, 'file')}`,
   uncounted: (untracked: number, binary: number) => [untracked > 0 && `${untracked} untracked`, binary > 0 && `${binary} binary`].filter(Boolean).join(' · '),
   changeUnavailable: 'Change unavailable',
-  unknown: '—', // the word cut (P174): a figure not known yet, as Session info's values read
   modelUnknown: 'model unknown', // W9 (H4): the row names the model by its alias (`<alias> <effort>`, the composer chip's words)
   sessionInfo: 'Session info',
   openChanges: 'Open changes', // UX wave U8b (l5-code-16): the change line's accessible name; its counts are its description
@@ -53,6 +52,7 @@ export const SUMMARY_COPY = {
   ahead: (n: number, upstream: string) => `${n} ahead of ${upstream}`,
   upToDate: (upstream: string) => `Up to date with ${upstream}`,
   behind: (n: number) => ` · ${n} behind`,
+  behindOnly: (n: number, upstream: string) => `${n} behind ${upstream}`, // nothing ahead (the word cut: the ↓N mark's name)
   // the word cut (P39): the push row's marks, "↑2 ↓1"; the sentences above are their name and tooltip
   aheadMark: (n: number) => `↑${n}`,
   behindMark: (n: number) => `↓${n}`,
@@ -89,6 +89,12 @@ export const SUMMARY_COPY = {
   sourceOnly: 'Source only', // the word cut (P58): a connector tool row's tooltip
   // Plugins (E8 D-9): the plugins the session loaded, beside Reload plugins and Reload skills
   pluginsLoaded: (n: number) => plural(n, 'plugin'), // the word cut (P65): "3 plugins", its age only when it is not now
+  // the word cut (P63): the Connectors card's two buttons, the first named in full; greyed, each says why
+  manage: 'Manage…',
+  manageName: 'Manage connectors…', // the accessible name the shorter label stands for
+  pluginsButton: 'Plugins…',
+  manageUnavailable: 'Open the session to manage its connectors',
+  pluginsUnavailable: 'Open the session to manage its plugins',
 } as const;
 
 // A tab or a summary button whose tool the host has no registration for: a restored tab before its tool registers, or a

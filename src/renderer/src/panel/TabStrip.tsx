@@ -25,10 +25,11 @@ import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { machineOf } from '@shared/machine/address';
 import { Icon, IconButton } from '../app/IconButton';
 import { useLayout, type LayoutState } from '../stores/layout';
+import { RefusedMenuItem } from '../ui/refused-menu-item';
 import { Tip } from '../ui/tip';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
-import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
+import { PANE_COPY } from '../engine-surface/copy'; // R2
 import { beginDrag, endDrag, endDragFrom, holdSideViews, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { DropHighlight, DropOverlay } from '../shell/DropOverlay'; // UX wave U6b-1 (M4)
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
@@ -390,7 +391,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
   );
 }
 
-const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 // Shift+F10 opens a tab's menu at the tab, as it opens an icon's (`SurfaceRow.tsx`).
 function openMenuOnShiftF10(event: KeyboardEvent<HTMLDivElement>) {
@@ -404,13 +405,9 @@ function openMenuOnShiftF10(event: KeyboardEvent<HTMLDivElement>) {
 // UX wave U6b-1: a file likewise.
 function MoveToMainItem({ tabId }: { tabId: string }) {
   const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
+  if (refusal !== null) return <RefusedMenuItem kit={ContextMenu} label={TRANSFER_COPY.moveToMain} reason={refusal} className={MENU_ITEM} />; // the word cut (N94's pattern)
   return (
-    <ContextMenu.Item
-      disabled={refusal !== null}
-      title={refusal ?? undefined}
-      onSelect={() => void moveToMain(tabId)}
-      className={MENU_ITEM}
-    >
+    <ContextMenu.Item onSelect={() => void moveToMain(tabId)} className={MENU_ITEM}>
       {TRANSFER_COPY.moveToMain}
     </ContextMenu.Item>
   );

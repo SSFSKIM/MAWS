@@ -12,18 +12,12 @@ import { useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import type { PanelTool, PanelToolContext } from '../panel/tool';
 import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
+import { PANE_COPY } from './copy';
 import { panesClient, usePaneRoster } from './pane-roster';
 import { useCells } from './cells';
 import { SurfaceSite } from './SurfaceSite';
 
 export const PLUGIN_PANE_TOOL = 'plugin-pane';
-
-export const PANE_COPY = {
-  title: 'Plugin pane',
-  menu: 'Plugin panes',
-  notDrawn: (plugin: string) => `${plugin} has not drawn here yet`, // the word cut (P511): the placeholder's one line
-  closed: 'This pane has closed',
-} as const;
 
 export interface PluginPaneParams {
   paneId: string;

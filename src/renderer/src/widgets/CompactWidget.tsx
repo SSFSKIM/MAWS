@@ -61,7 +61,7 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
           {driven
             ? drivenContext
               ? `${Math.round(drivenContext.percent)}% of ${num(drivenContext.maxTokens)}`
-              : FRESHNESS.notObserved
+              : FRESHNESS.unknown // the word cut (P174)
             : sampled
             ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
             : read.data

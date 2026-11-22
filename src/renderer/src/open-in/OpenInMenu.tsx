@@ -6,8 +6,8 @@
 // (N88); a terminal row a file outside the session's folders cannot go to stays in the keyboard's reach, drawn
 // `aria-disabled`, its reason the row's note on pointing or focus and its description always (N90).
 import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { useEffect, type ReactNode } from 'react';
-import { RowNote, useRowNote } from '../ui/row-note';
+import { useEffect } from 'react';
+import { RefusedMenuItem } from '../ui/refused-menu-item';
 import { QuietSpinner } from '../ui/spinner';
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -42,7 +42,7 @@ function Rows({ kit, choose, only, outside = false }: { kit: Kit; choose(app: Op
       {i > 0 && <kit.Separator className={SEPARATOR} />}
       {group.map((app) =>
         outside && TERMINALS.has(app.id) ? (
-          <RefusedRow key={app.id} kit={kit} app={app} reason={OPEN_IN_COPY.terminalOutside} />
+          <RefusedMenuItem key={app.id} kit={kit} data-open-in={app.id} label={app.name} reason={OPEN_IN_COPY.terminalOutside} className={ITEM} />
         ) : (
           <kit.Item key={app.id} data-open-in={app.id} onSelect={() => choose(app.id)} className={ITEM}>
             {app.name}
@@ -53,17 +53,6 @@ function Rows({ kit, choose, only, outside = false }: { kit: Kit; choose(app: Op
   ));
 }
 
-// A row that cannot be chosen here: still highlighted by the arrows and the pointer, its press doing nothing and keeping
-// the menu open, its reason its note.
-function RefusedRow({ kit, app, reason }: { kit: Kit; app: OpenInApp; reason: ReactNode }) {
-  const note = useRowNote();
-  return (
-    <kit.Item data-open-in={app.id} aria-disabled aria-label={app.name} textValue={app.name} {...note.rowProps} onSelect={(event) => event.preventDefault()} className={`relative ${ITEM}`}>
-      {app.name}
-      <RowNote note={note}>{reason}</RowNote>
-    </kit.Item>
-  );
-}
 
 /** The submenu of a session's menu: its working folder, to an app. `menu`: the kind of menu it stands in. */
 export function OpenInSubmenu({ appSessionId, menu }: { appSessionId: AppSessionId; menu: 'dropdown' | 'context' }) {

@@ -2,6 +2,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { openComposerWidget, useComposerStore } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
 import { UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
+import { SUMMARY_COPY } from '../copy';
 import { FloatingCard, type CardFold } from './FloatingCard';
 import { Plugins } from './Plugins';
 import { actionClass } from './Section';
@@ -32,11 +33,11 @@ export function Connectors({ appSessionId, fold }: { appSessionId: AppSessionId;
         </ul>
       )}
       <div className="flex flex-wrap gap-1.5">
-        <UnavailableButton reason={hasComposer ? null : 'Open the session to manage its connectors'}>
-          <button type="button" className={BUTTON} aria-label="Manage connectors…" onClick={() => openComposerWidget(appSessionId, 'mcp', '')}>Manage…</button>
+        <UnavailableButton reason={hasComposer ? null : SUMMARY_COPY.manageUnavailable}>
+          <button type="button" className={BUTTON} aria-label={SUMMARY_COPY.manageName} onClick={() => openComposerWidget(appSessionId, 'mcp', '')}>{SUMMARY_COPY.manage}</button>
         </UnavailableButton>
-        <UnavailableButton reason={hasComposer ? null : 'Open the session to manage its plugins'}>
-          <button type="button" className={BUTTON} onClick={() => openComposerWidget(appSessionId, 'plugins', '')}>Plugins…</button>
+        <UnavailableButton reason={hasComposer ? null : SUMMARY_COPY.pluginsUnavailable}>
+          <button type="button" className={BUTTON} onClick={() => openComposerWidget(appSessionId, 'plugins', '')}>{SUMMARY_COPY.pluginsButton}</button>
         </UnavailableButton>
       </div>
       {/* Keep pinned plugin lines and the existing reload controls; they have no equivalent in MCP status. */}

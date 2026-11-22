@@ -1,7 +1,8 @@
 // Environment (C8 spec *The summary*): the branch, the uncommitted change line (Review's own control, the card's one way
 // into Review; UX wave U8b, l5-code-16), and the model row that opens Session info. The git facts are the git store's for
 // the summary's directory (Summary.tsx holds the watch); a failed watch says why in words and draws no branch, a failed
-// diff keeps the branch and says the change is unavailable.
+// diff keeps the branch and says the change is unavailable. The word cut: why there is no status is said once, in the
+// heading, which shows folded or open (it was also a row).
 // UX wave U8c-2 (§H; the owner's answers, Decision Log 14 of docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md):
 // the folder row shows the agent's own folder (the selector's `cwd`), cut at its start when it does not fit and whole in
 // its tooltip, so after a move it names the worktree; while the working folder is not the launch folder, one muted line
@@ -20,7 +21,7 @@ import { useGit, type GitEntry } from '../../stores/git';
 import { useSessions } from '../../stores/sessions';
 import { Tip } from '../../ui/tip';
 import { SUMMARY_COPY } from '../copy';
-import { changeLine } from './derive';
+import { changeWords } from './ChangeWords';
 import { FloatingCard, type CardFold } from './FloatingCard';
 import { PushState } from './PushState';
 import { Row, ToolButton, ToolSummary, useToolSummary } from './Section';
@@ -45,17 +46,13 @@ export function Environment({ appSessionId, record, folder, fold }: { appSession
           {SUMMARY_COPY.movedFrom(lastSegment(folder.launch))}
         </p>
       )}
-      {status ? (
+      {status && (
         <>
           <Row>
             <span className="block truncate">{status.branch === null ? SUMMARY_COPY.detached(status.head) : SUMMARY_COPY.branch(status.branch)}</span>
           </Row>
           {reviewSummary ? <ToolSummary toolId="review" appSessionId={appSessionId} component={reviewSummary} /> : <ChangeLine entry={entry!} />}
         </>
-      ) : (
-        <Row>
-          <span className="text-fg-muted">{watchFailure(entry)}</span>
-        </Row>
       )}
       <PushState directory={directory} appSessionId={appSessionId} embedded />
       <Row action={<ToolButton toolId="session-info" label={SUMMARY_COPY.sessionInfo} appSessionId={appSessionId} />}>
@@ -91,22 +88,15 @@ function watchFailure(entry: GitEntry | undefined): string {
   return entry.error === NOT_A_REPOSITORY ? SUMMARY_COPY.notRepository : SUMMARY_COPY.gitUnavailable;
 }
 
-// The word cut (P36): "+12 −3 · 4 files", the untracked and binary counts its tooltip and description, on the line
-// itself, which takes the keyboard while it has them (Review's own line is a button already: ReviewSummary.tsx).
+// The read-only change line (ChangeWords.tsx), its uncounted files its tooltip and description, on the line itself, which
+// takes the keyboard while it has them (Review's own line is a button already: ReviewSummary.tsx).
 function ChangeLine({ entry }: { entry: GitEntry }) {
-  const line = changeLine(entry.status, entry.uncommitted?.files ?? null);
-  const uncounted = line.kind === 'change' ? SUMMARY_COPY.uncounted(line.untracked, line.binary) : '';
+  const { words, uncounted } = changeWords(entry);
   return (
     <p className="text-ui-sm text-fg-muted">
       <Tip content={uncounted} description={uncounted}>
         <span data-testid="change-line" tabIndex={uncounted ? 0 : undefined} className="rounded-sm outline-accent focus-visible:outline-2">
-          {line.kind === 'clean' && SUMMARY_COPY.clean}
-          {line.kind === 'unknown' && (entry.error ? SUMMARY_COPY.changeUnavailable : SUMMARY_COPY.pending)}
-          {line.kind === 'change' && (
-            <>
-              <span className="text-success">+{line.insertions}</span> <span className="text-danger">−{line.deletions}</span> {SUMMARY_COPY.files(line.files)}
-            </>
-          )}
+          {words}
         </span>
       </Tip>
     </p>

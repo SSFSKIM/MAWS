@@ -36,6 +36,7 @@ import { useArtifactTitle } from '../library/store';
 // P3-F wave S (F16); P4-B3 (X38): the move to the panel, its drag and its one refusal
 import { beginDrag, endDragFrom, moveToPanel, TAB_DRAG_TYPE, useTransferRefusal } from '../shell/transfer';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { RefusedMenuItem } from '../ui/refused-menu-item';
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
@@ -238,14 +239,13 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   );
 }
 
+const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+
+// The word cut (N94): an item greyed with a reason stays in the menu's keyboard, its reason its description and its note.
 function TabMenuItem({ children, onSelect, disabled = false, reason }: { children: string; onSelect(): void; disabled?: boolean; reason?: string }) {
+  if (disabled && reason) return <RefusedMenuItem kit={ContextMenu} label={children} reason={reason} className={MENU_ITEM} />;
   return (
-    <ContextMenu.Item
-      onSelect={onSelect}
-      disabled={disabled}
-      title={disabled ? reason : undefined}
-      className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
-    >
+    <ContextMenu.Item onSelect={onSelect} disabled={disabled} className={MENU_ITEM}>
       {children}
     </ContextMenu.Item>
   );

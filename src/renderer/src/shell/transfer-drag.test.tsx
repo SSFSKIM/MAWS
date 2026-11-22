@@ -413,7 +413,9 @@ describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
     fireEvent.contextMenu(panelTab(id));
     let item = within(await screen.findByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain });
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noRecord);
+    // the word cut (N94's pattern): the reason is the item's description and note, not a system tooltip
+    expect(item.getAttribute('title')).toBeNull();
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain, description: TRANSFER_COPY.noRecord })).toBe(item);
     fireEvent.keyDown(item, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 

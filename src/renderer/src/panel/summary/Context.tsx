@@ -3,7 +3,6 @@ import { FRESHNESS, useObservedFacts } from '../../sessions/observed';
 import { openComposerWidget, useComposerStore } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
 import { num } from '../../widgets/parts';
-import { SUMMARY_COPY } from '../copy';
 import { FloatingCard, type CardFold } from './FloatingCard';
 import { actionClass } from './Section';
 import { Sources, useHasSources } from './Sources';
@@ -26,7 +25,7 @@ export function Context({ appSessionId, directory, fold }: { appSessionId: AppSe
           {usage.autoCompactThreshold !== null && <p className="text-ui-sm text-fg-muted">Autocompacts at {num(usage.autoCompactThreshold)} tokens</p>}
           {!live && observed && <p className="text-ui-sm text-fg-muted">{FRESHNESS.asOf(observed.at)}</p>}
         </>
-      ) : <p className="text-ui-sm text-fg-muted">{SUMMARY_COPY.unknown}</p>}
+      ) : <p className="text-ui-sm text-fg-muted">{FRESHNESS.unknown}</p>}
       <div className="flex flex-wrap gap-1.5">
         <button type="button" className={actionClass} disabled={!hasComposer} title={hasComposer ? 'Context breakdown' : 'Open the session to inspect its context'} onClick={() => openComposerWidget(appSessionId, 'context', '')}>Details…</button>
       </div>
