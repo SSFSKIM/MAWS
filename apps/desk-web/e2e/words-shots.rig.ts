@@ -36,6 +36,7 @@ import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import type { Locator, Page } from '@playwright/test';
 import { loadRecording, SESSION_VIEW, TWO_SUBAGENTS, type Recording, type Step } from 'desk-hub/fake-machine';
+import type { JsonObject } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 import { DepthPlayer } from './depth-player';
@@ -246,6 +247,81 @@ function agentsAtWork(recording: Recording): number {
   const notified = recording.steps.findIndex(names('<task-notification>'));
   if (launched < 0 || (notified >= 0 && notified < launched)) throw new Error(`the recording ${recording.name} has no point where its agents are all launched and none has reported`);
   return launched + 1;
+}
+
+// A turn the touch scenes add to the session-view recording, after its last turn and before the session ends (as
+// long-inputs.ts adds one): three of MAWS's own tool calls, none of which the recordings hold, written as the engine
+// writes their rows — a historical browser call (`mcp__maws__browser_navigate`) with its result, the time it took and a
+// wait for the person; a delivered file (`mcp__maws__send_file`) with its result; and an ask (`mcp__maws__ask`) that
+// never got a result before its turn closed, which the transcript reads as cancelled ("the session ended"). Invented
+// content throughout.
+const TOUCH = { tab: 'b_0123456789ab', url: 'https://example.com/shelves', file: '/Users/owner/kettle-works/out/shelf-labels.pdf', answer: 'The labels are printed; the casing question can wait.' };
+function withTouchTurn(recording: Recording): Recording {
+  const main = recording.rows.main;
+  const lastRow = main.at(-1)!;
+  const end = recording.steps.findIndex((s) => s.k === 'presence' && s.record === null);
+  if (end < 0) throw new Error(`the recording ${recording.name} has no end`);
+  const at = recording.steps[end]!.at - 1;
+  const base = Date.parse(String(lastRow.timestamp)) + 60_000;
+  let parent = lastRow.uuid;
+  const envelope = (i: number) => {
+    const uuid = `70c4f00d-0000-4000-8000-${String(i).padStart(12, '0')}`;
+    const row = { uuid, parentUuid: parent, timestamp: new Date(base + i * 1000).toISOString(), sessionId: recording.session, isSidechain: false, userType: 'external', cwd: lastRow.cwd, version: lastRow.version, entrypoint: 'cli' };
+    parent = uuid;
+    return row;
+  };
+  const call = (i: number, id: string, name: string, input: JsonObject) => ({
+    ...envelope(i),
+    type: 'assistant',
+    message: { id: `msg_touch${i}`, role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'tool_use', id, name, input }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } },
+  });
+  const result = (i: number, id: string, json: JsonObject) => ({
+    ...envelope(i),
+    type: 'user',
+    promptId: 'p-touch',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: JSON.stringify(json) }], is_error: false }] },
+  });
+  const rows: JsonObject[] = [
+    { ...envelope(1), type: 'user', origin: { kind: 'human' }, promptId: 'p-touch', message: { role: 'user', content: 'Check the shelf page, send me the labels, then ask me about the casing.' } },
+    call(2, 'toolu_touch_nav', 'mcp__maws__browser_navigate', { tabId: TOUCH.tab, url: TOUCH.url }),
+    result(3, 'toolu_touch_nav', { status: 'ok', tabId: TOUCH.tab, url: TOUCH.url, title: 'Shelves', ms: 1240, waitedFor: 'human', waitedMs: 3000 }),
+    call(4, 'toolu_touch_send', 'mcp__maws__send_file', { files: [TOUCH.file], caption: 'The printed labels' }),
+    result(5, 'toolu_touch_send', { status: 'delivered', deliverables: [{ id: 'dlv_touch1', path: TOUCH.file, name: 'shelf-labels.pdf' }] }),
+    call(6, 'toolu_touch_ask', 'mcp__maws__ask', { title: 'Label casing', questions: [{ question: 'Which casing do the labels use?', modality: 'choice', options: [{ label: 'lower' }, { label: 'upper' }] }] }),
+    {
+      ...envelope(7),
+      type: 'assistant',
+      message: { id: 'msg_touch7', role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'text', text: `<message>${TOUCH.answer}</message>` }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } },
+    },
+    { ...envelope(8), type: 'system', subtype: 'turn_duration', durationMs: 8000, isMeta: false },
+  ];
+  const steps: Step[] = rows.map((row) => ({ at, k: 'row', agentId: null, row: row as never }));
+  return { ...recording, rows: { ...recording.rows, main: [...main, ...(rows as never[])] }, steps: [...recording.steps.slice(0, end), ...steps, ...recording.steps.slice(end)] };
+}
+
+/** The touch turn played in on the phone, every row in and the session still running; `target` in view in the session view. */
+async function openTouchTurn(page: Page, hub: HubDouble, target: (view: Locator) => Locator): Promise<Locator> {
+  const recording = withTouchTurn(loadRecording(SESSION_VIEW));
+  const fm = await openReplay(page, hub, recording, 'dc8');
+  fm.step(recording.steps.findIndex((s) => s.k === 'presence' && s.record === null));
+  const view = channel(page).getByTestId('session-view');
+  await expect(view).toContainText(TOUCH.answer);
+  await view.locator('[data-transcript-scroller]').first().evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  const found = target(view);
+  await expect(found).toHaveCount(1);
+  await found.scrollIntoViewIfNeeded();
+  await expect(found).toBeInViewport();
+  return found;
+}
+
+/** A touch scene's check: on the cut's build the surface's fact drawn at rest (`display` as given) and reading `text`; on master's, none. */
+async function touchFact(surface: Locator, cut: boolean, text: string | RegExp, display: 'inline' | 'block' = 'inline') {
+  const fact = surface.locator('[data-touch-fact]');
+  if (!cut) return expect(fact).toHaveCount(0);
+  await expect(fact).toHaveCount(1);
+  await expect(fact).toBeVisible();
+  await expect(fact).toHaveCSS('display', display);
+  await expect(fact).toHaveText(text);
 }
 
 // A group chat of invented sessions: two of them talk to each other three times (the folded agent run), then one writes
@@ -474,7 +550,7 @@ test.describe('desktop', () => {
       id: 'desk-chat',
       title: "The group chat with agents' traffic folded",
       how: `An invented project (${CHAT.name}): ${CHAT.a} and ${CHAT.b} join, write to each other ${CHAT.says} times, then ${CHAT.b} writes to the owner; the project's group chat`,
-      state: `The cut: the fold reads "${FOLD.cut}", its count an image named "${FOLD.count}" (a tip on pointing), the touch fact not drawn where the pointer can point. Master: "${FOLD.master}"`,
+      state: `The cut: the fold reads "${FOLD.cut}", its count an image named "${FOLD.count}" (a tip on pointing), its touch fact (a line under the row) not drawn where the pointer can point. Master: "${FOLD.master}"`,
       viewport: DESKTOP_NAME,
       rows: ['N170'],
     },
@@ -492,8 +568,8 @@ test.describe('desktop', () => {
           if (cut) {
             await expect(fold).toContainText(FOLD.cut);
             await expect(fold.getByRole('img', { name: FOLD.count })).toHaveText(String(CHAT.says));
-            await expect(fold.locator('[data-touch-fact]')).toHaveCount(1);
-            await expect(fold.locator('[data-touch-fact]')).toBeHidden(); // drawn only where nothing can point
+            await expect(run!.locator('[data-touch-fact]')).toHaveCount(1);
+            await expect(run!.locator('[data-touch-fact]')).toBeHidden(); // drawn only where nothing can point
           } else {
             await expect(fold).toContainText(FOLD.master);
           }
@@ -515,7 +591,7 @@ test.describe('phone', () => {
       id: 'desk-phone-chat-fold',
       title: "The group chat's folded agents' traffic on the phone",
       how: `As desk-chat, on the phone: the channel list, then ${CHAT.name}'s group chat; the fold scrolled into view`,
-      state: `The cut: the fold reads "${FOLD.cut}" and its touch fact "${FOLD.count}" is drawn at rest after it. Master: "${FOLD.master}", no touch fact`,
+      state: `The cut: the fold reads "${FOLD.cut}" and its touch fact "${FOLD.count}" is drawn at rest on a line of its own under the row. Master: "${FOLD.master}", no touch fact`,
       viewport: PHONE_NAME,
       rows: ['N170', 'ticket 830'],
     },
@@ -530,12 +606,13 @@ test.describe('phone', () => {
         async (cut) => {
           const fold = run!.getByRole('button').first();
           await expect(fold).toBeInViewport();
-          const fact = fold.locator('[data-touch-fact]');
+          const fact = run!.locator('[data-touch-fact]'); // the fold's own: the run holds no other
           if (cut) {
             await expect(fold).toContainText(FOLD.cut);
             await expect(fact).toBeVisible();
             await expect(fact).toHaveText(FOLD.count);
-            await expect(fact).not.toHaveCSS('display', 'none');
+            await expect(fact).toHaveCSS('display', 'block');
+            await expect(fact).toBeInViewport();
           } else {
             await expect(fold).toContainText(FOLD.master);
             await expect(fact).toHaveCount(0);
@@ -580,6 +657,81 @@ test.describe('phone', () => {
           } else {
             await expect(fact).toHaveCount(0);
           }
+        },
+      );
+    },
+  );
+  scene(
+    {
+      id: 'desk-phone-ask',
+      title: "An ask's capsule on the phone, cancelled because its turn closed unanswered",
+      how: 'The staged project; the fake machine replays the session-view recording as a DC8 producer with an invented turn added (a maws ask with no result before its turn ends), played to the session\'s end; the phone on the session\'s channel, at the bottom',
+      state: 'The cut: the chip reads Cancelled and its why ("The session ended") is drawn at rest after it. Master: the chip at rest, the why only its tooltip',
+      viewport: PHONE_NAME,
+      rows: ['T97', 'ticket 830'],
+    },
+    async (page, hub, meta) => {
+      let ask: Locator | null = null;
+      await shot(
+        page,
+        meta,
+        async () => {
+          ask = await openTouchTurn(page, hub, (view) => view.locator('.transcript-ask[data-ask-state="cancelled"]'));
+        },
+        async (cut) => {
+          await expect(ask!.locator('[data-ask-chip]')).toBeVisible();
+          await touchFact(ask!, cut, 'The session ended'); // the cut's words (ASK.why.ended)
+        },
+      );
+    },
+  );
+
+  scene(
+    {
+      id: 'desk-phone-browser',
+      title: "A browser action's row on the phone",
+      how: 'As desk-phone-ask: the invented turn\'s maws browser_navigate call, done in 1.24 s after a 3 s wait for the person',
+      state: 'The cut: the time it took and its wait drawn at rest on the line. Master: the line at rest, the time only its tooltip',
+      viewport: PHONE_NAME,
+      rows: ['T105', 'T106', 'ticket 830'],
+    },
+    async (page, hub, meta) => {
+      let row: Locator | null = null;
+      await shot(
+        page,
+        meta,
+        async () => {
+          row = await openTouchTurn(page, hub, (view) => view.locator('.transcript-browser-action[data-state="done"]'));
+        },
+        async (cut) => {
+          await expect(row!.locator('[data-browser-heading]')).toBeVisible();
+          await touchFact(row!, cut, /\d.* · .*\d/); // "<took> · <waited>"
+        },
+      );
+    },
+  );
+
+  scene(
+    {
+      id: 'desk-phone-delivery',
+      title: "A delivered file's row on the phone",
+      how: 'As desk-phone-ask: the invented turn\'s maws send_file call, delivered',
+      state: "The cut: a greyed button's reason drawn at rest after it. Master: the buttons at rest, the reason only their tooltip",
+      viewport: PHONE_NAME,
+      rows: ['T101', 'ticket 830'],
+    },
+    async (page, hub, meta) => {
+      let row: Locator | null = null;
+      await shot(
+        page,
+        meta,
+        async () => {
+          row = await openTouchTurn(page, hub, (view) => view.locator('[data-delivery]'));
+        },
+        async (cut) => {
+          await expect(row!.locator('.transcript-delivery-file')).toBeVisible();
+          if (cut) console.log(`[desk words] delivery: ${await row!.evaluate((el) => el.outerHTML.slice(0, 1500))}`);
+          await touchFact(row!, cut, /\S/);
         },
       );
     },
