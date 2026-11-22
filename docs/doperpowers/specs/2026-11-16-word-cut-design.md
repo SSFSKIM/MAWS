@@ -362,6 +362,13 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - Commits draws the unavailable state once the machine is known offline, before its capabilities are heard. It asks again on its own once the machine is heard.
 - The hunk counter gives the harness its numbers as data (`data-index`, `data-count`), apart from the grouped display.
 - N54's record is corrected: the older service offers no Retry.
+- 2026-11-22. **M3 task 6: the browser, its Chrome-profile import and the mark-up toolbar.** 41 cuts and 1 rewording, with T417 and T418 (the failed page's tips) kept, and one `new` row: N161, the picture's own "Connecting to …" becomes the quiet spinner. The desk's web app reaches the browser copy only through an import chain and draws none of these modules, so it needs no edit and no `TouchFact`. A keyboard-reachable `Tip` goes only on a new owner or a moved fact: the zoom chip, the viewport chip beside it, and Load's address. Other tooltips the cut rewrote keep their system `title`, as on master (board ticket 815).
+- The zoom becomes a chip in the navigation row ("Page zoom: 125%"). In Browser options it is one row, a group named "Zoom" whose middle item is named "Reset zoom, 125%". `ZoomBanner` becomes `ZoomChip`.
+- The find count draws "3 / 12" and is named "3 of 12 results". T429's "forwarded from" stays as screen-reader text.
+- P388: the import's summary ends at "· N skipped". Each skip reason with a count gets its own line under it: a fold where the import named sites, a plain line where it named none, and "Bookmarks · Not imported (N)".
+- Settings keeps "Sync bookmarks now" and "Last synced …"; the popover reads the age alone.
+- P394's "On" also shows on Settings › Browser's extension row, which draws the same chip, so P394's picture pair includes that M1 surface.
+- With T462's notice cut, an extension's options tab that the page cap drops by its rare backstop path closes with no line.
 
 ## Outcomes & Retrospective
 
