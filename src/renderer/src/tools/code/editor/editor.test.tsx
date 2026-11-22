@@ -916,7 +916,8 @@ describe('editor', () => {
     it('the find bar draws ↓ ↑ Aa .* ab| with their words as names and tips; all, replace and replace all keep their words', async () => {
       await open({ [APP]: 'const a = 1;\n' });
       act(() => void openSearchPanel(view()));
-      const panel = await waitFor(() => document.querySelector<HTMLElement>('.cm-search')!);
+      await waitFor(() => expect(document.querySelector('.cm-search')).not.toBeNull());
+      const panel = document.querySelector<HTMLElement>('.cm-search')!;
       const control = (name: string) => panel.querySelector<HTMLElement>(`[name="${name}"]`)!;
       const tipOf = (element: HTMLElement) => (element.closest('label') ?? element).getAttribute('data-find-tip');
       for (const [name, glyph, word] of [

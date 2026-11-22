@@ -3955,8 +3955,7 @@ describe('the file tab’s bar, cut', () => {
   it('a file past the viewer’s cap reads its two sizes', async () => {
     serve({ '/r/big.log': { generated: 20 * MiB, line: 'log line\n' } });
     render(<FileViewer tab={fileTab('/r/big.log')} />);
-    const shown = await waitFor(() => document.querySelector<HTMLElement>('[data-notice]')!);
-    expect(shown.textContent).toBe('1.0 MB of 20.0 MB');
+    await waitFor(() => expect(document.querySelector('[data-notice]')?.textContent).toBe('1.0 MB of 20.0 MB'));
     expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy();
   });
 
