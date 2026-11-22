@@ -1624,7 +1624,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ptyClients = serveSocketClients(ptyServer, {
       runtime: ptyRelay,
       badToken: 'close',
-      admitHello: (peer, appPid) => ptyRelay.admit(peer, appPid),
+      admitHello: (peer, appPid, live) => ptyRelay.admit(peer, appPid, live),
       identity: () => identity,
       counts: counts('pty-host'),
       token: () => token,

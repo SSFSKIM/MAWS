@@ -82,6 +82,7 @@ export class Relay implements ServedRuntime {
   private departing: App | null = null;
   private clients: SocketClients | null = null;
   private admitting = 0; // hellos waiting on their admission
+  private heldOff = new Set<() => boolean>(); // hellos a leaving upstream held off, by their sockets' liveness, until its park
 
   constructor(private readonly options: RelayOptions) {}
 
@@ -100,10 +101,13 @@ export class Relay implements ServedRuntime {
     return this.admitting > 0 || (this.departing !== null && !this.departing.gone);
   }
 
-  // The upstream parked (no HostState transition tells it): a hello still admitting, held off a host that was leaving,
-  // needs a fresh one, so it wakes it rather than wait out the hold.
+  // The upstream parked (no HostState transition tells it). The park that ends a leaving host, under a hello it held off
+  // whose app is still there, wakes its successor once: the set is emptied before the wake, so a park the successor's
+  // own launch makes (a declined spawn, notLaunched) wakes nothing again.
   parked(): void {
-    if (this.admitting > 0 && this.options.hosts.parked(this.options.owner)) this.options.hosts.wake(this.options.owner);
+    const live = [...this.heldOff].some((alive) => alive());
+    this.heldOff.clear();
+    if (live && this.options.hosts.parked(this.options.owner)) this.options.hosts.wake(this.options.owner);
   }
 
   // The upstream link ended under an attached app (a crash, a quiet loss): its connection closes too, so main reads the
@@ -115,23 +119,28 @@ export class Relay implements ServedRuntime {
   }
 
   // --- the socket layer's admission (socket-server.ts `admitHello`) ----------------------------------------------------
-  async admit(peer?: WirePeer, appPid?: number): Promise<Admission> {
+  async admit(peer?: WirePeer, appPid?: number, live: () => boolean = () => true): Promise<Admission> {
     const own = peer !== undefined && appPid !== undefined ? (this.options.refuseHello?.(peer, appPid) ?? null) : null;
     if (own) return { kind: 'refuse', line: own, own: true }; // P5 O3-D M5: no upstream is woken for it
     this.admitting += 1;
     this.options.between?.();
     try {
-      return await this.admission();
+      return await this.admission(live);
     } finally {
+      this.heldOff.delete(live);
       this.admitting -= 1;
       this.options.between?.();
     }
   }
 
-  private async admission(): Promise<Admission> {
+  private async admission(live: () => boolean): Promise<Admission> {
     const { hosts, owner } = this.options;
+    const leaving = () => this.options.leaving?.() === true;
     const answered = () => {
-      if (this.options.leaving?.() === true) return false; // asked to exit: its successor answers, once woken (`parked`)
+      if (leaving()) {
+        this.heldOff.add(live); // asked to exit: its successor answers, once its park wakes it (`parked`)
+        return false;
+      }
       const { state } = hosts.snapshot(owner);
       return (state === 'ready' && hosts.welcome(owner) !== null) || hosts.refusal(owner) !== null || (state === 'crashed' && !hosts.parked(owner));
     };
@@ -142,6 +151,11 @@ export class Relay implements ServedRuntime {
     }
     const holdMs = this.options.holdMs ?? HELLO_HOLD_MS;
     if (!answered()) await this.until(answered, holdMs);
+    if (leaving()) {
+      // its exit stalled: the old pid is never welcomed, whatever its state still says
+      this.options.log(`the ${owner} asked to exit is still ${hosts.snapshot(owner).state} after ${holdMs / 1000} s; a hello closed unwelcomed`);
+      return { kind: 'close', why: `the ${owner} asked to exit has not left within ${holdMs / 1000} s` };
+    }
     const welcome = hosts.welcome(owner);
     if (hosts.snapshot(owner).state === 'ready' && welcome) {
       const { peer } = welcome;

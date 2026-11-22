@@ -104,7 +104,7 @@ export interface SocketServerOptions {
   // refused, so the engine host tells a client that adopts through its successor apart, D11)
   onExit(when: 'now' | 'idle', from?: { refused: boolean; own?: boolean; capabilities?: readonly string[] }): void;
   onClient?(connected: boolean, peer?: WirePeer, appPid?: number): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it; M4: and its appPid), or a client left (not called for a replaced one)
-  admitHello?(peer: WirePeer, appPid: number): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above); P5 O3-D M5: with the hello's appPid
+  admitHello?(peer: WirePeer, appPid: number, live: () => boolean): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above); P5 O3-D M5: with the hello's appPid; with whether its socket is still there
   log(line: string): void;
   onActivity?(): void; // P5 Decision Log 273 (above)
   helloTimeoutMs?: number;
@@ -284,7 +284,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       }
       const admit = options.admitHello;
       welcome = () =>
-        void admit(peer, appPid).then(
+        void admit(peer, appPid, () => !socket.destroyed && !socket.readableEnded).then(
           (admission) => admitted(admission, peer, appPid, line),
           (error: unknown) => admitted({ kind: 'close', why: `its admission failed: ${error instanceof Error ? error.message : String(error)}` }, peer, appPid, line),
         );

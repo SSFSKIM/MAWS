@@ -7,6 +7,7 @@
 // host's ledger (`pty.op`, src/pty-host/ops.ts), sent through the endpoint seam as the endpoint sends it, beside a local
 // reader that holds the credit, and across mawsd's restart with the pty host adopted.
 import { mkdtempSync, rmSync } from 'node:fs';
+import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -155,6 +156,26 @@ describe('the pty relay', () => {
     expect(await second.request('pty.list', undefined, WAIT_MS)).toMatchObject({ ok: true });
     expect(second.closed).toBe(false);
     expect(scene.logs.filter((line) => line.includes("closing the app's connection"))).toEqual([]);
+  });
+
+  it('a hello held off the leaving pty host whose app went away starts no pty host at the park', async () => {
+    let release!: () => void;
+    exitGate = new Promise((resolve) => (release = resolve));
+    const daemon = await scene.start();
+    const first = await scene.app('pty-host');
+    first.leave();
+    await until(() => scene.logs.some((line) => line.includes('the pty host exits now and parks')), WAIT_MS, 'the park asked');
+    let socket: Socket | null = null;
+    const arriving = scene.app('pty-host', { onSocket: (made) => void (socket = made) });
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the hello is in, the leaving host still linked
+    const spawns = scene.spawn.mock.calls.length;
+    (socket as Socket | null)?.destroy(); // the app gives up while held
+    await arriving;
+    await new Promise((resolve) => setTimeout(resolve, 20)); // its end reaches mawsd
+    release();
+    await until(() => daemon.hosts.parked('pty-host'), WAIT_MS, 'the park');
+    await new Promise((resolve) => setTimeout(resolve, 100)); // a wake would have spawned by now
+    expect(scene.spawn.mock.calls.length).toBe(spawns);
   });
 });
 

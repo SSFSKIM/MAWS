@@ -65,6 +65,27 @@ describe('a private mawsd whose bundle was replaced', () => {
     expect(daemon.hosts.facts('engine-host').lastExit).toBeNull();
   });
 
+  // the handover's race (a hello held off the pty host mawsd asked to exit) under a replaced bundle: the leaving host's
+  // park wakes its successor once, whose launch is declined and parks it again, waking nothing more
+  it('a hello held off the leaving pty host: the successor declined once, no wake loop, the hello closed unwelcomed', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await scene.pty({ answers: { 'pty.list': () => ({ ptys: [] }) }, onExitNow: (supervisor) => void gate.then(() => supervisor.die()) });
+    const daemon = await scene.start();
+    await until(() => scene.logs.some((line) => line.includes('the pty host exits now and parks')), 5_000, 'the park asked');
+    replaceBundle();
+    const arriving = scene.app('pty-host');
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the hello is in, the leaving host still linked
+    release();
+    const app = await arriving;
+    expect(app.welcomed()).toBe(false);
+    expect(scene.spawn).not.toHaveBeenCalled();
+    expect(daemon.hosts.parked('pty-host')).toBe(true);
+    const declined = vi.mocked(console.error).mock.calls.filter(([line]) => String(line).startsWith('[hosts] pty-host not launched'));
+    expect(declined).toHaveLength(1);
+    expect(scene.exits).toEqual([]);
+  });
+
   it('loads no deferred chunk from the files now on disk: the spine’s load fails with the reason', async () => {
     const load = vi.fn(async () => {
       throw new Error('the services chunk was loaded');

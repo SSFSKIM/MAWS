@@ -160,11 +160,14 @@ describe('a relay’s request as work', () => {
 // handover: the adopted pty host parked with no app, the app's reconnect a few ms later) waits for the successor; it is
 // never welcomed onto the leaving host, whose close would fail what the app sent on it.
 describe('a hello while the upstream is leaving', () => {
-  function leavingUpstream() {
+  // `declines`: each wake's launch is declined at once (a replaced bundle's beforeSpawn), and the host parks again within
+  // it, onParked telling the relay, as notLaunched does
+  function leavingUpstream(over: { declines?: boolean; holdMs?: number } = {}) {
     let state = 'ready';
     let pid = 7;
     let parked = false;
     let woken = 0;
+    const lines: string[] = [];
     const listeners = new Set<() => void>();
     const tell = () => listeners.forEach((listener) => listener());
     const hosts = {
@@ -173,6 +176,11 @@ describe('a hello while the upstream is leaving', () => {
       wake: () => {
         if (!parked) return;
         woken += 1;
+        if (woken > 100) throw new Error('woken without end');
+        if (over.declines) {
+          made.parked(); // still parked: the declined launch's park
+          return;
+        }
         [parked, state] = [false, 'starting'];
         tell();
       },
@@ -183,8 +191,9 @@ describe('a hello while the upstream is leaving', () => {
     };
     let leaving = true;
     const made: Relay = new Relay({
-      owner: 'pty-host', hosts: hosts as unknown as HostSupervisor, log: () => {}, startedAt: () => 'then', onExit: () => {}, attached: () => {}, ready: () => {}, departed: () => {},
+      owner: 'pty-host', hosts: hosts as unknown as HostSupervisor, log: (line) => void lines.push(line), startedAt: () => 'then', onExit: () => {}, attached: () => {}, ready: () => {}, departed: () => {},
       leaving: () => leaving,
+      ...(over.holdMs !== undefined && { holdMs: over.holdMs }),
     });
     // the exit lands: the link's loss (`restarting`, the daemon's flag cleared there), then the deliberate exit's park
     const exited = () => {
@@ -197,7 +206,7 @@ describe('a hello while the upstream is leaving', () => {
       [state, pid] = ['ready', 8];
       tell();
     };
-    return { relay: made, exited, successor, woken: () => woken };
+    return { relay: made, exited, successor, woken: () => woken, lines };
   }
 
   it('is not welcomed onto the leaving host; it wakes the parked successor and is welcomed by it', async () => {
@@ -218,5 +227,32 @@ describe('a hello while the upstream is leaving', () => {
     const u = leavingUpstream();
     u.exited();
     expect(u.woken()).toBe(0);
+  });
+
+  it('wakes once, for the leaving host’s park; the successor’s declined launch parks it again and wakes nothing more', async () => {
+    const u = leavingUpstream({ declines: true, holdMs: 30 });
+    const admitted = u.relay.admit();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    u.exited();
+    expect(u.woken()).toBe(1);
+    expect((await admitted).kind).toBe('close');
+  });
+
+  it('a host still leaving at the hold’s end welcomes nothing: the hello closes and the stalled exit is said', async () => {
+    const u = leavingUpstream({ holdMs: 30 });
+    const admission = await u.relay.admit();
+    expect(admission.kind).toBe('close');
+    expect(u.lines.some((line) => line.includes('asked to exit') && line.includes('still ready'))).toBe(true);
+  });
+
+  it('a held hello whose socket closed wakes nothing at the park', async () => {
+    const u = leavingUpstream({ holdMs: 30 });
+    let live = true;
+    const admitted = u.relay.admit(undefined, undefined, () => live);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    live = false; // the app went away while held
+    u.exited();
+    expect(u.woken()).toBe(0);
+    await admitted;
   });
 });

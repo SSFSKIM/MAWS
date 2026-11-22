@@ -346,6 +346,7 @@ export interface RawHelloOptions {
   token?: string;
   capabilities?: string[];
   appPid?: number; // P5 O3-D M5: the app's pid its hello names (this process's unless a test names another)
+  onSocket?: (socket: Socket) => void; // the socket as it is made, for a test that ends it before its answer
 }
 
 // An app on a relay socket, raw: its hello, then (once welcomed) C1's envelope and the document frames through the real
@@ -365,6 +366,7 @@ export class RawApp {
     return new Promise((resolve) => {
       const socket = createConnection(path);
       const app = new RawApp(socket);
+      options.onSocket?.(socket);
       const capabilities = options.capabilities ?? [...APP_BEFORE_SPINE_CAPABILITIES]; // P5 O3-D: an app's own list, not the wire's union
       socket.on('error', () => {});
       socket.on('end', () => void (app.ended = true));
