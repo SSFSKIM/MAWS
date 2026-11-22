@@ -2013,7 +2013,16 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
         column: { left: box(frame).left + parseFloat(frameStyle.paddingLeft), right: box(frame).right - parseFloat(frameStyle.paddingRight) },
         bubble: box(frame.querySelector('[data-bubble]')!),
         line: box(line),
-        lineScrolls: line.scrollWidth > line.clientWidth + 1,
+        // whether a drawn part's place runs past either end of the line: its box less the side padding a button overhangs
+        // by (its negative margin), so Edit's target ending the line 2 px past it is in place (hidden, the controls are
+        // clipped by their box of no width and draw nothing). Not `scrollWidth`: the line packs to its end, so what cannot
+        // fit runs out past its start, which scrolling never reaches (a 71 px overflow read none), while that 2 px read one.
+        lineSpills: [...(box(actions).width === 0 ? [] : Array.from(actions.children)), ...(tail ? [tail] : [])].some((part) => {
+          const { left, right } = part.getBoundingClientRect();
+          const style = getComputedStyle(part);
+          const [inLeft, inRight] = [Math.max(0, -parseFloat(style.marginLeft)), Math.max(0, -parseFloat(style.marginRight))];
+          return left + inLeft < box(line).left - 0.5 || right - inRight > box(line).right + 0.5;
+        }),
         actions: box(actions),
         shown: getComputedStyle(actions).opacity,
         parts: [...Array.from(actions.children), ...(tail ? [tail] : [])].map((part) => ({ text: part.textContent ?? '', box: box(part) })),
@@ -2156,7 +2165,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
   expect(narrow.tail, '200 px: the steer has no caption (the word cut, T42)').toBeNull();
   expectNear(narrow.actions.width, wideControls, '200 px, R14: the controls keep their width');
   expect(narrow.line.height, 'nothing wraps').toBe(16);
-  expect(narrow.lineScrolls, 'nothing spills').toBe(false);
+  expect(narrow.lineSpills, 'nothing spills').toBe(false);
   expect(narrow.line.left >= narrow.column.left - 0.5 && narrow.line.right <= narrow.column.right + 0.5, 'the line stays inside the column').toBe(true);
 
   // M2-2: a dropped prompt's "Not sent" stands last on the line, always shown, flush with the bubble's edge
@@ -2205,7 +2214,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
   expect(cut.tail, '200 px, R14: the caption alone shrinks, cut, last on the line, its sentence as its title').toMatchObject({ whole: false, last: true, title: WAITING_CAPTION });
   expectNear(cut.actions.width, waitingControls, '200 px, R14: the controls keep their width');
   expect(cut.line.height, '200 px: nothing wraps').toBe(16);
-  expect(cut.lineScrolls, '200 px: nothing spills').toBe(false);
+  expect(cut.lineSpills, '200 px: nothing spills').toBe(false);
   expect(cut.line.left >= cut.column.left - 0.5 && cut.line.right <= cut.column.right + 0.5, '200 px: the line stays inside the column').toBe(true);
   expect(harness.consoleErrors()).toEqual([]);
 });
