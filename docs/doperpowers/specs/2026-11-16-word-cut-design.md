@@ -369,6 +369,24 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - Settings keeps "Sync bookmarks now" and "Last synced …"; the popover reads the age alone.
 - P394's "On" also shows on Settings › Browser's extension row, which draws the same chip, so P394's picture pair includes that M1 surface.
 - With T462's notice cut, an extension's options tab that the page cap drops by its rare backstop path closes with no line.
+- 2026-11-22. **M3 task 7: the side chat, side threads and comments, the questions panel and the Channel.** 25 cuts, with 11 `stays` rows left as they read, and five `new` rows:
+  - N162 (stays): a machine's notice in a project's channel keeps its sender, `<program>@<machine>` (board ticket 828), under rule 2.
+  - N163: the design-system question's "Reading your design systems…" becomes the quiet spinner.
+  - N164: Submit's "Sending…", in the questions panel and in M2's in-place form (one constant), keeps the control's words with a quiet spinner beside them.
+  - N165: Continue's "Starting…" takes the same form.
+  - N166 (stays): "Answering…" beside a side question still awaiting its answer is a live status, as T86's line is.
+
+  The form N164 and N165 use is a new shared part, `WaitingWords` in `ui/spinner.tsx`. It serves four controls in three modules, among them `SheetForm`'s optional `submitWait`. The control keeps its words, adds the quiet spinner named by the wait's words, and sets `aria-busy` itself.
+
+  Other choices:
+  - T277 reads as the transcript's ask capsule reads, "Asked, answer when ready", so the two surfaces say the same fact alike; the row is corrected.
+  - P434's Remove stays a word (rule 4), and only the size moves into a tip on a focusable "Screenshot".
+  - P408's Clear and P409's Continue are drawn only when they apply, and a remote machine's reason becomes an `UnavailableButton`.
+  - P440's needs-you strip draws the warning disc and a noun only where a noun replaces the sentence, with the sentence as screen-reader text. Errors, the relay, a failed start, a holder and "Waiting for you" keep their words.
+  - P447 and P448 fold a run of agent messages to "maws-45 and ci-opt · 3" ("maws-45 · 3" for a broadcast). The count is an image named "3 messages" inside the fold button, and the button's `Tip` says the same.
+  - P460's Send follows the message box's arrow and spinner.
+
+  None of these surfaces is drawn by the desk's web app, which draws a project channel as its own group chat. On the coordinator's call of 2026-11-22, that chat's fold follows P447 and P448 as a `new` row: "a and b · N", keeping its time range, with the count named "N messages" as its tip and as a `TouchFact` on the phone. Its single "a → b" lines stay.
 
 ## Outcomes & Retrospective
 
