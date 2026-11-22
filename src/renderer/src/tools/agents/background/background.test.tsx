@@ -761,7 +761,11 @@ describe('background work', () => {
     const taskId = run.snapshot!.taskId!;
     const { handle } = await mount({ status: null, runs: [{ runId: run.runId, snapshot: null, journal: [] }], params: { taskId, runId: run.runId, view: 'run' } });
     expect(handle.snapshot().view).toMatchObject({ kind: 'run', taskId: run.runId });
-    expect(await within(widget()!).findByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeTruthy();
+    // fix round 2 of the word cut (T212): the read answered with no snapshot and nothing else can bring one to a session not
+    // running here, so the page says what is known instead of spinning
+    expect(within(widget()!).getByText('No phase data')).toBeTruthy();
+    await pastQuietDelay();
+    expect(within(widget()!).queryByRole('progressbar')).toBeNull();
     act(() => useTaskGraph.getState().applyDisk(A, { runs: [run] })); // the snapshot is read: the node is keyed by its task id now
     expect(widget()?.dataset.run).toBe(taskId);
     expect(options()).toEqual(['All phases|', '*Echo|2/2']);
@@ -778,6 +782,17 @@ describe('background work', () => {
   // Fix round 1 of the word cut (T209): a link's run is waited on only while a read can still bring it. Once the disk
   // read of a session not live here failed, the list says why and nothing spins; once it answered without the run, the
   // list says the run is not found. Either way a later read that brings it opens it.
+  // Fix round 2 of the word cut (T212): a run read from disk whose snapshot is absent or unreadable has no read left to
+  // wait on in a session not running here, so its card reads No phase data, not a spinner.
+  it('a disk-only run with no snapshot reads No phase data on its card once the read answered, and no spinner', async () => {
+    const [run] = workflowRunsOf();
+    await mount({ status: null, runs: [{ runId: run.runId, snapshot: null, journal: [] }] });
+    toggleSection('done'); // a run with no status is listed under Done
+    expect(summaryLine(run.runId)).toBe('No phase data');
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
   it('a link to a run of a session not live here settles once its read fails, and opens the run a later read brings', async () => {
     const [run] = workflowRunsOf();
     const taskId = run.snapshot!.taskId!;
