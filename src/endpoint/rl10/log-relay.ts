@@ -99,7 +99,7 @@ import type { LogProject } from '../hub-link';
 import { attestFor, sessionOfWriter, verifiedOwners } from './attest';
 import { contains, digestOf, knownAudience, localPolicy, meet, sameAudience, withdrawnBy, type AudienceContext } from './audiences';
 import { PolicyCache, type Audience } from './policy-cache';
-import type { InboundIndex } from './inbound-index';
+import type { InboundIndex, Staged } from './inbound-index';
 import type { LegacyKey } from './legacy';
 import type { Members } from './members';
 import { bodyHash, uploadForm, type Signature, type SignatureLedger } from './signature-ledger';
@@ -491,7 +491,10 @@ export class LogRelay {
     if (!Array.isArray(events)) return;
     let down: Wrapped[] = [];
     let read = false;
+    // The inbound index's entries of what goes down, written in one append before any of it does.
+    const staged: Staged[] = [];
     const flush = () => {
+      if (staged.length > 0) this.#ctx.index.commit(staged.splice(0));
       if (down.length > 0) this.#toSminos({ t: 'events', project, events: down });
       down = [];
     };
@@ -507,7 +510,7 @@ export class LogRelay {
       let judged: Judged;
       for (;;) {
         const retries = this.#retries;
-        judged = await this.#verify(project, e);
+        judged = await this.#verify(project, e, staged);
         if (!('hold' in judged) || retries === this.#retries) break;
       }
       const at = position(e);
@@ -611,7 +614,8 @@ export class LogRelay {
     return true;
   }
 
-  async #verify(project: string, e: unknown): Promise<Judged> {
+  /** `staged` takes the inbound index's entry of a v2 event that goes down, to be committed before it does. */
+  async #verify(project: string, e: unknown, staged: Staged[]): Promise<Judged> {
     if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq) || typeof e.ts !== 'string' || typeof e.kind !== 'string') {
       return { spent: 'bad-shape', reason: 'bad-shape', message: 'not a log event (writer, seq, ts, kind)' };
     }
@@ -646,7 +650,8 @@ export class LogRelay {
       const content = sha256(eventSigningInput({ org: org.head.org, project }, event));
       const seen = this.#ctx.index.seen(project, content, event.writer, event.seq);
       if (seen.kind === 'replayed') return { spent: 'replayed', reason: 'seen-nonce', message: `replayed: its signed content arrived at ${seen.writer}:${seen.seq} before` };
-      if (seen.kind === 'new') this.#ctx.index.record(project, content, event.writer, event.seq);
+      const entry = this.#ctx.index.stage(project, content, event.writer, event.seq);
+      if (entry !== null) staged.push(entry);
       if (name !== null && isIsoMillis(event.created)) this.#saw(name, event.created);
       const owners = await verifiedOwners(event, org.head, org.certificates, this.#ctx.log);
       return { deliver: { event, signer, ...(owners === undefined ? {} : { owners }) } };

@@ -91,13 +91,18 @@ async function makeOrg(): Promise<Org> {
   return { state: head.state, certificates: { certs, retirements }, senders: [...listed.map((m) => ({ name: m.name, key: m.key })), ...certified], A, machine };
 }
 
-/** Writer sizes: a skewed spread over WRITERS summing to TOTAL. */
+/**
+ * Writer sizes: a skewed spread over WRITERS summing to exactly TOTAL (at least one each). The floor of one pushes the
+ * spread past a small TOTAL (341 events for 300), so the excess comes off the largest writers.
+ */
 function sizes(): number[] {
+  if (TOTAL < WRITERS) throw new Error(`EVENTS is at least ${WRITERS}, one a writer`);
   const weights = Array.from({ length: WRITERS }, (_, i) => 1 / (1 + (i % 37)));
   const sum = weights.reduce((a, b) => a + b, 0);
   const out = weights.map((w) => Math.max(1, Math.floor((w / sum) * TOTAL)));
   let left = TOTAL - out.reduce((a, b) => a + b, 0);
   for (let i = 0; left > 0; i = (i + 1) % WRITERS, left--) out[i]++;
+  for (; left < 0; left++) out[out.indexOf(Math.max(...out))]--;
   return out;
 }
 
@@ -208,13 +213,19 @@ bench(`a first download through the endpoint (certs ${CERTS}, retired ${RETIRED}
     // Each writer's first arrival at sminos, stamped as the stand-in reads it (a 2 ms poll).
     const first = new Map<string, number>();
     let delivered = 0;
+    const positions = new Map<string, number>();
+    const twice: string[] = [];
+    let t0 = 0;
     let scanned = 0;
     const stamp = setInterval(() => {
       for (; scanned < sminos.received.length; scanned++) {
         const f = sminos.received[scanned];
         if (f.t !== 'events') continue;
-        for (const w of f.events as Array<{ event: { writer: string } }>) {
+        for (const w of f.events as Array<{ event: { writer: string; seq: number } }>) {
           delivered++;
+          const key = `${w.event.writer}:${w.event.seq}`;
+          if (positions.has(key)) twice.push(`${key} in frames ${positions.get(key)} and ${scanned} at ${Math.round(performance.now() - t0)} ms`);
+          positions.set(key, scanned);
           if (!first.has(w.event.writer)) first.set(w.event.writer, performance.now());
         }
       }
@@ -222,7 +233,7 @@ bench(`a first download through the endpoint (certs ${CERTS}, retired ${RETIRED}
     closers.push(() => clearInterval(stamp));
 
     const cpu0 = process.cpuUsage();
-    const t0 = performance.now();
+    t0 = performance.now();
     hub.current.send(JSON.stringify({ t: 'have', project: P, have: {} }));
     let frames = 0;
     for (const page of pages(log)) {
@@ -238,6 +249,8 @@ bench(`a first download through the endpoint (certs ${CERTS}, retired ${RETIRED}
     }
     const wall = performance.now() - t0;
     const cpu = process.cpuUsage(cpu0);
+    // A little longer, so an event that came down twice is seen.
+    await new Promise((resolve) => setTimeout(resolve, 500));
     clearInterval(stamp);
     const order = [...log.keys()].sort();
     const at = (i: number) => {
@@ -256,15 +269,17 @@ bench(`a first download through the endpoint (certs ${CERTS}, retired ${RETIRED}
           cpuShare: +((cpu.user + cpu.system) / 1000 / wall).toFixed(2),
           writer33: at(32),
           writer88pct: at(Math.floor(order.length * 0.88)),
+          twice,
+          hubConnections: hub.sockets.length,
           spent: sminos.received.filter((f) => f.t === 'spent').length,
-          logLines: lines.slice(0, 5),
+          logLines: lines.slice(0, 12),
         },
         null,
         1,
       ),
     );
-    // At 150 certificates one event came down twice in some runs (301 of 300), not yet explained.
-    expect(delivered).toBeGreaterThanOrEqual(TOTAL);
+    expect(twice).toEqual([]);
+    expect(delivered).toBe(TOTAL);
   }, 1_900_000);
 
   it('each stage of #verify, alone', async () => {
