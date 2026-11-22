@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 // The Diff tab draws what the machine answered: its changes against the base, that there are none, or — when the machine
 // could not take the diff — why, never an empty "No changes against" with no base.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { createDiffView, DiffPane } from './DiffPane';
 
 afterEach(cleanup);
 
-function pane(answer: { base: string; text: string; error?: string }) {
+function pane(answer: { base: string; text: string; error?: string } | null) {
   const controller = { target: { machine: 'mini', session: 's', agentId: null }, requestDiff: vi.fn() } as unknown as PlaneTranscript;
-  const state = { phase: 'live', diff: { pending: false, answer } } as unknown as PlaneTranscriptState;
+  const state = { phase: 'live', diff: { pending: answer === null, answer } } as unknown as PlaneTranscriptState;
   render(<DiffPane controller={controller} state={state} view={createDiffView()} />);
   return screen.getByTestId('depth-diff');
 }
@@ -69,4 +69,28 @@ it('heads the diff with its totals since the base and walks its files one at a t
   expect([previous().disabled, next().disabled]).toEqual([false, true]);
   fireEvent.click(previous());
   expect(fileHeader()).toBe('src/harbour.ts · Modified');
+});
+
+// The word cut, as Review draws it: the hunk counter reads "n / m", named "Hunk n of m", its tooltip (T306); the wait for
+// the diff is the quiet spinner, nothing for half a second (Review's Loading).
+it('reads the hunk counter “n / m”, named “Hunk n of m”', () => {
+  const text = ['diff --git a/src/harbour.ts b/src/harbour.ts', 'index 1..2 100644', '--- a/src/harbour.ts', '+++ b/src/harbour.ts', '@@ -1,2 +1,2 @@', '-const berths = 4;', '+const berths = 6;', ' export { berths };', ''].join('\n');
+  const diff = pane({ base: 'main', text });
+  const counter = screen.getByRole('img', { name: 'Hunk 1 of 1' });
+  expect(counter.textContent).toBe('1 / 1');
+  expect(counter.tabIndex).toBe(0); // the tooltip's owner takes the keyboard
+  expect(diff.textContent).not.toContain('Showing hunk');
+});
+
+it('waits for the diff with the quiet spinner, nothing for its first half second', () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const diff = pane(null);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(diff.textContent).not.toContain('Loading');
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.getByRole('progressbar', { name: 'Loading' })).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
 });

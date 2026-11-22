@@ -48,7 +48,7 @@ export function scmStatusOf(over: Partial<ScmStatus> = {}): ScmStatus {
 }
 
 // The commands the page sends: the reads, and a link opened outside the window
-type ScmCommand = 'scm.status' | 'git.diff' | 'scm.pr.state' | 'layout.openExternal' | 'git.branchCommits';
+type ScmCommand = 'git.watch' | 'scm.status' | 'git.diff' | 'scm.pr.state' | 'layout.openExternal' | 'git.branchCommits';
 
 // Main as Source control's page reads it: C4's watch and the uncommitted diff over a scripted status, `scm.status`,
 // `scm.pr.state` and the branch read. Any other command fails, so a page that asked one would show it. `change`
@@ -65,7 +65,7 @@ export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
   const fake = installFakeMain((name, input) => {
     switch (name) {
       case 'git.watch':
-        return state.watchError !== null ? fail(state.watchError) : ok(state.status);
+        return state.answers[name]?.(input) ?? (state.watchError !== null ? fail(state.watchError) : ok(state.status));
       case 'git.unwatch':
         return ok();
       case 'git.diff':

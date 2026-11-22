@@ -79,17 +79,19 @@ describe('the Environment card and Source control’s page (S7)', () => {
     expect(cardChange.slice(1)).toEqual(['48', '12', '3']);
 
     // the pull request: the card's "PR #n · <decision> · <counts>" against the page's heading, state line and counts; the
-    // word cut (P44): the card leaves out an open PR's state and the passed checks, which the page still says
+    // word cut (P44, N72, N75): neither says an open PR's state; the card leaves out the passed checks, which the page says
+    // on its folded line
     const [cardHead, ...cardDetails] = text(card().querySelector('[data-testid="pr-line"]')).split(' · ');
     const cardNumber = /^PR (\S+)$/.exec(cardHead!)![1];
     const part = page().querySelector('[data-scm-part="pr"]')!;
     expect(text(part.querySelector('[data-scm-pr-number]'))).toBe(cardNumber);
     const phrases = [...part.querySelectorAll('[data-scm-pr-state] [data-scm-phrase]')].map((phrase) => text(phrase).replace(/ ·$/, ''));
-    expect(phrases[0]).toBe('Open');
+    expect(phrases[0]).toBe('into main');
     expect(phrases).toContain(cardDetails[0]); // the review decision
     const cardCounts = cardDetails[1]!.split(', ');
     const pageCounts2 = [...part.querySelectorAll('[data-scm-check-count]')].map(text);
-    expect(pageCounts2).toEqual(['3 passed', ...cardCounts]);
+    expect(pageCounts2).toEqual(cardCounts);
     expect(cardCounts).toEqual(['1 failed', '1 pending']);
+    expect(text(part.querySelector('[data-scm-fold-line] button'))).toBe('› 3 passed');
   });
 });

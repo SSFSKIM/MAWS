@@ -991,9 +991,24 @@ function reviewMain(options: ReviewMainOptions = {}) {
 }
 
 const chipOf = (id: string) => document.querySelector<HTMLButtonElement>(`[data-chip="${id}"]`);
-const chips = () => [...document.querySelectorAll<HTMLButtonElement>('[data-chip]')].map((c) => [c.dataset.chip, c.disabled, c.getAttribute('aria-pressed'), c.title]);
+// An element's accessible description, from the ids it names (the word cut's tips describe their owners)
+const describedBy = (element: Element | null | undefined) =>
+  (element?.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ');
+// A chip: its scope, greyed (natively, or drawn aria-disabled with its reason), pressed, and its description: a greyed
+// chip's reason, the pressed chip's scope words, a commit's chip its subject's (the word cut, T357, P288)
+const chips = () => [...document.querySelectorAll<HTMLButtonElement>('[data-chip]')].map((c) => [c.dataset.chip, c.disabled || c.getAttribute('aria-disabled') === 'true', c.getAttribute('aria-pressed'), describedBy(c)]);
 const header = () => document.querySelector('[data-review-header]')?.textContent ?? null;
+// What the scope reads, where the foot line said it until the word cut (T357): the pressed chip's description, or the
+// line that owns the words in a diff tab; the foot line itself is gone, but for a commit HEAD no longer holds (N53)
+const scopeWords = () => describedBy(document.querySelector('[data-review-scope-words]') ?? document.querySelector('[data-chip][aria-pressed="true"]'));
 const footer = () => document.querySelector('[data-review-footer]')?.textContent ?? null;
+const stale = () => document.querySelector('[data-review-stale]')?.textContent ?? null;
+// A commit's words, once its foot line's (N51 to N53): its chip's description, and the stale word at rest
+const commitWords = () => [scopeWords(), stale()];
 const stack = () => document.querySelector<HTMLElement>('[data-review-stack]');
 const stackText = () => stack()?.textContent ?? null;
 const sections = () => [...document.querySelectorAll<HTMLElement>('[data-review-file]')];
@@ -1035,7 +1050,7 @@ const mainFileTabs = () => currentSet(useLayout.getState().main).panes.flatMap((
 // Review's tab brought back into view: its body is drawn again, and counts its hunks once it has its diff
 async function showReview() {
   act(() => panelHost.selectTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
-  await waitFor(() => expect(document.querySelector('[data-review-hunk]')?.textContent).toMatch(/^Showing hunk \d+ of \d+$/));
+  await waitFor(() => expect(document.querySelector('[data-review-hunk]')?.textContent).toMatch(/^\d+ \/ \d+$/));
 }
 // UX wave U8c-2: the agent in a worktree of /repo reached by `cd` (a fact on the record), or back at /repo (null)
 const WT = '/repo/.claude/worktrees/w1';
@@ -1106,18 +1121,21 @@ describe('review tool', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens on Uncommitted for a dirty tree: the chips, the totals without the scope’s name, every file a section in the list’s order, the footer', async () => {
+  it('opens on Uncommitted for a dirty tree: the chips, the totals without the scope’s name, every file a section in the list’s order, the scope’s words on its chip', async () => {
     openReview(); // before the page renders, so the resting summary never mounts
     render(<TestHost />);
-    await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
+    await waitFor(() => expect(header()).toBe('3 files · +3 −0'));
     expect(chips()).toEqual([
-      ['uncommitted', false, 'true', ''],
+      ['uncommitted', false, 'true', 'main · Working tree against HEAD'],
       ['branch', true, 'false', ''], // UX wave U5b-2: no roster here, so whether the machine serves the reads is not known
       ['turn', true, 'false', 'No turn has changed files yet'],
       ['staged', false, 'false', ''],
     ]);
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
-    expect(footer()).toBe('main · Working tree against HEAD');
+    // the word cut (T357): no foot line; the scope's words are the pressed chip's tooltip and description
+    expect(footer()).toBeNull();
+    expect(scopeWords()).toBe('main · Working tree against HEAD');
+    expect(header()).not.toContain('Working tree');
     // C8a's git store reads the same diff once for Environment's change line, Review once, and the untracked file, whose
     // section is unfolded, is read on its own (as Source control reads it)
     await waitFor(() => expect(reads('scratch.txt')).toEqual([{ directory: '/repo', scope: 'untracked', path: 'scratch.txt' }]));
@@ -1134,26 +1152,29 @@ describe('review tool', () => {
     openReview();
     await waitFor(() => expect(chipOf('uncommitted')?.getAttribute('aria-pressed')).toBe('true'));
     expect(chips()).toEqual([
-      ['uncommitted', false, 'true', ''],
+      ['uncommitted', false, 'true', 'detached at fedcba9 · Working tree against HEAD'],
       ['branch', true, 'false', ''],
       ['turn', true, 'false', 'No turn has changed files yet'],
     ]);
-    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No uncommitted changes'));
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes')); // the word cut (T362)
     expect(sections()).toEqual([]);
     expect(document.querySelector('[data-review-toolbar]')).toBeNull();
-    expect(footer()).toBe('detached at fedcba9 · Working tree against HEAD');
+    expect(footer()).toBeNull();
   });
 
   it('keeps Staged selected but disabled once the index matches HEAD again', async () => {
     render(<TestHost />);
     openReview({ scope: 'staged' });
-    await waitFor(() => expect(header()).toBe('1 file changed · +1 −0'));
+    await waitFor(() => expect(header()).toBe('1 file · +1 −0'));
     expect(paths()).toEqual(['src/staged.ts']);
     const clean = statusOf({ dirty: true, files: [DIRTY.files[0], DIRTY.files[2]] });
     main().state.status = clean;
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: clean, reason: 'index' }));
-    await waitFor(() => expect(chips().find((c) => c[0] === 'staged')).toEqual(['staged', true, 'true', 'Index matches HEAD']));
+    // the word cut (P288): the reason in a person's words, on a chip that keeps the keyboard
+    await waitFor(() => expect(chips().find((c) => c[0] === 'staged')).toEqual(['staged', true, 'true', 'Nothing staged']));
+    expect(chipOf('staged')!.disabled).toBe(false);
     expect(document.querySelector<HTMLElement>('[data-review]')!.dataset.scope).toBe('staged');
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes'));
   });
 
   it('heads each file with its path, a badge for every kind but Modified, its counts, Viewed and Open file ↗, and no menu and no Staged badge', async () => {
@@ -1180,7 +1201,7 @@ describe('review tool', () => {
       expect(sectionOf(path!)!.querySelector('[aria-haspopup="menu"]'), path).toBeNull();
     }
     expect(stackText()).not.toContain('Staged');
-    expect(bodyOf('logo.png')?.textContent).toBe('Binary file');
+    expect(bodyOf('logo.png')).toBeNull(); // the word cut (N44): its badge says Binary; no body says it again
     expect(bodyOf('src/b.ts')).toBeNull(); // a rename with no change has no body
     expect(sectionOf('src/old.ts')!.querySelector('[data-review-open-placeholder]')).not.toBeNull(); // its column kept
   });
@@ -1252,7 +1273,7 @@ describe('review tool', () => {
     main().state.perFile = { 'src/app.ts': { patch: APP_PATCH, files: APP_FILES } };
     openReview();
     render(<TestHost />);
-    await waitFor(() => expect(header()).toBe('2 files changed · +39,950 −4,210'));
+    await waitFor(() => expect(header()).toBe('2 files · +39,950 −4,210'));
     expect(countsOf('src/app.ts')).toBe('+21,530 −4,210');
     expect(paths().map((path) => folded(path!))).toEqual([true, true]);
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeTruthy();
@@ -1261,7 +1282,7 @@ describe('review tool', () => {
     await act(tick);
     expect(main().callsOf('git.diff').filter((input) => input.path !== undefined)).toEqual([]);
     fold('src/app.ts');
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 2'));
     expect(main().callsOf('git.diff').filter((input) => input.path !== undefined)).toEqual([{ directory: '/repo', scope: 'all', path: 'src/app.ts' }]);
   });
 
@@ -1278,7 +1299,7 @@ describe('review tool', () => {
     const scopeReads = reads().length;
     failing = false;
     fireEvent.click(within(bodyOf('src/app.ts')!).getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 2'));
     expect(reads('src/app.ts')).toHaveLength(2);
     expect(reads()).toHaveLength(scopeReads);
   });
@@ -1298,9 +1319,10 @@ describe('review tool', () => {
     await waitFor(() => expect(bodyOf('logo.png')?.textContent).toBe('Diff unavailable: git busyRetry'));
     failing = false;
     fireEvent.click(within(bodyOf('logo.png')!).getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(bodyOf('logo.png')?.textContent).toBe('Binary file'));
+    await waitFor(() => expect(inSection('logo.png', '[data-review-viewed]')).not.toBeNull()); // its header read: a mark can sign it
     expect(reads('logo.png')).toHaveLength(2);
-    expect(inSection('logo.png', '[data-review-viewed]')).not.toBeNull(); // its header read: a mark can sign it
+    expect(bodyOf('logo.png')).toBeNull(); // drawn as a binary: its badge says so, and no body (the word cut, N44)
+    expect(badgeOf('logo.png')).toBe('Binary');
   });
 
   it('lets the harness read and drive each section by its path: its hunks, its fold, its mark and its Open file ↗', async () => {
@@ -1348,21 +1370,21 @@ describe('review tool', () => {
     main().state.status = statusOf({ dirty: true, files: DIRTY.files.slice(0, 2) });
     render(<TestHost />);
     openReview();
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 3'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 3'));
     expect(screen.getByLabelText('Previous hunk')).toHaveProperty('disabled', true);
     fireEvent.click(inSection('src/app.ts', '[data-open-file]')!);
     expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 5 })]);
     expect(mainFileTabs()).toEqual([]);
     await showReview(); // UX wave U6b-1: the file is in view in Review's place; Review comes back on its hunk
-    expect(hunkLabel()).toBe('Showing hunk 1 of 3');
+    expect(hunkLabel()).toBe('1 / 3');
     fireEvent.click(screen.getByLabelText('Next hunk'));
-    expect(hunkLabel()).toBe('Showing hunk 2 of 3');
+    expect(hunkLabel()).toBe('2 / 3');
     fireEvent.click(inSection('src/app.ts', '[data-open-file]')!);
     expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 14 })]); // the same tab, at the new line
     await showReview();
-    expect(hunkLabel()).toBe('Showing hunk 2 of 3');
+    expect(hunkLabel()).toBe('2 / 3');
     fireEvent.click(screen.getByLabelText('Next hunk'));
-    expect(hunkLabel()).toBe('Showing hunk 3 of 3'); // across into the next file
+    expect(hunkLabel()).toBe('3 / 3'); // across into the next file
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
     fireEvent.click(inSection('src/app.ts', '[data-open-file]')!);
     expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 5 })]); // its own first hunk
@@ -1371,9 +1393,9 @@ describe('review tool', () => {
     expect(sideFiles()).toContainEqual(expect.objectContaining({ file: '/repo/src/staged.ts', line: 1 }));
     expect(mainFileTabs()).toEqual([]);
     await showReview();
-    expect(hunkLabel()).toBe('Showing hunk 3 of 3');
+    expect(hunkLabel()).toBe('3 / 3');
     fold('src/app.ts');
-    expect(hunkLabel()).toBe('Showing hunk 3 of 3'); // a folded file's hunks are counted too (M4): a jump unfolds it
+    expect(hunkLabel()).toBe('3 / 3'); // a folded file's hunks are counted too (M4): a jump unfolds it
   });
 
   it('keeps a hunk it jumped to when the hunk cannot reach the top of the scroller; scrolling by hand moves the count', async () => {
@@ -1390,10 +1412,10 @@ describe('review tool', () => {
       await page.settle();
       expect(scroller.scrollTop).toBeGreaterThan(0);
       expect(scroller.scrollTop).toBe(scroller.scrollHeight - scroller.clientHeight); // clamped short of the second hunk's row
-      expect(hunkLabel()).toBe('Showing hunk 2 of 2');
+      expect(hunkLabel()).toBe('2 / 2');
       expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
       page.scrollTo(0); // scrolling by hand still moves the counter
-      expect(hunkLabel()).toBe('Showing hunk 1 of 2');
+      expect(hunkLabel()).toBe('1 / 2');
     } finally {
       page.restore();
     }
@@ -1461,7 +1483,7 @@ describe('review tool', () => {
     fireEvent.click(chipOf('turn')!);
     await waitFor(() => expect(paths()).toEqual(divider.files.map((file) => file.path)));
     expect(chipOf('turn')!.getAttribute('aria-pressed')).toBe('true');
-    expect(header()).toBe('3 files changed · +7 −4');
+    expect(header()).toBe('3 files · +7 −4');
   });
 
   it('re-reads once 250 ms after git.changed and keeps every section', async () => {
@@ -1473,7 +1495,7 @@ describe('review tool', () => {
     main().state.uncommitted = { patch: APP_PATCH + STAGED_PATCH, files: [{ ...APP_FILES[0], insertions: 5 }, { path: 'src/staged.ts', oldPath: null, insertions: 1, deletions: 0, binary: false }] };
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
-    await waitFor(() => expect(header()).toBe('3 files changed · +6 −0'));
+    await waitFor(() => expect(header()).toBe('3 files · +6 −0'));
     expect(reads()).toHaveLength(4); // one more each, the two events coalesced
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
     expect(folded('src/staged.ts')).toBe(true); // the person's fold stands
@@ -1538,6 +1560,18 @@ describe('review tool', () => {
     await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'src/staged.ts']));
   });
 
+  // The word cut (T361): an untracked folder's body says what it is, "Untracked folder", where the note called it a file
+  it('says “Untracked folder” for an untracked folder, which has no diff and no read of its own', async () => {
+    main().state.status = statusOf({ dirty: true, files: [{ path: 'drafts/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    main().state.uncommitted = { patch: '', files: [] };
+    render(<TestHost />);
+    openReview();
+    await waitFor(() => expect(paths()).toEqual(['drafts/']));
+    expect(badgeOf('drafts/')).toBe('Untracked');
+    expect(inSection('drafts/', '[data-review-note]')?.textContent).toBe('Untracked folder');
+    expect(reads('drafts/')).toEqual([]);
+  });
+
   it('past the scope cap, reads an unfolded file again after a refresh, and a marked one to hold its mark', async () => {
     main().state.uncommitted = { patch: APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: APP_FILES };
     main().state.status = statusOf({ dirty: true, files: [DIRTY.files[0]] });
@@ -1546,10 +1580,10 @@ describe('review tool', () => {
     render(<TestHost />);
     await waitFor(() => expect(sectionOf('src/app.ts')).not.toBeNull());
     fold('src/app.ts');
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 2'));
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
     await waitFor(() => expect(reads('src/app.ts')).toHaveLength(2));
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 2'));
     markViewed('src/app.ts');
     expect([viewed('src/app.ts'), folded('src/app.ts')]).toEqual([true, true]);
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
@@ -1566,7 +1600,7 @@ describe('review tool', () => {
     render(<TestHost />);
     await waitFor(() => expect(sectionOf('src/app.ts')).not.toBeNull());
     fold('src/app.ts');
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 2'));
     markViewed('src/app.ts');
     expect([viewed('src/app.ts'), folded('src/app.ts')]).toEqual([true, true]);
     main().state.perFile = { 'src/app.ts': { patch: APP_PATCH.replace('+n', '+changed'), files: APP_FILES } };
@@ -1593,7 +1627,8 @@ describe('review tool', () => {
     main().state.uncommitted = binary('1..2');
     openReview();
     render(<TestHost />);
-    await waitFor(() => expect(bodyOf('logo.png')?.textContent).toBe('Binary file'));
+    await waitFor(() => expect(inSection('logo.png', '[data-review-viewed]')).not.toBeNull());
+    expect(bodyOf('logo.png')).toBeNull(); // the word cut (N44)
     markViewed('logo.png');
     expect([viewed('logo.png'), folded('logo.png')]).toEqual([true, true]);
     main().state.uncommitted = binary('1..3');
@@ -1663,7 +1698,9 @@ describe('review tool', () => {
     main().state.perFile['scratch.txt'] = binary('9fc36a0');
     render(<TestHost />);
     openReview({ path: 'scratch.txt' });
+    // its badge says Untracked, so its body still says it is a binary (the word cut, N44, cuts only what is said twice)
     await waitFor(() => expect(bodyOf('scratch.txt')?.textContent).toBe('Binary file'));
+    expect(badgeOf('scratch.txt')).toBe('Untracked');
     markViewed('scratch.txt');
     expect([viewed('scratch.txt'), folded('scratch.txt')]).toEqual([true, true]);
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
@@ -1709,7 +1746,7 @@ describe('review tool', () => {
     act(() => useLayout.getState().openSession(B));
     act(() => panelHost.selectTab(useLayout.getState().panelPinned[0].id)); // B's own selection starts on the summary
     await waitFor(() => expect(main().callsOf('git.watch')).toContainEqual({ directory: '/repo-b' }));
-    await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
+    await waitFor(() => expect(header()).toBe('3 files · +3 −0'));
     expect([viewed('src/app.ts'), folded('src/staged.ts')]).toEqual([false, false]); // marks and folds are per directory and scope
     act(() => useLayout.getState().openSession(A));
     await waitFor(() => expect(viewed('src/app.ts')).toBe(true));
@@ -1731,7 +1768,7 @@ describe('review tool', () => {
       ['branch', 'false'],
       ['turn', 'true'],
     ]);
-    expect(header()).toBe('3 files changed · +7 −4');
+    expect(header()).toBe('3 files · +7 −4');
     expect(paths()).toEqual([
       '/tmp/maws-synth-edit-and-receipt/src/app.ts',
       '/tmp/maws-synth-edit-and-receipt/src/store.ts',
@@ -1801,11 +1838,11 @@ describe('review tool', () => {
     render(<TestHost />);
     openReview({ scope: 'turn', turnId: divider.turnId! });
     await waitFor(() => expect(document.querySelectorAll('[data-review-block]')).toHaveLength(3));
-    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 3'));
+    await waitFor(() => expect(hunkLabel()).toBe('1 / 3'));
     for (const text of ['+l12', '+EIGHT', '+ABOVE']) expect(stackText()).toContain(text); // every edit's hunk drawn
     fireEvent.click(screen.getByLabelText('Next hunk'));
     fireEvent.click(screen.getByLabelText('Next hunk'));
-    expect(hunkLabel()).toBe('Showing hunk 3 of 3');
+    expect(hunkLabel()).toBe('3 / 3');
     fireEvent.click(inSection(file, '[data-open-file]')!);
     expect(sideFiles()).toEqual([expect.objectContaining({ file, line: 4 })]); // the third block's own numbers
     // No warning from the diff view, save the store library's own timing note, which a loaded machine triggers.
@@ -1911,7 +1948,7 @@ describe('review tool', () => {
     late.resolve(ok({ patch: STAGED_PATCH, files: [{ path: 'src/staged.ts', oldPath: null, insertions: 1, deletions: 0, binary: false }] }));
     await act(tick);
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
-    expect(header()).toBe('3 files changed · +3 −0');
+    expect(header()).toBe('3 files · +3 −0');
   });
 
   // UX wave U8b (A8, l5-code-16): the line is a control named Open changes, its counts its description, and Environment is
@@ -1923,7 +1960,7 @@ describe('review tool', () => {
     const line = screen.getByRole('button', { name: 'Open changes', description: '+3 −0 · 3 files 1 untracked' });
     expect(line.textContent).toBe('+3 −0 · 3 files›');
     fireEvent.click(line);
-    await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
+    await waitFor(() => expect(header()).toBe('3 files · +3 −0'));
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
   });
 });
@@ -1984,11 +2021,11 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: 'HEAD' });
     expect(badgeOf('notes/berths.md')).toBe('Untracked');
     expect(countsOf('notes/berths.md')).toBe('+12');
-    expect(header()).toBe('2 files changed · +14 −0');
+    expect(header()).toBe('2 files · +14 −0');
     fireEvent.click(chipOf('branch')!);
     await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
     expect(countsOf('notes/berths.md')).toBe('+12');
-    expect(header()).toBe('3 files changed · +15 −0');
+    expect(header()).toBe('3 files · +15 −0');
   });
 
   it('for a session in the main checkout on a feature branch: This branch is enabled, measured against the merge base with the default branch, and its footer reads "feature/x · Since origin/main"', async () => {
@@ -1997,7 +2034,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     render(<TestHost />);
     await waitFor(() => expect(chipOf('branch')?.disabled).toBe(false));
     fireEvent.click(chipOf('branch')!);
-    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    await waitFor(() => expect(scopeWords()).toBe('feature/x · Since origin/main'));
     expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: MERGE_BASE });
     expect(main().callsOf('git.worktree.branch')).toEqual([]);
     expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']); // a committed change, an uncommitted edit and a new file
@@ -2008,7 +2045,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     serveReads();
     openReview();
     render(<TestHost />);
-    await waitFor(() => expect(footer()).toBe('feature/y · Since origin/main')); // a clean tree opens on This branch
+    await waitFor(() => expect(scopeWords()).toBe('feature/y · Since origin/main')); // a clean tree opens on This branch
     expect(main().callsOf('git.worktree.branch')).toEqual([]);
   });
 
@@ -2029,7 +2066,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     serveReads();
     openReview();
     render(<TestHost />);
-    await waitFor(() => expect(header()).toBe('4 files changed · +14 −0, and 2 untracked files not counted'));
+    await waitFor(() => expect(header()).toBe('4 files · +14 −0 · 2 untracked not counted'));
     expect(countsOf('big.csv')).toBeNull();
     expect(countsOf('more.md')).toBeNull();
   });
@@ -2038,8 +2075,8 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     serveReads(['rl2.project-acts']);
     openReview();
     render(<TestHost />);
-    await waitFor(() => expect(header()).toBe('2 files changed · +2 −0, and 1 untracked file not counted'));
-    expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', "This branch needs this Mac’s MAWS service to be updated"]);
+    await waitFor(() => expect(header()).toBe('2 files · +2 −0 · 1 untracked not counted'));
+    expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', 'This branch needs a newer MAWS on this Mac']);
     expect(countsOf('notes/berths.md')).toBeNull();
     expect(reads()).toContainEqual({ directory: '/repo', scope: 'all' });
     expect(main().callsOf('git.changesSince')).toEqual([]);
@@ -2049,7 +2086,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
   it('while whether the machine serves the reads is not known, asks none of them and reads Uncommitted as today, with no word of uncounted files', async () => {
     openReview();
     render(<TestHost />);
-    await waitFor(() => expect(header()).toBe('2 files changed · +2 −0'));
+    await waitFor(() => expect(header()).toBe('2 files · +2 −0'));
     expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', '']);
     for (const name of ['git.changesSince', 'git.branchCommits', 'git.commitDiff'] as const) expect(main().callsOf(name)).toEqual([]);
   });
@@ -2066,16 +2103,16 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     main().state.commits = (input) => (input.patch === false ? ok({ commit: commitOf(SHA), onHead: false, patch: '', files: [] }) : commitAnswer(SHA));
     openCommitted(SHA, 'src/app.ts');
     render(<TestHost />);
-    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names'));
+    await waitFor(() => expect(commitWords()).toEqual(['Quote the berth names', null]));
     expect(chips().find((c) => c[0] === 'commit')).toEqual(['commit', false, 'true', 'Quote the berth names']);
     expect(chipOf('commit')!.textContent).toBe('Commit 3f9a1c2');
-    expect(header()).toBe('2 files changed · +3 −0');
+    expect(header()).toBe('2 files · +3 −0');
     expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']);
     expect(main().callsOf('git.commitDiff')).toEqual([{ directory: '/repo', commit: SHA }]);
     const amended = { ...FEATURE, head: 'fedcba9876543210' };
     main().state.status = amended;
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: amended, reason: 'head' }));
-    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    await waitFor(() => expect(commitWords()).toEqual(['Quote the berth names', 'Not on feature/x now']));
     expect(main().callsOf('git.commitDiff')).toEqual([
       { directory: '/repo', commit: SHA },
       { directory: '/repo', commit: SHA, patch: false },
@@ -2088,7 +2125,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     main().state.commits = () => commitAnswer(SHA, false, { parents: ['0000000000000000000000000000000000000001', '0000000000000000000000000000000000000002'] });
     openCommitted(SHA);
     render(<TestHost />);
-    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · against its first parent · not in HEAD now'));
+    await waitFor(() => expect(commitWords()).toEqual(['Quote the berth names · against its first parent', 'Not in HEAD now']));
   });
 
   it('holds the commit’s read open: This branch chosen meanwhile is shown and the chip stays listed; chosen again, the chip reads nothing more; a second commit replaces it, the first answer dropped (async 2, S14)', async () => {
@@ -2099,10 +2136,10 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     render(<TestHost />);
     await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(1));
     fireEvent.click(chipOf('branch')!);
-    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    await waitFor(() => expect(scopeWords()).toBe('feature/x · Since origin/main'));
     expect(chipOf('commit')?.getAttribute('aria-pressed')).toBe('false');
     first.resolve(commitAnswer(SHA));
-    await waitFor(() => expect(chipOf('commit')?.title).toBe('Quote the berth names'));
+    await waitFor(() => expect(describedBy(chipOf('commit'))).toBe('Quote the berth names'));
     fireEvent.click(chipOf('commit')!);
     await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
     expect(main().callsOf('git.commitDiff')).toHaveLength(1); // one read in all
@@ -2115,7 +2152,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     openCommitted(OTHER_SHA);
     await waitFor(() => expect(chipOf('commit')?.textContent).toBe('Commit aa11bb2'));
     late.resolve(commitAnswer(THIRD_SHA, true, { subject: 'A late answer' }));
-    await waitFor(() => expect(footer()).toBe('Commit aa11bb2 · Name the berth columns'));
+    await waitFor(() => expect(commitWords()).toEqual(['Name the berth columns', null]));
     expect(chips().filter((c) => c[0] === 'commit')).toEqual([['commit', false, 'true', 'Name the berth columns']]);
   });
 
@@ -2140,7 +2177,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     serveReads([]);
     const tab = { kind: 'diff' as const, id: 'diff-commit', appSessionId: A, ref: `commit:${SHA}`, pinned: false };
     render(<DiffTab tab={tab} />);
-    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe("Diff unavailable: this Mac’s MAWS service is older than this window"));
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: this Mac’s MAWS needs updating'));
     expect(main().callsOf('git.commitDiff')).toEqual([]);
   });
 
@@ -2177,25 +2214,25 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
       serveReads();
       let full = first;
       main().state.commits = (input) => (input.patch === false ? ok({ commit: commitOf(SHA), onHead: checked, patch: '', files: [] }) : commitAnswer(SHA, full));
-      const words = (onHead: boolean) => `Commit 3f9a1c2 · Quote the berth names${onHead ? '' : ' · not on feature/x now'}`;
+      const words = (onHead: boolean) => ['Quote the berth names', onHead ? null : 'Not on feature/x now'];
       openCommitted(SHA);
       render(<TestHost />);
-      await waitFor(() => expect(footer()).toBe(words(first)));
+      await waitFor(() => expect(commitWords()).toEqual(words(first)));
       const moved = { ...FEATURE, head: 'fedcba9876543210' };
       main().state.status = moved;
       act(() => main().emit('git.changed', { repoRoot: '/repo', status: moved, reason: 'head' }));
-      await waitFor(() => expect(footer()).toBe(words(checked)));
+      await waitFor(() => expect(commitWords()).toEqual(words(checked)));
       await act(() => panelHost.closeTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
-      await waitFor(() => expect(footer()).toBeNull());
+      await waitFor(() => expect(commitWords()).toEqual(['', null]));
       const back = { ...FEATURE, head: '0123456789abcdef' }; // HEAD moved again while Review was closed
       main().state.status = back;
       act(() => main().emit('git.changed', { repoRoot: '/repo', status: back, reason: 'head' }));
       full = first;
       openCommitted(SHA);
       await waitFor(() => expect(main().callsOf('git.commitDiff').filter((input) => input.patch !== false)).toHaveLength(2)); // read afresh
-      await waitFor(() => expect(footer()).toBe(words(first)));
+      await waitFor(() => expect(commitWords()).toEqual(words(first)));
       await act(tick);
-      expect(footer()).toBe(words(first));
+      expect(commitWords()).toEqual(words(first));
     });
 
   // M9 fix 2 (Decision Log 38, 3): a branch read that failed before it ever answered leaves This branch enabled; chosen, it
@@ -2220,13 +2257,13 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     expect(main().callsOf('git.branchCommits')).toHaveLength(2);
     expect(others()).toEqual(before); // only the branch read
     held.resolve(branchAnswer());
-    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    await waitFor(() => expect(scopeWords()).toBe('feature/x · Since origin/main'));
     await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
     answer = fail('fatal: the remote hung up');
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
     await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(3));
     await act(tick);
-    expect(footer()).toBe('feature/x · Since origin/main');
+    expect(scopeWords()).toBe('feature/x · Since origin/main');
     expect(document.querySelector('[data-review-unavailable]')).toBeNull();
     expect(chipOf('branch')?.disabled).toBe(false);
   });
@@ -2273,14 +2310,15 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     await waitFor(() => expect(failure()).toBeNull());
   });
 
-  // UX wave U5b-2 fix 1 (Decision Log 37): an empty commit's words, where Uncommitted's empty message stands
-  it('says “No changes in this commit” for a commit with no change against its first parent', async () => {
+  // UX wave U5b-2 fix 1 (Decision Log 37): an empty commit's words, where Uncommitted's empty message stands; the word cut
+  // (N40): "No changes", as every empty scope but This branch reads, the pressed chip naming the commit
+  it('says “No changes” for a commit with no change against its first parent', async () => {
     serveReads();
     main().state.commits = () => ok({ commit: commitOf(SHA), onHead: true, patch: '', files: [] });
     openCommitted(SHA);
     render(<TestHost />);
-    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes in this commit'));
-    expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes'));
+    expect(commitWords()).toEqual(['Quote the berth names', null]);
   });
 
   // ---- what a tab has loaded, it keeps (the branch's max panel, ruling 1; Decision Log 49; §G) ------------------------------
@@ -2319,7 +2357,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
       roster(state, capabilities);
       await act(tick);
       expect(paths()).toEqual(COMMIT_PATHS);
-      expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+      expect(commitWords()).toEqual(['Quote the berth names', null]);
       expect(document.querySelector('[data-review-unavailable]')).toBeNull();
       roster('up', ['rl2.git-reads']);
       await act(tick);
@@ -2341,7 +2379,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     await hideReview();
     moveHead();
     showAgain();
-    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    await waitFor(() => expect(commitWords()).toEqual(['Quote the berth names', 'Not on feature/x now']));
     await act(tick);
     expect([fullReads(), checks()]).toEqual([1, 1]);
   });
@@ -2377,9 +2415,9 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     moveHead(); // a membership check is owed, and not asked while the reads are lost
     await act(tick);
     expect([fullReads(), checks()]).toEqual([1, 0]);
-    expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+    expect(commitWords()).toEqual(['Quote the berth names', null]);
     roster('up', ['rl2.git-reads']);
-    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    await waitFor(() => expect(commitWords()).toEqual(['Quote the berth names', 'Not on feature/x now']));
     await act(tick);
     expect([fullReads(), checks()]).toEqual([1, 1]);
   });
@@ -2439,7 +2477,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     await act(tick);
     expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']);
     expect(chipOf('branch')?.disabled).toBe(false);
-    expect(footer()).toBe('feature/x · Since origin/main');
+    expect(scopeWords()).toBe('feature/x · Since origin/main');
     expect(asked()).toEqual(before);
   });
 
@@ -2497,7 +2535,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     moveHead();
     await waitFor(() => expect(checks()).toBe(1));
     expect(main().targetsOf('git.commitDiff').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
-    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    await waitFor(() => expect(commitWords()).toEqual(['Quote the berth names', 'Not on feature/x now']));
     expect(main().targetsOf('git.branchCommits').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' })); // HEAD's move asked the branch read too
   });
 
@@ -2582,9 +2620,27 @@ describe('review diff tab', () => {
   it('draws the same stack for a ref, with no chips', async () => {
     render(<DiffTab tab={diffTab('uncommitted @ src/staged.ts')} />);
     await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']));
-    expect(header()).toBe('3 files changed · +3 −0');
+    expect(header()).toBe('3 files · +3 −0');
     expect(chips()).toEqual([]);
     expect(folded('src/staged.ts')).toBe(false);
+  });
+
+  // The word cut (T357): no foot line; with no chips, the totals line owns the scope's words, and takes the keyboard
+  it('gives the scope’s words to the totals line, which takes the keyboard, and draws no foot line', async () => {
+    render(<DiffTab tab={diffTab('uncommitted @ src/staged.ts')} />);
+    await waitFor(() => expect(header()).toBe('3 files · +3 −0'));
+    const line = document.querySelector<HTMLElement>('[data-review-header]')!;
+    expect([line.tabIndex, describedBy(line), footer()]).toEqual([0, 'main · Working tree against HEAD', null]);
+    expect(scopeWords()).toBe('main · Working tree against HEAD');
+  });
+
+  it('gives an empty scope’s words to its empty line in a diff tab', async () => {
+    main().state.status = statusOf({ dirty: false });
+    main().state.uncommitted = { patch: '', files: [] };
+    render(<DiffTab tab={diffTab('uncommitted')} />);
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes'));
+    const line = document.querySelector<HTMLElement>('[data-review-empty]')!;
+    expect([line.tabIndex, describedBy(line)]).toEqual([0, 'main · Working tree against HEAD']);
   });
 
   it('refuses a path outside the repository and opens nothing', async () => {
@@ -2630,7 +2686,7 @@ describe('review diff tab', () => {
     await painted(() => bodyOf('src/staged.ts')?.textContent?.includes('export const staged = 1;') ?? false);
     moveTo(WT);
     await waitFor(() => expect(paths()).toEqual(['src/other.ts', 'scratch.txt'])); // the fake's status lists scratch.txt untracked in every folder
-    expect(header()).toBe('2 files changed · +2 −0');
+    expect(header()).toBe('2 files · +2 −0');
     expect(document.body.textContent).not.toContain('src/staged.ts');
     expect(document.body.textContent).not.toContain('export const staged = 1;');
     expect(document.querySelector('[data-review-refused]')).toBeNull();
