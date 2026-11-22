@@ -1772,7 +1772,9 @@ test.describe('plugin management (E8)', () => {
     // The product's window: the session's tab and the Plugins controls inside its floating Connectors card.
     await (await sidebarRow(page, { appSessionId: READY })).click();
     const plugins = await unfoldSessionCard(page, 'Connectors');
-    await expect(plugins).toContainText('Plugins · 11 loaded'); // pass2/real-settings seq 15
+    // pass2/real-settings seq 15. The word cut (P65): the line is the count alone, "11 plugins", while it is loaded now
+    await expect(plugins.getByText('11 plugins', { exact: true })).toBeVisible();
+    await expect(plugins).not.toContainText('Loaded now');
     const reloadMods = plugins.getByRole('button', { name: 'Reload plugins' });
     const line = reloadMods.locator('xpath=following-sibling::*[@role="status"]');
     await reloadMods.click();

@@ -123,15 +123,25 @@ test('1, 6, 10: the import asks about Bookmarks and counts them, the rows reach 
 
       // (1) the report: 46 imported, 1 skipped; the phase between verifying and extensions; the rows in the browser's database
       const done = await importThrough(s);
-      await expect(done.locator('[data-import-summary]')).toContainText('46 bookmarks');
-      // the word cut (P388): the summary ends at the skipped count; the reason is the line under it
-      await expect(done.locator('[data-import-summary]')).toContainText('· 1 skipped');
-      await expect(done.locator('[data-import-summary]')).not.toContainText('not imported');
+      const summary = done.locator('[data-import-summary]');
+      await expect(summary).toContainText('46 bookmarks');
+      // the word cut (P388): the summary ends at the skipped count; the reasons are the lines under it. The count is every
+      // category's (the fixture's hidden and unsupported history rows among them, beside the one bookmark), so it is
+      // checked against the record's report below.
+      await expect(summary).toHaveText(/ · [\d,]+ skipped$/);
+      const skippedShown = Number(/ · ([\d,]+) skipped$/.exec((await summary.textContent()) ?? '')![1]!.replace(/,/g, ''));
+      await expect(summary).not.toContainText('not imported');
       await expect(done.getByText('Bookmarks · Not imported (1)', { exact: true })).toBeVisible();
       expect(await phasesHeard(s)).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
       await closeSheet(s);
       const record = (await recordOf(s, 'Default'))!;
       expect(record.report.bookmarks).toEqual({ imported: 46, skipped: 1, error: null });
+      const { cookies, history, extensions } = record.report;
+      const skippedReported = [
+        ...Object.values(cookies?.skipped ?? {}), ...Object.values(history?.skipped ?? {}), record.report.bookmarks!.skipped,
+        (extensions ?? []).filter((extension) => extension.status === 'copyFailed' || extension.status === 'loadFailed').length,
+      ].reduce((sum, n) => sum + n, 0);
+      expect(skippedShown, 'the summary’s skipped count is the report’s, over every category').toBe(skippedReported);
       expect(record.bookmarks).toMatchObject({ consentedAt: record.report.startedAt, count: 46, error: null, errorAt: null });
       expect(record.bookmarks!.syncedAt).not.toBeNull();
       expect(await barOf(s.page)).toEqual(['A', 'B', ['F', ['F1', 'F2', ['G', ['G1']]]], ...N]);

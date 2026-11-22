@@ -33,6 +33,9 @@ const frames = async (n = 2) => {
   for (let i = 0; i < n; i += 1) await frame();
 };
 const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
+// A run's ended state (`RunBadge`): its word, or the word naming its mark (the word cut, T213: completed is a check named
+// "completed")
+const runStatus = (el: Element | null) => (el?.getAttribute('role') === 'img' ? (el.getAttribute('aria-label') ?? '') : text(el));
 
 // ---- where things are ------------------------------------------------------------------------------------------------------
 
@@ -149,7 +152,7 @@ function background(): BackgroundView | null {
       taskId: card.dataset.workflow!,
       title: text(card.querySelector('h4')),
       line: text(card.querySelector('[data-part="line"]')),
-      status: text(card.querySelector('[data-part="status"]')),
+      status: runStatus(card.querySelector('[data-part="status"]')),
       summary: text(card.querySelector('[data-part="summary"]')),
       stopping: stoppingIn(card),
       error: errorOf(card),
@@ -185,7 +188,7 @@ function widget(): RunWidgetView | null {
     taskId: root.dataset.run ?? '',
     header: text(root.querySelector('h2')),
     line: text(root.querySelector('[data-part="line"]')),
-    status: text(root.querySelector('[data-part="status"]')),
+    status: runStatus(root.querySelector('[data-part="status"]')),
     phases: [...root.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => ({
       title: text(option.querySelector('[data-part="title"]')),
       count: text(option.querySelector('[data-part="count"]')),

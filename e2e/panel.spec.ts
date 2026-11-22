@@ -633,8 +633,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         // the word cut (P36): the line is its counts and its files; the untracked count is its tooltip and description
         await expect(panel.changeLine).toHaveText('+1 −0 · 2 files');
         // UX2 embeds push state in Environment.
-        // the word cut (P39): the push row draws its marks, the sentence its name and tooltip
-        await expect(environment.getByRole('button', { name: '1 ahead of origin/main', exact: true })).toHaveText('↑1');
+        // the word cut (P39): the push row draws its marks, the sentence its name and tooltip. This page registers no Source
+        // control tool, so the marks are an image named by the sentence (a button only where that tool opens from it)
+        await expect(environment.getByRole('img', { name: '1 ahead of origin/main', exact: true })).toHaveText('↑1');
         await expect(environment.getByRole('button', { name: 'Open on GitHub' }), 'a local remote has no GitHub page').toHaveCount(0);
         // UX wave U8b, A8 (l5-code-16): the change line is the card's one way into Review, a control named Open changes
         // whose counts are its description; the branch row has no Review button, and no row names the engine's version.
