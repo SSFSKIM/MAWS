@@ -321,6 +321,10 @@ async function openTouchTurn(page: Page, hub: HubDouble, part: TouchCall, target
   const view = channel(page).getByTestId('session-view');
   await expect(view).toContainText(TOUCH.answer);
   await view.locator('[data-transcript-scroller]').first().evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  // A call the report view folds into the turn's working record (a browser action, unlike an ask or a delivery, does
+  // not stay in view): the record unfolded, then its run of calls opened, each one tap, as phone.spec.ts does.
+  const opens = [view.locator('[data-row-id^="record-fold:closed:toolu_touch_"] button'), view.locator(`[data-turn-id] .transcript-run-line[aria-expanded="false"]`).last()];
+  for (const open of opens) if ((await target(view).count()) === 0 && (await open.count()) > 0) await open.click();
   const found = target(view);
   await expect(found, 'the surface in the session view').toHaveCount(1);
   await found.scrollIntoViewIfNeeded();
@@ -715,15 +719,10 @@ test.describe('phone', () => {
         page,
         meta,
         async () => {
-          row = await openTouchTurn(page, hub, 'browser', (view) => view.locator('.transcript-browser-action')).catch(async (error: unknown) => {
-            const view = channel(page).getByTestId('session-view');
-            console.log(`[desk words] probe rows: ${(await view.locator('[data-row-id]').evaluateAll((els) => els.map((el) => `${el.getAttribute('data-row-id')}=${(el.textContent ?? '').slice(0, 60)}`))).slice(-12).join(' || ')}`);
-            throw error;
-          });
+          row = await openTouchTurn(page, hub, 'browser', (view) => view.locator('.transcript-browser-action[data-state="done"]'));
         },
         async (cut) => {
           await expect(row!.locator('[data-browser-heading]')).toBeVisible();
-          console.log(`[desk words] browser row: ${await row!.evaluate((el) => el.outerHTML.slice(0, 1500))}`);
           await touchFact(row!, cut, /\d.* · .*\d/); // "<took> · <waited>"
         },
       );
