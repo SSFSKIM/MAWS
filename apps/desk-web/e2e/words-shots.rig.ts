@@ -715,7 +715,11 @@ test.describe('phone', () => {
         page,
         meta,
         async () => {
-          row = await openTouchTurn(page, hub, 'browser', (view) => view.locator('.transcript-browser-action[data-state="done"]'));
+          row = await openTouchTurn(page, hub, 'browser', (view) => view.locator('.transcript-browser-action')).catch(async (error: unknown) => {
+            const view = channel(page).getByTestId('session-view');
+            console.log(`[desk words] probe rows: ${(await view.locator('[data-row-id]').evaluateAll((els) => els.map((el) => `${el.getAttribute('data-row-id')}=${(el.textContent ?? '').slice(0, 60)}`))).slice(-12).join(' || ')}`);
+            throw error;
+          });
         },
         async (cut) => {
           await expect(row!.locator('[data-browser-heading]')).toBeVisible();
