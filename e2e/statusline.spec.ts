@@ -96,12 +96,6 @@ test('usage: the popover keeps each account’s windows and reset times, Session
 
     await page.reload();
     await expect(meter(await account(page, DRAIN), 'Five-hour usage')).toHaveAttribute('aria-valuenow', '53');
-    const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z'); // ClaudeUsage's form, compared as text
-    const row = { limitKey: 'session', percent: 95, recordedAt: iso(Date.now()), resetsAt: iso(Date.now() + 2 * 3_600_000) };
-    appendFileSync(join(usageDir, 'history', '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3.jsonl'), `${JSON.stringify(row)}\n`);
-    await expect(meter(await account(page, PINNED), 'Five-hour usage')).toHaveAttribute('aria-valuenow', '95', { timeout: 10_000 });
-    await expect(nearLimitBanners(page)).toHaveCount(0);
-    expect(await page.evaluate(() => window.maws.invoke('layout.get', { key: 'usage.banners' }))).toMatchObject({ ok: true, value: { value: null } });
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
@@ -145,6 +139,16 @@ test('usage: each session reads its own windows in /usage: the routed one the dr
     await expect(pinned).not.toContainText(DRAIN);
     await expect(windowValue(pinned, '5h')).toHaveText(/^77% · resets in /);
     await expect(windowValue(pinned, 'Weekly')).toHaveText(/^44% · resets in /);
+    // a newer sample of that account's five-hour window, written while the widget is open: the pinned session's widget
+    // reads it (ClaudeUsage's history is this spec's one copy, so the sample is appended here, after the 77% above), and
+    // even an exhausted window posts no banner, the legacy layout key readable but unwritten
+    const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z'); // ClaudeUsage's form, compared as text
+    const row = { limitKey: 'session', percent: 95, recordedAt: iso(Date.now()), resetsAt: iso(Date.now() + 2 * 3_600_000) };
+    appendFileSync(join(usageDir, 'history', '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3.jsonl'), `${JSON.stringify(row)}\n`);
+    await expect(windowValue(pinned, '5h')).toHaveText(/^95% · resets in /, { timeout: 10_000 });
+    await expect(windowValue(pinned, 'Weekly')).toHaveText(/^44% · resets in /);
+    await expect(nearLimitBanners(page)).toHaveCount(0);
+    expect(await page.evaluate(() => window.maws.invoke('layout.get', { key: 'usage.banners' }))).toMatchObject({ ok: true, value: { value: null } });
 
     // a direct session: the engine's own reading, never an account's
     const widget = await usageWidget(page, CHARTER);
