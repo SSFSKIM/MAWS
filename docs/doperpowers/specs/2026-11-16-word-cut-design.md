@@ -368,7 +368,7 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - P388: the import's summary ends at "· N skipped". Each skip reason with a count gets its own line under it: a fold where the import named sites, a plain line where it named none, and "Bookmarks · Not imported (N)".
 - Settings keeps "Sync bookmarks now" and "Last synced …"; the popover reads the age alone.
 - P394's "On" also shows on Settings › Browser's extension row, which draws the same chip, so P394's picture pair includes that M1 surface.
-- With T462's notice cut, an extension's options tab that the page cap drops by its rare backstop path closes with no line.
+- T462 is split, on the coordinator's ruling of 2026-11-22. Its line is cut where the unloaded tab's chip stays greyed. Where the page cap closes the tab, so nothing on screen shows what happened, the line stays in its shortest form: "Closed: too many pages open", or "Closed: pages use too much memory".
 - 2026-11-22. **M3 task 7: the side chat, side threads and comments, the questions panel and the Channel.** 25 cuts, with 11 `stays` rows left as they read, and five `new` rows:
   - N162 (stays): a machine's notice in a project's channel keeps its sender, `<program>@<machine>` (board ticket 828), under rule 2.
   - N163: the design-system question's "Reading your design systems…" becomes the quiet spinner.
