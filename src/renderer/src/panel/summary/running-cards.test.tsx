@@ -198,7 +198,7 @@ describe('the Subagents card', () => {
     expect(tree()).toEqual(['p', 'x']);
     push([...nested('p', 'c', 6), finished('p', 8, { status: 'failed' }, at(50))]);
     expect(tree()).toEqual(['p (+1)▸', 'x']);
-    expect(lineOf('p').textContent).toBe('finished with errors');
+    expect(lineOf('p').textContent).toBe('failed'); // the word cut (T163): the outcome word the panel's rows read
     expect(lineOf('p').className).toContain('text-danger');
     expect(agentRow('p').querySelector('[data-part="elapsed"]')!.textContent).toBe('');
   });

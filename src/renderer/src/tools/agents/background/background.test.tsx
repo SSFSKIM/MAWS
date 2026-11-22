@@ -201,19 +201,19 @@ afterEach(() => {
 });
 
 describe('background work', () => {
-  it('shows a compact workflow card from pass2/workflow: its description, workflow maws-probe and one summary line per frame', async () => {
+  it('shows a compact workflow card from pass2/workflow: its description, maws-probe · time · agents and one summary line per frame', async () => {
     await mount({ events: upTo(workflow, 82) });
     expect(heading('running')).toBe('Running 1');
     expect(card('wayue3on6').querySelector('[data-kind-mark="workflow"]')).not.toBeNull(); // the Subagents tool's icon marks a workflow
     const wf = card('wayue3on6');
     expect(within(wf).getByRole('heading').textContent).toBe('Two echo agents in one phase');
     const line = wf.querySelector('[data-part="line"]')?.textContent;
-    expect(line).toMatch(/^workflow maws-probe · .+ · 2 agents · tokens unavailable$/); // no row has reported tokens at seq 82
+    expect(line).toMatch(/^maws-probe · .+ · 2 agents$/); // the word cut (T210): no kind word, no tokens
     expect(summaryLine('wayue3on6')).toBe('Echo · 0/2 agents');
     expect(wf.querySelector('table, [data-phase]')).toBeNull(); // the per-phase tables live in the widget (Decision Log 1)
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
     expect(summaryLine('wayue3on6')).toBe('Done');
-    expect(card('wayue3on6').querySelector('[data-part="line"]')?.textContent).toMatch(/ · 17\.7k tokens$/); // alpha's 8,861 + beta's 8,857
+    expect(card('wayue3on6').querySelector('[data-part="line"]')?.textContent).toMatch(/^maws-probe · .+ · 2 agents$/); // tokens stay off the line (T210)
     push(workflow.filter((e) => (e.seq ?? 0) > 93)); // the run's notification (seq 96): it ended, under the folded Done
     expect(section('running')).toBeNull();
     expect(heading('done')).toBe('Done 1 · 1 workflow');
@@ -227,7 +227,7 @@ describe('background work', () => {
     fireEvent.click(within(card('wayue3on6')).getByRole('button', { name: 'Two echo agents in one phase' }));
     expect(widget()).not.toBeNull();
     expect(within(widget()!).getByRole('heading').textContent).toBe('Two echo agents in one phase');
-    expect(widget()!.querySelector('[data-part="line"]')?.textContent).toMatch(/^workflow maws-probe · .+ · 2 agents · tokens unavailable$/);
+    expect(widget()!.querySelector('[data-part="line"]')?.textContent).toMatch(/^maws-probe · .+ · 2 agents$/);
     expect(options()).toEqual(['All phases|', '*Echo|0/2']); // the running phase by default
     expect(Array.from(widget()!.querySelectorAll('th')).map((th) => th.textContent)).toEqual(['Agent', 'Model', 'State', 'Time', 'Tokens']);
     // a row with an agent id leads with its glyph; the state is the engine's word (`start` while an agent runs)
@@ -238,9 +238,10 @@ describe('background work', () => {
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
     expect(options()).toEqual(['All phases|', '*Echo|2/2']); // the last phase once none runs
     expect(tableRows().map((cells) => cells.slice(2))).toEqual([
-      ['done', '1s', '8.9k'],
-      ['done', '1s', '8.9k'],
+      ['', '1s', '8.9k'], // the word cut (T238): the check alone
+      ['', '1s', '8.9k'],
     ]);
+    expect(Array.from(widget()!.querySelectorAll('td[data-part="state"]'), (cell) => cell.querySelector('[role="img"]')?.getAttribute('aria-label'))).toEqual(['done', 'done']);
     expect(tableRows().map((cells) => cells[0])).toEqual([expect.stringMatching(/alpha$/), expect.stringMatching(/beta$/)]);
     // Back returns to the list, the card still selected
     fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background' }) /* the word cut (T153) */);
@@ -320,10 +321,10 @@ describe('background work', () => {
     expect(widget()!.querySelector('tbody .animate-spin')).not.toBeNull();
   });
 
-  it('Stop workflow in the widget stops the run, as the card’s does', async () => {
+  it('Stop in the widget stops the run, as the card’s does (the word cut, T215)', async () => {
     await mount({ events: upTo(stopTask, 229) });
     openWidget('wkmzd07jp');
-    await act(async () => void fireEvent.click(within(widget()!).getByRole('button', { name: 'Stop workflow' })));
+    await act(async () => void fireEvent.click(within(widget()!).getByRole('button', { name: 'Stop' })));
     expect(fake.inputs.stopTask[0]).toEqual([A, 'wkmzd07jp']);
     expect(within(widget()!).getByRole('button', { name: 'stopping…' })).toHaveProperty('disabled', true);
     await act(async () => fake.fail('stopTask', 'engine went away'));
@@ -339,8 +340,9 @@ describe('background work', () => {
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', run.runId), runs: [stripped] });
     toggleSection('done');
     openWidget(run.snapshot!.taskId!);
-    expect(within(widget()!).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
-    expect(widget()!.querySelector('[data-part="status"]')?.textContent).toBe('completed');
+    expect(within(widget()!).queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(widget()!.querySelector('[data-part="status"]')?.textContent).toBe(''); // the word cut (T213): a check
+    expect(widget()!.querySelector('[data-part="status"]')?.getAttribute('aria-label')).toBe('completed');
     fireEvent.click(within(widget()!).getByRole('button', { name: /beta/ }));
     expect(openTool).toHaveBeenCalledWith('subagents', { appSessionId: A, params: { agentId: 'ae03d49e48b8ed708', appSessionId: A } });
   });
@@ -351,9 +353,9 @@ describe('background work', () => {
     const { handle, rerender } = await mount({ events: upTo(stopOn, 71) });
     toggleSection('done');
     const line = () => document.querySelector('[data-shell="b53no4rmo"] [data-part="line"]')?.textContent;
-    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.now}`);
+    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · ${REL.now}`); // the word cut (T218)
     act(() => vi.advanceTimersByTime(4 * SLOW_TICK_MS));
-    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.agoNarrow(2, 'minute')}`);
+    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · ${REL.agoNarrow(2, 'minute')}`);
     rerender(<Mounted state={handle} visible={false} />);
     vi.setSystemTime(Date.now() + 10 * 60_000); // ten minutes pass while the tool is hidden: no timer runs
     rerender(<Mounted state={handle} visible />);
@@ -394,11 +396,13 @@ describe('background work', () => {
     expect(options()).toEqual(['All phases|', 'Solve|Queued', '*Phase 2|Queued']); // no phase runs: the last
   });
 
-  it('a workflow with no progress yet says phases arrive with the first frame, on the card and in the widget', async () => {
+  // The word cut (T212): the wait for the first progress is a quiet spinner, its words its accessible name.
+  it('a workflow with no progress yet shows a spinner where its phases will be, on the card and in the widget', async () => {
     await mount({ events: [event('task.started', { taskId: 'wf1', taskType: 'local_workflow', description: 'Judge panel', workflowName: 'demo' }, { seq: 1, at: T })] });
-    expect(within(card('wf1')).getByText('Phases arrive with the first progress frame')).toBeTruthy();
+    expect(within(card('wf1')).queryByText('Phases arrive with the first progress frame')).toBeNull();
+    expect(await within(card('wf1')).findByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeTruthy();
     openWidget('wf1');
-    expect(within(widget()!).getByText('Phases arrive with the first progress frame')).toBeTruthy();
+    expect(await within(widget()!).findByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeTruthy();
   });
 
   it('a per-agent row with an agentId opens the drill-in through ctx.openTool; a row without one is not a button', async () => {
@@ -445,7 +449,7 @@ describe('background work', () => {
     await mount({ events: upTo(stopOn, 44) });
     expect(heading('running')).toBe('Running 1');
     const row = document.querySelector<HTMLElement>('[data-shell="b53no4rmo"]')!;
-    expect(row.querySelector('[data-part="line"]')?.textContent).toMatch(/^Sleep 30s then write BG_DONE to bg\.txt · running /);
+    expect(row.querySelector('[data-part="line"]')?.textContent).toMatch(/^Sleep 30s then write BG_DONE to bg\.txt · \d/); // the word cut (T216): no running word
     const output = within(row).getByRole('button', { name: 'Output' }) as HTMLButtonElement;
     expect(output.disabled).toBe(false);
     fireEvent.click(output);
@@ -463,7 +467,7 @@ describe('background work', () => {
   it('lists a monitor from a task.started of type monitor_ws', async () => {
     await mount({ events: [event('task.started', { taskId: 'm1', taskType: 'monitor_ws', description: 'until tests pass' }, { seq: 1, at: T })] });
     expect(heading('running')).toBe('Running 1');
-    expect(document.querySelector('[data-monitor="m1"] [data-part="line"]')?.textContent).toMatch(/^until tests pass · running /);
+    expect(document.querySelector('[data-monitor="m1"] [data-part="line"]')?.textContent).toMatch(/^until tests pass · \d/);
   });
 
   it('Stop marks stopping… at once, and the row reads stopped after R6’s recorded sequence', async () => {
@@ -479,9 +483,9 @@ describe('background work', () => {
     expect(within(row()).queryByRole('button', { name: /Stop|stopping/ })).toBeNull();
   });
 
-  it('Stop workflow reads stopping… and a second click is a no-op; a refused stop reads Couldn’t stop it', async () => {
+  it('Stop on a workflow’s card reads stopping… and a second click is a no-op; a refused stop reads Couldn’t stop it', async () => {
     const { handle } = await mount({ events: upTo(stopTask, 229) });
-    const stop = () => within(card('wkmzd07jp')).getByRole('button', { name: /Stop workflow|stopping…/ }) as HTMLButtonElement;
+    const stop = () => within(card('wkmzd07jp')).getByRole('button', { name: /^(Stop|stopping…)$/ }) as HTMLButtonElement;
     await act(async () => void fireEvent.click(stop()));
     expect(stop().textContent).toBe('stopping…');
     expect(stop().disabled).toBe(true);
@@ -489,7 +493,7 @@ describe('background work', () => {
     expect(fake.pending('stopTask')).toBe(1);
     await act(async () => fake.fail('stopTask', 'engine went away'));
     expect(within(card('wkmzd07jp')).getByText("Couldn't stop it: engine went away")).toBeTruthy();
-    expect(stop().textContent).toBe('Stop workflow');
+    expect(stop().textContent).toBe('Stop');
   });
 
   // P5 O9 M5: a terminal session driven through its bridge lists the jobs main derives from its transcript, which its
@@ -623,12 +627,12 @@ describe('background work', () => {
 
     // A run's widget follows custody too: the graph MAWS kept from its own run of the session is not live once a terminal
     // drives it, so no lane B Stop workflow is offered, as the list's card offers none.
-    it('offers no Stop workflow in a run’s widget once a terminal drives the session', async () => {
+    it('offers no Stop in a run’s widget once a terminal drives the session', async () => {
       await mount({ events: upTo(stopTask, 229) });
       openWidget('wkmzd07jp');
-      expect(within(widget()!).getByRole('button', { name: 'Stop workflow' })).toBeTruthy();
+      expect(within(widget()!).getByRole('button', { name: 'Stop' })).toBeTruthy();
       act(() => holder({ kind: 'terminal', pid: 4242 }));
-      expect(within(widget()!).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
+      expect(within(widget()!).queryByRole('button', { name: 'Stop' })).toBeNull();
       expect(within(widget()!).queryByRole('button', { name: 'stopping…' })).toBeNull();
     });
 
@@ -702,15 +706,18 @@ describe('background work', () => {
     toggleSection('done');
     const [run] = workflowRunsOf();
     const wf = card(run.snapshot!.taskId!);
-    expect(wf.querySelector('[data-part="status"]')?.textContent).toBe('completed');
+    expect(wf.querySelector('[data-part="status"]')?.textContent).toBe('');
+    expect(wf.querySelector('[data-part="status"]')?.getAttribute('role')).toBe('img');
+    expect(wf.querySelector('[data-part="status"]')?.getAttribute('aria-label')).toBe('completed');
+    expect(wf.querySelector('[data-part="status"]')?.className).toContain('text-success');
     expect(summaryLine(run.snapshot!.taskId!)).toBe('Done');
-    expect(within(wf).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
+    expect(within(wf).queryByRole('button', { name: 'Stop' })).toBeNull();
     openWidget(run.snapshot!.taskId!);
     expect(tableRows()).toHaveLength(2);
   });
 
   // E7 (Design §2, Decision Log 18): the id a hand-off names, resolved to the run.
-  it('open({ view: "run" }) resolves the task id, the Workflow call’s tool-use id and the run id; a name nothing resolves waits with a note', async () => {
+  it('open({ view: "run" }) resolves the task id, the Workflow call’s tool-use id and the run id; a name nothing resolves waits with a spinner', async () => {
     const { handle } = await mount({ events: upTo(workflow, 82) });
     const node = useTaskGraph.getState().entries.get(A)!.graph.tasks.get('wayue3on6' as TaskId)!;
     act(() => backgroundTool.open!(handle, { taskId: node.toolUseId as string, view: 'run' }));
@@ -720,10 +727,11 @@ describe('background work', () => {
     expect(widget()).toBeNull();
     act(() => backgroundTool.open!(handle, { taskId: 'not-yet', view: 'run' }));
     expect(widget()).toBeNull();
-    expect(screen.getByText('Run not found yet')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Loading run…' })).toBeTruthy(); // the word cut (T209)
+    expect(screen.queryByText('Run not found yet')).toBeNull();
     expect(handle.snapshot()).toMatchObject({ view: { kind: 'list' }, selected: 'not-yet', pendingRun: ['not-yet'] });
     act(() => backgroundTool.open!(handle, undefined as unknown as BackgroundParams)); // the summary's Open (no params): the list, the wait dropped
-    expect(screen.queryByText('Run not found yet')).toBeNull();
+    expect(screen.queryByRole('progressbar', { name: 'Loading run…' })).toBeNull();
     expect(handle.snapshot().pendingRun).toBeNull();
   });
 
@@ -732,7 +740,7 @@ describe('background work', () => {
     const taskId = run.snapshot!.taskId!;
     const { handle } = await mount({ status: null, runs: [{ runId: run.runId, snapshot: null, journal: [] }], params: { taskId, runId: run.runId, view: 'run' } });
     expect(handle.snapshot().view).toMatchObject({ kind: 'run', taskId: run.runId });
-    expect(within(widget()!).getByText('Phases arrive with the first progress frame')).toBeTruthy();
+    expect(await within(widget()!).findByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeTruthy();
     act(() => useTaskGraph.getState().applyDisk(A, { runs: [run] })); // the snapshot is read: the node is keyed by its task id now
     expect(widget()?.dataset.run).toBe(taskId);
     expect(options()).toEqual(['All phases|', '*Echo|2/2']);
@@ -740,7 +748,7 @@ describe('background work', () => {
 
   it('a fresh tab opened on a run no read has brought yet opens the widget once the run arrives', async () => {
     const { handle } = await mount({ events: [], params: { taskId: 'wayue3on6', view: 'run' } });
-    expect(screen.getByText('Run not found yet')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Loading run…' })).toBeTruthy();
     push(upTo(workflow, 82));
     expect(handle.snapshot()).toMatchObject({ view: { kind: 'run', taskId: 'wayue3on6' }, pendingRun: null, selected: 'wayue3on6' });
     expect(widget()?.dataset.run).toBe('wayue3on6');
@@ -785,7 +793,7 @@ describe('background work', () => {
       expect(section('done')).toBeNull();
       // a task of another kind: no Output, a Stop as a monitor has
       const other = document.querySelector<HTMLElement>('[data-other="x1"]')!;
-      expect(other.querySelector('[data-part="line"]')?.textContent).toMatch(/^Index the docs · running /);
+      expect(other.querySelector('[data-part="line"]')?.textContent).toMatch(/^Index the docs · \d/);
       expect(within(other).queryByRole('button', { name: 'Output' })).toBeNull();
       await act(async () => void fireEvent.click(within(other).getByRole('button', { name: 'Stop' })));
       expect(fake.inputs.stopTask[0]).toEqual([A, 'x1']);
@@ -872,7 +880,7 @@ describe('background work', () => {
       expect(line.querySelector('[data-part="description"]')?.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
       const state = line.querySelector<HTMLElement>('[data-part="state"]')!;
       expect(state.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full', 'overflow-hidden', 'text-ellipsis', 'whitespace-pre']));
-      expect(state.textContent).toMatch(/^ · running /);
+      expect(state.textContent).toMatch(/^ · \d/);
       expect(line.title).toBe(line.textContent);
       for (const button of within(document.querySelector<HTMLElement>('[data-shell="sh1"]')!).getAllByRole('button')) expect(button.className).toContain('shrink-0');
     });
@@ -1054,7 +1062,7 @@ describe('task checklist', () => {
     await mount({ status: live({ taskListId: 'sess-1' }) });
     await waitFor(() => expect(heading('tasks')).toBe('Tasks'));
     expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']);
-    const toggle = within(checklist()).getByRole('button', { name: '2 earlier tasks completed' });
+    const toggle = within(checklist()).getByRole('button', { name: '2 done' }); // the word cut (T231)
     fireEvent.click(toggle);
     expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests', 'Map handlers', 'Reproduce']);
     expect(tasksCalls).toEqual(['sess-1']);
@@ -1067,10 +1075,11 @@ describe('task checklist', () => {
     await waitFor(() => expect(rows()).toEqual(['Team task']));
   });
 
-  it('labels a disk-only session’s list session list, read from the record’s engine session id', async () => {
+  it('reads a disk-only session’s list from the record’s engine session id, with no session list label (the word cut, T230)', async () => {
     await mount({ status: null, engineSessionId: 'sess-1' });
     await waitFor(() => expect(heading('tasks')).toBe('Tasks'));
-    expect(checklist().querySelector('[data-part="label"]')?.textContent).toBe('session list');
+    expect(checklist().querySelector('[data-part="label"]')).toBeNull();
+    expect(checklist().textContent).not.toContain('session list');
   });
 
   it('draws no Tasks section until the engine reports its list, and reads nothing', async () => {
@@ -1118,7 +1127,11 @@ describe('task checklist', () => {
     // the action sits beside the heading, not in it: the heading's accessible name is its own text
     expect(within(checklist()).getByRole('heading', { level: 3 }).textContent).toBe('Tasks');
     expect(within(checklist()).getByRole('heading', { name: 'Tasks' })).toBeTruthy();
-    fireEvent.click(within(checklist()).getByRole('button', { name: 'Open the Tasks panel' }));
+    // the word cut (P140): Open is drawn on pointing at the heading or focus within it, and always where nothing points
+    const open = within(checklist()).getByRole('button', { name: 'Open the Tasks panel' });
+    expect(open.hasAttribute('data-on-hover')).toBe(true);
+    expect(open.closest('[data-hover-scope]')).toBe(within(checklist()).getByRole('heading', { name: 'Tasks' }).parentElement);
+    fireEvent.click(open);
     expect(openTool).toHaveBeenCalledWith('tasks', { appSessionId: A, params: { appSessionId: A } });
   });
 });
@@ -1145,7 +1158,7 @@ describe('scheduled jobs', () => {
       kind: row.querySelector('[data-part="kind"]')?.textContent,
       prompt: row.querySelector('[data-part="prompt"]')?.textContent,
       when: row.querySelector('[data-part="when"]')?.textContent,
-      link: row.querySelector('button')?.textContent ?? null,
+      link: row.querySelector('button')?.getAttribute('aria-label') ?? null, // the word cut (T222): a glyph named by the words
     }));
   const attachTranscript = (events: SessionEvent[]) => act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
   const withDurable = () => {
@@ -1175,15 +1188,20 @@ describe('scheduled jobs', () => {
       { id: '8d1a2582', schedule: '15 4 6 10 *', kind: 'one-shot · session-only', prompt: 'E7 one-shot', link: 'Open creating turn' },
     ]);
     const tick = next('*/2 * * * *', now);
-    expect(rows[1]!.when).toBe(`Next ≈ ${TIME.format(tick)} (${formatIn(tick - now)}) · Expires ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
+    expect(rows[1]!.when).toBe(`${TIME.format(tick)} · ${formatIn(tick - now)} · Expires ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
     const fire = next('15 4 6 10 *', Date.parse(ONE_SHOT.at));
-    expect(rows[2]!.when).toContain(`(${formatIn(fire - now)})`); // a one-shot: its one fire, no expiry
+    expect(rows[2]!.when).toBe(`${TIME.format(fire)} · ${formatIn(fire - now)}`); // a one-shot: its one fire, no expiry (the word cut, T224)
     expect(rows[2]!.when).not.toContain('Expires');
     expect(rows[0]!.when).toContain(TIME.format(next('0 9 * * 1', now)));
     expect(section('scheduled')!.querySelector('[data-part="when"] [title]')?.getAttribute('title')).toBe(
       'The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early',
     );
-    // Open creating turn jumps the transcript to the call's cell
+    // Open creating turn is a glyph drawn on the pointed or focused row (and always where nothing points), its words its
+    // name and its tooltip; it jumps the transcript to the call's cell
+    const link = within(document.querySelector<HTMLElement>('[data-scheduled="481abb0a"]')!).getByRole('button', { name: 'Open creating turn' });
+    expect(link.textContent).toBe('');
+    expect(link.hasAttribute('data-on-hover')).toBe(true);
+    expect(link.closest('[data-hover-scope]')).toBe(document.querySelector('[data-scheduled="481abb0a"]'));
     fireEvent.click(within(document.querySelector<HTMLElement>('[data-scheduled="481abb0a"]')!).getByRole('button', { name: 'Open creating turn' }));
     expect(useTranscriptStore.getState().entries[A]!.jump?.focus).toBe(cellId.tool(callOf('E7 cron tick').toolUseId));
   });
@@ -1213,7 +1231,7 @@ describe('scheduled jobs', () => {
     await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 3'));
     const rows = scheduled();
     expect(rows.map((r) => [r.id, r.when])).toEqual([
-      ['598b1690', expect.stringMatching(/^Next ≈ /)],
+      ['598b1690', expect.stringMatching(/^\d{1,2}:\d{2}\s?[AP]M · in /)],
       ['481abb0a', expect.stringMatching(/^Resumes with the session · Expires /)],
       ['8d1a2582', 'Resumes with the session'],
     ]);
@@ -1262,6 +1280,17 @@ describe('scheduled jobs', () => {
     // made by another session as far as this record knows (its engine id is not the file's creator): no link to a call
     expect(scheduled()[0]).toMatchObject({ kind: 'recurring · durable · another session', link: null });
     expect(section('scheduled')!.querySelector(':scope > p')).toBeNull();
+  });
+
+  // The word cut (T226): a job whose schedule MAWS cannot read has an empty next-run line, not words for the missing value.
+  it('leaves the next run of a job whose schedule cannot be read blank', async () => {
+    fake.dirs.add(`${ROOT}/.claude`);
+    fake.files.set(FILE, JSON.stringify({ tasks: [{ id: 'bad', cron: 'every so often', prompt: 'unreadable', createdAt: Date.now() }] }));
+    await mount();
+    await waitFor(() => expect(scheduled().map((r) => r.id)).toContain('bad'));
+    const when = scheduled().find((r) => r.id === 'bad')!.when!;
+    expect(when).not.toMatch(/unknown/);
+    expect(when).not.toMatch(/^ · /);
   });
 
   it('lists both rows of a hand-authored file that repeats an id, each its own', async () => {

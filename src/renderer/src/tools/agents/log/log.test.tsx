@@ -132,6 +132,12 @@ describe('log tool', () => {
 
   it('Refresh re-reads the last page in the window and updates the size', async () => {
     const { handle } = await mount({ path: PATH, title: 'shell' });
+    // the word cut (T241): Refresh is the circular arrow, its word its accessible name and its tooltip
+    const refresh = screen.getByRole('button', { name: 'Refresh' });
+    expect(refresh.textContent).toBe('');
+    expect(refresh.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    act(() => refresh.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Refresh');
     await click('Load more');
     const last = offsets()[1];
     installSpill(numberedLines(2 * 1024 * 1024)); // the output file grew
@@ -154,7 +160,7 @@ describe('log tool', () => {
 
   it('with path null renders the no-file state and never reads', async () => {
     await mount({ path: null, title: 'Ran npm test' });
-    expect(screen.getByText('No file to open: the engine reported no output file for this cell; the transcript shows what was kept')).toBeTruthy();
+    expect(screen.getByText('No output file for this cell')).toBeTruthy(); // the word cut (T246)
     expect(spill.readSpill).not.toHaveBeenCalled();
     expect(titles.at(-1)).toBe('Ran npm test');
   });
@@ -190,7 +196,7 @@ describe('log tool', () => {
   it('a param-less open is not read as restored: it says no file was reported and reads nothing', async () => {
     await mount(undefined);
     expect(screen.queryByText('This log was not restored. Reopen it from its row')).toBeNull();
-    expect(screen.getByText('No file to open: the engine reported no output file for this cell; the transcript shows what was kept')).toBeTruthy();
+    expect(screen.getByText('No output file for this cell')).toBeTruthy(); // the word cut (T246)
     expect(spill.readSpill).not.toHaveBeenCalled();
   });
 

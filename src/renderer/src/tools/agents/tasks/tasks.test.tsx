@@ -109,36 +109,46 @@ describe('the Tasks tool', () => {
     render(<TestHost />);
     addTasks(A);
     await waitFor(() => expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']));
-    expect(body()!.querySelector('[data-part="progress"]')?.textContent).toBe('2 of 4 completed');
+    expect(body()!.querySelector('[data-part="progress"]')?.textContent).toBe('2/4'); // the word cut (T232)
+    expect(within(body()!).getByRole('img', { name: '2 of 4 completed' }).textContent).toBe('2/4');
     expect(tasksCalls).toEqual(['list-a']);
     expect(tasksSessions, 'P5 O7 M8: the read names the session whose list it is').toEqual([A]);
-    const fold = within(body()!).getByRole('button', { name: '2 earlier tasks completed' });
+    const fold = within(body()!).getByRole('button', { name: '2 done' });
     expect(fold.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(fold);
     expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests', 'Map handlers', 'Reproduce']);
     // read-only (P-20): the fold is the one control; nothing to type in, nothing to drag
-    expect(within(body()!).getAllByRole('button').map((b) => b.textContent)).toEqual(['2 earlier tasks completed']);
+    expect(within(body()!).getAllByRole('button').map((b) => b.textContent)).toEqual(['2 done']); // the word cut (T231)
     expect(body()!.querySelector('input, textarea, select, [draggable="true"], [role="menu"]')).toBeNull();
   });
 
-  it('labels a disk-only session’s list session list and says why when the list cannot be read', async () => {
+  it('draws no session list label for a disk-only session’s list (the word cut, T230) and says why when the list cannot be read', async () => {
     seedEngine([]);
     useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { engineSessionId: 'list-a' as SessionId })) }));
     render(<TestHost />);
     addTasks(A);
     await waitFor(() => expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']));
-    expect(body()!.querySelector('[data-part="label"]')?.textContent).toBe('session list');
+    expect(body()!.querySelector('[data-part="label"]')).toBeNull();
+    expect(body()!.textContent).not.toContain('session list');
     lists['list-a'] = new Error('permission denied');
     act(() => tasksChanged.forEach((l) => l({ listId: 'list-a' })));
     await waitFor(() => expect(within(body()!).getByText('Tasks unavailable: permission denied')).toBeTruthy());
   });
 
-  it('reads unavailable until the engine reports its list, and reads nothing', () => {
+  it('reads No list yet until the engine reports its list (the word cut, T233), and reads nothing', () => {
     seedEngine([[A, live(A, null)]]);
     render(<TestHost />);
     addTasks(A);
-    expect(within(body()!).getByText('Tasks unavailable until the engine reports its list')).toBeTruthy();
+    expect(within(body()!).getByText('No list yet')).toBeTruthy();
     expect(tasksCalls).toEqual([]);
+  });
+
+  it('reads No tasks for an empty list (the word cut, T234)', async () => {
+    seedEngine([[A, live(A, 'list-empty')]]);
+    render(<TestHost />);
+    addTasks(A);
+    await waitFor(() => expect(within(body()!).getByText('No tasks')).toBeTruthy());
+    expect(body()!.querySelector('[data-part="progress"]')).toBeNull();
   });
 
   it('follows the list on fs.tasksChanged', async () => {
@@ -148,7 +158,7 @@ describe('the Tasks tool', () => {
     lists['list-a'] = [...(lists['list-a'] as PersistedTask[]), task('5', 'pending', 'New one')];
     act(() => tasksChanged.forEach((l) => l({ listId: 'list-a' })));
     await waitFor(() => expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests', 'New one']));
-    expect(body()!.querySelector('[data-part="progress"]')?.textContent).toBe('2 of 5 completed');
+    expect(body()!.querySelector('[data-part="progress"]')?.textContent).toBe('2/5');
   });
 });
 
@@ -167,7 +177,7 @@ describe('the target', () => {
     expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests', 'Map handlers', 'Reproduce']);
     expect(scrolled).toEqual(['4']);
     // the reveal is spent: closing the fold by hand keeps it closed
-    fireEvent.click(within(body()!).getByRole('button', { name: '2 earlier tasks completed' }));
+    fireEvent.click(within(body()!).getByRole('button', { name: '2 done' }));
     await act(async () => {});
     expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']);
     expect(scrolled).toEqual(['4']);
@@ -272,7 +282,7 @@ describe('the body', () => {
     handle.follow = () => {}; // the follow has not landed yet
     render(<Body handle={handle} appSessionId={B} />);
     await waitFor(() => expect(rows()).toEqual(['Write the parser'])); // B's list, its completed fold closed
-    expect(within(body()!).getByRole('button', { name: '1 earlier task completed' }).getAttribute('aria-expanded')).toBe('false');
+    expect(within(body()!).getByRole('button', { name: '1 done' }).getAttribute('aria-expanded')).toBe('false');
     expect(selectedRows()).toEqual([]);
     expect(scrolled).toEqual([]); // A's pending reveal is not spent on B's list
     expect(handle.snapshot()).toMatchObject({ appSessionId: A, selected: '4', showCompleted: true });
