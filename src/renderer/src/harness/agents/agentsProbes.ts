@@ -33,6 +33,14 @@ const frames = async (n = 2) => {
   for (let i = 0; i < n; i += 1) await frame();
 };
 const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
+// What an element shows: its text without its hidden parts' (a tip's description is a hidden span beside its owner,
+// ui/tip.tsx, so a row whose part carries a tip reads it as drawn).
+const shownText = (el: Element | null | undefined) => {
+  if (!el) return '';
+  const copy = el.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll('[hidden]')) hidden.remove();
+  return text(copy);
+};
 // A run's ended state (`RunBadge`): its word, or the word naming its mark (the word cut, T213: completed is a check named
 // "completed")
 const runStatus = (el: Element | null) => (el?.getAttribute('role') === 'img' ? (el.getAttribute('aria-label') ?? '') : text(el));
@@ -237,7 +245,8 @@ function scheduled(): ScheduledView | null {
   if (!body || body.querySelector('[data-view="run"]')) return null;
   const section = body.querySelector<HTMLElement>('section[data-section="scheduled"]');
   if (!section) return { heading: null, rows: [], error: null };
-  const part = (row: Element, name: string) => text(row.querySelector(`[data-part="${name}"]`));
+  // the next run carries the engine's jitter as its tip (ScheduledRows.tsx): read as drawn, without the tip's description
+  const part = (row: Element, name: string) => shownText(row.querySelector(`[data-part="${name}"]`));
   return {
     heading: text(section.querySelector('h3 button')),
     rows: [...section.querySelectorAll<HTMLElement>('[data-scheduled]')].map((row) => ({
