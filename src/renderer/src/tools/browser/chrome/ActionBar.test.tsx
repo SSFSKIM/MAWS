@@ -224,11 +224,12 @@ describe('the fold follows the address field on screen (M3 review)', () => {
 });
 
 describe('the cap\'s notice for an options tab it could not open (M3 review)', () => {
-  // the word cut (T463): the fact without the mechanism; T462: a tab left unloaded at the cap says nothing, one the cap
-  // closed (main's notice without a tab) says so, by count or by memory
+  // the word cut (T463): the fact without the mechanism; T462: a tab the memory cap unloaded says nothing (its chip is
+  // greyed), one the cap closed (main's notice without a tab) says so, by count or by memory; a page the count cap left
+  // suspended (main's notice on it: nothing could be unloaded for it) says why its Load did nothing
   it('names the extension', () => {
     expect(noticeText({ kind: 'tabsCap', tabId: null, count: 12, name: 'MAWS probe extension' })).toBe('Too many pages are loaded to open MAWS probe extension’s options');
-    expect(noticeText({ kind: 'tabsCap', tabId: T2, count: 12 })).toBeNull();
+    expect(noticeText({ kind: 'tabsCap', tabId: T2, count: 12 })).toBe('Not loaded: too many pages open');
     expect(noticeText({ kind: 'tabsCap', tabId: T2 })).toBeNull();
     expect(noticeText({ kind: 'tabsCap', tabId: null, count: 12 })).toBe('Closed: too many pages open');
     expect(noticeText({ kind: 'tabsCap', tabId: null })).toBe('Closed: pages use too much memory');

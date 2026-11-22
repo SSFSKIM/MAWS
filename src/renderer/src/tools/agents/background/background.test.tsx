@@ -992,6 +992,45 @@ describe('background work', () => {
     expect(marks()).toEqual(['shell', 'monitor']);
   });
 
+  // The word cut left running and completed to the dot, which assistive technology does not read: the row's name says
+  // the state, and what its time measures, for every row (desk web's Jobs pane draws these rows too).
+  it('names each row with its state and what its time measures', () => {
+    const NOW = Date.parse(T);
+    const base: TaskNode = {
+      taskId: 'sh1' as TaskId, kind: 'shell', taskType: 'local_bash', toolUseId: null, description: 'Build the site', status: 'running', stopping: false,
+      startedAt: null, endedAt: null, usage: null, lastToolName: null, activity: null, summary: null, report: null, reason: null, outputFile: null,
+      isBackground: true, parentTaskId: null, agent: null, workflow: null, provenance: { wire: true, disk: false, snapshot: true },
+    };
+    const ago = new Date(NOW - 3 * 60_000).toISOString();
+    const nodes: TaskNode[] = [
+      { ...base, taskId: 'r1' as TaskId, startedAt: new Date(NOW - 5 * 60_000).toISOString() },
+      { ...base, taskId: 'r2' as TaskId },
+      { ...base, taskId: 'c1' as TaskId, status: 'completed', endedAt: ago },
+      { ...base, taskId: 'c2' as TaskId, status: 'completed' },
+      { ...base, taskId: 'f1' as TaskId, status: 'failed', endedAt: ago },
+      { ...base, taskId: 'x1' as TaskId, status: 'exited' },
+      { ...base, taskId: 'u1' as TaskId, status: 'unknown' },
+    ];
+    render(
+      <>
+        {nodes.map((node) => (
+          <ShellRow key={node.taskId} node={node} now={NOW} selected={false} stopError={null} onStop={() => {}} onOutput={null} />
+        ))}
+        <MonitorRow node={{ ...nodes[0]!, taskId: 'm1' as TaskId, kind: 'monitor', taskType: 'monitor_ws' }} now={NOW} selected={false} stopError={null} onStop={() => {}} />
+      </>,
+    );
+    expect(screen.getAllByRole('group').map((row) => row.getAttribute('aria-label'))).toEqual([
+      'Build the site, running for 5m 00s',
+      'Build the site, running',
+      'Build the site, completed 3m ago',
+      'Build the site, completed',
+      'Build the site, failed 3m ago',
+      'Build the site, ended with the session',
+      'Build the site, ended',
+      'Build the site, running for 5m 00s',
+    ]);
+  });
+
   it('reads Nothing running for a live session with no background work, and no line about task lists', async () => {
     await mount({ events: [] });
     expect(screen.getByText('Nothing running')).toBeTruthy();
@@ -1277,7 +1316,12 @@ describe('scheduled jobs', () => {
     expect(rows[2]!.when).toBe(`${TIME.format(fire)} · ${formatIn(fire - now)}`); // a one-shot: its one fire, no expiry (the word cut, T224)
     expect(rows[2]!.when).not.toContain('Expires');
     expect(rows[0]!.when).toContain(TIME.format(next('0 9 * * 1', now)));
-    expect(section('scheduled')!.querySelector('[data-part="when"] [title]')?.getAttribute('title')).toBe(
+    // the engine's jitter is the next run's tip, which the keyboard reaches: a word that takes Tab, described by the
+    // jitter at all times, and no native title
+    const nextRun = document.querySelector<HTMLElement>('[data-scheduled="481abb0a"] [data-part="when"] [tabindex="0"]')!;
+    expect(nextRun.textContent).toBe(`${TIME.format(tick)} · ${formatIn(tick - now)}`);
+    expect(section('scheduled')!.querySelector('[data-part="when"] [title]')).toBeNull();
+    expect(document.getElementById(nextRun.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
       'The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early',
     );
     // Open creating turn is a glyph drawn on the pointed or focused row (and always where nothing points), its words its

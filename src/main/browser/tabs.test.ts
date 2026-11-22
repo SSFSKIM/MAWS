@@ -346,7 +346,7 @@ describe('TabStore: the loaded-tab cap (Design §2, Decision Log 6)', () => {
     return tabs;
   };
 
-  it('opening past the count suspends the least recently shown eligible tab, with one notice', () => {
+  it('opening past the count suspends the least recently shown eligible tab, with no notice', () => {
     const h = harness();
     const tabs = fill(h);
     for (const t of tabs) h.store.update(t.tabId, { loading: false });
@@ -360,8 +360,8 @@ describe('TabStore: the loaded-tab cap (Design §2, Decision Log 6)', () => {
     expect(victim.view).toBeNull();
     expect(victim.tab).toMatchObject({ suspended: true, url: 'https://1.test/', loading: false, memoryKiB: null });
     expect(h.views[1]!.webContents.close).toHaveBeenCalled();
-    // told to the opener's session, on the tab it opened, not on the other session's tab that was unloaded
-    expect(h.notices()).toEqual([{ appSessionId: B, tabId: added.tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX }]);
+    // the word cut (T462): the unloaded tab's greyed chip says it; the opened tab loaded, so nothing is told on it
+    expect(h.notices()).toEqual([]);
   });
 
   it('E13: a tab an agent drives through cua (under a lease) is never the victim, idle as its control may read', () => {
@@ -683,7 +683,7 @@ describe('TabStore: internal tabs (cua #90)', () => {
   });
 
   // the word cut (T462, split): the options tab closed to make room leaves no greyed chip, so its session is told
-  // without a tab, as the memory cap tells it; the session that opened the page keeps its notice on the page it opened
+  // without a tab, as the memory cap tells it; the page it made room for loaded, so nothing is told on it
   it('the options tab the count cap closed to admit another session’s page is told to its own session without a tab', () => {
     const h = harness();
     const options = openOptions(h);
@@ -693,12 +693,9 @@ describe('TabStore: internal tabs (cua #90)', () => {
       h.store.update(open(h, `https://${i}.test/`).tab.tabId, { loading: false });
       h.tick(1000);
     }
-    const added = open(h, 'https://new.test/', { appSessionId: B }).tab;
+    expect(open(h, 'https://new.test/', { appSessionId: B }).tab.suspended).toBe(false);
     expect(h.store.entry(options.tabId)).toBeUndefined();
-    expect(h.notices()).toEqual([
-      { appSessionId: A, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX },
-      { appSessionId: B, tabId: added.tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX },
-    ]);
+    expect(h.notices()).toEqual([{ appSessionId: A, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX }]);
   });
 });
 
@@ -804,7 +801,7 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
     h.store.adoptChild(opener, { url: 'https://a.test/d.html', select: true, webContents: child() as never });
     expect(h.store.entry(tabs[0]!.tabId)!.view).not.toBeNull(); // the opener, though least recently shown, is spared
     expect(h.store.entry(tabs[1]!.tabId)!.view).toBeNull(); // the next least recently shown idle, unplaced tab
-    expect(h.notices().at(-1)).toMatchObject({ kind: 'tabsCap', appSessionId: A });
+    expect(h.notices()).toEqual([]); // the child loaded: only a page left suspended is told
   });
 
   it('a page never suspends its own opener to make room: the room check spares it too', () => {

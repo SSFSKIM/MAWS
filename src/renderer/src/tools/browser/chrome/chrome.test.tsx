@@ -557,8 +557,9 @@ describe('the notice lines', () => {
     expect(within(line('download')!).queryByRole('button')).toBeNull();
   });
 
-  // the word cut (T462): a tab left unloaded at the page cap, by count or by memory, draws no line (its chip is greyed);
-  // an extension's options tab the cap closed does, as does one refused at the cap (T463). T464: a copy reads Copied.
+  // the word cut (T462): a tab the memory cap unloaded draws no line (its chip is greyed); a page the count cap left
+  // suspended does (its Load did nothing), as do an extension's options tab the cap closed and one refused at the cap
+  // (T463). T464: a copy reads Copied.
   it('the session’s transient notices, routed by session, each with its sentence and Dismiss', () => {
     show({ tab: tab() });
     act(() => {
@@ -571,7 +572,7 @@ describe('the notice lines', () => {
       raiseNotice({ appSessionId: B, tabId: null, kind: 'tabsFileBroken' });
     });
     const texts = [...document.querySelectorAll('[data-browser-notice]')].map((element) => element.textContent);
-    expect(texts).toEqual(['Too many pages are loaded to open uBlock’s options', 'Closed: too many pages open', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
+    expect(texts).toEqual(['Not loaded: too many pages open', 'Too many pages are loaded to open uBlock’s options', 'Closed: too many pages open', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
     fireEvent.click(within(line('urlCopied')!).getByRole('button', { name: BROWSER_COPY.dismiss }));
     expect(line('urlCopied')).toBeNull();
     expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['tabsCap', 'tabsCap', 'tabsCap', 'tabsCap', 'partitionFallback', 'tabsFileBroken']);
