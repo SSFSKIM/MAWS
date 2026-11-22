@@ -158,7 +158,7 @@ function FinderList({ tabId, directory, state, choose, clicked }: { tabId: strin
   // The word cut (N1): the wait for a first answer is the quiet spinner, nothing for its first half second
   if (said?.line === 'searching') {
     return (
-      <div data-files-line="" data-line={said.line} className={`${LINE} flex`}>
+      <div data-files-line="" data-line={said.line} className={`${LINE} flex text-fg-muted`}>
         <QuietSpinner label={said.words} />
       </div>
     );

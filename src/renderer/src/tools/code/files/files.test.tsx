@@ -604,7 +604,7 @@ describe('files tool', () => {
       expect(item('src').getAttribute('aria-selected')).toBe('true');
       tree[''] = [dir('/r'), dir('/docs')];
       put({});
-      await waitFor(() => expect(items()[0]).toBe('rdirectory'));
+      await waitFor(() => expect(items()[0]).toBe('r'));
       expect(items()).toEqual(['r', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']);
     });
 
@@ -614,7 +614,7 @@ describe('files tool', () => {
       put({ directory: '/wt/src', additionalDirectories: [], worktree: { path: '/wt', branch: 'w' }, launchFolder: '/r' });
       render(<TestHost />);
       openTool();
-      await waitFor(() => expect(items()).toEqual(['wtworking folder', 'w.ts', 'srcdirectory', 'rdirectory']));
+      await waitFor(() => expect(items()).toEqual(['wtworking folder', 'w.ts', 'src', 'r']));
     });
 
     // Held open: a roots listing is in flight when the agent moves. Its answer lands (without the working folder), and the
@@ -644,11 +644,11 @@ describe('files tool', () => {
       put(byCd); // the move asks again; the store re-lists once the flight lands
       await act(async () => answers[0].resolve(answer({ root: null, path: '', entries: [dir('/r'), dir('/docs')], truncated: false })));
       await waitFor(() => expect(answers).toHaveLength(2));
-      expect(items()[0]).toBe('rdirectory'); // the root in use stays: the working folder is not listed yet
+      expect(items()[0]).toBe('r'); // the root in use stays: the working folder is not listed yet
       expect(item('r').getAttribute('aria-expanded')).toBe('true');
       expect(rootsListed()).toBe(3);
       await act(async () => answers[1].resolve(answer({ root: null, path: '', entries: [dir('/r'), dir('/docs'), dir('/wt')], truncated: false })));
-      await waitFor(() => expect(items().slice(0, 3)).toEqual(['wtworking folder', 'w.ts', 'rdirectory']));
+      await waitFor(() => expect(items().slice(0, 3)).toEqual(['wtworking folder', 'w.ts', 'r']));
     });
   });
 

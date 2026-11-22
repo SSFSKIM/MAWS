@@ -744,7 +744,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
 
     const OTHER = '/elsewhere/other.txt';
     const first = show(OTHER);
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     first.unmount();
     main.names.add(OTHER);
     render(<FileViewer tab={fileTab(OTHER)} />); // shown again
@@ -777,7 +777,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
     });
     const offs = [connectCodeEvents()];
     const first = show(PATH);
-    expect((await screen.findByRole('alert')).textContent).toContain(`not found: ${PATH}`);
+    expect((await screen.findByRole('alert')).textContent).toContain('No file at this path.'); // the word cut (N11)
     files[PATH] = 'one\n'; // the folder and the file are made
     if (how === 'its link is clicked again') act(() => void openFile(A, PATH));
     else {
@@ -843,7 +843,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
     await waitFor(() => expect(codeText()).toBe('was named'));
     main.names.delete(OUT); // the transcript no longer names it
     act(() => void openFile(A, OUT));
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     expect(shown()).toMatchObject({ status: 'error', named: false, text: '', kind: null, hash: null, editable: false });
     expect(codeText()).toBeNull();
   });
@@ -906,7 +906,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
     await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(1));
     act(() => void openFile(B, OUT)); // the tab is one per machine and path: it takes session B
     rerender(<FileViewer tab={fileTab(OUT, null, B)} />);
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     gate.release(); // session A's answer, the file's text
     await settle();
     expect(shown()).toMatchObject({ appSessionId: B, status: 'error', named: false, text: '' });
@@ -1691,7 +1691,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     main.grant(MAIN_A, OUT);
     act(() => void openFile(A, OUT, null, { main: true }));
     const { rerender } = render(<FileViewer tab={fileTab(OUT)} agent />);
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ path: OUT, named: true, agent: true })]);
     rerender(<FileViewer tab={fileTab(OUT)} />); // the person's open removes the mark
     await editable();

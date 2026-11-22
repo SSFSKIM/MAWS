@@ -690,7 +690,7 @@ describe('editor', () => {
       const REASON = '[data-theirs-notice], [data-disk-unusable]';
       const row = () => document.querySelector<HTMLElement>('[data-editor-controls]')!;
       const parts = () =>
-        Array.from(row().children).map((part) =>
+        Array.from(row().children).filter((part) => !(part as HTMLElement).hidden).map((part) => // a tip's hidden description is no part of the layout
           part.matches(REASON) ? 'reason' : part.querySelector('[data-merge-changes]') ? 'changes' : (part.textContent ?? ''),
         );
       const expectLaidOut = (order: string[]) => {
@@ -939,7 +939,7 @@ describe('editor', () => {
         expect(screen.getByRole('checkbox', { name: word })).toBe(box);
       }
       expect(control('select').textContent).toBe('all');
-      expect(control('replace').textContent).toBe('replace');
+      expect(panel.querySelector('button[name="replace"]')!.textContent).toBe('replace'); // the field shares its name
       expect(control('replaceAll').textContent).toBe('replace all');
       expect(panel.querySelectorAll('[title]')).toHaveLength(0);
     });
