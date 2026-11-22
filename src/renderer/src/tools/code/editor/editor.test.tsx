@@ -904,7 +904,7 @@ describe('editor', () => {
     it('Save’s tooltip is the chord alone, shown on focus; no system tooltip', async () => {
       await open({ [APP]: 'const a = 1;\n' });
       type('// mine\n');
-      const save = await waitFor(() => saveButton()!);
+      const save = await screen.findByRole('button', { name: 'Save' });
       const chord = formatChord(effectiveChord('file.save', {})!);
       expect(save.hasAttribute('title')).toBe(false);
       act(() => save.focus());

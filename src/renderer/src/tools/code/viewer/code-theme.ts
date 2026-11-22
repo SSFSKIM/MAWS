@@ -4,6 +4,7 @@
 import { HighlightStyle } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
+import { FIND_TIP_THEME } from './find-glyphs';
 
 export const codeHighlightStyle = HighlightStyle.define([
   { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword, t.definitionKeyword, t.modifier, t.self, t.null], color: 'var(--code-keyword)' },
@@ -62,21 +63,13 @@ const spec = {
   '.cm-panel.cm-search input[type=checkbox]': { accentColor: 'var(--accent)' },
   '.cm-panel.cm-search [name=close]': { color: 'var(--fg-muted)' },
   // The word cut (T336, find-glyphs.ts): the three options are glyph toggles (Aa, .*, ab|), their box hidden but focusable,
-  // pressed while on; every glyph's word is its tooltip, drawn after the pointing delay and at once on keyboard focus
+  // pressed while on
   '.cm-panel.cm-search label': { position: 'relative', display: 'inline-flex', alignItems: 'center', padding: '0 6px', margin: '0 1px', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-mono)', color: 'var(--fg-muted)', cursor: 'default' },
   '.cm-panel.cm-search label:hover': { backgroundColor: 'var(--bg-hover)', color: 'var(--fg)' },
   '.cm-panel.cm-search label:has(input:checked)': { backgroundColor: 'var(--bg-active)', color: 'var(--fg)' },
   '.cm-panel.cm-search label:has(input:focus-visible)': { outline: '2px solid var(--accent)', outlineOffset: '-1px' },
   '.cm-panel.cm-search label input[type=checkbox]': { position: 'absolute', opacity: '0', width: '1px', height: '1px', margin: '0' },
-  '.cm-panel.cm-search [data-find-tip]': { position: 'relative' },
-  '.cm-panel.cm-search [data-find-tip]::after': {
-    content: 'attr(data-find-tip)', position: 'absolute', top: 'calc(100% + 4px)', left: '50%', transform: 'translateX(-50%)', zIndex: '1',
-    whiteSpace: 'nowrap', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-overlay)',
-    color: 'var(--fg)', fontFamily: 'var(--font-ui)', fontSize: 'var(--text-ui-sm)', boxShadow: 'var(--shadow-float)', pointerEvents: 'none',
-    visibility: 'hidden', opacity: '0',
-  },
-  '.cm-panel.cm-search [data-find-tip]:hover::after': { visibility: 'visible', opacity: '1', transition: 'visibility 0s 300ms, opacity 0s 300ms' }, // POINTING_DELAY_MS
-  '.cm-panel.cm-search [data-find-tip]:focus-visible::after, .cm-panel.cm-search [data-find-tip]:has(input:focus-visible)::after': { visibility: 'visible', opacity: '1' },
+  ...FIND_TIP_THEME, // the glyphs' tips: one owner at a time (find-glyphs.ts)
   // E5 M3 start: the merge view. Every colour `@codemirror/merge` 6.12.2's base theme sets, restated: its rules are one
   // class of scope (`&light`, `&dark` or the base's own) plus the selector, as these are, so each tie goes to this theme.
   // Mine's lines (the editor's, `cm-merge-b`) in the diff's added ground, theirs' deleted chunks in its removed ground,

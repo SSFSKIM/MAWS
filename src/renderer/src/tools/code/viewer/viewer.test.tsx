@@ -3940,8 +3940,10 @@ describe('the file tab’s bar, cut', () => {
     act(() => view.focus());
     expect((await screen.findByRole('tooltip')).textContent).toBe('View');
     const wrapped = useViewer.getState().wrap;
+    expect(view.getAttribute('aria-expanded')).toBe('false');
     await user.click(view);
     const wrap = await screen.findByRole('menuitemcheckbox', { name: 'Wrap' });
+    expect(view.getAttribute('aria-expanded')).toBe('true'); // the open look keys on this, not the tooltip's data-state
     expect(wrap.getAttribute('aria-checked')).toBe(String(wrapped));
     await user.click(wrap);
     expect(useViewer.getState().wrap).toBe(!wrapped);

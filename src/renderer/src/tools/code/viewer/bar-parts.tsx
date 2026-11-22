@@ -1,16 +1,19 @@
 // Two of the file tab's bar controls the word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M3 task 5) drew
 // as marks in place of words:
 // - `ViewMenu` (T305): the view's once-set setting, Wrap, a check item in a menu behind a sliders glyph named "View",
-//   that word its accessible name and its tooltip, a tip the keyboard reaches.
+//   that word its accessible name and its tooltip, a tip the keyboard reaches (the shared `NamedGlyph`).
 // - `ArrivalRing` (T324): a long file still arriving, a ring that fills as its pieces land, named by the wait's words
 //   ("Loading 1.0 MB of 5.2 MB"); it takes Tab, and its two sizes are its tooltip and its description.
 import { DropdownMenu } from 'radix-ui';
 import { Icon } from '../../../app/IconButton';
+import { NamedGlyph } from '../../../ui/glyph';
 import { Tip } from '../../../ui/tip';
 import { VIEWER_COPY } from '../copy';
 
+// The glyph's look at the bar's height; open while its menu is (`aria-expanded`: the tooltip and the menu each set their
+// own `data-state` on the one button, so that attribute says neither reliably)
 const TRIGGER =
-  'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg';
+  'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-expanded:bg-bg-active aria-expanded:text-fg';
 const MENU = 'z-50 min-w-36 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover';
 
@@ -25,13 +28,11 @@ const SlidersIcon = () => (
 export function ViewMenu({ wrap, onWrap }: { wrap: boolean; onWrap(on: boolean): void }) {
   return (
     <DropdownMenu.Root modal={false}>
-      <Tip content={VIEWER_COPY.view}>
-        <DropdownMenu.Trigger asChild>
-          <button type="button" data-file-view="" aria-label={VIEWER_COPY.view} className={TRIGGER}>
-            <SlidersIcon />
-          </button>
-        </DropdownMenu.Trigger>
-      </Tip>
+      <DropdownMenu.Trigger asChild>
+        <NamedGlyph label={VIEWER_COPY.view} data-file-view="" className={TRIGGER}>
+          <SlidersIcon />
+        </NamedGlyph>
+      </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
           <DropdownMenu.CheckboxItem checked={wrap} onCheckedChange={(on) => onWrap(on === true)} data-file-view-item="wrap" className={ITEM}>
