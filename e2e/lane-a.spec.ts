@@ -7,7 +7,7 @@
 // docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
 // UX wave U8d (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, acceptance 2, 3, 4 and 8): the
 // session's subagents with the statuses main derives from its transcript, its sidecars and the bridge's agents, on the
-// Subagents card and in the panel, the rows the engine writes at an agent's end as probes P1 and P2 recorded them.
+// Agents card and in the panel, the rows the engine writes at an agent's end as probes P1 and P2 recorded them.
 // UX wave U1b (docs/doperpowers/plans/2026-11-15-ux-wave-U1b-requests-in-transcript.md, Proof 1's `e2e:lane-a` row): those
 // cards are drawn in the session's transcript now, a question's form in the row of its call (when the transcript holds
 // it) and every other request at the transcript's end; an asynchronous question's answer and dismissal stand on its row,
@@ -26,6 +26,7 @@ import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backg
 import { addressed } from './support/address';
 import { menu } from './support/menu';
 import { openSurface, sessionCard, showSessionCards, sideColumn, surface } from './support/shell';
+import { unfoldInfoGroup } from './support/session-info'; // the word cut (T252)
 import { END_ROW, rowOf } from './support/request-keys';
 import { stopRecord } from './support/stop-record';
 import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2
@@ -259,7 +260,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // each card's (M6's scene); MCP disable is the /mcp widget's (the controls scene).
     await openSurface(page, 'Session info');
     const info = page.locator('[data-region="panel"] [data-surface][aria-label="Session info"]');
-    await expect(info).toContainText('Not available here');
+    // the word cut (T266): the group folds to its head, its count beside it; opened, its rows
+    await expect(info.getByRole('button', { name: /^Not available here \d+ not available$/ })).toHaveAttribute('aria-expanded', 'false');
+    await unfoldInfoGroup(info, 'Not available here');
     for (const [label, reason] of [
       ['Permission mode', "A terminal session's mode is changed in the terminal"],
       ['Rewind', 'Rewind is a terminal panel: use /rewind there'],
@@ -350,10 +353,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const c = await begin((sid, cwd, after) => backgroundBashRecords(sid, cwd, after, shellJob));
     const { page } = c;
     const { bridge } = await drive(c);
-    await openSurface(page, 'Background tasks');
+    await openSurface(page, 'Background');
     const tool = surface(page, 'background');
     const shell = tool.locator('[data-shell="bsleep01"]');
-    await expect(shell, 'derived by main from the transcript, carried by the watch').toContainText('Wait ten minutes · running', { timeout: 15_000 });
+    // the word cut (T216): a running shell's line is its description and its time, with no running word
+    await expect(shell.locator('[data-part="line"]'), 'derived by main from the transcript, carried by the watch').toHaveText(/^Wait ten minutes(?: · \d.*)?$/, { timeout: 15_000 });
     await expect(shell.getByRole('button', { name: 'Output' }), 'a local job has no output tail').toHaveCount(0);
     await shell.getByRole('button', { name: 'Stop' }).click();
     await expect.poll(() => bodies(bridge, 'stop')).toEqual([{ op: 'stop', taskId: 'bsleep01' }]);
@@ -610,11 +614,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // the agents tool: the subagent the transcript started (its sidecars on disk), told through the drill-in's box, then
     // stopped through its Stop (the jobs list's stop has its own scene). UX wave U8d (M4 decision 1): main derives its
     // status from the transcript's launch, so the panel lists it under Running, its status known.
-    await openSurface(page, 'Subagents');
+    await openSurface(page, 'Agents');
     const agents = surface(page, 'subagents');
     const running = agents.locator('section[data-section="running"]');
     await expect(running, 'the agent the transcript launched runs').toHaveAttribute('aria-label', 'Running 1', { timeout: 15_000 });
-    await expect(agents.locator('section[data-section="disk"]'), 'nothing is left On disk').toHaveCount(0);
+    await expect(agents.locator('section[data-section="disk"]'), 'nothing is left under Earlier').toHaveCount(0);
     await expect(agents.getByText('Status is known only while the session runs here'), 'its status is reported: the sentence is not drawn').toHaveCount(0);
     await running.locator(`[data-agent-row="${agent.agentId}"]`).click();
     const relay = page.locator('[data-region="panel"] [data-key-sink="composer"]'); // the drill-in's box, not the pane's composer
@@ -633,7 +637,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     });
     await c.store.appendLines(c.transcript, [note, ...killed].map((row) => JSON.stringify(row)));
     await expect(agents.getByRole('button', { name: /^(Stop agent|stopping…)$/ }), 'the agent ended: no stop is offered').toHaveCount(0, { timeout: 15_000 });
-    await agents.getByRole('button', { name: '‹ Subagents', exact: true }).click();
+    await agents.getByRole('button', { name: '‹ Agents', exact: true }).click();
     const done = agents.locator('section[data-section="done"]');
     await expect(done, 'the rows say how it ended').toHaveAttribute('aria-label', 'Done 1 · 1 stopped', { timeout: 15_000 });
     await expect(running, 'nothing runs').toHaveCount(0);
@@ -714,10 +718,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
   // UX wave U8b (A2; M5 decision 5, M8) and U8d (M4 decision 1; acceptance 2, 3 and 4): the card column of a terminal
   // session this Mac drives. Main derives its shells and its agents from its transcript, its sidecars and its bridge, and
-  // its watch carries them, so a running shell gives the Background tasks card and a running agent the Subagents card,
+  // its watch carries them, so a running shell gives the Background card and a running agent the Agents card,
   // with the nested agent under its parent's "(+1)". The cards for running work are the column's last, so their going
   // moves no card above them.
-  test('the card column of a terminal session this Mac drives: the Subagents and Background tasks cards while its agent and its shell run, a nested agent under its parent’s (+1); each card leaves with the last of its kind and moves no card above it', async () => {
+  test('the card column of a terminal session this Mac drives: the Agents and Background cards while its agent and its shell run, a nested agent under its parent’s (+1); each card leaves with the last of its kind and moves no card above it', async () => {
     test.setTimeout(120_000);
     const agent = { agentId: 'a1e2e000000000003', description: 'Index the notes', prompt: 'Index notes.md.', at: '2026-10-28T10:00:04.000Z' };
     const nested = { agentId: 'a1e2e000000000006', description: 'Index the headings', prompt: 'Index the headings of notes.md.', at: '2026-10-28T10:00:06.000Z' };
@@ -738,15 +742,15 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(row, 'the transcript: the agent works under the ended turn').toBeVisible({ timeout: 15_000 });
 
     await showSessionCards(page);
-    const subagents = sessionCard(page, 'Subagents');
-    const background = sessionCard(page, 'Background tasks');
+    const subagents = sessionCard(page, 'Agents');
+    const background = sessionCard(page, 'Background');
     const parentRow = subagents.locator(`[data-agent-row="${agent.agentId}"]`);
     await expect(parentRow, 'the agent, as the session’s watch carries its status').toContainText(agent.description, { timeout: 15_000 });
-    await expect(subagents.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
+    await expect(subagents.getByRole('button', { name: 'Agents 1 running', exact: true })).toBeVisible();
     await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell, as the session’s watch carries it').toContainText(job.description, { timeout: 15_000 });
-    await expect(background.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
+    await expect(background.getByRole('button', { name: 'Background 1 running', exact: true })).toBeVisible();
     const [agentsBox, tasksBox] = [await subagents.boundingBox(), await background.boundingBox()];
-    expect(agentsBox !== null && tasksBox !== null && agentsBox.y < tasksBox.y, 'Subagents above Background tasks').toBe(true);
+    expect(agentsBox !== null && tasksBox !== null && agentsBox.y < tasksBox.y, 'Agents above Background').toBe(true);
     const above = sessionCard(page, 'Connectors');
     // Read once the Environment card's own reads have answered, since each that lands grows it, which is no move the
     // card's leaving made: git's (its branch and push rows), then the pull request's, whose row is drawn only once
@@ -765,7 +769,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const nestedCall = nestedAgentRecords(c.sid, c.repo.root, agent.agentId, parentFile.last, nested);
     await c.store.appendLines(parentFile.transcript, nestedCall.map((r) => JSON.stringify(r)));
     bridge.agentSpawned({ agentId: nested.agentId, toolUseId: `toolu_${nested.agentId}`, parentAgentId: agent.agentId, description: nested.description });
-    await expect(subagents.getByRole('button', { name: 'Subagents 2 running', exact: true }), 'every running agent, the nested one too').toBeVisible({ timeout: 15_000 });
+    await expect(subagents.getByRole('button', { name: 'Agents 2 running', exact: true }), 'every running agent, the nested one too').toBeVisible({ timeout: 15_000 });
     await expect(subagents.locator('[data-agent-row]'), 'first-level agents only').toHaveCount(1);
     const under = parentRow.locator('[data-part="under"]');
     await expect(under).toHaveText('(+1)');
@@ -778,7 +782,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await c.store.appendLines(parentFile.transcript, [JSON.stringify(agentNotificationRecord(c.sid, c.repo.root, agent.agentId, nestedCall.at(-1)!.uuid as string, {
       taskIds: [nested.agentId], toolUseId: `toolu_${nested.agentId}`, outputFile: `/tmp/claude/tasks/${nested.agentId}.output`, status: 'completed', summary: `Agent "${nested.description}" finished`, at: '2026-10-28T10:00:08.000Z',
     }))]);
-    await expect(subagents.getByRole('button', { name: 'Subagents 1 running', exact: true }), 'the nested agent ended, from its parent’s file alone').toBeVisible({ timeout: 15_000 });
+    await expect(subagents.getByRole('button', { name: 'Agents 1 running', exact: true }), 'the nested agent ended, from its parent’s file alone').toBeVisible({ timeout: 15_000 });
     await expect(subagents.locator(`[data-agent-row="${nested.agentId}"]`)).toHaveCount(0);
     await expect(under, 'no agent runs under it: neither count nor arrow').toHaveCount(0);
     bridge.agentStopped(nested.agentId);
@@ -797,10 +801,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   // UX wave U8b (A7, M6; X-168) and U8d (M4 decision 1; acceptance 8): a terminal session's engine runs an agent in the
   // background, so its turn ends while the agent works, and the transcript never says the agent ended when the terminal
   // closes (P3: nothing that names it reaches the main transcript). The terminal going (its registry record and its bridge
-  // gone) ends the agents it left running: their row folds with the turn, the Subagents card leaves, and the panel's Done
-  // reads "ended with the session". A resume in a terminal ends the orphan with the engine's `stopped` block before any
+  // gone) ends the agents it left running: their row folds with the turn, the Agents card leaves, and the panel's Done
+  // reads "session ended" (the word cut, T164). A resume in a terminal ends the orphan with the engine's `stopped` block before any
   // prompt (P1, u8d-p1-one-r1), so the agent it then starts is alone on the card; that terminal going ends it as well.
-  test('X-168: an agent started in the background whose terminal goes: its row folds with the ended turn, the Subagents card leaves and Done reads ended with the session; resumed in a terminal, the orphan reads stopped and the next agent is alone on the card, then ends the same way once that terminal goes too', async () => {
+  test('X-168: an agent started in the background whose terminal goes: its row folds with the ended turn, the Agents card leaves and Done reads session ended; resumed in a terminal, the orphan reads stopped and the next agent is alone on the card, then ends the same way once that terminal goes too', async () => {
     test.setTimeout(120_000);
     const first: BackgroundAgent = { agentId: 'a1e2e000000000004', description: 'Sort the notes', prompt: 'Sort notes.md.', at: '2026-10-28T10:00:03.000Z' };
     const second: BackgroundAgent = { agentId: 'a1e2e000000000005', description: 'Tidy the notes', prompt: 'Tidy notes.md.', at: '2026-10-28T10:01:03.000Z' };
@@ -816,11 +820,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { page } = c;
     const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
     const rowOf = (agent: BackgroundAgent) => main(page).locator('.transcript-subagent', { hasText: agent.description });
-    const card = sessionCard(page, 'Subagents');
+    const card = sessionCard(page, 'Agents');
     const onCard = (agent: BackgroundAgent) => card.locator(`[data-agent-row="${agent.agentId}"]`);
     // the panel's Done, unfolded, once its heading reads `heading`
     const doneReads = async (heading: string): Promise<Locator> => {
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const tool = surface(page, 'subagents');
       const done = tool.locator('section[data-section="done"]');
       await expect(done).toHaveAttribute('aria-label', heading, { timeout: 15_000 });
@@ -834,15 +838,15 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(rowOf(first).locator('.transcript-subagent-sentence'), 'the turn ended while its agent works: the call stays in view').toHaveText(first.description, { timeout: 15_000 });
     await expect(rowOf(first).getByRole('img', { name: 'Working', exact: true })).toBeVisible();
     await showSessionCards(page);
-    await expect(onCard(first), 'the agent on the Subagents card').toContainText(first.description, { timeout: 15_000 });
-    await expect(card.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
+    await expect(onCard(first), 'the agent on the Agents card').toContainText(first.description, { timeout: 15_000 });
+    await expect(card.getByRole('button', { name: 'Agents 1 running', exact: true })).toBeVisible();
 
     await terminal.close();
     c.terminal = null;
     await expect.poll(holder, { timeout: 10_000 }).toBe('none');
     await expect(rowOf(first), 'its terminal went: the agent ended with it, and its row folds with the turn').toHaveCount(0, { timeout: 15_000 });
-    await expect(card, 'nothing of the session runs: the Subagents card leaves').toHaveCount(0, { timeout: 15_000 });
-    await expect((await doneReads('Done 1')).locator(`[data-agent-row="${first.agentId}"]`)).toContainText('ended with the session');
+    await expect(card, 'nothing of the session runs: the Agents card leaves').toHaveCount(0, { timeout: 15_000 });
+    await expect((await doneReads('Done 1')).locator(`[data-agent-row="${first.agentId}"]`)).toContainText('session ended');
 
     // resumed in a terminal: the engine ends the orphan first (one block, its output file, `stopped`: a queue record, a
     // dequeue and a user row), then the session starts another agent in the background and ends its turn
@@ -860,25 +864,25 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(rowOf(first), 'the first stays ended').toHaveCount(0);
     await showSessionCards(page);
     await expect(onCard(second), 'the second agent on the card').toContainText(second.description, { timeout: 15_000 });
-    await expect(card.getByRole('button', { name: 'Subagents 1 running', exact: true }), 'the orphan ended at the resume: the second agent alone').toBeVisible();
+    await expect(card.getByRole('button', { name: 'Agents 1 running', exact: true }), 'the orphan ended at the resume: the second agent alone').toBeVisible();
     await expect(onCard(first)).toHaveCount(0);
 
     await c.terminal!.close();
     c.terminal = null;
     await expect.poll(holder, { timeout: 10_000 }).toBe('none');
     await expect(rowOf(second), 'that terminal went too: the second agent ended with it').toHaveCount(0, { timeout: 15_000 });
-    await expect(card, 'the Subagents card leaves again').toHaveCount(0, { timeout: 15_000 });
+    await expect(card, 'the Agents card leaves again').toHaveCount(0, { timeout: 15_000 });
     const done = await doneReads('Done 2 · 1 stopped');
-    await expect(done.locator(`[data-agent-row="${second.agentId}"]`)).toContainText('ended with the session');
+    await expect(done.locator(`[data-agent-row="${second.agentId}"]`)).toContainText('session ended');
     await expect(done.locator(`[data-agent-row="${first.agentId}"]`), 'the orphan keeps the word its resume gave it').toContainText('stopped');
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
   // Ticket 701: the terminal's bridge goes (its socket gone, its child restarting) while the terminal's process runs.
   // Main reads that as the bridge alone going: the agent and the shell it drove are no longer known to run, so neither
-  // card holds them and nothing reads "ended with the session" (the panel lists the agent on disk, its status
-  // unavailable) until the bridge answers again and its watch says they run. The process then ending ends them.
-  test('a bridge that goes while its terminal runs: the cards leave and nothing reads ended with the session, the agent on disk with its status unavailable; the bridge back, both run again; the terminal going then ends them with the session', async () => {
+  // card holds them and nothing reads "session ended" (the panel lists the agent under Earlier, with no status line; the
+  // word cut, T158, T164, T167) until the bridge answers again and its watch says they run. The process then ending ends them.
+  test('a bridge that goes while its terminal runs: the cards leave and nothing reads session ended, the agent under Earlier with no status line; the bridge back, both run again; the terminal going then ends them with the session', async () => {
     test.setTimeout(120_000);
     const agent: BackgroundAgent = { agentId: 'a1e2e000000000007', description: 'Count the notes', prompt: 'Count notes.md.', at: '2026-10-28T10:00:04.000Z' };
     const job = { taskId: 'bwatch07', command: 'sleep 600', description: 'Watch the tests', at: '2026-10-28T10:00:03.000Z' };
@@ -892,16 +896,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { page } = c;
     const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
     const states = async () => value(await invoke(page, 'laneA.list', undefined)).states.length;
-    const subagents = sessionCard(page, 'Subagents');
-    const background = sessionCard(page, 'Background tasks');
+    const subagents = sessionCard(page, 'Agents');
+    const background = sessionCard(page, 'Background');
     const running = async () => {
       await showSessionCards(page);
-      await expect(subagents.locator(`[data-agent-row="${agent.agentId}"]`), 'the agent on the Subagents card').toContainText(agent.description, { timeout: 15_000 });
-      await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell on the Background tasks card').toContainText(job.description, { timeout: 15_000 });
+      await expect(subagents.locator(`[data-agent-row="${agent.agentId}"]`), 'the agent on the Agents card').toContainText(agent.description, { timeout: 15_000 });
+      await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell on the Background card').toContainText(job.description, { timeout: 15_000 });
     };
     // the panel's section `name`, unfolded, once its heading reads `heading`
     const section = async (name: string, heading: string): Promise<Locator> => {
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const found = surface(page, 'subagents').locator(`section[data-section="${name}"]`);
       await expect(found).toHaveAttribute('aria-label', heading, { timeout: 15_000 });
       const unfold = found.getByRole('heading').getByRole('button');
@@ -914,12 +918,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await terminal.bridge.close();
     await expect.poll(states, { timeout: 10_000, message: 'its bridge gone: no lane A state' }).toBe(0);
     expect(await holder(), 'the terminal still holds the session').toBe('terminal');
-    await expect(subagents, 'the agent is no longer known to run: the Subagents card leaves').toHaveCount(0, { timeout: 15_000 });
-    await expect(background, 'nor the shell: the Background tasks card leaves').toHaveCount(0, { timeout: 15_000 });
-    const disk = await section('disk', 'On disk 1');
-    await expect(disk.locator(`[data-agent-row="${agent.agentId}"]`), 'its status unknown, not ended').toContainText('status unavailable');
+    await expect(subagents, 'the agent is no longer known to run: the Agents card leaves').toHaveCount(0, { timeout: 15_000 });
+    await expect(background, 'nor the shell: the Background card leaves').toHaveCount(0, { timeout: 15_000 });
+    const disk = await section('disk', 'Earlier 1');
+    await expect(disk.locator(`[data-agent-row="${agent.agentId}"]`)).toContainText(agent.description);
+    await expect(disk.locator(`[data-agent-row="${agent.agentId}"] [data-part="line"]`), 'its status unknown, not ended: no second line').toHaveCount(0);
     await expect(surface(page, 'subagents').locator('section[data-section="done"]'), 'nothing reads ended').toHaveCount(0);
-    await expect(surface(page, 'subagents')).not.toContainText('ended with the session');
+    await expect(surface(page, 'subagents')).not.toContainText('session ended');
 
     // the bridge answers again under the same terminal: its watch says both run
     const back = await startFakeBridge({ home: c.maws.sminosHome, session: c.sid, pid: terminal.pid, sessionInfo: { session: c.sid, cwd: c.repo.root, model: 'claude-opus-4-5', version: '2.1.300' } });
@@ -933,7 +938,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     c.terminal = null;
     await expect.poll(holder, { timeout: 10_000 }).toBe('none');
     await expect(subagents, 'nothing of the session runs').toHaveCount(0, { timeout: 15_000 });
-    await expect((await section('done', 'Done 1')).locator(`[data-agent-row="${agent.agentId}"]`)).toContainText('ended with the session');
+    await expect((await section('done', 'Done 1')).locator(`[data-agent-row="${agent.agentId}"]`)).toContainText('session ended');
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 

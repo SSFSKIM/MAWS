@@ -391,7 +391,9 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
       const connectors = await unfoldSessionCard(page, 'Connectors');
       await expect(environment).toContainText('/tmp/maws-harness/a');
       await expect(environment.getByText('…', { exact: true })).toHaveCount(0); // git watch has answered
-      await expect(connectors.getByText('Connector status not reported', { exact: true })).toBeVisible();
+      // the word cut (P52, P62, P63): a session that reported nothing lists nothing and says nothing more; its ways in stay
+      await expect(connectors.getByRole('list')).toHaveCount(0);
+      await expect(connectors.getByRole('button', { name: 'Manage connectors…', exact: true })).toBeVisible();
       for (const { width, height } of SIZES) {
         await size(maws, width, height);
         await shot(maws, info, 'session-cards-expanded');
@@ -519,13 +521,13 @@ test('U8b: a narrow strip shrinks the tabs not in view to icons, the rightmost f
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toBeVisible({ timeout: 15_000 });
   const firstTerminal = await surface(page, 'terminal').locator('[data-terminal-id]').getAttribute('data-terminal-id');
   const firstTab = await sideGroup(page, 'upper').locator('[data-tab-id]').first().getAttribute('data-tab-id');
-  for (const tool of ['Session info', 'Background tasks', 'Subagents', 'Terminal']) {
+  for (const tool of ['Session info', 'Background', 'Agents', 'Terminal']) { // the word cut (T152, T153): the tools' titles
     await sideGroup(page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
     await page.getByRole('menuitem', { name: tool, exact: true }).click();
     await expect(sideColumn(page).getByRole('tab', { selected: true }), `${tool} from "+" comes into view`).toHaveAccessibleName(tool === 'Terminal' ? /^Terminal/ : tool);
   }
   // a second terminal is a second tab of the strip, its own process; the first is kept and comes back as it was left
-  await expect.poll(() => tabTitles(page, 'upper')).toEqual(['Terminal', 'Session info', 'Background tasks', 'Subagents', 'Terminal']);
+  await expect.poll(() => tabTitles(page, 'upper')).toEqual(['Terminal', 'Session info', 'Background', 'Agents', 'Terminal']);
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toBeVisible({ timeout: 15_000 });
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).not.toHaveAttribute('data-terminal-id', firstTerminal!);
   await expect(page.getByRole('tablist', { name: 'terminal tabs' }), 'no strip inside a terminal').toHaveCount(0);
@@ -589,7 +591,7 @@ test('U8b (A5): the side column remembers a reading tool’s width and any other
   expect(refreshBox.y, 'Files refresh lives beside the root, without its own toolbar').toBe(rootBox.y);
   expect(refreshBox.y + refreshBox.height).toBeLessThanOrEqual(rootBox.y + rootBox.height);
 
-  await openSurface(page, 'Background tasks');
+  await openSurface(page, 'Background');
   await expect(resizer, 'any other tool opens at 360 px').toHaveAttribute('aria-valuenow', '360');
   expect(Math.round((await box(panel(page))).width)).toBe(360);
   await dragBy(page, resizer, 360 - 400);
@@ -598,8 +600,8 @@ test('U8b (A5): the side column remembers a reading tool’s width and any other
 
   await openSurface(page, 'Review');
   await expect(resizer, 'Review as wide as it was left').toHaveAttribute('aria-valuenow', '820');
-  await openSurface(page, 'Background tasks');
-  await expect(resizer, 'Background tasks at 400 the next time').toHaveAttribute('aria-valuenow', '400');
+  await openSurface(page, 'Background');
+  await expect(resizer, 'Background at 400 the next time').toHaveAttribute('aria-valuenow', '400');
 
   await resizer.focus();
   await page.keyboard.press('Enter'); // the reset: automatic again
@@ -613,7 +615,7 @@ test('U8b (A5): the side column remembers a reading tool’s width and any other
 
 // The overflow tool's icon: pinned to the toolbar it stays in the row. UX wave U8b (M2, decision 8): a click on the icon
 // of the tool in view hides the side column and closes nothing (its tab and instance stay); its context menu reads
-// "Hide surface" then, "Open surface" otherwise.
+// "Hide surface" then, and nothing in its place otherwise (the word cut, P9: a press on the icon opens it).
 test('UX2 → U8b: an overflow tool’s icon pins to the toolbar; the icon of the tool in view hides the column and closes nothing', async ({ maws }, info) => {
   const { page } = maws;
   await size(maws, 1512, 982); // room for the chrome to keep the pinned icon
@@ -636,7 +638,11 @@ test('UX2 → U8b: an overflow tool’s icon pins to the toolbar; the icon of th
   await expect(infoIcon).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => layout(page, 'panelTools.surfaces')).toMatchObject({ pinnedTools: ['session-info'], stacks: { [scope]: [] } });
   await infoIcon.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Open surface', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Unpin from toolbar', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Hide surface', exact: true }), 'not in view: nothing to hide').toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Open surface', exact: true }), 'the word cut (P9): the icon itself opens it').toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await infoIcon.click(); // the icon of a tool not in view opens it
   await expect.poll(() => stack(page)).toEqual(['session-info']);
   await expect(sideGroup(page, 'upper').locator('[data-tab-id]'), 'the same tab, nothing closed').toHaveAttribute('data-tab-id', tabId!);
   await infoIcon.click();
@@ -961,7 +967,7 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   // last tab cannot be in view 40 px short of the strip's end, which its own last 40 px are.)
   const list = page.locator('[data-chrome-tabs] [role="tablist"]');
   const widthBefore = await list.evaluate((el) => el.clientWidth);
-  await openSurface(page, 'Background tasks');
+  await openSurface(page, 'Background');
   // Ticket 729: the column narrows the strip once, and the strip's observer delivers that resize a frame or more later,
   // scrolling the tab in front (Diagnostics, the strip's last) back into view: the one reveal still due once the column
   // is open. Until it runs the narrowed strip keeps its old, smaller offset, a column's width short of its new end; after
@@ -992,7 +998,7 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await backToTabs(page);
   await expect(inFront).toHaveAttribute('aria-selected', 'true');
   await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'Back shows the strip at the same offset' }).toBe(offset);
-  await hideSurface(page, 'Background tasks');
+  await hideSurface(page, 'Background');
   for (const dimensions of [...SIZES, { width: 900, height: 820 }, { width: 620, height: 820 }]) {
     await size(maws, dimensions.width, dimensions.height);
     const all = page.getByRole('button', { name: 'All tabs', exact: true });

@@ -142,7 +142,7 @@ function background(): BackgroundView | null {
   const body = bodyOf('background');
   if (!body) return null;
   const tasks = body.querySelector('section[data-section="tasks"]');
-  const earlier = [...(tasks?.querySelectorAll('button') ?? [])].map(text).find((t) => / earlier tasks? completed$/.test(t));
+  const earlier = [...(tasks?.querySelectorAll('button') ?? [])].map(text).find((t) => /^\d+ done$/.test(t)); // `4 done` (the word cut, T231)
   const notes = [...(tasks?.querySelectorAll(':scope > p') ?? [])].map(text);
   return {
     workflows: [...body.querySelectorAll<HTMLElement>('[data-workflow]')].map((card) => ({

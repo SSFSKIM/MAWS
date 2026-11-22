@@ -1,6 +1,6 @@
 // M5 of the DC9 plan, in a real browser against DC3's fake machine replaying the `session-view` recording as a DC8
-// producer (`fake-machine.ts`, `producer: 'dc8'`): the column's Subagents tree with every agent's status from DX4's
-// widened body — the nested agent under its parent, none left under "On disk" — and an `Agent` row in the center
+// producer (`fake-machine.ts`, `producer: 'dc8'`): the column's Agents tree with every agent's status from DX4's
+// widened body — the nested agent under its parent, none left under "Earlier" — and an `Agent` row in the center
 // opening its agent there, the column opened for it; the Jobs tab drawing the shells and the monitor with MAWS's
 // `ShellRow` and `MonitorRow`, a shell's Output under its row in each of DX4's variants, and the MCP names. The same
 // recording from a producer older than DC8 draws as DC6 drew it. And an interrupted turn reads stopped, not working,
@@ -69,6 +69,12 @@ const nestedOf = (recording: Recording) => Object.keys(recording.meta).find((age
 const agentRow = (depth: Locator, agentId: string) => depth.locator(`[data-agent-row="${agentId}"]`);
 const isRowNaming = (text: string) => (step: Step) => step.k === 'row' && JSON.stringify(step.row).includes(text);
 const jobRow = (depth: Locator, taskId: string) => depth.locator('[data-job-row]').filter({ has: depth.page().locator(`[data-task-id="${taskId}"]`) });
+// The word cut (T218): a completed job's state is its age alone (MAWS's shared row draws no `completed`); it reads as
+// ended (no Stop) and names no other outcome.
+async function expectCompleted(row: Locator): Promise<void> {
+  await expect(row.getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
+  await expect(row.locator('[data-part="state"]')).not.toHaveText(/completed|stopped|failed|ended with the session/);
+}
 const outputOf = (depth: Locator, taskId: string) => depth.locator(`[data-testid="job-output"][data-task="${taskId}"]`);
 
 /** Scrolls the virtualized list a step at a time (`direction` -1 up, 1 down) until `target` is drawn. */
@@ -167,7 +173,7 @@ test('the jobs view: shells and the monitor with MAWS’s rows, Stop offered on 
 
   fm.playThrough();
   await expect(tab).toHaveText('Jobs · 4');
-  await expect(jobRow(jobs, SUITE)).toContainText('completed');
+  await expectCompleted(jobRow(jobs, SUITE));
   await expect(jobRow(jobs, SERVE)).toContainText('stopped');
   // Its file is still gone; its summary, from the notification, stands under MAWS's row beside the open output.
   await expect(outputOf(jobs, SERVE)).toHaveAttribute('data-phase', 'missing');
@@ -212,7 +218,7 @@ test('from a producer older than DC8 the column draws as DC6 drew it: the nested
   await depth.getByTestId('depth-tab-subagents').click();
   const tree = depth.getByTestId('depth-subagents');
   const nested = nestedOf(fm.recording);
-  await expect(tree.locator('[data-section="disk"]')).toContainText('On disk · 1');
+  await expect(tree.locator('[data-section="disk"]')).toContainText('Earlier · 1'); // the word cut (T158): was On disk
   await expect(agentRow(tree, nested)).toHaveAttribute('data-status', 'unknown');
   await depth.getByTestId('depth-tab-jobs').click();
   await expect(depth.getByRole('tabpanel', { name: 'Jobs' })).toContainText(`${MACHINE}'s daemon does not report background jobs`);
@@ -350,7 +356,7 @@ test('G2: Stop stays disabled with §5’s reason without the bridge, on a read-
 
   // A job that has ended draws no Stop at all: its row says how it ended.
   fm.playThrough(isRowNaming(`<task-id>${SUITE}</task-id>`));
-  await expect(jobRow(jobs, SUITE)).toContainText('completed');
+  await expectCompleted(jobRow(jobs, SUITE));
   await expect(jobRow(jobs, SUITE).getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
 });
 

@@ -1,5 +1,5 @@
 // M2 of the DC6 plan, in a browser against DC5's DX3 double and the recorded session's plane (`depth-player.ts`): the
-// depth column's Subagents tab draws the session's subagent tree from the main subscription — matching the
+// depth column's Agents tab draws the session's subagent tree from the main subscription — matching the
 // recording's `subagents/*.meta.json`, growing as the agents start and following each to its end — and opening an
 // agent subscribes with its `agentId` and draws its transcript and stream as the main thread's are drawn, through a
 // reconnect, a hub restart, and a chunk the snapshot already held, with no gap and no duplicated text. A subagent's
@@ -91,7 +91,7 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   const { player, depth } = await openDepth(page, hub, { growTree: true });
   await depth.getByTestId('depth-tab-subagents').click();
   const tree = depth.getByTestId('depth-subagents');
-  await expect(tree).toContainText('No subagents yet');
+  await expect(tree).toContainText('No agents yet'); // the word cut (N158)
 
   // The first `Agent` call: its meta, then its row.
   player.advanceTo((item) => item.kind === 'subagents' && item.body.subagents.length === 2);
@@ -99,7 +99,7 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   await expect(tree).toContainText('Agents · 1 running');
   player.advanceTo(notificationOf(KETTLE.agentId));
   await expect(tree).toContainText('Agents · 2 running');
-  await expect(depth.getByTestId('depth-tab-subagents')).toHaveText('Subagents · 2 running');
+  await expect(depth.getByTestId('depth-tab-subagents')).toHaveText('Agents · 2 running'); // the word cut (T152): MAWS's tab
   player.advance(1); // the notes.md agent's task notification
   await expect(tree).toContainText('Agents · 1 running');
   await expect(tree).toContainText('Done · 1');
@@ -120,7 +120,8 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   );
   const metas = recording.subagents.map(({ agentId, meta }) => ({ agentId, status: 'completed', title: meta.description }));
   expect(drawn.sort((a, b) => a.agentId!.localeCompare(b.agentId!))).toEqual(metas.sort((a, b) => a.agentId.localeCompare(b.agentId)));
-  await expect(tree.locator(`[data-agent-row="${KETTLE.agentId}"] [data-part="line"]`)).toContainText('finished');
+  // the word cut (T162): a finished agent's line is its age (then its summary), with no `finished` word
+  await expect(tree.locator(`[data-agent-row="${KETTLE.agentId}"] [data-part="line"]`)).toHaveText(/^(?!finished|failed|stopped)\S/);
 });
 
 test('opening an agent subscribes with its agentId and draws its stream settling once into its transcript', async ({ page, hub }) => {
@@ -129,7 +130,8 @@ test('opening an agent subscribes with its agentId and draws its stream settling
   const detail = await openAgent(depth, KETTLE.agentId);
   await expect.poll(() => subscribes(hub, KETTLE.agentId)).toBe(1);
   await expect(detail).toContainText(String(KETTLE.meta.description));
-  await expect(detail).toContainText('Dispatched by maws-45');
+  await expect(detail.locator('[data-part="dispatched-by"]'), 'the word cut (T184): the session is said by the view already').toHaveCount(0);
+  await expect(detail).not.toContainText('Dispatched by');
   const track = player.agent(KETTLE.agentId);
   track.advanceTo(isChunk('text'));
   await expect(detail).toContainText('Report where the kettle is'); // the agent's own prompt, from its transcript
@@ -138,7 +140,7 @@ test('opening an agent subscribes with its agentId and draws its stream settling
   await settleAgentAnswer(track, detail, KETTLE_ANSWER);
   await expect(detail.locator('[data-part="agent-meta"]')).toContainText('claude-opus-5-5');
 
-  await detail.getByRole('button', { name: '‹ Subagents' }).click();
+  await detail.getByRole('button', { name: '‹ Agents' }).click(); // the word cut (T152)
   await expect(depth.getByTestId('depth-subagents')).toBeVisible();
   await expect.poll(() => track.subscriptions()).toBe(0); // leaving the agent closes its subscription
 });

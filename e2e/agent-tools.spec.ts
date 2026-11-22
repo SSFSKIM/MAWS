@@ -52,6 +52,12 @@ const STOP_TASK = { shell: 'ba3cr5gnx', agent: 'ac2bd8a00d8e492f4', workflow: 'w
 // the card's heading and no push or pull request row follows it.
 const ABOVE = ['Environment', 'Context', 'Connectors'] as const;
 const cardTitles = (page: Page) => sessionCards(page).locator('div[aria-label="Session cards"] > section').evaluateAll((cards) => cards.map((card) => card.getAttribute('aria-label')));
+// The word cut (P67): a running card's heading draws its title and a bare count, "Agents 3"; the heading's button is
+// named with the count's meaning, "Agents 3 running".
+async function expectRunningHeading(card: Locator, title: 'Agents' | 'Background', running: number): Promise<void> {
+  await expect(card.locator('h3')).toHaveText(`${title} ${running}`);
+  await expect(card.locator('h3').getByRole('button')).toHaveAccessibleName(`${title} ${running} running`);
+}
 const boxesOf = (page: Page) => Promise.all(ABOVE.map((name) => sessionCard(page, name).boundingBox()));
 async function settledBoxes(page: Page): Promise<Awaited<ReturnType<typeof boxesOf>>> {
   await expect(sessionCard(page, 'Environment').locator('h3'), 'the Environment card’s git read has answered').toHaveText(/Not a git repository|Git unavailable/);
@@ -113,7 +119,7 @@ class Harness {
   }
   // Show the real surface, returning from a drill-in through its own Back control when needed.
   async open(toolId: 'subagents' | 'background'): Promise<void> {
-    const name = toolId === 'subagents' ? 'Subagents' : 'Background tasks';
+    const name = toolId === 'subagents' ? 'Agents' : 'Background'; // the word cut (T152, T153): the tools' titles
     await hideSurfaces(this.page);
     await openSurface(this.page, name);
     const back = surface(this.page, toolId).getByRole('button', { name: `‹ ${name}`, exact: true });
@@ -142,8 +148,9 @@ test.describe('the #panel harness: the agent tools', () => {
     const h = await Harness.open(maws);
     await h.load('A', 'pass1/subagent', { releaseTo: PASS1.firstStart });
     await h.open('subagents');
-    // The engine's snapshot naming the first agent comes a frame before its start: a running node whose start is unknown.
-    await expect.poll(async () => (await h.subagents())?.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, elapsed: 'elapsed unavailable' })]);
+    // The engine's snapshot naming the first agent comes a frame before its start: a running node whose start is unknown,
+    // which draws no elapsed (the word cut, T168).
+    await expect.poll(async () => (await h.subagents())?.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, elapsed: '' })]);
 
     await h.agents('releaseThrough', 'A', PASS1.secondStart);
     await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Running 2']);
@@ -158,11 +165,12 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Running 1', 'Done 1']);
     expect((await h.subagents())!.done, 'Done is folded at first').toEqual([]);
     await h.expandDone();
-    expect((await h.subagents())!.done).toEqual([expect.objectContaining({ title: FIRST.title, status: 'completed', line: expect.stringMatching(/^finished · .+ · ONE$/) })]);
+    // the word cut (T162): a finished agent's line is its age, then its summary
+    expect((await h.subagents())!.done).toEqual([expect.objectContaining({ title: FIRST.title, status: 'completed', line: expect.stringMatching(/^(?!finished)\S.* · ONE$/) })]);
     await h.agents('releaseThrough', 'A', PASS1.secondFinish);
     await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done 2']);
     const done = (await h.subagents())!.done;
-    expect(done.map((row) => row.line)).toEqual([expect.stringMatching(/^finished · .+ · TWO$/), expect.stringMatching(/^finished · .+ · ONE$/)]); // newest end first
+    expect(done.map((row) => row.line)).toEqual([expect.stringMatching(/^(?!finished)\S.* · TWO$/), expect.stringMatching(/^(?!finished)\S.* · ONE$/)]); // newest end first
     h.expectQuietConsole();
   });
 
@@ -184,7 +192,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect(surface(h.page, 'subagents')).toBeVisible();
     await expect.poll(async () => (await h.drillIn())?.header).toBe(FIRST.title);
     const drillIn = (await h.drillIn())!;
-    expect(drillIn).toMatchObject({ agentId: FIRST.agentId, dispatchedBy: `Dispatched by ${SESSION}` });
+    expect(drillIn).toMatchObject({ agentId: FIRST.agentId, dispatchedBy: '' }); // the word cut (T184): the tab names the session already
     const body = h.region.locator('[data-view="agent"]');
     await expect(body.getByText('ONE', { exact: true }), 'its answer').toBeVisible();
     // The child's finished turn folds its work, as C6's transcript does anywhere: opened, its Read cell.
@@ -221,7 +229,12 @@ test.describe('the #panel harness: the agent tools', () => {
     for (const count of PANEL_CHILD_TAIL.batches) await h.release(count);
     await h.open('subagents');
     await expect.poll(async () => (await h.subagents())?.agents.find((row) => row.agentId === FIRST.agentId)?.waiting, 'the row waits on its approval').toBe(true);
-    expect((await h.subagents())!.agents.find((row) => row.agentId === FIRST.agentId)!.line, 'the row says it, in place of its state').toBe('Approval needed');
+    // the word cut (T166): the row keeps its line; its mark beside the glyph says it waits, and its open button carries
+    // "Approval needed" as its tooltip and description
+    expect((await h.subagents())!.agents.find((row) => row.agentId === FIRST.agentId)!.line, 'the row keeps its own line').not.toBe('Approval needed');
+    const waitingRow = surface(h.page, 'subagents').locator(`[data-agent-row="${FIRST.agentId}"]`);
+    await expect(waitingRow.locator('[data-part="waiting"]'), 'the waiting mark').toBeVisible();
+    await expect(waitingRow.locator('[data-part="open"]')).toHaveAccessibleDescription('Approval needed');
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.requestCards).toBe(1);
     const card = h.region.locator('[data-view="agent"] [data-request-end] [data-request-card]');
@@ -247,20 +260,21 @@ test.describe('the #panel harness: the agent tools', () => {
       await expect.poll(async () => (await h.drillIn())?.relay.pending).toMatch(new RegExp(`^Asked ${SESSION} to relay · (\\d+s|\\d+m \\d{2}s)$`));
       expect((await h.drillIn())!.relay.disabled).toBe('Waiting for the last relay');
     });
-    const forwarded = `${SESSION} sent it with SendMessage after 1 parent round · ${FIRST.title} gets it at its next tool round`;
+    const forwarded = `Sent · ${FIRST.title} reads it at its next step`; // the word cut (T200)
     await test.step('forwarded on the parent’s SendMessage, and resting there with no receipt (O3)', async () => {
       await h.release(AGENTS_RELAY_TAIL.batches[0]);
       await expect.poll(async () => (await h.drillIn())?.relay.pending).toBe(forwarded);
       await h.release(AGENTS_RELAY_TAIL.batches[1]); // the parent's later frames: nothing clears the line
       await expect.poll(async () => (await h.drillIn())?.relay).toEqual({ label: `Relay via ${SESSION}`, disabled: null, tooltip: null, pending: forwarded });
     });
-    await test.step('with the parent’s turn open, the asked line says when it forwards', async () => {
+    await test.step('with the parent’s turn open, the asked line says what happened and how long it has waited', async () => {
       await h.agents('patchStatus', 'A', { turn: OPEN_TURN });
       expect((await h.drillIn())!.relay.disabled).toBeNull();
       await h.agents('typeRelay', 'And say PONG after it');
       await h.agents('sendRelay');
       expect((await h.agents('calls')).steer).toHaveLength(2);
-      await expect.poll(async () => (await h.drillIn())?.relay.pending).toMatch(new RegExp(`^Asked ${SESSION} to relay · \\d+s · ${SESSION} forwards at its next tool boundary or when this turn ends$`));
+      // the word cut (T199): not how the engine forwards it
+      await expect.poll(async () => (await h.drillIn())?.relay.pending).toMatch(new RegExp(`^Asked ${SESSION} to relay · (\\d+s|\\d+m \\d{2}s)$`));
     });
     await test.step('with no status the composer is disabled and says why', async () => {
       await h.panel('setStatus', 'A', null);
@@ -278,7 +292,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.subagents())?.agents.map((row) => row.agentId)).toContain(AGENTS_RELAY_TAIL.foregroundAgentId);
     await h.agents('clickRow', AGENTS_RELAY_TAIL.foregroundAgentId);
     await expect.poll(async () => (await h.drillIn())?.relay).toMatchObject({
-      disabled: `${SESSION} is waiting on this agent and reads messages only after it returns`,
+      disabled: `${SESSION} is waiting on this agent`, // the word cut (T195)
       tooltip: 'A message sent now would resume the finished agent instead of reaching this one',
     });
     h.expectQuietConsole();
@@ -317,12 +331,15 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.open('background');
     const card = async () => (await h.background())?.workflows.find((w) => w.taskId === WORKFLOW.taskId);
     await expect.poll(async () => (await card())?.title).toBe(WORKFLOW.description);
-    expect((await card())!.summary).toBe('Phases arrive with the first progress frame');
+    // the word cut (T212): before the first progress the summary is a quiet spinner, its words its name
+    expect((await card())!.summary).toBe('');
+    await expect(surface(h.page, 'background').locator(`[data-workflow="${WORKFLOW.taskId}"]`).getByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeVisible();
     // E7: the card is compact; its phases and agents live in the run's widget.
     await surface(h.page, 'background').locator(`[data-workflow="${WORKFLOW.taskId}"] h4 button`).click();
     const widget = () => h.agents('widget');
     await expect.poll(async () => (await widget())?.header).toBe(WORKFLOW.description);
-    expect((await widget())!).toMatchObject({ phases: [], note: 'Phases arrive with the first progress frame' });
+    expect((await widget())!).toMatchObject({ phases: [], note: '' });
+    await expect(surface(h.page, 'background').locator('[data-view="run"]').getByRole('progressbar', { name: 'Phases arrive with the first progress frame' })).toBeVisible();
 
     // Per frame (the recorded run's workflow_agent rows): alpha starts, alpha is done (8,861 tokens, 1.4 s) while beta
     // runs, beta is done (8,857 tokens, 1.5 s). A running agent's time counts from its start; a done one's is its own.
@@ -341,7 +358,7 @@ test.describe('the #panel harness: the agent tools', () => {
       expect(table.map((row) => ({ label: row.label, tokens: row.tokens })), `frame ${i + 1}: tokens`).toEqual(expected.table.map(({ label, tokens }) => ({ label, tokens })));
       for (const [j, row] of table.entries()) expect(row.time, `frame ${i + 1}: ${row.label}'s time`).toMatch(expected.table[j].time);
     }
-    expect((await widget())!.line).toMatch(/^workflow maws-probe · .+ · 2 agents · .+ tokens$/);
+    expect((await widget())!.line).toMatch(/^maws-probe · .+ · 2 agents$/); // the word cut (T210): no kind word, no tokens
 
     // As C3's status reads while the run runs, then Stop from the widget: the id is still listed when the call resolves.
     await h.agents('patchStatus', 'A', { backgroundTasks: [WORKFLOW] });
@@ -383,16 +400,16 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('patchStatus', 'A', { backgroundTasks: [ghost] }); // a snapshot-born node
     await h.open('background');
     await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId)).toEqual([ghost.taskId]);
-    // The UX wave's U8b (the branch review's finding 7): at the column's 280 px minimum the untimed shell's state text stays
-    // inside its row's line, clear of the Output and Stop buttons.
+    // The UX wave's U8b (the branch review's finding 7): at the column's 280 px minimum the untimed shell's line stays
+    // clear of the Output and Stop buttons. The word cut (T216, T217): a running shell with no time has no state text.
     await h.panel('setWidth', 280);
     await expect.poll(async () => Math.round((await h.region.boundingBox())?.width ?? 0), 'the column at 280 px').toBe(280);
     const row = surface(h.page, 'background').locator(`[data-shell="${ghost.taskId}"]`);
-    await expect(row.locator('[data-part="state"]')).toHaveText(/· running · elapsed unavailable$/);
-    const state = (await row.locator('[data-part="state"]').boundingBox())!;
+    await expect(row.locator('[data-part="state"]')).toHaveText('');
+    const line = (await row.locator('[data-part="line"]').boundingBox())!;
     for (const name of ['Output', 'Stop']) {
       const button = (await row.getByRole('button', { name, exact: true }).boundingBox())!;
-      expect(state.x + state.width <= button.x || button.x + button.width <= state.x, `the state text clear of ${name}`).toBe(true);
+      expect(line.x + line.width <= button.x || button.x + button.width <= line.x, `the line clear of ${name}`).toBe(true);
     }
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
     // A snapshot's silence never removes a node: the ghost stays until the stop resolves.
@@ -465,7 +482,7 @@ test.describe('the #panel harness: the agent tools', () => {
     const reads = (await h.agents('calls')).readSpill.length;
     await h.load('A', 'transcript/long-output'); // its first Bash cell: 116,891 characters kept in the transcript, no spill
     await h.agents('clickTranscriptFullLog', 1);
-    await expect.poll(async () => (await h.log())?.noFile).toBe('No file to open: the engine reported no output file for this cell; the transcript shows what was kept');
+    await expect.poll(async () => (await h.log())?.noFile).toBe('No output file for this cell'); // the word cut (T246)
     expect(await logs()).toHaveLength(2);
     expect((await h.agents('calls')).readSpill, 'nothing read for a cell with no file').toHaveLength(reads);
     h.expectQuietConsole();
@@ -531,10 +548,11 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(tasks).toMatchObject({ heading: 'Tasks', rows: ['Task 2'], earlier: 1 });
     await h.agents('patchStatus', 'A', { taskListId: null });
     await expect.poll(tasks, 'no list known: no Tasks section').toEqual({ heading: '', label: null, rows: [], earlier: 0, unavailable: null });
-    expect((await h.background())!.notes, 'and no line about it').not.toContain('Tasks unavailable until the engine reports its list');
+    expect((await h.background())!.notes, 'and no line about it').not.toContain('No list yet'); // the word cut (T233): the panel's words
     await h.panel('setStatus', 'A', null);
     await h.panel('setSession', 'A', { engineSessionId: 'sess-1' as never });
-    await expect.poll(tasks).toMatchObject({ heading: 'Tasks', label: 'session list', rows: ['Working on task 5', 'Task 6', 'Task 7'] });
+    // the word cut (T230): the disk-only session's list is no longer labelled `session list`
+    await expect.poll(tasks).toMatchObject({ heading: 'Tasks', label: null, rows: ['Working on task 5', 'Task 6', 'Task 7'] });
     expect(existsSync(join(homedir(), '.claude', 'tasks', 'sess-1')), 'the real task store is never read or written').toBe(false);
     h.expectQuietConsole();
   });
@@ -546,14 +564,15 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('fixtureFs', 'subagent-sidecars');
     await h.agents('fixtureFs', 'workflow-disk');
     await h.open('subagents');
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['On disk 2']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Earlier 2']); // the word cut (T158): was On disk
     const lists = (await h.subagents())!;
     expect(lists.notes).toContain('Status is known only while the session runs here');
-    expect(lists.disk, 'On disk is folded at first (the UX wave\'s U8b)').toEqual([]);
+    expect(lists.disk, 'Earlier is folded at first (the UX wave\'s U8b)').toEqual([]);
     await h.unfold('subagents', 'disk');
+    // the word cut (T167): a row of unknown status has no second line
     await expect.poll(async () => (await h.subagents())?.disk.map((row) => [row.agentId, row.line])).toEqual([
-      [FIRST.agentId, 'status unavailable'],
-      [SECOND.agentId, 'status unavailable'],
+      [FIRST.agentId, ''],
+      [SECOND.agentId, ''],
     ]);
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.relay.disabled).toBe('Known only from disk');
@@ -601,10 +620,10 @@ test.describe('the #panel harness: the agent tools', () => {
 
   // A4. pass3/stop-task's recorded session stopped a background shell, an agent and a workflow; the engine's background
   // list then names a shell and a monitor while they run, which the process's exit ends, and a shell that still runs.
-  test('A4: Background tasks reads Running with the running shell on top and one folded Done counted by kind, then Nothing running', async ({ maws }) => {
+  test('A4: Background reads Running with the running shell on top and one folded Done counted by kind, then Nothing running', async ({ maws }) => {
     const h = await Harness.open(maws);
     await h.load('A', 'pass3/stop-task');
-    await test.step('the Subagents panel: the stopped agent under a folded Done that names its outcome', async () => {
+    await test.step('the Agents panel: the stopped agent under a folded Done that names its outcome', async () => {
       await h.open('subagents');
       await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done 1 · 1 stopped']);
       expect((await h.subagents())!.done, 'Done is folded at first').toEqual([]);
@@ -621,7 +640,8 @@ test.describe('the #panel harness: the agent tools', () => {
     const aboutLists = (notes: string[]) => notes.filter((note) => /task lists|Tasks unavailable|Nothing running/.test(note));
     await expect.poll(async () => (await view())?.headings, 'no heading reads 0 running').toEqual(['Running 1', 'Done 4 · 1 workflow · 2 shells · 1 monitor']);
     let shown = (await view())!;
-    expect(shown.shells.map((row) => [row.taskId, row.line])).toEqual([[running.taskId, expect.stringMatching(/^A shell still running · running/)]]);
+    // the word cut (T216, T217): a running shell's line is its description and its time, with no running word
+    expect(shown.shells.map((row) => [row.taskId, row.line])).toEqual([[running.taskId, expect.stringMatching(/^A shell still running(?: · \d.*)?$/)]]);
     expect(await surface(h.page, 'background').locator('section[data-section] [data-task-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-task-id'))), 'the running shell on top, Done folded').toEqual([running.taskId]);
     expect([shown.workflows, shown.monitors], 'nothing else is drawn while Done is folded').toEqual([[], []]);
     expect(shown.tasks.heading, 'the session has no task list: no Tasks section').toBe('');
@@ -642,9 +662,9 @@ test.describe('the #panel harness: the agent tools', () => {
   });
 
   // A7 (item 359): an agent whose own run has ended while shells it started still run stays under Running with its
-  // outcome word and how many run, and is under Done once the last of them ends. No agent runs, so no Subagents card;
-  // its shells are rows of the Background tasks card.
-  test('A7: an ended agent kept under Running by its shells reads finished · N background tasks running, then moves to Done', async ({ maws }) => {
+  // outcome word and how many run, and is under Done once the last of them ends. No agent runs, so no Agents card;
+  // its shells are rows of the Background card. The word cut (T169): "N tasks running".
+  test('A7: an ended agent kept under Running by its shells reads finished · N tasks running, then moves to Done', async ({ maws }) => {
     const h = await Harness.open(maws);
     await h.load('A', 'pass1/subagent'); // both agents finished
     await h.open('subagents');
@@ -653,38 +673,38 @@ test.describe('the #panel harness: the agent tools', () => {
     const shells = [startedBy(FIRST.agentId, 'e2e-under-first-1', 'A shell the first agent started'), startedBy(FIRST.agentId, 'e2e-under-first-2', 'A second shell it started')];
     await h.agents('patchStatus', 'A', { backgroundTasks: shells.slice(0, 1) });
     await expect.poll(async () => (await lists())?.headings, 'no agent runs: Running with no number').toEqual(['Running', 'Done 1']);
-    expect((await lists())!.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, line: 'finished · 1 background task running', elapsed: '', under: null })]);
+    expect((await lists())!.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, line: 'finished · 1 task running', elapsed: '', under: null })]);
     await h.agents('patchStatus', 'A', { backgroundTasks: shells });
-    await expect.poll(async () => (await lists())?.agents.map((row) => row.line)).toEqual(['finished · 2 background tasks running']);
+    await expect.poll(async () => (await lists())?.agents.map((row) => row.line)).toEqual(['finished · 2 tasks running']);
 
-    await test.step('the column: the Background tasks card lists the two shells, and there is no Subagents card', async () => {
+    await test.step('the column: the Background card lists the two shells, and there is no Agents card', async () => {
       await showSessionCards(h.page);
-      const card = sessionCard(h.page, 'Background tasks');
-      await expect(card.locator('h3')).toHaveText('Background tasks 2 running');
+      const card = sessionCard(h.page, 'Background');
+      await expectRunningHeading(card, 'Background', 2);
       await expect(card.locator('[data-task-id]')).toHaveCount(2);
-      await expect(sessionCard(h.page, 'Subagents')).toHaveCount(0);
+      await expect(sessionCard(h.page, 'Agents')).toHaveCount(0);
       await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:00:00.000Z')); // the shells end with the process
       await expect(card, 'the card leaves with the last running task').toHaveCount(0);
     });
     await h.open('subagents');
     await expect.poll(async () => (await lists())?.headings).toEqual(['Done 2']);
     await h.expandDone();
-    await expect.poll(async () => (await lists())?.done.find((row) => row.agentId === FIRST.agentId)?.line).toMatch(/^finished · .+ · ONE$/);
+    await expect.poll(async () => (await lists())?.done.find((row) => row.agentId === FIRST.agentId)?.line).toMatch(/^(?!finished)\S.* · ONE$/); // its age (T162)
     h.expectQuietConsole();
   });
 
-  // A2, the Background tasks card: drawn last while a task runs, so its coming and going moves nothing above it.
-  test('A2: a running shell draws the Background tasks card last in the column; it leaves when the shell ends and nothing above it moves', async ({ maws }) => {
+  // A2, the Background card: drawn last while a task runs, so its coming and going moves nothing above it.
+  test('A2: a running shell draws the Background card last in the column; it leaves when the shell ends and nothing above it moves', async ({ maws }) => {
     const h = await Harness.open(maws);
     const { taskId } = AGENTS_STOP_SHELL_TAIL;
     await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first }); // the shell runs
     await showSessionCards(h.page);
-    const card = sessionCard(h.page, 'Background tasks');
-    await expect(card.locator('h3')).toHaveText('Background tasks 1 running');
+    const card = sessionCard(h.page, 'Background');
+    await expectRunningHeading(card, 'Background', 1);
     await expect(card.locator('[data-task-id]')).toHaveCount(1);
     await expect(card.locator(`[data-task-id="${taskId}"] [data-part="description"]`)).toHaveText(SHELL.description);
-    await expect(sessionCard(h.page, 'Subagents'), 'no agent runs').toHaveCount(0);
-    expect(await cardTitles(h.page), 'the card stands last').toEqual([...ABOVE, 'Background tasks']);
+    await expect(sessionCard(h.page, 'Agents'), 'no agent runs').toHaveCount(0);
+    expect(await cardTitles(h.page), 'the card stands last').toEqual([...ABOVE, 'Background']);
 
     await test.step('a press on its row opens the panel at that shell, and the column gives way', async () => {
       await card.locator(`[data-task-id="${taskId}"]`).click();
@@ -704,21 +724,21 @@ test.describe('the #panel harness: the agent tools', () => {
     h.expectQuietConsole();
   });
 
-  // A2, the Subagents card: two first-level agents, the outer one running the inner one, and a sibling the status lists.
-  test('A2: the Subagents card opens the agent under a row from its (+1), its sibling keeping its place, and a press on a row opens that agent in the panel', async ({ maws }) => {
+  // A2, the Agents card: two first-level agents, the outer one running the inner one, and a sibling the status lists.
+  test('A2: the Agents card opens the agent under a row from its (+1), its sibling keeping its place, and a press on a row opens that agent in the panel', async ({ maws }) => {
     const h = await Harness.open(maws);
     const { outer, inner } = E7_NESTED_AGENTS;
     await h.load('A', 'pass3/nested-agents', { releaseTo: E7_NESTED_AGENTS.innerStart + 1 });
     await h.agents('patchStatus', 'A', { backgroundTasks: [SIBLING] }); // a second first-level agent, running
     await showSessionCards(h.page);
-    const card = sessionCard(h.page, 'Subagents');
+    const card = sessionCard(h.page, 'Agents');
     const rowsOf = () => card.locator('[data-agent-row]').evaluateAll((rows) => rows.map((row) => `${(row as HTMLElement).dataset.depth}:${(row as HTMLElement).dataset.agentRow}`));
-    await expect(card.locator('h3'), 'every running agent, the nested one too').toHaveText('Subagents 3 running');
+    await expectRunningHeading(card, 'Agents', 3); // every running agent, the nested one too
     await expect(card.locator('[data-agent-row]'), 'first-level agents only').toHaveCount(2);
     const firstLevel = await rowsOf();
     expect([...firstLevel].sort(), 'the two roots, each at depth 0').toEqual([`0:${outer}`, `0:${SIBLING.taskId}`].sort());
     await expect(card.locator(`[data-agent-row="${SIBLING.taskId}"] [data-part="under"]`), 'nothing runs under the sibling').toHaveCount(0);
-    await expect(sessionCard(h.page, 'Background tasks'), 'no background task runs').toHaveCount(0);
+    await expect(sessionCard(h.page, 'Background'), 'no background task runs').toHaveCount(0);
     const outerRow = card.locator(`[data-agent-row="${outer}"]`);
     const title = await outerRow.locator('[data-part="title"]').innerText();
     const disclosure = outerRow.locator('[data-part="under"]');
@@ -749,11 +769,11 @@ test.describe('the #panel harness: the agent tools', () => {
 
     await showSessionCards(h.page);
     await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.innerFinish);
-    await expect(card.locator('h3')).toHaveText('Subagents 2 running');
+    await expectRunningHeading(card, 'Agents', 2);
     await expect(card.locator('[data-agent-row]')).toHaveCount(2);
     await expect(outerRow.locator('[data-part="under"]'), 'no agent runs under it: neither count nor arrow').toHaveCount(0);
     await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.outerFinish);
-    await expect(card.locator('h3')).toHaveText('Subagents 1 running');
+    await expectRunningHeading(card, 'Agents', 1);
     expect(await rowsOf(), 'the sibling alone').toEqual([`0:${SIBLING.taskId}`]);
     await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:00:00.000Z')); // the sibling ends with the process
     await expect(card, 'the card leaves with the last running agent').toHaveCount(0);
@@ -851,22 +871,22 @@ test.describe('the #panel harness: the agent tools', () => {
       ],
       // The UX wave's U8b (A2): the card column's two cards for running work.
       [
-        'the Subagents card with a row opened',
+        'the Agents card with a row opened',
         async () => {
           await h.load('A', 'pass3/nested-agents', { releaseTo: E7_NESTED_AGENTS.innerStart + 1 });
           await showSessionCards(h.page);
-          const card = sessionCard(h.page, 'Subagents');
+          const card = sessionCard(h.page, 'Agents');
           const disclosure = card.locator(`[data-agent-row="${E7_NESTED_AGENTS.outer}"] > [data-part="under"]`);
           if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await disclosure.click();
           await expect(card.locator(`[data-agent-row="${E7_NESTED_AGENTS.inner}"]`)).toBeVisible();
         },
       ],
       [
-        'the Background tasks card',
+        'the Background card',
         async () => {
           await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first });
           await showSessionCards(h.page);
-          await expect(sessionCard(h.page, 'Background tasks').locator('[data-task-id]')).toHaveCount(1);
+          await expect(sessionCard(h.page, 'Background').locator('[data-task-id]')).toHaveCount(1);
         },
       ],
     ];
@@ -1144,13 +1164,14 @@ test.describe('E7: the orchestration views', () => {
 
     const first = await h.panel('addTool', 'tasks', { params: { target: '6' } });
     await expect.poll(tasks).toEqual({
-      progress: '4 of 7 completed', label: null, completedToggle: '4 earlier tasks completed', note: null,
+      progress: '4/7', label: null, completedToggle: '4 done', note: null, // the word cut (T231, T232)
       rows: [
         { id: '5', subject: 'Working on task 5', status: 'in_progress', selected: false },
         { id: '6', subject: 'Task 6', status: 'pending', selected: true },
         { id: '7', subject: 'Task 7', status: 'pending', selected: false },
       ],
     });
+    await expect(h.region.locator('[data-tool="tasks"] [data-part="progress"]').getByRole('img'), 'the bare count named by its meaning').toHaveAccessibleName('4 of 7 completed');
     const second = await h.panel('addTool', 'tasks', { params: { target: '2' } }); // show_pane's second call: the same tab
     expect(second).toBe(first);
     expect(await h.agents('instances', 'tasks')).toEqual([first]);
@@ -1160,7 +1181,7 @@ test.describe('E7: the orchestration views', () => {
 
     const next = [...statuses.map((s, i) => task(i + 1, i === 5 ? 'completed' : s)), task(8, 'pending')];
     await h.agents('pushTasks', 'e7-list', next);
-    await expect.poll(async () => (await tasks())?.progress, 'the list follows fs.tasksChanged').toBe('5 of 8 completed');
+    await expect.poll(async () => (await tasks())?.progress, 'the list follows fs.tasksChanged').toBe('5/8');
     expect((await tasks())!.rows.map((row) => [row.id, row.status])).toEqual([
       ['5', 'in_progress'], ['7', 'pending'], ['8', 'pending'], ['1', 'completed'], ['2', 'completed'], ['3', 'completed'], ['4', 'completed'], ['6', 'completed'],
     ]);
@@ -1191,12 +1212,12 @@ test.describe('E7: the orchestration views', () => {
       const view = (await scheduled())!;
       expect(view.rows[0]).toEqual({
         id: jobs.tick.id, store: 'session', schedule: 'Every 2 minutes', kind: 'recurring · session-only', prompt: 'E7 cron tick', dormant: false, link: true,
-        when: expect.stringMatching(new RegExp(`^Next ≈ .+ \\(${nextIn(jobs.tick, true, now)}\\) · Expires .+$`)),
+        when: expect.stringMatching(new RegExp(`^.+ · ${nextIn(jobs.tick, true, now)} · Expires .+$`)), // the word cut (T224): `14:30 · in 3m`
       });
-      if (view.rows[1]) expect(view.rows[1]).toMatchObject({ kind: 'one-shot · session-only', prompt: 'E7 one-shot', when: expect.stringMatching(new RegExp(`^Next ≈ .+ \\(${nextIn(jobs.oneShot, false, now)}\\)$`)) });
+      if (view.rows[1]) expect(view.rows[1]).toMatchObject({ kind: 'one-shot · session-only', prompt: 'E7 one-shot', when: expect.stringMatching(new RegExp(`^.+ · ${nextIn(jobs.oneShot, false, now)}$`)) });
       now = Date.parse('2026-10-06T11:20:00.000Z');
       await h.agents('setClock', new Date(now).toISOString());
-      await expect.poll(async () => (await scheduled())?.rows.find((row) => row.id === jobs.tick.id)?.when).toMatch(new RegExp(`^Next ≈ .+ \\(${nextIn(jobs.tick, true, now)}\\) · `));
+      await expect.poll(async () => (await scheduled())?.rows.find((row) => row.id === jobs.tick.id)?.when).toMatch(new RegExp(`^.+ · ${nextIn(jobs.tick, true, now)} · `));
       await h.agents('openCreatingTurn', jobs.tick.id);
       await expect(cell(jobs.tick.toolUseId), 'the CronCreate cell, scrolled into view').toBeInViewport();
     });
@@ -1216,7 +1237,7 @@ test.describe('E7: the orchestration views', () => {
       await h.agents('releaseThrough', 'A', Number.MAX_SAFE_INTEGER); // e7-cron-resume's launch
       await expect.poll(async () => (await scheduled())?.heading).toBe('Scheduled 2');
       const now = Date.parse('2026-10-06T11:20:00.000Z');
-      expect((await scheduled())!.rows.find((row) => row.id === jobs.nightly.id)!.when).toMatch(new RegExp(`^Next ≈ .+ \\(${nextIn(jobs.nightly, true, now)}\\) · Expires .+$`));
+      expect((await scheduled())!.rows.find((row) => row.id === jobs.nightly.id)!.when).toMatch(new RegExp(`^.+ · ${nextIn(jobs.nightly, true, now)} · Expires .+$`));
       await bothThemes(h, 'g5-scheduled', h.region);
       await h.agents('openCreatingTurn', jobs.nightly.id);
       await expect(cell(jobs.nightly.toolUseId)).toBeInViewport();
@@ -1225,7 +1246,7 @@ test.describe('E7: the orchestration views', () => {
     await test.step('disk-only: the session-only job resumes with the session; a refused file read says why', async () => {
       await h.agents('clearStatus', 'A');
       await expect.poll(async () => (await scheduled())?.rows.map((row) => [row.id, row.dormant, row.when])).toEqual([
-        [jobs.durable.id, false, expect.stringMatching(/^Next ≈ /)],
+        [jobs.durable.id, false, expect.stringMatching(/^\S.* · in /)], // a next run, `14:30 · in 3m` (T224)
         [jobs.nightly.id, true, expect.stringMatching(/^Resumes with the session/)],
       ]);
       await h.agents('fakeFs', { refusals: { [SCHEDULED_FILE]: 'the harness refused this read' } });

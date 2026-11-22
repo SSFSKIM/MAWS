@@ -14,6 +14,7 @@
 // is refused by the relay at `set_model`).
 import { addressed } from './support/address';
 import { openSurface, usageRing } from './support/shell';
+import { unfoldInfoGroup, type InfoGroup } from './support/session-info';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -204,17 +205,24 @@ async function settled(w: Locator): Promise<string> {
 }
 
 const sessionInfo = async (page: Page, id: string) => page.locator(`[data-session-info="${await addressed(page, id)}"]`);
-const infoRow = async (page: Page, id: string, label: string) => (await (await sessionInfo(page, id)).innerText()).match(new RegExp(`${label}\\n([^\\n]+)`))?.[1] ?? null;
-// W2: the status line and its usage popover are gone (§5.5 as amended 2026-10-01): Session info carries
-// the windows (its Usage row) and the route with its switch (its Route row).
+// The word cut (T252): Session info's groups fold, and a folded group's rows are not mounted; a row is read with its group
+// opened.
+const GROUP_OF: Record<string, InfoGroup> = { Main: 'Model', Route: 'Gateway', 'Auto-mode lane': 'Permissions' };
+const infoRow = async (page: Page, id: string, label: string) => {
+  const info = await sessionInfo(page, id);
+  await unfoldInfoGroup(info, GROUP_OF[label]);
+  return (await info.innerText()).match(new RegExp(`${label}\\n([^\\n]+)`))?.[1] ?? null;
+};
+// W2: the status line and its usage popover are gone (§5.5 as amended 2026-10-01): Session info carries the route with
+// its switch (its Route row). The word cut (P176): the usage windows are the usage displays' (the /usage widget here),
+// no longer a row of Session info.
 async function openSessionInfo(page: Page, id: string): Promise<Locator> {
   await openSurface(page, 'Session info');
   await expect(await sessionInfo(page, id)).toBeVisible();
   return sessionInfo(page, id);
 }
 const infoValue = (info: Locator, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
-const routeRow = async (page: Page, id: string) => infoValue(await openSessionInfo(page, id), 'Route');
-const usageRow = async (page: Page, id: string) => infoValue(await openSessionInfo(page, id), 'Usage');
+const routeRow = async (page: Page, id: string) => infoValue(await unfoldInfoGroup(await openSessionInfo(page, id), 'Gateway'), 'Route');
 
 // ---- 1. the twenty widgets over a live routed session, their controls, and changes read back ------------------------
 
@@ -343,19 +351,20 @@ test('every widget opens with live engine data; controls take effect and are rea
       expect(paths).toContain(join(scratch.config, 'settings.json'));
     });
 
-    await step('context and status agree on the model; usage windows equal Session info’s', async () => {
+    // The word cut (P176): Session info no longer repeats the usage windows; the /usage widget shows them, and Session
+    // info's Usage group has no Usage row.
+    await step('context and status agree on the model; the usage windows are the widget’s, not Session info’s', async () => {
       const context = await settled(await openWidget(live, 'context'));
       const statusText = await settled(await openWidget(live, 'status'));
       const usage = await settled(await openWidget(live, 'usage'));
       await closeWidgets(page);
-      const line = await (await usageRow(page, id)).innerText();
       const s = await status(page, id);
-      observe('agree', { context: context.slice(0, 200), statusModel: statusText.match(/Model\n[^\n]+/)?.[0], resolved: s.model.resolved, usage: usage.slice(0, 400), line });
+      observe('agree', { context: context.slice(0, 200), statusModel: statusText.match(/Model\n[^\n]+/)?.[0], resolved: s.model.resolved, usage: usage.slice(0, 400) });
       expect(statusText).toContain(`Model\n${s.model.resolved}`);
-      const five = line.match(/5h (\d+)%/)?.[1];
-      const week = line.match(/Weekly (\d+)%/)?.[1];
-      expect(usage).toContain(`5h\n${five}%`);
-      expect(usage).toContain(`Weekly\n${week}%`);
+      expect(usage).toMatch(/5h\n\d+%/);
+      expect(usage).toMatch(/Weekly\n\d+%/);
+      const usageGroup = await unfoldInfoGroup(await openSessionInfo(page, id), 'Usage');
+      await expect(infoValue(usageGroup, 'Usage')).toHaveCount(0);
     });
 
     await step('/rename Live C11 renames and the sidebar follows within 2 s', async () => {
@@ -501,7 +510,9 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
         cost: await usageCost(page, id),
       });
       expect(note).toContain('run locally');
-      expect(expected).toMatch(/^Local \(expected\)/);
+      // the word cut (T254): the lane in a word, its sentence the value's tooltip and description
+      expect(expected).toBe('Local');
+      await expect(infoValue(await openSessionInfo(page, id), 'Auto-mode lane').locator('[tabindex="0"]')).toHaveAccessibleDescription(/^Local \(expected\)/);
     });
 
     await step('a background task, then Switch to Direct… names it and requires a Claude model', async () => {
@@ -534,13 +545,12 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
         route: await infoRow(page, id, 'Route'),
         main: await infoRow(page, id, 'Main'),
         popover,
-        line: await (await usageRow(page, id)).innerText(),
         statusRows: statusText.split('\n').filter((l) => /Login|Organization|Email|base URL/i.test(l)),
         transcript: (await main.innerText()).split('\n').filter((l) => /exited|Continued|restarted/i.test(l)),
       });
       expect(text).toContain('1 background task');
       expect(toast).toMatch(/restarted direct · on (Sonnet 5|claude-sonnet)/);
-      expect(await infoRow(page, id, 'Route')).toMatch(/^Direct · engine's own login/);
+      expect(await infoRow(page, id, 'Route')).toMatch(/^Direct(?: · |$)/); // the word cut (T256): the route, then the login when known
       expect(popover).toContain('Switch to gateway…');
     });
 
@@ -555,10 +565,13 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
         return s !== null && s.process === 'ready' && s.gateway.mode === 'gateway';
       }, { timeout: 90_000 }).toBe(true);
       const back = await routeRow(page, id);
-      await expect(back).toContainText('Gateway · ClaudeUsage relay');
+      await expect(back).toContainText('Gateway · '); // the word cut (T256): the route and its base URL
       const popover = await back.innerText();
-      await expect(await usageRow(page, id)).toContainText(/5h \d+%/, { timeout: 30_000 });
-      observe('back', { sheet: text, popover: popover.replace(/[\w.+-]+@[\w.-]+/g, '<account>'), line: await (await usageRow(page, id)).innerText(), usageCost: await usageCost(page, id) });
+      const usage = await openWidget(live, 'usage'); // the word cut (P176): the windows are the usage display's
+      await expect(usage).toContainText(/5h\s+\d+%/, { timeout: 30_000 });
+      const line = await usage.innerText();
+      await closeWidgets(page);
+      observe('back', { sheet: text, popover: popover.replace(/[\w.+-]+@[\w.-]+/g, '<account>'), line, usageCost: await usageCost(page, id) });
       expect(text).not.toContain('Claude models');
       expect(text).not.toContain('background');
     });

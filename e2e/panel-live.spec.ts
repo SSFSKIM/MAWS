@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT, test } from './support/launch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
@@ -30,10 +30,11 @@ const tryGit = (cwd: string, ...args: string[]) => {
 };
 
 // The change line git's own answers imply, in the summary's copy: `git diff HEAD --numstat` summed (binary rows counted
-// apart), the files `git status --porcelain` lists, its untracked ones.
-function expectedChangeLine(dir: string): string {
+// apart), the files `git status --porcelain` lists, its untracked ones. The word cut (P36): the line is its counts and its
+// files, "+12 −3 · 4 files"; the untracked and binary counts are its tooltip and part of its description (`uncounted`).
+function expectedChangeLine(dir: string): { line: string; uncounted: string } {
   const porcelain = git(dir, 'status', '--porcelain', '--untracked-files=all').split('\n').filter(Boolean);
-  if (porcelain.length === 0) return 'Clean';
+  if (porcelain.length === 0) return { line: 'Clean', uncounted: '' };
   let insertions = 0;
   let deletions = 0;
   let binary = 0;
@@ -44,15 +45,28 @@ function expectedChangeLine(dir: string): string {
   }
   const untracked = porcelain.filter((line) => line.startsWith('??')).length;
   const files = porcelain.length;
-  return `+${insertions} −${deletions} across ${files} ${files === 1 ? 'file' : 'files'}${untracked ? ` · ${untracked} untracked` : ''}${binary ? ` · ${binary} binary` : ''}`;
+  return {
+    line: `+${insertions} −${deletions} · ${files} ${files === 1 ? 'file' : 'files'}`,
+    uncounted: [untracked > 0 && `${untracked} untracked`, binary > 0 && `${binary} binary`].filter(Boolean).join(' · '),
+  };
 }
 
-function expectedPush(dir: string): string {
+// The push row git's answers imply. The word cut (P39): commits ahead and behind are drawn as marks, "↑2 ↓1", the
+// sentence their accessible name; "Not pushed" and "Up to date with <upstream>" keep their words (`marks` null).
+function expectedPush(dir: string): { sentence: string; marks: string | null } {
   const upstream = tryGit(dir, 'rev-parse', '--abbrev-ref', '@{u}');
-  if (!upstream) return 'Not pushed';
+  if (!upstream) return { sentence: 'Not pushed', marks: null };
   const ahead = Number(git(dir, 'rev-list', '--count', '@{u}..HEAD'));
   const behind = Number(git(dir, 'rev-list', '--count', 'HEAD..@{u}'));
-  return `${ahead > 0 ? `${ahead} ahead of ${upstream}` : `Up to date with ${upstream}`}${behind > 0 ? ` · ${behind} behind` : ''}`;
+  if (ahead === 0 && behind === 0) return { sentence: `Up to date with ${upstream}`, marks: null };
+  const marks = [ahead > 0 && `↑${ahead}`, behind > 0 && `↓${behind}`].filter(Boolean).join(' ');
+  return { sentence: ahead > 0 ? `${ahead} ahead of ${upstream}${behind > 0 ? ` · ${behind} behind` : ''}` : `${behind} behind ${upstream}`, marks };
+}
+
+// The push row as drawn: its words, or its marks under the sentence as their name.
+async function expectPush(environment: Locator, push: { sentence: string; marks: string | null }): Promise<void> {
+  if (push.marks === null) await expect(environment).toContainText(push.sentence);
+  else await expect(environment.locator(`[aria-label="${push.sentence}"]`)).toHaveText(push.marks);
 }
 
 // `<owner>/<repo>` of a GitHub remote in any of its forms (git@github.com:o/r.git, ssh://git@github.com/o/r.git,
@@ -105,13 +119,14 @@ test('live: the summary over this repository matches git', async () => {
 
     await test.step('this checkout: branch, change line and push state as git reports them', async () => {
       await open('Charter + research');
-      const line = expectedChangeLine(REPO_ROOT);
+      const { line, uncounted } = expectedChangeLine(REPO_ROOT);
       const push = expectedPush(REPO_ROOT);
       await expect(environment).toContainText(`⎇ ${branch}`);
       await expect(changeLine).toHaveText(line);
-      // UX wave U8b (A8): the change line is the card's control into Review, its counts its description.
-      await expect(environment.getByRole('button', { name: 'Open changes', exact: true })).toHaveAccessibleDescription(line);
-      await expect(environment).toContainText(push);
+      // UX wave U8b (A8): the change line is the card's control into Review, its counts its description (with the word
+      // cut's uncounted files after them).
+      await expect(environment.getByRole('button', { name: 'Open changes', exact: true })).toHaveAccessibleDescription(`${line} ${uncounted}`.trim());
+      await expectPush(environment, push);
       Object.assign(observed, { checkout: { branch, line, push, revList: tryGit(REPO_ROOT, 'rev-list', '--count', '@{u}..HEAD') ?? 'no upstream' } });
     });
 
@@ -122,7 +137,7 @@ test('live: the summary over this repository matches git', async () => {
         shell.openExternal = async (url: string) => void opened.push(url);
       });
       await open('Fix sidebar drag');
-      await expect(environment).toContainText(expectedPush(clone)); // up to date with origin/<branch>
+      await expectPush(environment, expectedPush(clone)); // up to date with origin/<branch>
       await environment.getByRole('button', { name: 'Open on GitHub' }).click();
       await expect.poll(() => app.evaluate(() => (globalThis as { __opened?: string[] }).__opened)).toEqual([`https://github.com/${repository}/tree/${branch}`]);
       observed.openOnGitHub = (await app.evaluate(() => (globalThis as { __opened?: string[] }).__opened))?.[0];
@@ -130,7 +145,7 @@ test('live: the summary over this repository matches git', async () => {
       writeFileSync(join(clone, 'panel-live-note.txt'), 'scratch\n');
       fixtureGit(clone, 'add', 'panel-live-note.txt');
       fixtureGit(clone, '-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@maws.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'scratch');
-      await expect(environment).toContainText(expectedPush(clone));
+      await expectPush(environment, expectedPush(clone));
       observed.cloneAhead = { push: expectedPush(clone), revList: git(clone, 'rev-list', '--count', '@{u}..HEAD') };
       await expect(changeLine).toHaveText('Clean');
 
@@ -138,7 +153,7 @@ test('live: the summary over this repository matches git', async () => {
       for (const text of ['first live edit', 'second live edit']) {
         const written = Date.now();
         appendFileSync(join(clone, 'CLAUDE.md'), `\n${text}\n`);
-        const line = expectedChangeLine(clone);
+        const { line } = expectedChangeLine(clone);
         await expect(changeLine).toHaveText(line, { timeout: 2_000 });
         edits.push({ line, ms: Date.now() - written });
       }

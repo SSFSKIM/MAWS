@@ -101,6 +101,8 @@ function installProbes(): void {
   const w = window as unknown as { __c8b?: unknown };
   if (w.__c8b) return;
   const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
+  // an ended run's badge: its word, or a completed run's check by its name (the word cut, T213)
+  const badge = (el: Element | null | undefined) => text(el) || (el?.getAttribute('aria-label') ?? '');
   const all = <E extends Element = Element>(root: ParentNode | null | undefined, selector: string): E[] => Array.from(root?.querySelectorAll<E>(selector) ?? []);
   const panel = () => document.querySelector<HTMLElement>('[data-region="panel"]');
   const bodyOf = (toolId: string) => panel()?.querySelector<HTMLElement>(`[data-surface="${toolId}"] [role="tabpanel"]`) ?? null;
@@ -152,7 +154,7 @@ function installProbes(): void {
         title: text(row.querySelector('[data-part="title"]')),
         elapsed: text(row.querySelector('[data-part="elapsed"]')),
         line: text(row.querySelector('[data-part="line"]')),
-        waiting: row.dataset.waiting !== undefined, // the UX wave's U8b: the row's mark (its line reads Approval needed)
+        waiting: row.dataset.waiting !== undefined, // the UX wave's U8b: the row's mark (the word cut, T166: Approval needed its tooltip)
         nested: row.querySelector('[data-part="nested"]') !== null,
       }));
     const agent = body?.querySelector<HTMLElement>('[data-view="agent"]');
@@ -160,14 +162,13 @@ function installProbes(): void {
     return {
       headings: all(lists, 'section[data-section] > h3').map(text),
       notes: all(lists, ':scope > p').map(text),
-      agents: rows('running'), // the UX wave's U8b: the Running section's rows (Done and On disk are folded at first)
+      agents: rows('running'), // the UX wave's U8b: the Running section's rows (Done and Earlier are folded at first)
       done: rows('done'),
       disk: rows('disk'),
       drillIn: agent
         ? {
             header: text(agent.querySelector('h2')),
             meta: text(agent.querySelector('[data-part="agent-meta"]')),
-            dispatchedBy: text(agent.querySelector('[data-part="dispatched-by"]')),
             requestCards: agent.querySelectorAll('[data-request-card]').length,
             label: text(agent.querySelector('[data-key-sink="composer"] label')),
             disabled: box?.disabled ? box.placeholder : null,
@@ -181,7 +182,7 @@ function installProbes(): void {
   const background = () => {
     const body = bodyOf('background');
     const tasks = body?.querySelector('section[data-section="tasks"]');
-    const earlier = all(tasks, 'button').map(text).find((t) => / earlier tasks? completed$/.test(t));
+    const earlier = all(tasks, 'button').map(text).find((t) => /^\d+ done$/.test(t)); // `4 done` (the word cut, T231)
     return {
       headings: all(body, 'section[data-section] h3 > button').map(text), // the UX wave's U8b: `Running N`, `Done N · …`
       notes: all(body, 'p').map(text).filter(Boolean),
@@ -189,7 +190,7 @@ function installProbes(): void {
         taskId: card.dataset.workflow!,
         title: text(card.querySelector('h4')),
         line: text(card.querySelector('[data-part="line"]')),
-        status: text(card.querySelector('[data-part="status"]')),
+        status: badge(card.querySelector('[data-part="status"]')),
         summary: text(card.querySelector('[data-part="summary"]')), // E7: the compact card's one line
         buttons: all(card, 'button').map(text),
       })),
@@ -219,7 +220,7 @@ function installProbes(): void {
       taskId: run.dataset.run!,
       title: text(run.querySelector('h2')),
       line: text(run.querySelector('[data-part="line"]')),
-      status: text(run.querySelector('[data-part="status"]')),
+      status: badge(run.querySelector('[data-part="status"]')),
       phases: all(run, '[role="option"]').map((o) => `${text(o.querySelector('[data-part="title"]'))} ${text(o.querySelector('[data-part="count"]'))}`.trim()),
       agents: all(run, 'tbody tr').map((tr) => ({ label: cell(tr, 'agent-label'), model: cell(tr, 'model'), state: cell(tr, 'state'), time: cell(tr, 'time'), tokens: cell(tr, 'tokens') })),
       buttons: all(run.querySelector('header'), 'button').map(text),
@@ -242,7 +243,7 @@ type Probe = {
     agents: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     done: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     disk: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
-    drillIn: { header: string; meta: string; dispatchedBy: string; requestCards: number; label: string; disabled: string | null; tooltip: string | null; line: string | null } | null;
+    drillIn: { header: string; meta: string; requestCards: number; label: string; disabled: string | null; tooltip: string | null; line: string | null } | null;
     pending: boolean;
   };
   background(): {
@@ -378,7 +379,7 @@ function expectStopOrder(order: string[], taskId: string): void {
 }
 
 // A panel's section unfolded, once listed, unless it is open already: Done (E7; the UX wave's U8b for Background tasks
-// too) and On disk (U8b) are folded at first.
+// too) and Earlier (U8b; the word cut, T158: was On disk) are folded at first.
 async function unfold(page: Page, tool: 'subagents' | 'background', section: 'done' | 'disk'): Promise<void> {
   const toggle = page.locator(`[data-region="panel"] [data-surface="${tool}"] section[data-section="${section}"] h3 > button`);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -527,7 +528,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const ids = { first: [] as string[], perm: '', relayBusy: '', relayIdle: '', foreground: '' };
 
     await step('i', 'two background agents under Agents, then Done', async () => {
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const from = await s.send('Dispatch two general-purpose agents in the background, model haiku: one lists the files under docs/, the other under mockups/; report both.');
       const started = await s.until('two subagent.started', (ev) => {
         const found = ev.filter((e) => e.seq !== null && e.seq > from && e.kind === 'subagent.started');
@@ -553,7 +554,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await openDone(page);
       const done = await probe(page, (p) => p.subagents().done);
       note('i.done', { rows: done, finished: s.after(from).filter((e) => e.kind === 'subagent.finished').map((e) => ({ taskId: e.taskId, status: e.status, summary: e.summary })) });
-      for (const row of done.filter((r) => ids.first.includes(r.agentId))) expect(row.line).toMatch(/^finished · /);
+      // the word cut (T162): a finished agent's line is its age, with no `finished` word
+      for (const row of done.filter((r) => ids.first.includes(r.agentId))) expect(row.line).toMatch(/^(?!finished|failed|stopped)\S/);
       await s.idle();
       note('i.log', s.taskLog(from));
     });
@@ -627,14 +629,17 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       note('iii.mode', mode);
       expect(mode.value?.effective).toBe('default');
       s.holdChildPermissions = true;
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const from = await s.send(`Dispatch one general-purpose agent in the background, model haiku: run "touch ${TMP.perm}" with Bash and reply OK.`);
       const asked = await s.until('the child’s permission request', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'permission.requested' && e.agentId !== null), 180_000);
       ids.perm = asked.agentId!;
       await expect.poll(() => probe(page, (p) => p.subagents().agents.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
       const row = (await probe(page, (p) => p.subagents().agents)).find((r) => r.agentId === ids.perm);
       expect(row?.waiting, 'the waiting agent’s row is marked').toBe(true);
-      expect(row?.line, 'its line says it, in place of its state').toBe('Approval needed');
+      // the word cut (T166): the row keeps its line; its mark and its open button's description say it waits
+      expect(row?.line, 'the row keeps its own line').not.toBe('Approval needed');
+      await expect(panel.locator(`[data-agent-row="${ids.perm}"] [data-part="waiting"]`)).toBeVisible();
+      await expect(panel.locator(`[data-agent-row="${ids.perm}"] [data-part="open"]`)).toHaveAccessibleDescription('Approval needed');
       await panel.locator(`[data-agent-row="${ids.perm}"]`).click();
       const card = panel.locator('[data-view="agent"] [data-request-card]');
       await expect(card).toHaveCount(1, { timeout: 15_000 });
@@ -648,11 +653,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await s.idle();
       const back = (await invoke('session.setPermissionMode', { appSessionId: record.appId, mode: 'auto' })) as { value?: { effective: string } };
       note('iii.modeBack', back);
-      await panel.getByRole('button', { name: '‹ Subagents' }).click();
+      await panel.getByRole('button', { name: '‹ Agents' }).click();
     });
 
     await step('iv', 'a background shell: Output opens the Log, Stop reads stopping then stopped', async () => {
-      await openSurface(page, 'Background tasks');
+      await openSurface(page, 'Background');
       const from = await s.send(`Run exactly "sleep 300 && echo done > ${TMP.bg}" with Bash, run_in_background true; reply STARTED.`);
       const started = await s.until('the shell’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_bash' && e.isBackground === true));
       const taskId = started.taskId as string;
@@ -669,7 +674,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const log = await probe(page, (p) => p.log());
       note('iv.shell', { taskId, command: started.description, row: shell, outputEnabledAfterStartMs: enabledAfterMs, resultText: result?.content, log });
       expect(log.path).toMatch(/^\/private\/tmp\/claude-\d+\/.+\/tasks\/[^/]+\.output$/);
-      await openSurface(page, 'Background tasks');
+      await openSurface(page, 'Background');
       const stopFrom = s.seq;
       await row.getByRole('button', { name: 'Stop', exact: true }).click();
       await s.until('the shell’s task.notification', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === taskId), 30_000);
@@ -688,13 +693,13 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     // E7: the card is compact; its phases and agent table live in the run's widget, opened from the card's title. The
     // recorder reads the card's summary line until the widget opens and the widget's phase rows after, in one form.
     const openRun = async (taskId: string) => {
-      const back = panel.getByRole('button', { name: '‹ Background tasks' });
+      const back = panel.getByRole('button', { name: '‹ Background' });
       if (await back.isVisible()) await back.click();
       await panel.locator(`[data-workflow="${taskId}"] h4 button`).click();
       await expect(panel.locator(`[data-view="run"][data-run="${taskId}"]`)).toBeVisible();
     };
-    await step('v', 'a workflow shows its phases and agent table in its widget; Stop workflow ends a re-run', async () => {
-      await openSurface(page, 'Background tasks');
+    await step('v', 'a workflow shows its phases and agent table in its widget; Stop ends a re-run', async () => {
+      await openSurface(page, 'Background');
       const from = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${WORKFLOW_SCRIPT}`);
       const started = await s.until('the workflow’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_workflow'));
       const taskId = started.taskId as string;
@@ -704,8 +709,9 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const widget = await probe(page, (p) => p.widget());
       const history = (await probe(page, (p) => p.rec.cards))[taskId] ?? [];
       note('v.run', { taskId, description: started.description, workflowName: started.workflowName, widget, phaseHistory: history.map((h) => h.v), frames: s.events.filter((e) => e.kind === 'workflow.progress' && e.taskId === taskId).length });
-      // what carries phase progress: neither the card's line before the first frame nor the widget's empty phase list
-      const phases = history.map((h) => h.v).filter((v) => v !== '' && v !== 'Phases arrive with the first progress frame');
+      // what carries phase progress: neither the card's line before the first frame (the word cut, T212: a quiet spinner
+      // with no text) nor the widget's empty phase list
+      const phases = history.map((h) => h.v).filter((v) => v !== '');
       expect(phases[0], 'the first phase row: Echo 0/2, or Queued before any agent started').toMatch(/^(Echo 0\/2|Echo Queued|Queued)$/);
       expect(phases.at(-1)).toBe('Echo 2/2');
       // `Echo 1/2` is recorded, not asserted: two agents finishing inside one progress frame would skip it.
@@ -719,9 +725,9 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await s.until('the slow workflow’s first progress', (ev) => ev.find((e) => e.kind === 'workflow.progress' && e.taskId === slowId), 120_000);
       await openRun(slowId);
       const runLoc = panel.locator(`[data-view="run"][data-run="${slowId}"]`);
-      await expect(runLoc.getByRole('button', { name: 'Stop workflow' })).toBeEnabled({ timeout: 15_000 });
+      await expect(runLoc.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled({ timeout: 15_000 }); // the word cut (T215)
       const stopFrom = s.seq;
-      await runLoc.getByRole('button', { name: 'Stop workflow' }).click();
+      await runLoc.getByRole('button', { name: 'Stop', exact: true }).click();
       await s.until('the slow workflow’s notification', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === slowId), 30_000);
       await sleep(1_500);
       const stopped = await probe(page, (p) => p.widget());
@@ -732,15 +738,15 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       expect(stopped?.taskId).toBe(slowId);
       expect(stopped?.status).toBe('stopped');
       expectStopOrder(order, slowId);
-      await panel.getByRole('button', { name: '‹ Background tasks' }).click(); // the list again, for the checklist's step
+      await panel.getByRole('button', { name: '‹ Background' }).click(); // the list again, for the checklist's step
       await s.idle();
     });
 
     await step('vi', 'the relay: busy parent, then idle parent', async () => {
       rmSync(TMP.stop, { force: true });
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const relay = async (agentId: string, text: string, turnOpen: boolean) => {
-        const back = panel.getByRole('button', { name: '‹ Subagents' });
+        const back = panel.getByRole('button', { name: '‹ Agents' });
         if (await back.isVisible()) await back.click();
         await panel.locator(`[data-agent-row="${agentId}"]`).click();
         const box = panel.locator('[data-view="agent"] textarea');
@@ -752,10 +758,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         await panel.locator('[data-view="agent"]').getByRole('button', { name: 'Send', exact: true }).click();
         await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.line ?? ''), { timeout: 10_000 }).toMatch(/^Asked .+ to relay · /);
         const asked = await probe(page, (p) => p.subagents().drillIn?.line ?? '');
-        if (turnOpen) expect(asked).toMatch(/forwards at its next tool boundary or when this turn ends$/);
-        else expect(asked).not.toMatch(/ · .+ (forwards|is inside)/);
+        // the word cut (T199): what happened and how long it has waited, whether or not the parent's turn is open (the
+        // turn's state is recorded in the note, no longer read from the line)
+        expect(asked, turnOpen ? 'the parent’s turn open' : 'the parent idle').toMatch(/^Asked .+ to relay · \d+[smh][^·]*$/);
         const sendMessage = await s.until('the parent’s SendMessage to the agent', (ev) => ev.find((e) => e.seq !== null && e.seq > sentFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'SendMessage' && (e.input as { to?: string }).to === agentId), 240_000);
-        await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.line ?? ''), { timeout: 10_000 }).toMatch(/sent it with SendMessage after \d+ parent rounds? · .+ gets it at its next tool round$/);
+        await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.line ?? ''), { timeout: 10_000 }).toMatch(/^Sent · .+ reads it at its next step$/); // the word cut (T200)
         const forwarded = await probe(page, (p) => p.subagents().drillIn?.line ?? '');
         const reply = s.events.find((e) => e.kind === 'tool.result' && e.toolUseId === sendMessage.toolUseId);
         // The delivery's evidence (O3): the child appends the message to its inbox, and its disk transcript holds the
@@ -779,9 +786,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         const resting = await probe(page, (p) => p.subagents().drillIn?.line ?? '');
         const lines = (await probe(page, (p) => p.rec.relay)).filter((h) => h.t >= sentAt - 1_000).map((h) => ({ ms: h.t - sentAt, v: h.v.replace(/ · \d+[smh][^·]*(?= · |$)/, ' · <elapsed>') }));
         const distinct = lines.filter((l, i) => i === 0 || l.v !== lines[i - 1].v);
-        const parentRounds = /after (\d+) parent round/.exec(forwarded)?.[1] ?? null;
         return {
-          agentId, before, asked, forwarded, resting, parentRounds, sentAt: new Date(sentAt).toISOString(),
+          agentId, before, asked, turnOpen, forwarded, resting, sentAt: new Date(sentAt).toISOString(),
           sendMessage: { input: sendMessage.input, at: sendMessage.at, seq: sendMessage.seq, afterSendMs: Date.parse(sendMessage.at) - sentAt },
           reply: reply?.content ?? null, inboxAfterSendMs: inboxAt === null ? null : inboxAt - sentAt, transcript, attachment, lineHistory: distinct,
         };
@@ -821,8 +827,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     // gate off through the flag settings' env to show a genuine foreground child.
     const foreground = async (pg: Page, sess: Session) => {
       const pnl = pg.locator('[data-region="panel"]');
-      await openSurface(pg, 'Subagents');
-      const back = pnl.getByRole('button', { name: '‹ Subagents' });
+      await openSurface(pg, 'Agents');
+      const back = pnl.getByRole('button', { name: '‹ Agents' });
       if (await back.isVisible()) await back.click();
       const from = await sess.send('Dispatch one general-purpose agent in the foreground, model haiku: run `node -e "setTimeout(() => {}, 30000)"` with Bash, a 30-second job, and reply OK; wait for it.');
       const started = await sess.until('the foreground agent’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'subagent.started'));
@@ -836,14 +842,14 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const finishedReads = async (pg: Page, sess: Session, agentId: string) => {
       const pnl = pg.locator('[data-region="panel"]');
       await sess.until('the agent finished', (ev) => ev.find((e) => e.kind === 'subagent.finished' && e.taskId === agentId), 180_000);
-      await openSurface(pg, 'Subagents');
-      const back = pnl.getByRole('button', { name: '‹ Subagents' });
+      await openSurface(pg, 'Agents');
+      const back = pnl.getByRole('button', { name: '‹ Agents' });
       if (await back.isVisible()) await back.click();
       await openDone(pg); // E7: a finished root is listed under Done, collapsed by default
       await pnl.locator(`[data-agent-row="${agentId}"]`).click();
       await expect.poll(() => probe(pg, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).toBe('This agent has finished');
       const drill = await probe(pg, (p) => p.subagents().drillIn);
-      await pnl.getByRole('button', { name: '‹ Subagents' }).click();
+      await pnl.getByRole('button', { name: '‹ Agents' }).click();
       return drill;
     };
 
@@ -852,7 +858,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       ids.foreground = fg.agentId;
       note('vii.productLaunch', fg);
       if (fg.isBackground) expect(fg.drill.disabled, 'a backgrounded child’s composer is enabled').toBeNull();
-      else expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent and reads messages only after it returns`);
+      else expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent`); // the word cut (T195)
     });
 
     await step('viii', 'a finished agent’s composer reads This agent has finished', async () => {
@@ -862,7 +868,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     await step('ix', 'the checklist reads the list TaskCreate writes', async () => {
-      await openSurface(page, 'Background tasks');
+      await openSurface(page, 'Background');
       const from = await s.send('Create three tasks with TaskCreate, one call each: "Survey docs", "Survey mockups", "Write the summary". Then mark "Survey docs" completed with TaskUpdate. Reply OK.');
       await s.idle(240_000);
       const st = await s.status();
@@ -888,27 +894,28 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const p2 = second.page;
       const panel2 = p2.locator('[data-region="panel"]');
 
-      await step('x', 'a disk-only session: On disk, runs from disk, the shells sentence, the session list', async () => {
-        await openSurface(p2, 'Subagents');
-        await expect.poll(() => probe(p2, (p) => p.subagents().headings.find((h) => h.startsWith('On disk')) ?? null), { timeout: 20_000 }).not.toBeNull();
-        await unfold(p2, 'subagents', 'disk'); // the UX wave's U8b: On disk is folded at first
+      // the word cut: On disk is Earlier (T158), and the disk-only session's list is no longer labelled (T230)
+      await step('x', 'a disk-only session: Earlier, runs from disk, the shells sentence, the list unlabelled', async () => {
+        await openSurface(p2, 'Agents');
+        await expect.poll(() => probe(p2, (p) => p.subagents().headings.find((h) => h.startsWith('Earlier')) ?? null), { timeout: 20_000 }).not.toBeNull();
+        await unfold(p2, 'subagents', 'disk'); // the UX wave's U8b: Earlier is folded at first
         const lists = await probe(p2, (p) => p.subagents());
         if (lists.disk[0]) {
           await panel2.locator(`[data-agent-row="${lists.disk[0].agentId}"]`).click();
           await expect.poll(() => probe(p2, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).not.toBeNull();
         }
         const drill = await probe(p2, (p) => p.subagents().drillIn);
-        await openSurface(p2, 'Background tasks');
+        await openSurface(p2, 'Background');
         // The UX wave's U8b: the Tasks section is drawn only while the list holds a task, which step ix made.
-        if (STEPS.has('ix')) await expect.poll(() => probe(p2, (p) => p.background().tasks.label), { timeout: 20_000 }).toBe('session list');
+        if (STEPS.has('ix')) await expect.poll(() => probe(p2, (p) => p.background().tasks.heading), { timeout: 20_000 }).toBe('Tasks');
         // The runs step (v) leaves this session's two workflow runs on disk: under Done (U8b), with nothing running.
         if (STEPS.has('v')) await expect.poll(() => probe(p2, (p) => p.background().headings.join(' | ')), { timeout: 20_000 }).toMatch(/Done 2 · 2 workflows/);
         const bg = await probe(p2, (p) => p.background());
         note('x', { headings: lists.headings, notes: lists.notes, disk: lists.disk.map((r) => ({ agentId: r.agentId, title: r.title, line: r.line, depth: r.depth })), drillIn: drill, background: bg });
-        expect(lists.disk.map((r) => r.line)).toEqual(lists.disk.map(() => 'status unavailable'));
+        expect(lists.disk.map((r) => r.line)).toEqual(lists.disk.map(() => '')); // the word cut (T167): no second line
         expect(bg.notes).toContain('Shells and monitors are known only while the session runs here');
         if (STEPS.has('v')) expect(bg.notes).toContain('Nothing running');
-        expect(bg.tasks.label).toBe(STEPS.has('ix') ? 'session list' : null);
+        expect(bg.tasks.label).toBeNull();
       });
 
       if (STEPS.has('ix') || STEPS.has('vii')) {
@@ -921,7 +928,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         await step('ix', 'CLAUDE_CODE_TASK_LIST_ID shows that list instead', async () => {
           const st = await s2.status();
           expect(st.taskListId).toBe(TASK_LIST_OVERRIDE);
-          await openSurface(p2, 'Background tasks');
+          await openSurface(p2, 'Background');
           const empty = await probe(p2, (p) => p.background().tasks);
           await s2.send('Create two tasks with TaskCreate, one call each: "Override one", "Override two". Reply OK.');
           await s2.idle(240_000);
@@ -936,7 +943,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
           const fg = await foreground(p2, s2);
           note('vii.forkGateOff', fg);
           expect(fg.isBackground).toBe(false);
-          expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent and reads messages only after it returns`);
+          expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent`);
           note('viii.forkGateOff', await finishedReads(p2, s2, fg.agentId));
           await s2.idle();
         });

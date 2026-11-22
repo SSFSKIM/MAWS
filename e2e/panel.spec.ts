@@ -18,6 +18,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyWait } from './support/latency';
 import { END_ROW } from './support/request-keys'; // UX wave U1b
 import { sidebarRow } from './support/sidebar';
+import { unfoldInfoGroup } from './support/session-info'; // the word cut (T252)
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
 import { closeScene, launchScene, scratchProject, show, type Scene } from './support/maws-tools'; // P4-B3: the split's float
@@ -482,9 +483,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await panel.call('showSummary');
 
     // UX2: the primary tools are icons; non-primary registered tools remain reachable through overflow. UX wave U8b (M7):
-    // Background tasks is the tool's name (was Background work). This page registers no Artifacts tool.
+    // Background tasks is the tool's name (was Background work); the word cut (T152, T153) names it Background, and
+    // Subagents Agents. This page registers no Artifacts tool.
     await surfaceRow(panel.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Background tasks', 'Tasks', 'Session info', 'Stub']);
+    await expect(panel.page.getByRole('menuitem')).toHaveText(['Agents', 'Background', 'Tasks', 'Session info', 'Stub']);
     await panel.page.keyboard.press('Escape');
     await openSurface(panel.page, 'Terminal');
     const terminal = (await panel.tabs()).find((tab) => tab.toolId === 'terminal');
@@ -508,10 +510,13 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     const panel = await PanelPage.open(maws);
     const info = await panel.call('addTool', 'session-info', { pin: true });
     const body = panel.region.locator(`[data-session-info="${await addressed(panel.page, 'A')}"]`);
-    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(body.getByRole('region', { name: title })).toBeVisible();
+    // the word cut (T249, T252): the usage group is Usage, and each group folds to its head, Permissions and Usage open
+    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Usage', 'Hooks and MCP']) await expect(body.getByRole('region', { name: title })).toBeVisible();
+    await unfoldInfoGroup(body, 'Gateway');
     const route = body.getByRole('term').filter({ hasText: /^Route$/ }).locator('xpath=following-sibling::dd[1]');
-    // W2 (C3): the Direct⇄gateway switch is the Route row's action, its button text part of the row's.
-    await expect(route, 'A runs direct in the harness scenario').toHaveText("Direct · engine's own loginSwitch to gateway…Back to the machine’s own…"); // P5 O7 M9: and back
+    // W2 (C3): the Direct⇄gateway switch is the Route row's action, its button text part of the row's. The word cut
+    // (T256): the route alone, "Direct", without the words that repeat it.
+    await expect(route, 'A runs direct in the harness scenario').toHaveText('DirectSwitch to gateway…Back to the machine’s own…'); // P5 O7 M9: and back
     await expect(route.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
     await panel.call('switchSession', null);
     await panel.call('selectTab', info);
@@ -625,19 +630,21 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       await test.step('git, the status and the digest', async () => {
         const environment = panel.section('Environment');
         await expect(environment).toContainText('⎇ main');
-        await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
+        // the word cut (P36): the line is its counts and its files; the untracked count is its tooltip and description
+        await expect(panel.changeLine).toHaveText('+1 −0 · 2 files');
         // UX2 embeds push state in Environment.
-        await expect(environment).toContainText('1 ahead of origin/main');
+        // the word cut (P39): the push row draws its marks, the sentence its name and tooltip
+        await expect(environment.getByRole('button', { name: '1 ahead of origin/main', exact: true })).toHaveText('↑1');
         await expect(environment.getByRole('button', { name: 'Open on GitHub' }), 'a local remote has no GitHub page').toHaveCount(0);
         // UX wave U8b, A8 (l5-code-16): the change line is the card's one way into Review, a control named Open changes
         // whose counts are its description; the branch row has no Review button, and no row names the engine's version.
-        await expect(environment.getByRole('button', { name: 'Open changes', exact: true })).toHaveAccessibleDescription('+1 −0 across 2 files · 1 untracked');
+        await expect(environment.getByRole('button', { name: 'Open changes', exact: true })).toHaveAccessibleDescription('+1 −0 · 2 files 1 untracked');
         await expect(environment.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
         await expect(environment).not.toContainText('Claude Code');
         // A6 (O-10): Details… alone under the figures; running work has its own cards, compaction is the composer's.
         const context = panel.section('Context');
         await expect(context.getByRole('button', { name: 'Details…', exact: true })).toBeVisible();
-        for (const name of ['Compact…', 'Subagents', 'Background work', 'Background tasks']) await expect(context.getByRole('button', { name, exact: true }), name).toHaveCount(0);
+        for (const name of ['Compact…', 'Agents', 'Subagents', 'Background work', 'Background']) await expect(context.getByRole('button', { name, exact: true }), name).toHaveCount(0);
         // With no source to list (this page has not opened A's transcript), Context draws no Sources part and none of its notes.
         await expect(panel.section('Sources')).toHaveCount(0);
         await expect(context).not.toContainText('Open the session to list its sources');
@@ -721,10 +728,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       });
     }
     // agents-and-messages: the parent has no source of its own, so Context draws no Sources part (UX wave U8b, A6), and
-    // the Subagents destination is the card for running work and the panel, not a button of Context's.
+    // the Agents destination is the card for running work and the panel, not a button of Context's.
     await expect(panel.section('Sources')).toHaveCount(0);
     await expect(panel.section('Context')).not.toContainText('No sources yet');
-    await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toHaveCount(0);
+    await expect(panel.section('Context').getByRole('button', { name: 'Agents', exact: true })).toHaveCount(0);
     panel.expectQuietConsole();
   });
 
@@ -735,14 +742,14 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
       await panel.unfold('Environment', 'Context');
-      await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
+      await expect(panel.changeLine).toHaveText('+1 −0 · 2 files'); // the word cut (P36)
       // Two more writes to the same dirty tracked file: its status is unchanged, so only the watcher's size and mtime
       // comparison (the Ask of C4) makes each one a git.changed.
       const latencies: number[] = [];
       for (const lines of [2, 3]) {
         const written = Date.now();
         repo.append(`edit ${lines}`);
-        await expect(panel.changeLine).toHaveText(`+${lines} −0 across 2 files · 1 untracked`, { timeout: changeLineWait.timeout });
+        await expect(panel.changeLine).toHaveText(`+${lines} −0 · 2 files`, { timeout: changeLineWait.timeout });
         const elapsed = Date.now() - written;
         changeLineWait.assertElapsed?.(elapsed);
         latencies.push(elapsed);
@@ -752,16 +759,17 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     });
   });
 
-  test('a disk-only session marks shells unavailable in its Background tasks surface', async ({ maws }) => {
+  test('a disk-only session marks shells unavailable in its Background surface', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     // UX2 moves the work listing out of a permanent summary section, while preserving the live/disk read boundary. UX wave
-    // U8b (M7): the tool is Background tasks, its sections by state (`Running N`), a shell a row of its own.
-    await openSurface(panel.page, 'Background tasks');
+    // U8b (M7): the tool is Background tasks (the word cut's T153: Background), its sections by state (`Running N`), a
+    // shell a row of its own.
+    await openSurface(panel.page, 'Background');
     const running = surface(panel.page, 'background').locator('[data-section="running"]');
     await expect(running.getByRole('button', { name: /^Running \d+$/ })).toBeVisible(); // A: live, its shell and workflow running
     await expect(running).toContainText('pnpm dev');
     await panel.call('switchSession', 'B');
-    await openSurface(panel.page, 'Background tasks');
+    await openSurface(panel.page, 'Background');
     await expect(surface(panel.page, 'background')).toContainText('Shells and monitors are known only while the session runs here');
     // Unknown while offline is not zero: nothing is claimed running for this disk-only session.
     await expect(surface(panel.page, 'background').locator('[data-section="running"]')).toHaveCount(0);
@@ -926,7 +934,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
               await panel.call('switchSession', 'A');
               await panel.call('showSummary');
               await panel.unfold('Environment', 'Context');
-              await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
+              await expect(panel.changeLine).toHaveText('+1 −0 · 2 files'); // the word cut (P36)
               await expect.poll(() => panel.sources()).toEqual(EXPLORATION_SOURCES);
             },
           ],
@@ -1101,10 +1109,10 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await (await sidebarRow(page, CHARTER)).click();
       const environment = await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText('⎇ main');
-      await expect(environment).toContainText('1 ahead of origin/main');
-      // UX2 embeds push state without changing the real Source control route or its trust boundary (A-28).
+      // UX2 embeds push state without changing the real Source control route or its trust boundary (A-28). The word cut
+      // (P39): the row draws its marks, its sentence its name and tooltip.
       const openScm = environment.getByRole('button', { name: '1 ahead of origin/main', exact: true });
-      await expect(openScm).toHaveText('1 ahead of origin/main');
+      await expect(openScm).toHaveText('↑1');
       await expect(openScm).toHaveAccessibleDescription('Open Source control');
       await expect(environment).toContainText('Trust this folder to see PR state');
 
@@ -1123,7 +1131,7 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText(/Not a git repository|Git unavailable/);
       await expect(environment).not.toContainText('⎇');
-      await expect(environment).not.toContainText('ahead of origin/main');
+      await expect(environment.getByRole('button', { name: '1 ahead of origin/main', exact: true })).toHaveCount(0);
 
       await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: tabNamed(CHARTER) }).click();
       await unfoldSessionCard(page, 'Environment');
@@ -1151,12 +1159,13 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       // A6: Context has Details… alone; running work has its own cards and the agents' panels their icons and menu entries.
       const context = await unfoldSessionCard(page, 'Context');
       await expect(context.getByRole('button', { name: 'Details…', exact: true })).toBeVisible();
-      for (const name of ['Compact…', 'Subagents', 'Background work', 'Background tasks']) await expect(context.getByRole('button', { name, exact: true }), name).toHaveCount(0);
+      for (const name of ['Compact…', 'Agents', 'Subagents', 'Background work', 'Background']) await expect(context.getByRole('button', { name, exact: true }), name).toHaveCount(0);
       for (const name of ['Terminal', 'Review', 'Files', 'Browser']) await expect(surfaceRow(page).getByRole('button', { name, exact: true })).toBeEnabled();
       await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
       // UX2: non-primary tools and the Session actions submenu share one More menu; Log is internal. UX wave U8b: Artifacts
-      // is an entry of it like any tool (A3), and Background tasks is the tool's name (M7).
-      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Subagents', 'Background tasks', 'Session info', 'Tasks', 'Source control', 'Side', 'Artifacts', 'Session actions'].sort());
+      // is an entry of it like any tool (A3), and Background tasks is the tool's name (M7; the word cut's T152 and T153:
+      // Agents and Background).
+      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Agents', 'Background', 'Session info', 'Tasks', 'Source control', 'Side', 'Artifacts', 'Session actions'].sort());
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
@@ -2372,21 +2381,21 @@ test.describe('the side column’s tabs and groups (UX wave U8b)', () => {
     });
 
     await test.step('the lower group’s “+” opens below, by the pointer and by keys alone', async () => {
-      await addBelow(page, 'Subagents', 'pointer');
-      await expect(lower).toHaveAttribute('aria-label', 'Subagents');
+      await addBelow(page, 'Agents', 'pointer');
+      await expect(lower).toHaveAttribute('aria-label', 'Agents');
       await expect(upper, 'the upper group’s tab in view is left alone').toHaveAttribute('aria-label', 'Session info');
-      await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['Stub', 'Subagents']);
-      await addBelow(page, 'Background tasks', 'keys');
-      await expect(lower).toHaveAttribute('aria-label', 'Background tasks');
+      await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['Stub', 'Agents']);
+      await addBelow(page, 'Background', 'keys');
+      await expect(lower).toHaveAttribute('aria-label', 'Background');
       await expect(upper).toHaveAttribute('aria-label', 'Session info');
-      await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['Stub', 'Subagents', 'Background tasks']);
+      await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['Stub', 'Agents', 'Background']);
       expect(await sideTabNames(page, 'upper')).toEqual(['Session info', 'Single']);
     });
 
     await test.step('closing the lower group’s last tab leaves one group', async () => {
-      await closeSideTab(page, 'Background tasks');
-      await expect(lower, 'its neighbour comes into view').toHaveAttribute('aria-label', 'Subagents');
-      await closeSideTab(page, 'Subagents');
+      await closeSideTab(page, 'Background');
+      await expect(lower, 'its neighbour comes into view').toHaveAttribute('aria-label', 'Agents');
+      await closeSideTab(page, 'Agents');
       await expect(lower).toHaveAttribute('aria-label', 'Stub');
       await closeSideTab(page, 'Stub');
       await expect(lower).toHaveCount(0);

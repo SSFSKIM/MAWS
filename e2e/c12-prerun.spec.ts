@@ -435,11 +435,17 @@ class EventLog {
   }
 }
 
-async function showTool(page: Page, name: 'Subagents' | 'Background tasks' | 'Review' | 'Files' | 'Terminal' | 'Session info'): Promise<void> {
+async function showTool(page: Page, name: 'Agents' | 'Background' | 'Review' | 'Files' | 'Terminal' | 'Session info'): Promise<void> {
   await openSurface(page, name);
 }
 
-// The UX wave's U8b: an ended task is under the Background tasks panel's Done, folded at first; this unfolds it.
+// The text an element's aria-describedby names (the word cut, T357: a Review chip's scope words are its tooltip and
+// description, where they were the panel's foot line).
+async function describedBy(target: Locator): Promise<string> {
+  return target.evaluate((el) => (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map((ref) => document.getElementById(ref)?.textContent?.trim() ?? '').filter(Boolean).join(' '));
+}
+
+// The UX wave's U8b: an ended task is under the Background panel's Done, folded at first; this unfolds it.
 async function unfoldBackgroundDone(page: Page): Promise<void> {
   const toggle = surface(page, 'background').locator('section[data-section="done"] h3 > button');
   if ((await toggle.getAttribute('aria-expanded', { timeout: 20_000 })) !== 'true') await toggle.click();
@@ -748,7 +754,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const started = await log.until('the background child’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'subagent.started' && e.isBackground === true));
       agentId = started.taskId as string;
       await log.idle(180_000, 3_000);
-      await showTool(page, 'Subagents');
+      await showTool(page, 'Agents');
       await panel(page).locator(`[data-agent-row="${agentId}"]`).click();
       const box = panel(page).locator('[data-view="agent"] textarea');
       await expect(box).toBeEnabled({ timeout: 15_000 });
@@ -767,7 +773,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
         await log.pull();
         if (inboxAt === null && existsSync(inbox) && readFileSync(inbox, 'utf8').includes(text)) inboxAt = Date.now();
         const h = (await lines()).filter((l) => l.t >= sentAt);
-        const fwd = h.findIndex((l) => /sent it with SendMessage/.test(l.v));
+        const fwd = h.findIndex((l) => /^Sent · .+ reads it at its next step$/.test(l.v)); // the word cut (T200)
         const cleared = fwd >= 0 ? h.slice(fwd + 1).find((l) => l.v === '') : undefined;
         if (cleared && deliveredAt === null) {
           const ended = childEndedAt();
@@ -792,7 +798,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await log.idle(240_000);
       expect(inboxAt, 'the child received the relayed message (its inbox)').not.toBeNull();
       // C8-R: delivered live, or the permitted fallback: forwarded, with the child's disk attachment and the follow's state
-      const forwardedLine = history.some((l) => /sent it with SendMessage/.test(l.v));
+      const forwardedLine = history.some((l) => /^Sent · .+ reads it at its next step$/.test(l.v));
       const diskAttachment = (attachment ?? []).some((a) => a.attachment === 'queued_command');
       const following = follow.some((f) => f.state === 'following');
       expect(deliveredAt !== null || (forwardedLine && diskAttachment && following), `the relay reached delivered, or forwarded with the disk attachment and the follow (${JSON.stringify({ deliveredAt, forwardedLine, diskAttachment, following })})`).toBe(true);
@@ -804,7 +810,8 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await log.idle(180_000);
       await showTool(page, 'Review');
       await expect(panel(page).locator('[data-review-file="c12-deep.txt"]')).toBeVisible({ timeout: 30_000 }); // UX wave U5b: a section of the stack
-      const uncommitted = { header: await panel(page).locator('[data-review-header]').innerText(), footer: await panel(page).locator('[data-review-footer]').innerText() };
+      // the word cut (T357): what the scope reads is the pressed chip's tooltip and description, no longer a foot line
+      const uncommitted = { header: await panel(page).locator('[data-review-header]').innerText(), scopeWords: await describedBy(panel(page).locator('[data-chip="uncommitted"]')) };
       const shotsUncommitted = await shoot(page, '10.4-review');
       git(worktree!, 'add', 'c12-deep.txt');
       git(worktree!, 'commit', '-qm', 'C12 pre-run deep file');
@@ -813,9 +820,11 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const base = await defaultBase(createGitRunner({ env: process.env }), worktree!);
       expect(base, 'the default-branch rule finds a base for the worktree').not.toBeNull();
       await panel(page).locator('[data-chip="branch"]').click();
-      await expect(panel(page).locator('[data-review-footer]')).toHaveText(`${branch} · Since ${base!.ref}`, { timeout: 30_000 });
-      await expect(panel(page).locator('[data-review-header]')).toContainText('1 file changed', { timeout: 30_000 });
-      out.review = { uncommitted, thisBranch: { header: await panel(page).locator('[data-review-header]').innerText(), footer: await panel(page).locator('[data-review-footer]').innerText() }, screenshots: [...shotsUncommitted, ...(await shoot(page, '10.4-review-this-branch'))] };
+      const branchChip = panel(page).locator('[data-chip="branch"]');
+      await expect(branchChip).toHaveAttribute('aria-pressed', 'true');
+      await expect(branchChip).toHaveAccessibleDescription(`${branch} · Since ${base!.ref}`, { timeout: 30_000 });
+      await expect(panel(page).locator('[data-review-header]')).toContainText('1 file · ', { timeout: 30_000 }); // the word cut (T356): no "changed"
+      out.review = { uncommitted, thisBranch: { header: await panel(page).locator('[data-review-header]').innerText(), scopeWords: await describedBy(branchChip) }, screenshots: [...shotsUncommitted, ...(await shoot(page, '10.4-review-this-branch'))] };
     });
 
     await step('a Terminal opens in the session’s worktree', async () => {
@@ -845,14 +854,14 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       out.viewer = { path: 'one.txt in the worktree, beside the chat', screenshots: await shoot(page, '10.4-viewer') };
     });
 
-    await step('a workflow shows its phases and agents in Background tasks', async () => {
+    await step('a workflow shows its phases and agents in Background', async () => {
       const from = log.seq;
       value(await invoke(page, 'session.send', { appSessionId: id as AppSessionId, content: `Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${WORKFLOW_SCRIPT}` } as never));
       const started = await log.until('the workflow’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_workflow'), 240_000);
       const taskId = started.taskId as string;
       await log.until('the workflow’s end', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === taskId), 300_000);
       await log.idle(240_000);
-      await showTool(page, 'Background tasks');
+      await showTool(page, 'Background');
       await unfoldBackgroundDone(page); // the ended run (the UX wave's U8b)
       const card = panel(page).locator(`[data-workflow="${taskId}"]`);
       await expect(card).toBeVisible({ timeout: 20_000 });
@@ -869,7 +878,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       expect((out.workflow as { agents: string[] }).agents.length).toBeGreaterThanOrEqual(2);
     });
     // C8's sitting item "a monitor started from a live session", run here so the owner's script carries a tested prompt
-    await step('a monitor started from the live session shows in Background tasks and stops', async () => {
+    await step('a monitor started from the live session shows in Background and stops', async () => {
       // the viewer piece before this one opens its file beside the chat (UX wave U6b-1), so the session's composer is still
       // in the main area, whichever pieces ran before
       await expect(main(page).locator(`[data-composer="${await addressed(page, id!)}"]`)).toBeVisible({ timeout: 20_000 });
@@ -890,8 +899,8 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
         return;
       }
       const taskId = outcome.monitor.taskId as string;
-      await showTool(page, 'Background tasks');
-      const back = surface(page, 'background').getByRole('button', { name: '‹ Background tasks', exact: true }); // the workflow piece left its widget open
+      await showTool(page, 'Background');
+      const back = surface(page, 'background').getByRole('button', { name: '‹ Background', exact: true }); // the workflow piece left its widget open
       if (await back.isVisible()) await back.click();
       const row = panel(page).locator(`[data-monitor="${taskId}"]`);
       await expect(row).toBeVisible({ timeout: 20_000 });
