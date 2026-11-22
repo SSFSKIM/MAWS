@@ -125,7 +125,7 @@ describe('the ask capsule', () => {
   it('stands a cancelled capsule’s why after its chip for a screen that cannot point, hidden from assistive technology', () => {
     const base: RowOf<'ask'> = {
       id: 'ask:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'ask', toolUseId: 't1' as never, askId: 't1', title: null, context: null, blocking: false,
-      questions: [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }], state: 'cancelled', answers: null, error: null, cancelReason: 'ended',
+      questions: [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }], state: 'cancelled', answers: null, error: null, cancelReason: 'exit',
     };
     const { container } = renderRow(base, { storeKey: APP });
     const chip = container.querySelector<HTMLElement>('[data-ask-chip]')!;
