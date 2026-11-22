@@ -46,6 +46,8 @@ const heard: Array<{ kind: string }> = [];
 const devices: Record<string, TestDevice> = {};
 /** The device words each `device-words` scene made, by seq. */
 const madeWords = new Map<number, Record<string, unknown>>();
+/** The other machines the `add-machine` scene enrolled in the org, by name: their signing keys. */
+const machines = new Map<string, SigningKey>();
 let answer: Promise<Record<string, unknown>> | null = null;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -355,6 +357,38 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       });
       await until(() => endpoint.status().stateVersion === head.state.version, 'the new head');
       return;
+    }
+    case 'add-machine': {
+      // Another machine of the org, owned by `owners`: its name, ref and key id bound for the steps after it.
+      const name = step.name as string;
+      const key = await generateSigningKey();
+      const ref = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+      await accept((s) => {
+        s.machines.push({ name, ref, pub: key.pub, owners: step.owners as string[] });
+        s.machineNames.push({ name, ref });
+      });
+      await until(() => endpoint.status().stateVersion === head.state.version, 'the new head');
+      machines.set(name, key);
+      bindings[`ref:${name}`] = ref;
+      bindings[`kid:${name}`] = await keyId(key.pub);
+      return;
+    }
+    case 'machine-event': {
+      // An event of one of `machine`'s sessions in `project`'s log, signed over that project and attested to `owners`,
+      // arriving from the hub there.
+      const key = machines.get(step.machine as string)!;
+      const at = new Date().toISOString();
+      const body = {
+        ts: at,
+        created: at,
+        writer: `${String(step.machine)}/${String(step.session)}`,
+        seq: step.seq,
+        ...(step.body as Record<string, unknown>),
+        attest: { owners: step.owners, ownersProof: [], origin: { kind: 'terminal' }, stateVersion: head.state.version },
+      };
+      const event = await signEvent({ org: ORG, project: step.project as string }, body, key.privateKey, key.pub);
+      if (typeof step.binding === 'string') bindings[step.binding] = event;
+      return endpoint.rl10.relay.fromHub({ t: 'events', project: step.project as string, events: [event] });
     }
     default:
       throw new Error(`no scene ${step.scene}`);
