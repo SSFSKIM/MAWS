@@ -1020,7 +1020,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(mark, `the browser's tab, marked forwarded\n${mainSaid(page)}\nB's log:\n${bPtyLines()}`).toHaveText(`forwarded from ${B_NAME}`, { timeout: 60_000 });
       // the word cut (T429): what is drawn is the machine's name; "forwarded from" before it is for a screen reader alone
       await expect(mark.locator('.sr-only')).toHaveText('forwarded from ');
-      expect(await mark.evaluate((el) => [...el.childNodes].filter((node) => !(node instanceof Element && node.classList.contains('sr-only'))).map((node) => node.textContent).join('')), 'drawn: the machine alone').toBe(B_NAME);
+      expect(await mark.evaluate((el) => Array.from(el.childNodes).filter((node) => !(node instanceof Element && node.classList.contains('sr-only'))).map((node) => node.textContent).join('')), 'drawn: the machine alone').toBe(B_NAME);
       await expect(mark).toHaveAttribute('title', `Port ${devPort} on ${B_NAME}, forwarded to this Mac`);
       type Tab = { tabId: string; url: string; forward?: { machine: string; port: number; localPort: number } };
       const forwardedTab = async () => (await invoke<{ tabs: Tab[] }>(page, 'browser.tabs.list', { appSessionId: app }, b.ref)).tabs.find((t) => t.forward?.port === devPort);
@@ -4493,7 +4493,7 @@ const sheetNow = (page: Page) =>
     const more = sheet?.querySelector('[data-chooser-more]');
     if (!sheet || !list || !more) return null;
     const [s, l, m] = [sheet, list, more].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
-    const waits = [...list.querySelectorAll('[role="progressbar"]')].map((spinner) => spinner.getAttribute('aria-label') ?? '');
+    const waits = Array.from(list.querySelectorAll('[role="progressbar"]')).map((spinner) => spinner.getAttribute('aria-label') ?? '');
     return { height: Math.round(s.height), listBottom: l.bottom, moreTop: m.top, moreBottom: m.bottom, windowHeight: window.innerHeight, listScrolled: list.scrollTop, words: [list.textContent ?? '', ...waits].join(' ') };
   });
 // The sheet caught in the state whose words its list's area shows, or null: a window a scene only stages (the held pipe's
