@@ -114,14 +114,14 @@ async function resize(app: ElectronApplication, page: Page, width: number, heigh
   await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, height), [width, height] as const);
   await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height] as const);
 }
-// W2: the session's windows as Session info's Usage row reads them (the status line that showed them is gone).
-async function sessionWindows(page: Page, title: string): Promise<[string, string]> {
+// The word cut (P176): Session info no longer repeats a session's windows (the usage displays show them); its Usage group
+// keeps Cost alone.
+async function noSessionWindows(page: Page, title: string): Promise<void> {
   await (await sidebarRow(page, title)).click();
   await openSurface(page, 'Session info');
-  const usage = surface(page, 'session-info').locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
-  await expect(usage).toHaveText(/^5h \d+% .* · Weekly \d+% /);
-  const text = (await usage.textContent()) ?? '';
-  return [/5h (\d+)%/.exec(text)![1]!, /Weekly (\d+)%/.exec(text)![1]!];
+  const info = surface(page, 'session-info').locator('[data-session-info]');
+  await expect(info.locator('dt', { hasText: /^Cost$/ })).toHaveCount(1);
+  await expect(info.locator('dt', { hasText: /^Usage$/ })).toHaveCount(0);
 }
 
 test('usage: the ring, the popover’s accounts, and in Settings › Usage the grid, the routing one and why, a reauth account, the disabled actions and the hand-off', async () => {
@@ -131,10 +131,10 @@ test('usage: the ring, the popover’s accounts, and in Settings › Usage the g
   const { app, page } = maws;
   try {
     await resize(app, page, 1440, 900); // Settings' body has its 760 px
-    // The windows Session info reads for the unpinned routed session (the drain target's) and the re-pinned one (1@'s).
-    const [quota5h, quota7d] = await sessionWindows(page, QUOTA);
-    const [probe5h, probe7d] = await sessionWindows(page, PROBE);
-    expect([quota5h, quota7d, probe5h, probe7d]).toEqual(['53', '63', '77', '44']);
+    // The windows the unpinned routed session reads (the drain target's) and the re-pinned one reads (1@'s), from the
+    // fixture; Session info draws neither (P176), the popover and the panel below do.
+    for (const title of [QUOTA, PROBE]) await noSessionWindows(page, title);
+    const [quota5h, quota7d, probe5h, probe7d] = ['53', '63', '77', '44'];
 
     // The ring: 3@ routes, and its most binding limit is the Fable week at 82 %, a warning; no number is drawn.
     const ring = ringOf(page);

@@ -24,6 +24,7 @@ import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject, sidebarRow } from './support/sidebar';
+import { unfoldInfoGroup } from './support/session-info';
 import { pageRegion, unfoldSessionCard } from './support/shell';
 import { customizePage } from './support/customize';
 
@@ -855,15 +856,21 @@ test.describe('interactive', () => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const info = page.locator(`[data-session-info="${await addressed(page, READY)}"]`);
-    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
-    await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: with its switch; P5 O7 M9: and back
-    await expect(valueOf(info, 'Context')).toHaveText('21,508 of 200,000 · 11% · autocompact at 167,000');
-    const lane = valueOf(info, 'Auto-mode lane');
+    // the word cut: the group of the context, usage and cost is Usage (T249), and only Permissions and Usage start open
+    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Usage', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
+    await unfoldInfoGroup(info, 'Gateway');
+    await expect(valueOf(info, 'Route')).toHaveText('Gateway · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: with its switch; P5 O7 M9: and back; the word cut (T256): the route and its URL
+    // the word cut (P176): no Context row; the composer's ring and its popover show the context
+    await expect(info.locator('dt', { hasText: /^Context$/ })).toHaveCount(0);
+    // the word cut (T254): the lane reads in a word, its sentence the value's tooltip and description
+    const lane = valueOf(info, 'Auto-mode lane').locator('span[tabindex]');
     const SERVER = 'Server · reviews ride on the main request · no charge · model chosen server-side';
-    await expect(lane, 'the scenario status on Sonnet, get_status reading Enabled (auto-routed seq 145)').toHaveText(SERVER);
+    await expect(lane, 'the scenario status on Sonnet, get_status reading Enabled (auto-routed seq 145)').toHaveText('Server');
+    await expect(lane).toHaveAccessibleDescription(SERVER);
 
     await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setModel', { appSessionId: id, model: 'claude/astra' }), READY);
-    await expect(lane).toHaveText('Local (expected) · a GPT route carries no Anthropic verdict');
+    await expect(lane).toHaveAccessibleDescription('Local (expected) · a GPT route carries no Anthropic verdict');
+    await expect(lane).toHaveText('Local');
 
     // C3's observation in the open turn (the unavailable-safeguard verdict or the billing notice)
     await app.evaluate((_, id) => {
@@ -871,12 +878,14 @@ test.describe('interactive', () => {
       const turn = b.emitTurnStarted(id as never);
       b.emitStatus(id as never, { gateway: { ...b.status(id as never).gateway, localLane: { observedInTurn: turn, at: new Date().toISOString() } } });
     }, READY);
-    await expect(lane).toHaveText(/^Local · Sonnet 5 through .+ · counted as usage · the engine's notice is in the transcript$/);
+    await expect(lane).toHaveAccessibleDescription(/^Local · Sonnet 5 through .+ · counted as usage · the engine's notice is in the transcript$/);
+    await expect(lane).toHaveText('Local');
 
     // the next turn on Sonnet: C3 cleared the observation at its turn.started
     await app.evaluate((_, id) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.emitTurnStarted(id as never), READY);
     await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setModel', { appSessionId: id, model: 'sonnet' }), READY);
-    await expect(lane).toHaveText(SERVER);
+    await expect(lane).toHaveAccessibleDescription(SERVER);
+    await expect(lane).toHaveText('Server');
     expect(backend.consoleErrors()).toEqual([]);
   });
 
@@ -896,8 +905,10 @@ test.describe('interactive', () => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
-    const route = valueOf(page.locator(`[data-session-info="${await addressed(page, READY)}"]`), 'Route'); // W2: Session info's Route row
-    await expect(route).toContainText('Gateway · ClaudeUsage relay');
+    const info = page.locator(`[data-session-info="${await addressed(page, READY)}"]`);
+    await unfoldInfoGroup(info, 'Gateway'); // the word cut: the Gateway group starts folded
+    const route = valueOf(info, 'Route'); // W2: Session info's Route row
+    await expect(route).toContainText('Gateway · http://127.0.0.1:8641'); // the word cut (T256): the route and its URL
     await route.getByRole('button', { name: 'Switch to Direct…' }).click();
 
     const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
@@ -921,7 +932,8 @@ test.describe('interactive', () => {
     expect(lifecycle.slice(stop - 1, stop + 2), 'the recheck, the stop, the restart, in one log').toEqual(['session.status', 'session.stop', 'session.start']);
     expect(lifecycle.filter((c) => c === 'session.stop' || c === 'session.start')).toEqual(['session.stop', 'session.start']);
     await expect(route.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
-    await expect(route).toHaveText(/^Direct · engine's own login/);
+    await expect(route).toHaveText(/^Direct(?: · |Switch)/); // the word cut (T256): the route and the login, no "engine's own login"
+    await expect(route).not.toContainText("engine's own login");
     expect(backend.consoleErrors()).toEqual([]);
   });
 
@@ -929,7 +941,7 @@ test.describe('interactive', () => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
-    await valueOf(page.locator(`[data-session-info="${await addressed(page, READY)}"]`), 'Route').getByRole('button', { name: 'Switch to Direct…' }).click(); // W2: Session info's
+    await valueOf(await unfoldInfoGroup(page.locator(`[data-session-info="${await addressed(page, READY)}"]`), 'Gateway'), 'Route').getByRole('button', { name: 'Switch to Direct…' }).click(); // W2: Session info's
     const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
     await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
     // a third task between the confirm and the stop: it starts as the switch re-reads the status after the answer

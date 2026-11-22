@@ -3,7 +3,7 @@
 // scratch root under /tmp (E8's live form, `e2e/plugins-live.spec.ts`): a scratch `CLAUDE_CONFIG_DIR` the engine reads
 // and writes, a scratch profile (`userData`) kept across one relaunch, the runner's CLAUDE* variables dropped by
 // `launchMaws`, the relay reached only by the engine (and `GET /api/hello` at the gate). Two terminal-style sessions are
-// discovered from transcripts seeded in the scratch home: the first is opened (nothing launches; "Not observed yet"),
+// discovered from transcripts seeded in the scratch home: the first is opened (nothing launches; its model "—", unknown),
 // then sent "Reply with OK" (Starting…, then the one-line Haiku reply in the same conversation) and stopped; the second
 // is started once with no prompt from Session info's Refresh and stopped, so it is an exited MAWS-run session, and its
 // `/skills` reads "Not read yet." with Load now, which says Starting… and then shows the scratch home's skill. MAWS then
@@ -18,6 +18,7 @@
 // In the gate it is the live group e2e:available-live (`ci-gate.sh --live`), its cap and the installed engine in its script.
 // Its log, observations and screenshots stay in the scratch root, which the run leaves in place and names.
 import { addressed } from './support/address';
+import { unfoldInfoGroup } from './support/session-info';
 import { mainTabById, openSurface, surface } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -201,10 +202,11 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
     skillsId = await appIdOf(page, SKILLS_SESSION);
     log(`discovered: ${SEND_SESSION} → ${sendId}; ${SKILLS_SESSION} → ${skillsId}`);
 
-    await step('open', 'a discovered terminal session opened: nothing launches; Session info reads Not observed yet', async () => {
+    await step('open', 'a discovered terminal session opened: nothing launches; Session info reads its model as unknown', async () => {
       await open(page, sendId);
       const info = await sessionInfo(page);
-      await expect(infoValue(info, 'Main')).toContainText('Not observed yet');
+      await unfoldInfoGroup(info, 'Model'); // the word cut: the Model group starts folded
+      await expect(infoValue(info, 'Main')).toHaveText('—'); // the word cut (P174): an unknown value is a dash
       const main = (await infoValue(info, 'Main').innerText()).trim();
       expect(spawns(sendId), 'no session.launch for it').toHaveLength(0);
       expect((await engineSessions(page)).filter((s) => s.appSessionId === sendId)).toEqual([]);
@@ -279,10 +281,14 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
       await expect(main(page)).toBeVisible();
       await open(page, sendId);
       const info = await sessionInfo(page);
-      await expect(infoValue(info, 'Main')).toContainText('Last observed', { timeout: 30_000 });
+      await unfoldInfoGroup(info, 'Model');
+      // the word cut (T253): when the model was last observed is the value's tooltip and description; Session info has no
+      // Context row (P176), the ring carries the context
+      const observedMain = infoValue(info, 'Main').locator('span[tabindex]');
+      await expect(observedMain).toHaveAccessibleDescription(/^Last observed /, { timeout: 30_000 });
       const ring = main(page).getByRole('button', { name: /^Context window/ });
       await expect(ring).toHaveAttribute('aria-label', /Last reading, /, { timeout: 30_000 });
-      const lines = { main: (await infoValue(info, 'Main').innerText()).trim(), context: (await infoValue(info, 'Context').innerText()).trim(), ring: await ring.getAttribute('aria-label') };
+      const lines = { main: `${(await observedMain.innerText()).trim()} (${await observedMain.evaluate((el) => document.getElementById(el.getAttribute('aria-describedby') ?? '')?.textContent ?? '')})`, ring: await ring.getAttribute('aria-label') };
       await page.waitForTimeout(3_000);
       const live = (await engineSessions(page)).filter((s) => s.process !== 'exited');
       expect(live, 'no engine started').toEqual([]);

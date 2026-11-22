@@ -58,6 +58,7 @@
 //   (f) and (g) branch on `host.holder` (above): the older host's form is kept with an engine host that stands in for
 //        one before O16 (MAWS_E2E_HOST_WITHOUT_HOLDER, detached.ts).
 import { addressed } from './support/address';
+import { unfoldInfoGroup } from './support/session-info';
 import { openSurface, settingsDialog, sideColumn, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -401,7 +402,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     const budget = value(await invoke(second.page, 'engine.budget', undefined));
     expect(budget.blocked.length + budget.settling + budget.candidates, 'engine.budget counts the kept session').toBe(1);
     await openSurface(second.page, 'Session info');
-    const budgetRow = dd(second.page.locator(`[data-session-info="${await addressed(second.page, id)}"]`), 'Memory budget');
+    const budgetRow = dd(await unfoldInfoGroup(second.page.locator(`[data-session-info="${await addressed(second.page, id)}"]`), 'Engine'), 'Memory budget'); // the word cut: Engine starts folded
     await expect(budgetRow, 'Session info reads the budget the renderer holds').toHaveText(/ · 1 session$/);
     log.push(`engine.budget after the relaunch: ${JSON.stringify(budget)}; Session info's Memory budget "${await budgetRow.textContent()}"`);
 
