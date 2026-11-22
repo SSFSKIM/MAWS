@@ -622,7 +622,8 @@ function CrossProject({ event }: { event: LogEvent }) {
  * One run of agent-to-agent traffic, as MAWS draws a message between sessions: a lifecycle line with the bubble mark. A
  * run of one is the line itself; more fold behind their participants, their count and their span, and open in place.
  * The fold reads as the app's Channel draws one (the word cut, after P447 and P448): "maws-45 and ci-opt · 3", the count
- * named by its meaning ("3 messages"), its keyboard tooltip too, and drawn at rest on a phone, which cannot point.
+ * named by its meaning ("3 messages"), its keyboard tooltip too, and drawn at rest under the row on a phone, which
+ * cannot point.
  */
 function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }) {
   const [open, setOpen] = useState(false);
@@ -666,10 +667,13 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
             <span className="desk-chat-time">
               {clock(says[0].event.ts)}–{clock(says.at(-1)!.event.ts)}
             </span>
-            <TouchFact className="desk-chat-count-fact">{count}</TouchFact>
           </button>
         </Tip>
       </div>
+      {/* on a phone, the count's meaning on a line of its own under the row, so the row keeps its order */}
+      <TouchFact block className="desk-chat-count-fact">
+        {count}
+      </TouchFact>
       {open && (
         <ul className="desk-chat-says" data-testid="agent-run-messages">
           {says.map((s) => (

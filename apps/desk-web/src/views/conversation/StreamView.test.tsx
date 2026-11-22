@@ -440,11 +440,16 @@ it('folds a run of agent messages to its names and its count, named as messages,
   const fold = within(run).getByRole('button');
   expect(fold.textContent).toContain('maws-45 and ci-opt · 3');
   expect(fold.textContent).not.toContain('between agents');
-  expect(fold.textContent).toMatch(/^maws-45 and ci-opt · 3.+–.+3 messages$/); // the names, the count, the span, then the touch fact
+  expect(fold.textContent).toMatch(/^maws-45 and ci-opt · 3.+–.+$/); // the names, the count, then the span
+  expect(fold.textContent).not.toContain('messages');
   expect(within(fold).getByRole('img', { name: '3 messages' }).textContent).toBe('3');
+  // the touch fact: a block of its own under the fold's row, never inline among the names
   const touch = run.querySelector<HTMLElement>('[data-touch-fact]')!;
   expect(touch.textContent).toBe('3 messages');
+  expect(touch.getAttribute('data-touch-fact')).toBe('block');
   expect(touch.getAttribute('aria-hidden')).toBe('true');
+  expect(fold.contains(touch)).toBe(false);
+  expect(touch.previousElementSibling).toBe(fold.closest('.transcript-lifecycle'));
   act(() => fold.focus());
   expect((await screen.findByRole('tooltip')).textContent).toBe('3 messages');
   fireEvent.click(fold);
