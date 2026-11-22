@@ -144,6 +144,7 @@ export const BACKGROUND_COPY = {
   columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time', /* E7 */ state: 'State' }, // the widget's agent table
   phasesPending: 'Phases arrive with the first progress frame', // the quiet spinner's name (the word cut, T212)
   noPhases: 'No phases', // a run that ended before any progress: its wait is over (the word cut, T212)
+  noPhaseData: 'No phase data', // a run read from disk without its snapshot, in a session nothing else reports (T212)
   stop: 'Stop', // a workflow's too, on its own card and page (the word cut, T215)
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,

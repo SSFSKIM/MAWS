@@ -327,7 +327,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const row = (node: TaskNode) => {
     const key = node.taskId;
     const common = { node, selected: selected === node.taskId, stopError: stopErrors.get(node.taskId) ?? null };
-    if (node.kind === 'workflow') return <WorkflowCard key={key} {...common} view={runView(node, null, now)} live={live} onOpen={handle.openRun} onStop={handle.stop} />;
+    if (node.kind === 'workflow') return <WorkflowCard key={key} {...common} view={runView(node, null, now)} live={live} phasesCanArrive={ctx.status !== null || driven || !runsRead} onOpen={handle.openRun} onStop={handle.stop} />;
     const task = { ...common, now, stopDoubt: doubted.has(node.taskId), onStop, stopGap };
     if (node.kind === 'shell') return <ShellRow key={key} {...task} kindMark onOutput={live ? (path) => openLog(appSessionId, path, node.description) : null} />; // a lane A job's tail is remote-only
     if (node.kind === 'monitor') return <MonitorRow key={key} {...task} kindMark />;

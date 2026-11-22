@@ -17,6 +17,8 @@ interface Props {
   node: TaskNode;
   view: RunView;
   live: boolean;
+  /** Whether its phases can still arrive (`PhasesPending`): the session runs, or its disk read has not answered. */
+  phasesCanArrive: boolean;
   selected: boolean;
   stopError: string | null;
   onOpen: (taskId: TaskId) => void;
@@ -25,16 +27,16 @@ interface Props {
 
 // The word cut (T212): before the first progress, a quiet spinner in the sentence's place, the words its name, or
 // `No phases` once the run ended without any.
-const summaryText = (node: TaskNode, summary: RunSummary | null) =>
+const summaryText = (node: TaskNode, summary: RunSummary | null, canArrive: boolean) =>
   summary === null ? (
-    <PhasesPending node={node} />
+    <PhasesPending node={node} canArrive={canArrive} />
   ) : summary.kind === 'phase' ? (
     BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
   ) : (
     BACKGROUND_COPY.runSummary[summary.kind]
   );
 
-export function WorkflowCard({ node, view, live, selected, stopError, onOpen, onStop }: Props) {
+export function WorkflowCard({ node, view, live, phasesCanArrive, selected, stopError, onOpen, onStop }: Props) {
   return (
     <article
       data-workflow={node.taskId}
@@ -69,7 +71,7 @@ export function WorkflowCard({ node, view, live, selected, stopError, onOpen, on
         {runLine(node, view)}
       </p>
       <p data-part="summary" className="min-h-[1lh] truncate text-ui-sm tabular-nums">
-        {summaryText(node, runSummary(view.phases))}
+        {summaryText(node, runSummary(view.phases), phasesCanArrive)}
       </p>
       {node.status === 'running' && live && (
         <div className="mt-1 flex flex-col items-start gap-1">

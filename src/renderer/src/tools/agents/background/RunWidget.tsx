@@ -84,7 +84,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
       </header>
       {view.phases.length === 0 ? (
         <p className="px-3.5 pt-3">
-          <PhasesPending node={node} /* the word cut (T212) */ />
+          <PhasesPending node={node} canArrive={ctx.status !== null || driven || runs === null} /* the word cut (T212) */ />
         </p>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col @min-[520px]:flex-row">

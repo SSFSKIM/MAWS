@@ -16,10 +16,14 @@ export function runLine(node: TaskNode, view: RunView): string {
   return BACKGROUND_COPY.workflowLine(node.workflow?.workflowName ?? null, view.elapsedMs === null ? null : formatElapsed(view.elapsedMs), view.agents);
 }
 
-// Where a run's phases go before it has any (the word cut, T212): a quiet spinner while the run can still report them,
-// `No phases` once it ended without (its badge says how).
-export function PhasesPending({ node }: { node: TaskNode }) {
-  return isEnded(node.status) ? BACKGROUND_COPY.noPhases : <QuietSpinner label={BACKGROUND_COPY.phasesPending} />;
+// Where a run's phases go before it has any (the word cut, T212). A quiet spinner while they can still arrive: the run
+// has not ended and something can still report it (`canArrive`: the session runs here or in a terminal, whose frames
+// and run files keep coming, or the disk read has not answered). Settled otherwise: `No phases` for a run that ended
+// without any (its badge says how), `No phase data` for one whose answered read held no snapshot. A later read that
+// brings one draws its phases.
+export function PhasesPending({ node, canArrive }: { node: TaskNode; canArrive: boolean }) {
+  if (isEnded(node.status)) return BACKGROUND_COPY.noPhases;
+  return canArrive ? <QuietSpinner label={BACKGROUND_COPY.phasesPending} /> : BACKGROUND_COPY.noPhaseData;
 }
 
 // A run a link named that no read has brought yet (the word cut, T209). A quiet spinner while a read can still bring it:
