@@ -559,7 +559,7 @@ describe('the notice lines', () => {
 
   // the word cut (T462): a tab the memory cap unloaded draws no line (its chip is greyed); a page the count cap left
   // suspended does (its Load did nothing), as do an extension's options tab the cap closed and one refused at the cap
-  // (T463). T464: a copy reads Copied.
+  // (T463). T464: a copy reads Copied. The refused page's line is that page's (the next case): another tab's draws none here.
   it('the session’s transient notices, routed by session, each with its sentence and Dismiss', () => {
     show({ tab: tab() });
     act(() => {
@@ -572,10 +572,28 @@ describe('the notice lines', () => {
       raiseNotice({ appSessionId: B, tabId: null, kind: 'tabsFileBroken' });
     });
     const texts = [...document.querySelectorAll('[data-browser-notice]')].map((element) => element.textContent);
-    expect(texts).toEqual(['Not loaded: too many pages open', 'Too many pages are loaded to open uBlock’s options', 'Closed: too many pages open', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
+    expect(texts).toEqual(['Too many pages are loaded to open uBlock’s options', 'Closed: too many pages open', 'Copied', BROWSER_COPY.partitionFallback('Work')]);
     fireEvent.click(within(line('urlCopied')!).getByRole('button', { name: BROWSER_COPY.dismiss }));
     expect(line('urlCopied')).toBeNull();
     expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['tabsCap', 'tabsCap', 'tabsCap', 'tabsCap', 'partitionFallback', 'tabsFileBroken']);
+  });
+
+  // The word cut's M3 fix wave review: the count cap's refusal says why one page's Load did nothing, so it stands in the
+  // chrome showing that page while the page is still not loaded; a sibling shown meanwhile, or the page once a retry
+  // loaded it, draws none.
+  it('a page the count cap left unloaded says so only on that page, until it loads', () => {
+    const refused = tab({ suspended: true });
+    const sibling = browserTab(T2, A, { title: 'Page B' });
+    const chromeOn = (shown: BrowserTab) => <Chrome appSessionId={A} surface="panel" tab={shown} tabs={[refused, sibling]} />;
+    const { rerender } = render(chromeOn(refused));
+    act(() => raiseNotice({ appSessionId: A, tabId: T1, kind: 'tabsCap', count: 12 }));
+    expect(line('tabsCap')?.textContent).toBe('Not loaded: too many pages open');
+    rerender(chromeOn(sibling));
+    expect(line('tabsCap')).toBeNull();
+    rerender(chromeOn(refused));
+    expect(line('tabsCap')?.textContent).toBe('Not loaded: too many pages open');
+    rerender(chromeOn(tab({ suspended: false })));
+    expect(line('tabsCap')).toBeNull();
   });
 });
 

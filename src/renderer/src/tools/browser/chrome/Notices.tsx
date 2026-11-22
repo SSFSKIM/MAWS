@@ -8,7 +8,8 @@
 //   address; U12a: Copy screenshot's outcome), routed by session (Decision Log 44 (f)) and gone after 4 s or on Dismiss.
 //   The word cut (T462): a tab the memory cap unloaded draws none, since its chip is already greyed; an extension's
 //   options tab the cap closed instead (main's notice without a tab) keeps a short line, since nothing else on screen
-//   says why it went, and so does a page the count cap left suspended (main's notice on it), whose Load did nothing.
+//   says why it went, and so does a page the count cap left suspended (main's notice on it), whose Load did nothing,
+//   in the chrome showing that page only.
 //   E4d: comment mode's refused pick and unconfirmed arm come this way too (E4d execution document, Decision Log 35).
 //
 // Each line sits on whole px (a 24 px text line in 4 px padding, Decision Log 48), so the pane under the chrome starts on
@@ -34,8 +35,14 @@ interface Action {
   run(): void;
 }
 
+// The count cap's refusal of one page's Load (main's `tabsCap` with a count and that tab): that page's, not the session's.
+const refusedLoad = (notice: ChromeNotice) => notice.kind === 'tabsCap' && notice.name === undefined && notice.count !== undefined && notice.tabId !== null;
+
 export function Notices({ appSessionId, tab }: { appSessionId: AppSessionId; tab: BrowserTab | null }) {
-  const notices = useBrowser(useShallow((s) => s.notices.filter((notice) => notice.appSessionId === appSessionId)));
+  // A refusal stands in the chrome showing its page while that page is still unloaded: a sibling shown meanwhile, or the
+  // page once a retry loaded it, draws none.
+  const unloaded = tab?.suspended ? tab.tabId : null;
+  const notices = useBrowser(useShallow((s) => s.notices.filter((notice) => notice.appSessionId === appSessionId && (!refusedLoad(notice) || notice.tabId === unloaded))));
   return (
     <>
       {tab && <TabLines tab={tab} />}
