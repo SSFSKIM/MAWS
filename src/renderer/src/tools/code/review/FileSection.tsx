@@ -5,14 +5,16 @@
 // option) is built here alone: under NARROW_HEADER_WIDTH Viewed is a check box and "Open file ↗" is "↗", each with its
 // words as a tooltip.
 //
-// The body: the file's diff (FileBody, loaded on first use); "Binary file"; "Diff too large to display. Open the file";
-// nothing for a rename without a change; the note for an untracked folder; "Diff unavailable: …" with Retry for a file
-// whose own read failed. A folded section has no body; an unfolded one outside the stack's band (M4) is a spacer of the
+// The body: the file's diff (FileBody, loaded on first use); "Diff too large to display. Open the file"; nothing for a
+// rename without a change, nor for a binary, whose badge says Binary (the word cut, N44), but "Binary file" for an
+// untracked binary, whose badge says Untracked; "Untracked folder" for an untracked folder (T361); "Diff unavailable: …"
+// with Retry for a file whose own read failed; while it is read, the quiet spinner. A folded section has no body; an unfolded one outside the stack's band (M4) is a spacer of the
 // height the stack gives it.
 //
 // UX wave U5b, M5 (§G, decision 10): while the card is open on a line of the file, the file holds still; when the scope's
 // re-read brings other hunks for it, the header shows one muted line under its row, "This file changed · Refresh".
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { QuietSpinner } from '../../../ui/spinner';
 import { REVIEW_COPY } from '../copy';
 import type { DiffBlockData } from './FileBody';
 import { reviewLayout } from './measure';
@@ -32,11 +34,12 @@ const quiet = 'inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-s
 const glyph = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 const BADGE = 'shrink-0 whitespace-nowrap rounded-sm bg-bg-active px-1.5 text-ui-sm';
 
-// Marked, so the stack does not take a Loading line's height for the body's, nor its rows for the diff's.
+// Marked, so the stack does not take a wait's height for the body's, nor its rows for the diff's: the line a wait keeps,
+// empty for half a second, then the quiet spinner.
 const Loading = () => (
-  <p data-review-loading className="m-0 px-3 py-2 text-ui-sm text-fg-muted">
-    {REVIEW_COPY.loading}
-  </p>
+  <div data-review-loading className="flex h-8 items-center px-3">
+    <QuietSpinner label={REVIEW_COPY.loading} />
+  </div>
 );
 
 // The library's `data` for each block of a file, made from the blocks' text: a section keeps the objects while the text
@@ -89,7 +92,7 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
     if (untrackedDirectory)
       return (
         <p data-review-note className="m-0 px-3 py-2 text-ui-sm text-fg-muted">
-          {REVIEW_COPY.untrackedNote}
+          {REVIEW_COPY.untrackedFolder}
         </p>
       );
     // A failed own read says so first, a binary's (its header, what a mark signs) as much as a text file's.
@@ -102,7 +105,7 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
           </button>
         </div>
       );
-    if (binary) return <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{REVIEW_COPY.binaryFile}</p>;
+    if (binary) return file.kind === 'binary' ? null : <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{REVIEW_COPY.binaryFile}</p>;
     if (hunks === null) return <Loading />;
     if (large)
       return (

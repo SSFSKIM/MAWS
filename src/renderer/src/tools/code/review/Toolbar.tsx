@@ -2,11 +2,14 @@
 // card host, M5), Collapse all, the hunk counter with ↑ and ↓, and one menu, View, holding Unified, Split and Wrap,
 // which are the stack's. It wraps by measure, not by a width (D1): one line when everything fits; otherwise the totals
 // on the first line and the controls on the next, the chip beside the totals while it fits there and on a line of its
-// own when it does not; the counter shortens to "n of m" last, where "Showing hunk n of m" does not fit the controls'
-// line. Card 1 ("Wrap, drop scope word", the owner's answer at its recommended option) is built here and in
-// `totalsWords`: the second answer would be one edit of `totalsWords`.
+// own when it does not. Card 1 ("Wrap, drop scope word", the owner's answer at its recommended option) is built here and
+// in `totalsWords`: the second answer would be one edit of `totalsWords`. The word cut (T306): the counter reads "n / m"
+// at every width, a bare count named "Hunk n of m", which is its tooltip; (T357) in a diff tab, which has no scope
+// chips, the totals line owns the scope's words, the faint foot line's until the cut.
 import { DropdownMenu } from 'radix-ui';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { BareCount } from '../../../ui/count';
+import { Tip } from '../../../ui/tip';
 import { REVIEW_COPY } from '../copy';
 import { reviewLayout } from './measure';
 import type { ReviewMode } from './view-state';
@@ -25,34 +28,29 @@ export interface ToolbarWidths {
   totals: number;
   chip: number; // 0: no chip
   collapse: number;
-  nav: number; // the counter (in the form drawn), ↑, ↓ and View
-  counterShown: number; // the counter as drawn
-  counterLong: number; // "Showing hunk n of m"
-  counterShort: number; // "n of m"
+  nav: number; // the counter, ↑, ↓ and View
 }
 export interface ToolbarFit {
   lines: 1 | 2 | 3; // 2: the totals (and the chip), then the controls; 3: the totals, the chip, the controls
-  counter: 'long' | 'short';
 }
 
 export function toolbarFit(w: ToolbarWidths): ToolbarFit {
-  if (w.room <= 0) return { lines: 1, counter: 'long' };
-  const navLong = w.nav - w.counterShown + w.counterLong;
-  const controls = w.collapse + GAP + navLong;
+  if (w.room <= 0) return { lines: 1 };
+  const controls = w.collapse + GAP + w.nav;
   const head = w.totals + (w.chip > 0 ? GAP + w.chip : 0);
-  if (head + GAP + controls <= w.room) return { lines: 1, counter: 'long' };
-  return { lines: w.chip > 0 && head > w.room ? 3 : 2, counter: controls <= w.room ? 'long' : 'short' };
+  if (head + GAP + controls <= w.room) return { lines: 1 };
+  return { lines: w.chip > 0 && head > w.room ? 3 : 2 };
 }
-
-const sameFit = (a: ToolbarFit, b: ToolbarFit) => a.lines === b.lines && a.counter === b.counter;
 
 const quiet = 'inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
 const MENU = 'z-50 min-w-40 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 const LINE_BREAK = 'h-0 basis-full';
+const HEADER = 'm-0 min-w-0 max-w-full truncate text-ui font-medium text-fg';
 
 export interface ToolbarProps {
   totals: string; // `totalsWords`
+  scopeWords?: string | null; // a diff tab's: what the scope reads, the totals line's tooltip and description (T357)
   chip?: ReactNode; // the card host's chip and place line (M5)
   allFolded: boolean; // the button reads Expand all
   onFoldAll(): void;
@@ -65,12 +63,11 @@ export interface ToolbarProps {
   onWrap(): void;
 }
 
-export function Toolbar({ totals, chip, allFolded, onFoldAll, counter, onHunk, mode, splitRoom, onMode, wrap, onWrap }: ToolbarProps) {
+export function Toolbar({ totals, scopeWords, chip, allFolded, onFoldAll, counter, onHunk, mode, splitRoom, onMode, wrap, onWrap }: ToolbarProps) {
   const root = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState<ToolbarFit>({ lines: 1, counter: 'long' });
+  const [fit, setFit] = useState<ToolbarFit>({ lines: 1 });
   const hasChip = chip !== undefined && chip !== null;
-  const long = counter ? REVIEW_COPY.hunkOf(counter.index + 1, counter.count) : '';
-  const short = counter ? REVIEW_COPY.hunkOfShort(counter.index + 1, counter.count) : '';
+  const shown = counter ? REVIEW_COPY.hunkCount(counter.index + 1, counter.count) : '';
 
   // Measured at every change of what the parts say and of the room or a part's size (a chip that appears or grows).
   useLayoutEffect(() => {
@@ -87,11 +84,8 @@ export function Toolbar({ totals, chip, allFolded, onFoldAll, counter, onHunk, m
         chip: part('[data-review-toolbar-chip]'),
         collapse: part('[data-review-collapse]'),
         nav: part('[data-review-nav]'),
-        counterShown: part('[data-review-hunk]'),
-        counterLong: part('[data-review-counter="long"]'),
-        counterShort: part('[data-review-counter="short"]'),
       });
-      setFit((prev) => (sameFit(prev, next) ? prev : next));
+      setFit((prev) => (prev.lines === next.lines ? prev : next));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -102,14 +96,22 @@ export function Toolbar({ totals, chip, allFolded, onFoldAll, counter, onHunk, m
       if (found) observer.observe(found);
     }
     return () => observer.disconnect();
-  }, [totals, hasChip, long, allFolded]);
+  }, [totals, hasChip, shown, allFolded]);
 
   const drawn: ReviewMode = mode === 'split' && splitRoom ? 'split' : 'unified';
   return (
     <div ref={root} data-review-toolbar data-lines={fit.lines} className="relative flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-3 py-1.5">
-      <p data-review-header className="m-0 min-w-0 max-w-full truncate text-ui font-medium text-fg">
-        {totals}
-      </p>
+      {scopeWords ? (
+        <Tip content={scopeWords} description={scopeWords}>
+          <p data-review-header data-review-scope-words tabIndex={0} className={`${HEADER} rounded-sm outline-accent focus-visible:outline-2`}>
+            {totals}
+          </p>
+        </Tip>
+      ) : (
+        <p data-review-header className={HEADER}>
+          {totals}
+        </p>
+      )}
       {fit.lines === 3 && <div aria-hidden className={LINE_BREAK} />}
       {hasChip && (
         <div data-review-toolbar-chip className="flex min-w-0 max-w-full shrink-0 items-center">
@@ -123,8 +125,8 @@ export function Toolbar({ totals, chip, allFolded, onFoldAll, counter, onHunk, m
       <div data-review-nav className={`flex shrink-0 items-center gap-1 ${fit.lines === 1 ? '' : 'ml-auto'}`}>
         {counter && (
           <>
-            <span data-review-hunk className="whitespace-nowrap text-ui-sm text-fg-muted">
-              {fit.counter === 'long' ? long : short}
+            <span data-review-hunk className="whitespace-nowrap text-ui-sm">
+              <BareCount count={shown} meaning={REVIEW_COPY.hunkOf(counter.index + 1, counter.count)} />
             </span>
             <button type="button" className={quiet} aria-label={REVIEW_COPY.previousHunk} title={REVIEW_COPY.previousHunk} disabled={counter.index === 0} onClick={() => onHunk(counter.index - 1)}>
               ↑
@@ -136,16 +138,6 @@ export function Toolbar({ totals, chip, allFolded, onFoldAll, counter, onHunk, m
         )}
         <ViewMenu drawn={drawn} splitRoom={splitRoom} onMode={onMode} wrap={wrap} onWrap={onWrap} />
       </div>
-      {counter && (
-        <>
-          <span aria-hidden data-review-counter="long" className="invisible absolute top-0 left-0 whitespace-nowrap text-ui-sm">
-            {long}
-          </span>
-          <span aria-hidden data-review-counter="short" className="invisible absolute top-0 left-0 whitespace-nowrap text-ui-sm">
-            {short}
-          </span>
-        </>
-      )}
     </div>
   );
 }

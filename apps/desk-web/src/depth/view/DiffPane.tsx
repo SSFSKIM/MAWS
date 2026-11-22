@@ -5,13 +5,16 @@
 // asked for when the tab opens and again on the reader's Refresh, never polled; the last answer stays drawn while a new
 // one is on its way. An answer the machine could not take says why: its `error` when git failed, and no base when the
 // session's directory is no git working tree. The body (the diff library, its stylesheet, and the highlighter) loads on
-// first use. Its one-file view state and the words only it says are its own (`diff-view-state.ts`).
+// first use. Its one-file view state and the words only it says are its own (`diff-view-state.ts`). It follows Review's
+// word cut where it draws what Review draws: the hunk counter (T306) and the wait for the diff.
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { loadChunk } from '../../pwa/load-chunk';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { createDiffViewUi, DIFF_COPY, selectFile, type DiffViewUi } from './diff-view-state';
 import { REVIEW_COPY } from '../../../../../src/renderer/src/tools/code/copy';
+import { BareCount } from '../../../../../src/renderer/src/ui/count';
+import { QuietSpinner } from '../../../../../src/renderer/src/ui/spinner';
 import '../../../../../src/renderer/src/tools/code/code.css';
 import { tooLarge } from '../../../../../src/renderer/src/tools/code/review/review-model';
 import { diffFiles, diffTotals, type DiffFile } from '../../../../../src/renderer/src/lane-a/diff/files';
@@ -22,7 +25,12 @@ const ReviewView = lazy(() => loadChunk(() => import('./ReviewView')));
 const quiet = 'rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
 const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg';
 
-const Loading = () => <p className="p-3 text-ui-sm text-fg-muted">{REVIEW_COPY.loading}</p>;
+// Review's wait: nothing for half a second, then the quiet spinner where the diff will be
+const Loading = () => (
+  <div className="flex h-10 items-center px-3">
+    <QuietSpinner label={REVIEW_COPY.loading} />
+  </div>
+);
 
 /** The Diff tab's own view state (selection, hunk, mode, scroll, wrap), kept by the column so it outlives the tab. */
 export type DiffView = { ui: StoreApi<DiffViewUi>; wrap: StoreApi<{ wrap: boolean }> };
@@ -172,8 +180,8 @@ function FileSection({ file, files, view }: { file: DiffFile; files: readonly Di
             {REVIEW_COPY.wrap}
           </button>
           <span className="flex-1" />
-          <span data-review-hunk className="text-ui-sm text-fg-muted">
-            {REVIEW_COPY.hunkOf(hunk + 1, count)}
+          <span data-review-hunk className="text-ui-sm">
+            <BareCount count={REVIEW_COPY.hunkCount(hunk + 1, count)} meaning={REVIEW_COPY.hunkOf(hunk + 1, count)} />
           </span>
           <button type="button" className={quiet} aria-label={REVIEW_COPY.previousHunk} title={REVIEW_COPY.previousHunk} disabled={hunk === 0} onClick={() => goHunk(hunk - 1)}>
             ↑

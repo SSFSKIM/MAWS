@@ -27,8 +27,8 @@ export interface CommitGroup {
   upstream: string | null;
   count: number | null;
 }
-/** "Commits N since <base>" with "· N behind", or with no base "Commits · latest on <branch>" ("Commits · latest" detached). */
-export type CommitsHeading = { kind: 'since'; count: number; base: string; behind: number } | { kind: 'latest'; branch: string | null };
+/** "Commits N since <base>" with "· N behind", or with no base "Commits · latest" (the word cut, N62: the Where line names the branch). */
+export type CommitsHeading = { kind: 'since'; count: number; base: string; behind: number } | { kind: 'latest' };
 export interface CommitList {
   heading: CommitsHeading;
   review: boolean; // the heading's "Review ›": only where there is a base (the scope it opens is disabled without one)
@@ -37,11 +37,11 @@ export interface CommitList {
 }
 
 /** What the list draws of a branch read's answer: `whole` is the page's fold (the list shown whole). */
-export function commitList(answer: GitBranchCommits, branch: string | null, whole: boolean): CommitList {
+export function commitList(answer: GitBranchCommits, whole: boolean): CommitList {
   const { base, upstream, commits, counts } = answer;
   if (base === null) {
     const rows = commits.slice(0, COMMITS_FOLDED);
-    return { heading: { kind: 'latest', branch }, review: false, sections: sectionsOf(rows, upstream, null), control: { kind: 'none' } };
+    return { heading: { kind: 'latest' }, review: false, sections: sectionsOf(rows, upstream, null), control: { kind: 'none' } };
   }
   const total = counts?.all ?? commits.length;
   const heading: CommitsHeading = { kind: 'since', count: total, base: base.ref, behind: answer.behind ?? 0 };
@@ -140,14 +140,14 @@ export function mergeWords(pr: Pr): MergeWords {
 
 const isOpen = (pr: Pr) => pr.state !== 'MERGED' && pr.state !== 'CLOSED';
 
-/** The state line's phrases: the state, "into <base>", the review decision in the card's words, and while open the merge words. */
+/**
+ * The state line's phrases: the state, "into <base>", the review decision in the card's words, and while open the merge
+ * words. The word cut (N72): an open pull request's state is the normal one and is not said; Draft, Merged and Closed are.
+ */
 export function stateLine(pr: Pr): { words: string; tone: Tone }[] {
   const words = SUMMARY_COPY.prState;
-  const state = pr.state === 'MERGED' ? words.merged : pr.state === 'CLOSED' ? words.closed : pr.isDraft ? words.draft : words.open;
-  const phrases: { words: string; tone: Tone }[] = [
-    { words: state, tone: 'fg' },
-    { words: SCM_COPY.into(pr.baseRefName), tone: 'fg' },
-  ];
+  const state = pr.state === 'MERGED' ? words.merged : pr.state === 'CLOSED' ? words.closed : pr.isDraft ? words.draft : null;
+  const phrases: { words: string; tone: Tone }[] = [...(state === null ? [] : [{ words: state, tone: 'fg' as const }]), { words: SCM_COPY.into(pr.baseRefName), tone: 'fg' }];
   const review = pr.reviewDecision === null ? undefined : SUMMARY_COPY.reviewDecision[pr.reviewDecision];
   if (review !== undefined) phrases.push({ words: review, tone: 'fg' });
   const merge = isOpen(pr) ? mergeWords(pr) : null;
@@ -166,7 +166,7 @@ const countsOf = (items: readonly Check[], buckets: readonly Check['bucket'][]) 
 
 export interface Checks {
   countsLine: boolean; // the counts line is drawn: not when nothing is listed and the folded line can stand in its place (Decision Log 41)
-  counts: string; // the counts line, in the card's bucket words and order ("3 passed · 1 failed · 1 pending")
+  counts: string; // the counts line, in the card's bucket words and order ("1 failed · 1 pending"; "No checks")
   countParts: string[]; // the same, one count apiece (the line wraps between them)
   attention: Check[]; // failed, cancelled and pending, in that order
   folded: Check[]; // passed and skipped, in the answer's order
@@ -176,12 +176,14 @@ export interface Checks {
 /**
  * An open pull request's checks; null for a merged or a closed one, which lists none. With no check to list (none failed,
  * was cancelled or is pending) the counts line is not drawn and the folded line stands in its place, its words the same
- * counts (Decision Log 41); where nothing folds either (no checks yet, checks unavailable) the counts line says so.
+ * counts (Decision Log 41); where nothing folds either (no checks yet, checks unavailable) the counts line says so. The
+ * word cut (N75): the counts line counts what is listed under it, the failed, cancelled and pending, and leaves the
+ * passed and skipped to the folded line, as the card's row does.
  */
 export function checksOf(pr: Pr): Checks | null {
   if (!isOpen(pr)) return null;
   const { summary, items } = pr.checks;
-  const countParts = summary === 'unknown' ? [SUMMARY_COPY.checksUnavailable] : items.length === 0 ? [SUMMARY_COPY.noChecks] : countsOf(items, ['pass', 'fail', 'cancel', 'pending', 'skipping']);
+  const countParts = summary === 'unknown' ? [SUMMARY_COPY.checksUnavailable] : items.length === 0 ? [SUMMARY_COPY.noChecks] : countsOf(items, ATTENTION);
   const folded = items.filter((item) => item.bucket === 'pass' || item.bucket === 'skipping');
   const fold = countsOf(items, ['pass', 'skipping']);
   const attention = ATTENTION.flatMap((bucket) => items.filter((item) => item.bucket === bucket));

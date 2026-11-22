@@ -22,6 +22,8 @@ import { useServesReads } from '../code/review/reads';
 import { REVIEW_TOOL_ID } from '../code/review/ReviewTool';
 import { CommitsPart } from './CommitsPart';
 import { SCM_COPY } from './copy';
+import { QuietSpinner } from '../../ui/spinner';
+import { Tip } from '../../ui/tip';
 import { conflictCount, uncommittedFit, whereFit } from './page-model';
 import { CountBadge, fixedWidth, Measured, measuredWidth, Part, quietControl, shortest, useLineFit } from './page-parts';
 import { PullRequestPart } from './PullRequestPart';
@@ -51,6 +53,14 @@ const Message = ({ children }: { children: string }) => (
   </div>
 );
 
+const Waiting = () => (
+  <div data-scm-page className="h-full bg-bg">
+    <div className="flex h-9 items-center px-3">
+      <QuietSpinner label={SCM_COPY.loading} />
+    </div>
+  </div>
+);
+
 export function SourceControlPage({ appSessionId, directory, ui, visible }: SourceControlPageProps) {
   const machine = machineFor(appSessionId);
   const mark = useMachineMark(appSessionId);
@@ -67,7 +77,7 @@ export function SourceControlPage({ appSessionId, directory, ui, visible }: Sour
 
   if (status === null || entry === undefined) {
     const error = entry?.error ?? null;
-    if (error === null) return <Message>{SCM_COPY.loading}</Message>;
+    if (error === null) return <Waiting />; // the word cut (P211): the first git read, as the quiet spinner
     return <Message>{error === NOT_A_REPOSITORY ? SCM_COPY.notRepository : SCM_COPY.gitUnavailable(error)}</Message>;
   }
   const retry = () => useBranchReads.getState().retry(machine, status.repoRoot);
@@ -76,7 +86,7 @@ export function SourceControlPage({ appSessionId, directory, ui, visible }: Sour
       <Where status={status} mark={mark} directory={directory} />
       <div data-scm-scroll className="min-h-0 flex-1 overflow-y-auto">
         <Uncommitted appSessionId={appSessionId} entry={entry} status={status} />
-        <CommitsPart appSessionId={appSessionId} status={status} serves={serves} read={read} mark={mark} ui={ui} retry={retry} />
+        <CommitsPart appSessionId={appSessionId} serves={serves} read={read} mark={mark} ui={ui} retry={retry} />
         <PullRequestPart appSessionId={appSessionId} directory={directory} status={status} mark={mark} ui={ui} />
       </div>
     </div>
@@ -87,7 +97,8 @@ export function SourceControlPage({ appSessionId, directory, ui, visible }: Sour
 // label (with "· offline") when the session is not on this Mac; the folder's path as its title. It gives way in a fixed
 // order and never by cutting its end: the branch's name shortens to eight characters and an ellipsis, then "· worktree"
 // is left out, then the machine's label moves to a second line, where it breaks anywhere and is never cut. A detached
-// HEAD's words never shorten. On the first line the label is one unbreakable piece.
+// HEAD's words never shorten. On the first line the label is one unbreakable piece. The folder's path is the line's
+// tooltip and description, the line taking the keyboard so the path has a way there (the word cut, N57).
 function Where({ status, mark, directory }: { status: GitStatus; mark: MachineMark; directory: string }) {
   const line = useRef<HTMLDivElement>(null);
   const detached = status.branch === null;
@@ -98,38 +109,40 @@ function Where({ status, mark, directory }: { status: GitStatus; mark: MachineMa
   const fit = useLineFit(line, whereOf, sameWhere, WHOLE_WHERE, `${words}\0${worktree}\0${label}`);
   return (
     <div className="shrink-0 border-b border-border px-3 py-1.5 text-ui">
-      <div ref={line} data-scm-where title={directory} className="relative flex min-w-0 flex-col">
-        <div className="flex min-h-6 min-w-0 items-center">
-          <span data-scm-where-branch className={detached ? 'shrink-0 whitespace-nowrap text-fg' : 'min-w-0 truncate text-fg'} style={fit.shorten && fit.branchMin > 0 ? { minWidth: fit.branchMin } : undefined}>
-            {words}
-          </span>
-          {worktree !== null && fit.worktree && (
-            <>
-              {' '}
-              <span data-scm-where-worktree className="shrink-0 whitespace-nowrap pl-1 text-fg-muted">
-                {worktree}
-              </span>
-            </>
+      <Tip content={directory} description={directory}>
+        <div ref={line} data-scm-where tabIndex={0} className="relative flex min-w-0 flex-col rounded-sm outline-accent focus-visible:outline-2">
+          <div className="flex min-h-6 min-w-0 items-center">
+            <span data-scm-where-branch className={detached ? 'shrink-0 whitespace-nowrap text-fg' : 'min-w-0 truncate text-fg'} style={fit.shorten && fit.branchMin > 0 ? { minWidth: fit.branchMin } : undefined}>
+              {words}
+            </span>
+            {worktree !== null && fit.worktree && (
+              <>
+                {' '}
+                <span data-scm-where-worktree className="shrink-0 whitespace-nowrap pl-1 text-fg-muted">
+                  {worktree}
+                </span>
+              </>
+            )}
+            {label !== null && !fit.machineBelow && (
+              <>
+                {' '}
+                <span data-scm-where-machine className="shrink-0 whitespace-nowrap pl-1 text-fg-muted">
+                  {`· ${label}`}
+                </span>
+              </>
+            )}
+          </div>
+          {label !== null && fit.machineBelow && (
+            <span data-scm-where-below className="wrap-anywhere text-fg-muted">
+              {label}
+            </span>
           )}
-          {label !== null && !fit.machineBelow && (
-            <>
-              {' '}
-              <span data-scm-where-machine className="shrink-0 whitespace-nowrap pl-1 text-fg-muted">
-                {`· ${label}`}
-              </span>
-            </>
-          )}
+          <Measured name="branch" text={words} />
+          <Measured name="branch-min" text={least} />
+          {worktree !== null && <Measured name="worktree" text={worktree} className="pl-1" />}
+          {label !== null && <Measured name="machine" text={`· ${label}`} className="pl-1" />}
         </div>
-        {label !== null && fit.machineBelow && (
-          <span data-scm-where-below className="wrap-anywhere text-fg-muted">
-            {label}
-          </span>
-        )}
-        <Measured name="branch" text={words} />
-        <Measured name="branch-min" text={least} />
-        {worktree !== null && <Measured name="worktree" text={worktree} className="pl-1" />}
-        {label !== null && <Measured name="machine" text={`· ${label}`} className="pl-1" />}
-      </div>
+      </Tip>
     </div>
   );
 }

@@ -120,29 +120,29 @@ export const REVIEW_COPY = {
   scopes: { uncommitted: 'Uncommitted', branch: 'This branch', turn: 'Last turn', staged: 'Staged', commit: 'Commit' }, // UX wave U5b-2: a commit's chip reads `commitChip`
   commitChip: (sha: string) => `Commit ${sha.slice(0, 7)}`, // UX wave U5b-2 (§I): a commit's chip, its title the subject
   // UX wave U5b (§I; card 1 at its default, built in `totalsWords`): the totals without the scope's name, which the
-  // pressed chip above them says.
-  totals: (files: number, added: number, removed: number) => `${count(files)} ${files === 1 ? 'file' : 'files'} changed · +${count(added)} −${count(removed)}`,
-  // UX wave U5b-2 (§I): after the totals, the new files whose lines are not counted
-  uncounted: (n: number) => `, and ${count(n)} untracked ${n === 1 ? 'file' : 'files'} not counted`,
-  // A disabled chip's reason, as its tooltip.
-  indexMatchesHead: 'Index matches HEAD',
-  // UX wave U5b-2 (§I): This branch off, with no default branch, or on a machine whose MAWS does not serve the reads
-  noDefaultBranch: 'No default branch to compare with',
-  branchNeedsReads: (machine: string | null) => (machine === null ? 'This branch needs this Mac’s MAWS service to be updated' : `This branch needs a newer MAWS on ${machine}`),
-  noTurnChangedFiles: 'No turn has changed files yet', // UX wave U5b (l5-code-12 c): Last turn is always listed
-  // Empty scopes
-  noUncommitted: 'No uncommitted changes',
-  emptyCommit: 'No changes in this commit', // UX wave U5b-2 (§I; Decision Log 37): a commit with no change against its first parent, where noUncommitted stands
-  nothingOnBranch: (branch: string, base: string) => `Nothing on ${branch} beyond ${base}`,
+  // pressed chip above them says; the word cut (T356): nor "changed", which the totals already are.
+  totals: (files: number, added: number, removed: number) => `${count(files)} ${files === 1 ? 'file' : 'files'} · +${count(added)} −${count(removed)}`,
+  // UX wave U5b-2 (§I): after the totals, the new files whose lines are not counted (the word cut, N35: shortened)
+  uncounted: (n: number) => ` · ${count(n)} untracked not counted`,
+  // A greyed chip's reason, its tooltip and description. The word cut (P288): Staged greyed once the index matches HEAD
+  // again says so in a person's words.
   nothingStaged: 'Nothing staged',
-  turnChangedNothing: 'This turn changed no files',
+  // UX wave U5b-2 (§I): This branch off, with no default branch, or on a machine whose MAWS does not serve the reads (the
+  // word cut, N38: this Mac's form in the other machine's words)
+  noDefaultBranch: 'No default branch to compare with',
+  branchNeedsReads: (machine: string | null) => `This branch needs a newer MAWS on ${machine ?? 'this Mac'}`,
+  noTurnChangedFiles: 'No turn has changed files yet', // UX wave U5b (l5-code-12 c): Last turn is always listed
+  // Empty scopes: the word cut (T362, N40) says "No changes" for every scope but This branch, the pressed chip naming the
+  // scope (a commit's chip the commit)
+  noChanges: 'No changes',
+  nothingOnBranch: (branch: string, base: string) => `Nothing on ${branch} beyond ${base}`,
   // A file's section (UX wave U5b, §F and §I): a kind's badge (none for a modified file), its counts, its body
   kinds: { modified: 'Modified', added: 'Added', deleted: 'Deleted', renamed: 'Renamed', binary: 'Binary', untracked: 'Untracked', conflict: 'Conflict' },
   renamedFrom: (old: string) => `Renamed from ${old}`,
   renamed: (old: string, now: string) => `${old} → ${now}`, // a rename whose two paths fit whole
   added: (n: number) => `+${count(n)}`,
   removed: (n: number) => `−${count(n)}`,
-  binaryFile: 'Binary file',
+  binaryFile: 'Binary file', // the word cut (N44): only where the header's badge does not say Binary (an untracked binary)
   retry: 'Retry',
   // A file held still under an open comment card while the agent changed it (UX wave U5b, M5; §G, §I)
   fileChanged: 'This file changed',
@@ -154,7 +154,7 @@ export const REVIEW_COPY = {
   notOnThisCommit: 'This comment is not on this commit.', // UX wave U5b-2 (§G, §I; Decision Log 39): over the comments made on no commit, in a commit's scope; no link
   diffNotShown: "This file's diff is not shown here.", // over the comments whose file is in the scope while the surface draws no lines for it: its own read failed, or it is too large to draw (Decision Log 21)
   refresh: 'Refresh',
-  untrackedNote: 'Untracked file · not in the diff',
+  untrackedFolder: 'Untracked folder', // the word cut (T361): an untracked folder's body, which today's note called a file
   // The toolbar (UX wave U5b, §F): Collapse all and the View menu, which holds the stack's Unified, Split and Wrap
   collapseAll: 'Collapse all',
   expandAll: 'Expand all',
@@ -163,8 +163,9 @@ export const REVIEW_COPY = {
   split: 'Split',
   splitNeedsRoom: 'Split needs a wider column',
   wrap: 'Wrap',
-  hunkOf: (index: number, count: number) => `Showing hunk ${index} of ${count}`,
-  hunkOfShort: (index: number, count: number) => `${index} of ${count}`, // where the long form does not fit (card 1)
+  // The word cut (T306): the counter reads `hunkCount` at every width, `hunkOf` its name and tooltip
+  hunkOf: (index: number, total: number) => `Hunk ${count(index)} of ${count(total)}`,
+  hunkCount: (index: number, total: number) => `${count(index)} / ${count(total)}`,
   previousHunk: 'Previous hunk',
   nextHunk: 'Next hunk',
   openFile: 'Open file ↗',
@@ -173,29 +174,31 @@ export const REVIEW_COPY = {
   viewed: 'Viewed',
   tooLarge: 'Diff too large to display.',
   openTheFile: 'Open the file', // follows `tooLarge` in one sentence: `Diff too large to display. Open the file`
-  // Footers
-  footer: {
+  // What a scope reads: the faint line at Review's foot until the word cut (T357, N51, N52), which moves it to the pressed
+  // chip's tooltip and description, or the totals line's in a diff tab, which has no chips. A commit's chip says its hash,
+  // so its words are the subject, then `firstParent` for a merge commit; a diff tab's are `commit` before them.
+  scopeWords: {
     uncommitted: (branch: string) => `${branch} · Working tree against HEAD`,
     branch: (branch: string, base: string) => `${branch} · Since ${base}`,
     staged: (branch: string) => `${branch} · Index against HEAD`,
     turn: (branch: string | null) => (branch === null ? 'Changes from the turn' : `${branch} · Changes from the turn`),
-    // UX wave U5b-2 (§I; D8): a commit's footer is `commit`, then the subject (a span of its own, which shortens first),
-    // then each of the words after it that holds
-    commit: (sha: string) => `Commit ${sha.slice(0, 7)} · `,
+    commit: (sha: string) => `Commit ${sha.slice(0, 7)} · `, // UX wave U5b-2 (§I; D8)
     firstParent: ' · against its first parent', // a merge commit
-    notOnBranch: (branch: string | null) => (branch === null ? ' · not in HEAD now' : ` · not on ${branch} now`), // a detached HEAD: `not in HEAD`
   },
+  // The one word of the foot that stays at rest (N53): a commit HEAD no longer holds; `not in HEAD` on a detached HEAD
+  notOnBranch: (branch: string | null) => (branch === null ? 'Not in HEAD now' : `Not on ${branch} now`),
   detachedAt: (head: string) => `detached at ${head.slice(0, 7)}`,
   notRepository: 'Not a git repository',
   unavailable: (message: string) => `Diff unavailable: ${message}`,
   // UX wave U5b-2 (§H's refusals told apart, for a commit's diff; §I): `null` names this Mac's service
-  commitNeedsReads: (machine: string | null) => (machine === null ? 'Diff unavailable: this Mac’s MAWS service is older than this window' : `Diff unavailable: ${machine} runs an older MAWS`),
+  // The word cut: this Mac's form (N54) and a refusal (N56) without the wire's words
+  commitNeedsReads: (machine: string | null) => (machine === null ? 'Diff unavailable: this Mac’s MAWS needs updating' : `Diff unavailable: ${machine} runs an older MAWS`),
   commitOffline: (machine: string) => `Diff unavailable: ${machine} is offline`,
-  commitRefused: (machine: string) => `Diff unavailable: ${machine} refused this read`,
+  commitRefused: (machine: string) => `Diff unavailable: ${machine} refused it`,
   refused: (message: string) => `Refused: ${message}`, // a diff tab's path outside the session's directories
   unknownRef: 'unknown ref',
   turnNotLoaded: 'the turn is not loaded · Open the session',
-  loading: 'Loading',
+  loading: 'Loading', // the word cut: the quiet spinner's name, where the list, a file's diff or its body is read
 } as const;
 
 // E5: the editor's sentences (E5 execution document, Interfaces *Copy*; exact strings are decisions). M2 shows the save,
